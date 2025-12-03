@@ -1,0 +1,513 @@
+{
+  "name": "Knowledge Sync",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1200, 300],
+      "id": "manual-trigger",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtMinute": 0
+            },
+            {
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 500],
+      "id": "schedule-trigger",
+      "name": "Schedule (каждые 30 мин)"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, name, folder_id, notify_telegram, notify_whatsapp\nFROM knowledge_clients\nWHERE active = true;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [-960, 400],
+      "id": "get-clients",
+      "name": "Get Active Clients",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [-720, 400],
+      "id": "loop-clients",
+      "name": "Loop Clients"
+    },
+    {
+      "parameters": {
+        "operation": "list",
+        "driveId": {
+          "__rl": true,
+          "value": "myDrive",
+          "mode": "list"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.folder_id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [-480, 400],
+      "id": "list-files",
+      "name": "Google Drive: List Files"
+    },
+    {
+      "parameters": {
+        "jsCode": "const client = $('Loop Clients').item.json;\nconst files = $input.all();\n\n// Фильтруем только Google Docs\nconst docs = files.filter(f => \n  f.json.mimeType === 'application/vnd.google-apps.document'\n);\n\nif (docs.length === 0) {\n  return [{\n    json: {\n      client_id: client.id,\n      client_name: client.name,\n      notify_telegram: client.notify_telegram,\n      notify_whatsapp: client.notify_whatsapp,\n      status: 'no_docs',\n      message: 'Нет документов в папке'\n    }\n  }];\n}\n\nreturn docs.map(doc => ({\n  json: {\n    client_id: client.id,\n    client_name: client.name,\n    notify_telegram: client.notify_telegram,\n    notify_whatsapp: client.notify_whatsapp,\n    doc_id: doc.json.id,\n    doc_name: doc.json.name\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-240, 400],
+      "id": "prepare-docs",
+      "name": "Prepare Docs List"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [0, 400],
+      "id": "loop-docs",
+      "name": "Loop Docs"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "documentURL": "={{ $json.doc_id }}",
+        "simple": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [240, 400],
+      "id": "get-doc-content",
+      "name": "Google Docs: Get Content"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prevData = $('Loop Docs').item.json;\nconst content = $json.body?.content || $json.text || $json.content || '';\n\n// Извлекаем текст из Google Docs структуры\nlet text = '';\nif (typeof content === 'string') {\n  text = content;\n} else if (Array.isArray(content)) {\n  text = content\n    .filter(el => el.paragraph)\n    .map(el => el.paragraph.elements\n      ?.map(e => e.textRun?.content || '')\n      .join('') || '')\n    .join('');\n}\n\n// Валидация: есть ли ## заголовки?\nconst hasHeadings = text.includes('## ') || text.includes('# ');\nconst minLength = text.length >= 100;\n\nif (!hasHeadings) {\n  return [{\n    json: {\n      ...prevData,\n      status: 'error',\n      error: 'Документ не содержит заголовков (##)',\n      raw_content: text.substring(0, 500)\n    }\n  }];\n}\n\nif (!minLength) {\n  return [{\n    json: {\n      ...prevData,\n      status: 'error',\n      error: 'Документ слишком короткий (< 100 символов)',\n      raw_content: text\n    }\n  }];\n}\n\n// Генерируем hash контента\nconst crypto = require('crypto');\nconst contentHash = crypto.createHash('sha256').update(text).digest('hex');\n\nreturn [{\n  json: {\n    ...prevData,\n    status: 'valid',\n    raw_content: text,\n    content_hash: contentHash\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 400],
+      "id": "validate-and-hash",
+      "name": "Validate & Hash"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 },
+          "conditions": [
+            {
+              "id": "valid",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "valid",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 400],
+      "id": "if-valid",
+      "name": "If Valid?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT content_hash FROM knowledge_versions\nWHERE client_id = {{ $json.client_id }}\n  AND doc_id = '{{ $json.doc_id }}'\nORDER BY created_at DESC\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [960, 300],
+      "id": "get-prev-hash",
+      "name": "Get Previous Hash",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const docData = $('If Valid?').item.json;\nconst prevResult = $input.all();\n\nconst prevHash = prevResult[0]?.json?.content_hash || null;\nconst currentHash = docData.content_hash;\n\nconst hasChanges = prevHash !== currentHash;\n\nreturn [{\n  json: {\n    ...docData,\n    prev_hash: prevHash,\n    has_changes: hasChanges,\n    is_new: prevHash === null\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300],
+      "id": "check-changes",
+      "name": "Check Changes"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 },
+          "conditions": [
+            {
+              "id": "has-changes",
+              "leftValue": "={{ $json.has_changes }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1440, 300],
+      "id": "if-changed",
+      "name": "If Changed?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $json;\nconst text = data.raw_content;\n\n// Парсим по ## заголовкам\nconst sections = [];\nconst lines = text.split('\\n');\nlet currentSection = null;\nlet currentContent = [];\n\nfor (const line of lines) {\n  // Проверяем на заголовок ## или #\n  const h2Match = line.match(/^##\\s+(.+)/);\n  const h1Match = line.match(/^#\\s+(.+)/);\n  \n  if (h2Match || h1Match) {\n    // Сохраняем предыдущую секцию\n    if (currentSection && currentContent.length > 0) {\n      sections.push({\n        title: currentSection,\n        content: currentContent.join('\\n').trim()\n      });\n    }\n    currentSection = (h2Match || h1Match)[1].trim();\n    currentContent = [];\n  } else if (currentSection) {\n    currentContent.push(line);\n  }\n}\n\n// Сохраняем последнюю секцию\nif (currentSection && currentContent.length > 0) {\n  sections.push({\n    title: currentSection,\n    content: currentContent.join('\\n').trim()\n  });\n}\n\n// Фильтруем пустые секции\nconst validSections = sections.filter(s => s.content.length >= 20);\n\n// Формируем чанки для Qdrant\nconst chunks = validSections.map((section, index) => ({\n  id: `${data.client_id}-${data.doc_id}-${index}`,\n  text: `## ${section.title}\\n\\n${section.content}`,\n  metadata: {\n    client_id: data.client_id,\n    doc_id: data.doc_id,\n    doc_name: data.doc_name,\n    section_title: section.title,\n    section_index: index,\n    source: 'google_docs',\n    updated_at: new Date().toISOString()\n  }\n}));\n\nreturn [{\n  json: {\n    ...data,\n    chunks: chunks,\n    chunks_count: chunks.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 200],
+      "id": "parse-sections",
+      "name": "Parse Sections"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO knowledge_versions (client_id, doc_id, doc_name, content_hash, raw_content, chunks_count)\nVALUES (\n  {{ $json.client_id }},\n  '{{ $json.doc_id }}',\n  '{{ $json.doc_name }}',\n  '{{ $json.content_hash }}',\n  $1,\n  {{ $json.chunks_count }}\n);",
+        "options": {
+          "queryReplacement": "={{ $json.raw_content }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1920, 200],
+      "id": "save-version",
+      "name": "Save Version",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.22.0.2:6333/collections/truffles_knowledge/points/delete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"filter\": {\n    \"must\": [\n      { \"key\": \"client_id\", \"match\": { \"value\": {{ $json.client_id }} } },\n      { \"key\": \"doc_id\", \"match\": { \"value\": \"{{ $json.doc_id }}\" } }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2160, 200],
+      "id": "qdrant-delete-old",
+      "name": "Qdrant: Delete Old",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdrant-api-key",
+          "name": "Qdrant API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Parse Sections').item.json;\nconst chunks = data.chunks || [];\n\nreturn chunks.map(chunk => ({\n  json: {\n    ...chunk,\n    client_id: data.client_id,\n    notify_telegram: data.notify_telegram,\n    notify_whatsapp: data.notify_whatsapp,\n    doc_name: data.doc_name,\n    total_chunks: chunks.length\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 200],
+      "id": "prepare-chunks",
+      "name": "Prepare Chunks"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2640, 200],
+      "id": "loop-chunks",
+      "name": "Loop Chunks"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "text-embedding-3-small",
+          "mode": "list"
+        },
+        "text": "={{ $json.text }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [2880, 200],
+      "id": "openai-embed",
+      "name": "OpenAI Embeddings",
+      "credentials": {
+        "openAiApi": {
+          "id": "C31JRkzPBiItNcOT",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "http://172.22.0.2:6333/collections/truffles_knowledge/points",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"points\": [\n    {\n      \"id\": \"{{ $('Loop Chunks').item.json.id }}\",\n      \"vector\": {{ JSON.stringify($json.embedding) }},\n      \"payload\": {\n        \"content\": {{ JSON.stringify($('Loop Chunks').item.json.text) }},\n        \"client_id\": {{ $('Loop Chunks').item.json.client_id }},\n        \"doc_id\": \"{{ $('Loop Chunks').item.json.metadata.doc_id }}\",\n        \"doc_name\": \"{{ $('Loop Chunks').item.json.metadata.doc_name }}\",\n        \"section_title\": \"{{ $('Loop Chunks').item.json.metadata.section_title }}\",\n        \"section_index\": {{ $('Loop Chunks').item.json.metadata.section_index }},\n        \"source\": \"google_docs\",\n        \"updated_at\": \"{{ $('Loop Chunks').item.json.metadata.updated_at }}\"\n      }\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3120, 200],
+      "id": "qdrant-upsert",
+      "name": "Qdrant: Upsert",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdrant-api-key",
+          "name": "Qdrant API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Собираем результаты после loop chunks\nconst items = $input.all();\nconst firstItem = $('Prepare Chunks').first().json;\n\nreturn [{\n  json: {\n    client_id: firstItem.client_id,\n    doc_name: firstItem.doc_name,\n    notify_telegram: firstItem.notify_telegram,\n    notify_whatsapp: firstItem.notify_whatsapp,\n    chunks_count: firstItem.total_chunks,\n    status: 'success'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3360, 200],
+      "id": "aggregate-results",
+      "name": "Aggregate Results"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO knowledge_sync_logs (client_id, status, docs_processed, chunks_added)\nVALUES ({{ $json.client_id }}, 'success', 1, {{ $json.chunks_count }});",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [3600, 200],
+      "id": "log-success",
+      "name": "Log Success",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": \"{{ $json.notify_telegram }}\",\n  \"text\": \"✅ База знаний обновлена\\n\\nДокумент: {{ $json.doc_name }}\\nРазделов: {{ $json.chunks_count }}\\n\\nИзменения применены.\",\n  \"parse_mode\": \"HTML\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3840, 100],
+      "id": "notify-telegram",
+      "name": "Notify Telegram"
+    },
+    {
+      "parameters": {
+        "url": "https://app.chatflow.kz/api/v1/send-text",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "token", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzYyMTExNDU2fQ.myOt6xgCLfqbD9IF9EdJxkAyjij3fMty1B7sOhP2iKA" },
+            { "name": "instance_id", "value": "eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InRydWZmbGVzLWNoYXRib3QifQ==" },
+            { "name": "jid", "value": "={{ $json.notify_whatsapp }}@s.whatsapp.net" },
+            { "name": "msg", "value": "=✅ База знаний обновлена\n\nДокумент: {{ $json.doc_name }}\nРазделов: {{ $json.chunks_count }}\n\nИзменения применены." }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3840, 300],
+      "id": "notify-whatsapp",
+      "name": "Notify WhatsApp"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO knowledge_sync_logs (client_id, status, error_message)\nVALUES ({{ $json.client_id }}, 'error', '{{ $json.error }}');",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [960, 500],
+      "id": "log-error",
+      "name": "Log Error",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO knowledge_sync_logs (client_id, status)\nVALUES ({{ $json.client_id }}, 'no_changes');",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1680, 400],
+      "id": "log-no-changes",
+      "name": "Log No Changes",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Get Active Clients", "type": "main", "index": 0 }]]
+    },
+    "Schedule (каждые 30 мин)": {
+      "main": [[{ "node": "Get Active Clients", "type": "main", "index": 0 }]]
+    },
+    "Get Active Clients": {
+      "main": [[{ "node": "Loop Clients", "type": "main", "index": 0 }]]
+    },
+    "Loop Clients": {
+      "main": [
+        [{ "node": "Google Drive: List Files", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Google Drive: List Files": {
+      "main": [[{ "node": "Prepare Docs List", "type": "main", "index": 0 }]]
+    },
+    "Prepare Docs List": {
+      "main": [[{ "node": "Loop Docs", "type": "main", "index": 0 }]]
+    },
+    "Loop Docs": {
+      "main": [
+        [{ "node": "Google Docs: Get Content", "type": "main", "index": 0 }],
+        [{ "node": "Loop Clients", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Docs: Get Content": {
+      "main": [[{ "node": "Validate & Hash", "type": "main", "index": 0 }]]
+    },
+    "Validate & Hash": {
+      "main": [[{ "node": "If Valid?", "type": "main", "index": 0 }]]
+    },
+    "If Valid?": {
+      "main": [
+        [{ "node": "Get Previous Hash", "type": "main", "index": 0 }],
+        [{ "node": "Log Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Previous Hash": {
+      "main": [[{ "node": "Check Changes", "type": "main", "index": 0 }]]
+    },
+    "Check Changes": {
+      "main": [[{ "node": "If Changed?", "type": "main", "index": 0 }]]
+    },
+    "If Changed?": {
+      "main": [
+        [{ "node": "Parse Sections", "type": "main", "index": 0 }],
+        [{ "node": "Log No Changes", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Sections": {
+      "main": [[{ "node": "Save Version", "type": "main", "index": 0 }]]
+    },
+    "Save Version": {
+      "main": [[{ "node": "Qdrant: Delete Old", "type": "main", "index": 0 }]]
+    },
+    "Qdrant: Delete Old": {
+      "main": [[{ "node": "Prepare Chunks", "type": "main", "index": 0 }]]
+    },
+    "Prepare Chunks": {
+      "main": [[{ "node": "Loop Chunks", "type": "main", "index": 0 }]]
+    },
+    "Loop Chunks": {
+      "main": [
+        [{ "node": "OpenAI Embeddings", "type": "main", "index": 0 }],
+        [{ "node": "Aggregate Results", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Embeddings": {
+      "main": [[{ "node": "Qdrant: Upsert", "type": "main", "index": 0 }]]
+    },
+    "Qdrant: Upsert": {
+      "main": [[{ "node": "Loop Chunks", "type": "main", "index": 0 }]]
+    },
+    "Aggregate Results": {
+      "main": [[{ "node": "Log Success", "type": "main", "index": 0 }]]
+    },
+    "Log Success": {
+      "main": [
+        [
+          { "node": "Notify Telegram", "type": "main", "index": 0 },
+          { "node": "Notify WhatsApp", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Log Error": {
+      "main": [[{ "node": "Loop Docs", "type": "main", "index": 0 }]]
+    },
+    "Log No Changes": {
+      "main": [[{ "node": "Loop Docs", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}
