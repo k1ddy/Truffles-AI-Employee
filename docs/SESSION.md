@@ -35,16 +35,38 @@
 1. Knowledge Sync — добавлена проверка Qdrant (self-healing)
 2. Cron изменён на 5 минут
 3. [object Object] в промпте — исправлено (JSON.stringify)
-4. Реструктуризация документов
+4. Реструктуризация документов (AGENTS.md, SESSION.md)
+5. **Реструктуризация сервера:**
+   - infrastructure/ — traefik + website (изолировано)
+   - secrets/ — сертификаты
+   - truffles/ — n8n, postgres, redis, qdrant + документы
+   - _trash/ — старые файлы
+6. Все документы перенесены на сервер ~/truffles/docs/
+7. Git инициализирован на сервере
+8. GitHub Truffles-Chat-Bot обновлён (force push)
+9. SSH ключ создан на сервере (нужно добавить в GitHub)
+10. Droid установлен на сервере
 
 ---
 
 ## СЛЕДУЮЩЕЕ
 
-1. Диагностика дубликатов (n8n executions API)
-2. Решение дубликатов (идемпотентность или фикс источника)
-3. Тест бота end-to-end
-4. Поиск первого пилота
+1. Добавить SSH ключ сервера в GitHub
+2. Диагностика дубликатов
+3. Переименовать volumes (client_zero → truffles) — опционально
+4. Тест бота end-to-end
+
+---
+
+## КАК РАБОТАТЬ
+
+```bash
+ssh -p 222 zhan@5.188.241.234
+cd ~/truffles
+droid
+```
+
+Всё в одном месте на сервере.
 
 ---
 
