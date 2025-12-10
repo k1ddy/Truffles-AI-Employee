@@ -1,0 +1,13 @@
+{
+  "body": {
+    "messageType": "text",
+    "message": "Привет, тестовое сообщение через Python API!",
+    "metadata": {
+      "sender": "Test",
+      "timestamp": 1733745600,
+      "messageId": "TEST123",
+      "remoteJid": "77015705555@s.whatsapp.net"
+    }
+  },
+  "client_slug": "truffles"
+}

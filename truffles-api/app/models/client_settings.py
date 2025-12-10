@@ -1,0 +1,15 @@
+from sqlalchemy import Column, Text, Integer, Boolean, Time
+from sqlalchemy.dialects.postgresql import UUID, JSONB, TIMESTAMP
+
+from app.database import Base
+
+
+class ClientSettings(Base):
+    __tablename__ = "client_settings"
+
+    client_id = Column(UUID(as_uuid=True), primary_key=True)
+    telegram_chat_id = Column(Text)
+    telegram_bot_token = Column(Text)
+    reminder_timeout_1 = Column(Integer, default=30)
+    reminder_timeout_2 = Column(Integer, default=60)
+    auto_close_timeout = Column(Integer, default=120)

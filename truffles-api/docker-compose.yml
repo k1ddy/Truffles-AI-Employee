@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  truffles-api:
+    build: .
+    container_name: truffles-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://n8n:Iddqd777!@postgres:5432/chatbot
+      - DEBUG=false
+    networks:
+      - truffles_internal-net
+      - proxy-net
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.truffles-api.rule=Host(`api.truffles.kz`)"
+      - "traefik.http.routers.truffles-api.entrypoints=websecure"
+      - "traefik.http.routers.truffles-api.tls.certresolver=myresolver"
+      - "traefik.http.services.truffles-api.loadbalancer.server.port=8000"
+      - "traefik.docker.network=proxy-net"
+
+networks:
+  truffles_internal-net:
+    external: true
+  proxy-net:
+    external: true
