@@ -1,0 +1,525 @@
+{
+  "name": "1_Webhook_656fmXR6GPZrJbxm",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot7730378933:AAHG1lZY6u6AmvNDF7DT29veuXUDu8EeqIc/setWebhook?url=https://n8n.truffles.kz/webhook/flow",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -112,
+        896
+      ],
+      "id": "95f164c1-d2ed-480a-b08d-63cb82afb108",
+      "name": "HTTP Request",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": ":client",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        1312
+      ],
+      "id": "02373873-5e20-4721-ad80-0c2f01e1f162",
+      "name": "Webhook",
+      "webhookId": "a29b2ad2-9485-476c-897d-34799c3f940b"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "dedupHit",
+        "key": "={{ $json.dedupKey }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        768,
+        1312
+      ],
+      "id": "33494a4e-9857-4f7e-bd2a-c7c194aabe52",
+      "name": "Redis",
+      "credentials": {
+        "redis": {
+          "id": "xMdLG7kqWMMoPY0M",
+          "name": "Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200,
+          "responseKey": "Duplicate"
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1136,
+        1408
+      ],
+      "id": "86e6fdfc-d654-4ea2-8cfc-93071405f362",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $('Build Dedup Key').item.json.dedupKey }}",
+        "value": "1",
+        "expire": true,
+        "ttl": 86400
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1136,
+        1216
+      ],
+      "id": "95e2f1ae-9a55-4c41-aa86-803b836cfe49",
+      "name": "Mark Dedup",
+      "credentials": {
+        "redis": {
+          "id": "xMdLG7kqWMMoPY0M",
+          "name": "Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a91adacb-32e0-4398-acc4-66b486edea73",
+              "leftValue": "={{ $json.dedupHit }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        944,
+        1312
+      ],
+      "id": "b1c48d23-810f-4c00-b16c-7ba49913bcc3",
+      "name": "MessageIDisEmpty"
+    },
+    {
+      "parameters": {
+        "jsCode": "async function hmacSha256(key, message) {\n  const encoder = new TextEncoder();\n  const cryptoKey = await crypto.subtle.importKey(\n    'raw',\n    encoder.encode(key),\n    { name: 'HMAC', hash: 'SHA-256' },\n    false,\n    ['sign'],\n  );\n  const signature = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(message));\n  return Buffer.from(signature).toString('hex');\n}\n\nfunction safeEqual(a = '', b = '') {\n  if (a.length !== b.length) return false;\n  let result = 0;\n  for (let i = 0; i < a.length; i += 1) {\n    result |= a.charCodeAt(i) ^ b.charCodeAt(i);\n  }\n  return result === 0;\n}\n\nfunction toLowerCaseHeaders(headers = {}) {\n  const lowered = {};\n  for (const [key, value] of Object.entries(headers)) {\n    lowered[String(key).toLowerCase()] = value;\n  }\n  return lowered;\n}\n\nreturn await Promise.all(items.map(async item => {\n  const headersRaw = item.json.headers || {};\n  const headers = toLowerCaseHeaders(headersRaw);\n  const body = item.json.body || {};\n  const payload = JSON.stringify(body);\n\n  const secret = headers['x-chatflow-secret'] || headers['x-client-secret'] || $env.CHATFLOW_SIGNING_SECRET;\n  const signatureHeader = headers['x-chatflow-signature'] || headers['x-webhook-signature'] || headers['x-signature'] || headers['x-hub-signature'];\n\n  const normalizedSignature = signatureHeader ? String(signatureHeader).replace(/^sha256=/i, '').trim() : '';\n  const hasSecret = Boolean(secret);\n  const hasSignature = Boolean(normalizedSignature);\n  const digest = hasSecret ? await hmacSha256(secret, payload) : '';\n  let valid = false;\n  let reason = 'unknown';\n\n  if (!hasSecret && !hasSignature) {\n    valid = true;\n    reason = 'skipped_no_secret_or_signature';\n  } else if (!hasSecret) {\n    reason = 'missing_secret';\n  } else if (!hasSignature) {\n    reason = 'missing_signature';\n  } else if (normalizedSignature.length !== digest.length) {\n    reason = 'signature_length_mismatch';\n  } else {\n    valid = safeEqual(normalizedSignature, digest);\n    reason = valid ? 'ok' : 'signature_mismatch';\n  }\n\n  item.json.signatureValid = valid;\n  item.json.signature_reason = reason;\n  item.json.signature_present = hasSignature;\n  item.json.signature_secret_present = hasSecret;\n  return item;\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        1312
+      ],
+      "id": "7ad5e729-5b1a-45fb-8d9a-c94f3c4db9fe",
+      "name": "Validate Signature"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5b7fe4e8-dff1-4b68-80ae-96cf8fe3859f",
+              "leftValue": "={{ $json.signatureValid ? 'valid' : '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        208,
+        1312
+      ],
+      "id": "22d09fa4-815c-461f-b7eb-f1a4d269dd14",
+      "name": "Signature OK?"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const headersRaw = item.json.headers || {};\n  const headers = Object.fromEntries(Object.entries(headersRaw).map(([k, v]) => [String(k).toLowerCase(), v]));\n  const body = item.json.body || {};\n  const md = body.metadata || {};\n\n  const messageId = md.messageId || body.messageId || body.id || (body.message && body.message.id) || headers['x-message-id'] || null;\n  const remoteJid = md.remoteJid || '';\n  const timestamp = md.timestamp || body.timestamp || Date.now();\n  const fallback = `${remoteJid || 'unknown'}:${timestamp}`;\n  const dedupKey = `dedup:${messageId || fallback}`;\n\n  item.json.dedupKey = dedupKey;\n  item.json.dedupSource = { messageId, remoteJid, timestamp };\n  return item;\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        1312
+      ],
+      "id": "b56a45fe-6a40-45a1-89b3-ce00ffa9d433",
+      "name": "Build Dedup Key"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        208,
+        1504
+      ],
+      "id": "7b1349c0-7d7a-425a-b035-05339941c99f",
+      "name": "Respond Invalid Signature"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "24b85b43-45a5-455a-b4d8-5db297815e14",
+              "name": "headers",
+              "value": "={{ $('Webhook').item.json.headers }}",
+              "type": "object"
+            },
+            {
+              "id": "39fc38c1-5b33-46e7-8be4-b3e55d8969a0",
+              "name": "body",
+              "value": "={{ $('Webhook').item.json.body }}",
+              "type": "object"
+            },
+            {
+              "id": "dc5273eb-e768-429f-a66a-a7eb34cb2a10",
+              "name": "query",
+              "value": "={{ $('Webhook').item.json.query }}",
+              "type": "object"
+            },
+            {
+              "id": "9850b125-6bf9-4d51-bba5-ecbe4b7618a5",
+              "name": "params",
+              "value": "={{ $('Webhook').item.json.params }}",
+              "type": "object"
+            },
+            {
+              "id": "cd435e83-70ac-43f4-b379-565904bed2f5",
+              "name": "webhookUrl",
+              "value": "={{ $('Webhook').item.json.webhookUrl }}",
+              "type": "string"
+            },
+            {
+              "id": "35959873-cc8f-4e48-bf20-a788b65f838f",
+              "name": "executionMode",
+              "value": "={{ $('Webhook').item.json.executionMode }}",
+              "type": "string"
+            },
+            {
+              "id": "client-slug-from-path",
+              "name": "client_slug",
+              "value": "={{ $('Webhook').item.json.params?.client || 'truffles' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1632,
+        1216
+      ],
+      "id": "01200160-b625-4ddf-8929-93699caacfc8",
+      "name": "Restore Webhook Data"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "C38zCf2jfc2Zqfzf",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/C38zCf2jfc2Zqfzf",
+          "cachedResultName": "2_ChannelAdapter_C38zCf2jfc2Zqfzf"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {}
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1840,
+        1216
+      ],
+      "id": "372e13f7-2e65-40e9-bf73-252eb39e6207",
+      "name": "Call '2_ChannelAdapter_C38zCf2jfc2Zqfzf'"
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200,
+          "responseKey": "ok"
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1392,
+        1216
+      ],
+      "id": "2a4700dd-6cce-4191-88ad-d45681534087",
+      "name": "Respond to Webhook1"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.truffles.kz",
+            "user-agent": "axios/1.11.0",
+            "content-length": "277",
+            "accept": "application/json, text/plain, */*",
+            "accept-encoding": "gzip, compress, deflate, br",
+            "content-type": "application/json",
+            "x-forwarded-for": "144.91.105.72",
+            "x-forwarded-host": "n8n.truffles.kz",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "fb4d66f71278",
+            "x-real-ip": "144.91.105.72"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "messageType": "text",
+            "message": "вы кто",
+            "metadata": {
+              "sender": "Zh.",
+              "timestamp": 1764929737,
+              "messageId": "3F6E61E2301EC33CF87A",
+              "remoteJid": "77015705555@s.whatsapp.net"
+            },
+            "mediaData": null,
+            "nodeData": {
+              "webHook": {
+                "text": "https://n8n.truffles.kz/webhook/flow",
+                "method": "POST"
+              }
+            }
+          },
+          "webhookUrl": "https://n8n.truffles.kz/webhook/flow",
+          "executionMode": "production"
+        }
+      }
+    ],
+    "Demo_Salon": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.truffles.kz",
+            "user-agent": "axios/1.11.0",
+            "content-length": "288",
+            "accept": "application/json, text/plain, */*",
+            "accept-encoding": "gzip, compress, deflate, br",
+            "content-type": "application/json",
+            "x-forwarded-for": "144.91.105.72",
+            "x-forwarded-host": "n8n.truffles.kz",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "fb4d66f71278",
+            "x-real-ip": "144.91.105.72"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "messageType": "text",
+            "message": "фывафыав",
+            "metadata": {
+              "sender": "Zh.",
+              "timestamp": 1765113455,
+              "messageId": "3FAAF67BAA1862AED2B9",
+              "remoteJid": "77015705555@s.whatsapp.net"
+            },
+            "mediaData": null,
+            "nodeData": {
+              "webHook": {
+                "text": "https://n8n.truffles.kz/webhook/demo_salon",
+                "method": "POST"
+              }
+            }
+          },
+          "webhookUrl": "https://n8n.truffles.kz/webhook/demo_salon",
+          "executionMode": "production"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Signature": {
+      "main": [
+        [
+          {
+            "node": "Signature OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature OK?": {
+      "main": [
+        [
+          {
+            "node": "Build Dedup Key",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Invalid Signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Dedup Key": {
+      "main": [
+        [
+          {
+            "node": "Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis": {
+      "main": [
+        [
+          {
+            "node": "MessageIDisEmpty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MessageIDisEmpty": {
+      "main": [
+        [
+          {
+            "node": "Mark Dedup",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Dedup": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Webhook Data": {
+      "main": [
+        [
+          {
+            "node": "Call '2_ChannelAdapter_C38zCf2jfc2Zqfzf'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call '2_ChannelAdapter_C38zCf2jfc2Zqfzf'": {
+      "main": [
+        []
+      ]
+    },
+    "Respond to Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Restore Webhook Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "9c5ea0d2-dfea-412a-8582-3c5db1c326f1",
+  "meta": {
+    "instanceId": "01b56804ece88a9cc615224a075b1fb601dddc8bc8fa664ead4d87907f4c7973"
+  },
+  "id": "656fmXR6GPZrJbxm",
+  "tags": []
+}

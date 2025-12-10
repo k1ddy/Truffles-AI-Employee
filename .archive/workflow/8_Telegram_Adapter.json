@@ -1,0 +1,381 @@
+{
+  "name": "8_Telegram_Adapter",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -800,
+        304
+      ],
+      "id": "tg-start-001",
+      "name": "Start"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем данные от Escalation Handler\nconst input = $json;\n\n// Формируем данные для Telegram\nconst chatId = input.telegram_chat_id;\nconst botToken = input.telegram_bot_token;\nconst phone = input.phone;\nconst clientName = input.client_name || 'Клиент';\nconst businessName = input.business_name || input.client_slug || '';\nconst message = input.message;\nconst handoverId = input.handover_id;\nconst conversationId = input.conversation_id;\n\n// Название топика\nconst topicName = `${phone} ${clientName} [${businessName}]`;\n\nreturn [{\n  json: {\n    ...input,\n    chat_id: chatId,\n    bot_token: botToken,\n    topic_name: topicName,\n    phone,\n    client_name: clientName,\n    business_name: businessName,\n    message,\n    handover_id: handoverId,\n    conversation_id: conversationId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -576,
+        304
+      ],
+      "id": "tg-prepare-001",
+      "name": "Prepare Data"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT telegram_topic_id \nFROM conversations \nWHERE id = '{{ $json.conversation_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -352,
+        304
+      ],
+      "id": "tg-get-topic-001",
+      "name": "Get Existing Topic",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-topic",
+              "leftValue": "={{ $json.telegram_topic_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -128,
+        304
+      ],
+      "id": "tg-has-topic-001",
+      "name": "Has Topic?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Prepare Data').first().json.bot_token }}/createForumTopic",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Prepare Data').first().json.chat_id }}"
+            },
+            {
+              "name": "name",
+              "value": "={{ $('Prepare Data').first().json.topic_name }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        400
+      ],
+      "id": "tg-create-topic-001",
+      "name": "Create Topic"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE conversations \nSET telegram_topic_id = {{ $json.result.message_thread_id }} \nWHERE id = '{{ $('Prepare Data').first().json.conversation_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        320,
+        400
+      ],
+      "id": "tg-save-topic-001",
+      "name": "Save Topic ID",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем topic_id из существующего или нового\nconst prep = $('Prepare Data').first().json;\nlet topicId;\n\ntry {\n  // Если создали новый топик\n  topicId = $('Create Topic').first()?.json?.result?.message_thread_id;\n} catch(e) {}\n\nif (!topicId) {\n  // Если использовали существующий\n  topicId = $('Get Existing Topic').first()?.json?.telegram_topic_id;\n}\n\nreturn [{\n  json: {\n    ...prep,\n    topic_id: topicId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        304
+      ],
+      "id": "tg-merge-topic-001",
+      "name": "Get Topic ID"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $json.bot_token }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.chat_id }}"
+            },
+            {
+              "name": "message_thread_id",
+              "value": "={{ $json.topic_id }}"
+            },
+            {
+              "name": "text",
+              "value": "=🚨 НОВАЯ ЗАЯВКА\n\n📱 Телефон: {{ $json.phone }}\n👤 Клиент: {{ $json.client_name }}\n🏢 Бизнес: {{ $json.business_name }}\n\n💬 Сообщение:\n{{ $json.message }}"
+            },
+            {
+              "name": "reply_markup",
+              "value": "={\"inline_keyboard\":[[{\"text\":\"Беру ✋\",\"callback_data\":\"take_{{ $json.handover_id }}\"},{\"text\":\"Не могу ❌\",\"callback_data\":\"skip_{{ $json.handover_id }}\"}]]}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        768,
+        304
+      ],
+      "id": "tg-send-escalation-001",
+      "name": "Send Escalation"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE handovers \nSET channel = 'telegram', \n    channel_ref = '{{ $('Get Topic ID').first().json.topic_id }}', \n    telegram_message_id = {{ $('Send Escalation').first().json.result.message_id }}\nWHERE id = '{{ $('Prepare Data').first().json.handover_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        992,
+        304
+      ],
+      "id": "tg-save-refs-001",
+      "name": "Save Channel Refs",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Возвращаем результат\nreturn [{\n  json: {\n    success: true,\n    topic_id: $('Get Topic ID').first().json.topic_id,\n    message_id: $('Send Escalation').first().json.result?.message_id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        304
+      ],
+      "id": "tg-result-001",
+      "name": "Return Result"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Prepare Data').first().json.bot_token }}/pinChatMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Prepare Data').first().json.chat_id }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $('Send Escalation').first().json.result.message_id }}"
+            },
+            {
+              "name": "disable_notification",
+              "value": "=true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1408,
+        304
+      ],
+      "id": "adapter-pin-msg",
+      "name": "Pin Escalation"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Prepare Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Data": {
+      "main": [
+        [
+          {
+            "node": "Get Existing Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Existing Topic": {
+      "main": [
+        [
+          {
+            "node": "Has Topic?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Topic?": {
+      "main": [
+        [
+          {
+            "node": "Get Topic ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Topic": {
+      "main": [
+        [
+          {
+            "node": "Save Topic ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Topic ID": {
+      "main": [
+        [
+          {
+            "node": "Get Topic ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Topic ID": {
+      "main": [
+        [
+          {
+            "node": "Send Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Escalation": {
+      "main": [
+        [
+          {
+            "node": "Pin Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Channel Refs": {
+      "main": [
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pin Escalation": {
+      "main": [
+        [
+          {
+            "node": "Save Channel Refs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "1b6f5345-4045-4fa1-b494-564753d3408a",
+  "meta": {
+    "instanceId": "01b56804ece88a9cc615224a075b1fb601dddc8bc8fa664ead4d87907f4c7973"
+  },
+  "id": "fFPEbTNlkBSjo66A",
+  "tags": []
+}

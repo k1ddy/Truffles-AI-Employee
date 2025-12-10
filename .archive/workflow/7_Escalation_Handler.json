@@ -1,0 +1,524 @@
+{
+  "name": "7_Escalation_Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -800,
+        304
+      ],
+      "id": "esc-start-001",
+      "name": "Start"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  c.bot_status,\n  c.no_count,\n  c.bot_muted_until,\n  c.user_id,\n  cs.telegram_chat_id,\n  cs.telegram_bot_token,\n  cs.silence_after_first_no_minutes,\n  cs.max_retry_offers,\n  cl.name as client_name,\n  cl.config->>'instance_id' as instance_id\nFROM conversations c\nJOIN clients cl ON c.client_id = cl.id\nLEFT JOIN client_settings cs ON cs.client_id = cl.id\nWHERE c.id = '{{ $json.conversation_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -576,
+        304
+      ],
+      "id": "esc-load-status-001",
+      "name": "Load Status",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Start').first().json;\nconst status = $json;\n\nconst botStatus = status.bot_status || 'active';\nconst noCount = status.no_count || 0;\nconst mutedUntil = status.bot_muted_until ? new Date(status.bot_muted_until) : null;\nconst now = new Date();\n\nconst silenceMinutes = status.silence_after_first_no_minutes || 30;\n\nconst isMuted = botStatus === 'muted' && mutedUntil && now < mutedUntil;\n\nlet action = 'process';\nlet responseText = null;\nlet shouldMute = false;\nlet newNoCount = noCount;\n\nif (isMuted) {\n  action = 'silent_exit';\n} else if (input.reason === 'human_request') {\n  newNoCount = noCount + 1;\n  if (newNoCount === 1) {\n    // ФИКСИРОВАННЫЙ текст, без вариаций\n    responseText = 'Передаю ваш вопрос менеджеру — свяжется в ближайшее время.';\n    shouldMute = true;\n  } else {\n    action = 'silent_exit';\n  }\n} else if (input.reason === 'frustration') {\n  responseText = 'Понимаю, передаю менеджеру — свяжется с вами лично.';\n  shouldMute = true;\n  newNoCount = noCount + 1;\n} else {\n  // Для других случаев - тоже фиксированный текст\n  responseText = 'Уточню у коллег и вернусь с ответом.';\n}\n\nreturn [{\n  json: {\n    ...input,\n    conversation_id: input.conversation_id,\n    user_id: status.user_id,\n    current_bot_status: botStatus,\n    current_no_count: noCount,\n    is_muted: isMuted,\n    action,\n    response_text: responseText,\n    should_mute: shouldMute,\n    new_no_count: newNoCount,\n    silence_minutes: silenceMinutes,\n    telegram_chat_id: status.telegram_chat_id,\n    telegram_bot_token: status.telegram_bot_token,\n    client_name: status.client_name,\n    instance_id: status.instance_id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        304
+      ],
+      "id": "esc-decide-001",
+      "name": "Decide Action"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "action-check",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "process",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -128,
+        304
+      ],
+      "id": "esc-should-process-001",
+      "name": "Should Process?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE conversations SET\n  bot_status = CASE WHEN {{ $('Decide Action').first().json.should_mute }} THEN 'muted' ELSE bot_status END,\n  bot_muted_until = CASE WHEN {{ $('Decide Action').first().json.should_mute }} THEN NOW() + INTERVAL '{{ $('Decide Action').first().json.silence_minutes }} minutes' ELSE bot_muted_until END,\n  no_count = {{ $('Decide Action').first().json.new_no_count }}\nWHERE id = '{{ $('Decide Action').first().json.conversation_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        96,
+        208
+      ],
+      "id": "esc-update-conv-001",
+      "name": "Update Conversation",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO handovers (\n  conversation_id,\n  client_id,\n  user_message,\n  status,\n  trigger_type,\n  trigger_value,\n  escalation_reason\n) VALUES (\n  '{{ $('Decide Action').first().json.conversation_id }}',\n  '{{ $('Decide Action').first().json.client_id }}',\n  '{{ $('Decide Action').first().json.message.replace(/'/g, \"''\") }}',\n  'pending',\n  'intent',\n  '{{ $('Decide Action').first().json.reason }}',\n  '{{ $('Decide Action').first().json.reason }}'\n) RETURNING id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        320,
+        208
+      ],
+      "id": "esc-create-handover-001",
+      "name": "Create Handover",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-telegram",
+              "leftValue": "={{ $('Decide Action').first().json.telegram_chat_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        544,
+        208
+      ],
+      "id": "esc-has-telegram-001",
+      "name": "Has Telegram?"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "fFPEbTNlkBSjo66A",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "telegram_chat_id": "={{ $('Decide Action').first().json.telegram_chat_id }}",
+            "telegram_bot_token": "={{ $('Decide Action').first().json.telegram_bot_token }}",
+            "phone": "={{ $('Decide Action').first().json.phone }}",
+            "client_name": "={{ $('Decide Action').first().json.client_name }}",
+            "client_slug": "={{ $('Start').first().json.client_slug }}",
+            "business_name": "={{ $('Decide Action').first().json.client_name }}",
+            "message": "={{ $('Decide Action').first().json.message }}",
+            "handover_id": "={{ $('Create Handover').first().json.id }}",
+            "conversation_id": "={{ $('Decide Action').first().json.conversation_id }}"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        768,
+        112
+      ],
+      "id": "esc-send-telegram-http-001",
+      "name": "Call Telegram Adapter"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "1969855532"
+            },
+            {
+              "name": "text",
+              "value": "=⚠️ Эскалация без Telegram группы!\n\nКлиент: {{ $('Decide Action').first().json.client_name }}\nНужно настроить telegram_chat_id в client_settings"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        768,
+        304
+      ],
+      "id": "esc-notify-admin-http-001",
+      "name": "Notify Admin"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-response",
+              "leftValue": "={{ $('Decide Action').first().json.response_text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        992,
+        208
+      ],
+      "id": "esc-should-respond-001",
+      "name": "Should Respond?"
+    },
+    {
+      "parameters": {
+        "url": "https://app.chatflow.kz/api/v1/send-text",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "***********************************************************************************************************************************************************************************"
+            },
+            {
+              "name": "instance_id",
+              "value": "={{ $('Decide Action').first().json.instance_id }}"
+            },
+            {
+              "name": "jid",
+              "value": "={{ $('Decide Action').first().json.remoteJid }}"
+            },
+            {
+              "name": "msg",
+              "value": "={{ $('Decide Action').first().json.response_text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1216,
+        112
+      ],
+      "id": "esc-send-whatsapp-001",
+      "name": "Send WhatsApp Response"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (conversation_id, client_id, role, content, metadata)\nVALUES (\n  '{{ $('Decide Action').first().json.conversation_id }}',\n  '{{ $('Decide Action').first().json.client_id }}',\n  'assistant',\n  '{{ $('Decide Action').first().json.response_text.replace(/'/g, \"''\") }}',\n  '{\"escalation\": true, \"reason\": \"{{ $('Decide Action').first().json.reason }}\"}'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1440,
+        112
+      ],
+      "id": "esc-save-response-001",
+      "name": "Save Response",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Silent exit - бот замьючен или повторный запрос\nreturn [{ json: { status: 'silent_exit', reason: $('Decide Action').first().json.action } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        512
+      ],
+      "id": "esc-silent-exit-001",
+      "name": "Silent Exit"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return final status\nreturn [{\n  json: {\n    status: 'completed',\n    escalation_sent: true,\n    response_sent: !!$('Decide Action').first().json.response_text,\n    handover_id: $('Create Handover').first()?.json?.id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        304
+      ],
+      "id": "esc-complete-001",
+      "name": "Complete"
+    }
+  ],
+  "pinData": {
+    "Start": [
+      {
+        "json": {
+          "output": {
+            "thinking": "Клиент явно просит связаться с менеджером. В базе есть контакты и правила эскалации (при явном запросе к менеджеру нужно подключать человека). Эскалирую и сообщаю контакты для срочной связи.",
+            "has_answer": true,
+            "needs_escalation": true,
+            "source": "faq.md",
+            "response": "Передаю ваш запрос менеджеру — свяжется в ближайшее время. Если нужно срочно, позвоните +7 775 984 19 26 или напишите на info@truffles.kz."
+          },
+          "conversation_id": "42f15f30-008c-471f-957e-a955f412907a",
+          "client_id": "499e4744-5e7f-4a97-8466-56ff2cdcf587",
+          "phone": "77015705555",
+          "remoteJid": "77015705555@s.whatsapp.net",
+          "message": "Хочу связаться с менеджером.",
+          "reason": "escalation",
+          "bot_response": "Передаю ваш запрос менеджеру — свяжется в ближайшее время. Если нужно срочно, позвоните +7 775 984 19 26 или напишите на info@truffles.kz."
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Load Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Status": {
+      "main": [
+        [
+          {
+            "node": "Decide Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Action": {
+      "main": [
+        [
+          {
+            "node": "Should Process?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Process?": {
+      "main": [
+        [
+          {
+            "node": "Update Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Silent Exit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Conversation": {
+      "main": [
+        [
+          {
+            "node": "Create Handover",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Handover": {
+      "main": [
+        [
+          {
+            "node": "Has Telegram?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Telegram?": {
+      "main": [
+        [
+          {
+            "node": "Call Telegram Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin": {
+      "main": [
+        [
+          {
+            "node": "Should Respond?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Respond?": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Response": {
+      "main": [
+        [
+          {
+            "node": "Save Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Response": {
+      "main": [
+        [
+          {
+            "node": "Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Telegram Adapter": {
+      "main": [
+        [
+          {
+            "node": "Should Respond?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "5230468c-f314-4ca1-ba25-921ccee69c68",
+  "meta": {
+    "instanceId": "01b56804ece88a9cc615224a075b1fb601dddc8bc8fa664ead4d87907f4c7973"
+  },
+  "id": "7jGZrdbaAAvtTnQX",
+  "tags": []
+}

@@ -1,0 +1,303 @@
+{
+  "name": "3_Normalize_DCs6AoJDIOPB4ZtF",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -96,
+        -32
+      ],
+      "id": "a855c57d-50ce-4e0e-8049-443169febba0",
+      "name": "Start"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.message_type }}",
+                    "rightValue": "audio",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "audio"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.message_type }}",
+                    "rightValue": "image",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "image"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        176,
+        -48
+      ],
+      "id": "92313776-0387-4ddc-9b1c-df490913c96c",
+      "name": "Message Type"
+    },
+    {
+      "parameters": {
+        "jsCode": "// TEXT - просто пропускаем\nconst input = $json;\n\nreturn [{\n  json: {\n    ...input,\n    normalized_text: input.text,\n    processing: 'text_passthrough'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        144
+      ],
+      "id": "98ce6ccf-7c7e-4225-bb83-3036be9902fd",
+      "name": "Text Passthrough"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Подготовить binary для STT\nconst input = $json;\nconst media = input.media || {};\n\nif (!media.base64) {\n  return [{ json: { ...input, normalized_text: '[audio without data]', processing: 'audio_no_data' } }];\n}\n\nconst buffer = Buffer.from(media.base64, 'base64');\n\nreturn [{\n  json: input,\n  binary: {\n    audio: {\n      data: buffer,\n      mimeType: media.mimetype || 'audio/ogg',\n      fileName: media.filename || 'voice.ogg'\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -160
+      ],
+      "id": "dcb8a67b-dcb0-41a9-bbb1-b2b147d008c7",
+      "name": "Prepare Audio"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/speech-to-text",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "audio"
+            },
+            {
+              "name": "model_id",
+              "value": "scribe_v2"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        -160
+      ],
+      "id": "e20defac-0f3c-45c5-8ac7-4b3faa4db1fe",
+      "name": "ElevenLabs STT",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "lAIfrKkpaC6WZwvB",
+          "name": "ElevenLabs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Собрать результат STT\nconst input = $('Prepare Audio').item.json;\nconst sttResult = $json;\n\nreturn [{\n  json: {\n    ...input,\n    normalized_text: sttResult.text || sttResult.transcript || '[audio not transcribed]',\n    processing: 'audio_stt'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -160
+      ],
+      "id": "7f152e76-a76f-46cc-8e0d-a42170ca51df",
+      "name": "Audio Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "// IMAGE - пока placeholder\nconst input = $json;\nconst media = input.media || {};\n\nreturn [{\n  json: {\n    ...input,\n    normalized_text: media.caption || '[image received]',\n    processing: 'image_placeholder'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        48
+      ],
+      "id": "75a2ae19-21a9-4bd5-a562-5d42cad7af0f",
+      "name": "Image Placeholder"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "3QqFRxapNa29jODD",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/3QqFRxapNa29jODD",
+          "cachedResultName": "4_MessageBuffer_3QqFRxapNa29jODD"
+        },
+        "workflowInputs": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1120,
+        -48
+      ],
+      "id": "bb045340-a34d-405b-a262-c88c71153930",
+      "name": "Call MessageBuffer"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Message Type": {
+      "main": [
+        [
+          {
+            "node": "Prepare Audio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Image Placeholder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Text Passthrough",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Audio": {
+      "main": [
+        [
+          {
+            "node": "ElevenLabs STT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ElevenLabs STT": {
+      "main": [
+        [
+          {
+            "node": "Audio Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audio Result": {
+      "main": [
+        [
+          {
+            "node": "Call MessageBuffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Image Placeholder": {
+      "main": [
+        [
+          {
+            "node": "Call MessageBuffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Passthrough": {
+      "main": [
+        [
+          {
+            "node": "Call MessageBuffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Message Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "b3eb63bc-d67f-45ae-b030-12d06454fc08",
+  "meta": {
+    "instanceId": "01b56804ece88a9cc615224a075b1fb601dddc8bc8fa664ead4d87907f4c7973"
+  },
+  "id": "DCs6AoJDIOPB4ZtF",
+  "tags": []
+}

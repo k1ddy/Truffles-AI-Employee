@@ -1,0 +1,344 @@
+{
+  "name": "5_TurnDetector_kEXEMbThwUsCJ2Cz",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -864,
+        96
+      ],
+      "id": "9fbe6aa5-e1be-4c19-aa3a-a1695dcab701",
+      "name": "Start"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Эвристики ДО LLM\nconst input = $json;\nconst messages = input.buffered_messages || [];\nconst mergedText = input.merged_text || '';\nconst lastType = input.last_message_type || 'text';\n\n// Базовая уверенность\nlet confidence = 0.5;\nlet skipLLM = false;\nlet intentType = 'unknown';\n\n// Эвристика 1: Аудио = законченная мысль (+0.3)\nif (input.has_audio) {\n  confidence += 0.3;\n}\n\n// Эвристика 2: Несколько сообщений = скорее законченная мысль (+0.2)\nif (messages.length >= 2) {\n  confidence += 0.2;\n}\n\n// Эвристика 3: Короткие ответы\nconst shortAnswers = ['да', 'нет', 'ок', 'окей', 'хорошо', 'ладно', 'свяжи', 'давай', 'понял', 'ага', 'угу'];\nconst lowerText = mergedText.toLowerCase().trim();\nif (shortAnswers.includes(lowerText)) {\n  confidence = 0.95;\n  intentType = 'answer';\n  skipLLM = true;\n}\n\n// Эвристика 4: Только точка или вопрос\nif (lowerText === '.' || lowerText === '??' || lowerText === '?') {\n  confidence = 0.3; // Нужен контекст\n  intentType = 'reaction';\n}\n\n// Эвристика 5: Вопрос в конце = законченная мысль\nif (mergedText.trim().endsWith('?')) {\n  confidence += 0.2;\n  intentType = 'question';\n}\n\n// Эвристика 6: Длинный текст = скорее законченный\nif (mergedText.length > 50) {\n  confidence += 0.1;\n}\n\nreturn [{\n  json: {\n    ...input,\n    heuristics: {\n      confidence: Math.min(confidence, 1.0),\n      intent_type: intentType,\n      skip_llm: skipLLM || confidence >= 0.85\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        96
+      ],
+      "id": "966ce550-4e78-4d46-bb38-ec7baaa266e1",
+      "name": "Heuristics"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.heuristics.skip_llm }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -416,
+        96
+      ],
+      "id": "f6f9ba5b-240c-465e-8d84-3038ee852661",
+      "name": "Need LLM?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Пропуск LLM - уже уверены\nconst input = $json;\n\nreturn [{\n  json: {\n    ...input,\n    turn_analysis: {\n      is_complete: true,\n      intent_type: input.heuristics.intent_type || 'statement',\n      merged_message: input.merged_text,\n      context_hint: 'heuristics_confident',\n      confidence: input.heuristics.confidence\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        -16
+      ],
+      "id": "14973fab-0b63-4386-8200-eb2a7e3ffa85",
+      "name": "Skip LLM"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Парсим ответ от Structured Output LLM\nconst input = $('Heuristics').item.json;\n\n// Structured Output возвращает данные напрямую в $json\nconst analysis = $json.output || $json;\n\nreturn [{\n  json: {\n    ...input,\n    turn_analysis: {\n      is_complete: analysis.is_complete !== false,\n      intent_type: analysis.intent_type || 'statement',\n      merged_message: analysis.merged_message || input.merged_text,\n      context_hint: analysis.context_hint || '',\n      confidence: input.heuristics.confidence\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        192
+      ],
+      "id": "0ccbf7d9-7584-459a-923c-8a6943c85ec4",
+      "name": "Parse LLM"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "4vaEvzlaMrgovhNz",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/4vaEvzlaMrgovhNz",
+          "cachedResultName": "Multi-Agent_4vaEvzlaMrgovhNz"
+        },
+        "workflowInputs": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        560,
+        96
+      ],
+      "id": "e202729d-2648-4b0f-9b59-4e7f6d6cd3e2",
+      "name": "Call MainWorkflow"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Сообщения клиента:\n{{ $json.merged_text }}\n\nКоличество сообщений: {{ $json.buffered_count }}\nПоследний тип: {{ $json.last_message_type }}\nЕсть аудио: {{ $json.has_audio }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "Ты анализатор сообщений для чат-бота Truffles.\n\nЗАДАЧИ:\n1. is_complete: это законченная мысль или клиент ещё печатает?\n2. intent_type: question (вопрос), answer (ответ на вопрос бота), statement (утверждение), greeting (приветствие)\n3. merged_message: ОБЪЕДИНИ все сообщения и ИСПРАВЬ ОПЕЧАТКИ в одно грамотное предложение\n4. context_hint: о чём речь (2-3 слова)\n\nПРАВИЛА для merged_message:\n- Исправляй опечатки и ошибки\n- Объединяй фрагменты в связное предложение\n- Сохраняй смысл и intent клиента\n- Пиши грамотно, но естественно\n\nПРИМЕРЫ:\nВход: [\"привет\", \"раскажи\", \"ооб изнесе\"]\nmerged_message: \"Привет, расскажи о бизнесе\"\n\nВход: [\"сколко\", \"стоит\"]\nmerged_message: \"Сколько стоит?\"\n\nВход: [\"да свяжи\"]\nmerged_message: \"Да, свяжи с менеджером\"\n\nОтвечай ТОЛЬКО JSON без markdown."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -144,
+        144
+      ],
+      "id": "c63484e6-b4d6-44b7-859c-69c6c8279218",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -384,
+        400
+      ],
+      "id": "12a46153-3390-4415-9fba-f9e3857c1537",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "C31JRkzPBiItNcOT",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"is_complete\": {\n      \"type\": \"boolean\",\n      \"description\": \"true если это законченная мысль, false если клиент ещё печатает\"\n    },\n    \"intent_type\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"greeting\",\n        \"question\",\n        \"answer\",\n        \"statement\"\n      ],\n      \"description\": \"greeting - приветствие, question - вопрос, answer - ответ на вопрос бота, statement - утверждение\"\n    },\n    \"merged_message\": {\n      \"type\": \"string\",\n      \"description\": \"Объединённое сообщение с исправленными опечатками\"\n    },\n    \"context_hint\": {\n      \"type\": \"string\",\n      \"description\": \"О чём речь (2-3 слова)\"\n    }\n  },\n  \"required\": [\n    \"is_complete\",\n    \"intent_type\",\n    \"merged_message\",\n    \"context_hint\"\n  ]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -16,
+        400
+      ],
+      "id": "f8c99af6-9b36-40ff-83df-a6e36fcfd50f",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-5-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-5-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=Сообщения клиента:\n{{ $json.merged_text }}\n\nКоличество сообщений: {{ $json.buffered_count }}\nПоследний тип: {{ $json.last_message_type }}\nЕсть аудио: {{ $json.has_audio }}"
+            },
+            {
+              "role": "system",
+              "content": "Ты анализатор сообщений для чат-бота Truffles.\n\nЗАДАЧИ:\n1. is_complete: это законченная мысль или клиент ещё печатает?\n2. intent_type: question (вопрос), answer (ответ на вопрос бота), statement (утверждение), greeting (приветствие)\n3. merged_message: ОБЪЕДИНИ все сообщения и ИСПРАВЬ ОПЕЧАТКИ в одно грамотное предложение\n4. context_hint: о чём речь (2-3 слова)\n\nПРАВИЛА для merged_message:\n- Исправляй опечатки и ошибки\n- Объединяй фрагменты в связное предложение\n- Сохраняй смысл и intent клиента\n- Пиши грамотно, но естественно\n\nПРИМЕРЫ:\nВход: [\"привет\", \"раскажи\", \"ооб изнесе\"]\nmerged_message: \"Привет, расскажи о бизнесе\"\n\nВход: [\"сколко\", \"стоит\"]\nmerged_message: \"Сколько стоит?\"\n\nВход: [\"да свяжи\"]\nmerged_message: \"Да, свяжи с менеджером\"\n\nОтвечай ТОЛЬКО JSON без markdown."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2,
+      "position": [
+        176,
+        512
+      ],
+      "id": "66074ec8-19a0-4fcc-a4dd-c67b6fd26cb4",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "C31JRkzPBiItNcOT",
+          "name": "OpenAi account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Start": [
+      {
+        "json": {
+          "channel": "whatsapp",
+          "user_id": "77015705555",
+          "session_id": "77015705555@s.whatsapp.net",
+          "sender_name": "Zh.",
+          "buffered_messages": [
+            {
+              "text": "здравсвтуйте",
+              "type": "text",
+              "timestamp": 1764929367,
+              "message_id": "3FA2562C92C1C6CD85CA"
+            }
+          ],
+          "buffered_count": 1,
+          "merged_text": "здравсвтуйте",
+          "has_audio": false,
+          "has_image": false,
+          "last_message_type": "text"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Heuristics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heuristics": {
+      "main": [
+        [
+          {
+            "node": "Need LLM?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Need LLM?": {
+      "main": [
+        [
+          {
+            "node": "Skip LLM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip LLM": {
+      "main": [
+        [
+          {
+            "node": "Call MainWorkflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM": {
+      "main": [
+        [
+          {
+            "node": "Call MainWorkflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "ed05ab21-0306-4f28-97a2-0daaecf4d2a2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "01b56804ece88a9cc615224a075b1fb601dddc8bc8fa664ead4d87907f4c7973"
+  },
+  "id": "kEXEMbThwUsCJ2Cz",
+  "tags": []
+}

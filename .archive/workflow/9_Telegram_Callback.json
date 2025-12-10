@@ -1,0 +1,1010 @@
+{
+  "name": "9_Telegram_Callback",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram-callback",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        304
+      ],
+      "id": "cb-webhook-001",
+      "name": "Telegram Webhook",
+      "webhookId": "telegram-callback-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Парсим update от Telegram (callback или message)\nconst body = $json.body || $json;\n\n// CALLBACK (кнопка нажата)\nconst callback = body.callback_query;\nif (callback) {\n  const data = callback.data;\n  const firstUnderscore = data.indexOf('_');\n  const action = data.substring(0, firstUnderscore);\n  const handoverId = data.substring(firstUnderscore + 1);\n\n  const from = callback.from;\n  const managerName = from.first_name + (from.last_name ? ' ' + from.last_name : '');\n  const managerId = from.id.toString();\n  const message = callback.message;\n  const messageId = message?.message_id;\n  const chatId = message?.chat?.id;\n  const topicId = message?.message_thread_id;\n\n  return [{\n    json: {\n      type: 'callback',\n      action,\n      handover_id: handoverId,\n      manager_id: managerId,\n      manager_name: managerName,\n      callback_query_id: callback.id,\n      message_id: messageId,\n      chat_id: chatId,\n      topic_id: topicId\n    }\n  }];\n}\n\n// MESSAGE (обычное сообщение в топике)\nconst msg = body.message;\nif (msg) {\n  const chatId = msg.chat?.id;\n  const topicId = msg.message_thread_id;\n  const text = msg.text || '';\n  const from = msg.from || {};\n  \n  return [{\n    json: {\n      type: 'message',\n      chat_id: chatId,\n      topic_id: topicId,\n      message_id: msg.message_id,\n      text: text,\n      from_id: from.id,\n      from_name: from.first_name + (from.last_name ? ' ' + from.last_name : ''),\n      is_bot: from.is_bot || false,\n      message: msg  // полный объект для Parse Message\n    }\n  }];\n}\n\nreturn [];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -576,
+        304
+      ],
+      "id": "cb-parse-001",
+      "name": "Parse Callback"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-callback",
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "callback",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -352,
+        304
+      ],
+      "id": "cb-is-callback-001",
+      "name": "Is Callback?"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "take",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "resolve",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "skip",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -128,
+        304
+      ],
+      "id": "cb-action-switch-001",
+      "name": "Action Switch"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE handovers SET status = 'active', assigned_to = '{{ $json.manager_id }}', assigned_to_name = '{{ $json.manager_name.replace(/'/g, \"''\") }}' WHERE id = '{{ $json.handover_id }}' AND status = 'pending' RETURNING id, conversation_id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        96,
+        112
+      ],
+      "id": "cb-take-001",
+      "name": "Take Handover",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE handovers SET status = 'resolved', resolved_at = NOW() WHERE id = '{{ $json.handover_id }}' RETURNING id, conversation_id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        96,
+        304
+      ],
+      "id": "cb-resolve-001",
+      "name": "Resolve Handover",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE conversations \nSET bot_status = 'active', bot_muted_until = NULL, no_count = 0\nWHERE id = (\n  SELECT conversation_id FROM handovers \n  WHERE id = '{{ $('Merge Token').first().json.handover_id }}'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        320,
+        304
+      ],
+      "id": "cb-unmute-001",
+      "name": "Unmute Bot",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Parse Callback').first().json;\nconst result = $json;\n\nlet text;\nlet success = false;\n\nif (result.id) {\n  text = `✅ ${input.manager_name} взял(а) заявку`;\n  success = true;\n} else {\n  text = `⚠️ Заявку уже взял другой менеджер`;\n}\n\nreturn [{\n  json: {\n    ...input,\n    response_text: text,\n    success,\n    remove_buttons: success\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        112
+      ],
+      "id": "cb-take-response-001",
+      "name": "Take Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Parse Callback').first().json;\n\nreturn [{\n  json: {\n    ...input,\n    response_text: '🟢 Заявка решена',\n    success: true,\n    remove_buttons: true\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        304
+      ],
+      "id": "cb-resolve-response-001",
+      "name": "Resolve Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Parse Callback').first().json;\n\nreturn [{\n  json: {\n    ...input,\n    response_text: '❌ Пропущено',\n    new_buttons: null,\n    success: true\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        96,
+        512
+      ],
+      "id": "cb-skip-response-001",
+      "name": "Skip Response"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Merge Token').first().json.bot_token }}/answerCallbackQuery",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "callback_query_id",
+              "value": "={{ $('Parse Callback').first().json.callback_query_id }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.response_text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        768,
+        208
+      ],
+      "id": "cb-answer-001",
+      "name": "Answer Callback"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Merge Token').first().json.bot_token }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Merge Token').first().json.chat_id }}"
+            },
+            {
+              "name": "message_thread_id",
+              "value": "={{ $('Merge Token').first().json.topic_id }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $('Take Response').first().json.response_text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        992,
+        208
+      ],
+      "id": "cb-notify-001",
+      "name": "Notify in Chat"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Обработка сообщений менеджера в топике\n// Input: Merge Token (который смержил Parse Callback + Bot Token)\nconst input = $('Merge Token').first().json;\n\n// Проверяем что это message (не callback)\nif (input.type !== 'message') return [];\n\n// Проверяем что есть текст и топик\nconst topicId = input.topic_id;\nconst text = input.text;\nif (!topicId || !text) return [];\n\n// Проверяем что это не бот\nif (input.is_bot) return [];\n\nreturn [{\n  json: {\n    type: 'manager_reply',\n    topic_id: topicId,\n    text: text,\n    manager_name: input.from_name,\n    manager_id: String(input.from_id),\n    chat_id: input.chat_id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        512
+      ],
+      "id": "cb-message-001",
+      "name": "Parse Message"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Merge Token').first().json.bot_token }}/editMessageReplyMarkup",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Merge Token').first().json.chat_id }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $('Merge Token').first().json.message_id }}"
+            },
+            {
+              "name": "reply_markup",
+              "value": "={{ JSON.stringify({inline_keyboard: [[{text: 'Решено ✅', callback_data: 'resolve_' + $('Merge Token').first().json.handover_id}]]}) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1104,
+        208
+      ],
+      "id": "cb-remove-btns-001",
+      "name": "Update Buttons"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT telegram_bot_token FROM client_settings WHERE telegram_chat_id = '{{ $json.chat_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -464,
+        304
+      ],
+      "id": "cb-get-token-001",
+      "name": "Get Bot Token",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const parsed = $('Parse Callback').first().json;\nconst tokenResult = $('Get Bot Token').first().json;\n\nreturn [{\n  json: {\n    ...parsed,\n    bot_token: tokenResult.telegram_bot_token\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        304
+      ],
+      "id": "cb-merge-token-001",
+      "name": "Merge Token"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Merge Token').first().json.bot_token }}/editMessageReplyMarkup",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Merge Token').first().json.chat_id }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $('Merge Token').first().json.message_id }}"
+            },
+            {
+              "name": "reply_markup",
+              "value": "={{ JSON.stringify({inline_keyboard: []}) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        544,
+        400
+      ],
+      "id": "cb-remove-btns-resolve",
+      "name": "Remove Buttons Resolve"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  h.id as handover_id,\n  h.conversation_id,\n  c.client_id,\n  u.phone,\n  u.phone || '@s.whatsapp.net' as remote_jid,\n  cl.config->>'instance_id' as instance_id,\n  cs.telegram_bot_token as bot_token\nFROM conversations c\nJOIN handovers h ON h.conversation_id = c.id AND h.status = 'active'\nJOIN users u ON u.id = c.user_id\nJOIN clients cl ON cl.id = c.client_id\nJOIN client_settings cs ON cs.client_id = c.client_id\nWHERE c.telegram_topic_id = {{ $('Parse Message').first().json.topic_id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        208,
+        608
+      ],
+      "id": "cb-find-handover",
+      "name": "Find Handover Data",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "has-handover",
+              "leftValue": "={{ $json.handover_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        400,
+        608
+      ],
+      "id": "cb-has-handover",
+      "name": "Has Active Handover?"
+    },
+    {
+      "parameters": {
+        "url": "https://app.chatflow.kz/api/v1/send-text",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzYyMTExNDU2fQ.myOt6xgCLfqbD9IF9EdJxkAyjij3fMty1B7sOhP2iKA"
+            },
+            {
+              "name": "instance_id",
+              "value": "={{ $('Find Handover Data').first().json.instance_id }}"
+            },
+            {
+              "name": "jid",
+              "value": "={{ $('Find Handover Data').first().json.remote_jid }}"
+            },
+            {
+              "name": "msg",
+              "value": "={{ $('Parse Message').first().json.text }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        608,
+        560
+      ],
+      "id": "cb-send-whatsapp",
+      "name": "Send Manager Reply to WhatsApp"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE handovers \nSET messages = COALESCE(messages, '[]'::jsonb) || \n  jsonb_build_array(jsonb_build_object(\n    'from', 'manager',\n    'name', '{{ $('Parse Message').first().json.manager_name }}',\n    'text', '{{ $('Parse Message').first().json.text }}',\n    'at', NOW()::text\n  ))\nWHERE id = '{{ $('Find Handover Data').first().json.handover_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        800,
+        560
+      ],
+      "id": "cb-save-message",
+      "name": "Save Manager Message",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Find Handover Data').first().json.bot_token }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Parse Message').first().json.chat_id }}"
+            },
+            {
+              "name": "message_thread_id",
+              "value": "={{ $('Parse Message').first().json.topic_id }}"
+            },
+            {
+              "name": "text",
+              "value": "=✅ Доставлено"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1008,
+        560
+      ],
+      "id": "cb-confirm-sent",
+      "name": "Confirm Sent to Topic"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Merge Token').first().json.bot_token }}/unpinChatMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Merge Token').first().json.chat_id }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $('Merge Token').first().json.message_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        704,
+        464
+      ],
+      "id": "cb-unpin-msg",
+      "name": "Unpin Escalation"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "delivery-ok",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        704,
+        608
+      ],
+      "id": "cb-check-delivery",
+      "name": "Delivery OK?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Find Handover Data').first().json.bot_token }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Parse Message').first().json.chat_id }}"
+            },
+            {
+              "name": "message_thread_id",
+              "value": "={{ $('Parse Message').first().json.topic_id }}"
+            },
+            {
+              "name": "text",
+              "value": "❌ Сообщение не доставлено клиенту"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        704
+      ],
+      "id": "cb-delivery-failed",
+      "name": "Notify Delivery Failed"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1104,
+        560
+      ],
+      "id": "cb-wait-delete",
+      "name": "Wait 3s",
+      "webhookId": "wait-delete-confirm"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Find Handover Data').first().json.bot_token }}/deleteMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Parse Message').first().json.chat_id }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $('Confirm Sent to Topic').first().json.result.message_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        560
+      ],
+      "id": "cb-delete-confirm",
+      "name": "Delete Confirm Message"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Merge Token').first().json.bot_token }}/answerCallbackQuery",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "callback_query_id",
+              "value": "={{ $('Merge Token').first().json.callback_query_id }}"
+            },
+            {
+              "name": "text",
+              "value": "Заявка закрыта"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        464
+      ],
+      "id": "cb-answer-resolve",
+      "name": "Answer Callback Resolve"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Callback": {
+      "main": [
+        [
+          {
+            "node": "Get Bot Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Callback?": {
+      "main": [
+        [
+          {
+            "node": "Action Switch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action Switch": {
+      "main": [
+        [
+          {
+            "node": "Take Handover",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resolve Handover",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Take Handover": {
+      "main": [
+        [
+          {
+            "node": "Take Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Handover": {
+      "main": [
+        [
+          {
+            "node": "Unmute Bot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unmute Bot": {
+      "main": [
+        [
+          {
+            "node": "Resolve Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Take Response": {
+      "main": [
+        [
+          {
+            "node": "Answer Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Response": {
+      "main": [
+        [
+          {
+            "node": "Remove Buttons Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Response": {
+      "main": [
+        [
+          {
+            "node": "Answer Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer Callback": {
+      "main": [
+        [
+          {
+            "node": "Update Buttons",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Bot Token": {
+      "main": [
+        [
+          {
+            "node": "Merge Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Token": {
+      "main": [
+        [
+          {
+            "node": "Is Callback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Buttons Resolve": {
+      "main": [
+        [
+          {
+            "node": "Unpin Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Message": {
+      "main": [
+        [
+          {
+            "node": "Find Handover Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Handover Data": {
+      "main": [
+        [
+          {
+            "node": "Has Active Handover?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Active Handover?": {
+      "main": [
+        [
+          {
+            "node": "Send Manager Reply to WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Send Manager Reply to WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Save Manager Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Manager Message": {
+      "main": [
+        [
+          {
+            "node": "Confirm Sent to Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unpin Escalation": {
+      "main": [
+        [
+          {
+            "node": "Answer Callback Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm Sent to Topic": {
+      "main": [
+        [
+          {
+            "node": "Wait 3s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 3s": {
+      "main": [
+        [
+          {
+            "node": "Delete Confirm Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "a382d8ea-22d1-4980-bc6a-33a1f8f3e3ac",
+  "meta": {
+    "instanceId": "01b56804ece88a9cc615224a075b1fb601dddc8bc8fa664ead4d87907f4c7973"
+  },
+  "id": "HQOWuMDIBPphC86v",
+  "tags": []
+}
