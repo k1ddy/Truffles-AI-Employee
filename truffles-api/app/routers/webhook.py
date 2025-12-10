@@ -5,7 +5,7 @@ from typing import Any
 
 from app.database import get_db
 from app.schemas.webhook import WebhookRequest, WebhookResponse
-from app.models import Client
+from app.models import Client, ClientSettings
 from app.services.conversation_service import (
     get_or_create_user,
     get_or_create_conversation,
@@ -19,12 +19,29 @@ from app.services.telegram_service import TelegramService
 
 router = APIRouter()
 
-MUTE_DURATION_MINUTES = 30
-MUTE_DURATION_HOURS_SECOND = 24
+# Default values (can be overridden in client_settings)
+DEFAULT_MUTE_DURATION_FIRST_MINUTES = 30
+DEFAULT_MUTE_DURATION_SECOND_HOURS = 24
 SESSION_TIMEOUT_HOURS = 24
 MSG_ESCALATED = "Передал менеджеру. Могу чем-то помочь пока ждёте?"
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."
 MSG_MUTED_LONG = "Понял! Если ответа от менеджеров долго нет — лучше звоните напрямую: +7 775 984 19 26"
+
+
+def get_mute_settings(db: Session, client_id) -> tuple[int, int]:
+    """Get mute durations from client_settings or use defaults."""
+    settings = db.query(ClientSettings).filter(
+        ClientSettings.client_id == client_id
+    ).first()
+    
+    if settings:
+        mute_first = settings.mute_duration_first_minutes or DEFAULT_MUTE_DURATION_FIRST_MINUTES
+        mute_second = settings.mute_duration_second_hours or DEFAULT_MUTE_DURATION_SECOND_HOURS
+    else:
+        mute_first = DEFAULT_MUTE_DURATION_FIRST_MINUTES
+        mute_second = DEFAULT_MUTE_DURATION_SECOND_HOURS
+    
+    return mute_first, mute_second
 
 
 @router.post("/webhook/debug")
@@ -161,14 +178,15 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
         
     elif is_rejection(intent):
         # Client rejects bot help
+        mute_first, mute_second = get_mute_settings(db, client.id)
         if conversation.no_count == 0:
-            # First rejection: mute for 30 min
-            conversation.bot_muted_until = now + timedelta(minutes=MUTE_DURATION_MINUTES)
+            # First rejection: mute (default 30 min)
+            conversation.bot_muted_until = now + timedelta(minutes=mute_first)
             conversation.no_count = 1
             bot_response = MSG_MUTED_TEMP
         else:
-            # Second rejection: mute for 24 hours (not permanent)
-            conversation.bot_muted_until = now + timedelta(hours=MUTE_DURATION_HOURS_SECOND)
+            # Second rejection: mute (default 24 hours)
+            conversation.bot_muted_until = now + timedelta(hours=mute_second)
             conversation.no_count += 1
             bot_response = MSG_MUTED_LONG
         

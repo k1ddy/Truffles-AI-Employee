@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 
 from app.database import get_db
 from app.schemas.message import MessageRequest, MessageResponse
+from app.models import ClientSettings
 from app.services.conversation_service import (
     get_or_create_user,
     get_or_create_conversation,
@@ -16,10 +17,27 @@ from app.services.escalation_service import escalate_conversation
 
 router = APIRouter()
 
-MUTE_DURATION_MINUTES = 30
+DEFAULT_MUTE_DURATION_FIRST_MINUTES = 30
+DEFAULT_MUTE_DURATION_SECOND_HOURS = 24
 MSG_ESCALATED = "Передал менеджеру. Могу чем-то помочь пока ждёте?"
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."
-MSG_MUTED_FULL = "Понял, не буду беспокоить."
+MSG_MUTED_LONG = "Понял! Если ответа от менеджеров долго нет — лучше звоните напрямую: +7 775 984 19 26"
+
+
+def get_mute_settings(db: Session, client_id) -> tuple[int, int]:
+    """Get mute durations from client_settings or use defaults."""
+    settings = db.query(ClientSettings).filter(
+        ClientSettings.client_id == client_id
+    ).first()
+    
+    if settings:
+        mute_first = settings.mute_duration_first_minutes or DEFAULT_MUTE_DURATION_FIRST_MINUTES
+        mute_second = settings.mute_duration_second_hours or DEFAULT_MUTE_DURATION_SECOND_HOURS
+    else:
+        mute_first = DEFAULT_MUTE_DURATION_FIRST_MINUTES
+        mute_second = DEFAULT_MUTE_DURATION_SECOND_HOURS
+    
+    return mute_first, mute_second
 
 
 @router.post("/message", response_model=MessageResponse)
@@ -108,22 +126,23 @@ def handle_message(request: MessageRequest, db: Session = Depends(get_db)):
         
     elif is_rejection(intent):
         # Client rejects bot help
+        mute_first, mute_second = get_mute_settings(db, request.client_id)
         if conversation.no_count == 0:
-            # First rejection: mute for 30 min
-            conversation.bot_muted_until = now + timedelta(minutes=MUTE_DURATION_MINUTES)
+            # First rejection: mute (default 30 min)
+            conversation.bot_muted_until = now + timedelta(minutes=mute_first)
             conversation.no_count = 1
             bot_response = MSG_MUTED_TEMP
             save_message(db, conversation.id, request.client_id, role="assistant", content=bot_response)
             sent = send_bot_response(db, request.client_id, request.remote_jid, bot_response)
-            message = f"Muted for {MUTE_DURATION_MINUTES} min (first rejection)"
+            message = f"Muted for {mute_first} min (first rejection)"
         else:
-            # Second+ rejection: permanent mute
-            conversation.bot_status = "muted"
+            # Second+ rejection: mute (default 24 hours)
+            conversation.bot_muted_until = now + timedelta(hours=mute_second)
             conversation.no_count += 1
-            bot_response = MSG_MUTED_FULL
+            bot_response = MSG_MUTED_LONG
             save_message(db, conversation.id, request.client_id, role="assistant", content=bot_response)
             sent = send_bot_response(db, request.client_id, request.remote_jid, bot_response)
-            message = "Permanently muted (repeated rejection)"
+            message = f"Muted for {mute_second}h (repeated rejection)"
             
     elif conversation.state == ConversationState.BOT_ACTIVE.value:
         # Normal flow: generate AI response

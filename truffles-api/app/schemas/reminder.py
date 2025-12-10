@@ -13,7 +13,10 @@ class ReminderItem(BaseModel):
     minutes_waiting: int
     telegram_chat_id: Optional[str] = None
     telegram_message_id: Optional[int] = None
+    telegram_bot_token: Optional[str] = None
+    channel_ref: Optional[str] = None
     context_summary: Optional[str] = None
+    owner_telegram_id: Optional[str] = None
 
 
 class RemindersResponse(BaseModel):

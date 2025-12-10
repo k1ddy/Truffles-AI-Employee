@@ -28,7 +28,7 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234
 ### n8n API
 ```
 URL: https://n8n.truffles.kz
-API Key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY0MTkzNjI5fQ.I06M9VWLgBkZKCk14CqahwM3ntuvUn_VcA9XzEHQV0Q
+API Key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY1MDc2NzQxfQ.vnXGUX7k77dUNlu0QTw4T6oxMlXAzbHVws4525CyU_4
 ```
 
 ### PostgreSQL
@@ -198,5 +198,4 @@ ssh ... "docker exec client_zero_n8n_1 curl -X POST 'http://qdrant:6333/...' -H 
 
 ---
 
-*Текущее состояние проекта: см. SESSION.md*
-*Детальный план v3: см. PROJECT_PLAN.md*
+*Текущее состояние проекта: см. STATE.md*

@@ -8,7 +8,7 @@ from app.schemas.reminder import (
     ReminderSentRequest,
     ReminderSentResponse,
 )
-from app.services.reminder_service import get_pending_reminders, mark_reminder_sent
+from app.services.reminder_service import get_pending_reminders, mark_reminder_sent, process_reminders
 
 router = APIRouter()
 
@@ -43,3 +43,14 @@ def reminder_sent(
         reminder_type=request.reminder_type,
         message=f"{request.reminder_type} marked as sent"
     )
+
+
+@router.post("/reminders/process")
+def process_all_reminders(db: Session = Depends(get_db)):
+    """Process and send all pending reminders to Telegram.
+    
+    Call this endpoint from cron every minute.
+    """
+    results = process_reminders(db)
+    db.commit()
+    return results
