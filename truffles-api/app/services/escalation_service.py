@@ -120,6 +120,25 @@ def send_telegram_notification(
         message_thread_id=topic_id,
     )
     
+    # 4.1 If topic not found - reset and create new
+    if not result.get("ok"):
+        error_desc = result.get("description", "")
+        if "thread not found" in error_desc.lower() or "message_thread_id" in error_desc.lower():
+            print(f"Topic {topic_id} not found, creating new one...")
+            # Reset topic_id
+            conversation.telegram_topic_id = None
+            db.flush()
+            # Create new topic
+            topic_id = get_or_create_topic(db, telegram, chat_id, conversation, user)
+            if topic_id:
+                # Retry send
+                result = telegram.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    reply_markup=buttons,
+                    message_thread_id=topic_id,
+                )
+    
     if result.get("ok"):
         message_id = result["result"]["message_id"]
         

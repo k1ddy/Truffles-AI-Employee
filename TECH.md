@@ -36,7 +36,7 @@
 | Контейнер | truffles_postgres_1 |
 | База | chatbot |
 | Пользователь | n8n |
-| Пароль | Iddqd777! |
+| Пароль | ${DB_PASSWORD} |
 
 ### Подключение
 ```bash
@@ -112,7 +112,7 @@ ssh -p 222 zhan@5.188.241.234 "docker exec truffles_postgres_1 psql -U n8n -d ch
 
 ### Qdrant
 ```bash
-ssh -p 222 zhan@5.188.241.234 "curl -s -H 'api-key: Iddqd777!' 'http://localhost:6333/collections'"
+ssh -p 222 zhan@5.188.241.234 "curl -s -H 'api-key: ${DB_PASSWORD}' 'http://localhost:6333/collections'"
 ```
 
 ---

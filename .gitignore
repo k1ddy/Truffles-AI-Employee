@@ -1,0 +1,14 @@
+# Archive with old scripts (contains hardcoded URLs/tokens)
+.archive/ops_old/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
