@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User, Conversation, Message, Handover
-from app.routers import message, callback, reminders, webhook, telegram_webhook
+from app.routers import message, callback, reminders, webhook, telegram_webhook, admin
 
 app = FastAPI(
     title="Truffles API",
@@ -16,6 +16,7 @@ app.include_router(callback.router)
 app.include_router(reminders.router)
 app.include_router(webhook.router)
 app.include_router(telegram_webhook.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

@@ -120,11 +120,12 @@ truffles-api/
 | `monitor.sh` | Мониторинг сервера |
 | `health_check.py` | Проверка здоровья системы |
 | `onboard_client.py` | Онбординг нового заказчика |
+| `update_prompt.py` | Обновление промпта через API |
 | `migrations/` | SQL миграции |
-| `templates/` | Шаблоны промптов |
+| `templates/` | Шаблоны (промпты, FAQ) |
 | `LESSONS_LEARNED.md` | Уроки из отладки |
 
-**Можно удалить:** Все `check_*.py`, `fix_*.py`, `add_*.py` — это было для n8n.
+**Старые скрипты:** `.archive/ops_old/` — не в git.
 
 ---
 
