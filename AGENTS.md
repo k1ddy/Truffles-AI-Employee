@@ -1,4 +1,4 @@
-# TRUFFLES — ГЛАВНЫЙ ДОКУМЕНТ
+# AGENTS — Принципы работы
 
 **Читай это первым. Каждую сессию.**
 
@@ -13,44 +13,10 @@
 | Ценность клиенту | Ответ в 11 вечера, не ждать до утра |
 | Ценность бизнесу | Менеджер не нужен 24/7, бот закрывает 80% вопросов |
 | Продаём | "Автоответчик + проверка оплат", НЕ "AI" |
-| Стадия | Pre-MVP, 0 клиентов |
-| Цель сейчас | Один работающий пилот |
 
----
-
-## ДОСТУПЫ
-
-### SSH
-```
-ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234
-```
-
-### n8n API
-```
-URL: https://n8n.truffles.kz
-API Key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY1MDc2NzQxfQ.vnXGUX7k77dUNlu0QTw4T6oxMlXAzbHVws4525CyU_4
-```
-
-### PostgreSQL
-```
-Host: postgres (внутри Docker)
-DB: truffles-chat-bot
-User: n8n
-Password: Iddqd777!
-```
-
-### Qdrant
-```
-Host: qdrant:6333 или 172.22.0.2:6333
-API Key: Iddqd777!
-Collection: truffles_knowledge
-```
-
-### GitHub
-```
-Repo: github.com/k1ddy/Truffles-Chat-Bot
-Доступ: через Factory, НЕ СПРАШИВАЙ ПАРОЛЬ
-```
+**Технические данные** → см. TECH.md
+**Планы развития** → см. ROADMAP.md
+**История изменений** → см. CHANGELOG.md
 
 ---
 
@@ -171,31 +137,9 @@ Solo founder. Технически не глубокий, но умный и б�
 
 ---
 
-## ИНСТРУМЕНТЫ
-
-### Диагностика через n8n API
-```bash
-curl -H "X-N8N-API-KEY: <key>" https://n8n.truffles.kz/api/v1/executions?limit=10
-curl -H "X-N8N-API-KEY: <key>" https://n8n.truffles.kz/api/v1/workflows/{id}
-```
-
-### SSH команды
-```bash
-# SQL запрос
-ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "docker exec -i client_zero_postgres_1 psql -U n8n -d chatbot -c 'SELECT ...'"
-
-# Qdrant запрос
-ssh ... "docker exec client_zero_n8n_1 curl -X POST 'http://qdrant:6333/...' -H 'api-key: Iddqd777!'"
-```
-
----
-
 ## КОМПАНИЯ
 
 - ТОО "Truffles", БИН 230640035188
 - Директор: Насурла Жанбол
+- Telegram: @ent3rprise
 - Тел: +7 775 984 19 26
-
----
-
-*Текущее состояние проекта: см. STATE.md*
