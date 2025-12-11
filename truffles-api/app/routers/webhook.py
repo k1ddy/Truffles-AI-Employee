@@ -5,7 +5,7 @@ from typing import Any
 
 from app.database import get_db
 from app.schemas.webhook import WebhookRequest, WebhookResponse
-from app.models import Client, ClientSettings
+from app.models import Client, ClientSettings, Handover
 from app.services.conversation_service import (
     get_or_create_user,
     get_or_create_conversation,
@@ -131,6 +131,22 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
     # 6. Classify intent
     intent = classify_intent(message_text)
     print(f"Intent classified: {intent.value}")
+    
+    # 6.1 FIX: If state=manager_active/pending but no topic — reset to bot_active
+    # Without topic, manager can't respond, so return bot to active state
+    if conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]:
+        if not conversation.telegram_topic_id:
+            print(f"WARNING: state={conversation.state} but no telegram_topic_id. Resetting to bot_active.")
+            conversation.state = ConversationState.BOT_ACTIVE.value
+            # Close any open handovers for this conversation
+            open_handovers = db.query(Handover).filter(
+                Handover.conversation_id == conversation.id,
+                Handover.status.in_(["pending", "active"])
+            ).all()
+            for h in open_handovers:
+                h.status = "resolved"
+                h.resolved_at = now
+                print(f"Auto-closed handover {h.id} due to missing topic")
     
     # 7. Forward to topic if pending/manager_active (always, even if muted)
     if conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]:

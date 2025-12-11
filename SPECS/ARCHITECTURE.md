@@ -259,48 +259,84 @@ IF bot_response exists:
 
 ### Схема базы данных
 
+> **ВАЖНО:** Полная иерархия и конечное видение описаны в `SPECS/MULTI_TENANT.md`
+
 ```
+┌─────────────┐
+│  companies  │ (биллинг, юр. лицо) — СУЩЕСТВУЕТ, НЕ ИСПОЛЬЗУЕТСЯ
+│             │
+│ id (PK)     │
+│ name        │
+│ billing_info│
+└──────┬──────┘
+       │
+       ▼
 ┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
 │   clients   │────▶│ client_settings │     │   prompts   │
 │             │     │                 │     │             │
 │ id (PK)     │     │ client_id (FK)  │     │ client_id   │
-│ name        │     │ telegram_chat_id│     │ name        │
-│ slug        │     │ telegram_bot_token    │ text        │
+│ company_id  │     │ telegram_chat_id│     │ name        │
+│ name        │     │ telegram_bot_token    │ text        │
 │ status      │     │ reminder_timeout_1    │ is_active   │
 └──────┬──────┘     │ mute_duration_*  │     └─────────────┘
        │            └─────────────────┘
        │
-       ▼
-┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
-│    users    │────▶│  conversations  │────▶│  messages   │
-│             │     │                 │     │             │
-│ id (PK)     │     │ id (PK)         │     │ id (PK)     │
-│ phone       │     │ user_id (FK)    │     │ conv_id (FK)│
-│ name        │     │ client_id       │     │ role        │
-│ metadata    │     │ state           │     │ content     │
-└─────────────┘     │ bot_muted_until │     │ created_at  │
-                    │ no_count        │     └─────────────┘
-                    │ telegram_topic_id│
-                    └────────┬────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │    handovers    │
-                    │                 │
-                    │ id (PK)         │
-                    │ conversation_id │
-                    │ status          │
-                    │ trigger_type    │
-                    │ user_message    │
-                    │ manager_response│
-                    │ assigned_to     │
-                    │ reminder_*_sent │
-                    └─────────────────┘
+       ├────────────────────────────────┐
+       ▼                                ▼
+┌─────────────┐                  ┌─────────────┐
+│  branches   │ ⚠️ НЕ ПОДКЛЮЧЕН  │    users    │
+│             │                  │             │
+│ id (PK)     │                  │ id (PK)     │
+│ client_id   │                  │ phone       │
+│ instance_id │ (WhatsApp)       │ name        │
+│ telegram_   │                  │ metadata    │
+│ chat_id     │                  └──────┬──────┘
+│ knowledge_  │                         │
+│ tag         │                         ▼
+└─────────────┘                  ┌─────────────────┐     ┌─────────────┐
+                                 │  conversations  │────▶│  messages   │
+                                 │                 │     │             │
+                                 │ id (PK)         │     │ id (PK)     │
+                                 │ user_id (FK)    │     │ conv_id (FK)│
+                                 │ client_id       │     │ role        │
+                                 │ state           │     │ content     │
+                                 │ bot_muted_until │     │ created_at  │
+                                 │ telegram_topic_id     └─────────────┘
+                                 └────────┬────────┘
+                                          │
+                                          ▼
+                                 ┌─────────────────┐
+                                 │    handovers    │
+                                 │                 │
+                                 │ id (PK)         │
+                                 │ conversation_id │
+                                 │ status          │
+                                 │ trigger_type    │
+                                 │ user_message    │
+                                 │ manager_response│
+                                 │ assigned_to     │
+                                 │ reminder_*_sent │
+                                 └─────────────────┘
 ```
+
+### ПЛАН: Подключение Branch
+
+После реализации (см. STATE.md):
+- `conversations.branch_id` вместо `client_id`
+- Роутинг по `branch.instance_id`
+- Telegram credentials из `branch.telegram_chat_id`
+- RAG по `branch.knowledge_tag`
 
 ### Ключевые таблицы
 
-**clients** — компании-заказчики
+**companies** — юр. лица (биллинг) — НЕ ИСПОЛЬЗУЕТСЯ
+```sql
+id           UUID PRIMARY KEY
+name         TEXT            -- "ТОО Truffles"
+billing_info JSONB           -- информация для оплаты
+```
+
+**clients** — бренды/продукты
 ```sql
 id          UUID PRIMARY KEY
 name        TEXT            -- "Салон Мира"
@@ -321,6 +357,19 @@ mute_duration_first_minutes INT     -- 30
 mute_duration_second_hours  INT     -- 24
 enable_reminders            BOOLEAN -- true
 enable_owner_escalation     BOOLEAN -- true
+```
+
+**branches** — филиалы (⚠️ СУЩЕСТВУЕТ, НЕ ПОДКЛЮЧЕН)
+```sql
+id               UUID PRIMARY KEY
+client_id        UUID REFERENCES clients
+slug             TEXT            -- "almaty"
+name             TEXT            -- "Филиал Алматы"
+instance_id      TEXT            -- WhatsApp instance (ChatFlow)
+phone            TEXT            -- +7 777 123 4567
+telegram_chat_id TEXT            -- ID группы в Telegram (для эскалации)
+knowledge_tag    TEXT            -- тег для RAG фильтрации
+is_active        BOOLEAN         -- true
 ```
 
 **conversations** — диалоги с клиентами

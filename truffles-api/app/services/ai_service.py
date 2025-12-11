@@ -6,6 +6,9 @@ from app.models import Prompt, Client, Message, Conversation
 from app.services.llm import OpenAIProvider, LLMResponse
 from app.services.knowledge_service import search_knowledge, format_knowledge_context
 
+# Minimum RAG score to consider knowledge reliable
+KNOWLEDGE_CONFIDENCE_THRESHOLD = 0.7
+
 OPENAI_API_KEY = "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"
 
 # Global LLM provider instance
@@ -79,9 +82,22 @@ def generate_ai_response(
         except Exception as e:
             print(f"Knowledge search error: {e}")
         
-        knowledge_context = format_knowledge_context(knowledge_results)
+        # 3. Check knowledge confidence
+        has_reliable_knowledge = False
+        if knowledge_results:
+            max_score = max(r.get("score", 0) for r in knowledge_results)
+            has_reliable_knowledge = max_score >= KNOWLEDGE_CONFIDENCE_THRESHOLD
+            print(f"Knowledge confidence: max_score={max_score:.3f}, threshold={KNOWLEDGE_CONFIDENCE_THRESHOLD}, reliable={has_reliable_knowledge}")
         
-        # 3. Build messages
+        # Format knowledge context
+        if has_reliable_knowledge:
+            knowledge_context = format_knowledge_context(knowledge_results)
+        else:
+            # No reliable knowledge - instruct LLM to say "will check with colleagues"
+            knowledge_context = "ВНИМАНИЕ: В базе знаний нет надёжной информации по этому вопросу. Скажи клиенту что уточнишь у коллег."
+            print("No reliable knowledge found - will instruct to escalate")
+        
+        # 4. Build messages
         messages = []
         
         # System prompt with knowledge context
@@ -91,15 +107,15 @@ def generate_ai_response(
         
         messages.append({"role": "system", "content": full_system})
         
-        # 4. Add conversation history (last 10 messages for context)
+        # 5. Add conversation history (last 10 messages for context)
         history = get_conversation_history(db, conversation_id, limit=10)
         messages.extend(history)
         
-        # 5. Add current user message (if not already in history)
+        # 6. Add current user message (if not already in history)
         if not history or history[-1].get("content") != user_message:
             messages.append({"role": "user", "content": user_message})
         
-        # 6. Generate response
+        # 7. Generate response
         llm = get_llm_provider()
         print(f"Calling LLM with {len(messages)} messages")
         response = llm.generate(messages, temperature=1.0, max_tokens=2000)
