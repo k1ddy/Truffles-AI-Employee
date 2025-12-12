@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql://n8n:Iddqd777!@postgres:5432/chatbot"
+    database_url: str
     debug: bool = False
 
     class Config:

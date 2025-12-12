@@ -1,12 +1,13 @@
+import os
 import httpx
 from typing import List, Optional
 from uuid import UUID
 
 
-QDRANT_HOST = "http://qdrant:6333"
-QDRANT_API_KEY = "Iddqd777!"
+QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 QDRANT_COLLECTION = "truffles_knowledge"
-BGE_M3_URL = "http://bge-m3:80/embed"
+BGE_M3_URL = os.environ.get("BGE_M3_URL", "http://bge-m3:80/embed")
 
 
 def get_embedding(text: str) -> List[float]:

@@ -1,3 +1,4 @@
+import os
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import Optional, List
@@ -9,7 +10,7 @@ from app.services.knowledge_service import search_knowledge, format_knowledge_co
 # Minimum RAG score to consider knowledge reliable
 KNOWLEDGE_CONFIDENCE_THRESHOLD = 0.7
 
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 # Global LLM provider instance
 _llm_provider = None
