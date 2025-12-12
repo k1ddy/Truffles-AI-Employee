@@ -42,21 +42,27 @@
 
 ### Следующее (по порядку)
 
-**ФАЗА 1: Защита от сбоев [P0]**
-1. [ ] Result pattern — `services/result.py`
-2. [ ] Применить к ai_service → webhook.py
+**НЕДЕЛЯ 1: Критичная инфраструктура [P0]** → `SPECS/INFRASTRUCTURE.md`
+1. [ ] Секреты → .env (убрать из кода)
+2. [ ] Бэкап PostgreSQL (cron)
+3. [ ] Бэкап Qdrant
+4. [ ] Алерты в Telegram
 
-**ФАЗА 2: Защита от багов [P0]**
-3. [ ] SQL Constraints — невалидные состояния невозможны
-4. [ ] Транзакционные переходы — `state_service.py`
-5. [ ] Self-healing job — `health_service.py`
+**НЕДЕЛЯ 2: Качество кода [P1]**
+5. [ ] Базовые тесты (10-15 шт)
+6. [ ] Логирование (JSON вместо print)
+7. [ ] CI/CD (GitHub Actions)
+8. [ ] Линтер (ruff)
 
-**ФАЗА 3: Функционал (на фундаменте)**
-6. [ ] Эскалация при низком confidence
-7. [ ] Active Learning — сохранять manager_response
-8. [ ] Multi-level confidence (0.85/0.6/0)
+**НЕДЕЛЯ 3: Защита кода [P0]** → `SPECS/ARCHITECTURE.md` ЧАСТЬ 10
+9. [ ] Result pattern — `services/result.py`
+10. [ ] SQL Constraints — невалидные состояния невозможны
+11. [ ] Транзакционные переходы — `state_service.py`
 
-> Полная спека: `SPECS/ARCHITECTURE.md` ЧАСТЬ 10
+**НЕДЕЛЯ 4+: Функционал**
+12. [ ] Эскалация при низком confidence
+13. [ ] Active Learning — сохранять manager_response
+14. [ ] Multi-level confidence (0.85/0.6/0)
 
 ---
 
@@ -101,6 +107,7 @@
 | **Поведение бота** | `SPECS/CONSULTANT.md` | промпт, правила ответов |
 | **Автообучение** | `SPECS/ACTIVE_LEARNING.md` | модерация, Qdrant |
 | **Архитектура** | `SPECS/ARCHITECTURE.md` | новые сервисы, потоки данных |
+| **Инфраструктура** | `SPECS/INFRASTRUCTURE.md` | безопасность, CI/CD, тесты |
 | **Мультитенант** | `SPECS/MULTI_TENANT.md` | онбординг, новые клиенты |
 | | | |
 | **Требования** | `STRATEGY/REQUIREMENTS.md` | Требования Жанбола |
