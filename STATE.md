@@ -40,12 +40,18 @@
    - Реализовано в ai_service.py
 5. [ ] **Эскалация при низком RAG** — сейчас говорит "уточню", нужно реально эскалировать
 
-### Следующее
-1. [ ] Эскалация при низком confidence (доделать п.5 выше)
-2. [ ] Active Learning — сохранять manager_response в handovers
-3. [ ] Multi-level confidence (0.85/0.6/0) — `SPECS/CONSULTANT.md` ЧАСТЬ 12
-4. [ ] История переписки в заявке
-5. [ ] Автоприветствие менеджера
+### Следующее (по порядку)
+
+**ФУНДАМЕНТ (сначала):**
+1. [ ] Result pattern — `SPECS/ARCHITECTURE.md` ЧАСТЬ 10
+   - Создать `services/result.py`
+   - Применить к `ai_service.py`
+2. [ ] Graceful degradation — fallback при ошибках
+
+**ФУНКЦИОНАЛ (на фундаменте):**
+3. [ ] Эскалация при низком confidence — `SPECS/CONSULTANT.md` ЧАСТЬ 12
+4. [ ] Active Learning — сохранять manager_response
+5. [ ] Multi-level confidence (0.85/0.6/0)
 
 ---
 

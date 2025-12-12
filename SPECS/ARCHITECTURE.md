@@ -873,6 +873,164 @@ volumes:
 
 ---
 
+# ЧАСТЬ 10: ERROR HANDLING И RESILIENCE [ФУНДАМЕНТ]
+
+> *Добавлено 2025-12-11. Архитектурное решение для надёжности системы.*
+
+## Проблема
+
+Сейчас error handling разбросан хаотично. Каждый сервис обрабатывает ошибки по-своему.
+
+## Принцип: Клиент всегда получает ответ
+
+Что бы ни сломалось внутри — клиент должен получить ответ. Либо полезный, либо fallback.
+
+## Решение: Result Pattern
+
+### Базовый класс
+
+**Файл:** `truffles-api/app/services/result.py`
+
+```python
+from dataclasses import dataclass
+from typing import Optional, TypeVar, Generic
+
+T = TypeVar('T')
+
+@dataclass
+class Result(Generic[T]):
+    ok: bool
+    value: Optional[T] = None
+    error: Optional[str] = None
+    error_code: Optional[str] = None  # для классификации ошибок
+    
+    @staticmethod
+    def success(value: T) -> 'Result[T]':
+        return Result(ok=True, value=value)
+    
+    @staticmethod
+    def failure(error: str, code: str = "unknown") -> 'Result[T]':
+        return Result(ok=False, error=error, error_code=code)
+    
+    def unwrap_or(self, default: T) -> T:
+        """Вернуть value или default если ошибка."""
+        return self.value if self.ok else default
+```
+
+### Использование в сервисах
+
+```python
+# ai_service.py
+def generate_ai_response(...) -> Result[tuple[str, str]]:
+    try:
+        # ... логика ...
+        return Result.success((response, confidence))
+    except Exception as e:
+        log_error("ai_service", e)
+        return Result.failure(str(e), "ai_error")
+
+# webhook.py
+result = generate_ai_response(...)
+if result.ok:
+    response, confidence = result.value
+else:
+    response = "Извините, произошла ошибка. Попробуйте позже."
+    log_error("webhook", result.error)
+```
+
+### Коды ошибок
+
+| Код | Описание | Fallback |
+|-----|----------|----------|
+| `ai_error` | LLM не ответил | "Ошибка, попробуйте позже" |
+| `rag_error` | Qdrant недоступен | Ответить без RAG |
+| `escalation_error` | Не удалось эскалировать | Ответить + лог |
+| `telegram_error` | Telegram API | Retry через 5 сек |
+| `db_error` | PostgreSQL | Ошибка, не сохранять |
+
+## Graceful Degradation
+
+Если компонент X упал — система продолжает работать с ограничениями.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    ВХОДЯЩЕЕ СООБЩЕНИЕ                    │
+└─────────────────────────────┬───────────────────────────┘
+                              ▼
+┌─────────────────────────────────────────────────────────┐
+│  RAG Search                                              │
+│  OK → использовать контекст                             │
+│  FAIL → ответить без контекста (LLM only)               │
+└─────────────────────────────┬───────────────────────────┘
+                              ▼
+┌─────────────────────────────────────────────────────────┐
+│  LLM Generate                                            │
+│  OK → отправить ответ                                   │
+│  FAIL → fallback: "Ошибка, попробуйте позже"           │
+└─────────────────────────────┬───────────────────────────┘
+                              ▼
+┌─────────────────────────────────────────────────────────┐
+│  Escalation (если нужна)                                 │
+│  OK → создать handover + уведомить                      │
+│  FAIL → ответить клиенту + лог (не терять сообщение)   │
+└─────────────────────────────┬───────────────────────────┘
+                              ▼
+┌─────────────────────────────────────────────────────────┐
+│  Send Response (WhatsApp)                                │
+│  OK → готово                                            │
+│  FAIL → retry 3 раза → лог критической ошибки          │
+└─────────────────────────────────────────────────────────┘
+```
+
+## Логирование
+
+### Уровни
+
+| Уровень | Когда | Пример |
+|---------|-------|--------|
+| `DEBUG` | Детали для отладки | RAG score, LLM tokens |
+| `INFO` | Нормальные события | Сообщение обработано |
+| `WARNING` | Нештатная ситуация, но работаем | RAG упал, ответили без него |
+| `ERROR` | Ошибка, нужно внимание | LLM не ответил |
+| `CRITICAL` | Система не работает | БД недоступна |
+
+### Формат
+
+```python
+import logging
+
+def log_error(service: str, error: Exception, context: dict = None):
+    logging.error(f"[{service}] {error}", extra={
+        "service": service,
+        "error_type": type(error).__name__,
+        "context": context or {}
+    })
+```
+
+## TODO: Шаги реализации
+
+### Шаг 1: Result class [P0]
+- Создать `services/result.py`
+- Базовый класс с success/failure
+
+### Шаг 2: Применить к ai_service [P0]
+- Изменить `generate_ai_response` → возвращает `Result`
+- Обработать в `webhook.py`
+
+### Шаг 3: Применить к escalation_service [P1]
+- Изменить `create_escalation` → возвращает `Result`
+- Fallback если не удалось
+
+### Шаг 4: Централизованное логирование [P2]
+- Настроить logging
+- Формат с context
+
+### Шаг 5: Мониторинг [P3]
+- Алерты при ERROR/CRITICAL
+- Dashboard ошибок
+
+---
+
 ## СВЯЗЬ С ДРУГИМИ ДОКУМЕНТАМИ
 
 | Документ | Что там |
@@ -886,4 +1044,4 @@ volumes:
 ---
 
 *Создано: 2025-12-06*
-*Обновлено: 2025-12-10 — синхронизация с текущей реализацией*
+*Обновлено: 2025-12-11 — добавлена ЧАСТЬ 10 (Error Handling)*
