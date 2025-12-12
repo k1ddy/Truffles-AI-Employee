@@ -1,8 +1,9 @@
+import os
 import httpx
 
-QDRANT_HOST = "http://qdrant:6333"
-QDRANT_API_KEY = "Iddqd777!"
-BGE_M3_URL = "http://bge-m3:80/embed"
+QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
+BGE_M3_URL = os.environ.get("BGE_M3_URL", "http://bge-m3:80/embed")
 
 # Get embedding
 query = "цены на стрижку"

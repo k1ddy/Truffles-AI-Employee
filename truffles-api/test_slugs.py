@@ -1,7 +1,8 @@
+import os
 import httpx
 
-QDRANT_HOST = "http://qdrant:6333"
-QDRANT_API_KEY = "Iddqd777!"
+QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 
 # Get some points to see client_slugs
 r = httpx.post(
