@@ -135,40 +135,43 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
-### 2025-12-12 (вечер) — Неделя 4: Low confidence + Active Learning
+### 2025-12-12 (вечер) — Неделя 4: СЛОМАЛИ БОТА
 
-**Что сделали:**
+**Урок для архитектора:**
+Жанбол учил меня работать правильно:
+1. Сначала искать ответы в документах, НЕ спрашивать
+2. Признавать что НЕ знаю, а не притворяться
+3. Задавать правильные вопросы себе, не ему
 
-*Код:*
-- `ai_service.py` — возвращает `Result[Tuple[str, str]]` с confidence flag
-- `message.py` — обрабатывает low_confidence → эскалация
-- `webhook.py` — то же самое (ВАЖНО: оба файла нужно обновлять!)
-- `learning_service.py` — СОЗДАН: `is_owner_response()`, `add_to_knowledge()`
-- `manager_message_service.py` — auto-learn для owner ответов
-- 140 тестов всего
+**Что пытались сделать:**
+- Low confidence → эскалация (вместо враньё "уточню")
+- Active Learning — owner ответы в Qdrant
 
-*Инфра:*
-- owner_telegram_id = 1969855532 (было @ent3rprise — НЕ РАБОТАЛО)
-- Деплой через SCP + docker build (docker-compose глючит)
+**Что получилось (СЛОМАНО):**
+1. ❌ **Эскалация на ВСЁ** — даже "ты еще здесь?" создаёт заявку (threshold 0.7 слишком высокий)
+2. ❌ **Кнопки [Беру] [Решено] не работают** — причина неизвестна
+3. ❌ **Непонятно что происходит** — нет обратной связи клиенту/менеджеру
 
-**⚠️ ПРОБЛЕМА обнаружена:**
-Эскалация срабатывает на ВСЁ — даже на "ты еще здесь?"
-RAG score < 0.7 для большинства вопросов.
+**Технические проблемы:**
+- `docker-compose up -d --build` выдаёт ошибку `KeyError: 'ContainerConfig'`
+- Деплой через `docker build` + `docker run` вручную — labels traefik могли не примениться
+- webhook.py и message.py оба обрабатывают сообщения — нужно обновлять ОБА
 
-**Решения (следующая сессия):**
-1. Понизить threshold до 0.5-0.6
-2. ИЛИ whitelist интентов: greeting, thanks → не требуют RAG
-3. ИЛИ добавить базовые фразы в knowledge base
+**Что менялось:**
+- `ai_service.py` — возвращает `Result[Tuple[str, str]]`
+- `message.py` — обработка low_confidence
+- `webhook.py` — то же самое
+- `learning_service.py` — СОЗДАН
+- `manager_message_service.py` — auto-learn
+- owner_telegram_id = 1969855532 (было @ent3rprise)
 
-**Коммиты:**
-- `8e10fa8` — Week 4: Low confidence escalation
-- `379ba4c` — Week 4: Active Learning owner auto-add
-- НЕ ЗАКОММИЧЕН: webhook.py (исправление Result handling)
+**Следующая сессия (КРИТИЧНО):**
+1. [ ] Починить кнопки [Беру] [Решено]
+2. [ ] Понизить threshold до 0.5 ИЛИ whitelist интентов
+3. [ ] Проверить что бот вообще работает на базовые вопросы
+4. [ ] Разобраться с docker-compose
 
-**Следующая сессия:**
-- [ ] Закоммитить webhook.py
-- [ ] Исправить threshold / whitelist проблему
-- [ ] Telegram кнопки модерации
+**Коммиты:** `8e10fa8`, `379ba4c`, `2f74e1b`
 
 ---
 
