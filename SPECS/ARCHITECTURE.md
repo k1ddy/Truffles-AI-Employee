@@ -1007,27 +1007,134 @@ def log_error(service: str, error: Exception, context: dict = None):
     })
 ```
 
+## Инварианты системы
+
+**Инвариант** — правило которое всегда должно быть истинным. Если нарушено — баг.
+
+### Инварианты состояний
+
+| Состояние | Инвариант | Constraint |
+|-----------|-----------|------------|
+| `bot_active` | topic_id может быть NULL | — |
+| `pending` | должен быть handover со status='pending' | FK + CHECK |
+| `manager_active` | topic_id NOT NULL, handover status='active' | CHECK |
+
+### SQL Constraints
+
+```sql
+-- Добавить в миграцию
+ALTER TABLE conversations ADD CONSTRAINT chk_manager_active_has_topic
+    CHECK (state != 'manager_active' OR telegram_topic_id IS NOT NULL);
+
+ALTER TABLE conversations ADD CONSTRAINT chk_pending_or_active_has_handover
+    CHECK (state = 'bot_active' OR EXISTS (
+        SELECT 1 FROM handovers h 
+        WHERE h.conversation_id = conversations.id 
+        AND h.status IN ('pending', 'active')
+    ));
+```
+
+### Транзакции при смене состояния
+
+```python
+# services/state_service.py
+
+def escalate_to_pending(db: Session, conversation: Conversation, user_message: str) -> Result:
+    """Атомарный переход bot_active → pending."""
+    try:
+        with db.begin_nested():  # savepoint
+            # 1. Создать handover
+            handover = Handover(
+                conversation_id=conversation.id,
+                status="pending",
+                user_message=user_message
+            )
+            db.add(handover)
+            
+            # 2. Создать topic
+            topic_id = create_telegram_topic(...)
+            if not topic_id:
+                raise ValueError("Failed to create topic")
+            
+            # 3. Обновить conversation
+            conversation.state = "pending"
+            conversation.telegram_topic_id = topic_id
+            
+            db.flush()  # проверить constraints
+        
+        db.commit()
+        return Result.success(handover)
+        
+    except Exception as e:
+        db.rollback()
+        return Result.failure(str(e), "escalation_failed")
+```
+
+### Self-healing (второй уровень защиты)
+
+Если инвариант всё же нарушен — обнаружить и починить:
+
+```python
+# services/health_service.py
+
+def check_and_heal_conversations(db: Session) -> dict:
+    """Проверить инварианты и починить нарушения."""
+    healed = []
+    
+    # Инвариант 1: manager_active должен иметь topic_id
+    broken = db.query(Conversation).filter(
+        Conversation.state == "manager_active",
+        Conversation.telegram_topic_id == None
+    ).all()
+    
+    for conv in broken:
+        conv.state = "bot_active"
+        healed.append({"id": conv.id, "issue": "manager_active_no_topic"})
+    
+    # Инвариант 2: pending/active должен иметь handover
+    # ... аналогично
+    
+    db.commit()
+    return {"healed": len(healed), "details": healed}
+```
+
+---
+
 ## TODO: Шаги реализации
 
-### Шаг 1: Result class [P0]
+### Фаза 1: Защита от сбоев [P0]
+
+**Шаг 1: Result class**
 - Создать `services/result.py`
 - Базовый класс с success/failure
 
-### Шаг 2: Применить к ai_service [P0]
-- Изменить `generate_ai_response` → возвращает `Result`
+**Шаг 2: Применить к ai_service**
+- `generate_ai_response` → возвращает `Result`
 - Обработать в `webhook.py`
 
-### Шаг 3: Применить к escalation_service [P1]
-- Изменить `create_escalation` → возвращает `Result`
-- Fallback если не удалось
+### Фаза 2: Защита от багов [P0]
 
-### Шаг 4: Централизованное логирование [P2]
+**Шаг 3: SQL Constraints**
+- Добавить CHECK constraints в БД
+- Невалидные состояния невозможны на уровне данных
+
+**Шаг 4: Транзакционные переходы**
+- `state_service.py` — атомарные переходы состояний
+- Либо всё, либо ничего
+
+**Шаг 5: Self-healing job**
+- `health_service.py` — проверка инвариантов
+- Cron каждые 5 минут
+
+### Фаза 3: Наблюдаемость [P1]
+
+**Шаг 6: Централизованное логирование**
 - Настроить logging
 - Формат с context
 
-### Шаг 5: Мониторинг [P3]
-- Алерты при ERROR/CRITICAL
-- Dashboard ошибок
+**Шаг 7: Мониторинг**
+- Алерты при нарушении инвариантов
+- Dashboard здоровья системы
 
 ---
 

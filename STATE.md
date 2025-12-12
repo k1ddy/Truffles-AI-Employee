@@ -42,16 +42,21 @@
 
 ### Следующее (по порядку)
 
-**ФУНДАМЕНТ (сначала):**
-1. [ ] Result pattern — `SPECS/ARCHITECTURE.md` ЧАСТЬ 10
-   - Создать `services/result.py`
-   - Применить к `ai_service.py`
-2. [ ] Graceful degradation — fallback при ошибках
+**ФАЗА 1: Защита от сбоев [P0]**
+1. [ ] Result pattern — `services/result.py`
+2. [ ] Применить к ai_service → webhook.py
 
-**ФУНКЦИОНАЛ (на фундаменте):**
-3. [ ] Эскалация при низком confidence — `SPECS/CONSULTANT.md` ЧАСТЬ 12
-4. [ ] Active Learning — сохранять manager_response
-5. [ ] Multi-level confidence (0.85/0.6/0)
+**ФАЗА 2: Защита от багов [P0]**
+3. [ ] SQL Constraints — невалидные состояния невозможны
+4. [ ] Транзакционные переходы — `state_service.py`
+5. [ ] Self-healing job — `health_service.py`
+
+**ФАЗА 3: Функционал (на фундаменте)**
+6. [ ] Эскалация при низком confidence
+7. [ ] Active Learning — сохранять manager_response
+8. [ ] Multi-level confidence (0.85/0.6/0)
+
+> Полная спека: `SPECS/ARCHITECTURE.md` ЧАСТЬ 10
 
 ---
 
