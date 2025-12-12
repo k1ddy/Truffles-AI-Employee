@@ -30,6 +30,8 @@ SESSION_TIMEOUT_HOURS = 24
 MSG_ESCALATED = "Передал менеджеру. Могу чем-то помочь пока ждёте?"
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."
 MSG_MUTED_LONG = "Понял! Если ответа от менеджеров долго нет — лучше звоните напрямую: +7 775 984 19 26"
+MSG_LOW_CONFIDENCE = "Хороший вопрос! Уточню у коллег и вернусь с ответом."
+MSG_AI_ERROR = "Извините, произошла ошибка. Попробуйте позже."
 
 
 def get_mute_settings(db: Session, client_id) -> tuple[int, int]:
@@ -167,8 +169,9 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
         else:
             logger.error(f"Escalation failed: {result.error}")
             # Fallback: respond normally
-            bot_response = generate_bot_response(db, conversation, message_text, request.client_slug)
-            if bot_response:
+            gen_result = generate_bot_response(db, conversation, message_text, request.client_slug)
+            if gen_result.ok and gen_result.value[0]:
+                bot_response = gen_result.value[0]
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                 sent = send_bot_response(db, client.id, remote_jid, bot_response)
             result_message = f"Escalation failed ({result.error_code}), responded normally"
@@ -197,14 +200,57 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
 
     elif conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value]:
         # Bot responds: normal mode OR pending (bot helps while waiting)
-        bot_response = generate_bot_response(db, conversation, message_text, request.client_slug)
-        logger.debug(f"bot_response: {bot_response[:100] if bot_response else 'None/Empty'}...")
-        if bot_response:
+        gen_result = generate_bot_response(db, conversation, message_text, request.client_slug)
+
+        if not gen_result.ok:
+            # AI error — fallback response
+            bot_response = MSG_AI_ERROR
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = send_bot_response(db, client.id, remote_jid, bot_response)
-            result_message = "Message sent" if sent else "Failed to send"
+            result_message = f"AI error: {gen_result.error}"
         else:
-            result_message = "No response generated"
+            response_text, confidence = gen_result.value
+
+            if confidence == "low_confidence":
+                # Low RAG confidence — escalate
+                esc_result = escalate_to_pending(
+                    db=db,
+                    conversation=conversation,
+                    user_message=message_text,
+                    trigger_type="intent",
+                    trigger_value="low_confidence",
+                )
+
+                if esc_result.ok:
+                    handover = esc_result.value
+                    telegram_sent = send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=message_text,
+                    )
+                    bot_response = MSG_LOW_CONFIDENCE
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = send_bot_response(db, client.id, remote_jid, bot_response)
+                    result_message = f"Low confidence escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                else:
+                    bot_response = MSG_LOW_CONFIDENCE
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = send_bot_response(db, client.id, remote_jid, bot_response)
+                    result_message = f"Low confidence, escalation failed: {esc_result.error}"
+
+            elif confidence == "bot_inactive":
+                result_message = f"Bot not active (state: {conversation.state})"
+
+            elif response_text:
+                bot_response = response_text
+                logger.debug(f"bot_response: {bot_response[:100] if bot_response else 'None/Empty'}...")
+                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                sent = send_bot_response(db, client.id, remote_jid, bot_response)
+                result_message = "Message sent" if sent else "Failed to send"
+            else:
+                result_message = "No response generated"
     else:
         result_message = f"Unknown state: {conversation.state}"
 

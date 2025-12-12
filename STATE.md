@@ -63,10 +63,18 @@
 14. [x] Рефакторинг webhook.py — использует state_service
 15. [x] Health endpoints — GET/POST /admin/health, /admin/heal
 
-**НЕДЕЛЯ 4+: Функционал**
-16. [ ] Эскалация при низком confidence
-17. [ ] Active Learning — сохранять manager_response
+**НЕДЕЛЯ 4: Функционал** ⚠️ ЧАСТИЧНО (есть проблема)
+16. [x] Эскалация при низком confidence — РЕАЛИЗОВАНО, но threshold 0.7 слишком высокий
+17. [x] Active Learning — owner ответы автоматически в Qdrant
 18. [ ] Multi-level confidence (0.85/0.6/0)
+19. [ ] Telegram кнопки модерации [В базу] [Отклонить] для не-owner
+
+**⚠️ ПРОБЛЕМА:** Эскалация срабатывает слишком часто — даже на "ты еще здесь?"
+- **Причина:** RAG score < 0.7 для большинства вопросов
+- **Решения:**
+  1. Понизить threshold до 0.5-0.6
+  2. Добавить whitelist интентов (greeting, thanks) которые не требуют RAG
+  3. Добавить базовые ответы в knowledge base
 
 ---
 
@@ -126,6 +134,43 @@
 ---
 
 ## ИСТОРИЯ СЕССИЙ
+
+### 2025-12-12 (вечер) — Неделя 4: Low confidence + Active Learning
+
+**Что сделали:**
+
+*Код:*
+- `ai_service.py` — возвращает `Result[Tuple[str, str]]` с confidence flag
+- `message.py` — обрабатывает low_confidence → эскалация
+- `webhook.py` — то же самое (ВАЖНО: оба файла нужно обновлять!)
+- `learning_service.py` — СОЗДАН: `is_owner_response()`, `add_to_knowledge()`
+- `manager_message_service.py` — auto-learn для owner ответов
+- 140 тестов всего
+
+*Инфра:*
+- owner_telegram_id = 1969855532 (было @ent3rprise — НЕ РАБОТАЛО)
+- Деплой через SCP + docker build (docker-compose глючит)
+
+**⚠️ ПРОБЛЕМА обнаружена:**
+Эскалация срабатывает на ВСЁ — даже на "ты еще здесь?"
+RAG score < 0.7 для большинства вопросов.
+
+**Решения (следующая сессия):**
+1. Понизить threshold до 0.5-0.6
+2. ИЛИ whitelist интентов: greeting, thanks → не требуют RAG
+3. ИЛИ добавить базовые фразы в knowledge base
+
+**Коммиты:**
+- `8e10fa8` — Week 4: Low confidence escalation
+- `379ba4c` — Week 4: Active Learning owner auto-add
+- НЕ ЗАКОММИЧЕН: webhook.py (исправление Result handling)
+
+**Следующая сессия:**
+- [ ] Закоммитить webhook.py
+- [ ] Исправить threshold / whitelist проблему
+- [ ] Telegram кнопки модерации
+
+---
 
 ### 2025-12-12 — Неделя 2 + Неделя 3 + Улучшение workflow
 
