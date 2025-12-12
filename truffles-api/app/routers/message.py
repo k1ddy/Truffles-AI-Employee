@@ -23,6 +23,8 @@ DEFAULT_MUTE_DURATION_SECOND_HOURS = 24
 MSG_ESCALATED = "Передал менеджеру. Могу чем-то помочь пока ждёте?"
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."
 MSG_MUTED_LONG = "Понял! Если ответа от менеджеров долго нет — лучше звоните напрямую: +7 775 984 19 26"
+MSG_LOW_CONFIDENCE = "Хороший вопрос! Уточню у коллег и вернусь с ответом."
+MSG_AI_ERROR = "Извините, произошла ошибка. Попробуйте позже."
 
 
 def get_mute_settings(db: Session, client_id) -> tuple[int, int]:
@@ -134,13 +136,48 @@ def handle_message(request: MessageRequest, db: Session = Depends(get_db)):
 
     elif conversation.state == ConversationState.BOT_ACTIVE.value:
         # Normal flow: generate AI response
-        bot_response = generate_bot_response(db, conversation, request.content)
-        if bot_response:
+        result = generate_bot_response(db, conversation, request.content)
+
+        if not result.ok:
+            # AI error — fallback response
+            bot_response = MSG_AI_ERROR
             save_message(db, conversation.id, request.client_id, role="assistant", content=bot_response)
             sent = send_bot_response(db, request.client_id, request.remote_jid, bot_response)
-            message = "Message sent" if sent else "Failed to send"
+            message = f"AI error: {result.error}"
         else:
-            message = "No response generated"
+            response_text, confidence = result.value
+
+            if confidence == "low_confidence":
+                # Low RAG confidence — escalate
+                new_state = escalate(ConversationState(conversation.state))
+                conversation.state = new_state.value
+                conversation.escalated_at = now
+
+                handover, telegram_sent = escalate_conversation(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    trigger_type="intent",
+                    trigger_value="low_confidence",
+                    user_message=request.content,
+                )
+
+                bot_response = MSG_LOW_CONFIDENCE
+                save_message(db, conversation.id, request.client_id, role="assistant", content=bot_response)
+                sent = send_bot_response(db, request.client_id, request.remote_jid, bot_response)
+                message = f"Low confidence escalation, telegram={'sent' if telegram_sent else 'failed'}"
+
+            elif confidence == "bot_inactive":
+                message = f"Bot not active (state: {conversation.state})"
+
+            elif response_text:
+                # Normal response
+                bot_response = response_text
+                save_message(db, conversation.id, request.client_id, role="assistant", content=bot_response)
+                sent = send_bot_response(db, request.client_id, request.remote_jid, bot_response)
+                message = "Message sent" if sent else "Failed to send"
+            else:
+                message = "No response generated"
     else:
         message = f"Bot not active (state: {conversation.state})"
 

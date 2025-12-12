@@ -7,6 +7,7 @@ from app.services.ai_service import (
     get_conversation_history,
     get_system_prompt,
 )
+from app.services.result import Result
 
 
 class TestKnowledgeConfidenceThreshold:
@@ -87,43 +88,99 @@ class TestGenerateAIResponse:
 
         result = generate_ai_response(mock_db, uuid4(), "test-client", uuid4(), "What is X?")
 
-        assert result == "AI generated response"
+        assert result.ok is True
+        assert result.value[0] == "AI generated response"
+        assert result.value[1] == "high"
         mock_llm.return_value.generate.assert_called_once()
 
-    @patch("app.services.ai_service.get_llm_provider")
     @patch("app.services.ai_service.search_knowledge")
     @patch("app.services.ai_service.get_system_prompt")
-    @patch("app.services.ai_service.get_conversation_history")
-    def test_instructs_escalation_when_low_confidence(self, mock_history, mock_prompt, mock_search, mock_llm):
+    def test_low_confidence_returns_escalation_flag(self, mock_prompt, mock_search):
         mock_db = Mock()
         mock_prompt.return_value = "You are a helpful assistant"
-        mock_history.return_value = []
-        mock_search.return_value = [{"score": 0.3, "text": "Low relevance"}]
+        mock_search.return_value = [{"score": 0.5, "text": "Some text"}]  # Below threshold
 
-        mock_response = Mock()
-        mock_response.content = "Let me check with colleagues"
-        mock_llm.return_value.generate.return_value = mock_response
+        result = generate_ai_response(
+            db=mock_db,
+            client_id=uuid4(),
+            client_slug="test",
+            conversation_id=uuid4(),
+            user_message="Test question",
+        )
 
-        result = generate_ai_response(mock_db, uuid4(), "test-client", uuid4(), "What is X?")
+        assert result.ok is True
+        assert result.value[0] is None  # No response text
+        assert result.value[1] == "low_confidence"
 
-        assert result == "Let me check with colleagues"
+    @patch("app.services.ai_service.search_knowledge")
+    @patch("app.services.ai_service.get_system_prompt")
+    def test_empty_knowledge_returns_escalation_flag(self, mock_prompt, mock_search):
+        mock_db = Mock()
+        mock_prompt.return_value = "You are a helpful assistant"
+        mock_search.return_value = []  # Empty results
 
-        call_args = mock_llm.return_value.generate.call_args
-        messages = call_args[0][0]
-        system_content = messages[0]["content"]
-        assert "уточнишь у коллег" in system_content
+        result = generate_ai_response(
+            db=mock_db,
+            client_id=uuid4(),
+            client_slug="test",
+            conversation_id=uuid4(),
+            user_message="Test question",
+        )
+
+        assert result.ok is True
+        assert result.value[0] is None
+        assert result.value[1] == "low_confidence"
 
     @patch("app.services.ai_service.alert_error")
     @patch("app.services.ai_service.get_llm_provider")
     @patch("app.services.ai_service.search_knowledge")
     @patch("app.services.ai_service.get_system_prompt")
-    def test_returns_error_message_on_exception(self, mock_prompt, mock_search, mock_llm, mock_alert):
+    @patch("app.services.ai_service.get_conversation_history")
+    def test_returns_failure_on_exception(self, mock_history, mock_prompt, mock_search, mock_llm, mock_alert):
         mock_db = Mock()
         mock_prompt.return_value = "You are a helpful assistant"
-        mock_search.return_value = []
+        mock_history.return_value = []
+        mock_search.return_value = [{"score": 0.85, "text": "Relevant"}]  # High confidence
         mock_llm.return_value.generate.side_effect = Exception("LLM error")
 
         result = generate_ai_response(mock_db, uuid4(), "test-client", uuid4(), "What is X?")
 
-        assert "ошибка" in result.lower()
+        assert result.ok is False
+        assert result.error_code == "ai_error"
+        assert "LLM error" in result.error
         mock_alert.assert_called_once()
+
+
+class TestLowConfidenceEscalation:
+    @patch("app.services.ai_service.search_knowledge")
+    @patch("app.services.ai_service.get_system_prompt")
+    def test_score_at_threshold_is_reliable(self, mock_prompt, mock_search):
+        """Score exactly at threshold should be considered reliable."""
+        mock_db = Mock()
+        mock_prompt.return_value = "You are a helpful assistant"
+        mock_search.return_value = [{"score": KNOWLEDGE_CONFIDENCE_THRESHOLD, "text": "Info"}]
+
+        with patch("app.services.ai_service.get_llm_provider") as mock_llm, \
+             patch("app.services.ai_service.get_conversation_history") as mock_history:
+            mock_history.return_value = []
+            mock_response = Mock()
+            mock_response.content = "Response"
+            mock_llm.return_value.generate.return_value = mock_response
+
+            result = generate_ai_response(mock_db, uuid4(), "test", uuid4(), "Q?")
+
+            assert result.ok is True
+            assert result.value[1] == "high"
+
+    @patch("app.services.ai_service.search_knowledge")
+    @patch("app.services.ai_service.get_system_prompt")
+    def test_score_below_threshold_triggers_escalation(self, mock_prompt, mock_search):
+        """Score below threshold should trigger escalation."""
+        mock_db = Mock()
+        mock_prompt.return_value = "You are a helpful assistant"
+        mock_search.return_value = [{"score": KNOWLEDGE_CONFIDENCE_THRESHOLD - 0.01, "text": "Info"}]
+
+        result = generate_ai_response(mock_db, uuid4(), "test", uuid4(), "Q?")
+
+        assert result.ok is True
+        assert result.value[1] == "low_confidence"

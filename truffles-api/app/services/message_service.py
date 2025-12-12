@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Message
+from app.services.result import Result
 from app.services.state_machine import ConversationState
 
 
@@ -27,12 +28,19 @@ def generate_bot_response(
     conversation: Conversation,
     user_message: str,
     client_slug: str = "truffles",
-) -> Optional[str]:
-    """Generate bot response using AI."""
+) -> Result[Tuple[Optional[str], str]]:
+    """
+    Generate bot response using AI.
+
+    Returns Result with tuple:
+    - (response_text, "high") — уверенный ответ
+    - (None, "low_confidence") — нужна эскалация
+    - (None, "bot_inactive") — бот не активен
+    """
     # Bot responds in bot_active and pending states
     allowed_states = [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value]
     if conversation.state not in allowed_states:
-        return None
+        return Result.success((None, "bot_inactive"))
 
     from app.services.ai_service import generate_ai_response
 

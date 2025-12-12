@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -9,6 +9,7 @@ from app.models import Message, Prompt
 from app.services.alert_service import alert_error
 from app.services.knowledge_service import format_knowledge_context, search_knowledge
 from app.services.llm import OpenAIProvider
+from app.services.result import Result
 
 logger = get_logger("ai_service")
 
@@ -75,8 +76,14 @@ def generate_ai_response(
     client_slug: str,
     conversation_id: UUID,
     user_message: str,
-) -> str:
-    """Generate AI response using LLM with knowledge base."""
+) -> Result[Tuple[Optional[str], str]]:
+    """
+    Generate AI response using LLM with knowledge base.
+
+    Returns Result with tuple:
+    - (response_text, "high") — уверенный ответ
+    - (None, "low_confidence") — нужна эскалация
+    """
     logger.info(f"generate_ai_response: client_id={client_id}, client_slug={client_slug}")
 
     try:
@@ -105,11 +112,10 @@ def generate_ai_response(
         if has_reliable_knowledge:
             knowledge_context = format_knowledge_context(knowledge_results)
         else:
-            # No reliable knowledge - instruct LLM to say "will check with colleagues"
-            knowledge_context = (
-                "ВНИМАНИЕ: В базе знаний нет надёжной информации по этому вопросу. Скажи клиенту что уточнишь у коллег."
-            )
-            logger.info("No reliable knowledge found - will instruct to escalate")
+            # Return escalation flag instead of instructing LLM
+            max_score_val = max((r.get("score", 0) for r in knowledge_results), default=0)
+            logger.info(f"Low confidence (max_score={max_score_val:.3f}), triggering escalation")
+            return Result.success((None, "low_confidence"))
 
         # 4. Build messages
         messages = []
@@ -135,9 +141,9 @@ def generate_ai_response(
         response = llm.generate(messages, temperature=1.0, max_tokens=2000)
         logger.debug(f"LLM response: {response.content[:100] if response.content else 'EMPTY'}...")
 
-        return response.content
+        return Result.success((response.content, "high"))
 
     except Exception as e:
         logger.error(f"AI generation error: {e}", exc_info=True)
         alert_error("AI generation failed", {"client_id": str(client_id), "error": str(e)})
-        return "Извините, произошла ошибка. Попробуйте позже."
+        return Result.failure(str(e), "ai_error")
