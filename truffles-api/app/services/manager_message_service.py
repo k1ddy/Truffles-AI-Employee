@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.logging_config import get_logger
 from app.models import ClientSettings, Conversation, Handover, User
 from app.services.chatflow_service import send_bot_response
+from app.services.learning_service import add_to_knowledge, is_owner_response
 from app.services.message_service import save_message
 
 logger = get_logger("manager_message_service")
@@ -104,6 +105,13 @@ def process_manager_message(
 
     # Update handover with manager response
     handover.manager_response = message_text
+
+    # Auto-learn from owner responses
+    if is_owner_response(db, handover.client_id, manager_telegram_id):
+        logger.info("Owner response detected, auto-adding to knowledge base")
+        point_id = add_to_knowledge(db, handover, source="owner")
+        if point_id:
+            logger.info(f"Successfully added to knowledge: {point_id}")
 
     # 4. Get user's WhatsApp JID
     remote_jid = get_user_remote_jid(db, conversation.user_id)
