@@ -9,6 +9,8 @@ from app.logging_config import get_logger
 from app.models import ClientSettings, Conversation, Handover
 from app.schemas.telegram import TelegramUpdate, TelegramWebhookResponse
 from app.services.manager_message_service import process_manager_message
+from app.services.state_service import manager_resolve as state_manager_resolve
+from app.services.state_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("telegram_webhook")
@@ -167,23 +169,16 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
 
     # Process action
     if action == "take":
-        # Take: status='active', update buttons to [Решено]
-        if handover.status != "pending":
-            # Show who already took it
+        # Take using state_service
+        result = state_manager_take(db, conversation, handover, manager_id, manager_name)
+
+        if not result.ok:
             taken_by = handover.assigned_to_name or "Кто-то"
             telegram._make_request(
                 "answerCallbackQuery",
                 {"callback_query_id": callback.id, "text": f"⚠️ Заявку уже взял {taken_by}", "show_alert": True},
             )
-            return TelegramWebhookResponse(success=False, message="Handover not pending")
-
-        handover.status = "active"
-        handover.assigned_to = manager_id
-        handover.assigned_to_name = manager_name
-        handover.first_response_at = datetime.now(timezone.utc)
-
-        if conversation:
-            conversation.state = "manager_active"
+            return TelegramWebhookResponse(success=False, message=result.error)
 
         # Update buttons to [Решено]
         if message_id:
@@ -212,18 +207,15 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
         return TelegramWebhookResponse(success=True, message="Taken", conversation_id=handover.conversation_id)
 
     elif action == "resolve":
-        # Resolve: status='resolved', unmute bot, unpin
-        handover.status = "resolved"
-        handover.resolved_at = datetime.now(timezone.utc)
-        handover.resolved_by_id = manager_id
-        handover.resolved_by_name = manager_name
+        # Resolve using state_service
+        result = state_manager_resolve(db, conversation, handover, manager_id, manager_name)
 
-        if conversation:
-            # Unmute bot
-            conversation.state = "bot_active"
-            conversation.bot_status = "active"
-            conversation.bot_muted_until = None
-            conversation.no_count = 0
+        if not result.ok:
+            telegram._make_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback.id, "text": f"❌ Ошибка: {result.error}", "show_alert": True},
+            )
+            return TelegramWebhookResponse(success=False, message=result.error)
 
         # Remove buttons
         if message_id:

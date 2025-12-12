@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Client, ClientSettings, Prompt
+from app.services.health_service import check_and_heal_conversations, get_system_health
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -172,3 +173,18 @@ async def update_settings(client_slug: str, data: SettingsUpdate, db: Session = 
     db.commit()
 
     return await get_settings(client_slug, db)
+
+
+# === HEALTH ENDPOINTS ===
+
+
+@router.get("/health")
+async def system_health(db: Session = Depends(get_db)):
+    """Get system health status."""
+    return get_system_health(db)
+
+
+@router.post("/heal")
+async def heal_system(db: Session = Depends(get_db)):
+    """Check and heal invariant violations."""
+    return check_and_heal_conversations(db)

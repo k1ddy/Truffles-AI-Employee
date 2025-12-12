@@ -55,15 +55,18 @@
 8. [x] Линтер (ruff)
 9. [x] Интеграция alert_service в код
 
-**НЕДЕЛЯ 3: Защита кода [P0]** → `SPECS/ARCHITECTURE.md` ЧАСТЬ 10
-10. [ ] Result pattern — `services/result.py`
-11. [ ] SQL Constraints — невалидные состояния невозможны
-12. [ ] Транзакционные переходы — `state_service.py`
+**НЕДЕЛЯ 3: Защита кода [P0]** → `SPECS/ARCHITECTURE.md` ЧАСТЬ 10 ✅ DONE
+10. [x] Result pattern — `services/result.py` (11 тестов)
+11. [x] State service — атомарные переходы с транзакциями (13 тестов)
+12. [x] Health service — self-healing (6 тестов)
+13. [x] SQL Constraint — `migrations/003_add_state_constraint.sql`
+14. [x] Рефакторинг webhook.py — использует state_service
+15. [x] Health endpoints — GET/POST /admin/health, /admin/heal
 
 **НЕДЕЛЯ 4+: Функционал**
-13. [ ] Эскалация при низком confidence
-14. [ ] Active Learning — сохранять manager_response
-15. [ ] Multi-level confidence (0.85/0.6/0)
+16. [ ] Эскалация при низком confidence
+17. [ ] Active Learning — сохранять manager_response
+18. [ ] Multi-level confidence (0.85/0.6/0)
 
 ---
 
@@ -124,42 +127,33 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
-### 2025-12-12 — Неделя 2 + Улучшение workflow архитектора
+### 2025-12-12 — Неделя 2 + Неделя 3 + Улучшение workflow
 
 **Что сделали:**
 
-*Неделя 2:*
-- Создали спецификацию для кодера: `SPECS/WEEK2_CODER_TASKS.md`
-- 5 задач: ruff, logging, alerts integration, CI/CD, tests
-- Кодер выполнил задачи
+*Неделя 2 (качество кода):*
+- ruff, logging (JSON), alerts integration, CI/CD, 91 тест
+- Закоммичено и запушено
 
-*Убрали MVP-менталити:*
-- Удалили "пилот", "MVP", "первый клиент" из активных документов
-- AGENTS.md, STRATEGY/VISION.md, STRATEGY/PRODUCT.md, SPECS/ACTIVE_LEARNING.md
-- Заменили на "продакшен с первого дня"
+*Неделя 3 (защита кода):*
+- Result pattern — `services/result.py`
+- State service — атомарные переходы с транзакциями
+- Health service — self-healing
+- SQL constraint — `migrations/003_add_state_constraint.sql`
+- Рефакторинг webhook.py — использует state_service
+- Health endpoints — /admin/health, /admin/heal
+- 121 тест всего
 
 *Улучшили workflow архитектора:*
-- Добавили в дройда секцию "ГДЕ ИСКАТЬ ОТВЕТЫ" — карта документов
-- Правило: сначала grep по документам, спрашивать только если не нашёл
-- Архитектор должен давать задачи со ссылками на спеки
-
-**Затронутые файлы:**
-- [x] STATE.md
-- [x] AGENTS.md — убрали "пилот"
-- [x] STRATEGY/VISION.md — убрали "MVP"
-- [x] STRATEGY/PRODUCT.md — убрали "3-5 клиентов"
-- [x] SPECS/ACTIVE_LEARNING.md — убрали "MVP"
-- [x] .factory/droids/truffles-architect.md — добавили карту ответов
-- [x] .factory/droids/truffles-ops.md — убрали "Pre-MVP"
-- [x] SPECS/WEEK2_CODER_TASKS.md — создали
-- [x] STRUCTURE.md — добавили WEEK2_CODER_TASKS.md
+- Добавили секцию "ГДЕ ИСКАТЬ ОТВЕТЫ" — карта документов
+- Правило: сначала grep, спрашивать только если не нашёл
+- Убрали MVP-менталити из документов
 
 **Ключевой урок:**
-Все ответы уже есть в документах. Архитектор должен искать, не спрашивать.
+Все ответы уже есть в документах. Архитектор ищет, не спрашивает.
 
 **Следующая сессия:**
-- Проверить результаты работы кодера (Неделя 2)
-- Неделя 3: Result pattern, SQL Constraints, транзакционные переходы
+- Неделя 4: Эскалация при низком confidence, Active Learning
 
 ---
 

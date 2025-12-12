@@ -12,10 +12,11 @@ from app.services.conversation_service import (
     get_or_create_conversation,
     get_or_create_user,
 )
-from app.services.escalation_service import escalate_conversation, get_telegram_credentials
+from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import classify_intent, is_rejection, should_escalate
 from app.services.message_service import generate_bot_response, save_message
-from app.services.state_machine import ConversationState, escalate
+from app.services.state_machine import ConversationState
+from app.services.state_service import escalate_to_pending
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("webhook")
@@ -113,22 +114,8 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
     intent = classify_intent(message_text)
     logger.info(f"Intent classified: {intent.value}")
 
-    # 6.1 FIX: If state=manager_active/pending but no topic — reset to bot_active
-    # Without topic, manager can't respond, so return bot to active state
-    if conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]:
-        if not conversation.telegram_topic_id:
-            logger.warning(f"state={conversation.state} but no telegram_topic_id. Resetting to bot_active.")
-            conversation.state = ConversationState.BOT_ACTIVE.value
-            # Close any open handovers for this conversation
-            open_handovers = (
-                db.query(Handover)
-                .filter(Handover.conversation_id == conversation.id, Handover.status.in_(["pending", "active"]))
-                .all()
-            )
-            for h in open_handovers:
-                h.status = "resolved"
-                h.resolved_at = now
-                logger.info(f"Auto-closed handover {h.id} due to missing topic")
+    # 6.1 Self-healing moved to health_service.check_and_heal_conversations()
+    # Call POST /admin/heal periodically to fix broken states
 
     # 7. Forward to topic if pending/manager_active (always, even if muted)
     if conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]:
@@ -154,25 +141,37 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
 
     # 9. Handle based on intent and state
     if conversation.state == ConversationState.BOT_ACTIVE.value and should_escalate(intent):
-        # Escalate to pending + create handover + notify Telegram
-        new_state = escalate(ConversationState(conversation.state))
-        conversation.state = new_state.value
-        conversation.escalated_at = now
-
-        # Create handover and send to Telegram
-        handover, telegram_sent = escalate_conversation(
+        # Escalate using state_service (atomic transition)
+        result = escalate_to_pending(
             db=db,
             conversation=conversation,
-            user=user,
+            user_message=message_text,
             trigger_type="intent",
             trigger_value=intent.value,
-            user_message=message_text,
         )
 
-        bot_response = MSG_ESCALATED
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = send_bot_response(db, client.id, remote_jid, bot_response)
-        result_message = f"Escalated ({intent.value}), telegram={'sent' if telegram_sent else 'failed'}"
+        if result.ok:
+            handover = result.value
+            # Send notification to Telegram
+            telegram_sent = send_telegram_notification(
+                db=db,
+                handover=handover,
+                conversation=conversation,
+                user=user,
+                message=message_text,
+            )
+            bot_response = MSG_ESCALATED
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = send_bot_response(db, client.id, remote_jid, bot_response)
+            result_message = f"Escalated ({intent.value}), telegram={'sent' if telegram_sent else 'failed'}"
+        else:
+            logger.error(f"Escalation failed: {result.error}")
+            # Fallback: respond normally
+            bot_response = generate_bot_response(db, conversation, message_text, request.client_slug)
+            if bot_response:
+                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                sent = send_bot_response(db, client.id, remote_jid, bot_response)
+            result_message = f"Escalation failed ({result.error_code}), responded normally"
 
     elif is_rejection(intent):
         # Client rejects bot help
