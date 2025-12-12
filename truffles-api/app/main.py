@@ -1,9 +1,12 @@
-from fastapi import FastAPI, Depends
+from fastapi import Depends, FastAPI
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User, Conversation, Message, Handover
-from app.routers import message, callback, reminders, webhook, telegram_webhook, admin
+from app.logging_config import setup_logging
+from app.models import Conversation, Handover, Message, User
+from app.routers import admin, callback, message, reminders, telegram_webhook, webhook
+
+setup_logging()
 
 app = FastAPI(
     title="Truffles API",

@@ -12,7 +12,7 @@ class LLMResponse:
 
 class LLMProvider(ABC):
     """Abstract base class for LLM providers."""
-    
+
     @abstractmethod
     def generate(
         self,

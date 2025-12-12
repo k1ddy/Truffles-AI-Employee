@@ -1,18 +1,19 @@
 from enum import Enum
-from typing import Optional
-import json
 
+from app.logging_config import get_logger
 from app.services.ai_service import get_llm_provider
+
+logger = get_logger("intent_service")
 
 
 class Intent(str, Enum):
     HUMAN_REQUEST = "human_request"  # Клиент просит менеджера/человека
-    FRUSTRATION = "frustration"       # Клиент раздражён, ругается
-    REJECTION = "rejection"           # Клиент отказывается от помощи бота ("нет", "не надо")
-    QUESTION = "question"             # Вопрос о продукте/услуге
-    GREETING = "greeting"             # Приветствие
-    THANKS = "thanks"                 # Благодарность
-    OTHER = "other"                   # Всё остальное
+    FRUSTRATION = "frustration"  # Клиент раздражён, ругается
+    REJECTION = "rejection"  # Клиент отказывается от помощи бота ("нет", "не надо")
+    QUESTION = "question"  # Вопрос о продукте/услуге
+    GREETING = "greeting"  # Приветствие
+    THANKS = "thanks"  # Благодарность
+    OTHER = "other"  # Всё остальное
 
 
 ESCALATION_INTENTS = {Intent.HUMAN_REQUEST, Intent.FRUSTRATION}
@@ -47,22 +48,22 @@ def classify_intent(message: str) -> Intent:
     """Classify user message intent using LLM."""
     try:
         llm = get_llm_provider()
-        
+
         prompt = CLASSIFY_PROMPT.format(message=message)
         messages = [{"role": "user", "content": prompt}]
-        
+
         response = llm.generate(messages, temperature=1.0, max_tokens=100)
         result = response.content.strip().lower()
-        
+
         # Parse response
         for intent in Intent:
             if intent.value in result:
                 return intent
-        
+
         return Intent.OTHER
-        
+
     except Exception as e:
-        print(f"Intent classification error: {e}")
+        logger.error(f"Intent classification error: {e}")
         return Intent.OTHER
 
 

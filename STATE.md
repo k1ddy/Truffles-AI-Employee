@@ -48,21 +48,22 @@
 3. [x] Бэкап Qdrant (cron воскресенье 4:00)
 4. [x] Алерты в Telegram (сервис готов, нужно интегрировать)
 
-**НЕДЕЛЯ 2: Качество кода [P1]**
-5. [ ] Базовые тесты (10-15 шт)
-6. [ ] Логирование (JSON вместо print)
-7. [ ] CI/CD (GitHub Actions)
-8. [ ] Линтер (ruff)
+**НЕДЕЛЯ 2: Качество кода [P1]** ✅ DONE
+5. [x] Базовые тесты (91 тест, pytest проходит)
+6. [x] Логирование (JSON, 46 print→0)
+7. [x] CI/CD (GitHub Actions)
+8. [x] Линтер (ruff)
+9. [x] Интеграция alert_service в код
 
 **НЕДЕЛЯ 3: Защита кода [P0]** → `SPECS/ARCHITECTURE.md` ЧАСТЬ 10
-9. [ ] Result pattern — `services/result.py`
-10. [ ] SQL Constraints — невалидные состояния невозможны
-11. [ ] Транзакционные переходы — `state_service.py`
+10. [ ] Result pattern — `services/result.py`
+11. [ ] SQL Constraints — невалидные состояния невозможны
+12. [ ] Транзакционные переходы — `state_service.py`
 
 **НЕДЕЛЯ 4+: Функционал**
-12. [ ] Эскалация при низком confidence
-13. [ ] Active Learning — сохранять manager_response
-14. [ ] Multi-level confidence (0.85/0.6/0)
+13. [ ] Эскалация при низком confidence
+14. [ ] Active Learning — сохранять manager_response
+15. [ ] Multi-level confidence (0.85/0.6/0)
 
 ---
 
@@ -122,6 +123,45 @@
 ---
 
 ## ИСТОРИЯ СЕССИЙ
+
+### 2025-12-12 — Неделя 2 + Улучшение workflow архитектора
+
+**Что сделали:**
+
+*Неделя 2:*
+- Создали спецификацию для кодера: `SPECS/WEEK2_CODER_TASKS.md`
+- 5 задач: ruff, logging, alerts integration, CI/CD, tests
+- Кодер выполнил задачи
+
+*Убрали MVP-менталити:*
+- Удалили "пилот", "MVP", "первый клиент" из активных документов
+- AGENTS.md, STRATEGY/VISION.md, STRATEGY/PRODUCT.md, SPECS/ACTIVE_LEARNING.md
+- Заменили на "продакшен с первого дня"
+
+*Улучшили workflow архитектора:*
+- Добавили в дройда секцию "ГДЕ ИСКАТЬ ОТВЕТЫ" — карта документов
+- Правило: сначала grep по документам, спрашивать только если не нашёл
+- Архитектор должен давать задачи со ссылками на спеки
+
+**Затронутые файлы:**
+- [x] STATE.md
+- [x] AGENTS.md — убрали "пилот"
+- [x] STRATEGY/VISION.md — убрали "MVP"
+- [x] STRATEGY/PRODUCT.md — убрали "3-5 клиентов"
+- [x] SPECS/ACTIVE_LEARNING.md — убрали "MVP"
+- [x] .factory/droids/truffles-architect.md — добавили карту ответов
+- [x] .factory/droids/truffles-ops.md — убрали "Pre-MVP"
+- [x] SPECS/WEEK2_CODER_TASKS.md — создали
+- [x] STRUCTURE.md — добавили WEEK2_CODER_TASKS.md
+
+**Ключевой урок:**
+Все ответы уже есть в документах. Архитектор должен искать, не спрашивать.
+
+**Следующая сессия:**
+- Проверить результаты работы кодера (Неделя 2)
+- Неделя 3: Result pattern, SQL Constraints, транзакционные переходы
+
+---
 
 ### 2025-12-10 (вечер) — Архитектура мультитенанта + Дройды
 

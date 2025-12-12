@@ -1,4 +1,5 @@
 import os
+
 import httpx
 
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")

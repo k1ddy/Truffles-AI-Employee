@@ -1,7 +1,8 @@
-from sqlalchemy import Column, Text, Boolean, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
-from sqlalchemy.orm import relationship
 import uuid
+
+from sqlalchemy import Boolean, Column, ForeignKey, Text
+from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 

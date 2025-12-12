@@ -1,6 +1,7 @@
-from pydantic import BaseModel
-from typing import Optional, Any
+from typing import Any, Optional
 from uuid import UUID
+
+from pydantic import BaseModel
 
 
 class TelegramUser(BaseModel):
@@ -26,11 +27,11 @@ class TelegramMessage(BaseModel):
     text: Optional[str] = None
     message_thread_id: Optional[int] = None  # Topic ID for forum groups
     reply_to_message: Optional[Any] = None
-    
+
     class Config:
         # Allow "from" field from Telegram API
         populate_by_name = True
-        
+
     def __init__(self, **data):
         # Handle "from" -> "from_user" mapping
         if "from" in data:
@@ -43,7 +44,7 @@ class TelegramCallbackQuery(BaseModel):
     from_user: TelegramUser
     message: Optional[TelegramMessage] = None
     data: Optional[str] = None  # callback_data from button
-    
+
     def __init__(self, **data):
         if "from" in data:
             data["from_user"] = data.pop("from")

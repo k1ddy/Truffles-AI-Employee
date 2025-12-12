@@ -1,11 +1,16 @@
 import os
-from sqlalchemy.orm import Session
+from typing import List, Optional
 from uuid import UUID
-from typing import Optional, List
 
-from app.models import Prompt, Client, Message, Conversation
-from app.services.llm import OpenAIProvider, LLMResponse
-from app.services.knowledge_service import search_knowledge, format_knowledge_context
+from sqlalchemy.orm import Session
+
+from app.logging_config import get_logger
+from app.models import Message, Prompt
+from app.services.alert_service import alert_error
+from app.services.knowledge_service import format_knowledge_context, search_knowledge
+from app.services.llm import OpenAIProvider
+
+logger = get_logger("ai_service")
 
 # Minimum RAG score to consider knowledge reliable
 KNOWLEDGE_CONFIDENCE_THRESHOLD = 0.7
@@ -26,37 +31,41 @@ def get_llm_provider() -> OpenAIProvider:
 
 def get_system_prompt(db: Session, client_id: UUID) -> Optional[str]:
     """Get system prompt for client."""
-    print(f"Looking for prompt with client_id={client_id}")
-    prompt = db.query(Prompt).filter(
-        Prompt.client_id == client_id,
-        Prompt.name == "system",
-        Prompt.is_active == True
-    ).first()
-    
+    logger.debug(f"Looking for prompt with client_id={client_id}")
+    prompt = (
+        db.query(Prompt)
+        .filter(Prompt.client_id == client_id, Prompt.name == "system", Prompt.is_active == True)
+        .first()
+    )
+
     if prompt:
-        print(f"Found prompt: {prompt.text[:100]}...")
+        logger.debug(f"Found prompt: {prompt.text[:100]}...")
     else:
-        print(f"No prompt found for client_id={client_id}")
-    
+        logger.warning(f"No prompt found for client_id={client_id}")
+
     return prompt.text if prompt else None
 
 
 def get_conversation_history(db: Session, conversation_id: UUID, limit: int = 10) -> List[dict]:
     """Get recent conversation history."""
-    messages = db.query(Message).filter(
-        Message.conversation_id == conversation_id
-    ).order_by(Message.created_at.desc()).limit(limit).all()
-    
+    messages = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
     # Reverse to get chronological order
     messages = list(reversed(messages))
-    
+
     history = []
     for msg in messages:
         role = "assistant" if msg.role == "assistant" else "user"
         if msg.role == "system":
             continue  # Skip system messages
         history.append({"role": role, "content": msg.content})
-    
+
     return history
 
 
@@ -68,64 +77,67 @@ def generate_ai_response(
     user_message: str,
 ) -> str:
     """Generate AI response using LLM with knowledge base."""
-    print(f"generate_ai_response: client_id={client_id}, client_slug={client_slug}")
-    
+    logger.info(f"generate_ai_response: client_id={client_id}, client_slug={client_slug}")
+
     try:
         # 1. Get system prompt
         system_prompt = get_system_prompt(db, client_id)
         if not system_prompt:
             system_prompt = "Ты полезный ассистент. Отвечай кратко и по делу."
-        
+
         # 2. Search knowledge base
         knowledge_results = []
         try:
             knowledge_results = search_knowledge(user_message, client_slug, limit=3)
         except Exception as e:
-            print(f"Knowledge search error: {e}")
-        
+            logger.warning(f"Knowledge search error: {e}")
+
         # 3. Check knowledge confidence
         has_reliable_knowledge = False
         if knowledge_results:
             max_score = max(r.get("score", 0) for r in knowledge_results)
             has_reliable_knowledge = max_score >= KNOWLEDGE_CONFIDENCE_THRESHOLD
-            print(f"Knowledge confidence: max_score={max_score:.3f}, threshold={KNOWLEDGE_CONFIDENCE_THRESHOLD}, reliable={has_reliable_knowledge}")
-        
+            logger.info(
+                f"Knowledge confidence: max_score={max_score:.3f}, threshold={KNOWLEDGE_CONFIDENCE_THRESHOLD}, reliable={has_reliable_knowledge}"
+            )
+
         # Format knowledge context
         if has_reliable_knowledge:
             knowledge_context = format_knowledge_context(knowledge_results)
         else:
             # No reliable knowledge - instruct LLM to say "will check with colleagues"
-            knowledge_context = "ВНИМАНИЕ: В базе знаний нет надёжной информации по этому вопросу. Скажи клиенту что уточнишь у коллег."
-            print("No reliable knowledge found - will instruct to escalate")
-        
+            knowledge_context = (
+                "ВНИМАНИЕ: В базе знаний нет надёжной информации по этому вопросу. Скажи клиенту что уточнишь у коллег."
+            )
+            logger.info("No reliable knowledge found - will instruct to escalate")
+
         # 4. Build messages
         messages = []
-        
+
         # System prompt with knowledge context
         full_system = system_prompt
         if knowledge_context:
             full_system += f"\n\n{knowledge_context}"
-        
+
         messages.append({"role": "system", "content": full_system})
-        
+
         # 5. Add conversation history (last 10 messages for context)
         history = get_conversation_history(db, conversation_id, limit=10)
         messages.extend(history)
-        
+
         # 6. Add current user message (if not already in history)
         if not history or history[-1].get("content") != user_message:
             messages.append({"role": "user", "content": user_message})
-        
+
         # 7. Generate response
         llm = get_llm_provider()
-        print(f"Calling LLM with {len(messages)} messages")
+        logger.debug(f"Calling LLM with {len(messages)} messages")
         response = llm.generate(messages, temperature=1.0, max_tokens=2000)
-        print(f"LLM response: {response.content[:100] if response.content else 'EMPTY'}...")
-        
+        logger.debug(f"LLM response: {response.content[:100] if response.content else 'EMPTY'}...")
+
         return response.content
-        
+
     except Exception as e:
-        print(f"AI generation error: {e}")
-        import traceback
-        traceback.print_exc()
-        return f"Извините, произошла ошибка. Попробуйте позже."
+        logger.error(f"AI generation error: {e}", exc_info=True)
+        alert_error("AI generation failed", {"client_id": str(client_id), "error": str(e)})
+        return "Извините, произошла ошибка. Попробуйте позже."

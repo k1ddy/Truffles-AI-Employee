@@ -1,13 +1,14 @@
 import pytest
+
 from app.services.state_machine import (
     ConversationState,
-    can_transition,
-    transition,
-    escalate,
-    manager_take,
-    manager_resolve,
-    cancel_escalation,
     InvalidTransitionError,
+    can_transition,
+    cancel_escalation,
+    escalate,
+    manager_resolve,
+    manager_take,
+    transition,
 )
 
 

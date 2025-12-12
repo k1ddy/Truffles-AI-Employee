@@ -1,7 +1,13 @@
 """Alert service for sending notifications to Telegram."""
+
 import os
-import httpx
 from typing import Optional
+
+import httpx
+
+from app.logging_config import get_logger
+
+logger = get_logger("alert_service")
 
 ALERT_BOT_TOKEN = os.environ.get("ALERT_BOT_TOKEN")
 ALERT_CHAT_ID = os.environ.get("ALERT_CHAT_ID")
@@ -9,45 +15,36 @@ ALERT_CHAT_ID = os.environ.get("ALERT_CHAT_ID")
 
 def send_alert(level: str, message: str, context: Optional[dict] = None) -> bool:
     """Send alert to Telegram.
-    
+
     Args:
         level: INFO, WARNING, ERROR, CRITICAL
         message: Alert message
         context: Optional context dict
-    
+
     Returns:
         True if sent successfully
     """
     if not ALERT_BOT_TOKEN or not ALERT_CHAT_ID:
-        print(f"Alert not configured: {level} - {message}")
+        logger.warning(f"Alert not configured: {level} - {message}")
         return False
-    
-    emoji = {
-        "INFO": "ℹ️",
-        "WARNING": "⚠️", 
-        "ERROR": "❌",
-        "CRITICAL": "🔥"
-    }
-    
+
+    emoji = {"INFO": "ℹ️", "WARNING": "⚠️", "ERROR": "❌", "CRITICAL": "🔥"}
+
     text = f"{emoji.get(level, '📢')} *{level}*\n\n{message}"
-    
+
     if context:
         context_str = "\n".join(f"  {k}: {v}" for k, v in context.items())
         text += f"\n\n```\n{context_str}\n```"
-    
+
     try:
         with httpx.Client(timeout=10) as client:
             response = client.post(
                 f"https://api.telegram.org/bot{ALERT_BOT_TOKEN}/sendMessage",
-                json={
-                    "chat_id": ALERT_CHAT_ID,
-                    "text": text,
-                    "parse_mode": "Markdown"
-                }
+                json={"chat_id": ALERT_CHAT_ID, "text": text, "parse_mode": "Markdown"},
             )
             return response.status_code == 200
     except Exception as e:
-        print(f"Failed to send alert: {e}")
+        logger.error(f"Failed to send alert: {e}")
         return False
 
 

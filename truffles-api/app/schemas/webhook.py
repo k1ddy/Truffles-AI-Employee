@@ -1,6 +1,7 @@
-from pydantic import BaseModel
-from typing import Optional, Any
+from typing import Any, Optional
 from uuid import UUID
+
+from pydantic import BaseModel
 
 
 class WebhookMetadata(BaseModel):

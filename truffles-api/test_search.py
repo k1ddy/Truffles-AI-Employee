@@ -1,4 +1,5 @@
 import os
+
 import httpx
 
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
@@ -25,7 +26,7 @@ r = httpx.post(
         "vector": embedding,
         "limit": 3,
         "with_payload": True,
-    }
+    },
 )
 print(f"Search result: {r.status_code}")
 print(r.text[:1000])

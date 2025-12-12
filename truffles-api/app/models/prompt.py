@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Text, Boolean, Numeric
-from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
+from sqlalchemy import Boolean, Column, Numeric, Text
+from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 
 from app.database import Base
 
