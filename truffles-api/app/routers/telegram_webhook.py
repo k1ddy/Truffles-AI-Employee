@@ -49,6 +49,7 @@ async def handle_telegram_webhook(request: Request, db: Session = Depends(get_db
 async def handle_manager_message(update: TelegramUpdate, db: Session) -> TelegramWebhookResponse:
     """Handle text message from manager -> forward to WhatsApp client."""
     message = update.message
+    logger.info(f"Manager message received: chat_id={message.chat.id}, from={message.from_user.id if message.from_user else 'unknown'}, text={message.text[:50] if message.text else 'none'}...")
 
     # Skip bot messages
     if message.from_user and message.from_user.is_bot:

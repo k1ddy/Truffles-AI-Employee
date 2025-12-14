@@ -75,9 +75,12 @@ def process_manager_message(
 
     Returns: (success, message, took_handover, handover)
     """
+    logger.info(f"process_manager_message: chat_id={chat_id}, manager={manager_telegram_id}, thread={message_thread_id}")
+
     # 1. Find conversation
     result = find_conversation_by_telegram(db, chat_id, message_thread_id)
     if not result:
+        logger.warning(f"No conversation found for chat_id={chat_id}, thread={message_thread_id}")
         return False, "No active conversation found for this chat", False, None
 
     conversation, handover = result
