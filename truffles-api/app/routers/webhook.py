@@ -335,6 +335,25 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
                 conversation_id=conversation.id,
                 bot_response=None,
             )
+        # Re-check state after waiting: manager could take the request during debounce pause.
+        db.refresh(conversation)
+        now = datetime.now(timezone.utc)
+        if conversation.state == ConversationState.MANAGER_ACTIVE.value:
+            return WebhookResponse(
+                success=True,
+                message="Manager active (after debounce), message forwarded",
+                conversation_id=conversation.id,
+                bot_response=None,
+            )
+        if conversation.bot_status == "muted" or (conversation.bot_muted_until and conversation.bot_muted_until > now):
+            return WebhookResponse(
+                success=True,
+                message="Bot muted (after debounce), forwarded to topic"
+                if conversation.telegram_topic_id
+                else "Bot muted (after debounce)",
+                conversation_id=conversation.id,
+                bot_response=None,
+            )
 
     # 10. Classify intent (expensive). Protect against accidental escalations on short/noisy messages.
     if is_acknowledgement_message(message_text) or is_low_signal_message(message_text):
