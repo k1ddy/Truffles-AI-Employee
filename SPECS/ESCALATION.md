@@ -86,15 +86,15 @@
 - Бот отвечает на все сообщения
 - Нормальная работа
 
-**Реализация:** `message.py` — `if conversation.state == ConversationState.BOT_ACTIVE.value`
+**Реализация:** `truffles-api/app/routers/webhook.py` (основной путь), `truffles-api/app/routers/message.py` (legacy)
 
 ### Когда `pending`:
 - Бот УЖЕ ответил клиенту ("Передал менеджеру")
 - Создан handover в БД
-- Уведомление в Telegram с кнопками [Беру] [Пропустить]
+- Уведомление в Telegram с кнопками [Беру] [Вернуть боту] [Не могу]
 - Бот продолжает помогать если клиент пишет
 
-**Реализация:** `escalation_service.py` — `escalate_conversation()`
+**Реализация:** `truffles-api/app/services/state_service.py` (`escalate_to_pending`) + `truffles-api/app/services/escalation_service.py` (`send_telegram_notification`)
 
 ### Когда `manager_active`:
 - **БОТ ПОЛНОСТЬЮ МОЛЧИТ**
@@ -117,7 +117,7 @@
 | 24 часа без сообщений | Сброс счётчика |
 
 **Реализация:** 
-- `message.py` — `is_rejection(intent)` логика
+- `truffles-api/app/routers/webhook.py` / `truffles-api/app/routers/message.py` — `is_rejection(intent)`
 - `conversation.bot_muted_until`, `conversation.no_count`
 - `client_settings.mute_duration_first_minutes`, `mute_duration_second_hours`
 
@@ -207,7 +207,7 @@ Manager ответил → модерация admin/owner
 Support ответил → модерация admin/owner
 ```
 
-**Текущая реализация:** Автообучение не реализовано.
+**Текущая реализация:** ⚠️ Частично. Ответ менеджера сохраняется в `handover.manager_response`. Если отвечает owner (по `client_settings.owner_telegram_id`) — ответ может авто-добавляться в KB (Qdrant).
 
 ---
 
@@ -495,7 +495,8 @@ resolution_time_seconds INTEGER
 
 -- Telegram
 telegram_message_id     BIGINT
-channel_ref             TEXT  -- topic_id
+channel_ref             TEXT  -- WhatsApp remote_jid (куда отправлять ответ менеджера клиенту)
+-- topic_id для Telegram хранится в conversations.telegram_topic_id
 
 -- Напоминания
 reminder_1_sent_at      TIMESTAMP
@@ -609,7 +610,7 @@ qdrant_point_id TEXT  -- ID в Qdrant
 ## Fallback сообщения [РЕАЛИЗОВАНО]
 
 ```python
-# Реализация: message.py
+# Реализация: truffles-api/app/routers/webhook.py (и legacy: truffles-api/app/routers/message.py)
 
 MSG_ESCALATED = "Передал менеджеру. Могу чем-то помочь пока ждёте?"
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."

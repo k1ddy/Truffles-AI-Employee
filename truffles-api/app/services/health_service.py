@@ -3,10 +3,17 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.models import Conversation, Handover
+from app.models import Conversation, Handover, User
 from app.services.state_machine import ConversationState
 
 logger = get_logger("health_service")
+
+def is_probably_whatsapp_jid(value: str | None) -> bool:
+    if not value:
+        return False
+    # We only need to distinguish between real WhatsApp JIDs and broken numeric topic_ids.
+    # WhatsApp identifiers always contain "@" (e.g. 7701...@s.whatsapp.net, ...@lid).
+    return "@" in value
 
 
 def check_and_heal_conversations(db: Session) -> dict:
@@ -26,6 +33,7 @@ def check_and_heal_conversations(db: Session) -> dict:
     for conv in broken_no_topic:
         old_state = conv.state
         conv.state = ConversationState.BOT_ACTIVE.value
+        conv.retry_offered_at = None
 
         open_handovers = (
             db.query(Handover)
@@ -72,6 +80,7 @@ def check_and_heal_conversations(db: Session) -> dict:
         if not active_handover:
             old_state = conv.state
             conv.state = ConversationState.BOT_ACTIVE.value
+            conv.retry_offered_at = None
             healed.append(
                 {
                     "conversation_id": str(conv.id),
@@ -80,6 +89,44 @@ def check_and_heal_conversations(db: Session) -> dict:
                 }
             )
             logger.warning(f"Healed conversation {conv.id}: {old_state} without active handover")
+
+    # Инвариант 3: pending/active handovers должны указывать на того же WhatsApp пользователя,
+    # что и conversation.user.remote_jid (иначе менеджер может ответить не тому клиенту).
+    broken_handover_refs = (
+        db.query(Handover, Conversation, User)
+        .join(Conversation, Conversation.id == Handover.conversation_id)
+        .join(User, User.id == Conversation.user_id)
+        .filter(
+            Handover.status.in_(["pending", "active"]),
+            Conversation.channel == "whatsapp",
+        )
+        .all()
+    )
+
+    for handover, conversation, user in broken_handover_refs:
+        desired_ref = user.remote_jid
+        if not is_probably_whatsapp_jid(desired_ref):
+            continue
+
+        old_ref = handover.channel_ref
+        if old_ref == desired_ref:
+            continue
+
+        if not is_probably_whatsapp_jid(old_ref):
+            issue = "handover_invalid_channel_ref"
+        else:
+            issue = "handover_mismatched_channel_ref"
+
+        handover.channel_ref = desired_ref
+        healed.append(
+            {
+                "handover_id": str(handover.id),
+                "conversation_id": str(conversation.id),
+                "issue": issue,
+                "action": f"set_channel_ref_to_user_remote_jid (old='{old_ref}')",
+            }
+        )
+        logger.warning(f"Healed handover {handover.id}: channel_ref='{old_ref}' -> '{desired_ref}'")
 
     db.commit()
 

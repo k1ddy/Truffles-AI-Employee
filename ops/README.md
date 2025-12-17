@@ -14,6 +14,14 @@ ssh ... "psql -c \"SELECT * FROM table;\""
 ssh ... "psql < ~/truffles/ops/query.sql"
 ```
 
+```powershell
+# Локально
+.\ops\smoke_local.ps1
+
+# На прод
+.\ops\smoke_local.ps1 -BaseUrl "https://api.truffles.kz"
+```
+     
 ---
 
 ## ДОСТУПЫ
@@ -60,10 +68,9 @@ DemoSalonBot: 8249719610:AAGdyGmYTM9xnD5NojlsrIA36tbDcZFnpNk
 
 | Файл | Назначение | Использование |
 |------|------------|---------------|
-| `check_settings.sql` | Посмотреть client_settings | `psql < check_settings.sql` |
-| `check_handovers.sql` | Посмотреть handovers | `psql < check_handovers.sql` |
-| `reset_muted.sql` | Сбросить bot_status всех | `psql < reset_muted.sql` |
-| `reset_handover.sql` | Сбросить конкретный handover | `psql < reset_handover.sql` |
+| `reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | `psql < reset.sql` |
+| `update_instance_demo.sql` | Обновить instance_id для demo_salon | `psql < update_instance_demo.sql` |
+| `update_truffles_prompt.sql` | Обновить промпт truffles (SQL) | `psql < update_truffles_prompt.sql` |
 
 **Как выполнить SQL:**
 ```bash
@@ -71,6 +78,8 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "docker exec -i truff
 ```
 
 ### n8n Workflows
+
+⚠️ Эти скрипты исторически живут **на сервере** в `~/truffles/ops/` (не в git). Если локально файла нет — запускай через SSH.
 
 | Файл | Назначение | Использование |
 |------|------------|---------------|
@@ -109,15 +118,13 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "python3 ~/truffles/o
 
 ### 1. Посмотреть последние executions workflow
 ```bash
-# Скопировать скрипт
-scp -i C:\Users\user\.ssh\id_rsa -P 222 "C:\Users\user\Documents\Truffles-AI-Employee\ops\get_latest_exec.py" zhan@5.188.241.234:~/truffles/ops/
-
 # Выполнить
 ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "python3 ~/truffles/ops/get_latest_exec.py"
 ```
 
 ### 2. Сбросить muted status
 ```bash
+ # Файл лежит на сервере: ~/truffles/ops/reset_muted.sql
 ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "docker exec -i truffles_postgres_1 psql -U n8n -d chatbot < ~/truffles/ops/reset_muted.sql"
 ```
 
@@ -132,13 +139,18 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s -H 'api-key:
 ```
 
 ### 5. Настроить Telegram webhook
+API принимает оба пути: `/telegram-webhook` (прямо в FastAPI) и `/telegram-callback` (алиас для обратной совместимости n8n).
 ```bash
-ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s 'https://api.telegram.org/botTOKEN/setWebhook?url=https://n8n.truffles.kz/webhook/telegram-callback'"
+# FastAPI напрямую
+ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s \"https://api.telegram.org/botTOKEN/setWebhook?url=https://api.truffles.kz/telegram-webhook\""
+
+# n8n алиас (работает благодаря алиасу в API)
+ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s \"https://api.telegram.org/botTOKEN/setWebhook?url=https://api.truffles.kz/telegram-callback\""
 ```
 
 ### 6. Проверить Telegram webhook
 ```bash
-ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s 'https://api.telegram.org/botTOKEN/getWebhookInfo'"
+ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s \"https://api.telegram.org/botTOKEN/getWebhookInfo\""
 ```
 
 ---

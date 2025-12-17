@@ -3,6 +3,8 @@ from uuid import uuid4
 
 from app.services.ai_service import (
     KNOWLEDGE_CONFIDENCE_THRESHOLD,
+    ACKNOWLEDGEMENT_RESPONSE,
+    LOW_SIGNAL_RESPONSE,
     generate_ai_response,
     get_conversation_history,
     get_system_prompt,
@@ -93,12 +95,46 @@ class TestGenerateAIResponse:
         assert result.value[1] == "high"
         mock_llm.return_value.generate.assert_called_once()
 
+    @patch("app.services.ai_service.get_llm_provider")
     @patch("app.services.ai_service.search_knowledge")
     @patch("app.services.ai_service.get_system_prompt")
-    def test_low_confidence_returns_escalation_flag(self, mock_prompt, mock_search):
+    @patch("app.services.ai_service.get_conversation_history")
+    def test_contextual_rag_retry_avoids_escalation(self, mock_history, mock_prompt, mock_search, mock_llm):
         mock_db = Mock()
         mock_prompt.return_value = "You are a helpful assistant"
-        mock_search.return_value = [{"score": 0.5, "text": "Some text"}]  # Below threshold
+        mock_history.return_value = [
+            {"role": "user", "content": "педикюр интересует"},
+            {"role": "assistant", "content": "Какой вид педикюра вас интересует?"},
+            {"role": "user", "content": "сколько длится по времени"},
+            {"role": "assistant", "content": "Уточните вид педикюра."},
+        ]
+
+        def search_side_effect(query: str, client_slug: str, limit: int = 3):
+            if query == "классический интересует":
+                return [{"score": 0.1, "text": "Weak match"}]
+            return [{"score": 0.8, "text": "Relevant info"}]
+
+        mock_search.side_effect = search_side_effect
+
+        mock_response = Mock()
+        mock_response.content = "AI generated response"
+        mock_llm.return_value.generate.return_value = mock_response
+
+        result = generate_ai_response(mock_db, uuid4(), "demo_salon", uuid4(), "классический интересует")
+
+        assert result.ok is True
+        assert result.value[0] == "AI generated response"
+        assert result.value[1] in ["medium", "high"]
+        mock_llm.return_value.generate.assert_called_once()
+
+    @patch("app.services.ai_service.search_knowledge")
+    @patch("app.services.ai_service.get_system_prompt")
+    @patch("app.services.ai_service.get_conversation_history")
+    def test_low_confidence_returns_escalation_flag(self, mock_history, mock_prompt, mock_search):
+        mock_db = Mock()
+        mock_prompt.return_value = "You are a helpful assistant"
+        mock_history.return_value = []
+        mock_search.return_value = [{"score": 0.49, "text": "Some text"}]  # Below threshold
 
         result = generate_ai_response(
             db=mock_db,
@@ -114,9 +150,11 @@ class TestGenerateAIResponse:
 
     @patch("app.services.ai_service.search_knowledge")
     @patch("app.services.ai_service.get_system_prompt")
-    def test_empty_knowledge_returns_escalation_flag(self, mock_prompt, mock_search):
+    @patch("app.services.ai_service.get_conversation_history")
+    def test_empty_knowledge_returns_escalation_flag(self, mock_history, mock_prompt, mock_search):
         mock_db = Mock()
         mock_prompt.return_value = "You are a helpful assistant"
+        mock_history.return_value = []
         mock_search.return_value = []  # Empty results
 
         result = generate_ai_response(
@@ -167,10 +205,10 @@ class TestLowConfidenceEscalation:
             mock_response.content = "Response"
             mock_llm.return_value.generate.return_value = mock_response
 
-            result = generate_ai_response(mock_db, uuid4(), "test", uuid4(), "Q?")
+            result = generate_ai_response(mock_db, uuid4(), "test", uuid4(), "Test question?")
 
             assert result.ok is True
-            assert result.value[1] == "high"
+            assert result.value[1] == "medium"
 
     @patch("app.services.ai_service.search_knowledge")
     @patch("app.services.ai_service.get_system_prompt")
@@ -180,7 +218,50 @@ class TestLowConfidenceEscalation:
         mock_prompt.return_value = "You are a helpful assistant"
         mock_search.return_value = [{"score": KNOWLEDGE_CONFIDENCE_THRESHOLD - 0.01, "text": "Info"}]
 
-        result = generate_ai_response(mock_db, uuid4(), "test", uuid4(), "Q?")
+        result = generate_ai_response(mock_db, uuid4(), "test", uuid4(), "Test question?")
 
         assert result.ok is True
         assert result.value[1] == "low_confidence"
+
+    @patch("app.services.ai_service.get_llm_provider")
+    @patch("app.services.ai_service.search_knowledge")
+    @patch("app.services.ai_service.get_system_prompt")
+    @patch("app.services.ai_service.get_conversation_history")
+    def test_whitelisted_message_avoids_escalation(self, mock_history, mock_prompt, mock_search, mock_llm):
+        """Greeting/thanks should respond even when knowledge is low."""
+        mock_db = Mock()
+        mock_prompt.return_value = "You are a helpful assistant"
+        mock_history.return_value = []
+        mock_search.return_value = []  # No knowledge
+
+        mock_response = Mock()
+        mock_response.content = "Hello!"
+        mock_llm.return_value.generate.return_value = mock_response
+
+        result = generate_ai_response(
+            db=mock_db,
+            client_id=uuid4(),
+            client_slug="test",
+            conversation_id=uuid4(),
+            user_message="Привет",
+        )
+
+        assert result.ok is True
+        assert result.value[1] == "medium"
+        assert result.value[0] == "Hello!"
+
+
+class TestAckAndLowSignal:
+    def test_acknowledgement_does_not_trigger_escalation(self):
+        result = generate_ai_response(Mock(), uuid4(), "test", uuid4(), "ок?")
+
+        assert result.ok is True
+        assert result.value[1] == "medium"
+        assert result.value[0] == ACKNOWLEDGEMENT_RESPONSE
+
+    def test_low_signal_message_returns_clarifying_prompt(self):
+        result = generate_ai_response(Mock(), uuid4(), "test", uuid4(), "???")
+
+        assert result.ok is True
+        assert result.value[1] == "medium"
+        assert result.value[0] == LOW_SIGNAL_RESPONSE

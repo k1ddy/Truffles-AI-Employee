@@ -32,7 +32,7 @@ def search_knowledge(
     query: str,
     client_slug: str,
     limit: int = 5,
-    score_threshold: float = 0.5,
+    score_threshold: float = 0.45,
 ) -> List[dict]:
     """Search knowledge base in Qdrant."""
 

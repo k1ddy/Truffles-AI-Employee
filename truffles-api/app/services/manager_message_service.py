@@ -12,6 +12,11 @@ from app.services.message_service import save_message
 
 logger = get_logger("manager_message_service")
 
+def is_probably_whatsapp_jid(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    return "@" in value
+
 
 def find_conversation_by_telegram(
     db: Session,
@@ -32,7 +37,40 @@ def find_conversation_by_telegram(
         logger.warning(f"No client found for telegram chat_id={chat_id}")
         return None
 
-    # Find active handover for this client
+    # Preferred strategy: topic-based routing (avoid cross-client mix-ups)
+    if message_thread_id:
+        conversation = (
+            db.query(Conversation)
+            .filter(
+                Conversation.client_id == settings.client_id,
+                Conversation.telegram_topic_id == message_thread_id,
+            )
+            .first()
+        )
+
+        if not conversation:
+            logger.warning(
+                f"No conversation found for client={settings.client_id}, topic_id={message_thread_id}"
+            )
+            return None
+
+        handover = (
+            db.query(Handover)
+            .filter(
+                Handover.conversation_id == conversation.id,
+                Handover.status.in_(["pending", "active"]),
+            )
+            .order_by(Handover.created_at.desc())
+            .first()
+        )
+
+        if not handover:
+            logger.warning(f"No active handover for conversation {conversation.id} in topic {message_thread_id}")
+            return None
+
+        return conversation, handover
+
+    # Fallback strategy (no topic): pick latest active handover for this client
     handover = (
         db.query(Handover)
         .filter(
@@ -116,8 +154,23 @@ def process_manager_message(
         if point_id:
             logger.info(f"Successfully added to knowledge: {point_id}")
 
-    # 4. Get user's WhatsApp JID
-    remote_jid = get_user_remote_jid(db, conversation.user_id)
+    # 4. Get user's WhatsApp JID (authoritative source: user.remote_jid)
+    user_remote_jid = get_user_remote_jid(db, conversation.user_id)
+    remote_jid = user_remote_jid
+
+    # Fallback for legacy/broken data
+    if not is_probably_whatsapp_jid(remote_jid):
+        remote_jid = handover.channel_ref if is_probably_whatsapp_jid(handover.channel_ref) else None
+
+    # Self-heal mismatch: never trust channel_ref if it points to another WhatsApp JID
+    if is_probably_whatsapp_jid(user_remote_jid) and handover.channel_ref != user_remote_jid:
+        if is_probably_whatsapp_jid(handover.channel_ref):
+            logger.warning(
+                "handover.channel_ref mismatch: "
+                f"'{handover.channel_ref}' != user.remote_jid '{user_remote_jid}', fixing"
+            )
+        handover.channel_ref = user_remote_jid
+
     if not remote_jid:
         return False, "User remote_jid not found", took_handover, handover
 

@@ -749,76 +749,37 @@ RAG score = 0      →  ESCALATION + "пробел в базе"
 
 ## TODO: Шаги реализации
 
-### Шаг 1: Эскалация при низком RAG [P0 — следующий]
+### Шаг 1: Low confidence → эскалация [✅ РЕАЛИЗОВАНО]
 
-**Где:** `truffles-api/app/services/ai_service.py`
+**Где:** `truffles-api/app/services/ai_service.py`, `truffles-api/app/routers/webhook.py`
 
-**Сейчас:**
-```python
-if not has_reliable_knowledge:
-    knowledge_context = "ВНИМАНИЕ: В базе знаний нет информации. Скажи что уточнишь."
-```
+**Как сейчас работает (факт):**
+- RAG max_score ≥ 0.85 → `high`
+- 0.5 ≤ max_score < 0.85 → `medium`
+- max_score < 0.5 → `low_confidence` → создаём handover (`pending`) + уведомление в Telegram
+- Исключения чтобы не спамить заявками: whitelist/guardrails (greeting/thanks/ок/??? и т.п.)
 
-**Нужно:**
-```python
-if not has_reliable_knowledge:
-    # Вернуть флаг что нужна эскалация
-    return None, "low_confidence"  # или raise LowConfidenceError
-```
+### Шаг 2: Сохранять ответ менеджера [✅ РЕАЛИЗОВАНО]
 
-**Где обрабатывать:** `truffles-api/app/routers/webhook.py` — в `process_message()`
+**Где:** `truffles-api/app/services/manager_message_service.py`
 
-```python
-response, confidence_flag = generate_ai_response(...)
-if confidence_flag == "low_confidence":
-    # Эскалировать
-    escalation_service.create_escalation(
-        db, conversation, user_message, 
-        trigger_type="low_confidence"
-    )
-    response = "Передам ваш вопрос коллеге, скоро ответят."
-```
+**Факт:** при ответе менеджера сохраняем `handover.manager_response` (и используем это для обучения).
 
-### Шаг 2: Сохранять ответ менеджера [P1]
+### Шаг 3: Active Learning [⚠️ ЧАСТИЧНО]
 
-**Где:** `truffles-api/app/routers/telegram_webhook.py`
-
-**Сейчас:** Ответ менеджера отправляется клиенту, но НЕ сохраняется в handover.
-
-**Нужно:** При ответе менеджера — сохранить в `handovers.manager_response`
-
-```python
-# В handle_manager_reply()
-handover.manager_response = message_text
-db.commit()
-```
-
-### Шаг 3: Active Learning [P2]
-
-**Где:** Новый сервис `truffles-api/app/services/learning_service.py`
+**Где:** `truffles-api/app/services/learning_service.py`
 
 **Логика:**
-1. При `handover.status = 'resolved'` — проверить есть ли `manager_response`
-2. Если owner → сразу в Qdrant
-3. Если другой → в очередь на модерацию (новая таблица `pending_knowledge`)
-4. Owner модерирует → approve → в Qdrant
+1. Если owner ответил → auto-upsert в Qdrant (есть в коде)
+2. Для не-owner: модерация/approval flow — план
 
 ### Шаг 4: Multi-level confidence [P2]
 
 **Где:** `truffles-api/app/services/ai_service.py`
 
-```python
-CONFIDENCE_HIGH = 0.85    # Бот сам
-CONFIDENCE_MEDIUM = 0.6   # Бот + флаг review
-CONFIDENCE_LOW = 0.6      # Эскалация
+**Текущее (в коде):** HIGH=0.85, MID=0.5, иначе `low_confidence`.
 
-if max_score >= CONFIDENCE_HIGH:
-    return response, "high"
-elif max_score >= CONFIDENCE_MEDIUM:
-    return response, "medium"  # + сохранить для review
-else:
-    return None, "low"  # эскалация
-```
+**Следующее улучшение (P0):** «уточнение перед заявкой» — при первом `low_confidence` задать вопрос, и только если снова `low_confidence` → эскалация.
 
 ---
 

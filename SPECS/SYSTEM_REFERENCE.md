@@ -24,7 +24,7 @@
 | База данных | PostgreSQL 15 |
 | Векторная БД | Qdrant (self-hosted) |
 | Embeddings | BGE-M3 (self-hosted, HTTP `http://bge-m3:8080/embed`) |
-| LLM | OpenAI API (GPT-4) |
+| LLM | OpenAI API (по умолчанию `gpt-5-mini`) |
 | Кэш/очереди | Redis |
 | Оркестрация | Docker + Docker Compose |
 | Reverse proxy | Traefik |
@@ -55,11 +55,15 @@
 # 1. Скопировать файлы
 scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles-api/...
 
-# 2. Пересобрать образ
-ssh -p 222 zhan@5.188.241.234 "cd /home/zhan/truffles-api && docker build -t truffles-api_truffles-api ."
+# 2. Пересобрать образ (+ метаданные для /admin/version)
+ssh -p 222 zhan@5.188.241.234 "cd /home/zhan/truffles-api && docker build -t truffles-api_truffles-api \
+  --build-arg APP_VERSION=prod \
+  --build-arg GIT_COMMIT=unknown \
+  --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  ."
 
 # 3. Перезапустить
-ssh -p 222 zhan@5.188.241.234 "bash /tmp/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 
 # 4. Проверить логи
 ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
@@ -86,7 +90,12 @@ docker run -d --name truffles-api \
   truffles-api_truffles-api
 ```
 
-**Проверка нового кода:** Нет `/version`. Смотреть логи на новые сообщения.
+**Проверка нового кода:**
+```bash
+ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/version"
+ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/health"
+```
+⚠️ `/admin/version` возвращает `unknown`, если не переданы build-метаданные (APP_VERSION/GIT_COMMIT/BUILD_TIME) в контейнер.
 
 ---
 
@@ -113,9 +122,9 @@ chatflow_service → WhatsApp
 
 ### Эскалация
 ```
-Low confidence (RAG score < 0.7) ИЛИ intent=HUMAN_REQUEST/FRUSTRATION
+Low confidence (RAG score < MID_CONFIDENCE_THRESHOLD, сейчас 0.5) ИЛИ intent=HUMAN_REQUEST/FRUSTRATION
     ↓
-escalation_service.escalate_conversation()
+state_service.escalate_to_pending() + escalation_service.send_telegram_notification()
     ↓
 Создать handover + topic в Telegram
     ↓

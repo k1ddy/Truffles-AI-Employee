@@ -1,5 +1,10 @@
+import asyncio
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from datetime import timedelta
 from unittest.mock import Mock, patch
+
+import pytest
 
 from app.services.state_machine import ConversationState
 from app.services.state_service import (
@@ -7,6 +12,13 @@ from app.services.state_service import (
     escalate_to_pending,
     manager_resolve,
     manager_take,
+)
+
+from app.routers.webhook import (
+    LOW_CONFIDENCE_RETRY_WINDOW_MINUTES,
+    is_handover_status_question,
+    should_process_debounced_message,
+    should_offer_low_confidence_retry,
 )
 
 
@@ -27,6 +39,7 @@ class TestEscalateToPending:
         conversation.id = "conv-123"
         conversation.client_id = "client-123"
         conversation.user_id = "user-123"
+        conversation.retry_offered_at = datetime.now(timezone.utc)
 
         result = escalate_to_pending(db, conversation, "Help me", "intent", "human_request")
 
@@ -34,6 +47,7 @@ class TestEscalateToPending:
         assert result.value is not None
         assert conversation.state == ConversationState.PENDING.value
         assert conversation.telegram_topic_id == 12345
+        assert conversation.retry_offered_at is None
 
     def test_fails_from_wrong_state(self):
         db = Mock()
@@ -110,6 +124,7 @@ class TestManagerResolve:
         conversation = Mock()
         conversation.state = ConversationState.MANAGER_ACTIVE.value
         conversation.id = "conv-123"
+        conversation.retry_offered_at = datetime.now(timezone.utc)
 
         handover = Mock()
         handover.status = "active"
@@ -119,6 +134,7 @@ class TestManagerResolve:
 
         assert result.ok is True
         assert conversation.state == ConversationState.BOT_ACTIVE.value
+        assert conversation.retry_offered_at is None
         assert handover.status == "resolved"
         assert handover.resolved_by_name == "Manager Name"
 
@@ -189,3 +205,92 @@ class TestCheckInvariants:
         violations = check_invariants(conversation, handover)
 
         assert len(violations) == 0
+
+
+class TestLowConfidenceRetryGate:
+    def test_first_low_confidence_offers_retry(self):
+        now = datetime.now(timezone.utc)
+        conversation = SimpleNamespace(retry_offered_at=None)
+        assert should_offer_low_confidence_retry(conversation, now) is True
+
+    def test_within_window_does_not_offer_retry(self):
+        now = datetime.now(timezone.utc)
+        conversation = SimpleNamespace(
+            retry_offered_at=now - timedelta(minutes=LOW_CONFIDENCE_RETRY_WINDOW_MINUTES - 1)
+        )
+        assert should_offer_low_confidence_retry(conversation, now) is False
+
+    def test_after_window_offers_retry_again(self):
+        now = datetime.now(timezone.utc)
+        conversation = SimpleNamespace(
+            retry_offered_at=now - timedelta(minutes=LOW_CONFIDENCE_RETRY_WINDOW_MINUTES + 1)
+        )
+        assert should_offer_low_confidence_retry(conversation, now) is True
+
+
+class FakeRedis:
+    def __init__(self):
+        self.data = {}
+
+    async def set(self, key: str, value: str, ex: int | None = None):
+        self.data[key] = value
+        return True
+
+    async def get(self, key: str):
+        return self.data.get(key)
+
+
+class TestDebounce:
+    @pytest.mark.asyncio
+    async def test_only_latest_message_is_processed(self, monkeypatch):
+        monkeypatch.setenv("DEBOUNCE_ENABLED", "true")
+
+        redis_client = FakeRedis()
+        pause_events: list[asyncio.Event] = []
+
+        async def controlled_sleep(_seconds: float):
+            event = asyncio.Event()
+            pause_events.append(event)
+            await event.wait()
+
+        task_1 = asyncio.create_task(
+            should_process_debounced_message(
+                client_id="client-1",
+                remote_jid="77010000000@s.whatsapp.net",
+                message_id="m1",
+                sleep_func=controlled_sleep,
+                redis_client=redis_client,
+            )
+        )
+
+        while len(pause_events) < 1:
+            await asyncio.sleep(0)
+
+        task_2 = asyncio.create_task(
+            should_process_debounced_message(
+                client_id="client-1",
+                remote_jid="77010000000@s.whatsapp.net",
+                message_id="m2",
+                sleep_func=controlled_sleep,
+                redis_client=redis_client,
+            )
+        )
+
+        while len(pause_events) < 2:
+            await asyncio.sleep(0)
+
+        pause_events[0].set()
+        pause_events[1].set()
+
+        result_1, result_2 = await asyncio.gather(task_1, task_2)
+
+        assert result_1 is False
+        assert result_2 is True
+
+
+class TestPendingStatusQuestionDetection:
+    def test_detects_not_answering_phrase(self):
+        assert is_handover_status_question("почему не отвечаете?") is True
+
+    def test_detects_silence_phrase(self):
+        assert is_handover_status_question("почему молчит?") is True

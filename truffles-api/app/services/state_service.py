@@ -32,6 +32,7 @@ def escalate_to_pending(
         telegram = TelegramService(bot_token)
         user = db.query(User).filter(User.id == conversation.user_id).first()
         user_name = user.name or user.phone if user else "Unknown"
+        remote_jid = user.remote_jid if user else None
 
         topic_id = telegram.create_forum_topic(chat_id, f"💬 {user_name}")
         if not topic_id:
@@ -48,12 +49,14 @@ def escalate_to_pending(
             status="pending",
             created_at=now,
             channel="telegram",
+            channel_ref=remote_jid,
         )
         db.add(handover)
 
         conversation.state = ConversationState.PENDING.value
         conversation.telegram_topic_id = topic_id
         conversation.escalated_at = now
+        conversation.retry_offered_at = None
 
         db.flush()
 
@@ -117,6 +120,7 @@ def manager_resolve(
         conversation.state = ConversationState.BOT_ACTIVE.value
         conversation.bot_muted_until = None
         conversation.no_count = 0
+        conversation.retry_offered_at = None
 
         handover.status = "resolved"
         handover.resolved_at = now

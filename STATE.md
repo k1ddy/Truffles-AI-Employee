@@ -16,15 +16,15 @@
 - [x] Мультитенант (truffles, demo_salon)
 
 ### Что не работает / в процессе
-- [ ] **⚠️ Эскалация на всё** — threshold 0.7 слишком высокий, даже "спасибо" создаёт заявку
-- [ ] **⚠️ Active Learning не работает** — код есть, но обучение не вызывается (нет логов)
+- [ ] **⚠️ Эскалация всё ещё частая на реальные вопросы** — KB неполная, score часто < 0.5 → создаётся заявка; мелкие сообщения ("спасибо", "ок?") больше не должны создавать заявки (whitelist + guardrails)
+- [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant (код есть), но нет модерации/метрик и нужен факт-пруф по логам на проде
 - [ ] **Branch не подключен** — модель есть, но роутинг идёт через client_id → `SPECS/MULTI_TENANT.md`
 - [ ] Метрики (Quality Deflection, CSAT) — план: `SPECS/ESCALATION.md`, часть 6
 - [ ] Dashboard для заказчика — backlog
 - [ ] Quiet hours для напоминаний — P2
 
 ### Блокеры
-- **docker-compose не работает** — ошибка `KeyError: 'ContainerConfig'`, деплой через `ops/restart_api.sh`
+- **docker-compose не работает** — ошибка `KeyError: 'ContainerConfig'`, деплой через `ops/restart_api.sh` (на сервере: `~/restart_api.sh`)
 
 ---
 
@@ -37,9 +37,9 @@
 2. [x] **Gap в спеке: state=manager_active без топика** (P0) ✅
 3. [x] **Промпт: бот представляется** (Закон РК об ИИ) ✅
    - Бот говорит "Я виртуальный помощник" при приветствии
-4. [x] **Confidence threshold** — score < 0.7 → не выдумывать ✅
+4. [x] **Confidence threshold** — score < 0.5 → не выдумывать ✅
    - Реализовано в ai_service.py
-5. [ ] **Эскалация при низком RAG** — сейчас говорит "уточню", нужно реально эскалировать
+5. [ ] **Low confidence: уточнить → потом заявка** — сейчас `low_confidence` сразу создаёт handover; нужно 1–2 уточняющих вопроса до эскалации
 
 ### Следующее (по порядку)
 
@@ -65,17 +65,18 @@
 15. [x] Health endpoints — GET/POST /admin/health, /admin/heal
 
 **НЕДЕЛЯ 4: Функционал** ⚠️ ЧАСТИЧНО (есть проблема)
-16. [x] Эскалация при низком confidence — РЕАЛИЗОВАНО, но threshold 0.7 слишком высокий
+16. [x] Эскалация при низком confidence — РЕАЛИЗОВАНО (MID=0.5, HIGH=0.85 + whitelist/guardrails)
 17. [x] Active Learning — owner ответы автоматически в Qdrant
-18. [ ] Multi-level confidence (0.85/0.6/0)
+18. [ ] Multi-level confidence (в продукте: 0.85/0.5/low_confidence + уточнения)
 19. [ ] Telegram кнопки модерации [В базу] [Отклонить] для не-owner
 
 **⚠️ ПРОБЛЕМА:** Эскалация срабатывает слишком часто — даже на "ты еще здесь?"
-- **Причина:** RAG score < 0.7 для большинства вопросов
+- **Причина:** KB неполная → RAG score часто < 0.5 на реальные вопросы
 - **Решения:**
-  1. Понизить threshold до 0.5-0.6
-  2. Добавить whitelist интентов (greeting, thanks) которые не требуют RAG
+  1. Threshold уже понижен до 0.5 (MID) + HIGH=0.85
+  2. Whitelist/guardrails уже добавлены (greeting/thanks/ok/???)
   3. Добавить базовые ответы в knowledge base
+  4. Добавить «уточнение перед заявкой» (см. пункт 5 в плане)
 
 ---
 
@@ -136,6 +137,18 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-17 — Фикс “бот молчит” + защита заявок
+
+**Диагностика:**
+- “Бот молчит” часто означает не баг, а состояние `manager_active` — по протоколу бот должен молчать и только форвардить в Telegram-топик.
+- На проде были зависшие заявки (`handovers.pending/active`) и один опасный случай mismatch `handover.channel_ref` (риск ответить не тому клиенту).
+
+**Что сделали:**
+- Emergency reset: `ops/reset.sql` теперь (1) чинит `channel_ref` у открытых заявок, (2) закрывает все open handovers, (3) возвращает диалоги в `bot_active`.
+- Защита: self-heal чинит mismatch `channel_ref`, а ответы менеджера отправляются по `user.remote_jid` (source of truth).
+- Reminders: напоминания теперь идут по всем open handovers (`pending` + `active`), чтобы заявки не висели бесконечно.
+- Debounce: в FastAPI `POST /webhook` добавлен Redis-debounce — при серии быстрых сообщений бот отвечает один раз (последнее сообщение после паузы). Параметры: `DEBOUNCE_ENABLED` (default=on), `DEBOUNCE_INACTIVITY_SECONDS` (default=1.5), `REDIS_URL` (default=`redis://truffles_redis_1:6379/0`). Быстрый откат: поставить `DEBOUNCE_ENABLED=0` в `.env` и `bash ~/restart_api.sh`.
+
 ### 2025-12-12 (вечер) — Неделя 4: ПРОВАЛ
 
 ---
@@ -144,14 +157,42 @@
 
 **Состояние бота: ЧАСТИЧНО РАБОТАЕТ, НО ПЛОХО**
 
+Важно:
+- Если клиент пишет в WA и “бот молчит” — первым делом проверить `conversation.state`: в `manager_active` это ожидаемое поведение.
+- Если заявки зависли и нужно срочно “оживить” бота — использовать `ops/reset.sql`.
+
+Протокол проверки (10 минут, без догадок):
+1. Проверить прод-состояние: `curl -s http://localhost:8000/admin/health` (через SSH на сервере).
+2. Если `pending/active > 0` и это тесты — закрыть: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot < ~/truffles/ops/reset.sql`.
+3. Прогнать WA тест-диалог с номера `+77015705555`: приветствие → попросить менеджера → менеджер ответил → [Решено].
+4. Смотреть `docker logs truffles-api --tail 200` и убедиться что видно `remote_jid`, `state` и что не происходит loop `pending → pending`.
+5. Если есть “молчание”, но нет открытых заявок — выполнить `POST /admin/heal` и проверить инварианты (state/topic/handover).
+
+Runbook (если “всё странно” или сессия оборвалась):
+1. Подключиться на прод: `ssh -p 222 zhan@5.188.241.234`.
+2. Быстро понять “это заявка или баг”: `curl -s http://localhost:8000/admin/health`.
+3. Если `handovers.pending/active > 0` и это тестовый мусор — одним выстрелом очистить: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot < ~/truffles/ops/reset.sql`.
+4. Если “бот молчит” у конкретного клиента — проверить состояние диалога (пример для `+77015705555`):
+   `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT c.id, c.state, c.telegram_topic_id, c.last_message_at FROM conversations c JOIN users u ON u.id=c.user_id WHERE u.remote_jid='77015705555@s.whatsapp.net' ORDER BY c.started_at DESC LIMIT 3;"`
+5. Если `state=manager_active` — это НЕ баг: бот обязан молчать, а сообщения должны улетать в Telegram-топик.
+6. Если `state=bot_active`, но бот “молчит” — смотреть логи доставки: `docker logs truffles-api --tail 300`.
+
+Правило тестов (чтобы самому себе не ломать картину):
+- Не мешать сценарии в одну кашу: отдельно “прайс/запись”, отдельно “эскалация”, отдельно “жалоба”.
+- Быстрые сообщения подряд (“подскажите/…/…”) теперь debounced на уровне API → промежуточные сообщения сохраняются в историю, но бот отвечает один раз (по последнему сообщению после паузы).
+- После тестов закрывать заявки кнопкой [Решено] или делать `reset.sql`, чтобы диалоги не оставались в `pending/manager_active`.
+
+Ключевые файлы для отладки: `truffles-api/app/routers/webhook.py`, `truffles-api/app/routers/telegram_webhook.py`, `truffles-api/app/services/ai_service.py`, `truffles-api/app/services/manager_message_service.py`, `truffles-api/app/services/state_service.py`, `ops/reset.sql`.
+
 Что работает:
-- Бот отвечает на вопросы с высоким RAG score (>0.7)
+- Бот отвечает при RAG score ≥ 0.5 (medium/high), а приветствия/«спасибо»/«ок?»/«???» — без заявок (guardrails)
+- В `pending` бот отвечает и не создаёт повторную заявку (но сообщения всё равно форвардятся в Telegram-топик)
 - Кнопки [Беру] [Решено] работают (после починки traefik labels)
 - Заявки создаются
 
 Что НЕ работает:
-- Эскалация срабатывает слишком часто (даже на "ты еще здесь?", "спасибо")
-- Обучение на ответах owner — НЕ РАБОТАЕТ (текст в логах не появляется)
+- Low confidence всё ещё часто уходит в заявку из-за неполной базы знаний (нужно «уточнение перед заявкой»)
+- Active Learning по owner-ответам в коде есть, но нужно проверить на проде логами + решить модерацию
 
 ---
 
@@ -218,7 +259,7 @@
 
 2. **Как сообщение менеджера доходит до клиента?** Через n8n или через Python API? Я не разобрался.
 
-3. **Правильный ли threshold?** 0.7 — слишком высокий. Но какой правильный? 0.5? 0.55?
+3. **Правильный ли threshold?** Сейчас в коде: MID=0.5, HIGH=0.85. Дальше тюнить только по фактам (сколько эскалаций/качество ответов).
 
 ---
 
@@ -237,7 +278,7 @@
 | Приоритет | Задача | Как проверить |
 |-----------|--------|---------------|
 | P0 | Понять почему обучение не работает | Логи должны показать "Owner response detected" |
-| P0 | Понизить threshold (0.7 → 0.5) или whitelist | "спасибо" не должно создавать заявку |
+| P0 | Сделать «уточнение перед заявкой» для `low_confidence` | 1–2 уточнения → только потом handover |
 | P1 | Добавить базовые фразы в knowledge base | "ты еще здесь?" → бот отвечает сам |
 
 ### 3. КАК ДЕПЛОИТЬ
@@ -247,7 +288,7 @@
 scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles-api/...
 
 # 2. Пересобрать и запустить
-ssh -p 222 zhan@5.188.241.234 "bash /tmp/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 # или скопировать ops/restart_api.sh и запустить
 
 # 3. Проверить логи
@@ -404,4 +445,4 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 
 ---
 
-*Последнее обновление: 2025-12-10 (вечер)*
+*Последнее обновление: 2025-12-17*

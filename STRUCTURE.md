@@ -13,7 +13,7 @@
 | `STRUCTURE.md` | Этот файл — карта проекта | Оба (каждую сессию) |
 | `HOW_TO_WORK.md` | Инструкция для Жанбола | Жанбол |
 | `TECH.md` | Доступы, команды, данные сервера | Кодер |
-| `reset.sql` | Сброс тестовых данных | Кодер |
+| `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 
 ---
 
@@ -53,22 +53,32 @@
 truffles-api/
 ├── app/
 │   ├── main.py              # FastAPI entry point
-│   ├── api/
-│   │   └── routes/
-│   │       └── webhook.py   # POST /webhook — входящие сообщения
+│   ├── routers/
+│   │   ├── webhook.py           # POST /webhook — входящие сообщения WhatsApp (через ChatFlow/n8n)
+│   │   ├── telegram_webhook.py  # POST /telegram-webhook — сообщения/кнопки менеджеров
+│   │   ├── admin.py             # /admin/* (health/heal/prompt/settings/version)
+│   │   ├── reminders.py         # /reminders/* — cron напоминаний
+│   │   ├── callback.py          # /callback — (legacy/n8n)
+│   │   └── message.py           # /message — legacy/manual, не основной путь
 │   ├── services/
-│   │   ├── message.py       # Главная логика обработки
-│   │   ├── intent_service.py    # Классификация интентов
-│   │   ├── knowledge_service.py # RAG поиск
-│   │   ├── llm_service.py       # Генерация ответов
-│   │   ├── escalation_service.py # Эскалация в Telegram
-│   │   ├── reminder_service.py   # Напоминания
-│   │   └── telegram_service.py   # Telegram API
+│   │   ├── ai_service.py            # LLM + RAG thresholds + guardrails
+│   │   ├── message_service.py        # save_message + generate_bot_response
+│   │   ├── intent_service.py         # Классификация интентов
+│   │   ├── knowledge_service.py      # Qdrant RAG поиск + embeddings
+│   │   ├── state_machine.py          # ConversationState enum
+│   │   ├── state_service.py          # Атомарные переходы + handover create/resolve
+│   │   ├── escalation_service.py     # Telegram уведомления + кнопки
+│   │   ├── manager_message_service.py# Ответ менеджера → клиент + auto-learning (owner)
+│   │   ├── reminder_service.py       # Напоминания по open handovers
+│   │   ├── health_service.py         # self-heal инвариантов
+│   │   ├── telegram_service.py       # Telegram API wrapper
+│   │   ├── chatflow_service.py       # Отправка сообщений в WhatsApp (ChatFlow)
+│   │   └── learning_service.py       # Qdrant upsert по ответам owner
 │   ├── models/              # SQLAlchemy модели
-│   └── db/                  # Database connection
-├── migrations/              # Alembic миграции
+│   ├── schemas/             # Pydantic схемы
+│   └── database.py          # Database connection
 ├── tests/                   # Pytest тесты
-├── docker-compose.yml       # Локальный запуск
+├── docker-compose.yml       # Локальный запуск (на проде НЕ используется)
 └── requirements.txt         # Зависимости
 ```
 

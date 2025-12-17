@@ -1,6 +1,10 @@
 # Archive with old scripts (contains hardcoded URLs/tokens)
 .archive/ops_old/
 
+# Codex/Droid local context packs (generated)
+.factory/context_pack*.txt
+.factory/context_pack_latest.txt
+
 # Python
 __pycache__/
 *.py[cod]

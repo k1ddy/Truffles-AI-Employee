@@ -110,8 +110,11 @@ def build_handover_buttons(handover_id: UUID) -> dict:
         "inline_keyboard": [
             [
                 {"text": "Беру ✋", "callback_data": f"take_{handover_id}"},
+                {"text": "Вернуть боту 🤖", "callback_data": f"return_{handover_id}"},
+            ],
+            [
                 {"text": "Не могу ❌", "callback_data": f"skip_{handover_id}"},
-            ]
+            ],
         ]
     }
 

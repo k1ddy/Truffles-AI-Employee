@@ -1,5 +1,6 @@
 """Admin API endpoints for managing bot configuration."""
 
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,6 +32,12 @@ class SettingsUpdate(BaseModel):
     mute_duration_second_hours: Optional[int] = None
     reminder_1_minutes: Optional[int] = None
     reminder_2_minutes: Optional[int] = None
+
+
+class VersionResponse(BaseModel):
+    version: str
+    git_commit: Optional[str] = None
+    build_time: Optional[str] = None
 
 
 # === PROMPT ENDPOINTS ===
@@ -188,3 +195,13 @@ async def system_health(db: Session = Depends(get_db)):
 async def heal_system(db: Session = Depends(get_db)):
     """Check and heal invariant violations."""
     return check_and_heal_conversations(db)
+
+
+@router.get("/version", response_model=VersionResponse)
+async def get_version():
+    """Return build metadata for diagnostics."""
+    return VersionResponse(
+        version=os.environ.get("APP_VERSION", "unknown"),
+        git_commit=os.environ.get("GIT_COMMIT"),
+        build_time=os.environ.get("BUILD_TIME"),
+    )

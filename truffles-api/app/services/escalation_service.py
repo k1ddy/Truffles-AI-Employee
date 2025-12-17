@@ -43,6 +43,7 @@ def create_handover(
         created_at=now,
         adapter_type="telegram",
         channel="telegram",
+        channel_ref=user.remote_jid if user else None,
     )
     db.add(handover)
     db.flush()  # Get ID before commit
@@ -141,9 +142,8 @@ def send_telegram_notification(
     if result.get("ok"):
         message_id = result["result"]["message_id"]
 
-        # 5. Save telegram_message_id and channel_ref
+        # 5. Save telegram_message_id
         handover.telegram_message_id = message_id
-        handover.channel_ref = str(topic_id) if topic_id else None
         handover.notified_at = datetime.now(timezone.utc)
 
         # 6. Pin message

@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -18,6 +19,28 @@ logger = get_logger("telegram_webhook")
 router = APIRouter()
 
 
+async def parse_telegram_update(request: Request) -> Optional[dict]:
+    """
+    Parse Telegram update with tolerant decoding to avoid utf-8 crashes.
+    Returns dict or None.
+    """
+    try:
+        return await request.json()
+    except Exception as e:
+        logger.warning(f"Standard request.json() failed: {e}, fallback decoding", exc_info=True)
+
+    raw = await request.body()
+    for enc in ("utf-8", "latin-1"):
+        try:
+            decoded = raw.decode(enc, errors="replace")
+            return json.loads(decoded)
+        except Exception:
+            continue
+
+    logger.error("Failed to decode Telegram webhook payload after fallbacks")
+    return None
+
+
 @router.post("/telegram-webhook", response_model=TelegramWebhookResponse)
 async def handle_telegram_webhook(request: Request, db: Session = Depends(get_db)):
     """
@@ -26,7 +49,10 @@ async def handle_telegram_webhook(request: Request, db: Session = Depends(get_db
     - Callback queries (button clicks) -> process callback action
     """
     try:
-        body = await request.json()
+        body = await parse_telegram_update(request)
+        if body is None:
+            return TelegramWebhookResponse(success=False, message="Invalid telegram payload")
+
         logger.debug(f"Telegram webhook received: {body}")
 
         update = TelegramUpdate(**body)
@@ -44,6 +70,12 @@ async def handle_telegram_webhook(request: Request, db: Session = Depends(get_db
     except Exception as e:
         logger.error(f"Telegram webhook error: {e}", exc_info=True)
         return TelegramWebhookResponse(success=False, message=str(e))
+
+
+# Backward-compatible alias used in ops docs
+@router.post("/telegram-callback", response_model=TelegramWebhookResponse)
+async def handle_telegram_callback(request: Request, db: Session = Depends(get_db)):
+    return await handle_telegram_webhook(request, db)
 
 
 async def handle_manager_message(update: TelegramUpdate, db: Session) -> TelegramWebhookResponse:
@@ -101,6 +133,14 @@ async def handle_manager_message(update: TelegramUpdate, db: Session) -> Telegra
                     },
                 },
             )
+
+            # Notify in the topic that the manager took the request (auto-take on first message)
+            if message_thread_id:
+                telegram.send_message(
+                    chat_id=str(chat_id),
+                    text=f"👤 <b>{manager_name}</b> взял заявку",
+                    message_thread_id=message_thread_id,
+                )
 
         # Only notify on failure
         if not success:
@@ -168,6 +208,22 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
     # Get topic_id for sending messages
     topic_id = conversation.telegram_topic_id if conversation else None
 
+    # Stale buttons protection: if handover already closed, don't error and remove buttons.
+    if handover.status not in ["pending", "active"]:
+        telegram._make_request(
+            "answerCallbackQuery",
+            {"callback_query_id": callback.id, "text": "✅ Заявка уже закрыта"},
+        )
+
+        if message_id:
+            telegram._make_request(
+                "editMessageReplyMarkup",
+                {"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
+            )
+            telegram.unpin_message(str(chat_id), message_id)
+
+        return TelegramWebhookResponse(success=True, message="Already closed", conversation_id=handover.conversation_id)
+
     # Process action
     if action == "take":
         # Take using state_service
@@ -233,6 +289,43 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
 
         db.commit()
         return TelegramWebhookResponse(success=True, message="Resolved", conversation_id=handover.conversation_id)
+
+    elif action == "return":
+        # Return bot: close handover and set state back to bot_active (even if it was pending)
+        result = state_manager_resolve(db, conversation, handover, manager_id, manager_name)
+
+        if not result.ok:
+            telegram._make_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback.id, "text": f"❌ Ошибка: {result.error}", "show_alert": True},
+            )
+            return TelegramWebhookResponse(success=False, message=result.error)
+
+        handover.resolution_notes = "Returned to bot by manager"
+
+        # Remove buttons
+        if message_id:
+            telegram._make_request(
+                "editMessageReplyMarkup",
+                {"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
+            )
+
+        # Unpin
+        if message_id:
+            telegram.unpin_message(str(chat_id), message_id)
+
+        # Notify in topic
+        if topic_id:
+            telegram.send_message(
+                chat_id=str(chat_id),
+                text=f"🤖 Заявка закрыта, бот снова отвечает (by {manager_name})",
+                message_thread_id=topic_id,
+            )
+
+        telegram._make_request("answerCallbackQuery", {"callback_query_id": callback.id, "text": "✅ Возвращено боту"})
+
+        db.commit()
+        return TelegramWebhookResponse(success=True, message="Returned to bot", conversation_id=handover.conversation_id)
 
     elif action == "skip":
         # Skip: just notification, no recording needed

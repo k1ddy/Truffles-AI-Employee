@@ -12,18 +12,23 @@ class TestBuildHandoverButtons:
         buttons = build_handover_buttons(handover_id)
 
         assert "inline_keyboard" in buttons
-        assert len(buttons["inline_keyboard"]) == 1
-        assert len(buttons["inline_keyboard"][0]) == 2  # [Беру][Не могу]
+        assert len(buttons["inline_keyboard"]) == 2
+        assert len(buttons["inline_keyboard"][0]) == 2  # [Беру][Вернуть боту]
+        assert len(buttons["inline_keyboard"][1]) == 1  # [Не могу]
 
     def test_button_callbacks(self):
         handover_id = uuid4()
         buttons = build_handover_buttons(handover_id)
 
-        row = buttons["inline_keyboard"][0]
-        assert row[0]["text"] == "Беру ✋"
-        assert row[0]["callback_data"] == f"take_{handover_id}"
-        assert row[1]["text"] == "Не могу ❌"
-        assert row[1]["callback_data"] == f"skip_{handover_id}"
+        row1 = buttons["inline_keyboard"][0]
+        assert row1[0]["text"] == "Беру ✋"
+        assert row1[0]["callback_data"] == f"take_{handover_id}"
+        assert row1[1]["text"] == "Вернуть боту 🤖"
+        assert row1[1]["callback_data"] == f"return_{handover_id}"
+
+        row2 = buttons["inline_keyboard"][1]
+        assert row2[0]["text"] == "Не могу ❌"
+        assert row2[0]["callback_data"] == f"skip_{handover_id}"
 
 
 class TestFormatHandoverMessage:

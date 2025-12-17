@@ -14,10 +14,12 @@ def get_pending_reminders(db: Session) -> List[ReminderItem]:
     now = datetime.now(timezone.utc)
     reminders = []
 
-    # Get all pending handovers
-    pending_handovers = db.query(Handover).filter(Handover.status == "pending").all()
+    # Get all open handovers (pending + active)
+    open_handovers = db.query(Handover).filter(Handover.status.in_(["pending", "active"])).all()
 
-    for handover in pending_handovers:
+    for handover in open_handovers:
+        topic_id = handover.conversation.telegram_topic_id if handover.conversation else None
+
         # Get client settings for timeouts
         settings = db.query(ClientSettings).filter(ClientSettings.client_id == handover.client_id).first()
 
@@ -53,7 +55,7 @@ def get_pending_reminders(db: Session) -> List[ReminderItem]:
                     telegram_chat_id=telegram_chat_id,
                     telegram_message_id=handover.telegram_message_id,
                     telegram_bot_token=telegram_bot_token,
-                    channel_ref=handover.channel_ref,
+                    channel_ref=str(topic_id) if topic_id else None,
                     context_summary=handover.context_summary,
                 )
             )
@@ -75,7 +77,7 @@ def get_pending_reminders(db: Session) -> List[ReminderItem]:
                     telegram_chat_id=telegram_chat_id,
                     telegram_message_id=handover.telegram_message_id,
                     telegram_bot_token=telegram_bot_token,
-                    channel_ref=handover.channel_ref,
+                    channel_ref=str(topic_id) if topic_id else None,
                     context_summary=handover.context_summary,
                     owner_telegram_id=owner_telegram_id if enable_owner_escalation else None,
                 )
@@ -122,29 +124,39 @@ def process_reminders(db: Session) -> dict:
 
         # Build message
         if reminder.reminder_type == "reminder_1":
-            text = f"⏰ <b>Напоминание:</b> заявка ждёт {reminder.minutes_waiting} мин"
+            text = f"⏰ <b>Напоминание:</b> заявка открыта {reminder.minutes_waiting} мин"
         else:
             owner_tag = f"\n\n{reminder.owner_telegram_id}" if reminder.owner_telegram_id else ""
-            text = f"🔴 <b>Срочно!</b> Заявка ждёт {reminder.minutes_waiting} мин{owner_tag}"
+            text = f"🔴 <b>Срочно!</b> Заявка открыта {reminder.minutes_waiting} мин{owner_tag}"
 
         # Send to topic
-        message_id = telegram.send_message(
+        result = telegram.send_message(
             chat_id=reminder.telegram_chat_id,
             text=text,
             message_thread_id=topic_id,
             reply_to_message_id=reminder.telegram_message_id,
         )
 
-        if message_id:
+        if result.get("ok"):
+            message_id = result["result"]["message_id"]
             mark_reminder_sent(db, reminder.handover_id, reminder.reminder_type)
             results["sent"] += 1
             results["details"].append(
-                {"handover_id": str(reminder.handover_id), "reminder_type": reminder.reminder_type, "success": True}
+                {
+                    "handover_id": str(reminder.handover_id),
+                    "reminder_type": reminder.reminder_type,
+                    "success": True,
+                    "telegram_message_id": message_id,
+                }
             )
         else:
             results["failed"] += 1
             results["details"].append(
-                {"handover_id": str(reminder.handover_id), "error": "Failed to send telegram message"}
+                {
+                    "handover_id": str(reminder.handover_id),
+                    "error": "Failed to send telegram message",
+                    "telegram_result": result,
+                }
             )
 
     return results

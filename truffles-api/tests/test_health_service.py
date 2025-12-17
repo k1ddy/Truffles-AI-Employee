@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, Mock
 
 from app.services.health_service import check_and_heal_conversations, get_system_health
@@ -10,6 +11,7 @@ class TestCheckAndHealConversations:
         conversation.id = "conv-123"
         conversation.state = ConversationState.PENDING.value
         conversation.telegram_topic_id = None
+        conversation.retry_offered_at = datetime.now(timezone.utc)
 
         db = MagicMock()
         # Need 3 .all() calls: broken_no_topic, open_handovers (in loop), conversations_with_state
@@ -23,12 +25,14 @@ class TestCheckAndHealConversations:
 
         assert result["healed_count"] >= 1
         assert conversation.state == ConversationState.BOT_ACTIVE.value
+        assert conversation.retry_offered_at is None
 
     def test_heals_manager_active_without_handover(self):
         conversation = Mock()
         conversation.id = "conv-456"
         conversation.state = ConversationState.MANAGER_ACTIVE.value
         conversation.telegram_topic_id = 123
+        conversation.retry_offered_at = datetime.now(timezone.utc)
 
         db = MagicMock()
         db.query.return_value.filter.return_value.all.side_effect = [
@@ -41,6 +45,7 @@ class TestCheckAndHealConversations:
 
         assert result["healed_count"] == 1
         assert conversation.state == ConversationState.BOT_ACTIVE.value
+        assert conversation.retry_offered_at is None
 
     def test_no_healing_needed(self):
         db = MagicMock()

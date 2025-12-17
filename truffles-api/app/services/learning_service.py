@@ -17,6 +17,8 @@ from app.services.knowledge_service import (
 
 logger = get_logger("learning_service")
 
+MAX_KNOWLEDGE_TEXT_LENGTH = 2000
+
 
 def is_owner_response(db: Session, client_id: UUID, manager_telegram_id: int) -> bool:
     """
@@ -43,6 +45,15 @@ def get_client_slug(db: Session, client_id: UUID) -> Optional[str]:
     return client.name if client else None
 
 
+def _trim_text(text: str) -> str:
+    """Trim long text to keep Qdrant payloads bounded."""
+    if text is None:
+        return ""
+    if len(text) <= MAX_KNOWLEDGE_TEXT_LENGTH:
+        return text
+    return text[:MAX_KNOWLEDGE_TEXT_LENGTH]
+
+
 def add_to_knowledge(
     db: Session,
     handover: Handover,
@@ -63,7 +74,11 @@ def add_to_knowledge(
         return None
 
     # Format content for indexing
-    content = f"Вопрос: {handover.user_message}\nОтвет: {handover.manager_response}"
+    question = _trim_text(handover.user_message.strip())
+    answer = _trim_text(handover.manager_response.strip())
+    content = f"Вопрос: {question}\nОтвет: {answer}"
+    if len(handover.user_message.strip()) > len(question) or len(handover.manager_response.strip()) > len(answer):
+        logger.info("Truncated knowledge sample to fit length limits")
 
     try:
         # Get embedding
@@ -88,8 +103,8 @@ def add_to_knowledge(
                                     "client_slug": client_slug,
                                     "source": source,
                                     "handover_id": str(handover.id),
-                                    "question": handover.user_message,
-                                    "answer": handover.manager_response,
+                                    "question": question,
+                                    "answer": answer,
                                     "learned_from": handover.assigned_to_name or "manager",
                                 },
                             },
