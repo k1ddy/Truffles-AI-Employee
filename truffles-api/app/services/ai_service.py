@@ -55,6 +55,49 @@ ACKNOWLEDGEMENT_PHRASES = {
 
 WHITELISTED_PHRASES = GREETING_PHRASES | THANKS_PHRASES | ACKNOWLEDGEMENT_PHRASES
 
+CONFIRMATION_PHRASES = {
+    "да",
+    "нет",
+    "ага",
+    "угу",
+    "неа",
+    "не",
+}
+
+YES_NO_QUESTION_HINTS = {
+    "имеете в виду",
+    "правильно понимаю",
+    "верно",
+    "если да",
+    "если нет",
+    "есть ли",
+    "можно ли",
+    "нужно ли",
+    "подтвердите",
+    "да или нет",
+}
+
+OPEN_QUESTION_HINTS = {
+    "что",
+    "какой",
+    "какая",
+    "какие",
+    "сколько",
+    "когда",
+    "где",
+    "почему",
+    "как",
+    "уточните",
+    "напишите",
+    "выберите",
+    "назовите",
+    "укажите",
+    "адрес",
+    "дата",
+    "время",
+    "имя",
+}
+
 ACKNOWLEDGEMENT_RESPONSE = "Ок. Если появится вопрос — напишите, я помогу."
 LOW_SIGNAL_RESPONSE = "Понял. Можете уточнить, что именно вас интересует?"
 GREETING_RESPONSE = "Здравствуйте! Чем могу помочь?"
@@ -163,6 +206,40 @@ def is_whitelisted_message(text: str) -> bool:
     return normalized in WHITELISTED_PHRASES
 
 
+def _get_last_assistant_message(history: List[dict]) -> str:
+    for msg in reversed(history):
+        if msg.get("role") == "assistant":
+            return msg.get("content", "")
+    return ""
+
+
+def _is_short_confirmation(text: str) -> bool:
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return False
+    return normalized in CONFIRMATION_PHRASES
+
+
+def _assistant_expects_details(text: str) -> bool:
+    if not text:
+        return False
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return False
+    return any(hint in normalized for hint in OPEN_QUESTION_HINTS)
+
+
+def _assistant_expects_yes_no(text: str) -> bool:
+    if not text:
+        return False
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return False
+    if any(hint in normalized for hint in YES_NO_QUESTION_HINTS):
+        return True
+    return text.strip().endswith("?") and not _assistant_expects_details(text)
+
+
 def _is_context_dependent_message(text: str) -> bool:
     """
     Detect short follow-up replies that often require previous context.
@@ -242,8 +319,15 @@ def generate_ai_response(
     if is_acknowledgement_message(user_message):
         return Result.success((ACKNOWLEDGEMENT_RESPONSE, "medium"))
 
+    followup_confirmation = False
+    history: List[dict] | None = None
     if is_low_signal_message(user_message):
-        return Result.success((LOW_SIGNAL_RESPONSE, "medium"))
+        history = get_conversation_history(db, conversation_id, limit=10)
+        last_assistant = _get_last_assistant_message(history)
+        if last_assistant and _is_short_confirmation(user_message) and _assistant_expects_yes_no(last_assistant):
+            followup_confirmation = True
+        else:
+            return Result.success((LOW_SIGNAL_RESPONSE, "medium"))
 
     logger.info(f"generate_ai_response: client_id={client_id}, client_slug={client_slug}")
 
@@ -267,8 +351,8 @@ def generate_ai_response(
 
         # 2.1 If query is a short follow-up and knowledge is weak, retry RAG with recent context.
         if not whitelisted and (not knowledge_results or max_score < MID_CONFIDENCE_THRESHOLD):
-            if _is_context_dependent_message(user_message):
-                history_for_query = get_conversation_history(db, conversation_id, limit=10)
+            if followup_confirmation or _is_context_dependent_message(user_message):
+                history_for_query = history or get_conversation_history(db, conversation_id, limit=10)
                 contextual_query = _build_contextual_search_query(history_for_query, user_message)
 
                 if contextual_query and contextual_query != user_message:
@@ -315,7 +399,7 @@ def generate_ai_response(
         messages.append({"role": "system", "content": full_system})
 
         # 5. Add conversation history (last 10 messages for context)
-        history = get_conversation_history(db, conversation_id, limit=10)
+        history = history or get_conversation_history(db, conversation_id, limit=10)
         messages.extend(history)
 
         # 6. Add current user message (if not already in history)
