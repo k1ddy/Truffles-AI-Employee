@@ -4,6 +4,7 @@ from uuid import uuid4
 from app.services.ai_service import (
     KNOWLEDGE_CONFIDENCE_THRESHOLD,
     ACKNOWLEDGEMENT_RESPONSE,
+    GREETING_RESPONSE,
     LOW_SIGNAL_RESPONSE,
     generate_ai_response,
     get_conversation_history,
@@ -223,20 +224,15 @@ class TestLowConfidenceEscalation:
         assert result.ok is True
         assert result.value[1] == "low_confidence"
 
-    @patch("app.services.ai_service.get_llm_provider")
     @patch("app.services.ai_service.search_knowledge")
     @patch("app.services.ai_service.get_system_prompt")
     @patch("app.services.ai_service.get_conversation_history")
-    def test_whitelisted_message_avoids_escalation(self, mock_history, mock_prompt, mock_search, mock_llm):
+    def test_whitelisted_message_avoids_escalation(self, mock_history, mock_prompt, mock_search):
         """Greeting/thanks should respond even when knowledge is low."""
         mock_db = Mock()
         mock_prompt.return_value = "You are a helpful assistant"
         mock_history.return_value = []
         mock_search.return_value = []  # No knowledge
-
-        mock_response = Mock()
-        mock_response.content = "Hello!"
-        mock_llm.return_value.generate.return_value = mock_response
 
         result = generate_ai_response(
             db=mock_db,
@@ -248,7 +244,7 @@ class TestLowConfidenceEscalation:
 
         assert result.ok is True
         assert result.value[1] == "medium"
-        assert result.value[0] == "Hello!"
+        assert result.value[0] == GREETING_RESPONSE
 
 
 class TestAckAndLowSignal:

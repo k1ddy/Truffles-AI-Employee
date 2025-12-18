@@ -322,10 +322,13 @@ def generate_ai_response(
     followup_confirmation = False
     history: List[dict] | None = None
     if is_low_signal_message(user_message):
-        history = get_conversation_history(db, conversation_id, limit=10)
-        last_assistant = _get_last_assistant_message(history)
-        if last_assistant and _is_short_confirmation(user_message) and _assistant_expects_yes_no(last_assistant):
-            followup_confirmation = True
+        if _is_short_confirmation(user_message):
+            history = get_conversation_history(db, conversation_id, limit=10)
+            last_assistant = _get_last_assistant_message(history)
+            if last_assistant and _assistant_expects_yes_no(last_assistant):
+                followup_confirmation = True
+            else:
+                return Result.success((LOW_SIGNAL_RESPONSE, "medium"))
         else:
             return Result.success((LOW_SIGNAL_RESPONSE, "medium"))
 

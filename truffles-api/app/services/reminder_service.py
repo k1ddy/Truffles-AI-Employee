@@ -1,13 +1,145 @@
+import os
 from datetime import datetime, timezone
 from typing import List
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.models import ClientSettings, Handover
+from app.logging_config import get_logger
+from app.models import ClientSettings, Conversation, Handover, Message
+from app.services.alert_service import alert_warning
+from app.services.state_machine import ConversationState
 from app.schemas.reminder import ReminderItem
 from app.services.telegram_service import TelegramService
 
+logger = get_logger("reminder_service")
+
+
+def _get_no_response_threshold_minutes() -> int:
+    try:
+        return int(float(os.environ.get("NO_RESPONSE_ALERT_MINUTES", "3")))
+    except ValueError:
+        return 3
+
+
+def _ensure_timezone(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _get_last_message(db: Session, conversation_id, role: str) -> Message | None:
+    return (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id, Message.role == role)
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+
+
+def auto_close_stale_handovers(db: Session) -> dict:
+    """Auto-close stale handovers based on client_settings.auto_close_timeout."""
+    now = datetime.now(timezone.utc)
+    closed = []
+
+    open_handovers = db.query(Handover).filter(Handover.status.in_(["pending", "active"])).all()
+
+    for handover in open_handovers:
+        settings = db.query(ClientSettings).filter(ClientSettings.client_id == handover.client_id).first()
+        timeout_minutes = settings.auto_close_timeout if settings and settings.auto_close_timeout else 0
+        if timeout_minutes <= 0:
+            continue
+
+        created_at = _ensure_timezone(handover.created_at)
+        minutes_waiting = int((now - created_at).total_seconds() / 60)
+        if minutes_waiting < timeout_minutes:
+            continue
+
+        handover.status = "resolved"
+        handover.resolved_at = now
+        handover.resolved_by_id = "system"
+        handover.resolved_by_name = "system"
+        handover.resolution_notes = f"Auto-closed after {minutes_waiting} min"
+        if handover.created_at:
+            handover.resolution_time_seconds = int((now - created_at).total_seconds())
+
+        conversation = handover.conversation
+        if conversation:
+            conversation.state = ConversationState.BOT_ACTIVE.value
+            conversation.bot_muted_until = None
+            conversation.no_count = 0
+            conversation.retry_offered_at = None
+            conversation.context = {}
+
+        closed.append(
+            {
+                "handover_id": str(handover.id),
+                "conversation_id": str(handover.conversation_id),
+                "minutes_waiting": minutes_waiting,
+            }
+        )
+
+    if closed:
+        logger.warning(f"Auto-closed handovers: {len(closed)}")
+
+    return {"closed": len(closed), "items": closed}
+
+
+def check_no_response_alerts(db: Session) -> dict:
+    """Alert if user message waits too long without bot response in bot_active."""
+    now = datetime.now(timezone.utc)
+    threshold_minutes = _get_no_response_threshold_minutes()
+    alerted = []
+
+    conversations = db.query(Conversation).filter(Conversation.state == ConversationState.BOT_ACTIVE.value).all()
+
+    for conversation in conversations:
+        if conversation.bot_status == "muted" or (
+            conversation.bot_muted_until and conversation.bot_muted_until > now
+        ):
+            continue
+
+        last_user = _get_last_message(db, conversation.id, "user")
+        if not last_user:
+            continue
+
+        last_assistant = _get_last_message(db, conversation.id, "assistant")
+        last_user_at = _ensure_timezone(last_user.created_at)
+        if last_assistant and _ensure_timezone(last_assistant.created_at) >= last_user_at:
+            continue
+
+        minutes_waiting = int((now - last_user_at).total_seconds() / 60)
+        if minutes_waiting < threshold_minutes:
+            continue
+
+        context = conversation.context if isinstance(conversation.context, dict) else {}
+        alerts = context.get("alerts") if isinstance(context.get("alerts"), dict) else {}
+        if alerts.get("no_response_for") == str(last_user.id):
+            continue
+
+        alerts["no_response_for"] = str(last_user.id)
+        alerts["no_response_at"] = now.isoformat()
+        context["alerts"] = alerts
+        conversation.context = context
+
+        alert_warning(
+            "No bot response for user message",
+            {
+                "conversation_id": str(conversation.id),
+                "client_id": str(conversation.client_id),
+                "minutes_waiting": minutes_waiting,
+                "message": (last_user.content or "")[:200],
+            },
+        )
+
+        alerted.append(
+            {
+                "conversation_id": str(conversation.id),
+                "minutes_waiting": minutes_waiting,
+            }
+        )
+
+    return {"alerted": len(alerted), "items": alerted}
 
 def get_pending_reminders(db: Session) -> List[ReminderItem]:
     """Get list of handovers that need reminders."""
@@ -159,4 +291,6 @@ def process_reminders(db: Session) -> dict:
                 }
             )
 
+    results["auto_close"] = auto_close_stale_handovers(db)
+    results["no_response_alerts"] = check_no_response_alerts(db)
     return results

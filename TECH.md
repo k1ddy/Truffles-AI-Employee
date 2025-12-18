@@ -80,6 +80,9 @@ docker exec truffles_postgres_1 psql -U n8n -d chatbot -c 'SELECT ...'
 - `GET /health` — проверка здоровья
 - `POST /reminders/process` — обработка напоминаний
 
+### Переменные окружения (API)
+- `NO_RESPONSE_ALERT_MINUTES` — порог минут для алерта “вход есть — ответа нет” (default: 3).
+
 ---
 
 ## Telegram
