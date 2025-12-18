@@ -121,6 +121,7 @@ def manager_resolve(
         conversation.bot_muted_until = None
         conversation.no_count = 0
         conversation.retry_offered_at = None
+        conversation.context = {}
 
         handover.status = "resolved"
         handover.resolved_at = now

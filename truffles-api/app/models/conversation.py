@@ -1,7 +1,7 @@
 import uuid
 
 from sqlalchemy import BigInteger, Column, ForeignKey, Integer, Text
-from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -26,6 +26,7 @@ class Conversation(Base):
     retry_offered_at = Column(TIMESTAMP(timezone=True))
     telegram_topic_id = Column(BigInteger)
     state = Column(Text, default="bot_active")  # bot_active, pending, manager_active
+    context = Column(JSONB, nullable=False, default=dict)
 
     user = relationship("User", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation")

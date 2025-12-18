@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -221,6 +222,11 @@ MSG_PENDING_LOW_CONFIDENCE = (
 MSG_PENDING_STATUS = "Да, я передал. Сейчас менеджер ещё не взял заявку. Как только возьмёт — ответит здесь. Пока ждём, могу помочь: уточните, что нужно?"
 MSG_AI_ERROR = "Извините, произошла ошибка. Попробуйте позже."
 
+MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
+MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
+MSG_BOOKING_ASK_NAME = "Как вас зовут?"
+MSG_BOOKING_CANCELLED = "Хорошо, если передумаете — пишите."
+
 
 def is_handover_status_question(text: str) -> bool:
     """Detect 'did you forward / when manager replies' questions in pending state."""
@@ -252,6 +258,190 @@ def is_handover_status_question(text: str) -> bool:
         "беру",
     ]
     return any(k in normalized for k in keywords)
+
+
+BOOKING_REQUEST_KEYWORDS = [
+    "запис",
+    "запись",
+    "запишите",
+    "записаться",
+    "бронь",
+    "окошк",
+    "свободн",
+]
+
+BOOKING_CANCEL_KEYWORDS = [
+    "не надо запис",
+    "не хочу запис",
+    "передумал",
+    "передумала",
+    "не буду запис",
+    "отмена записи",
+]
+
+SERVICE_KEYWORDS = [
+    "маникюр",
+    "педикюр",
+    "стриж",
+    "окраш",
+    "мелирован",
+    "кератин",
+    "ботокс",
+    "бров",
+    "ресниц",
+    "депиляц",
+    "шугар",
+    "воск",
+    "чистк",
+    "пилинг",
+    "макияж",
+    "укладк",
+    "прическ",
+    "наращив",
+    "лак",
+]
+
+DATE_KEYWORDS = [
+    "сегодня",
+    "завтра",
+    "послезавтра",
+    "понедель",
+    "вторник",
+    "сред",
+    "четверг",
+    "пятниц",
+    "суббот",
+    "воскрес",
+    "утром",
+    "днем",
+    "днём",
+    "вечером",
+]
+
+TIME_PATTERN = re.compile(r"\b\d{1,2}[:.]\d{2}\b")
+NAME_PATTERN = re.compile(r"\bменя зовут\s+([a-zа-яё-]{2,})", re.IGNORECASE)
+
+
+def _normalize_text(text: str) -> str:
+    if not text:
+        return ""
+    normalized = text.strip().casefold()
+    normalized = re.sub(r"[^\w\s]", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized
+
+
+def _contains_any(normalized: str, keywords: list[str]) -> bool:
+    return any(keyword in normalized for keyword in keywords)
+
+
+def _is_booking_request(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    return _contains_any(normalized, BOOKING_REQUEST_KEYWORDS)
+
+
+def _is_booking_cancel(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    return _contains_any(normalized, BOOKING_CANCEL_KEYWORDS)
+
+
+def _extract_service(text: str) -> str | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    if _contains_any(normalized, SERVICE_KEYWORDS):
+        return text.strip()
+    return None
+
+
+def _extract_datetime(text: str) -> str | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    if _contains_any(normalized, DATE_KEYWORDS) or TIME_PATTERN.search(text):
+        return text.strip()
+    return None
+
+
+def _get_conversation_context(conversation: Conversation) -> dict:
+    context = conversation.context or {}
+    if isinstance(context, dict):
+        return dict(context)
+    return {}
+
+
+def _set_conversation_context(conversation: Conversation, context: dict) -> None:
+    conversation.context = context
+
+
+def _get_booking_context(context: dict) -> dict:
+    booking = context.get("booking") if isinstance(context, dict) else None
+    if isinstance(booking, dict):
+        return dict(booking)
+    return {}
+
+
+def _set_booking_context(context: dict, booking: dict) -> dict:
+    context = dict(context)
+    context["booking"] = booking
+    return context
+
+
+def _update_booking_from_message(booking: dict, message_text: str) -> dict:
+    booking = dict(booking)
+    last_question = booking.get("last_question")
+
+    if last_question == "service" and not booking.get("service"):
+        if not is_low_signal_message(message_text):
+            booking["service"] = message_text.strip()
+    if last_question == "datetime" and not booking.get("datetime"):
+        if not is_low_signal_message(message_text):
+            booking["datetime"] = message_text.strip()
+    if last_question == "name" and not booking.get("name"):
+        booking["name"] = message_text.strip()
+
+    if not booking.get("name"):
+        name_match = NAME_PATTERN.search(message_text)
+        if name_match:
+            booking["name"] = name_match.group(1).strip()
+
+    if not booking.get("service"):
+        detected_service = _extract_service(message_text)
+        if detected_service:
+            booking["service"] = detected_service
+
+    if not booking.get("datetime"):
+        detected_datetime = _extract_datetime(message_text)
+        if detected_datetime:
+            booking["datetime"] = detected_datetime
+
+    return booking
+
+
+def _next_booking_prompt(booking: dict) -> tuple[dict, str | None]:
+    booking = dict(booking)
+    if not booking.get("service"):
+        booking["last_question"] = "service"
+        return booking, MSG_BOOKING_ASK_SERVICE
+    if not booking.get("datetime"):
+        booking["last_question"] = "datetime"
+        return booking, MSG_BOOKING_ASK_DATETIME
+    if not booking.get("name"):
+        booking["last_question"] = "name"
+        return booking, MSG_BOOKING_ASK_NAME
+    booking["last_question"] = None
+    return booking, None
+
+
+def _build_booking_summary(booking: dict) -> str:
+    service = booking.get("service") or "не указано"
+    datetime_pref = booking.get("datetime") or "не указано"
+    name = booking.get("name") or "не указано"
+    return f"Запись: услуга={service}; дата/время={datetime_pref}; имя={name}."
 
 
 def find_active_conversation_by_channel_ref(db: Session, client_id, remote_jid: str) -> Conversation | None:
@@ -388,6 +578,7 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
             conversation.bot_status = "active"
             conversation.bot_muted_until = None
             conversation.no_count = 0
+            conversation.context = {}
             logger.info(f"Session reset: {time_since_last} since last message")
 
     # 6. Check if bot is muted - but still forward to topic
@@ -489,6 +680,81 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
                 else "Bot muted (after debounce)",
                 conversation_id=conversation.id,
                 bot_response=None,
+            )
+
+    # 9.05 Booking flow: collect slots before intent/LLM.
+    if conversation.state == ConversationState.BOT_ACTIVE.value:
+        context = _get_conversation_context(conversation)
+        booking = _get_booking_context(context)
+        booking_active = bool(booking.get("active"))
+
+        if booking_active and _is_booking_cancel(message_text):
+            booking = {"active": False}
+            context = _set_booking_context(context, booking)
+            _set_conversation_context(conversation, context)
+            bot_response = MSG_BOOKING_CANCELLED
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = send_bot_response(db, client.id, remote_jid, bot_response)
+            result_message = "Booking cancelled" if sent else "Booking cancel response failed"
+            db.commit()
+            return WebhookResponse(
+                success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
+            )
+
+        if booking_active or _is_booking_request(message_text):
+            if not booking_active:
+                booking = dict(booking)
+                booking["active"] = True
+                booking["started_at"] = now.isoformat()
+
+            booking = _update_booking_from_message(booking, message_text)
+            booking, prompt = _next_booking_prompt(booking)
+            context = _set_booking_context(context, booking)
+            _set_conversation_context(conversation, context)
+
+            if prompt:
+                bot_response = prompt
+                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                sent = send_bot_response(db, client.id, remote_jid, bot_response)
+                result_message = "Booking slot requested" if sent else "Booking slot response failed"
+                db.commit()
+                return WebhookResponse(
+                    success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
+                )
+
+            booking_summary = _build_booking_summary(booking)
+            result = escalate_to_pending(
+                db=db,
+                conversation=conversation,
+                user_message=booking_summary,
+                trigger_type="intent",
+                trigger_value="booking",
+            )
+
+            if result.ok:
+                handover = result.value
+                telegram_sent = send_telegram_notification(
+                    db=db,
+                    handover=handover,
+                    conversation=conversation,
+                    user=user,
+                    message=booking_summary,
+                )
+                bot_response = MSG_ESCALATED
+                result_message = f"Booking escalation, telegram={'sent' if telegram_sent else 'failed'}"
+            else:
+                bot_response = MSG_AI_ERROR
+                result_message = f"Booking escalation failed: {result.error}"
+
+            context = _set_booking_context(context, {"active": False})
+            _set_conversation_context(conversation, context)
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = send_bot_response(db, client.id, remote_jid, bot_response)
+            if not sent:
+                result_message = f"{result_message}; response_send=failed"
+            db.commit()
+            return WebhookResponse(
+                success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
             )
 
     # 10. Classify intent (expensive). Protect against accidental escalations on short/noisy messages.

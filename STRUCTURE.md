@@ -138,6 +138,9 @@ truffles-api/
 | `templates/` | Шаблоны (промпты, FAQ) |
 | `LESSONS_LEARNED.md` | Уроки из отладки |
 
+Миграции:
+- `ops/migrations/009_add_conversation_context.sql` — JSONB `conversations.context` для диалогового контекста/слотов.
+
 **Старые скрипты:** `.archive/ops_old/` — не в git.
 
 ---

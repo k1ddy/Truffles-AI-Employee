@@ -34,7 +34,8 @@ SET
   bot_status = 'active',
   bot_muted_until = NULL,
   no_count = 0,
-  retry_offered_at = NULL
+  retry_offered_at = NULL,
+  context = '{}'::jsonb
 WHERE state IN ('pending', 'manager_active');
 
 COMMIT;
