@@ -210,6 +210,7 @@ def generate_ai_response(
     client_slug: str,
     conversation_id: UUID,
     user_message: str,
+    append_user_message: bool = True,
 ) -> Result[Tuple[Optional[str], str]]:
     """
     Generate AI response using LLM with knowledge base.
@@ -299,8 +300,9 @@ def generate_ai_response(
         messages.extend(history)
 
         # 6. Add current user message (if not already in history)
-        if not history or history[-1].get("content") != user_message:
-            messages.append({"role": "user", "content": user_message})
+        if append_user_message or not history:
+            if not history or history[-1].get("content") != user_message:
+                messages.append({"role": "user", "content": user_message})
 
         # 7. Generate response
         llm = get_llm_provider()

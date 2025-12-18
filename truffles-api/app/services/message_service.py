@@ -36,6 +36,7 @@ def generate_bot_response(
     conversation: Conversation,
     user_message: str,
     client_slug: str = "truffles",
+    append_user_message: bool = True,
 ) -> Result[Tuple[Optional[str], str]]:
     """
     Generate bot response using AI.
@@ -58,4 +59,5 @@ def generate_bot_response(
         client_slug=client_slug,
         conversation_id=conversation.id,
         user_message=user_message,
+        append_user_message=append_user_message,
     )

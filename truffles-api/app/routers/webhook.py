@@ -423,6 +423,7 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
         )
 
     # 9.0 Debounce bursty inputs: only the latest message triggers bot logic.
+    append_user_message = True
     if conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value]:
         # Persist user message + last_message_at before waiting.
         db.commit()
@@ -463,6 +464,7 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
             )
             if buffered_messages:
                 message_text = " ".join(buffered_messages)
+                append_user_message = False
 
         # Re-check state after waiting: manager could take the request during debounce pause.
         db.refresh(conversation)
@@ -545,7 +547,13 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
         else:
             logger.error(f"Escalation failed: {result.error}")
             # Fallback: respond normally
-            gen_result = generate_bot_response(db, conversation, message_text, request.client_slug)
+            gen_result = generate_bot_response(
+                db,
+                conversation,
+                message_text,
+                request.client_slug,
+                append_user_message=append_user_message,
+            )
             if gen_result.ok and gen_result.value[0]:
                 bot_response = gen_result.value[0]
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
@@ -581,7 +589,13 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
 
     elif conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value]:
         # Bot responds: normal mode OR pending (bot helps while waiting)
-        gen_result = generate_bot_response(db, conversation, message_text, request.client_slug)
+        gen_result = generate_bot_response(
+            db,
+            conversation,
+            message_text,
+            request.client_slug,
+            append_user_message=append_user_message,
+        )
 
         if not gen_result.ok:
             # AI error — fallback response
