@@ -20,21 +20,23 @@ MID_CONFIDENCE_THRESHOLD = 0.5
 # Minimum RAG score to consider knowledge reliable (legacy name used in tests)
 KNOWLEDGE_CONFIDENCE_THRESHOLD = MID_CONFIDENCE_THRESHOLD
 
-# Whitelist to avoid needless escalations on common small-talk
-WHITELISTED_PHRASES = [
+# Common short-form greetings/thanks/acknowledgements.
+GREETING_PHRASES = {
     "привет",
     "здравствуйте",
     "добрый день",
     "добрый вечер",
+    "доброе утро",
     "салам",
     "салют",
+    "дд",
+}
+
+THANKS_PHRASES = {
     "спасибо",
     "благодарю",
-    "ок",
-    "окей",
-    "ok",
-    "okay",
-]
+    "спасибо большое",
+}
 
 ACKNOWLEDGEMENT_PHRASES = {
     "ок",
@@ -51,8 +53,12 @@ ACKNOWLEDGEMENT_PHRASES = {
     "норм",
 }
 
+WHITELISTED_PHRASES = GREETING_PHRASES | THANKS_PHRASES | ACKNOWLEDGEMENT_PHRASES
+
 ACKNOWLEDGEMENT_RESPONSE = "Ок. Если появится вопрос — напишите, я помогу."
 LOW_SIGNAL_RESPONSE = "Понял. Можете уточнить, что именно вас интересует?"
+GREETING_RESPONSE = "Здравствуйте! Чем могу помочь?"
+THANKS_RESPONSE = "Рад помочь. Если нужно что-то ещё — пишите."
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
@@ -131,10 +137,20 @@ def is_acknowledgement_message(text: str) -> bool:
     return normalize_for_matching(text) in ACKNOWLEDGEMENT_PHRASES
 
 
+def is_greeting_message(text: str) -> bool:
+    return normalize_for_matching(text) in GREETING_PHRASES
+
+
+def is_thanks_message(text: str) -> bool:
+    return normalize_for_matching(text) in THANKS_PHRASES
+
+
 def is_low_signal_message(text: str) -> bool:
     normalized = normalize_for_matching(text)
     if not normalized:
         return True
+    if is_greeting_message(text) or is_thanks_message(text):
+        return False
     return len(normalized) <= 2
 
 
@@ -144,10 +160,7 @@ def is_whitelisted_message(text: str) -> bool:
         return False
 
     normalized = normalize_for_matching(text)
-    return any(
-        normalized == phrase or normalized.startswith(f"{phrase} ")
-        for phrase in WHITELISTED_PHRASES
-    )
+    return normalized in WHITELISTED_PHRASES
 
 
 def _is_context_dependent_message(text: str) -> bool:
@@ -220,6 +233,12 @@ def generate_ai_response(
     - (response_text, "medium") — ответ с умеренной уверенностью
     - (None, "low_confidence") — нужна эскалация
     """
+    if is_greeting_message(user_message):
+        return Result.success((GREETING_RESPONSE, "medium"))
+
+    if is_thanks_message(user_message):
+        return Result.success((THANKS_RESPONSE, "medium"))
+
     if is_acknowledgement_message(user_message):
         return Result.success((ACKNOWLEDGEMENT_RESPONSE, "medium"))
 

@@ -16,7 +16,14 @@ from app.services.conversation_service import (
     get_or_create_user,
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
-from app.services.ai_service import is_acknowledgement_message, is_low_signal_message
+from app.services.ai_service import (
+    GREETING_RESPONSE,
+    THANKS_RESPONSE,
+    is_acknowledgement_message,
+    is_greeting_message,
+    is_low_signal_message,
+    is_thanks_message,
+)
 from app.services.intent_service import Intent, classify_intent, is_rejection, should_escalate
 from app.services.message_service import generate_bot_response, save_message
 from app.services.state_machine import ConversationState
@@ -213,8 +220,6 @@ MSG_PENDING_LOW_CONFIDENCE = (
 )
 MSG_PENDING_STATUS = "Да, я передал. Сейчас менеджер ещё не взял заявку. Как только возьмёт — ответит здесь. Пока ждём, могу помочь: уточните, что нужно?"
 MSG_AI_ERROR = "Извините, произошла ошибка. Попробуйте позже."
-GREETING_RESPONSE = "Здравствуйте! Чем могу помочь?"
-THANKS_RESPONSE = "Рад помочь. Если нужно что-то ещё — пишите."
 
 
 def is_handover_status_question(text: str) -> bool:
@@ -487,7 +492,13 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
             )
 
     # 10. Classify intent (expensive). Protect against accidental escalations on short/noisy messages.
-    if is_acknowledgement_message(message_text) or is_low_signal_message(message_text):
+    if is_greeting_message(message_text):
+        intent = Intent.GREETING
+        logger.info("Intent shortcut: greeting")
+    elif is_thanks_message(message_text):
+        intent = Intent.THANKS
+        logger.info("Intent shortcut: thanks")
+    elif is_acknowledgement_message(message_text) or is_low_signal_message(message_text):
         intent = Intent.OTHER
         logger.info("Intent shortcut: acknowledgement/low-signal -> other")
     else:
