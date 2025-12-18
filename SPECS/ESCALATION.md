@@ -541,7 +541,7 @@ client_id                   UUID PRIMARY KEY
 -- Telegram
 telegram_chat_id            TEXT
 telegram_bot_token          TEXT
-owner_telegram_id           TEXT  -- для тега в reminder_2
+owner_telegram_id           TEXT  -- для тега в reminder_2; допускает список через запятую/пробел (@username или numeric id)
 
 -- Таймауты
 reminder_timeout_1          INTEGER DEFAULT 30  -- минуты
@@ -671,7 +671,7 @@ MSG_MUTED_LONG = "Понял! Если ответа от менеджеров д
 | `mute_duration_second_hours` | 24 ч | client_settings |
 | `enable_reminders` | true | client_settings |
 | `enable_owner_escalation` | true | client_settings |
-| `owner_telegram_id` | — | client_settings |
+| `owner_telegram_id` | — | client_settings (может быть список через запятую/пробел) |
 
 ### План (не реализовано):
 

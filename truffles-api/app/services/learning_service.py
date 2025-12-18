@@ -1,3 +1,4 @@
+import re
 import uuid
 from typing import Optional
 from uuid import UUID
@@ -26,6 +27,20 @@ def _normalize_telegram_identifier(value: Optional[str]) -> Optional[str]:
     return value.strip().lstrip("@")
 
 
+def _split_owner_identifiers(raw_value: Optional[str]) -> list[str]:
+    if not raw_value:
+        return []
+    parts = re.split(r"[\s,]+", raw_value.strip())
+    normalized: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        token = _normalize_telegram_identifier(part)
+        if token:
+            normalized.append(token)
+    return normalized
+
+
 def is_owner_response(
     db: Session,
     client_id: UUID,
@@ -44,23 +59,37 @@ def is_owner_response(
     if not settings or not settings.owner_telegram_id:
         return False
 
-    owner_id = _normalize_telegram_identifier(settings.owner_telegram_id)
-    if not owner_id:
+    owner_ids = _split_owner_identifiers(settings.owner_telegram_id)
+    if not owner_ids:
         return False
 
     manager_id = str(manager_telegram_id) if manager_telegram_id else None
+    normalized_username = _normalize_telegram_identifier(manager_username) if manager_username else None
 
-    # Prefer numeric ID match when owner_telegram_id is a user id.
-    if owner_id.isdigit():
-        return manager_id == owner_id
+    for owner_id in owner_ids:
+        # Prefer numeric ID match when owner_telegram_id is a user id.
+        if owner_id.isdigit():
+            if manager_id and manager_id == owner_id:
+                return True
+            continue
 
-    # Fall back to username match (case-insensitive).
-    if manager_username:
-        normalized_username = _normalize_telegram_identifier(manager_username)
-        if normalized_username:
-            return normalized_username.lower() == owner_id.lower()
+        # Fall back to username match (case-insensitive).
+        if normalized_username and normalized_username.lower() == owner_id.lower():
+            return True
 
-    logger.debug("Owner username set but manager username missing or mismatched")
+    if not manager_id and not normalized_username:
+        logger.debug("Owner response check: missing manager id/username")
+    else:
+        logger.debug(
+            "Owner response mismatch",
+            extra={
+                "context": {
+                    "owner_ids": owner_ids,
+                    "manager_id": manager_id,
+                    "manager_username": normalized_username,
+                }
+            },
+        )
     return False
 
 

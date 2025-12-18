@@ -27,6 +27,26 @@ class TestIsOwnerResponse:
 
         assert result is True
 
+    def test_returns_true_when_owner_list_matches_id(self):
+        mock_db = Mock()
+        mock_settings = Mock()
+        mock_settings.owner_telegram_id = "123456789, @owner_user"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_settings
+
+        result = is_owner_response(mock_db, uuid.uuid4(), 123456789, manager_username="someone")
+
+        assert result is True
+
+    def test_returns_true_when_owner_list_matches_username(self):
+        mock_db = Mock()
+        mock_settings = Mock()
+        mock_settings.owner_telegram_id = "987654321 @owner_user"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_settings
+
+        result = is_owner_response(mock_db, uuid.uuid4(), 111111111, manager_username="OWNER_USER")
+
+        assert result is True
+
     def test_returns_false_when_manager_is_not_owner(self):
         mock_db = Mock()
         mock_settings = Mock()
