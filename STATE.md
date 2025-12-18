@@ -137,6 +137,23 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-18 — Автообучение owner + дедуп по messageId
+
+**Диагностика:**
+- Owner auto-learning мог не срабатывать при `owner_telegram_id` в формате username или при сообщениях без `from_user` (анонимный админ).
+
+**Что сделали:**
+- `is_owner_response` теперь матчится по id или username (case-insensitive) и принимает `manager_username`; добавлен warning, если `from_user` отсутствует.
+- Дедуп по `metadata.messageId`: Redis SETNX + fallback на БД (`messages.metadata.message_id`), сохраняем `message_id` в metadata входящих сообщений.
+- `get_system_prompt` ищет `system`, а при отсутствии — `system_prompt` (обратная совместимость).
+- Пересинхронизировали KB для `demo_salon` из `~/truffles/ops/demo_salon_docs` (22 chunks).
+- Добавлен буфер сообщений поверх debounce (склеивание нескольких сообщений в одно перед обработкой).
+- Обновлены шаблоны промптов: явное правило для вопросов вне темы бизнеса.
+- Промпт `demo_salon` обновлён: оффтоп (маркетинг/продвижение) → вернуть к теме салона.
+- Прод: `DEBOUNCE_INACTIVITY_SECONDS=2.0`.
+- KB `demo_salon` расширена под полный FAQ/запись/гигиена/услуги/конфликты (34 chunks).
+- Тест: `python -m pytest truffles-api/tests/test_learning_service.py -q` (16 passed).
+
 ### 2025-12-17 — Фикс “бот молчит” + защита заявок
 
 **Диагностика:**
@@ -445,4 +462,4 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 
 ---
 
-*Последнее обновление: 2025-12-17*
+*Последнее обновление: 2025-12-18*

@@ -77,6 +77,13 @@ def get_system_prompt(db: Session, client_id: UUID) -> Optional[str]:
         .first()
     )
 
+    if not prompt:
+        prompt = (
+            db.query(Prompt)
+            .filter(Prompt.client_id == client_id, Prompt.name == "system_prompt", Prompt.is_active == True)
+            .first()
+        )
+
     if prompt:
         logger.debug(f"Found prompt: {prompt.text[:100]}...")
     else:

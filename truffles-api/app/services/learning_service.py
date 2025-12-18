@@ -20,7 +20,18 @@ logger = get_logger("learning_service")
 MAX_KNOWLEDGE_TEXT_LENGTH = 2000
 
 
-def is_owner_response(db: Session, client_id: UUID, manager_telegram_id: int) -> bool:
+def _normalize_telegram_identifier(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    return value.strip().lstrip("@")
+
+
+def is_owner_response(
+    db: Session,
+    client_id: UUID,
+    manager_telegram_id: int,
+    manager_username: Optional[str] = None,
+) -> bool:
     """
     Check if manager is the owner of this client.
 
@@ -33,10 +44,24 @@ def is_owner_response(db: Session, client_id: UUID, manager_telegram_id: int) ->
     if not settings or not settings.owner_telegram_id:
         return False
 
-    owner_id = settings.owner_telegram_id.lstrip("@")
-    manager_id = str(manager_telegram_id)
+    owner_id = _normalize_telegram_identifier(settings.owner_telegram_id)
+    if not owner_id:
+        return False
 
-    return manager_id == owner_id
+    manager_id = str(manager_telegram_id) if manager_telegram_id else None
+
+    # Prefer numeric ID match when owner_telegram_id is a user id.
+    if owner_id.isdigit():
+        return manager_id == owner_id
+
+    # Fall back to username match (case-insensitive).
+    if manager_username:
+        normalized_username = _normalize_telegram_identifier(manager_username)
+        if normalized_username:
+            return normalized_username.lower() == owner_id.lower()
+
+    logger.debug("Owner username set but manager username missing or mismatched")
+    return False
 
 
 def get_client_slug(db: Session, client_id: UUID) -> Optional[str]:

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.logging_config import get_logger
-from app.models import Client, ClientSettings, Conversation, Handover
+from app.models import Client, ClientSettings, Conversation, Handover, Message
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.chatflow_service import send_bot_response
 from app.services.conversation_service import (
@@ -51,6 +51,19 @@ def _get_debounce_settings() -> tuple[bool, float, int, str, float]:
     redis_url = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
     socket_timeout_seconds = float(os.environ.get("DEBOUNCE_SOCKET_TIMEOUT_SECONDS", "0.3"))
     return enabled, inactivity_seconds, ttl_seconds, redis_url, socket_timeout_seconds
+
+
+def _get_message_buffer_settings() -> tuple[bool, int]:
+    enabled = _is_env_enabled(os.environ.get("DEBOUNCE_ENABLED"), default=True)
+    max_messages = int(float(os.environ.get("DEBOUNCE_MAX_BUFFER_MESSAGES", "8")))
+    return enabled, max_messages
+
+
+def _get_dedup_settings() -> tuple[int, str, float]:
+    ttl_seconds = int(float(os.environ.get("DEDUP_TTL_SECONDS", "86400")))
+    redis_url = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
+    socket_timeout_seconds = float(os.environ.get("DEDUP_SOCKET_TIMEOUT_SECONDS", "0.3"))
+    return ttl_seconds, redis_url, socket_timeout_seconds
 
 
 def _get_debounce_redis(redis_url: str, socket_timeout_seconds: float):
@@ -104,6 +117,82 @@ async def should_process_debounced_message(
     except Exception as e:
         logger.warning(f"Debounce unavailable, proceeding without it: {e}")
         return True
+
+
+async def _buffer_user_message(
+    *,
+    redis_client,
+    client_id: str,
+    remote_jid: str,
+    message_text: str,
+    ttl_seconds: int,
+    max_messages: int,
+) -> None:
+    if not redis_client:
+        return
+
+    key = f"truffles:buffer:{client_id}:{remote_jid}"
+    try:
+        await redis_client.rpush(key, message_text)
+        await redis_client.ltrim(key, -max_messages, -1)
+        await redis_client.expire(key, ttl_seconds)
+    except Exception as e:
+        logger.warning(f"Message buffer unavailable: {e}")
+
+
+async def _drain_buffered_messages(*, redis_client, client_id: str, remote_jid: str) -> list[str]:
+    if not redis_client:
+        return []
+
+    key = f"truffles:buffer:{client_id}:{remote_jid}"
+    try:
+        messages = await redis_client.lrange(key, 0, -1)
+        await redis_client.delete(key)
+    except Exception as e:
+        logger.warning(f"Message buffer drain failed: {e}")
+        return []
+
+    cleaned: list[str] = []
+    for msg in messages or []:
+        if not msg:
+            continue
+        text = msg.strip()
+        if text:
+            cleaned.append(text)
+    return cleaned
+
+
+async def is_duplicate_message_id(
+    *,
+    db: Session,
+    client_id,
+    message_id: str | None,
+    redis_client=None,
+) -> bool:
+    if not message_id:
+        return False
+
+    ttl_seconds, redis_url, socket_timeout_seconds = _get_dedup_settings()
+    key = f"truffles:dedup:{client_id}:{message_id}"
+
+    redis_client = redis_client or _get_debounce_redis(redis_url, socket_timeout_seconds)
+    if redis_client:
+        try:
+            was_set = await redis_client.set(key, "1", ex=ttl_seconds, nx=True)
+            if not was_set:
+                return True
+        except Exception as e:
+            logger.warning(f"Dedup redis unavailable, falling back to DB: {e}")
+
+    duplicate = (
+        db.query(Message)
+        .filter(
+            Message.client_id == client_id,
+            Message.message_metadata["message_id"].astext == message_id,
+        )
+        .first()
+    )
+    return duplicate is not None
 
 # Default values (can be overridden in client_settings)
 DEFAULT_MUTE_DURATION_FIRST_MINUTES = 30
@@ -247,6 +336,10 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
     if not message_text:
         return WebhookResponse(success=False, message="Empty message")
 
+    if await is_duplicate_message_id(db=db, client_id=client.id, message_id=message_id):
+        logger.info(f"Duplicate message_id skipped: {message_id}")
+        return WebhookResponse(success=True, message="Duplicate message_id", conversation_id=None, bot_response=None)
+
     # 1. Get or create user
     user = get_or_create_user(db, client.id, remote_jid)
 
@@ -255,8 +348,18 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
     if not conversation:
         conversation = get_or_create_conversation(db, client.id, user.id, "whatsapp")
 
-    # 3. Save user message
-    save_message(db, conversation.id, client.id, role="user", content=message_text)
+    # 3. Save user message (keep message_id for dedup)
+    message_metadata = metadata.model_dump(exclude_none=True) if metadata else {}
+    if message_id:
+        message_metadata["message_id"] = message_id
+    save_message(
+        db,
+        conversation.id,
+        client.id,
+        role="user",
+        content=message_text,
+        message_metadata=message_metadata,
+    )
 
     # 4. Update last_message_at (keep previous for session timeout check)
     now = datetime.now(timezone.utc)
@@ -323,10 +426,26 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
     if conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value]:
         # Persist user message + last_message_at before waiting.
         db.commit()
+
+        debounce_enabled, _, ttl_seconds, redis_url, socket_timeout_seconds = _get_debounce_settings()
+        buffer_enabled, max_buffer_messages = _get_message_buffer_settings()
+        redis_client = _get_debounce_redis(redis_url, socket_timeout_seconds)
+
+        if debounce_enabled and buffer_enabled and redis_client:
+            await _buffer_user_message(
+                redis_client=redis_client,
+                client_id=str(client.id),
+                remote_jid=remote_jid,
+                message_text=message_text,
+                ttl_seconds=ttl_seconds,
+                max_messages=max_buffer_messages,
+            )
+
         should_process = await should_process_debounced_message(
             client_id=str(client.id),
             remote_jid=remote_jid,
             message_id=message_id,
+            redis_client=redis_client,
         )
         if not should_process:
             return WebhookResponse(
@@ -335,6 +454,16 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
                 conversation_id=conversation.id,
                 bot_response=None,
             )
+
+        if debounce_enabled and buffer_enabled and redis_client:
+            buffered_messages = await _drain_buffered_messages(
+                redis_client=redis_client,
+                client_id=str(client.id),
+                remote_jid=remote_jid,
+            )
+            if buffered_messages:
+                message_text = " ".join(buffered_messages)
+
         # Re-check state after waiting: manager could take the request during debounce pause.
         db.refresh(conversation)
         now = datetime.now(timezone.utc)

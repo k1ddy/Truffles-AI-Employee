@@ -106,6 +106,7 @@ def process_manager_message(
     message_text: str,
     manager_telegram_id: int,
     manager_name: str,
+    manager_username: Optional[str] = None,
     message_thread_id: Optional[int] = None,
 ) -> Tuple[bool, str, bool, Optional[Handover]]:
     """
@@ -148,7 +149,7 @@ def process_manager_message(
     handover.manager_response = message_text
 
     # Auto-learn from owner responses
-    if is_owner_response(db, handover.client_id, manager_telegram_id):
+    if is_owner_response(db, handover.client_id, manager_telegram_id, manager_username):
         logger.info("Owner response detected, auto-adding to knowledge base")
         point_id = add_to_knowledge(db, handover, source="owner")
         if point_id:

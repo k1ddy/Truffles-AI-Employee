@@ -100,11 +100,15 @@ async def handle_manager_message(update: TelegramUpdate, db: Session) -> Telegra
 
     manager_name = "Unknown"
     manager_id = 0
+    manager_username = None
     if message.from_user:
         manager_id = message.from_user.id
         manager_name = message.from_user.first_name
         if message.from_user.last_name:
             manager_name += f" {message.from_user.last_name}"
+        manager_username = message.from_user.username
+    else:
+        logger.warning("Manager message missing from_user; auto-learning disabled for this message")
 
     success, result_message, took_handover, handover = process_manager_message(
         db=db,
@@ -112,6 +116,7 @@ async def handle_manager_message(update: TelegramUpdate, db: Session) -> Telegra
         message_text=message.text,
         manager_telegram_id=manager_id,
         manager_name=manager_name,
+        manager_username=manager_username,
         message_thread_id=message_thread_id,
     )
 

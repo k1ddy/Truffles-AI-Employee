@@ -9,13 +9,21 @@ from app.services.result import Result
 from app.services.state_machine import ConversationState
 
 
-def save_message(db: Session, conversation_id: UUID, client_id: UUID, role: str, content: str) -> Message:
+def save_message(
+    db: Session,
+    conversation_id: UUID,
+    client_id: UUID,
+    role: str,
+    content: str,
+    message_metadata: Optional[dict] = None,
+) -> Message:
     """Save message to database."""
     message = Message(
         conversation_id=conversation_id,
         client_id=client_id,
         role=role,
         content=content,
+        message_metadata=message_metadata or {},
         created_at=datetime.now(timezone.utc),
     )
     db.add(message)
