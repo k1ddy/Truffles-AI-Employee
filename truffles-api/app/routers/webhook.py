@@ -645,6 +645,10 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
             redis_client=redis_client,
         )
         if not should_process:
+            logger.info(
+                "Debounced intermediate message",
+                extra={"context": {"remote_jid": remote_jid, "message_id": message_id}},
+            )
             return WebhookResponse(
                 success=True,
                 message="Debounced: skipped intermediate message",
@@ -659,6 +663,16 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
                 remote_jid=remote_jid,
             )
             if buffered_messages:
+                logger.info(
+                    "Debounce buffer drained",
+                    extra={
+                        "context": {
+                            "remote_jid": remote_jid,
+                            "message_id": message_id,
+                            "buffered_count": len(buffered_messages),
+                        }
+                    },
+                )
                 message_text = " ".join(buffered_messages)
                 append_user_message = False
 

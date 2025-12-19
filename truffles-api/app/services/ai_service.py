@@ -240,6 +240,34 @@ def _assistant_expects_yes_no(text: str) -> bool:
     return text.strip().endswith("?") and not _assistant_expects_details(text)
 
 
+BAD_WORDS = {
+    "блять",
+    "бля",
+    "сука",
+    "нах",
+    "нахуй",
+    "хер",
+    "пизд",
+    "fuck",
+    "shit",
+}
+
+
+def _sanitize_query_for_rag(text: str) -> str:
+    """
+    Remove profanity/noise that can hurt retrieval while keeping semantic parts of the query.
+    """
+    if not text:
+        return ""
+
+    cleaned = text
+    for bad in BAD_WORDS:
+        cleaned = re.sub(bad, " ", cleaned, flags=re.IGNORECASE)
+
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or text
+
+
 def _is_context_dependent_message(text: str) -> bool:
     """
     Detect short follow-up replies that often require previous context.
@@ -343,8 +371,10 @@ def generate_ai_response(
         # 2. Search knowledge base
         knowledge_results = []
         max_score = 0.0
+        query_for_rag = _sanitize_query_for_rag(user_message)
+
         try:
-            knowledge_results = search_knowledge(user_message, client_slug, limit=3)
+            knowledge_results = search_knowledge(query_for_rag, client_slug, limit=3)
             if knowledge_results:
                 max_score = max(r.get("score", 0) for r in knowledge_results)
         except Exception as e:
@@ -359,6 +389,7 @@ def generate_ai_response(
                 contextual_query = _build_contextual_search_query(history_for_query, user_message)
 
                 if contextual_query and contextual_query != user_message:
+                    contextual_query = _sanitize_query_for_rag(contextual_query)
                     try:
                         retry_results = search_knowledge(contextual_query, client_slug, limit=3)
                         if retry_results:

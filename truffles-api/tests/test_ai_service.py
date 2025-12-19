@@ -9,6 +9,7 @@ from app.services.ai_service import (
     generate_ai_response,
     get_conversation_history,
     get_system_prompt,
+    _sanitize_query_for_rag,
 )
 from app.services.result import Result
 
@@ -72,6 +73,19 @@ class TestGetConversationHistory:
 
         assert len(result) == 1
         assert result[0]["role"] == "user"
+
+
+class TestSanitizeQueryForRag:
+    def test_removes_profanity_and_keeps_meaningful_tokens(self):
+        query = "вы работаете сегодня блять?"
+        sanitized = _sanitize_query_for_rag(query)
+        assert "блять" not in sanitized.lower()
+        assert "работаете" in sanitized
+
+    def test_returns_original_when_clean(self):
+        query = "сколько стоит маникюр?"
+        sanitized = _sanitize_query_for_rag(query)
+        assert sanitized == query
 
 
 class TestGenerateAIResponse:
