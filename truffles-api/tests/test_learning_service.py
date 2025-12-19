@@ -233,7 +233,8 @@ class TestAddToKnowledge:
 
         assert result is not None
 
-    def test_skips_too_short_texts(self):
+    @patch("app.services.learning_service.alert_warning")
+    def test_skips_too_short_texts(self, mock_warn):
         mock_db = Mock()
         mock_client = Mock()
         mock_client.name = "test_client"
@@ -249,6 +250,33 @@ class TestAddToKnowledge:
         result = add_to_knowledge(mock_db, mock_handover)
 
         assert result is None
+        mock_warn.assert_called_once()
+
+    @patch("app.services.learning_service.alert_warning")
+    def test_warns_when_missing_messages(self, mock_warn):
+        mock_db = Mock()
+        mock_handover = Mock()
+        mock_handover.user_message = None
+        mock_handover.manager_response = "Some response"
+        mock_handover.client_id = uuid.uuid4()
+        result = add_to_knowledge(mock_db, mock_handover)
+        assert result is None
+        mock_warn.assert_called_once()
+
+    @patch("app.services.learning_service.alert_warning")
+    def test_warns_when_missing_client_slug(self, mock_warn):
+        mock_db = Mock()
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+
+        mock_handover = Mock()
+        mock_handover.user_message = "Question"
+        mock_handover.manager_response = "Answer"
+        mock_handover.client_id = uuid.uuid4()
+
+        result = add_to_knowledge(mock_db, mock_handover)
+
+        assert result is None
+        mock_warn.assert_called_once()
 
     @patch("app.services.learning_service.get_embedding")
     @patch("app.services.learning_service.httpx.Client")

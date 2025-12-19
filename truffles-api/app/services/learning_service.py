@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.models import Client, ClientSettings, Handover
-from app.services.alert_service import alert_error
+from app.services.alert_service import alert_error, alert_warning
 from app.services.knowledge_service import (
     QDRANT_API_KEY,
     QDRANT_COLLECTION,
@@ -122,11 +122,19 @@ def add_to_knowledge(
     """
     if not handover.user_message or not handover.manager_response:
         logger.warning("Cannot add to knowledge: missing user_message or manager_response")
+        alert_warning(
+            "Learning skipped: missing text",
+            {"handover_id": str(getattr(handover, "id", None)), "client_id": str(handover.client_id)},
+        )
         return None
 
     client_slug = get_client_slug(db, handover.client_id)
     if not client_slug:
         logger.warning(f"Cannot add to knowledge: client_slug not found for {handover.client_id}")
+        alert_warning(
+            "Learning skipped: client_slug not found",
+            {"handover_id": str(getattr(handover, "id", None)), "client_id": str(handover.client_id)},
+        )
         return None
 
     # Format content for indexing
@@ -142,6 +150,15 @@ def add_to_knowledge(
                     "question_len": len(question),
                     "answer_len": len(answer),
                 }
+            },
+        )
+        alert_warning(
+            "Learning skipped: text too short",
+            {
+                "handover_id": str(handover.id),
+                "client_slug": client_slug,
+                "question_len": len(question),
+                "answer_len": len(answer),
             },
         )
         return None
