@@ -176,8 +176,8 @@ class TestAddToKnowledge:
         mock_handover = Mock()
         mock_handover.id = uuid.uuid4()
         mock_handover.client_id = uuid.uuid4()
-        mock_handover.user_message = "Q"
-        mock_handover.manager_response = "A"
+        mock_handover.user_message = "Question text"
+        mock_handover.manager_response = "Answer text"
         mock_handover.assigned_to_name = "Test"
 
         result = add_to_knowledge(mock_db, mock_handover)
@@ -199,8 +199,8 @@ class TestAddToKnowledge:
         mock_handover = Mock()
         mock_handover.id = uuid.uuid4()
         mock_handover.client_id = uuid.uuid4()
-        mock_handover.user_message = "Q"
-        mock_handover.manager_response = "A"
+        mock_handover.user_message = "Question text"
+        mock_handover.manager_response = "Answer text"
         mock_handover.assigned_to_name = "Test"
 
         result = add_to_knowledge(mock_db, mock_handover)
@@ -232,6 +232,23 @@ class TestAddToKnowledge:
         result = add_to_knowledge(mock_db, mock_handover)
 
         assert result is not None
+
+    def test_skips_too_short_texts(self):
+        mock_db = Mock()
+        mock_client = Mock()
+        mock_client.name = "test_client"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_client
+
+        mock_handover = Mock()
+        mock_handover.id = uuid.uuid4()
+        mock_handover.client_id = uuid.uuid4()
+        mock_handover.user_message = "да"
+        mock_handover.manager_response = "ок"
+        mock_handover.assigned_to_name = "Owner"
+
+        result = add_to_knowledge(mock_db, mock_handover)
+
+        assert result is None
 
     @patch("app.services.learning_service.get_embedding")
     @patch("app.services.learning_service.httpx.Client")

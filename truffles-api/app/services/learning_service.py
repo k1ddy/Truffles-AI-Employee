@@ -19,6 +19,8 @@ from app.services.knowledge_service import (
 logger = get_logger("learning_service")
 
 MAX_KNOWLEDGE_TEXT_LENGTH = 2000
+MIN_QUESTION_LENGTH = 5
+MIN_ANSWER_LENGTH = 5
 
 
 def _normalize_telegram_identifier(value: Optional[str]) -> Optional[str]:
@@ -130,6 +132,20 @@ def add_to_knowledge(
     # Format content for indexing
     question = _trim_text(handover.user_message.strip())
     answer = _trim_text(handover.manager_response.strip())
+    if len(question) < MIN_QUESTION_LENGTH or len(answer) < MIN_ANSWER_LENGTH:
+        logger.info(
+            "Skipped learning: text too short",
+            extra={
+                "context": {
+                    "client_slug": client_slug,
+                    "handover_id": str(handover.id),
+                    "question_len": len(question),
+                    "answer_len": len(answer),
+                }
+            },
+        )
+        return None
+
     content = f"Вопрос: {question}\nОтвет: {answer}"
     if len(handover.user_message.strip()) > len(question) or len(handover.manager_response.strip()) > len(answer):
         logger.info("Truncated knowledge sample to fit length limits")
