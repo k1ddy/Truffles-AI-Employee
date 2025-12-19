@@ -188,7 +188,19 @@ def add_to_knowledge(
                 alert_error("Failed to add to knowledge", {"handover_id": str(handover.id), "status": response.status_code})
                 return None
 
-            logger.info(f"Added to knowledge: point_id={point_id}, client_slug={client_slug}")
+            logger.info(
+                "Added to knowledge",
+                extra={
+                    "context": {
+                        "point_id": point_id,
+                        "client_slug": client_slug,
+                        "handover_id": str(handover.id),
+                        "question_len": len(question),
+                        "answer_len": len(answer),
+                        "source": source,
+                    }
+                },
+            )
             return point_id
 
     except Exception as e:

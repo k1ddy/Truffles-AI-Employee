@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.database import get_db
 from app.logging_config import get_logger
@@ -192,6 +193,31 @@ async def is_duplicate_message_id(
         except Exception as e:
             logger.warning(f"Dedup redis unavailable, falling back to DB: {e}")
 
+    # Persistent dedup in DB (message_dedup) to survive restarts/retries.
+    try:
+        result = db.execute(
+            text(
+                """
+                INSERT INTO message_dedup (client_id, message_id)
+                VALUES (:client_id, :message_id)
+                ON CONFLICT DO NOTHING
+                """
+            ),
+            {"client_id": client_id, "message_id": message_id},
+        )
+        db.commit()
+        if result.rowcount == 0:
+            logger.info(
+                "Duplicate message_id (DB)",
+                extra={"context": {"client_id": str(client_id), "message_id": message_id}},
+            )
+            return True
+    except Exception as e:
+        logger.warning(
+            "DB dedup check failed, falling back to messages table",
+            extra={"context": {"client_id": str(client_id), "message_id": message_id, "error": str(e)}},
+        )
+
     duplicate = (
         db.query(Message)
         .filter(
@@ -200,6 +226,11 @@ async def is_duplicate_message_id(
         )
         .first()
     )
+    if duplicate:
+        logger.info(
+            "Duplicate message_id (messages table)",
+            extra={"context": {"client_id": str(client_id), "message_id": message_id}},
+        )
     return duplicate is not None
 
 # Default values (can be overridden in client_settings)
