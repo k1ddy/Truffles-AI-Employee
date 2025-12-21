@@ -130,14 +130,11 @@ class TestWebhookAuth:
         finally:
             app.dependency_overrides.clear()
 
-    def test_path_secret_fallback_returns_200(self):
-        db = _build_db("test", "secret")
+    def test_direct_webhook_missing_secret_returns_401(self):
+        db = _build_db("direct", "secret")
         client = self._client_with_db(db)
         try:
-            response = client.post(
-                "/webhook/secret",
-                json={"client_slug": "test", "body": {"message": "hi"}},
-            )
-            assert response.status_code == 200
+            response = client.post("/webhook/direct", json={"client_slug": "direct", "body": {"message": "hi"}})
+            assert response.status_code == 401
         finally:
             app.dependency_overrides.clear()

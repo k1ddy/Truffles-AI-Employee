@@ -1,15 +1,15 @@
 import asyncio
-import hmac
 import os
 import re
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from starlette.requests import ClientDisconnect
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.logging_config import get_logger
 from app.models import Client, ClientSettings, Conversation, Handover, Message
 from app.schemas.webhook import WebhookRequest, WebhookResponse
@@ -18,7 +18,6 @@ from app.services.conversation_service import (
     get_or_create_conversation,
     get_or_create_user,
 )
-from app.services.alert_service import alert_warning
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.ai_service import (
     BOT_STATUS_RESPONSE,
@@ -26,18 +25,21 @@ from app.services.ai_service import (
     OUT_OF_DOMAIN_RESPONSE,
     THANKS_RESPONSE,
     classify_confirmation,
+    get_rag_confidence,
     is_acknowledgement_message,
     is_bot_status_question,
     is_greeting_message,
     is_low_signal_message,
     is_thanks_message,
 )
+from app.services.alert_service import alert_warning
 from app.services.intent_service import (
     DomainIntent,
     Intent,
     classify_domain_with_scores,
     classify_intent,
     is_rejection,
+    is_strong_out_of_domain,
     should_escalate,
 )
 from app.services.message_service import generate_bot_response, save_message
@@ -88,41 +90,166 @@ def _get_dedup_settings() -> tuple[int, str, float]:
     return ttl_seconds, redis_url, socket_timeout_seconds
 
 
-WEBHOOK_SECRET_HEADER = "X-Webhook-Secret"
-WEBHOOK_SECRET_QUERY_PARAM = "webhook_secret"
-WEBHOOK_SECRET_QUERY_FALLBACK = "secret"
-
-# Webhook auth (ChatFlow/n8n) quick guide:
-# 1) Issue secret: `openssl rand -hex 16` -> store in client_settings.webhook_secret.
-# 2) Configure webhook URL (n8n -> API):
-#    - Preferred header: X-Webhook-Secret: <secret>
-#    - Fallback URL: /webhook/<secret> OR /webhook?webhook_secret=<secret> (or ?secret=...)
-# 3) Rotation: set new secret in DB, update ChatFlow/n8n config; old secret invalid immediately.
-
-
-def _verify_webhook_secret(provided: str | None, expected: str | None) -> bool:
-    if not expected or not provided:
-        return False
-    return hmac.compare_digest(provided, expected)
+def _coerce_remote_jid(value) -> str | None:
+    if not value or isinstance(value, (dict, list, tuple)):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if "@" in text:
+        return text
+    digits = re.sub(r"\D", "", text)
+    if not digits:
+        return None
+    return f"{digits}@s.whatsapp.net"
 
 
-def _extract_webhook_secret(
-    http_request: Request,
+def _normalize_chatflow_payload(payload: dict, client_slug: str | None) -> tuple[dict, str]:
+    body = payload.get("body")
+    if not isinstance(body, dict):
+        body = payload
+
+    body = dict(body)
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+
+    candidate = payload
+    remote_jid = metadata.get("remoteJid")
+    if not remote_jid:
+        for key in ("remoteJid", "remote_jid", "jid", "from", "chatId", "session_id", "user_id", "phone"):
+            remote_jid = candidate.get(key)
+            if remote_jid:
+                break
+    remote_jid = _coerce_remote_jid(remote_jid)
+    if remote_jid:
+        metadata.setdefault("remoteJid", remote_jid)
+
+    message_id = metadata.get("messageId")
+    if not message_id:
+        for key in ("messageId", "message_id", "id"):
+            message_id = candidate.get(key)
+            if message_id:
+                break
+
+    msg_obj = candidate.get("message") if isinstance(candidate.get("message"), dict) else None
+    if not message_id and msg_obj:
+        message_id = msg_obj.get("id") or msg_obj.get("messageId")
+    if message_id:
+        metadata.setdefault("messageId", message_id)
+
+    timestamp = metadata.get("timestamp")
+    if not timestamp:
+        for key in ("timestamp", "t", "time"):
+            timestamp = candidate.get(key)
+            if timestamp:
+                break
+    if timestamp:
+        metadata.setdefault("timestamp", timestamp)
+
+    sender = metadata.get("sender")
+    if not sender:
+        for key in ("sender", "pushName", "name"):
+            sender = candidate.get(key)
+            if sender:
+                break
+    if sender:
+        metadata.setdefault("sender", sender)
+
+    message = body.get("message")
+    if not isinstance(message, str) or not message.strip():
+        message = None
+        for key in ("text", "body", "message_text", "content"):
+            value = candidate.get(key)
+            if isinstance(value, str) and value.strip():
+                message = value
+                break
+        if not message and msg_obj:
+            for key in ("text", "body", "message", "content"):
+                value = msg_obj.get(key)
+                if isinstance(value, str) and value.strip():
+                    message = value
+                    break
+    if message:
+        body["message"] = message
+
+    body["metadata"] = metadata
+    slug = client_slug or payload.get("client_slug") or "truffles"
+    return body, slug
+
+
+async def _parse_webhook_request(
+    request: Request,
     *,
-    path_secret: str | None,
-    query_secret: str | None,
-    query_webhook_secret: str | None,
-) -> tuple[str | None, str]:
-    header_secret = http_request.headers.get(WEBHOOK_SECRET_HEADER)
-    if header_secret:
-        return header_secret, "header"
-    if query_webhook_secret:
-        return query_webhook_secret, f"query:{WEBHOOK_SECRET_QUERY_PARAM}"
-    if query_secret:
-        return query_secret, f"query:{WEBHOOK_SECRET_QUERY_FALLBACK}"
-    if path_secret:
-        return path_secret, "path"
-    return None, "missing"
+    client_slug: str | None = None,
+) -> WebhookRequest | WebhookResponse:
+    try:
+        payload = await request.json()
+    except ClientDisconnect:
+        logger.info("Webhook client disconnected during read", extra={"context": {"client_slug": client_slug}})
+        return WebhookResponse(success=True, message="Client disconnected")
+    except Exception as exc:
+        try:
+            raw = await request.body()
+        except ClientDisconnect:
+            logger.info("Webhook client disconnected during body read", extra={"context": {"client_slug": client_slug}})
+            return WebhookResponse(success=True, message="Client disconnected")
+        if not raw or not raw.strip():
+            logger.info("Webhook probe with empty body", extra={"context": {"client_slug": client_slug}})
+            return WebhookResponse(success=True, message="Empty payload")
+
+        logger.warning(
+            "Webhook payload is not valid JSON",
+            extra={
+                "context": {
+                    "error": str(exc),
+                    "body_preview": raw[:200].decode("utf-8", "ignore"),
+                }
+            },
+        )
+        return WebhookResponse(success=False, message="Invalid JSON payload")
+
+    if not isinstance(payload, dict):
+        return WebhookResponse(success=False, message="Invalid payload format")
+
+    body, slug = _normalize_chatflow_payload(payload, client_slug)
+
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    if not metadata.get("remoteJid") or not body.get("message"):
+        logger.info(
+            "Webhook payload missing expected fields",
+            extra={
+                "context": {
+                    "client_slug": slug,
+                    "payload_keys": list(payload.keys())[:20],
+                    "body_keys": list(body.keys())[:20],
+                    "metadata_keys": list(metadata.keys())[:20],
+                    "has_message": bool(body.get("message")),
+                }
+            },
+        )
+
+    try:
+        return WebhookRequest(body=body, client_slug=slug)
+    except Exception as exc:
+        logger.warning("Webhook payload validation failed", extra={"context": {"error": str(exc)}})
+        return WebhookResponse(success=False, message="Invalid webhook payload")
+
+
+async def _process_webhook_background(
+    parsed: WebhookRequest,
+    *,
+    provided_secret: str | None,
+    enforce_secret: bool,
+) -> None:
+    db = SessionLocal()
+    try:
+        await _handle_webhook_payload(parsed, db, provided_secret=provided_secret, enforce_secret=enforce_secret)
+    except Exception as exc:
+        logger.error(
+            "Async webhook processing failed",
+            extra={"context": {"client_slug": parsed.client_slug, "error": str(exc)}},
+        )
+    finally:
+        db.close()
 
 
 def _get_debounce_redis(redis_url: str, socket_timeout_seconds: float):
@@ -638,6 +765,26 @@ def should_offer_low_confidence_retry(conversation: Conversation, now: datetime)
     return (now - offered_at) > timedelta(minutes=LOW_CONFIDENCE_RETRY_WINDOW_MINUTES)
 
 
+def _get_client_webhook_secret(settings: ClientSettings | None) -> str | None:
+    if not settings:
+        return None
+    secret = getattr(settings, "webhook_secret", None)
+    if not secret:
+        return None
+    cleaned = str(secret).strip()
+    return cleaned or None
+
+
+def _get_request_webhook_secret(request: Request) -> str | None:
+    header_secret = request.headers.get("X-Webhook-Secret")
+    if header_secret:
+        return header_secret.strip()
+    query_secret = request.query_params.get("webhook_secret")
+    if query_secret:
+        return query_secret.strip()
+    return None
+
+
 @router.post("/webhook/debug")
 async def debug_webhook(request: Request):
     """Debug endpoint to see raw request."""
@@ -646,68 +793,75 @@ async def debug_webhook(request: Request):
     return {"received": body}
 
 
-@router.post("/webhook/{path_secret}", response_model=WebhookResponse)
-async def handle_webhook_with_secret(
-    path_secret: str,
-    payload: WebhookRequest,
-    http_request: Request,
-    db: Session = Depends(get_db),
-):
-    return await _handle_webhook(payload, http_request, db, path_secret=path_secret)
+@router.post("/webhook/{client_slug}", response_model=WebhookResponse)
+async def handle_webhook_direct(client_slug: str, request: Request, db: Session = Depends(get_db)):
+    """Handle direct ChatFlow webhook without n8n wrapper."""
+    parsed = await _parse_webhook_request(request, client_slug=client_slug)
+    if isinstance(parsed, WebhookResponse):
+        return parsed
+
+    provided_secret = _get_request_webhook_secret(request)
+    client = db.query(Client).filter(Client.name == parsed.client_slug).first()
+    if not client:
+        return WebhookResponse(success=False, message=f"Client '{parsed.client_slug}' not found")
+
+    settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
+    expected_secret = _get_client_webhook_secret(settings)
+    if expected_secret:
+        if not provided_secret or provided_secret != expected_secret:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
+    elif not provided_secret:
+        alert_warning("Webhook secret missing", {"client_slug": parsed.client_slug})
+
+    asyncio.create_task(
+        _process_webhook_background(parsed, provided_secret=provided_secret, enforce_secret=False)
+    )
+    return WebhookResponse(success=True, message="Accepted", conversation_id=None, bot_response=None)
+
+
+@router.get("/webhook/{client_slug}")
+async def handle_webhook_probe(client_slug: str):
+    """Health probe for ChatFlow UI checks; real webhooks must use POST."""
+    return {"ok": True, "message": "Use POST with JSON payload", "client_slug": client_slug}
 
 
 @router.post("/webhook", response_model=WebhookResponse)
-async def handle_webhook(
-    payload: WebhookRequest,
-    http_request: Request,
-    db: Session = Depends(get_db),
-    webhook_secret: str | None = None,
-    secret: str | None = None,
-):
-    return await _handle_webhook(
+async def handle_webhook(payload: WebhookRequest, http_request: Request, db: Session = Depends(get_db)):
+    """Handle raw webhook from n8n (same format as ChatFlow webhook)."""
+    provided_secret = _get_request_webhook_secret(http_request)
+    return await _handle_webhook_payload(
         payload,
-        http_request,
         db,
-        webhook_secret=webhook_secret,
-        secret=secret,
+        provided_secret=provided_secret,
+        enforce_secret=True,
     )
 
 
-async def _handle_webhook(
+async def _handle_webhook_payload(
     payload: WebhookRequest,
-    http_request: Request,
     db: Session,
     *,
-    path_secret: str | None = None,
-    secret: str | None = None,
-    webhook_secret: str | None = None,
-):
-    """Handle raw webhook from n8n (same format as ChatFlow webhook)."""
+    provided_secret: str | None,
+    enforce_secret: bool,
+) -> WebhookResponse:
+    """Shared webhook processing for inbound ChatFlow/n8n payloads."""
     logger.info(f"Webhook received: client_slug={payload.client_slug}")
 
-    body = payload.body
     # Get client by slug
     client = db.query(Client).filter(Client.name == payload.client_slug).first()
     if not client:
         return WebhookResponse(success=False, message=f"Client '{payload.client_slug}' not found")
 
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
-    expected_secret = settings.webhook_secret if settings else None
-    provided_secret, secret_source = _extract_webhook_secret(
-        http_request,
-        path_secret=path_secret,
-        query_secret=secret,
-        query_webhook_secret=webhook_secret,
-    )
+    if enforce_secret:
+        expected_secret = _get_client_webhook_secret(settings)
+        if expected_secret:
+            if not provided_secret or provided_secret != expected_secret:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
+        elif not provided_secret:
+            alert_warning("Webhook secret missing", {"client_slug": payload.client_slug})
 
-    if not expected_secret:
-        logger.warning(f"Webhook secret missing: client_slug={payload.client_slug} source={secret_source}")
-        alert_warning("Webhook secret missing", {"client_slug": payload.client_slug})
-    elif not _verify_webhook_secret(provided_secret, expected_secret):
-        reason = "missing_secret" if not provided_secret else "invalid_secret"
-        logger.warning(f"Webhook auth failed: client_slug={payload.client_slug} reason={reason} source={secret_source}")
-        raise HTTPException(status_code=401, detail="Invalid webhook secret")
-
+    body = payload.body
     metadata = body.metadata
 
     if not metadata or not metadata.remoteJid:
@@ -1057,6 +1211,8 @@ async def _handle_webhook(
     domain_in_score = 0.0
     domain_out_score = 0.0
     domain_meta: dict = {}
+    strong_domain_out = False
+    strong_domain_meta: dict = {}
     if (
         conversation.state == ConversationState.BOT_ACTIVE.value
         and not (is_greeting or is_thanks or is_ack or is_low_signal)
@@ -1071,7 +1227,7 @@ async def _handle_webhook(
                 "Domain scores",
                 extra={
                     "context": {
-                        "client_slug": request.client_slug,
+                        "client_slug": payload.client_slug,
                         "remote_jid": remote_jid,
                         "intent": intent.value,
                         "domain_intent": domain_intent.value,
@@ -1084,6 +1240,56 @@ async def _handle_webhook(
                         "anchors_out": domain_meta.get("anchors_out"),
                         "message_len": len(message_text),
                         "message_preview": message_text[:80],
+                    }
+                },
+            )
+        if domain_intent == DomainIntent.OUT_OF_DOMAIN:
+            strong_domain_out, strong_domain_meta = is_strong_out_of_domain(
+                message_text,
+                domain_intent,
+                domain_in_score,
+                domain_out_score,
+                client.config if client else None,
+            )
+
+    out_of_domain_signal = False
+    if strong_domain_out:
+        out_of_domain_signal = True
+    elif intent == Intent.OUT_OF_DOMAIN and domain_intent != DomainIntent.IN_DOMAIN:
+        out_of_domain_signal = True
+
+    rag_confident = False
+    rag_score = 0.0
+    if conversation.state == ConversationState.BOT_ACTIVE.value and out_of_domain_signal:
+        rag_confident, rag_score = get_rag_confidence(
+            db=db,
+            conversation_id=conversation.id,
+            client_slug=payload.client_slug,
+            user_message=message_text,
+        )
+        log_scores = _is_env_enabled(os.environ.get("DOMAIN_ROUTER_LOG_SCORES"), default=False)
+        if log_scores:
+            logger.info(
+                "Domain out-of-domain gate",
+                extra={
+                    "context": {
+                        "client_slug": payload.client_slug,
+                        "remote_jid": remote_jid,
+                        "intent": intent.value,
+                        "domain_intent": domain_intent.value,
+                        "strong_domain_out": strong_domain_out,
+                        "rag_confident": rag_confident,
+                        "rag_score": round(rag_score, 4),
+                        "in_score": round(domain_in_score, 4),
+                        "out_score": round(domain_out_score, 4),
+                        "strict_out_threshold": strong_domain_meta.get("strict_out_threshold"),
+                        "strong_out_threshold": strong_domain_meta.get("strong_out_threshold"),
+                        "strict_margin": strong_domain_meta.get("strict_margin"),
+                        "strong_margin": strong_domain_meta.get("strong_margin"),
+                        "strict_in_max": strong_domain_meta.get("strict_in_max"),
+                        "strong_in_max": strong_domain_meta.get("strong_in_max"),
+                        "strict_min_len": strong_domain_meta.get("strict_min_len"),
+                        "message_len": strong_domain_meta.get("message_len"),
                     }
                 },
             )
@@ -1126,20 +1332,8 @@ async def _handle_webhook(
             success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
         )
 
-    # 9.35 Domain routing: respond to off-topic messages without escalation
-    if domain_intent == DomainIntent.OUT_OF_DOMAIN and conversation.state == ConversationState.BOT_ACTIVE.value:
-        bot_response = OUT_OF_DOMAIN_RESPONSE
-        _reset_low_confidence_retry(conversation)
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = send_bot_response(db, client.id, remote_jid, bot_response)
-        result_message = "Domain out-of-domain response sent" if sent else "Domain out-of-domain response failed"
-        db.commit()
-        return WebhookResponse(
-            success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
-        )
-
-    # 9.4 Out-of-domain: respond without escalation
-    if intent == Intent.OUT_OF_DOMAIN and conversation.state == ConversationState.BOT_ACTIVE.value:
+    # 9.35 Out-of-domain: respond without escalation only when RAG has no confident match
+    if conversation.state == ConversationState.BOT_ACTIVE.value and out_of_domain_signal and not rag_confident:
         bot_response = OUT_OF_DOMAIN_RESPONSE
         _reset_low_confidence_retry(conversation)
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
@@ -1182,7 +1376,7 @@ async def _handle_webhook(
                 db,
                 conversation,
                 message_text,
-                request.client_slug,
+                payload.client_slug,
                 append_user_message=append_user_message,
             )
             if gen_result.ok and gen_result.value[0]:
@@ -1224,7 +1418,7 @@ async def _handle_webhook(
             db,
             conversation,
             message_text,
-            request.client_slug,
+            payload.client_slug,
             append_user_message=append_user_message,
         )
 

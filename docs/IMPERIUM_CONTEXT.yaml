@@ -1,0 +1,331 @@
+meta:
+  date_generated: "2025-12-21"
+  generated_by: "Codex"
+  repo_root: "/home/zhan/truffles"
+  repo_commit: "2b16a72e81b56e8a1ccaea1c6bbdca265d235fac"
+  evidence:
+    - "git rev-parse HEAD (command)"
+    - "date +%Y-%m-%d (command)"
+
+project:
+  name: "Truffles"
+  description: "WhatsApp auto-responder for business"
+  value_to_client: "Reply late at night without waiting until morning"
+  value_to_business: "No 24/7 manager; bot handles ~80% of questions"
+  positioning: "Auto-responder + payment checks, not AI"
+  evidence:
+    - "AGENTS.md:9-15"
+
+runtime:
+  server:
+    ip: "5.188.241.234"
+    ssh_port: 222
+    user: "zhan"
+    evidence:
+      - "TECH.md:11-14"
+  docker:
+    compose_file: "/home/zhan/truffles/docker-compose.yml"
+    compose_services:
+      - "n8n"
+      - "n8n-worker"
+      - "postgres"
+      - "qdrant"
+      - "redis"
+      - "pgadmin"
+    networks:
+      - name: "proxy-net"
+        type: "external"
+      - name: "internal-net"
+        type: "bridge"
+    evidence:
+      - "docker-compose.yml:3-100"
+  running_containers:
+    items:
+      - name: "truffles-api"
+        image: "truffles-api_truffles-api"
+      - name: "truffles_n8n_1"
+        image: "n8nio/n8n:latest"
+      - name: "truffles_n8n-worker_1"
+        image: "n8nio/n8n:latest"
+      - name: "truffles_postgres_1"
+        image: "postgres:15-alpine"
+      - name: "truffles_qdrant_1"
+        image: "qdrant/qdrant:latest"
+      - name: "truffles_redis_1"
+        image: "redis:7-alpine"
+      - name: "truffles_pgadmin_1"
+        image: "dpage/pgadmin4:latest"
+      - name: "bge-m3"
+        image: "ghcr.io/huggingface/text-embeddings-inference:cpu-1.2"
+      - name: "truffles-traefik"
+        image: "traefik:v2.11"
+      - name: "truffles-website"
+        image: "infrastructure_website"
+      - name: "gemini_autonomous_proxy"
+        image: "opus45gui-gemini-proxy"
+    evidence:
+      - "docker ps (2025-12-21)"
+  compose_status:
+    evidence:
+      - "docker compose -f docker-compose.yml ps (2025-12-21)"
+  volumes:
+    items:
+      - name: "truffles_n8n_data"
+        mountpoint: "/var/lib/docker/volumes/truffles_n8n_data/_data"
+      - name: "truffles_postgres_data"
+        mountpoint: "/var/lib/docker/volumes/truffles_postgres_data/_data"
+      - name: "truffles_qdrant_data"
+        mountpoint: "/var/lib/docker/volumes/truffles_qdrant_data/_data"
+      - name: "truffles_redis_data"
+        mountpoint: "/var/lib/docker/volumes/truffles_redis_data/_data"
+      - name: "ops_bge-m3-data"
+        mountpoint: "/var/lib/docker/volumes/ops_bge-m3-data/_data"
+    evidence:
+      - "docker volume inspect truffles_n8n_data truffles_postgres_data truffles_qdrant_data truffles_redis_data ops_bge-m3-data (2025-12-21)"
+
+network_topology:
+  docker_networks:
+    - name: "proxy-net"
+      purpose: "public routing"
+    - name: "truffles_internal-net"
+      purpose: "internal services (compose internal-net)"
+  container_networks:
+    truffles-api:
+      - "proxy-net"
+      - "truffles_internal-net"
+    bge-m3:
+      - "truffles_internal-net"
+  evidence:
+    - "docker inspect truffles-api --format '{{json .NetworkSettings.Networks}}' (2025-12-21)"
+    - "docker inspect bge-m3 --format '{{json .NetworkSettings.Networks}}' (2025-12-21)"
+    - "docker-compose.yml:3-42"
+
+service_connectivity:
+  networks:
+    proxy-net:
+      members:
+        - "n8n"
+        - "truffles-api"
+    truffles_internal-net:
+      members:
+        - "n8n"
+        - "n8n-worker"
+        - "postgres"
+        - "qdrant"
+        - "redis"
+        - "pgadmin"
+        - "truffles-api"
+        - "bge-m3"
+  ports_exposed:
+    - service: "truffles-api"
+      host_ports: "8000:8000"
+    - service: "truffles-traefik"
+      host_ports: "80:80, 443:443"
+    - service: "truffles_pgadmin_1"
+      host_ports: "5050:80"
+  evidence:
+    - "docker-compose.yml:19-98 (network memberships)"
+    - "docker inspect truffles-api --format '{{json .NetworkSettings.Networks}}' (2025-12-21)"
+    - "docker inspect bge-m3 --format '{{json .NetworkSettings.Networks}}' (2025-12-21)"
+    - "docker ps (published ports) (2025-12-21)"
+api_service:
+  framework: "FastAPI"
+  entrypoint: "truffles-api/app/main.py"
+  routes:
+    - path: "/webhook/{client_slug}"
+      purpose: "WhatsApp inbound (ChatFlow direct, preferred)"
+    - path: "/webhook"
+      purpose: "WhatsApp inbound (n8n legacy)"
+    - path: "/telegram-webhook"
+      purpose: "Telegram inbound for manager replies"
+    - path: "/reminders/process"
+      purpose: "Cron reminder processor"
+    - path: "/health"
+      purpose: "Health endpoint"
+    - path: "/db-check"
+      purpose: "DB sanity counts"
+  evidence:
+    - "truffles-api/app/main.py:11-42"
+    - "truffles-api/app/routers/webhook.py:610-612"
+    - "truffles-api/app/routers/telegram_webhook.py:44-68"
+    - "truffles-api/app/routers/reminders.py:42-50"
+
+tenancy:
+  model: "shared multi-tenant via client_id and client_slug"
+  tenant_resolution:
+    inbound: "WebhookRequest.client_slug -> clients.name"
+    storage: "client_id on core tables"
+  evidence:
+    - "truffles-api/app/schemas/webhook.py:21-23"
+    - "truffles-api/app/routers/webhook.py:621-623"
+    - "truffles-api/app/models/conversation.py:13-16"
+    - "truffles-api/app/models/message.py:13-16"
+    - "truffles-api/app/models/user.py:13-15"
+
+whatsapp_chatflow_integration:
+  inbound_webhook:
+    route: "/webhook/{client_slug}"
+    legacy_route: "/webhook"
+    payload: "body.message, body.metadata.remoteJid, body.metadata.messageId"
+    auth: "webhook_secret via X-Webhook-Secret or webhook_secret query param"
+    ack_strategy: "direct: async (ack before processing), legacy: sync"
+    deduplication: "redis + message_dedup table"
+    evidence:
+      - "truffles-api/app/schemas/webhook.py:7-24"
+      - "truffles-api/app/routers/webhook.py:610-655"
+      - "truffles-api/app/routers/webhook.py:185-240"
+      - "truffles-api/app/routers/webhook.py:839-849"
+      - "docker exec truffles_postgres_1 psql -U n8n -d chatbot -c \\dt+ (message_dedup) (2025-12-21)"
+  outbound_send:
+    function: "send_bot_response -> send_whatsapp_message"
+    api_url_default: "https://app.chatflow.kz/api/v1/send-text"
+    timeout_seconds: 30
+    retries: "none in code"
+    evidence:
+      - "truffles-api/app/services/chatflow_service.py:14-52"
+      - "truffles-api/app/routers/webhook.py:839-849"
+
+telegram_control_plane:
+  inbound_route: "/telegram-webhook"
+  purpose: "manager replies + callback buttons"
+  outbound: "TelegramService.send_message"
+  evidence:
+    - "truffles-api/app/routers/telegram_webhook.py:44-159"
+
+data_stores:
+  postgres:
+    container: "truffles_postgres_1"
+    database: "chatbot"
+    user: "n8n"
+    schemas:
+      - "public"
+    tables:
+      - "audit_log"
+      - "backups"
+      - "billing_reminders"
+      - "branches"
+      - "client_settings"
+      - "clients"
+      - "companies"
+      - "conversation_summaries"
+      - "conversations"
+      - "documents"
+      - "error_logs"
+      - "escalated_topics"
+      - "handovers"
+      - "knowledge_sync_logs"
+      - "knowledge_versions"
+      - "learned_responses"
+      - "managers"
+      - "message_dedup"
+      - "message_traces"
+      - "messages"
+      - "prompts"
+      - "subscriptions"
+      - "users"
+    key_tables:
+      conversations: "conversations"
+      messages: "messages"
+      tenants: "clients"
+      kb_versions: "knowledge_versions"
+      kb_sync_logs: "knowledge_sync_logs"
+      tool_logs: "message_traces"
+      incidents: "error_logs"
+    evidence:
+      - "docker exec truffles_postgres_1 psql -U n8n -d chatbot -c \\dn (2025-12-21)"
+      - "docker exec truffles_postgres_1 psql -U n8n -d chatbot -c \\dt+ (2025-12-21)"
+      - "TECH.md:36-47"
+  qdrant:
+    container: "truffles_qdrant_1"
+    collection: "truffles_knowledge"
+    vectors:
+      size: 1024
+      distance: "Cosine"
+    points_count: 111
+    payload_schema: "{} (empty)"
+    evidence:
+      - "docker run --rm --network truffles_internal-net -e QDRANT__SERVICE__API_KEY curlimages/curl:8.5.0 -s -H \"api-key: $QDRANT__SERVICE__API_KEY\" http://qdrant:6333/collections (2025-12-21)"
+      - "docker run --rm --network truffles_internal-net -e QDRANT__SERVICE__API_KEY curlimages/curl:8.5.0 -s -H \"api-key: $QDRANT__SERVICE__API_KEY\" http://qdrant:6333/collections/truffles_knowledge (2025-12-21)"
+  redis:
+    container: "truffles_redis_1"
+    usage: "debounce + dedup in webhook"
+    evidence:
+      - "docker ps (2025-12-21)"
+      - "truffles-api/app/routers/webhook.py:185-205"
+
+knowledge_pipeline:
+  retrieval:
+    function: "search_knowledge(query, client_slug)"
+    filter: "metadata.client_slug"
+    evidence:
+      - "truffles-api/app/services/knowledge_service.py:31-52"
+  embeddings:
+    model: "BAAI/bge-m3"
+    endpoint_default: "http://bge-m3:80/embed"
+    vector_dim: 1024
+    evidence:
+      - "ops/start_bge_m3.sh:2-8"
+      - "truffles-api/app/services/knowledge_service.py:11-20"
+      - "docker run --rm --network truffles_internal-net -e QDRANT__SERVICE__API_KEY curlimages/curl:8.5.0 -s -H \"api-key: $QDRANT__SERVICE__API_KEY\" http://qdrant:6333/collections/truffles_knowledge (size=1024) (2025-12-21)"
+  chunking_strategy:
+    description: "Split markdown by headers, drop sections < 50 chars"
+    evidence:
+      - "ops/sync_all_clients.py:72-96"
+
+llm_stack:
+  provider: "OpenAI"
+  default_model: "gpt-5-mini"
+  max_completion_tokens: 1000
+  evidence:
+    - "truffles-api/app/services/ai_service.py:134-139"
+    - "truffles-api/app/services/llm/openai_provider.py:14-36"
+
+guardrails:
+  low_confidence_thresholds:
+    high: 0.85
+    mid: 0.5
+  whitelist_short_messages: true
+  out_of_domain_router: "embedding anchors"
+  evidence:
+    - "truffles-api/app/services/ai_service.py:17-56"
+    - "truffles-api/app/services/intent_service.py:32-210"
+
+observability:
+  alerts:
+    channel: "Telegram via alert_service"
+    configured: "NO (ALERT_BOT_TOKEN/ALERT_CHAT_ID not set in container env)"
+    evidence:
+      - "truffles-api/app/services/alert_service.py:11-38"
+      - "docker exec truffles-api env | grep '^ALERT_' (no output) (2025-12-21)"
+  no_response_alerts:
+    logic: "check_no_response_alerts in reminder_service"
+    trigger: "NO_RESPONSE_ALERT_MINUTES env (default 3)"
+    evidence:
+      - "truffles-api/app/services/reminder_service.py:18-133"
+
+cicd:
+  github_actions: "NOT_FOUND"
+  evidence:
+    - "rg --files -g '.github/**' (no output)"
+
+env_vars:
+  truffles_api_container:
+    present_keys:
+      - "database_url"
+      - "CHATFLOW_TOKEN"
+      - "QDRANT__SERVICE__API_KEY"
+    evidence:
+      - "docker exec truffles-api env | grep -E '^QDRANT_API_KEY=|^QDRANT__SERVICE__API_KEY=|^BGE_M3_URL=|^CHATFLOW_API_URL=|^CHATFLOW_TOKEN=|^DATABASE_URL=|^database_url=' (2025-12-21)"
+  repo_env_files:
+    file: "truffles-api/.env"
+    keys:
+      - "database_url"
+      - "CHATFLOW_TOKEN"
+      - "QDRANT__SERVICE__API_KEY"
+      - "DEBOUNCE_ENABLED"
+      - "DEBOUNCE_INACTIVITY_SECONDS"
+      - "DEBOUNCE_TTL_SECONDS"
+      - "DEBOUNCE_MAX_BUFFER_MESSAGES"
+      - "DOMAIN_ROUTER_LOG_SCORES"
+    evidence:
+      - "truffles-api/.env:41-47 (keys listed via python3 script; values redacted)"

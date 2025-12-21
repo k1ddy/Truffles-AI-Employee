@@ -75,10 +75,14 @@ docker exec truffles_postgres_1 psql -U n8n -d chatbot -c 'SELECT ...'
 | https://n8n.truffles.kz | n8n интерфейс |
 
 ### Endpoints
-- `POST /webhook` — входящие сообщения от n8n
+- `POST /webhook/{client_slug}` — входящие сообщения от ChatFlow (прямой путь, preferred)
+- `POST /webhook` — входящие сообщения от n8n (legacy)
 - `POST /telegram-webhook` — callbacks от Telegram
 - `GET /health` — проверка здоровья
 - `POST /reminders/process` — обработка напоминаний
+
+**WhatsApp Webhook URL (ChatFlow):**
+`https://api.truffles.kz/webhook/{client_slug}?webhook_secret=<SECRET>`
 
 ### Переменные окружения (API)
 - `NO_RESPONSE_ALERT_MINUTES` — порог минут для алерта “вход есть — ответа нет” (default: 3).
