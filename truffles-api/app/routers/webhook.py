@@ -1,10 +1,11 @@
 import asyncio
+import hmac
 import os
 import re
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -19,14 +20,25 @@ from app.services.conversation_service import (
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.ai_service import (
+    BOT_STATUS_RESPONSE,
     GREETING_RESPONSE,
+    OUT_OF_DOMAIN_RESPONSE,
     THANKS_RESPONSE,
+    classify_confirmation,
     is_acknowledgement_message,
+    is_bot_status_question,
     is_greeting_message,
     is_low_signal_message,
     is_thanks_message,
 )
-from app.services.intent_service import Intent, classify_intent, is_rejection, should_escalate
+from app.services.intent_service import (
+    DomainIntent,
+    Intent,
+    classify_domain_with_scores,
+    classify_intent,
+    is_rejection,
+    should_escalate,
+)
 from app.services.message_service import generate_bot_response, save_message
 from app.services.state_machine import ConversationState
 from app.services.state_service import escalate_to_pending, manager_resolve
@@ -73,6 +85,15 @@ def _get_dedup_settings() -> tuple[int, str, float]:
     redis_url = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
     socket_timeout_seconds = float(os.environ.get("DEDUP_SOCKET_TIMEOUT_SECONDS", "0.3"))
     return ttl_seconds, redis_url, socket_timeout_seconds
+
+
+WEBHOOK_SECRET_HEADER = "X-Webhook-Secret"
+
+
+def _verify_webhook_secret(provided: str | None, expected: str | None) -> bool:
+    if not expected or not provided:
+        return False
+    return hmac.compare_digest(provided, expected)
 
 
 def _get_debounce_redis(redis_url: str, socket_timeout_seconds: float):
@@ -238,10 +259,16 @@ DEFAULT_MUTE_DURATION_FIRST_MINUTES = 30
 DEFAULT_MUTE_DURATION_SECOND_HOURS = 24
 SESSION_TIMEOUT_HOURS = 24
 LOW_CONFIDENCE_RETRY_WINDOW_MINUTES = 10
+LOW_CONFIDENCE_MAX_RETRIES = 2
+HANDOVER_CONFIRM_WINDOW_MINUTES = 15
 MSG_ESCALATED = "Передал менеджеру. Могу чем-то помочь пока ждёте?"
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."
 MSG_MUTED_LONG = "Понял! Если ответа от менеджеров долго нет — лучше звоните напрямую: +7 775 984 19 26"
 MSG_LOW_CONFIDENCE = "Хороший вопрос! Уточню у коллег и вернусь с ответом."
+MSG_HANDOVER_CONFIRM = "Не уверен, что понял. Подключить менеджера? Ответьте 'да' или 'нет'."
+MSG_HANDOVER_DECLINED = (
+    "Ок. Напишите, что именно интересует по салону: цена/запись/адрес/мастер/жалоба."
+)
 MSG_LOW_CONFIDENCE_RETRY = (
     "Не совсем понял. Напишите, пожалуйста, что именно нужно по салону: "
     "цена/длительность/запись/адрес/мастер или жалоба."
@@ -409,6 +436,57 @@ def _set_conversation_context(conversation: Conversation, context: dict) -> None
     conversation.context = context
 
 
+def _get_low_confidence_retry_count(context: dict) -> int:
+    value = context.get("low_confidence_retry_count", 0) if isinstance(context, dict) else 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _set_low_confidence_retry_count(context: dict, count: int) -> dict:
+    context = dict(context)
+    context["low_confidence_retry_count"] = max(0, int(count))
+    return context
+
+
+def _reset_low_confidence_retry(conversation: Conversation) -> None:
+    context = _get_conversation_context(conversation)
+    if context.get("low_confidence_retry_count"):
+        context = _set_low_confidence_retry_count(context, 0)
+        _set_conversation_context(conversation, context)
+    conversation.retry_offered_at = None
+
+
+def _get_handover_confirmation(context: dict) -> dict | None:
+    confirmation = context.get("handover_confirmation") if isinstance(context, dict) else None
+    if isinstance(confirmation, dict):
+        return dict(confirmation)
+    return None
+
+
+def _set_handover_confirmation(context: dict, confirmation: dict | None) -> dict:
+    context = dict(context)
+    if confirmation:
+        context["handover_confirmation"] = confirmation
+    else:
+        context.pop("handover_confirmation", None)
+    return context
+
+
+def _is_handover_confirmation_active(confirmation: dict, now: datetime) -> bool:
+    asked_at_raw = confirmation.get("asked_at")
+    if not asked_at_raw:
+        return False
+    try:
+        asked_at = datetime.fromisoformat(asked_at_raw)
+    except (TypeError, ValueError):
+        return False
+    if asked_at.tzinfo is None:
+        asked_at = asked_at.replace(tzinfo=timezone.utc)
+    return (now - asked_at) <= timedelta(minutes=HANDOVER_CONFIRM_WINDOW_MINUTES)
+
+
 def _get_booking_context(context: dict) -> dict:
     booking = context.get("booking") if isinstance(context, dict) else None
     if isinstance(booking, dict):
@@ -540,20 +618,38 @@ async def debug_webhook(request: Request):
 
 
 @router.post("/webhook", response_model=WebhookResponse)
-async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db)):
+async def handle_webhook(
+    payload: WebhookRequest,
+    http_request: Request,
+    db: Session = Depends(get_db),
+):
     """Handle raw webhook from n8n (same format as ChatFlow webhook)."""
-    logger.info(f"Webhook received: client_slug={request.client_slug}")
+    logger.info(f"Webhook received: client_slug={payload.client_slug}")
 
-    body = request.body
+    body = payload.body
+    # Get client by slug
+    client = db.query(Client).filter(Client.name == payload.client_slug).first()
+    if not client:
+        return WebhookResponse(success=False, message=f"Client '{payload.client_slug}' not found")
+
+    settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
+    expected_secret = settings.webhook_secret if settings else None
+    provided_secret = http_request.headers.get(WEBHOOK_SECRET_HEADER)
+
+    if not _verify_webhook_secret(provided_secret, expected_secret):
+        if not expected_secret:
+            reason = "secret_not_configured"
+        elif not provided_secret:
+            reason = "missing_header"
+        else:
+            reason = "invalid_secret"
+        logger.warning(f"Webhook auth failed: client_slug={payload.client_slug} reason={reason}")
+        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
     metadata = body.metadata
 
     if not metadata or not metadata.remoteJid:
         return WebhookResponse(success=False, message="Missing metadata.remoteJid")
-
-    # Get client by slug
-    client = db.query(Client).filter(Client.name == request.client_slug).first()
-    if not client:
-        return WebhookResponse(success=False, message=f"Client '{request.client_slug}' not found")
 
     remote_jid = metadata.remoteJid
     message_text = body.message or ""
@@ -727,6 +823,79 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
                 bot_response=None,
             )
 
+    # 9.02 Pending handover confirmation before other flows.
+    if conversation.state == ConversationState.BOT_ACTIVE.value:
+        context = _get_conversation_context(conversation)
+        confirmation = _get_handover_confirmation(context)
+        if confirmation:
+            if not _is_handover_confirmation_active(confirmation, now):
+                context = _set_handover_confirmation(context, None)
+                _set_conversation_context(conversation, context)
+            else:
+                decision = classify_confirmation(message_text)
+                if decision == "yes":
+                    context = _set_handover_confirmation(context, None)
+                    _set_conversation_context(conversation, context)
+                    _reset_low_confidence_retry(conversation)
+
+                    escalation_message = confirmation.get("user_message") or message_text
+                    esc_result = escalate_to_pending(
+                        db=db,
+                        conversation=conversation,
+                        user_message=escalation_message,
+                        trigger_type="intent",
+                        trigger_value="low_confidence",
+                    )
+
+                    if esc_result.ok:
+                        handover = esc_result.value
+                        telegram_sent = send_telegram_notification(
+                            db=db,
+                            handover=handover,
+                            conversation=conversation,
+                            user=user,
+                            message=escalation_message,
+                        )
+                        bot_response = MSG_ESCALATED
+                        result_message = (
+                            f"Handover confirmed, telegram={'sent' if telegram_sent else 'failed'}"
+                        )
+                    else:
+                        bot_response = MSG_AI_ERROR
+                        result_message = f"Handover confirm escalation failed: {esc_result.error}"
+
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = send_bot_response(db, client.id, remote_jid, bot_response)
+                    if not sent:
+                        result_message = f"{result_message}; response_send=failed"
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
+
+                if decision == "no":
+                    context = _set_handover_confirmation(context, None)
+                    _set_conversation_context(conversation, context)
+                    _reset_low_confidence_retry(conversation)
+
+                    bot_response = MSG_HANDOVER_DECLINED
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = send_bot_response(db, client.id, remote_jid, bot_response)
+                    result_message = "Handover declined, asked for salon details" if sent else "Handover decline send failed"
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
+
+                context = _set_handover_confirmation(context, None)
+                _set_conversation_context(conversation, context)
+
     # 9.05 Booking flow: collect slots before intent/LLM.
     if conversation.state == ConversationState.BOT_ACTIVE.value:
         context = _get_conversation_context(conversation)
@@ -803,18 +972,59 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
             )
 
     # 10. Classify intent (expensive). Protect against accidental escalations on short/noisy messages.
-    if is_greeting_message(message_text):
+    is_greeting = is_greeting_message(message_text)
+    is_thanks = is_thanks_message(message_text)
+    is_ack = is_acknowledgement_message(message_text)
+    is_low_signal = is_low_signal_message(message_text)
+    is_status_question = is_bot_status_question(message_text)
+
+    if is_greeting:
         intent = Intent.GREETING
         logger.info("Intent shortcut: greeting")
-    elif is_thanks_message(message_text):
+    elif is_thanks:
         intent = Intent.THANKS
         logger.info("Intent shortcut: thanks")
-    elif is_acknowledgement_message(message_text) or is_low_signal_message(message_text):
+    elif is_ack or is_low_signal:
         intent = Intent.OTHER
         logger.info("Intent shortcut: acknowledgement/low-signal -> other")
     else:
         intent = classify_intent(message_text)
         logger.info(f"Intent classified: {intent.value}")
+
+    domain_intent = DomainIntent.UNKNOWN
+    domain_in_score = 0.0
+    domain_out_score = 0.0
+    domain_meta: dict = {}
+    if (
+        conversation.state == ConversationState.BOT_ACTIVE.value
+        and not (is_greeting or is_thanks or is_ack or is_low_signal)
+        and not is_status_question
+    ):
+        domain_intent, domain_in_score, domain_out_score, domain_meta = classify_domain_with_scores(
+            message_text, client.config if client else None
+        )
+        log_scores = _is_env_enabled(os.environ.get("DOMAIN_ROUTER_LOG_SCORES"), default=False)
+        if log_scores and (domain_intent != DomainIntent.UNKNOWN or max(domain_in_score, domain_out_score) >= 0.45):
+            logger.info(
+                "Domain scores",
+                extra={
+                    "context": {
+                        "client_slug": request.client_slug,
+                        "remote_jid": remote_jid,
+                        "intent": intent.value,
+                        "domain_intent": domain_intent.value,
+                        "in_score": round(domain_in_score, 4),
+                        "out_score": round(domain_out_score, 4),
+                        "in_threshold": domain_meta.get("in_threshold"),
+                        "out_threshold": domain_meta.get("out_threshold"),
+                        "margin": domain_meta.get("margin"),
+                        "anchors_in": domain_meta.get("anchors_in"),
+                        "anchors_out": domain_meta.get("anchors_out"),
+                        "message_len": len(message_text),
+                        "message_preview": message_text[:80],
+                    }
+                },
+            )
 
     # 10.1 Self-healing moved to health_service.check_and_heal_conversations()
     # Call POST /admin/heal periodically to fix broken states
@@ -822,6 +1032,7 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
     # 9.1 Greeting/thanks: always respond politely without escalation
     if intent in [Intent.GREETING, Intent.THANKS]:
         bot_response = GREETING_RESPONSE if intent == Intent.GREETING else THANKS_RESPONSE
+        _reset_low_confidence_retry(conversation)
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = send_bot_response(db, client.id, remote_jid, bot_response)
         result_message = "Greeting response sent" if sent else "Greeting response failed"
@@ -836,6 +1047,42 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = send_bot_response(db, client.id, remote_jid, bot_response)
         result_message = "Pending status response sent" if sent else "Pending status response failed"
+        db.commit()
+        return WebhookResponse(
+            success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
+        )
+
+    # 9.3 Bot status questions: respond without escalation
+    if is_status_question:
+        bot_response = BOT_STATUS_RESPONSE
+        _reset_low_confidence_retry(conversation)
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = send_bot_response(db, client.id, remote_jid, bot_response)
+        result_message = "Bot status response sent" if sent else "Bot status response failed"
+        db.commit()
+        return WebhookResponse(
+            success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
+        )
+
+    # 9.35 Domain routing: respond to off-topic messages without escalation
+    if domain_intent == DomainIntent.OUT_OF_DOMAIN and conversation.state == ConversationState.BOT_ACTIVE.value:
+        bot_response = OUT_OF_DOMAIN_RESPONSE
+        _reset_low_confidence_retry(conversation)
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = send_bot_response(db, client.id, remote_jid, bot_response)
+        result_message = "Domain out-of-domain response sent" if sent else "Domain out-of-domain response failed"
+        db.commit()
+        return WebhookResponse(
+            success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
+        )
+
+    # 9.4 Out-of-domain: respond without escalation
+    if intent == Intent.OUT_OF_DOMAIN and conversation.state == ConversationState.BOT_ACTIVE.value:
+        bot_response = OUT_OF_DOMAIN_RESPONSE
+        _reset_low_confidence_retry(conversation)
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = send_bot_response(db, client.id, remote_jid, bot_response)
+        result_message = "Out-of-domain response sent" if sent else "Out-of-domain response failed"
         db.commit()
         return WebhookResponse(
             success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
@@ -936,42 +1183,39 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
                     sent = send_bot_response(db, client.id, remote_jid, bot_response)
                     result_message = "Low confidence while pending, responded without re-escalation"
                 else:
-                    # Low RAG confidence — first ask clarifying question, only then create a handover.
+                    # Low RAG confidence — ask clarifying question before escalation (up to a limit).
+                    context = _get_conversation_context(conversation)
+                    retry_count = _get_low_confidence_retry_count(context)
                     if should_offer_low_confidence_retry(conversation, now):
+                        retry_count = 0
+
+                    if retry_count < LOW_CONFIDENCE_MAX_RETRIES:
                         bot_response = MSG_LOW_CONFIDENCE_RETRY
                         conversation.retry_offered_at = now
+                        context = _set_low_confidence_retry_count(context, retry_count + 1)
+                        _set_conversation_context(conversation, context)
                         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                         sent = send_bot_response(db, client.id, remote_jid, bot_response)
                         result_message = "Low confidence: asked clarification before escalation"
                     else:
-                        esc_result = escalate_to_pending(
-                            db=db,
-                            conversation=conversation,
-                            user_message=message_text,
-                            trigger_type="intent",
-                            trigger_value="low_confidence",
-                        )
+                        confirmation = {
+                            "status": "pending",
+                            "asked_at": now.isoformat(),
+                            "trigger_type": "low_confidence",
+                            "trigger_value": "low_confidence",
+                            "user_message": message_text,
+                        }
+                        context = _set_handover_confirmation(context, confirmation)
+                        _set_conversation_context(conversation, context)
 
-                        if esc_result.ok:
-                            handover = esc_result.value
-                            telegram_sent = send_telegram_notification(
-                                db=db,
-                                handover=handover,
-                                conversation=conversation,
-                                user=user,
-                                message=message_text,
-                            )
-                            bot_response = MSG_LOW_CONFIDENCE
-                            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                            sent = send_bot_response(db, client.id, remote_jid, bot_response)
-                            result_message = (
-                                f"Low confidence escalation, telegram={'sent' if telegram_sent else 'failed'}"
-                            )
-                        else:
-                            bot_response = MSG_LOW_CONFIDENCE
-                            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                            sent = send_bot_response(db, client.id, remote_jid, bot_response)
-                            result_message = f"Low confidence, escalation failed: {esc_result.error}"
+                        bot_response = MSG_HANDOVER_CONFIRM
+                        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                        sent = send_bot_response(db, client.id, remote_jid, bot_response)
+                        result_message = (
+                            "Low confidence: asked for handover confirmation"
+                            if sent
+                            else "Low confidence: handover confirmation send failed"
+                        )
 
             elif confidence == "bot_inactive":
                 result_message = f"Bot not active (state: {conversation.state})"
@@ -979,7 +1223,7 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
             elif response_text:
                 bot_response = response_text
                 logger.debug(f"bot_response: {bot_response[:100] if bot_response else 'None/Empty'}...")
-                conversation.retry_offered_at = None
+                _reset_low_confidence_retry(conversation)
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                 sent = send_bot_response(db, client.id, remote_jid, bot_response)
                 result_message = "Message sent" if sent else "Failed to send"

@@ -1,8 +1,10 @@
 from uuid import uuid4
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.database import get_db
 from app.main import app
 from app.schemas.message import MessageRequest, MessageResponse
 
@@ -38,3 +40,66 @@ class TestMessageSchemas:
         resp = MessageResponse(success=True, conversation_id=uuid4(), state="bot_active", bot_response="Test response")
         assert resp.success == True
         assert resp.state == "bot_active"
+
+
+def _build_db(client_slug: str, webhook_secret: str):
+    client = Mock()
+    client.id = "client-123"
+    client.name = client_slug
+
+    settings = Mock()
+    settings.webhook_secret = webhook_secret
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+
+    db = Mock()
+    db.query.side_effect = [client_query, settings_query]
+    return db
+
+
+class TestWebhookAuth:
+    def _client_with_db(self, db):
+        def _override_get_db():
+            yield db
+
+        app.dependency_overrides[get_db] = _override_get_db
+        return TestClient(app)
+
+    def test_missing_secret_returns_401(self):
+        db = _build_db("test", "secret")
+        client = self._client_with_db(db)
+        try:
+            response = client.post("/webhook", json={"client_slug": "test", "body": {"message": "hi"}})
+            assert response.status_code == 401
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_invalid_secret_returns_401(self):
+        db = _build_db("test", "secret")
+        client = self._client_with_db(db)
+        try:
+            response = client.post(
+                "/webhook",
+                json={"client_slug": "test", "body": {"message": "hi"}},
+                headers={"X-Webhook-Secret": "wrong"},
+            )
+            assert response.status_code == 401
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_valid_secret_returns_200(self):
+        db = _build_db("test", "secret")
+        client = self._client_with_db(db)
+        try:
+            response = client.post(
+                "/webhook",
+                json={"client_slug": "test", "body": {"message": "hi"}},
+                headers={"X-Webhook-Secret": "secret"},
+            )
+            assert response.status_code == 200
+        finally:
+            app.dependency_overrides.clear()

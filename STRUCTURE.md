@@ -13,6 +13,7 @@
 | `STRUCTURE.md` | Этот файл — карта проекта | Оба (каждую сессию) |
 | `HOW_TO_WORK.md` | Инструкция для Жанбола | Жанбол |
 | `TECH.md` | Доступы, команды, данные сервера | Кодер |
+| `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 
 ---
@@ -44,6 +45,17 @@
 | `PRODUCT.md` | Тарифы, roadmap продукта | При вопросах о ценах |
 | `MARKET.md` | Исследования, метрики, ниши | При вопросах о рынке |
 | `VISION.md` | Видение продукта | Редко |
+
+---
+
+## docs/ — Контекст проекта
+
+| Файл | Содержание |
+|------|------------|
+| `IMPERIUM_CONTEXT.yaml` | Единый контекст проекта (факты + evidence) |
+| `IMPERIUM_DECISIONS.yaml` | CEO-level решения (policy) |
+| `IMPERIUM_GAPS.yaml` | Критические пробелы и MVP фиксы |
+| `SESSION_START_PROMPT.txt` | Стартовый промпт для новых сессий |
 
 ---
 
@@ -140,6 +152,7 @@ truffles-api/
 
 Миграции:
 - `ops/migrations/009_add_conversation_context.sql` — JSONB `conversations.context` для диалогового контекста/слотов.
+- `ops/migrations/011_add_webhook_secret.sql` — `client_settings.webhook_secret` для защиты /webhook.
 
 **Старые скрипты:** `.archive/ops_old/` — не в git.
 

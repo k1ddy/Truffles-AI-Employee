@@ -387,11 +387,14 @@ python3 sync_client.py salon_elita ./knowledge/salon_elita/
 
 1. Зайти в ChatFlow
 2. Добавить номер WhatsApp заказчика
-3. Настроить webhook:
+3. Сгенерировать webhook secret (32+ символов) и записать в `client_settings.webhook_secret`
+   - Пример (SQL): `UPDATE client_settings SET webhook_secret = '<SECRET>' WHERE client_id = '<CLIENT_ID>';`
+4. Настроить webhook:
    ```
    URL: https://n8n.truffles.kz/webhook/a29b2ad2-9485-476c-897d-34799c3f940b/salon_elita
    ```
-4. Сохранить
+5. Добавить header `X-Webhook-Secret: <SECRET>` в ChatFlow/n8n
+6. Сохранить
 
 ## Шаг 9: Тестирование
 

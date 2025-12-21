@@ -39,7 +39,7 @@
    - Бот говорит "Я виртуальный помощник" при приветствии
 4. [x] **Confidence threshold** — score < 0.5 → не выдумывать ✅
    - Реализовано в ai_service.py
-5. [ ] **Low confidence: уточнить → потом заявка** — сейчас `low_confidence` сразу создаёт handover; нужно 1–2 уточняющих вопроса до эскалации
+5. [x] **Low confidence: уточнить → потом заявка** — теперь 1–2 уточнения + подтверждение перед эскалацией
 
 ### Следующее (по порядку)
 
@@ -116,6 +116,11 @@
 | **Состояние** | `STATE.md` | Каждую сессию |
 | **Структура** | `STRUCTURE.md` | При добавлении/удалении файлов |
 | **Техника** | `TECH.md` | При изменении доступов/команд |
+| **Контекст** | `docs/IMPERIUM_CONTEXT.yaml` | При изменении фактов/архитектуры |
+| **Решения** | `docs/IMPERIUM_DECISIONS.yaml` | При изменении CEO-level policy |
+| **Gaps** | `docs/IMPERIUM_GAPS.yaml` | При закрытии/открытии критических пробелов |
+| **Старт сессии** | `docs/SESSION_START_PROMPT.txt` | При изменении правил запуска |
+| **Сводка** | `SUMMARY.md` | После инвентаризации/крупных изменений |
 | | | |
 | **Эскалация** | `SPECS/ESCALATION.md` | handovers, напоминания, Telegram |
 | **Поведение бота** | `SPECS/CONSULTANT.md` | промпт, правила ответов |
@@ -125,6 +130,7 @@
 | **Мультитенант** | `SPECS/MULTI_TENANT.md` | онбординг, новые клиенты |
 | | | |
 | **Миграции** | `ops/migrations/*.sql` | при изменении схемы БД |
+| **Миграции** | `ops/migrations/011_add_webhook_secret.sql` | webhook secret per tenant |
 | **Требования** | `STRATEGY/REQUIREMENTS.md` | Требования Жанбола |
 | **Roadmap** | `STRATEGY/TECH_ROADMAP.md` | Технический план |
 | **Продукт** | `STRATEGY/PRODUCT.md` | Тарифы, фичи |
@@ -138,7 +144,69 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
-### 2025-12-19 — AL наблюдаемость + дедуп + KB sync
+### 2025-12-20 — Health check: убрали ложные алерты
+
+**Диагностика:**
+- `ops/health_check.py` использовал статические IP контейнеров → после рестарта IP меняются, «Connection refused».
+- `https://n8n.truffles.kz/healthz` возвращает 404 → алерты даже при живом n8n.
+
+**Что сделали:**
+- `ops/health_check.py` теперь получает IP контейнера через `docker inspect`.
+- n8n проверяется по корню домена и допускает 200/30x/401/403.
+- Qdrant API key берётся из env (fallback на старый).
+
+### 2025-12-20 — Traefik не видел docker → n8n/api недоступны
+
+**Диагностика:**
+- Traefik отдавал 404 по `n8n.truffles.kz` и `api.truffles.kz`.
+- В логах: `client version 1.24 is too old` → docker provider не поднимался.
+
+**Что сделали:**
+- Обновили Traefik до `v2.11` в `/home/zhan/infrastructure/docker-compose.yml`.
+- Перезапустили контейнер, docker provider поднялся, маршруты появились.
+
+### 2025-12-20 — Консолидация: один корень `/home/zhan/truffles`
+
+**Диагностика:**
+- Было 3 корня: `/home/zhan/truffles`, `/home/zhan/Truffles-AI-Employee`, `/home/zhan/truffles-api`.
+- Команды/доки ссылались на разные пути → путаница.
+
+**Что сделали:**
+- Скопировали актуальные документы и директории в `/home/zhan/truffles`.
+- Перенесли API‑код в `/home/zhan/truffles/truffles-api`.
+- Обновили пути в `restart_api.sh` и документах.
+- Архивировали старый `/home/zhan/Truffles-AI-Employee` в `/home/zhan/_trash`.
+
+### 2025-12-20 - Guardrails: оффтоп и "бот молчит" без заявок
+
+**Диагностика:**
+- Оффтоп ("трусы") и вопрос "почему не отвечает?" уходили в low_confidence/frustration → создавалась заявка.
+
+**Что сделали:**
+- Добавили intent `out_of_domain` в классификатор.
+- Ответ на `out_of_domain` без эскалации (возврат к теме салона).
+- Guardrail на вопросы "бот не отвечает" → шаблонный ответ без заявки.
+- Подняли `DEBOUNCE_INACTIVITY_SECONDS` до 3.0 (лучше склейка коротких сообщений).
+- Обновили FAQ demo_salon ("Чем вы занимаетесь?") и пересинхронизировали KB.
+- Intent классификатор перевели на `temperature=0.0` (меньше случайных эскалаций).
+- Для low_confidence добавили до 2 уточнений перед эскалацией.
+
+### 2025-12-20 — Domain router + подтверждение эскалации
+
+**Диагностика:**
+- Off-topic и низкая уверенность всё ещё могли создавать заявки менеджерам.
+
+**Что сделали:**
+- Добавили embedding-based domain router (якоря in/out) и ранний оффтоп-ответ без эскалации.
+- Добавили подтверждение эскалации после low_confidence (да/нет) с окном 15 минут.
+- Исправили битые domain anchors (кодировка).
+- Протянули логику в `/webhook` и legacy `/message`.
+- Задеплоили `webhook.py`, `message.py`, `intent_service.py` и перезапустили API.
+- Добавили domain router config per-client (anchors + thresholds) в `clients.config`.
+- Включили логирование domain scores через `DOMAIN_ROUTER_LOG_SCORES=1`.
+- Перезалили `intent_service.py`, `webhook.py`, `message.py` и перезапустили API.
+
+### 2025-12-19 - AL наблюдаемость + дедуп + KB sync
 
 **Диагностика:**
 - Нет видимости успехов/пропусков AL; дедуп messageId опирался на Redis/БД сообщений; KB demo могла быть несинхронна.
@@ -382,7 +450,7 @@ Runbook (если “всё странно” или сессия оборвал
 
 ```bash
 # 1. Скопировать файлы
-scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles-api/...
+scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles/truffles-api/...
 
 # 2. Пересобрать и запустить
 ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
@@ -542,4 +610,4 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 
 ---
 
-*Последнее обновление: 2025-12-18*
+*Последнее обновление: 2025-12-20*
