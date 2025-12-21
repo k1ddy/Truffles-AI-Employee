@@ -92,12 +92,12 @@ WEBHOOK_SECRET_HEADER = "X-Webhook-Secret"
 WEBHOOK_SECRET_QUERY_PARAM = "webhook_secret"
 WEBHOOK_SECRET_QUERY_FALLBACK = "secret"
 
-# Webhook auth (ChatFlow/n8n):
-# - Preferred: set client_settings.webhook_secret and send X-Webhook-Secret header.
-# - Fallback: add ?webhook_secret=... (or ?secret=...) to the webhook URL,
-#   or call POST /webhook/<secret> if headers are not supported.
-# Secret issuance/rotation: generate 32+ chars, store in client_settings.webhook_secret,
-# then update ChatFlow URL/header. Old secret becomes invalid immediately.
+# Webhook auth (ChatFlow/n8n) quick guide:
+# 1) Issue secret: `openssl rand -hex 16` -> store in client_settings.webhook_secret.
+# 2) Configure webhook URL (n8n -> API):
+#    - Preferred header: X-Webhook-Secret: <secret>
+#    - Fallback URL: /webhook/<secret> OR /webhook?webhook_secret=<secret> (or ?secret=...)
+# 3) Rotation: set new secret in DB, update ChatFlow/n8n config; old secret invalid immediately.
 
 
 def _verify_webhook_secret(provided: str | None, expected: str | None) -> bool:

@@ -73,10 +73,7 @@ class TestWebhookAuth:
         db = _build_db("test", "secret")
         client = self._client_with_db(db)
         try:
-            response = client.post(
-                "/webhook",
-                json={"client_slug": "test", "body": {"message": "hi", "metadata": {"remoteJid": "1@wa"}}},
-            )
+            response = client.post("/webhook", json={"client_slug": "test", "body": {"message": "hi"}})
             assert response.status_code == 401
         finally:
             app.dependency_overrides.clear()
@@ -87,7 +84,7 @@ class TestWebhookAuth:
         try:
             response = client.post(
                 "/webhook",
-                json={"client_slug": "test", "body": {"message": "hi", "metadata": {"remoteJid": "1@wa"}}},
+                json={"client_slug": "test", "body": {"message": "hi"}},
                 headers={"X-Webhook-Secret": "wrong"},
             )
             assert response.status_code == 401
@@ -100,7 +97,7 @@ class TestWebhookAuth:
         try:
             response = client.post(
                 "/webhook",
-                json={"client_slug": "test", "body": {"message": "hi", "metadata": {"remoteJid": "1@wa"}}},
+                json={"client_slug": "test", "body": {"message": "hi"}},
                 headers={"X-Webhook-Secret": "secret"},
             )
             assert response.status_code == 200
@@ -114,7 +111,7 @@ class TestWebhookAuth:
         try:
             response = client.post(
                 "/webhook",
-                json={"client_slug": "test", "body": {"message": "hi", "metadata": {"remoteJid": "1@wa"}}},
+                json={"client_slug": "test", "body": {"message": "hi"}},
             )
             assert response.status_code == 200
             mock_alert.assert_called_once()
@@ -127,7 +124,7 @@ class TestWebhookAuth:
         try:
             response = client.post(
                 "/webhook?webhook_secret=secret",
-                json={"client_slug": "test", "body": {"message": "hi", "metadata": {"remoteJid": "1@wa"}}},
+                json={"client_slug": "test", "body": {"message": "hi"}},
             )
             assert response.status_code == 200
         finally:
@@ -139,7 +136,7 @@ class TestWebhookAuth:
         try:
             response = client.post(
                 "/webhook/secret",
-                json={"client_slug": "test", "body": {"message": "hi", "metadata": {"remoteJid": "1@wa"}}},
+                json={"client_slug": "test", "body": {"message": "hi"}},
             )
             assert response.status_code == 200
         finally:
