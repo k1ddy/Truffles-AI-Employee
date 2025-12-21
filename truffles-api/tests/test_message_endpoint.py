@@ -1,5 +1,5 @@
 from uuid import uuid4
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -42,7 +42,7 @@ class TestMessageSchemas:
         assert resp.state == "bot_active"
 
 
-def _build_db(client_slug: str, webhook_secret: str):
+def _build_db(client_slug: str, webhook_secret: str | None):
     client = Mock()
     client.id = "client-123"
     client.name = client_slug
@@ -73,7 +73,10 @@ class TestWebhookAuth:
         db = _build_db("test", "secret")
         client = self._client_with_db(db)
         try:
-            response = client.post("/webhook", json={"client_slug": "test", "body": {"message": "hi"}})
+            response = client.post(
+                "/webhook",
+                json={"client_slug": "test", "body": {"message": "hi", "metadata": {"remoteJid": "1@wa"}}},
+            )
             assert response.status_code == 401
         finally:
             app.dependency_overrides.clear()
@@ -84,7 +87,7 @@ class TestWebhookAuth:
         try:
             response = client.post(
                 "/webhook",
-                json={"client_slug": "test", "body": {"message": "hi"}},
+                json={"client_slug": "test", "body": {"message": "hi", "metadata": {"remoteJid": "1@wa"}}},
                 headers={"X-Webhook-Secret": "wrong"},
             )
             assert response.status_code == 401
@@ -97,8 +100,46 @@ class TestWebhookAuth:
         try:
             response = client.post(
                 "/webhook",
-                json={"client_slug": "test", "body": {"message": "hi"}},
+                json={"client_slug": "test", "body": {"message": "hi", "metadata": {"remoteJid": "1@wa"}}},
                 headers={"X-Webhook-Secret": "secret"},
+            )
+            assert response.status_code == 200
+        finally:
+            app.dependency_overrides.clear()
+
+    @patch("app.routers.webhook.alert_warning")
+    def test_missing_secret_allows_request_with_warning(self, mock_alert):
+        db = _build_db("test", None)
+        client = self._client_with_db(db)
+        try:
+            response = client.post(
+                "/webhook",
+                json={"client_slug": "test", "body": {"message": "hi", "metadata": {"remoteJid": "1@wa"}}},
+            )
+            assert response.status_code == 200
+            mock_alert.assert_called_once()
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_query_secret_fallback_returns_200(self):
+        db = _build_db("test", "secret")
+        client = self._client_with_db(db)
+        try:
+            response = client.post(
+                "/webhook?webhook_secret=secret",
+                json={"client_slug": "test", "body": {"message": "hi", "metadata": {"remoteJid": "1@wa"}}},
+            )
+            assert response.status_code == 200
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_path_secret_fallback_returns_200(self):
+        db = _build_db("test", "secret")
+        client = self._client_with_db(db)
+        try:
+            response = client.post(
+                "/webhook/secret",
+                json={"client_slug": "test", "body": {"message": "hi", "metadata": {"remoteJid": "1@wa"}}},
             )
             assert response.status_code == 200
         finally:

@@ -18,6 +18,7 @@ from app.services.conversation_service import (
     get_or_create_conversation,
     get_or_create_user,
 )
+from app.services.alert_service import alert_warning
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.ai_service import (
     BOT_STATUS_RESPONSE,
@@ -88,12 +89,40 @@ def _get_dedup_settings() -> tuple[int, str, float]:
 
 
 WEBHOOK_SECRET_HEADER = "X-Webhook-Secret"
+WEBHOOK_SECRET_QUERY_PARAM = "webhook_secret"
+WEBHOOK_SECRET_QUERY_FALLBACK = "secret"
+
+# Webhook auth (ChatFlow/n8n):
+# - Preferred: set client_settings.webhook_secret and send X-Webhook-Secret header.
+# - Fallback: add ?webhook_secret=... (or ?secret=...) to the webhook URL,
+#   or call POST /webhook/<secret> if headers are not supported.
+# Secret issuance/rotation: generate 32+ chars, store in client_settings.webhook_secret,
+# then update ChatFlow URL/header. Old secret becomes invalid immediately.
 
 
 def _verify_webhook_secret(provided: str | None, expected: str | None) -> bool:
     if not expected or not provided:
         return False
     return hmac.compare_digest(provided, expected)
+
+
+def _extract_webhook_secret(
+    http_request: Request,
+    *,
+    path_secret: str | None,
+    query_secret: str | None,
+    query_webhook_secret: str | None,
+) -> tuple[str | None, str]:
+    header_secret = http_request.headers.get(WEBHOOK_SECRET_HEADER)
+    if header_secret:
+        return header_secret, "header"
+    if query_webhook_secret:
+        return query_webhook_secret, f"query:{WEBHOOK_SECRET_QUERY_PARAM}"
+    if query_secret:
+        return query_secret, f"query:{WEBHOOK_SECRET_QUERY_FALLBACK}"
+    if path_secret:
+        return path_secret, "path"
+    return None, "missing"
 
 
 def _get_debounce_redis(redis_url: str, socket_timeout_seconds: float):
@@ -617,11 +646,41 @@ async def debug_webhook(request: Request):
     return {"received": body}
 
 
+@router.post("/webhook/{path_secret}", response_model=WebhookResponse)
+async def handle_webhook_with_secret(
+    path_secret: str,
+    payload: WebhookRequest,
+    http_request: Request,
+    db: Session = Depends(get_db),
+):
+    return await _handle_webhook(payload, http_request, db, path_secret=path_secret)
+
+
 @router.post("/webhook", response_model=WebhookResponse)
 async def handle_webhook(
     payload: WebhookRequest,
     http_request: Request,
     db: Session = Depends(get_db),
+    webhook_secret: str | None = None,
+    secret: str | None = None,
+):
+    return await _handle_webhook(
+        payload,
+        http_request,
+        db,
+        webhook_secret=webhook_secret,
+        secret=secret,
+    )
+
+
+async def _handle_webhook(
+    payload: WebhookRequest,
+    http_request: Request,
+    db: Session,
+    *,
+    path_secret: str | None = None,
+    secret: str | None = None,
+    webhook_secret: str | None = None,
 ):
     """Handle raw webhook from n8n (same format as ChatFlow webhook)."""
     logger.info(f"Webhook received: client_slug={payload.client_slug}")
@@ -634,16 +693,19 @@ async def handle_webhook(
 
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
     expected_secret = settings.webhook_secret if settings else None
-    provided_secret = http_request.headers.get(WEBHOOK_SECRET_HEADER)
+    provided_secret, secret_source = _extract_webhook_secret(
+        http_request,
+        path_secret=path_secret,
+        query_secret=secret,
+        query_webhook_secret=webhook_secret,
+    )
 
-    if not _verify_webhook_secret(provided_secret, expected_secret):
-        if not expected_secret:
-            reason = "secret_not_configured"
-        elif not provided_secret:
-            reason = "missing_header"
-        else:
-            reason = "invalid_secret"
-        logger.warning(f"Webhook auth failed: client_slug={payload.client_slug} reason={reason}")
+    if not expected_secret:
+        logger.warning(f"Webhook secret missing: client_slug={payload.client_slug} source={secret_source}")
+        alert_warning("Webhook secret missing", {"client_slug": payload.client_slug})
+    elif not _verify_webhook_secret(provided_secret, expected_secret):
+        reason = "missing_secret" if not provided_secret else "invalid_secret"
+        logger.warning(f"Webhook auth failed: client_slug={payload.client_slug} reason={reason} source={secret_source}")
         raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
     metadata = body.metadata
