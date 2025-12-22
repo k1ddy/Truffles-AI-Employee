@@ -2,22 +2,23 @@ import asyncio
 import os
 import re
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from starlette.requests import ClientDisconnect
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal, get_db
+from app.database import get_db
 from app.logging_config import get_logger
-from app.models import Client, ClientSettings, Conversation, Handover, Message
+from app.models import Client, ClientSettings, Conversation, Handover, Message, User
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.chatflow_service import send_bot_response
 from app.services.conversation_service import (
     get_or_create_conversation,
     get_or_create_user,
 )
+from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.ai_service import (
     BOT_STATUS_RESPONSE,
@@ -232,24 +233,6 @@ async def _parse_webhook_request(
     except Exception as exc:
         logger.warning("Webhook payload validation failed", extra={"context": {"error": str(exc)}})
         return WebhookResponse(success=False, message="Invalid webhook payload")
-
-
-async def _process_webhook_background(
-    parsed: WebhookRequest,
-    *,
-    provided_secret: str | None,
-    enforce_secret: bool,
-) -> None:
-    db = SessionLocal()
-    try:
-        await _handle_webhook_payload(parsed, db, provided_secret=provided_secret, enforce_secret=enforce_secret)
-    except Exception as exc:
-        logger.error(
-            "Async webhook processing failed",
-            extra={"context": {"client_slug": parsed.client_slug, "error": str(exc)}},
-        )
-    finally:
-        db.close()
 
 
 def _get_debounce_redis(redis_url: str, socket_timeout_seconds: float):
@@ -813,10 +796,13 @@ async def handle_webhook_direct(client_slug: str, request: Request, db: Session 
     elif not provided_secret:
         alert_warning("Webhook secret missing", {"client_slug": parsed.client_slug})
 
-    asyncio.create_task(
-        _process_webhook_background(parsed, provided_secret=provided_secret, enforce_secret=False)
+    return await _handle_webhook_payload(
+        parsed,
+        db,
+        provided_secret=provided_secret,
+        enforce_secret=False,
+        enqueue_only=True,
     )
-    return WebhookResponse(success=True, message="Accepted", conversation_id=None, bot_response=None)
 
 
 @router.get("/webhook/{client_slug}")
@@ -834,6 +820,7 @@ async def handle_webhook(payload: WebhookRequest, http_request: Request, db: Ses
         db,
         provided_secret=provided_secret,
         enforce_secret=True,
+        enqueue_only=True,
     )
 
 
@@ -843,6 +830,9 @@ async def _handle_webhook_payload(
     *,
     provided_secret: str | None,
     enforce_secret: bool,
+    enqueue_only: bool = False,
+    skip_persist: bool = False,
+    conversation_id: UUID | None = None,
 ) -> WebhookResponse:
     """Shared webhook processing for inbound ChatFlow/n8n payloads."""
     logger.info(f"Webhook received: client_slug={payload.client_slug}")
@@ -874,30 +864,77 @@ async def _handle_webhook_payload(
     if not message_text:
         return WebhookResponse(success=False, message="Empty message")
 
-    if await is_duplicate_message_id(db=db, client_id=client.id, message_id=message_id):
-        logger.info(f"Duplicate message_id skipped: {message_id}")
-        return WebhookResponse(success=True, message="Duplicate message_id", conversation_id=None, bot_response=None)
+    if skip_persist:
+        if not conversation_id:
+            return WebhookResponse(success=False, message="Missing conversation_id")
+        conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        if not conversation:
+            return WebhookResponse(success=False, message="Conversation not found")
+        user = db.query(User).filter(User.id == conversation.user_id).first()
+        if not user:
+            return WebhookResponse(success=False, message="User not found")
+    else:
+        if await is_duplicate_message_id(db=db, client_id=client.id, message_id=message_id):
+            logger.info(f"Duplicate message_id skipped: {message_id}")
+            return WebhookResponse(success=True, message="Duplicate message_id", conversation_id=None, bot_response=None)
 
-    # 1. Get or create user
-    user = get_or_create_user(db, client.id, remote_jid)
+        # 1. Get or create user
+        user = get_or_create_user(db, client.id, remote_jid)
 
-    # 2. Find existing conversation by handover.channel_ref or create new
-    conversation = find_active_conversation_by_channel_ref(db, client.id, remote_jid)
-    if not conversation:
-        conversation = get_or_create_conversation(db, client.id, user.id, "whatsapp")
+        # 2. Find existing conversation by handover.channel_ref or create new
+        conversation = find_active_conversation_by_channel_ref(db, client.id, remote_jid)
+        if not conversation:
+            conversation = get_or_create_conversation(db, client.id, user.id, "whatsapp")
 
-    # 3. Save user message (keep message_id for dedup)
-    message_metadata = metadata.model_dump(exclude_none=True) if metadata else {}
-    if message_id:
-        message_metadata["message_id"] = message_id
-    save_message(
-        db,
-        conversation.id,
-        client.id,
-        role="user",
-        content=message_text,
-        message_metadata=message_metadata,
-    )
+        # 3. Save user message (keep message_id for dedup)
+        message_metadata = metadata.model_dump(exclude_none=True) if metadata else {}
+        if message_id:
+            message_metadata["message_id"] = message_id
+        save_message(
+            db,
+            conversation.id,
+            client.id,
+            role="user",
+            content=message_text,
+            message_metadata=message_metadata,
+        )
+
+        if enqueue_only:
+            inbound_message_id = build_inbound_message_id(
+                message_id, remote_jid, metadata.timestamp if metadata else None, message_text
+            )
+            payload_json = payload.model_dump(exclude_none=True)
+            enqueued = enqueue_outbox_message(
+                db,
+                client_id=client.id,
+                conversation_id=conversation.id,
+                inbound_message_id=inbound_message_id,
+                payload_json=payload_json,
+            )
+            if enqueued:
+                logger.info(
+                    "Outbox enqueued",
+                    extra={
+                        "context": {
+                            "client_slug": payload.client_slug,
+                            "conversation_id": str(conversation.id),
+                            "inbound_message_id": inbound_message_id,
+                        }
+                    },
+                )
+            else:
+                logger.info(
+                    "Outbox duplicate skipped",
+                    extra={
+                        "context": {
+                            "client_slug": payload.client_slug,
+                            "conversation_id": str(conversation.id),
+                            "inbound_message_id": inbound_message_id,
+                        }
+                    },
+                )
+            db.commit()
+            return WebhookResponse(success=True, message="Accepted", conversation_id=conversation.id, bot_response=None)
 
     # 4. Update last_message_at (keep previous for session timeout check)
     now = datetime.now(timezone.utc)

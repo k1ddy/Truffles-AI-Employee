@@ -3,15 +3,19 @@
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.logging_config import get_logger
 from app.models import Client, ClientSettings, Prompt
+from app.schemas.webhook import WebhookRequest
 from app.services.health_service import check_and_heal_conversations, get_system_health
+from app.services.outbox_service import claim_pending_outbox, mark_outbox_status
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+logger = get_logger("outbox")
 
 
 # === SCHEMAS ===
@@ -41,6 +45,14 @@ class VersionResponse(BaseModel):
 
 
 # === PROMPT ENDPOINTS ===
+
+
+def _require_admin_token(provided: Optional[str]) -> None:
+    expected = os.environ.get("ALERTS_ADMIN_TOKEN")
+    if not expected:
+        raise HTTPException(status_code=500, detail="ALERTS_ADMIN_TOKEN not configured")
+    if not provided or provided != expected:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
 
 
 @router.get("/prompt/{client_slug}")
@@ -180,6 +192,72 @@ async def update_settings(client_slug: str, data: SettingsUpdate, db: Session = 
     db.commit()
 
     return await get_settings(client_slug, db)
+
+
+# === OUTBOX ENDPOINTS ===
+
+
+@router.post("/outbox/process")
+async def process_outbox(
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    _require_admin_token(x_admin_token)
+    limit = int(os.environ.get("OUTBOX_PROCESS_LIMIT", "10"))
+    rows = claim_pending_outbox(db, limit=limit)
+    results = {"claimed": len(rows), "sent": 0, "failed": 0}
+
+    if not rows:
+        return results
+
+    from app.routers.webhook import _handle_webhook_payload
+
+    for row in rows:
+        outbox_id = row.get("id")
+        conversation_id = row.get("conversation_id")
+        logger.info(
+            "Outbox processing start",
+            extra={
+                "context": {
+                    "outbox_id": str(outbox_id),
+                    "conversation_id": str(conversation_id),
+                    "attempts": row.get("attempts"),
+                }
+            },
+        )
+        try:
+            if not conversation_id:
+                raise ValueError("conversation_id missing")
+            payload = WebhookRequest.model_validate(row.get("payload_json") or {})
+            await _handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+            mark_outbox_status(db, outbox_id=outbox_id, status="SENT", last_error=None)
+            results["sent"] += 1
+            logger.info(
+                "Outbox processed",
+                extra={"context": {"outbox_id": str(outbox_id), "conversation_id": str(conversation_id)}},
+            )
+        except Exception as exc:
+            mark_outbox_status(db, outbox_id=outbox_id, status="FAILED", last_error=str(exc)[:500])
+            results["failed"] += 1
+            logger.error(
+                "Outbox processing failed",
+                extra={
+                    "context": {
+                        "outbox_id": str(outbox_id),
+                        "conversation_id": str(conversation_id),
+                        "error": str(exc),
+                    }
+                },
+            )
+
+    return results
 
 
 # === HEALTH ENDPOINTS ===

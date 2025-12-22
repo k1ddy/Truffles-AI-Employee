@@ -84,11 +84,13 @@ truffles-api/
 │   │   ├── escalation_service.py     # Telegram уведомления + кнопки
 │   │   ├── manager_message_service.py# Ответ менеджера → клиент + auto-learning (owner)
 │   │   ├── reminder_service.py       # Напоминания по open handovers
+│   │   ├── outbox_service.py         # Outbox enqueue/claim/status
 │   │   ├── health_service.py         # self-heal инвариантов
 │   │   ├── telegram_service.py       # Telegram API wrapper
 │   │   ├── chatflow_service.py       # Отправка сообщений в WhatsApp (ChatFlow)
 │   │   └── learning_service.py       # Qdrant upsert по ответам owner
 │   ├── models/              # SQLAlchemy модели
+│   │   ├── outbox_message.py     # Outbox таблица (ACK-first)
 │   ├── schemas/             # Pydantic схемы
 │   └── database.py          # Database connection
 ├── tests/                   # Pytest тесты
@@ -155,6 +157,7 @@ truffles-api/
 Миграции:
 - `ops/migrations/009_add_conversation_context.sql` — JSONB `conversations.context` для диалогового контекста/слотов.
 - `ops/migrations/011_add_webhook_secret.sql` — `client_settings.webhook_secret` для защиты /webhook.
+- `ops/migrations/012_add_outbox_messages.sql` — Outbox для ACK-first обработки.
 
 **Старые скрипты:** `.archive/ops_old/` — не в git.
 

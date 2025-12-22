@@ -144,6 +144,14 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-22 — PR-004: Outbox + ACK-first (prod)
+
+**Что сделали:**
+- Добавили таблицу `outbox_messages` + сервис outbox
+- `/webhook` теперь ACK-first: сохраняет входящее, кладёт в outbox, возвращает 200 без LLM
+- Добавили `POST /admin/outbox/process` (X-Admin-Token) для обработки очереди
+- Задеплоено на прод, проверка: enqueue → process → SENT
+
 ### 2025-12-22 — PR-002: Alerts endpoint restored on prod
 
 **Что сделали:**

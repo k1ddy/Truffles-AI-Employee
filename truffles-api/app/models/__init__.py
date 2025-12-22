@@ -5,7 +5,19 @@ from app.models.company import Company
 from app.models.conversation import Conversation
 from app.models.handover import Handover
 from app.models.message import Message
+from app.models.outbox_message import OutboxMessage
 from app.models.prompt import Prompt
 from app.models.user import User
 
-__all__ = ["Company", "Client", "Branch", "User", "Conversation", "Message", "Handover", "ClientSettings", "Prompt"]
+__all__ = [
+    "Company",
+    "Client",
+    "Branch",
+    "User",
+    "Conversation",
+    "Message",
+    "Handover",
+    "ClientSettings",
+    "Prompt",
+    "OutboxMessage",
+]
