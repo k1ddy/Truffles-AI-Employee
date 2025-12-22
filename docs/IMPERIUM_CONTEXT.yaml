@@ -293,10 +293,12 @@ guardrails:
 observability:
   alerts:
     channel: "Telegram via alert_service"
-    configured: "NO (ALERT_BOT_TOKEN/ALERT_CHAT_ID not set in container env)"
+    configured: "YES (ALERT_BOT_TOKEN/ALERT_CHAT_ID set; /alerts/test enabled)"
     evidence:
       - "truffles-api/app/services/alert_service.py:11-38"
-      - "docker exec truffles-api env | grep '^ALERT_' (no output) (2025-12-21)"
+      - "truffles-api/app/routers/alerts.py:1-45"
+      - "docker exec truffles-api env | grep '^ALERT_' (values redacted) (2025-12-22)"
+      - "curl -i -X POST http://localhost:8000/alerts/test (401/200) (2025-12-22)"
   no_response_alerts:
     logic: "check_no_response_alerts in reminder_service"
     trigger: "NO_RESPONSE_ALERT_MINUTES env (default 3)"

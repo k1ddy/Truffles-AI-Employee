@@ -144,6 +144,15 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-22 — PR-002: Alerts endpoint restored on prod
+
+**Что сделали:**
+- Добавили router `/alerts/test` + защита `ALERTS_ADMIN_TOKEN`
+- Прописали `ALERTS_ADMIN_TOKEN` в `truffles-api/.env`, пересобрали и перезапустили API
+- Проверка: `/alerts/test` → 401 без токена, 200 с токеном
+
+**Статус:** PR-002 DONE on prod
+
 ### 2025-12-21 — Sync: перенос реализаций из truffles_origin
 
 **Что сделали:**

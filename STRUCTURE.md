@@ -69,6 +69,7 @@ truffles-api/
 │   │   ├── webhook.py           # POST /webhook/{client_slug} (direct), POST /webhook (n8n legacy) — входящие WhatsApp
 │   │   ├── telegram_webhook.py  # POST /telegram-webhook — сообщения/кнопки менеджеров
 │   │   ├── admin.py             # /admin/* (health/heal/prompt/settings/version)
+│   │   ├── alerts.py            # /alerts/test — проверка алертов (токен)
 │   │   ├── reminders.py         # /reminders/* — cron напоминаний
 │   │   ├── callback.py          # /callback — (legacy/n8n)
 │   │   └── message.py           # /message — legacy/manual, не основной путь
