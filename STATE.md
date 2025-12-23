@@ -158,6 +158,22 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-23 — Hotfix: outbox delivery + ChatFlow idempotency
+
+**Проблема:** бот молчал при обработке outbox.
+
+**Диагностика:**
+- В логах `send_bot_response() got an unexpected keyword argument 'idempotency_key'`
+- 401 от OpenAI (ключ в контейнере невалиден)
+
+**Что сделали:**
+- `chatflow_service.send_bot_response()` принимает `idempotency_key`/`raise_on_fail`
+- `send_whatsapp_message()` прокидывает `msg_id` (idempotency)
+
+**Статус:**
+- Код запушен в `main`, CI должен собрать/задеплоить.
+- OpenAI ключ всё ещё возвращает 401 — нужен валидный ключ.
+
 ### 2025-12-23 — Demo salon truth-first + outbox coalescing (repo)
 
 **Что сделали:**
