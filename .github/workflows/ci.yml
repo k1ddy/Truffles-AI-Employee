@@ -95,4 +95,5 @@ jobs:
             IMAGE_NAME=${{ env.IMAGE_NAME }}:main PULL_IMAGE=1 bash ~/restart_api.sh
       - name: Deploy skipped (missing secrets)
         if: ${{ secrets.SSH_PRIVATE_KEY == '' || secrets.SERVER_HOST == '' || secrets.SERVER_USER == '' || secrets.SERVER_PORT == '' }}
-        run: echo "Deploy skipped: missing SSH secrets."
+        run: |
+          echo "Deploy skipped: missing SSH secrets."
