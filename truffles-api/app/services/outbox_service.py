@@ -93,12 +93,64 @@ def claim_pending_outbox(db: Session, *, limit: int = 10) -> list[dict[str, Any]
     return rows
 
 
+def claim_pending_outbox_batches(
+    db: Session,
+    *,
+    limit: int = 10,
+    idle_seconds: int = 8,
+) -> list[dict[str, Any]]:
+    rows = (
+        db.execute(
+            text(
+                """
+                WITH candidates AS (
+                    SELECT conversation_id, MAX(created_at) AS last_created_at
+                    FROM outbox_messages
+                    WHERE status = 'PENDING'
+                      AND conversation_id IS NOT NULL
+                      AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+                    GROUP BY conversation_id
+                    HAVING MAX(created_at) <= NOW() - (:idle_seconds * INTERVAL '1 second')
+                    ORDER BY last_created_at
+                    LIMIT :limit
+                ),
+                to_claim AS (
+                    SELECT id
+                    FROM outbox_messages
+                    WHERE status = 'PENDING'
+                      AND conversation_id IN (SELECT conversation_id FROM candidates)
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE outbox_messages
+                SET status = 'PROCESSING',
+                    attempts = attempts + 1,
+                    updated_at = NOW()
+                WHERE id IN (SELECT id FROM to_claim)
+                RETURNING outbox_messages.id,
+                          outbox_messages.client_id,
+                          outbox_messages.conversation_id,
+                          outbox_messages.inbound_message_id,
+                          outbox_messages.payload_json,
+                          outbox_messages.attempts,
+                          outbox_messages.created_at
+                """
+            ),
+            {"limit": limit, "idle_seconds": idle_seconds},
+        )
+        .mappings()
+        .all()
+    )
+    db.commit()
+    return rows
+
+
 def mark_outbox_status(
     db: Session,
     *,
     outbox_id,
     status: str,
     last_error: str | None = None,
+    next_attempt_at: datetime | None = None,
 ) -> None:
     db.execute(
         text(
@@ -106,10 +158,16 @@ def mark_outbox_status(
             UPDATE outbox_messages
             SET status = :status,
                 last_error = :last_error,
+                next_attempt_at = :next_attempt_at,
                 updated_at = NOW()
             WHERE id = :id
             """
         ),
-        {"id": outbox_id, "status": status, "last_error": last_error},
+        {
+            "id": outbox_id,
+            "status": status,
+            "last_error": last_error,
+            "next_attempt_at": next_attempt_at,
+        },
     )
     db.commit()

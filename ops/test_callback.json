@@ -1,0 +1,15 @@
+{
+  "callback_query": {
+    "id": "test123",
+    "from": {
+      "id": 123456,
+      "first_name": "Test",
+      "last_name": "User"
+    },
+    "message": {
+      "message_id": 16,
+      "chat": {"id": -1001234567890}
+    },
+    "data": "take_7b5a441f-9837-44ce-a24a-2c9272bed473"
+  }
+}

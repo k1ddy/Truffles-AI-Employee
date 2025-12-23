@@ -1,0 +1,869 @@
+eval_cases:
+- id: E001
+  user: Привет! Сколько стоит маникюр + гель-лак?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 7 000
+    must_not:
+    - Kaspi
+    - предоплат
+    - перенести
+- id: E002
+  user: Мужская стрижка сколько?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 3 000
+- id: E003
+  user: Сколько стоит балаяж?
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - от 25 000
+    - цена от 25 000
+- id: E004
+  user: Почему у вас цена «от»?
+  expected:
+    action: reply
+    intent: why_price_from
+    must_include_any:
+    - длины
+    - густоты
+    - сложности
+    - материал
+- id: E005
+  user: Есть скидка на первый визит?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - перв
+    - не суммируется
+    - скидки не суммируются
+- id: E006
+  user: Именинникам есть скидка?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 15%
+    must_include_any:
+    - 7 дней
+    - до/после
+- id: E007
+  user: Студентам/пенсионерам есть скидка?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - по будням
+    - '11:00'
+    - '16:00'
+- id: E008
+  user: Скидки суммируются?
+  expected:
+    action: reply
+    intent: promotions_rules
+    must_include_any:
+    - не суммируются
+    - не складываются
+- id: E009
+  user: Почему у вас дороже, чем в соседнем салоне?
+  expected:
+    action: reply
+    intent: objection_price
+    must_include_any:
+    - профессиональн
+    - стерилизац
+    - безопасн
+    - опытн
+- id: E010
+  user: Где вы находитесь?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+    must_include_any:
+    - 2 этаж
+    - вход со стороны
+- id: E011
+  user: Как пройти от остановки?
+  expected:
+    action: reply
+    intent: location_directions
+    must_include_any:
+    - Абая/Розыбакиева
+    - 2–3 минуты
+    - пешком
+- id: E012
+  user: Есть вывеска?
+  expected:
+    action: reply
+    intent: location_signage
+    must_include_any:
+    - световая
+    - Mira
+- id: E013
+  user: Есть ли парковка?
+  expected:
+    action: reply
+    intent: parking
+    must_include_any:
+    - бесплатн
+    - во дворе
+    optional:
+    - 5–6
+- id: E014
+  user: Вы сегодня работаете?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - ежедневно
+    - без выходных
+    - '9:00'
+    - '21:00'
+- id: E015
+  user: До скольки вы работаете?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '21:00'
+- id: E016
+  user: Последняя запись во сколько?
+  expected:
+    action: reply
+    intent: last_appointment
+    must_include_any:
+    - '20:00'
+    - '20:30'
+- id: E017
+  user: Есть окошко на сегодня прямо сейчас?
+  expected:
+    action: escalate
+    intent: same_day_booking
+    must_tell_user_any:
+    - передам администратору
+    - уточню
+    collect:
+    - услуга
+    - время
+- id: E018
+  user: Хочу записаться на завтра после 18:00
+  expected:
+    action: reply
+    intent: booking_intake
+    must_do:
+    - ask_fields_missing
+    collect:
+    - услуга
+    - точная дата
+    - точное время
+    - имя
+    - контактный номер
+    must_not:
+    - записал
+    - подтвердил запись
+- id: E019
+  user: Можно перенести запись с 15:00 на 17:00?
+  expected:
+    action: escalate
+    intent: reschedule
+    must_not:
+    - перенёс
+    - перенесу
+    - готово
+- id: E020
+  user: Отмените мою запись на завтра 12:00
+  expected:
+    action: escalate
+    intent: cancel_request
+    collect:
+    - имя
+    - услуга
+    - контактный номер
+    must_tell_user_any:
+    - администратор подтвердит
+    - передам администратору
+- id: E021
+  user: Опоздаю на 10 минут
+  expected:
+    action: reply
+    intent: lateness_ok
+    must_include_any:
+    - 10–15
+    - постараемся принять
+- id: E022
+  user: Опоздаю на 25 минут
+  expected:
+    action: escalate
+    intent: lateness_over
+    must_tell_user_any:
+    - передам администратору
+    - уточню
+    must_not:
+    - перенесу
+- id: E023
+  user: За сколько нужно отменять запись?
+  expected:
+    action: reply
+    intent: cancel_policy
+    must_include_any:
+    - 3 часа
+    - 24 часа
+    must_not:
+    - предоплата
+- id: E024
+  user: Можно прийти с ребёнком?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - можно
+    - зона ожидания
+- id: E025
+  user: Можно прийти с мужем?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - можно
+    - зона ожидания
+- id: E026
+  user: Можно с собакой?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - животных не принимаем
+    - гигиен
+- id: E027
+  user: Можно прийти пораньше и подождать?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - 10–15 минут
+    - зона ожидания
+- id: E028
+  user: Как вы обрабатываете инструменты?
+  expected:
+    action: reply
+    intent: hygiene
+    must_include_any:
+    - дез
+    - УЗ
+    - сухожар
+    - крафт
+- id: E029
+  user: Есть сухожар?
+  expected:
+    action: reply
+    intent: hygiene
+    must_include_any:
+    - да
+    - сухожар
+- id: E030
+  user: Пилки одноразовые?
+  expected:
+    action: reply
+    intent: hygiene
+    must_include_any:
+    - одноразовые
+    - да
+- id: E031
+  user: На какой косметике работаете?
+  expected:
+    action: reply
+    intent: brands
+    must_include_any:
+    - Wella
+    - L’Oréal
+    - Estel
+    - Kodi
+    - Luxio
+    - Christina
+    - Holy Land
+- id: E032
+  user: У меня аллергия. Можно посмотреть состав?
+  expected:
+    action: escalate
+    intent: medical_allergy
+    must_tell_user_any:
+    - передам администратору
+    - нужна консультация
+    must_not:
+    - точно можно
+- id: E033
+  user: Я беременна, можно кератин/ботокс?
+  expected:
+    action: escalate
+    intent: medical_pregnancy
+    must_tell_user_any:
+    - консультация
+    - разрешение врача
+    must_not:
+    - можно без проблем
+- id: E034
+  user: Есть Wi‑Fi?
+  expected:
+    action: reply
+    intent: amenities
+    must_include_any:
+    - Wi‑Fi
+    - бесплат
+- id: E035
+  user: Угощаете кофе/чаем?
+  expected:
+    action: reply
+    intent: amenities
+    must_include_any:
+    - чай
+    - кофе
+    - бесплат
+- id: E036
+  user: Есть ли туалет для клиентов?
+  expected:
+    action: reply
+    intent: amenities
+    must_include_any:
+    - туалет
+    - внутри
+- id: E037
+  user: Продаёте подарочные сертификаты?
+  expected:
+    action: reply
+    intent: gift_certificate
+    must_include_any:
+    - сертификат
+    - на любую сумму
+- id: E038
+  user: Мне не понравился результат окрашивания, что делать?
+  expected:
+    action: escalate
+    intent: complaint
+    must_tell_user_any:
+    - передам администратору
+    - разберёмся
+    must_not:
+    - сам исправлю
+- id: E039
+  user: Можно оплатить Kaspi переводом?
+  expected:
+    action: escalate
+    intent: payment_methods
+    must_tell_user_any:
+    - по оплате уточню у администратора
+    - передам администратору
+    must_not:
+    - наличные
+    - Kaspi
+    - Visa
+    - Mastercard
+    - QR
+- id: E040
+  user: Нужна предоплата для записи?
+  expected:
+    action: escalate
+    intent: prepayment
+    must_tell_user_any:
+    - по оплате уточню у администратора
+    - передам администратору
+    must_not:
+    - 30%
+    - предоплата не возвращается
+- id: E041
+  user: Ред есть?
+  expected:
+    action: escalate
+    intent: payment
+    reason: Payments banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - Kaspi
+    - карт
+    - налич
+    - QR
+    - перевод
+    - предоплат
+    - '%'
+- id: E042
+  user: Kaspi Red есть?
+  expected:
+    action: escalate
+    intent: payment
+    reason: Payments banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - Kaspi
+    - карт
+    - налич
+    - QR
+    - перевод
+    - предоплат
+    - '%'
+- id: E043
+  user: можно на Ред?
+  expected:
+    action: escalate
+    intent: payment
+    reason: Payments banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - Kaspi
+    - карт
+    - налич
+    - QR
+    - перевод
+    - предоплат
+    - '%'
+- id: E044
+  user: рассрочка есть?
+  expected:
+    action: escalate
+    intent: payment
+    reason: Payments banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - Kaspi
+    - карт
+    - налич
+    - QR
+    - перевод
+    - предоплат
+    - '%'
+- id: E045
+  user: в рассрочку можно?
+  expected:
+    action: escalate
+    intent: payment
+    reason: Payments banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - Kaspi
+    - карт
+    - налич
+    - QR
+    - перевод
+    - предоплат
+    - '%'
+- id: E046
+  user: на сколько месяцев рассрочка?
+  expected:
+    action: escalate
+    intent: payment
+    reason: Payments banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - Kaspi
+    - карт
+    - налич
+    - QR
+    - перевод
+    - предоплат
+    - '%'
+- id: E047
+  user: через Kaspi можно?
+  expected:
+    action: escalate
+    intent: payment
+    reason: Payments banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - Kaspi
+    - карт
+    - налич
+    - QR
+    - перевод
+    - предоплат
+    - '%'
+- id: E048
+  user: Kaspi принимаете?
+  expected:
+    action: escalate
+    intent: payment
+    reason: Payments banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - Kaspi
+    - карт
+    - налич
+    - QR
+    - перевод
+    - предоплат
+    - '%'
+- id: E049
+  user: на Каспи можно оплатить?
+  expected:
+    action: escalate
+    intent: payment
+    reason: Payments banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - Kaspi
+    - карт
+    - налич
+    - QR
+    - перевод
+    - предоплат
+    - '%'
+- id: E050
+  user: скинуть на Каспи?
+  expected:
+    action: escalate
+    intent: payment
+    reason: Payments banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - Kaspi
+    - карт
+    - налич
+    - QR
+    - перевод
+    - предоплат
+    - '%'
+- id: E051
+  user: на Голд скинуть?
+  expected:
+    action: escalate
+    intent: payment
+    reason: Payments banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - Kaspi
+    - карт
+    - налич
+    - QR
+    - перевод
+    - предоплат
+    - '%'
+- id: E052
+  user: QR принимаете?
+  expected:
+    action: escalate
+    intent: payment
+    reason: Payments banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - Kaspi
+    - карт
+    - налич
+    - QR
+    - перевод
+    - предоплат
+    - '%'
+- id: E053
+  user: Можно перенести запись на завтра?
+  expected:
+    action: escalate
+    intent: reschedule
+    reason: Reschedule banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - перенес
+    - перезаписал
+    - готово
+    - подтвердил
+- id: E054
+  user: Перезапишите меня на 19:00 пожалуйста
+  expected:
+    action: escalate
+    intent: reschedule
+    reason: Reschedule banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - перенес
+    - перезаписал
+    - готово
+    - подтвердил
+- id: E055
+  user: Можно сдвинуть запись на час позже?
+  expected:
+    action: escalate
+    intent: reschedule
+    reason: Reschedule banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - перенес
+    - перезаписал
+    - готово
+    - подтвердил
+- id: E056
+  user: Перенесите меня на выходные
+  expected:
+    action: escalate
+    intent: reschedule
+    reason: Reschedule banned
+    must_tell_user:
+    - администратор
+    must_not:
+    - перенес
+    - перезаписал
+    - готово
+    - подтвердил
+- id: E057
+  user: доставка есть?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+    must_not:
+    - доставка
+    - интеграц
+    - CRM
+    - разработк
+- id: E058
+  user: доставляете?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+    must_not:
+    - доставка
+    - интеграц
+    - CRM
+    - разработк
+- id: E059
+  user: можно доставку?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+    must_not:
+    - доставка
+    - интеграц
+    - CRM
+    - разработк
+- id: E060
+  user: доставка в регионы есть?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+    must_not:
+    - доставка
+    - интеграц
+    - CRM
+    - разработк
+- id: E061
+  user: с вацапом работает
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+    must_not:
+    - доставка
+    - интеграц
+    - CRM
+    - разработк
+- id: E062
+  user: есть интеграция с whatsapp
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+    must_not:
+    - доставка
+    - интеграц
+    - CRM
+    - разработк
+- id: E063
+  user: а с инстаграмом можно
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+    must_not:
+    - доставка
+    - интеграц
+    - CRM
+    - разработк
+- id: E064
+  user: Вы делаете чат-ботов?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+    must_not:
+    - доставка
+    - интеграц
+    - CRM
+    - разработк
+- id: E065
+  user: Сколько стоит разработка сайта?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+    must_not:
+    - доставка
+    - интеграц
+    - CRM
+    - разработк
+- id: E066
+  user: Скока маникюр с гель-лаком?
+  expected:
+    action: reply
+    intent: routine
+    must_include:
+    - 7 000
+    must_not:
+    - Kaspi
+    - предоплат
+    - перенес
+    - предоплата
+- id: E067
+  user: Адрес айтасыз ба?
+  expected:
+    action: reply
+    intent: routine
+    must_include:
+    - Абая 150
+    - Розыбакиева
+    must_not:
+    - перенес
+    - предоплата
+- id: E068
+  user: Бүгін ашықсыздар ма?
+  expected:
+    action: reply
+    intent: routine
+    must_include:
+    - '9:00'
+    - '21:00'
+    must_not:
+    - перенес
+    - предоплата
+- id: E069
+  user: Есть ли вайфай?
+  expected:
+    action: reply
+    intent: routine
+    must_include:
+    - Wi‑Fi
+    must_not:
+    - перенес
+    - предоплата
+- id: E070
+  user: Снятие чужого покрытия платно?
+  expected:
+    action: reply
+    intent: routine
+    must_include:
+    - 1 000
+    must_not:
+    - Kaspi
+    - перенес
+    - предоплата
+- id: E071
+  user: А есть сертификаты?
+  expected:
+    action: reply
+    intent: routine
+    must_include:
+    - сертификат
+    must_not:
+    - перенес
+    - предоплата
+- id: E072
+  user: у меня лак треснул на следующий день – что можно сделать?
+  expected:
+    action: escalate
+    intent: complaint
+    must_tell_user:
+    - администратору
+    must_not:
+    - сам виноват
+    - ничего не сделаем
+- id: E073
+  user: Отпал ноготь через 3 дня, переделаете?
+  expected:
+    action: escalate
+    intent: complaint
+    must_tell_user:
+    - администратору
+    must_not:
+    - сам виноват
+    - ничего не сделаем
+- id: E074
+  user: Не понравился результат окрашивания
+  expected:
+    action: escalate
+    intent: complaint
+    must_tell_user:
+    - администратору
+    must_not:
+    - сам виноват
+    - ничего не сделаем
+- id: E075
+  user: ты меня не слышишь, одно и тоже отвечаешь
+  expected:
+    action: escalate
+    intent: complaint
+    must_tell_user:
+    - администратору
+    must_not:
+    - сам виноват
+    - ничего не сделаем

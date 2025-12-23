@@ -1,0 +1,1261 @@
+{
+  "name": "Knowledge Sync",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -4304,
+        1232
+      ],
+      "id": "582b0855-a40e-4ed3-9831-3469f969f07d",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 * * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -4304,
+        1424
+      ],
+      "id": "2b8b64e2-170f-4fcd-bc31-5851b7059c97",
+      "name": "Schedule (каждые 30 мин)"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, name, config->>'folder_id' as folder_id, config->>'escalation_telegram' as notify_telegram, config->>'notify_whatsapp' as notify_whatsapp\nFROM clients\nWHERE status = 'active';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -4080,
+        1360
+      ],
+      "id": "271e321f-9e6b-4123-99bb-62f39d14cd71",
+      "name": "Get Active Clients",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -3856,
+        1360
+      ],
+      "id": "5c136cc9-ee04-4f31-b03b-a31d7aada7e2",
+      "name": "Loop Clients"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "={{ $json.folder_id }}",
+            "mode": "id"
+          }
+        },
+        "options": {
+          "fields": [
+            "mimeType",
+            "name",
+            "version",
+            "id",
+            "kind"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -3632,
+        1280
+      ],
+      "id": "b72749ad-df8d-4cbd-b51b-5e19251490cb",
+      "name": "Google Drive: List Files",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "t9rodbCQUFV4TRV5",
+          "name": "Truffles_UpdateDocs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": " const files = $input.all();\n\n     let client;\n     try {\n       client = $('Loop Clients').first().json;\n     } catch (e) {\n       client = {\n         id: '499e4744-5e7f-4a97-8466-56ff2cdcf587',\n         name: 'truffles',\n         notify_telegram: '1969855532',\n         notify_whatsapp: '77759841926'\n       };\n     }\n\n     const allowedTypes = [\n       'application/vnd.google-apps.document',\n       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',\n       'application/msword',\n       'text/plain',\n       'text/markdown'\n     ];\n\n     const docs = files.filter(f => allowedTypes.includes(f.json.mimeType));\n\n     if (docs.length === 0) {\n       return [{\n         json: {\n           client_slug: client.name,\n           client_id: client.id,\n           notify_telegram: client.notify_telegram,\n           notify_whatsapp: client.notify_whatsapp,\n           status: 'no_docs',\n           message: 'Нет документов в папке'\n         }\n       }];\n     }\n\n     return docs.map(doc => ({\n       json: {\n         client_slug: client.name,\n         client_id: client.id,\n         notify_telegram: client.notify_telegram,\n         notify_whatsapp: client.notify_whatsapp,\n         doc_id: doc.json.id,\n         doc_name: doc.json.name,\n         mimeType: doc.json.mimeType,\n         version: doc.json.version\n       }\n     }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3408,
+        1280
+      ],
+      "id": "770d4055-e427-44b0-9d68-13c48cb5a4bb",
+      "name": "Prepare Docs List"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -3152,
+        1232
+      ],
+      "id": "d782b89b-324a-41d4-90a4-d65a24cb9e1f",
+      "name": "Loop Docs"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "documentURL": "={{ $json.doc_id }}"
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        -2288,
+        816
+      ],
+      "id": "666fbbb0-5e63-4baf-81b4-4fc2ef6873a7",
+      "name": "Google Docs: Get Content",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "CutTmqlRZ1PcTev5",
+          "name": "Truffles_UpdateDocs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prevData = $('Loop Docs').first().json;\nconst content = $json.body?.content || $json.text || $json.content || '';\n\nlet text = '';\nif (typeof content === 'string') {\n  text = content;\n} else if (Array.isArray(content)) {\n  text = content\n    .filter(el => el.paragraph)\n    .map(el => el.paragraph.elements\n      ?.map(e => e.textRun?.content || '')\n      .join('') || '')\n    .join('');\n}\n\nconst hasHeadings = text.includes('## ') || text.includes('# ');\nconst minLength = text.length >= 100;\n\nif (!hasHeadings) {\n  return [{\n    json: {\n      ...prevData,\n      status: 'error',\n      error: 'Документ не содержит заголовков (##)',\n      raw_content: text.substring(0, 500)\n    }\n  }];\n}\n\nif (!minLength) {\n  return [{\n    json: {\n      ...prevData,\n      status: 'error',\n      error: 'Документ слишком короткий (< 100 символов)',\n      raw_content: text\n    }\n  }];\n}\n\nconst version = prevData.version || $json.version || '1';\n\nreturn [{\n  json: {\n    ...prevData,\n    status: 'valid',\n    raw_content: text,\n    content_hash: version\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1840,
+        928
+      ],
+      "id": "df93c768-351c-48a6-b679-a23326c5a0ca",
+      "name": "Validate & Hash"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "valid",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "valid",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1616,
+        928
+      ],
+      "id": "16b01754-7034-4eb8-83a8-38a7cd879021",
+      "name": "If Valid?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(\n  (SELECT content_hash FROM knowledge_versions\n   WHERE client_slug = '{{ $json.client_slug }}'\n     AND doc_id = '{{ $json.doc_id }}'\n   ORDER BY created_at DESC\n   LIMIT 1),\n  'new'\n) AS content_hash;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1392,
+        832
+      ],
+      "id": "16b4adc1-a707-4d54-befa-a227c487df11",
+      "name": "Get Previous Hash",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const docData = $('If Valid?').first().json;\n     const prevHash = $('Get Previous Hash').first().json?.content_hash || 'new';\n     const qdrantCount = $('Check Qdrant Count').first().json?.result?.count || 0;\n\n     const currentHash = docData.content_hash;\n     const isNew = (prevHash === 'new');\n     const hashChanged = (prevHash !== currentHash);\n     const qdrantEmpty = (qdrantCount === 0);\n\n     const hasChanges = isNew || hashChanged || qdrantEmpty;\n\n     return [{\n       json: {\n         ...docData,\n         prev_hash: prevHash,\n         qdrant_count: qdrantCount,\n         has_changes: hasChanges,\n         is_new: isNew,\n         sync_reason: qdrantEmpty ? 'qdrant_empty' : (isNew ? 'new_doc' : (hashChanged ? 'hash_changed' : 'no_changes'))\n       }\n     }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -944,
+        1024
+      ],
+      "id": "df7e195e-cf9d-4b77-a658-af092e42a232",
+      "name": "Check Changes"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-changes",
+              "leftValue": "={{ $json.has_changes }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        1024
+      ],
+      "id": "85591805-13b5-42db-8403-dd7c396d3d28",
+      "name": "If Changed?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $json;\nconst text = data.raw_content;\n\nconst sections = [];\nconst lines = text.split('\\n');\nlet currentSection = null;\nlet currentContent = [];\n\nfor (const line of lines) {\n  const h2Match = line.match(/^##\\s+(.+)/);\n  const h1Match = line.match(/^#\\s+(.+)/);\n  \n  if (h2Match || h1Match) {\n    if (currentSection && currentContent.length > 0) {\n      sections.push({\n        title: currentSection,\n        content: currentContent.join('\\n').trim()\n      });\n    }\n    currentSection = (h2Match || h1Match)[1].trim();\n    currentContent = [];\n  } else if (currentSection) {\n    currentContent.push(line);\n  }\n}\n\nif (currentSection && currentContent.length > 0) {\n  sections.push({\n    title: currentSection,\n    content: currentContent.join('\\n').trim()\n  });\n}\n\n// Filter out:\n// 1. Sections shorter than 100 chars (was 20)\n// 2. Sections that are mostly meta/notes (start with ** or contain only ---)\nconst validSections = sections.filter(s => {\n  const content = s.content.trim();\n  \n  // Too short\n  if (content.length < 100) return false;\n  \n  // Only separators\n  if (content.replace(/-/g, '').trim().length < 50) return false;\n  \n  // Meta text (RAG notes, instructions)\n  if (content.startsWith('**Для RAG') || content.startsWith('> **RAG')) return false;\n  \n  return true;\n});\n\nconst chunks = validSections.map((section, index) => ({\n  id: `${data.client_slug}-${data.doc_id}-${index}`,\n  text: `## ${section.title}\\n\\n${section.content}`,\n  metadata: {\n    client_slug: data.client_slug,\n    doc_id: data.doc_id,\n    doc_name: data.doc_name,\n    section_title: section.title,\n    section_index: index,\n    source: 'google_docs',\n    updated_at: new Date().toISOString()\n  }\n}));\n\nreturn [{\n  json: {\n    ...data,\n    chunks: chunks,\n    chunks_count: chunks.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -496,
+        976
+      ],
+      "id": "3b0e0b2b-462a-4094-a192-7b2625ad1eaa",
+      "name": "Parse Sections"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO knowledge_versions (client_slug, doc_id, doc_name, content_hash, raw_content, chunks_count)\nVALUES (\n  '{{ $json.client_slug }}',\n  '{{ $json.doc_id }}',\n  '{{ $json.doc_name }}',\n  '{{ $json.content_hash }}',\n  $1,\n  {{ $json.chunks_count }}\n);",
+        "options": {
+          "queryReplacement": "={{ $json.raw_content }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -272,
+        976
+      ],
+      "id": "63f7a511-c882-49b5-97a3-c36237f75d5a",
+      "name": "Save Version",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const firstItem = $('Prepare Chunks').first().json;\n\n     return [{\n       json: {\n         client_slug: firstItem.metadata.client_slug,\n         doc_name: firstItem.metadata.doc_name,\n         notify_telegram: firstItem.notify_telegram,\n         notify_whatsapp: firstItem.notify_whatsapp,\n         chunks_count: firstItem.total_chunks, \n         status: 'success'\n       }\n     }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        736
+      ],
+      "id": "90070180-1ab8-40b5-8d7a-6c747e12f2a6",
+      "name": "Aggregate Results"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO knowledge_sync_logs (client_slug, status, docs_processed, chunks_added)\nVALUES ('{{ $json.client_slug }}', 'success', 1, {{ $json.chunks_count }});",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1120,
+        736
+      ],
+      "id": "e9004396-6537-4e5a-809f-2ca2f0935cf5",
+      "name": "Log Success",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO knowledge_sync_logs (client_slug, status, error_message)\nVALUES ('{{ $json.client_slug }}', 'error', '{{ $json.error }}');",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1392,
+        1184
+      ],
+      "id": "1e8285e1-85b8-462a-8731-8472e510ad15",
+      "name": "Log Error",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO knowledge_sync_logs (client_slug, status)\nVALUES ('{{ $json.client_slug }}', 'no_changes');",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -496,
+        1312
+      ],
+      "id": "1542ca01-8243-49bb-b5f3-b9c5e0f39cea",
+      "name": "Log No Changes",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Parse Sections').item.json;\n     const chunks = data.chunks || [];\n\n     return chunks.map(chunk => ({\n       json: {\n         pageContent: chunk.text,\n         metadata: {\n           ...chunk.metadata,\n           client_slug: data.client_slug\n         },\n         notify_telegram: data.notify_telegram,\n         notify_whatsapp: data.notify_whatsapp,\n         doc_name: data.doc_name,\n         total_chunks: chunks.length\n       }\n     }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        976
+      ],
+      "id": "07586406-616d-42f1-8d95-02d73834139b",
+      "name": "Prepare Chunks"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://qdrant:6333/collections/truffles_knowledge/points/delete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"filter\": {\n    \"must\": [\n      { \"key\": \"metadata.client_slug\", \"match\": { \"value\": \"{{ $('Parse Sections').item.json.client_slug }}\" } },\n      { \"key\": \"metadata.doc_id\", \"match\": { \"value\": \"{{ $('Parse Sections').item.json.doc_id }}\" } }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -48,
+        976
+      ],
+      "id": "15187672-ed68-4061-b958-85d72578e0f5",
+      "name": "Qdrant: Delete Old",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "tHgoKdaCF493jIDp",
+          "name": "Qdrant_Local API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://qdrant:6333/collections/truffles_knowledge/points/count",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n       \"filter\": {\n         \"must\": [\n           { \"key\": \"metadata.client_slug\", \"match\": { \"value\": \"{{ $('If Valid?').first().json.client_slug }}\" } },\n           { \"key\": \"metadata.doc_id\", \"match\": { \"value\": \"{{ $('If Valid?').first().json.doc_id }}\" } }\n         ]\n       }\n     }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1168,
+        832
+      ],
+      "id": "be331fa8-7e7f-4ed3-aa68-4b7a2aedabf8",
+      "name": "Check Qdrant Count",
+      "credentials": {
+        "qdrantApi": {
+          "id": "fNPgHKKlwuj3CF1q",
+          "name": "QdrantLocal"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "http://qdrant:6333/collections/truffles_knowledge",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"vectors\": {\n    \"size\": 1536,\n    \"distance\": \"Cosine\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -720,
+        816
+      ],
+      "id": "5a3a5a62-214b-4960-984c-e3621f9c9f65",
+      "name": "HTTP Request",
+      "credentials": {
+        "qdrantApi": {
+          "id": "fNPgHKKlwuj3CF1q",
+          "name": "QdrantLocal"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "189c539f-94dc-4fb8-842e-8d1725c73775",
+              "leftValue": "={{ $json.error.message }}",
+              "rightValue": "={{ $json.error.message }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -944,
+        816
+      ],
+      "id": "528035e0-64c7-42a4-ae40-7f782b15d3dc",
+      "name": "CollectionNotExist"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mimeType }}",
+                    "rightValue": "application/vnd.google-apps.document",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "e2ab7871-769b-4813-bb62-c924d2914323"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "GoogleDocsNative"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "adb1a1a4-83fc-4eb4-a19c-40c1e5d324c1",
+                    "leftValue": "={{ $json.mimeType }}",
+                    "rightValue": "=wordprocessingml|msword",
+                    "operator": {
+                      "type": "string",
+                      "operation": "regex"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "doc\\docs"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "d1683fb7-30ab-43f5-969a-acae1c69d474",
+                    "leftValue": "={{ $json.mimeType }}",
+                    "rightValue": "text/",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "md/Txt"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -2960,
+        992
+      ],
+      "id": "69bdb518-3b4f-4613-8b9b-7082c5470a9e",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.doc_id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -2512,
+        1200
+      ],
+      "id": "cb41e08b-e626-434a-a381-ff5836128f90",
+      "name": "Google Drive: Download File",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "t9rodbCQUFV4TRV5",
+          "name": "Truffles_UpdateDocs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.doc_id }}/copy",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n       \"mimeType\": \"application/vnd.google-apps.document\",\n       \"name\": \"temp_{{ $json.doc_id }}\"\n     }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -2736,
+        1008
+      ],
+      "id": "5d131aeb-06ac-4e5c-ac26-cf441c0e1c63",
+      "name": "Copy as Google Doc",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "t9rodbCQUFV4TRV5",
+          "name": "Truffles_UpdateDocs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": " const binaryData = $input.first().binary;\n     const binaryKey = Object.keys(binaryData)[0];\n     const text = Buffer.from(binaryData[binaryKey].data, 'base64').toString('utf8');\n     const prevData = $('Loop Docs').first().json;\n\n     return [{\n       json: {\n         ...prevData,\n         body: { content: text }\n       }\n     }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2288,
+        1200
+      ],
+      "id": "177ad11f-8e7e-4f8a-b437-7a91b37560b0",
+      "name": "Extract Text from Binary"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "documentURL": "={{ $json.id }}"
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        -2512,
+        1008
+      ],
+      "id": "6685eb69-aeee-442c-bde4-2126e782625b",
+      "name": "Get Content",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "CutTmqlRZ1PcTev5",
+          "name": "Truffles_UpdateDocs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $('Copy as Google Doc').item.json.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -2288,
+        1008
+      ],
+      "id": "9136a24e-4460-42e5-9f6f-625234c19a4b",
+      "name": "Delete Copy",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "CutTmqlRZ1PcTev5",
+          "name": "Truffles_UpdateDocs"
+        },
+        "googleDriveOAuth2Api": {
+          "id": "t9rodbCQUFV4TRV5",
+          "name": "Truffles_UpdateDocs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Aggregate Results').item.json.notify_telegram }}",
+        "text": "=\n✅ База знаний обновлена\nДокумент: {{ $('Aggregate Results').item.json.doc_name }}\nРазделов: {{ $('Aggregate Results').item.json.chunks_count }}\nИзменения применены.",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "2759c880-80d2-41e6-acfa-b30bd9a85d1e",
+      "name": "Notify Me in Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1392,
+        640
+      ],
+      "webhookId": "a964da4f-bf94-4e71-bba7-a03a508d01f5",
+      "credentials": {
+        "telegramApi": {
+          "id": "DFybSmTMlRzSErWx",
+          "name": "TrufflesChatBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "http://qdrant:6333/collections/truffles_knowledge",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantApi",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -4304,
+        192
+      ],
+      "id": "6ed84b33-41e3-45cc-8f64-8bde8a7111a7",
+      "name": "Delete Collection",
+      "credentials": {
+        "qdrantApi": {
+          "id": "fNPgHKKlwuj3CF1q",
+          "name": "QdrantLocal"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://qdrant:6333/collections/truffles_knowledge",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantApi",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -4304,
+        416
+      ],
+      "id": "25ef587f-a552-4d93-9b81-a0e38f523261",
+      "name": "Create Collection",
+      "credentials": {
+        "qdrantApi": {
+          "id": "fNPgHKKlwuj3CF1q",
+          "name": "QdrantLocal"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "https://app.chatflow.kz/api/v1/send-text",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzYyMTExNDU2fQ.myOt6xgCLfqbD9IF9EdJxkAyjij3fMty1B7sOhP2iKA"
+            },
+            {
+              "name": "instance_id",
+              "value": "eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InRydWZmbGVzLWNoYXRib3QifQ=="
+            },
+            {
+              "name": "jid",
+              "value": "={{ $('Aggregate Results').item.json.notify_whatsapp }}@s.whatsapp.net"
+            },
+            {
+              "name": "msg",
+              "value": "=✅ База знаний обновлена\n\nДокумент: {{ $('Aggregate Results').item.json.doc_name }}\nРазделов: {{ $('Aggregate Results').item.json.chunks_count }}\n\nИзменения применены."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        912
+      ],
+      "id": "79b4baa4-e73e-49ff-8a25-6e0f6e8e1280",
+      "name": "Notify Me in WhatsApp"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const chunk = $json;\n\n// 1. Get embedding from BGE-M3\nconst bgeResponse = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'http://bge-m3:80/embed',\n    body: { inputs: chunk.pageContent },\n    json: true\n});\n\n// BGE-M3 returns [[...floats...]], extract first array\nconst vector = bgeResponse[0];\n\n// 2. Generate integer ID\nconst idStr = chunk.metadata.doc_id + '-' + String(chunk.metadata.section_index);\nlet hash = 0;\nfor (let i = 0; i < idStr.length; i++) {\n    hash = ((hash << 5) - hash) + idStr.charCodeAt(i);\n    hash = hash >>> 0;\n}\n\n// 3. Upsert to Qdrant\nconst qdrantPayload = {\n    points: [{\n        id: hash,\n        vector: vector,\n        payload: {\n            content: chunk.pageContent,\n            metadata: chunk.metadata\n        }\n    }]\n};\n\nconst qdrantResponse = await this.helpers.httpRequest({\n    method: 'PUT',\n    url: 'http://qdrant:6333/collections/truffles_knowledge/points',\n    headers: {\n        'api-key': 'Iddqd777!',\n        'Content-Type': 'application/json'\n    },\n    body: qdrantPayload,\n    json: true\n});\n\nreturn {\n    json: {\n        success: true,\n        point_id: hash,\n        qdrant_status: qdrantResponse.status\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        976
+      ],
+      "id": "70f58829-9d8b-437d-922b-ccba7727140e",
+      "name": "Embed and Store"
+    }
+  ],
+  "pinData": {
+    "Schedule (каждые 30 мин)": [
+      {
+        "json": {
+          "timestamp": "2025-12-04T17:20:00.024+05:00",
+          "Readable date": "December 4th 2025, 5:20:00 pm",
+          "Readable time": "5:20:00 pm",
+          "Day of week": "Thursday",
+          "Year": "2025",
+          "Month": "December",
+          "Day of month": "04",
+          "Hour": "17",
+          "Minute": "20",
+          "Second": "00",
+          "Timezone": "Asia/Almaty (UTC+05:00)"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Get Active Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule (каждые 30 мин)": {
+      "main": [
+        [
+          {
+            "node": "Get Active Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Clients": {
+      "main": [
+        [
+          {
+            "node": "Loop Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Clients": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Google Drive: List Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive: List Files": {
+      "main": [
+        [
+          {
+            "node": "Prepare Docs List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Docs List": {
+      "main": [
+        [
+          {
+            "node": "Loop Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Docs": {
+      "main": [
+        [
+          {
+            "node": "Loop Clients",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Docs: Get Content": {
+      "main": [
+        [
+          {
+            "node": "Validate & Hash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Hash": {
+      "main": [
+        [
+          {
+            "node": "If Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Valid?": {
+      "main": [
+        [
+          {
+            "node": "Get Previous Hash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Previous Hash": {
+      "main": [
+        [
+          {
+            "node": "Check Qdrant Count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Changes": {
+      "main": [
+        [
+          {
+            "node": "If Changed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Changed?": {
+      "main": [
+        [
+          {
+            "node": "Parse Sections",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log No Changes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Sections": {
+      "main": [
+        [
+          {
+            "node": "Save Version",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Version": {
+      "main": [
+        [
+          {
+            "node": "Qdrant: Delete Old",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Results": {
+      "main": [
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Success": {
+      "main": [
+        [
+          {
+            "node": "Notify Me in Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Me in WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Error": {
+      "main": [
+        [
+          {
+            "node": "Loop Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log No Changes": {
+      "main": [
+        [
+          {
+            "node": "Loop Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Chunks": {
+      "main": [
+        [
+          {
+            "node": "Embed and Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qdrant: Delete Old": {
+      "main": [
+        [
+          {
+            "node": "Prepare Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Qdrant Count": {
+      "main": [
+        [
+          {
+            "node": "Check Changes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CollectionNotExist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CollectionNotExist": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Google Docs: Get Content",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Copy as Google Doc",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google Drive: Download File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copy as Google Doc": {
+      "main": [
+        [
+          {
+            "node": "Get Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive: Download File": {
+      "main": [
+        [
+          {
+            "node": "Extract Text from Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Content": {
+      "main": [
+        [
+          {
+            "node": "Delete Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Copy": {
+      "main": [
+        [
+          {
+            "node": "Validate & Hash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text from Binary": {
+      "main": [
+        [
+          {
+            "node": "Validate & Hash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        []
+      ]
+    },
+    "Notify Me in Telegram": {
+      "main": [
+        [
+          {
+            "node": "Loop Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Me in WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Loop Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed and Store": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "02a49055-26fd-452c-9676-b925164c4b92",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "01b56804ece88a9cc615224a075b1fb601dddc8bc8fa664ead4d87907f4c7973"
+  },
+  "id": "zTbaCLWLJN6vPMk4",
+  "tags": []
+}

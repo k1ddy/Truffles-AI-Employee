@@ -1,0 +1,18 @@
+version: '3.8'
+services:
+  bge-m3:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.2
+    container_name: bge-m3
+    command: ["--model-id", "BAAI/bge-m3"]
+    volumes:
+      - bge-m3-data:/data
+    networks:
+      - truffles_internal-net
+    restart: unless-stopped
+
+volumes:
+  bge-m3-data:
+
+networks:
+  truffles_internal-net:
+    external: true

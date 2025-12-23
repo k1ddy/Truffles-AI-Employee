@@ -1,0 +1,501 @@
+{
+  "updatedAt": "2025-12-09T01:42:14.545Z",
+  "createdAt": "2025-12-08T05:19:23.736Z",
+  "id": "fFPEbTNlkBSjo66A",
+  "name": "8_Telegram_Adapter",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -800,
+        300
+      ],
+      "id": "tg-start-001",
+      "name": "Start"
+    },
+    {
+      "parameters": {
+        "jsCode": "// \u041f\u043e\u043b\u0443\u0447\u0430\u0435\u043c \u0434\u0430\u043d\u043d\u044b\u0435 \u043e\u0442 Escalation Handler\nconst input = $json;\n\n// \u0424\u043e\u0440\u043c\u0438\u0440\u0443\u0435\u043c \u0434\u0430\u043d\u043d\u044b\u0435 \u0434\u043b\u044f Telegram\nconst chatId = input.telegram_chat_id;\nconst botToken = input.telegram_bot_token;\nconst phone = input.phone;\nconst clientName = input.client_name || '\u041a\u043b\u0438\u0435\u043d\u0442';\nconst businessName = input.business_name || input.client_slug || '';\nconst message = input.message;\nconst handoverId = input.handover_id;\nconst conversationId = input.conversation_id;\n\n// \u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u0442\u043e\u043f\u0438\u043a\u0430\nconst topicName = `${phone} ${clientName} [${businessName}]`;\n\nreturn [{\n  json: {\n    ...input,\n    chat_id: chatId,\n    bot_token: botToken,\n    topic_name: topicName,\n    phone,\n    client_name: clientName,\n    business_name: businessName,\n    message,\n    handover_id: handoverId,\n    conversation_id: conversationId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -576,
+        300
+      ],
+      "id": "tg-prepare-001",
+      "name": "Prepare Data"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT telegram_topic_id \nFROM conversations \nWHERE id = '{{ $json.conversation_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -352,
+        300
+      ],
+      "id": "tg-get-topic-001",
+      "name": "Get Existing Topic",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-topic",
+              "leftValue": "={{ $json.telegram_topic_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -128,
+        300
+      ],
+      "id": "tg-has-topic-001",
+      "name": "Has Topic?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Prepare Data').first().json.bot_token }}/createForumTopic",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Prepare Data').first().json.chat_id }}"
+            },
+            {
+              "name": "name",
+              "value": "={{ $('Prepare Data').first().json.topic_name }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        400
+      ],
+      "id": "tg-create-topic-001",
+      "name": "Create Topic"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE conversations \nSET telegram_topic_id = {{ $json.result.message_thread_id }} \nWHERE id = '{{ $('Prepare Data').first().json.conversation_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        320,
+        400
+      ],
+      "id": "tg-save-topic-001",
+      "name": "Save Topic ID",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// \u041f\u043e\u043b\u0443\u0447\u0430\u0435\u043c topic_id \u0438\u0437 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0435\u0433\u043e \u0438\u043b\u0438 \u043d\u043e\u0432\u043e\u0433\u043e\nconst prep = $('Build Message').first().json;\nlet topicId;\n\ntry {\n  // \u0415\u0441\u043b\u0438 \u0441\u043e\u0437\u0434\u0430\u043b\u0438 \u043d\u043e\u0432\u044b\u0439 \u0442\u043e\u043f\u0438\u043a\n  topicId = $('Create Topic').first()?.json?.result?.message_thread_id;\n} catch(e) {}\n\nif (!topicId) {\n  // \u0415\u0441\u043b\u0438 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043b\u0438 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0438\u0439\n  topicId = $('Get Existing Topic').first()?.json?.telegram_topic_id;\n}\n\nreturn [{\n  json: {\n    ...prep,\n    topic_id: topicId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        300
+      ],
+      "id": "tg-merge-topic-001",
+      "name": "Get Topic ID"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $json.bot_token }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.chat_id }}"
+            },
+            {
+              "name": "message_thread_id",
+              "value": "={{ $json.topic_id }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.escalation_text }}"
+            },
+            {
+              "name": "reply_markup",
+              "value": "={\"inline_keyboard\":[[{\"text\":\"\u0411\u0435\u0440\u0443 \u270b\",\"callback_data\":\"take_{{ $json.handover_id }}\"},{\"text\":\"\u041d\u0435 \u043c\u043e\u0433\u0443 \u274c\",\"callback_data\":\"skip_{{ $json.handover_id }}\"}]]}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        768,
+        300
+      ],
+      "id": "tg-send-escalation-001",
+      "name": "Send Escalation"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE handovers \nSET channel = 'telegram', \n    channel_ref = '{{ $('Get Topic ID').first().json.topic_id }}', \n    telegram_message_id = {{ $('Send Escalation').first().json.result.message_id }}\nWHERE id = '{{ $('Prepare Data').first().json.handover_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        992,
+        300
+      ],
+      "id": "tg-save-refs-001",
+      "name": "Save Channel Refs",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// \u0412\u043e\u0437\u0432\u0440\u0430\u0449\u0430\u0435\u043c \u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442\nreturn [{\n  json: {\n    success: true,\n    topic_id: $('Get Topic ID').first().json.topic_id,\n    message_id: $('Send Escalation').first().json.result?.message_id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        300
+      ],
+      "id": "tg-result-001",
+      "name": "Return Result"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Prepare Data').first().json.bot_token }}/pinChatMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Prepare Data').first().json.chat_id }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $('Send Escalation').first().json.result.message_id }}"
+            },
+            {
+              "name": "disable_notification",
+              "value": "=true"
+            }
+          ]
+        },
+        "options": {
+          "ignore_errors": true
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1400,
+        300
+      ],
+      "id": "adapter-pin-msg",
+      "name": "Pin Escalation"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  t.user_message as prev_message,\n  t.resolved_at as timeout_at,\n  EXTRACT(EPOCH FROM (NOW() - t.resolved_at)) / 3600 as hours_ago\nFROM handovers t\nJOIN conversations c ON c.id = t.conversation_id\nWHERE c.id = '{{ $json.conversation_id }}'\n  AND t.status = 'timeout'\n  AND t.resolved_at > NOW() - INTERVAL '24 hours'\n  -- \u041f\u0440\u043e\u0432\u0435\u0440\u044f\u0435\u043c \u0447\u0442\u043e \u041f\u041e\u0421\u041b\u0415 \u044d\u0442\u043e\u0433\u043e timeout \u043d\u0435 \u0431\u044b\u043b\u043e resolved \u0437\u0430\u044f\u0432\u043a\u0438\n  AND NOT EXISTS (\n    SELECT 1 FROM handovers r \n    WHERE r.conversation_id = t.conversation_id \n      AND r.status = 'resolved'\n      AND r.resolved_at > t.resolved_at\n  )\nORDER BY t.resolved_at DESC\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -464,
+        304
+      ],
+      "id": "tg-check-timeout-001",
+      "name": "Check Previous Timeout",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('Prepare Data').first().json;\nconst timeout = $('Check Previous Timeout').first()?.json;\n\nlet historyText = '';\nif (timeout && timeout.prev_message) {\n  const hoursAgo = Math.round(timeout.hours_ago || 0);\n  historyText = `\\n\\n\u26a0\ufe0f \u0418\u0421\u0422\u041e\u0420\u0418\u042f: timeout ${hoursAgo}\u0447 \u043d\u0430\u0437\u0430\u0434 (\u043d\u0435 \u043f\u043e\u043b\u0443\u0447\u0438\u043b \u043e\u0442\u0432\u0435\u0442)\\n\u041f\u0440\u0435\u0434\u044b\u0434\u0443\u0449\u0438\u0439 \u0432\u043e\u043f\u0440\u043e\u0441: \"${timeout.prev_message.substring(0, 100)}\"`;\n}\n\nconst messageText = `\ud83d\udea8 \u041d\u041e\u0412\u0410\u042f \u0417\u0410\u042f\u0412\u041a\u0410${historyText ? ' (\u041f\u041e\u0412\u0422\u041e\u0420\u041d\u0410\u042f)' : ''}\n\n\ud83d\udcf1 \u0422\u0435\u043b\u0435\u0444\u043e\u043d: ${prep.phone}\n\ud83d\udc64 \u041a\u043b\u0438\u0435\u043d\u0442: ${prep.client_name}\n\ud83c\udfe2 \u0411\u0438\u0437\u043d\u0435\u0441: ${prep.business_name}${historyText}\n\n\ud83d\udcac \u0421\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435:\n${prep.message}`;\n\nreturn [{\n  json: {\n    ...prep,\n    escalation_text: messageText,\n    has_history: !!historyText\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        304
+      ],
+      "id": "tg-build-msg-001",
+      "name": "Build Message"
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Prepare Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Data": {
+      "main": [
+        [
+          {
+            "node": "Check Previous Timeout",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Existing Topic": {
+      "main": [
+        [
+          {
+            "node": "Has Topic?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Topic?": {
+      "main": [
+        [
+          {
+            "node": "Get Topic ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Topic": {
+      "main": [
+        [
+          {
+            "node": "Save Topic ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Topic ID": {
+      "main": [
+        [
+          {
+            "node": "Get Topic ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Topic ID": {
+      "main": [
+        [
+          {
+            "node": "Send Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Escalation": {
+      "main": [
+        [
+          {
+            "node": "Pin Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Channel Refs": {
+      "main": [
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pin Escalation": {
+      "main": [
+        [
+          {
+            "node": "Save Channel Refs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Previous Timeout": {
+      "main": [
+        [
+          {
+            "node": "Build Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Message": {
+      "main": [
+        [
+          {
+            "node": "Get Existing Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": null,
+  "versionId": "d94a2a5d-b98c-45aa-81cb-0d570b2bc2b8",
+  "versionCounter": 9,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2025-12-08T05:19:23.736Z",
+      "createdAt": "2025-12-08T05:19:23.736Z",
+      "role": "workflow:owner",
+      "workflowId": "fFPEbTNlkBSjo66A",
+      "projectId": "Edco4DKU0vG4cvNQ",
+      "project": {
+        "updatedAt": "2025-07-26T06:30:59.771Z",
+        "createdAt": "2025-07-26T06:24:57.612Z",
+        "id": "Edco4DKU0vG4cvNQ",
+        "name": "Zhanbol Nassurla <centr.ag3nt@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "projectRelations": [
+          {
+            "updatedAt": "2025-07-26T06:24:57.612Z",
+            "createdAt": "2025-07-26T06:24:57.612Z",
+            "userId": "1017827a-5893-4c44-a900-9d2ec542dee9",
+            "projectId": "Edco4DKU0vG4cvNQ",
+            "user": {
+              "updatedAt": "2025-12-08T22:51:43.880Z",
+              "createdAt": "2025-07-26T06:24:40.626Z",
+              "id": "1017827a-5893-4c44-a900-9d2ec542dee9",
+              "email": "centr.ag3nt@gmail.com",
+              "firstName": "Zhanbol",
+              "lastName": "Nassurla",
+              "personalizationAnswers": {
+                "version": "v4",
+                "personalization_survey_submitted_at": "2025-07-26T06:31:12.321Z",
+                "personalization_survey_n8n_version": "1.103.2",
+                "companySize": "<20",
+                "companyType": "saas",
+                "role": "business-owner",
+                "reportedSource": "event"
+              },
+              "settings": {
+                "userActivated": true,
+                "easyAIWorkflowOnboarded": true,
+                "firstSuccessfulWorkflowId": "ZPaS9w6u3o0ZZZzm",
+                "userActivatedAt": 1756215492707,
+                "npsSurvey": {
+                  "responded": true,
+                  "lastShownAt": 1755608081520
+                }
+              },
+              "disabled": false,
+              "mfaEnabled": false,
+              "lastActiveAt": "2025-12-08",
+              "isPending": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "tags": []
+}

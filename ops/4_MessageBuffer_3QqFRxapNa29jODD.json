@@ -1,0 +1,417 @@
+{
+  "name": "4_MessageBuffer_3QqFRxapNa29jODD",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -896,
+        128
+      ],
+      "id": "6468799d-cde5-456d-9886-01dc122ad0ee",
+      "name": "Start"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Подготовить данные для буфера\nconst input = $json;\n\nconst bufferKey = `chat:${input.session_id}`;\nconst timerKey = `timer:${input.session_id}`;\n\nconst messageData = JSON.stringify({\n  text: input.normalized_text || input.text || '',\n  type: input.message_type,\n  timestamp: input.timestamp,\n  message_id: input.message_id\n});\n\nreturn [{\n  json: {\n    ...input,\n    bufferKey,\n    timerKey,\n    messageData\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        128
+      ],
+      "id": "880d54c9-2cd2-44ae-99e0-ea2206b12b5f",
+      "name": "Prepare Keys"
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $json.bufferKey }}",
+        "messageData": "={{ $json.messageData }}",
+        "tail": true
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -448,
+        128
+      ],
+      "id": "a69ecdd0-4393-4ce2-a306-4b41a70f35a9",
+      "name": "Push to Buffer",
+      "credentials": {
+        "redis": {
+          "id": "xMdLG7kqWMMoPY0M",
+          "name": "Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "={{ $('Prepare Keys').item.json.timerKey }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        128
+      ],
+      "id": "91da8055-8e5e-4767-8646-eb0f850069bb",
+      "name": "Get Timer",
+      "credentials": {
+        "redis": {
+          "id": "xMdLG7kqWMMoPY0M",
+          "name": "Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.propertyName }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              },
+              "id": "f5dac073-f4fe-45d1-a4a7-b723d79c7694"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -16,
+        128
+      ],
+      "id": "474b8bc7-d114-400f-97f0-d44ce888e916",
+      "name": "Is First Message?"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $('Prepare Keys').item.json.timerKey }}",
+        "value": "={{ Date.now() }}",
+        "keyType": "string",
+        "expire": true,
+        "ttl": 30
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        208,
+        16
+      ],
+      "id": "d34db0b0-13bb-4f9c-a43d-61f5cf535fa2",
+      "name": "Set Timer",
+      "credentials": {
+        "redis": {
+          "id": "xMdLG7kqWMMoPY0M",
+          "name": "Local"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        432,
+        16
+      ],
+      "id": "9f2966ca-796e-4a5f-a0ef-4e4d1be0d069",
+      "name": "Wait 5 sec",
+      "webhookId": "6e2d5434-a046-4d28-9065-db6c1d51d951"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "messages",
+        "key": "={{ $('Prepare Keys').item.json.bufferKey }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        656,
+        16
+      ],
+      "id": "cdd919d4-a383-4a5d-bf88-14a44878ef7c",
+      "name": "Get All Messages",
+      "credentials": {
+        "redis": {
+          "id": "xMdLG7kqWMMoPY0M",
+          "name": "Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $('Prepare Keys').item.json.bufferKey }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        880,
+        16
+      ],
+      "id": "fe68e086-3b0e-49e9-a584-b3853d081a76",
+      "name": "Delete Buffer",
+      "credentials": {
+        "redis": {
+          "id": "xMdLG7kqWMMoPY0M",
+          "name": "Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $('Prepare Keys').item.json.timerKey }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1088,
+        16
+      ],
+      "id": "5f4b955a-2d31-495c-80eb-2de0a2b18d7a",
+      "name": "Delete Timer",
+      "credentials": {
+        "redis": {
+          "id": "xMdLG7kqWMMoPY0M",
+          "name": "Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Собрать все сообщения из буфера\nconst input = $('Prepare Keys').item.json;\nconst messagesRaw = $('Get All Messages').item.json.messages || [];\n\n// Парсим JSON строки\nconst messages = messagesRaw.map(m => {\n  try { return JSON.parse(m); }\n  catch { return { text: m, type: 'unknown' }; }\n});\n\n// Объединяем тексты\nconst mergedText = messages.map(m => m.text).filter(t => t).join('\\n');\n\n// Определяем преобладающий тип\nconst hasAudio = messages.some(m => m.type === 'audio');\nconst hasImage = messages.some(m => m.type === 'image');\n\nreturn [{\n  json: {\n    channel: input.channel,\n    user_id: input.user_id,\n    session_id: input.session_id,\n    sender_name: input.sender_name,\n    client_slug: input.client_slug || 'truffles',\n    \n    // Буфер результаты\n    buffered_messages: messages,\n    buffered_count: messages.length,\n    merged_text: mergedText,\n    has_audio: hasAudio,\n    has_image: hasImage,\n    \n    // Для следующего шага\n    last_message_type: messages[messages.length - 1]?.type || 'text'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        16
+      ],
+      "id": "e6e8ff7c-7977-4e11-bb83-827752ad57d8",
+      "name": "Merge Messages"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "kEXEMbThwUsCJ2Cz",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/kEXEMbThwUsCJ2Cz",
+          "cachedResultName": "5_TurnDetector_kEXEMbThwUsCJ2Cz"
+        },
+        "workflowInputs": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1536,
+        16
+      ],
+      "id": "8486275f-457d-4d7a-a461-70c107197125",
+      "name": "Call TurnDetector"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Не первое сообщение - просто выходим\n     // Первое сообщение заберёт все из буфера\n     return [];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        256
+      ],
+      "id": "50dedfa5-62b0-4381-9e4b-9a7e5e6c2b4d",
+      "name": "Exit Silent"
+    }
+  ],
+  "pinData": {
+    "Start": [
+      {
+        "json": {
+          "channel": "whatsapp",
+          "user_id": "77015705555",
+          "session_id": "77015705555@s.whatsapp.net",
+          "message_id": "3F63A3D7F2B6E84BD173",
+          "timestamp": 1764912500,
+          "sender_name": "Zh.",
+          "message_type": "text",
+          "text": "здравсвтуйте",
+          "media": null,
+          "normalized_text": "здравсвтуйте",
+          "processing": "text_passthrough"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Prepare Keys",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Keys": {
+      "main": [
+        [
+          {
+            "node": "Push to Buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Push to Buffer": {
+      "main": [
+        [
+          {
+            "node": "Get Timer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Timer": {
+      "main": [
+        [
+          {
+            "node": "Is First Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is First Message?": {
+      "main": [
+        [
+          {
+            "node": "Set Timer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Exit Silent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Timer": {
+      "main": [
+        [
+          {
+            "node": "Wait 5 sec",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 5 sec": {
+      "main": [
+        [
+          {
+            "node": "Get All Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Messages": {
+      "main": [
+        [
+          {
+            "node": "Delete Buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Buffer": {
+      "main": [
+        [
+          {
+            "node": "Delete Timer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Timer": {
+      "main": [
+        [
+          {
+            "node": "Merge Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Messages": {
+      "main": [
+        [
+          {
+            "node": "Call TurnDetector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "eba251f4-d61f-4bdf-b19a-7a7eb2ed7ef0",
+  "meta": {
+    "instanceId": "01b56804ece88a9cc615224a075b1fb601dddc8bc8fa664ead4d87907f4c7973"
+  },
+  "id": "3QqFRxapNa29jODD",
+  "tags": []
+}

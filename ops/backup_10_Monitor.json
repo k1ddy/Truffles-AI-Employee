@@ -1,0 +1,604 @@
+{
+  "updatedAt": "2025-12-09T01:42:13.742Z",
+  "createdAt": "2025-12-08T22:57:49.794Z",
+  "id": "ZRcuYYCv1o9B0MyY",
+  "name": "10_Handover_Monitor",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -800,
+        300
+      ],
+      "id": "hm-schedule-001",
+      "name": "Every 5 Minutes"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  h.id as handover_id,\n  h.conversation_id,\n  h.status,\n  h.created_at,\n  h.assigned_to_name,\n  h.reminder_1_sent_at,\n  h.reminder_2_sent_at,\n  h.telegram_message_id,\n  EXTRACT(EPOCH FROM (NOW() - COALESCE(h.first_response_at, h.created_at))) / 60 as minutes_waiting,\n  c.telegram_topic_id,\n  cs.telegram_chat_id,\n  cs.telegram_bot_token,\n  cs.reminder_timeout_1,\n  cs.reminder_timeout_2,\n  cs.auto_close_timeout,\n  cs.owner_telegram_id,\n  u.phone as client_phone,\n  cl.name as client_name,\n  cl.config->>'instance_id' as instance_id\nFROM handovers h\nJOIN conversations c ON c.id = h.conversation_id\nJOIN users u ON u.id = c.user_id\nJOIN clients cl ON cl.id = c.client_id\nLEFT JOIN client_settings cs ON cs.client_id = c.client_id\nWHERE h.status IN ('pending', 'active')\n  AND cs.telegram_bot_token IS NOT NULL\nORDER BY h.created_at ASC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -576,
+        300
+      ],
+      "id": "hm-load-active-001",
+      "name": "Load Active Handovers",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const handovers = $input.all();\nconst results = [];\n\nfor (const item of handovers) {\n  const h = item.json;\n  const minutes = Math.floor(h.minutes_waiting || 0);\n  const timeout1 = h.reminder_timeout_1 || 30;\n  const timeout2 = h.reminder_timeout_2 || 60;\n  \n  let action = 'none';\n  \n  // \u0412\u0442\u043e\u0440\u043e\u0435 \u043d\u0430\u043f\u043e\u043c\u0438\u043d\u0430\u043d\u0438\u0435 (\u0421\u0420\u041e\u0427\u041d\u041e)\n  if (minutes >= timeout2 && !h.reminder_2_sent_at) {\n    action = 'reminder_2';\n  }\n  // \u041f\u0435\u0440\u0432\u043e\u0435 \u043d\u0430\u043f\u043e\u043c\u0438\u043d\u0430\u043d\u0438\u0435\n  else if (minutes >= timeout1 && !h.reminder_1_sent_at) {\n    action = 'reminder_1';\n  }\n  // \u041d\u0435\u0442 \u0430\u0432\u0442\u043e\u0437\u0430\u043a\u0440\u044b\u0442\u0438\u044f - \u0437\u0430\u044f\u0432\u043a\u0430 \u0432\u0438\u0441\u0438\u0442 \u043f\u043e\u043a\u0430 \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440 \u043d\u0435 \u043e\u0442\u0432\u0435\u0442\u0438\u0442\n  \n  if (action !== 'none') {\n    results.push({\n      json: {\n        ...h,\n        action,\n        minutes_waiting: minutes\n      }\n    });\n  }\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        300
+      ],
+      "id": "hm-decide-action-001",
+      "name": "Decide Action"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "reminder_1",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reminder_1"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "reminder_2",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reminder_2"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -128,
+        300
+      ],
+      "id": "hm-action-switch-001",
+      "name": "Action Switch"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $json.telegram_bot_token }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.telegram_chat_id }}"
+            },
+            {
+              "name": "message_thread_id",
+              "value": "={{ $json.telegram_topic_id }}"
+            },
+            {
+              "name": "text",
+              "value": "=\u23f0 \u0417\u0430\u044f\u0432\u043a\u0430 \u043e\u0442 {{ $json.client_phone }} \u0436\u0434\u0451\u0442 {{ $json.minutes_waiting }} \u043c\u0438\u043d"
+            },
+            {
+              "name": "reply_markup",
+              "value": "={{ JSON.stringify({inline_keyboard: [[{text: '\u041e\u0442\u0432\u0435\u0442\u0438\u043b \u2713', callback_data: 'answered_' + $json.handover_id}, {text: '\u0417\u0430\u043a\u0440\u044b\u0442\u044c', callback_data: 'resolve_' + $json.handover_id}, {text: '+30 \u043c\u0438\u043d', callback_data: 'snooze_' + $json.handover_id}]]}) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        100
+      ],
+      "id": "hm-send-reminder1-001",
+      "name": "Send Reminder 1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE handovers SET reminder_1_sent_at = NOW() WHERE id = '{{ $('Decide Action').first().json.handover_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        320,
+        100
+      ],
+      "id": "hm-mark-reminder1-001",
+      "name": "Mark Reminder 1 Sent",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $json.telegram_bot_token }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.telegram_chat_id }}"
+            },
+            {
+              "name": "message_thread_id",
+              "value": "={{ $json.telegram_topic_id }}"
+            },
+            {
+              "name": "text",
+              "value": "=\ud83d\udd34 \u0421\u0420\u041e\u0427\u041d\u041e: \u041a\u043b\u0438\u0435\u043d\u0442 {{ $json.client_phone }} \u0436\u0434\u0451\u0442 {{ $json.minutes_waiting }} \u043c\u0438\u043d!{{ $json.owner_telegram_id ? '\\n@' + $json.owner_telegram_id : '' }}"
+            },
+            {
+              "name": "reply_markup",
+              "value": "={{ JSON.stringify({inline_keyboard: [[{text: '\u041e\u0442\u0432\u0435\u0442\u0438\u043b \u2713', callback_data: 'answered_' + $json.handover_id}, {text: '\u0417\u0430\u043a\u0440\u044b\u0442\u044c', callback_data: 'resolve_' + $json.handover_id}]]}) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        300
+      ],
+      "id": "hm-send-reminder2-001",
+      "name": "Send Reminder 2"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE handovers SET reminder_2_sent_at = NOW() WHERE id = '{{ $('Decide Action').first().json.handover_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        320,
+        300
+      ],
+      "id": "hm-mark-reminder2-001",
+      "name": "Mark Reminder 2 Sent",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE handovers SET status = 'timeout', resolved_at = NOW() WHERE id = '{{ $('Decide Action').first().json.handover_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        96,
+        500
+      ],
+      "id": "hm-close-handover-001",
+      "name": "Close Handover",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE conversations SET bot_status = 'active', bot_muted_until = NULL, no_count = 0 WHERE id = '{{ $('Decide Action').first().json.conversation_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        320,
+        500
+      ],
+      "id": "hm-unmute-bot-001",
+      "name": "Unmute Bot",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (conversation_id, client_id, role, content, metadata) SELECT h.conversation_id, c.client_id, 'system', '\u23f1 \u0410\u0432\u0442\u043e\u0437\u0430\u043a\u0440\u044b\u0442\u0438\u0435 \u043f\u043e \u0442\u0430\u0439\u043c\u0430\u0443\u0442\u0443', jsonb_build_object('event', 'auto_close', 'minutes', {{ $('Decide Action').first().json.minutes_waiting }}) FROM handovers h JOIN conversations c ON c.id = h.conversation_id WHERE h.id = '{{ $('Decide Action').first().json.handover_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        544,
+        500
+      ],
+      "id": "hm-save-history-001",
+      "name": "Save to History",
+      "credentials": {
+        "postgres": {
+          "id": "SUHrbh39Ig0fBusT",
+          "name": "ChatbotDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.chatflow.me/v1/messages/text/{{ $('Decide Action').first().json.instance_id }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "a29b2ad2-9485-476c-897d-34799c3f940b"
+            },
+            {
+              "name": "number",
+              "value": "={{ $('Decide Action').first().json.client_phone }}"
+            },
+            {
+              "name": "text",
+              "value": "\u041a \u0441\u043e\u0436\u0430\u043b\u0435\u043d\u0438\u044e, \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440\u044b \u0441\u0435\u0439\u0447\u0430\u0441 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b. \u041d\u0430\u043f\u0438\u0448\u0438\u0442\u0435 '\u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440' \u0447\u0442\u043e\u0431\u044b \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u043d\u043e\u0432\u0443\u044e \u0437\u0430\u044f\u0432\u043a\u0443, \u0438\u043b\u0438 \u0437\u0430\u0434\u0430\u0439\u0442\u0435 \u0432\u043e\u043f\u0440\u043e\u0441 \u2014 \u044f \u043f\u043e\u0441\u0442\u0430\u0440\u0430\u044e\u0441\u044c \u043f\u043e\u043c\u043e\u0447\u044c."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        768,
+        500
+      ],
+      "id": "hm-notify-client-001",
+      "name": "Notify Client"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Decide Action').first().json.telegram_bot_token }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Decide Action').first().json.telegram_chat_id }}"
+            },
+            {
+              "name": "message_thread_id",
+              "value": "={{ $('Decide Action').first().json.telegram_topic_id }}"
+            },
+            {
+              "name": "text",
+              "value": "=\u23f1 \u0417\u0430\u044f\u0432\u043a\u0430 \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u0437\u0430\u043a\u0440\u044b\u0442\u0430 ({{ $('Decide Action').first().json.minutes_waiting }} \u043c\u0438\u043d \u0431\u0435\u0437 \u043e\u0442\u0432\u0435\u0442\u0430). \u041a\u043b\u0438\u0435\u043d\u0442\u0443 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u043e: \"\u0411\u043e\u0442 \u0441\u043d\u043e\u0432\u0430 \u043d\u0430 \u0441\u0432\u044f\u0437\u0438\""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        992,
+        500
+      ],
+      "id": "hm-notify-topic-001",
+      "name": "Notify Topic"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('Decide Action').first().json.telegram_bot_token }}/unpinChatMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Decide Action').first().json.telegram_chat_id }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $('Decide Action').first().json.telegram_message_id }}"
+            }
+          ]
+        },
+        "options": {
+          "ignore_ssl_issues": false
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        500
+      ],
+      "id": "hm-unpin-auto-001",
+      "name": "Unpin Auto-close"
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Load Active Handovers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Active Handovers": {
+      "main": [
+        [
+          {
+            "node": "Decide Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Action": {
+      "main": [
+        [
+          {
+            "node": "Action Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action Switch": {
+      "main": [
+        [
+          {
+            "node": "Send Reminder 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Reminder 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reminder 1": {
+      "main": [
+        [
+          {
+            "node": "Mark Reminder 1 Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reminder 2": {
+      "main": [
+        [
+          {
+            "node": "Mark Reminder 2 Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close Handover": {
+      "main": [
+        [
+          {
+            "node": "Unmute Bot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unmute Bot": {
+      "main": [
+        [
+          {
+            "node": "Save to History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to History": {
+      "main": [
+        [
+          {
+            "node": "Notify Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Client": {
+      "main": [
+        [
+          {
+            "node": "Notify Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Topic": {
+      "main": [
+        [
+          {
+            "node": "Unpin Auto-close",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Every 5 Minutes": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": null,
+  "pinData": null,
+  "versionId": "b3b4b877-ffb6-4590-b82d-1fdbab54b706",
+  "versionCounter": 14,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2025-12-08T22:57:49.794Z",
+      "createdAt": "2025-12-08T22:57:49.794Z",
+      "role": "workflow:owner",
+      "workflowId": "ZRcuYYCv1o9B0MyY",
+      "projectId": "Edco4DKU0vG4cvNQ",
+      "project": {
+        "updatedAt": "2025-07-26T06:30:59.771Z",
+        "createdAt": "2025-07-26T06:24:57.612Z",
+        "id": "Edco4DKU0vG4cvNQ",
+        "name": "Zhanbol Nassurla <centr.ag3nt@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "projectRelations": [
+          {
+            "updatedAt": "2025-07-26T06:24:57.612Z",
+            "createdAt": "2025-07-26T06:24:57.612Z",
+            "userId": "1017827a-5893-4c44-a900-9d2ec542dee9",
+            "projectId": "Edco4DKU0vG4cvNQ",
+            "user": {
+              "updatedAt": "2025-12-08T22:51:43.880Z",
+              "createdAt": "2025-07-26T06:24:40.626Z",
+              "id": "1017827a-5893-4c44-a900-9d2ec542dee9",
+              "email": "centr.ag3nt@gmail.com",
+              "firstName": "Zhanbol",
+              "lastName": "Nassurla",
+              "personalizationAnswers": {
+                "version": "v4",
+                "personalization_survey_submitted_at": "2025-07-26T06:31:12.321Z",
+                "personalization_survey_n8n_version": "1.103.2",
+                "companySize": "<20",
+                "companyType": "saas",
+                "role": "business-owner",
+                "reportedSource": "event"
+              },
+              "settings": {
+                "userActivated": true,
+                "easyAIWorkflowOnboarded": true,
+                "firstSuccessfulWorkflowId": "ZPaS9w6u3o0ZZZzm",
+                "userActivatedAt": 1756215492707,
+                "npsSurvey": {
+                  "responded": true,
+                  "lastShownAt": 1755608081520
+                }
+              },
+              "disabled": false,
+              "mfaEnabled": false,
+              "lastActiveAt": "2025-12-08",
+              "isPending": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "tags": []
+}
