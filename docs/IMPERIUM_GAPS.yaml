@@ -27,10 +27,10 @@ gaps:
 
   - id: "GAP-003"
     title: "CI/CD workflows missing in repo"
-    status: "NOT_IMPLEMENTED"
+    status: "DONE"
     why_it_matters: "No automated checks before deploy; regressions can ship silently."
     evidence:
-      - "rg --files -g '.github/**' (no output)"
+      - ".github/workflows/ci.yml (ruff + pytest)"
     proposed_fix_mvp: "Add .github/workflows/ci.yml with ruff + pytest; fail on lint/test errors."
     acceptance_tests:
       - "PR triggers CI and runs ruff + pytest"
@@ -38,23 +38,24 @@ gaps:
 
   - id: "GAP-004"
     title: "Qdrant API key mismatch in API service"
-    status: "PARTIAL"
+    status: "DONE"
     why_it_matters: "RAG retrieval can fail if API uses missing key while Qdrant requires API key."
     evidence:
       - "truffles-api/app/services/knowledge_service.py:11-47 (uses QDRANT_API_KEY)"
-      - "docker exec truffles-api env | grep -E '^QDRANT_API_KEY=|^QDRANT__SERVICE__API_KEY=' (only QDRANT__SERVICE__API_KEY present) (2025-12-21)"
-    proposed_fix_mvp: "Set QDRANT_API_KEY for API container or update code to fall back to QDRANT__SERVICE__API_KEY."
+      - "truffles-api/.env (QDRANT_API_KEY present)"
+      - "/home/zhan/restart_api.sh (uses --env-file .env)"
+    proposed_fix_mvp: "Set QDRANT_API_KEY in truffles-api/.env and ensure API container uses --env-file."
     acceptance_tests:
       - "search_knowledge returns results with 200 from Qdrant"
       - "Missing key triggers startup error/log"
 
   - id: "GAP-005"
     title: "Outbound WhatsApp send has no retries/backoff"
-    status: "NOT_IMPLEMENTED"
+    status: "DONE"
     why_it_matters: "Transient ChatFlow failures cause message loss and silent drops."
     evidence:
-      - "truffles-api/app/services/chatflow_service.py:37-55 (single request, no retry)"
-    proposed_fix_mvp: "Add retry with exponential backoff (e.g., 3 attempts) and log final failure."
+      - "truffles-api/app/services/chatflow_service.py (CHATFLOW_RETRY_ATTEMPTS/CHATFLOW_RETRY_BACKOFF_SECONDS)"
+    proposed_fix_mvp: "Retry with exponential backoff and log final failure."
     acceptance_tests:
       - "Simulated 500 from ChatFlow triggers retries"
       - "Success on retry marks delivery success"
@@ -72,12 +73,14 @@ gaps:
 
   - id: "GAP-007"
     title: "Alerting not configured in runtime env"
-    status: "NOT_IMPLEMENTED"
+    status: "DONE"
     why_it_matters: "Critical failures (ChatFlow/Qdrant/LLM) do not reach operators."
     evidence:
       - "truffles-api/app/services/alert_service.py:11-38 (requires ALERT_BOT_TOKEN/ALERT_CHAT_ID)"
-      - "docker exec truffles-api env | grep '^ALERT_' (no output) (2025-12-21)"
-    proposed_fix_mvp: "Set ALERT_BOT_TOKEN and ALERT_CHAT_ID in API container; add startup check and test endpoint."
+      - "truffles-api/app/routers/alerts.py (/alerts/test)"
+      - "truffles-api/.env (ALERT_BOT_TOKEN/ALERT_CHAT_ID present)"
+      - "/home/zhan/restart_api.sh (uses --env-file .env)"
+    proposed_fix_mvp: "Set ALERT_BOT_TOKEN/ALERT_CHAT_ID in truffles-api/.env and keep /alerts/test for runtime checks."
     acceptance_tests:
       - "Trigger alert sends Telegram message"
       - "Missing env causes loud startup warning"
@@ -108,11 +111,13 @@ gaps:
 
   - id: "GAP-010"
     title: "Webhook processing is synchronous (no ack-first queue)"
-    status: "PARTIAL"
+    status: "DONE"
     why_it_matters: "Slow LLM/ChatFlow calls can cause webhook timeouts and duplicate deliveries."
     evidence:
-      - "truffles-api/app/routers/webhook.py:839-849 (send_bot_response before response)"
-    proposed_fix_mvp: "Write inbound message to outbox and return 200 immediately; worker processes and sends replies."
+      - "truffles-api/app/routers/webhook.py (enqueue_only=True for /webhook and /webhook/{client_slug})"
+      - "truffles-api/app/services/outbox_service.py (enqueue/claim/mark)"
+      - "truffles-api/app/routers/admin.py (/admin/outbox/process)"
+    proposed_fix_mvp: "Write inbound message to outbox and return 200 immediately; process via outbox worker."
     acceptance_tests:
       - "Webhook responds <200ms while processing continues async"
       - "Outbox worker delivers response and updates message status"
@@ -123,8 +128,9 @@ gaps:
     why_it_matters: "Duplicate outbound sends can occur on retries or multi-callbacks."
     evidence:
       - "truffles-api/app/routers/webhook.py:185-240 (inbound dedup)"
-      - "truffles-api/app/services/chatflow_service.py:37-55 (no idempotency key)"
-    proposed_fix_mvp: "Add outbound idempotency key (message_id) and outbox de-dupe before send."
+      - "truffles-api/app/routers/webhook.py (outbound_idempotency_key via msg_id)"
+      - "truffles-api/app/services/chatflow_service.py (msg_id passthrough)"
+    proposed_fix_mvp: "Extend outbound idempotency key to all send paths (not only webhook/outbox)."
     acceptance_tests:
       - "Repeated outbound send with same key results in single ChatFlow request"
 

@@ -14,7 +14,16 @@
 | `HOW_TO_WORK.md` | Инструкция для Жанбола | Жанбол |
 | `TECH.md` | Доступы, команды, данные сервера | Кодер |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
+| `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
+
+---
+
+## .github/ — CI/CD
+
+| Файл | Назначение |
+|------|------------|
+| `.github/workflows/ci.yml` | GitHub Actions: ruff + pytest + build/push GHCR + deploy (optional) |
 
 ---
 
@@ -76,6 +85,7 @@ truffles-api/
 │   ├── services/
 │   │   ├── ai_service.py            # LLM + RAG thresholds + guardrails
 │   │   ├── alert_service.py         # Telegram alerts (errors/warnings)
+│   │   ├── demo_salon_knowledge.py  # Truth/policy/phrases для demo_salon
 │   │   ├── message_service.py        # save_message + generate_bot_response
 │   │   ├── intent_service.py         # Классификация интентов
 │   │   ├── knowledge_service.py      # Qdrant RAG поиск + embeddings
@@ -89,6 +99,8 @@ truffles-api/
 │   │   ├── telegram_service.py       # Telegram API wrapper
 │   │   ├── chatflow_service.py       # Отправка сообщений в WhatsApp (ChatFlow)
 │   │   └── learning_service.py       # Qdrant upsert по ответам owner
+│   ├── knowledge/
+│   │   └── demo_salon/          # Канон truth/policy/eval pack (Phase 0)
 │   ├── models/              # SQLAlchemy модели
 │   │   ├── outbox_message.py     # Outbox таблица (ACK-first)
 │   ├── schemas/             # Pydantic схемы
@@ -112,6 +124,7 @@ truffles-api/
 | `examples.md` | Примеры диалогов (как отвечать) |
 | `slang.md` | Сленг СНГ (Kaspi, "ноготочки") |
 | `README.md` | Описание формата |
+| `demo_salon/` | Канон KB для Qdrant (demo salon docs) |
 
 **Используется:** RAG поиск, промпт.
 

@@ -1,6 +1,6 @@
 # TECH — Технические данные
 
-**Проверено: 2025-12-10**
+**Проверено: 2025-12-23**
 
 ---
 
@@ -25,7 +25,9 @@
 | truffles_qdrant_1 | qdrant/qdrant:latest | Vector DB |
 | truffles_n8n_1 | n8nio/n8n:latest | n8n (роутинг) |
 | bge-m3 | text-embeddings-inference | Embeddings |
-| truffles-traefik | traefik:v2.10 | Reverse proxy |
+| truffles-traefik | traefik:v2.11 | Reverse proxy |
+
+**Важно:** Инфраструктура разделена: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, `n8n/postgres/redis/qdrant/pgadmin` → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`). API в проде деплоится через `/home/zhan/restart_api.sh`. В `/home/zhan/truffles/docker-compose.yml` — заглушка (не использовать). Ранее был кейс ошибки `KeyError: 'ContainerConfig'` на `up/build`.
 
 ---
 
@@ -36,7 +38,7 @@
 | Контейнер | truffles_postgres_1 |
 | База | chatbot |
 | Пользователь | n8n |
-| Пароль | ${DB_PASSWORD} |
+| Пароль | ${DB_POSTGRESDB_PASSWORD} |
 
 ### Подключение
 ```bash
@@ -79,6 +81,8 @@ docker exec truffles_postgres_1 psql -U n8n -d chatbot -c 'SELECT ...'
 - `POST /webhook` — входящие сообщения от n8n (legacy)
 - `POST /telegram-webhook` — callbacks от Telegram
 - `GET /health` — проверка здоровья
+- `GET /admin/health` — health/self-heal метрики
+- `POST /admin/outbox/process` — обработка ACK-first очереди (admin token)
 - `POST /reminders/process` — обработка напоминаний
 
 **WhatsApp Webhook URL (ChatFlow):**
@@ -86,6 +90,13 @@ docker exec truffles_postgres_1 psql -U n8n -d chatbot -c 'SELECT ...'
 
 ### Переменные окружения (API)
 - `NO_RESPONSE_ALERT_MINUTES` — порог минут для алерта “вход есть — ответа нет” (default: 3).
+- `OUTBOX_COALESCE_SECONDS` — тишина перед склейкой сообщений в outbox (default: 8).
+- `OUTBOX_PROCESS_LIMIT` — лимит сообщений на один запуск `/admin/outbox/process` (default: 10).
+- `OUTBOX_MAX_ATTEMPTS` — максимум попыток outbox перед статусом FAILED (default: 5).
+- `OUTBOX_RETRY_BACKOFF_SECONDS` — базовый backoff (сек) для повторов outbox (default: 2).
+- `ALERTS_ADMIN_TOKEN` — токен для admin/outbox эндпойнтов.
+- `CHATFLOW_RETRY_ATTEMPTS` — количество попыток отправки в ChatFlow (default: 3).
+- `CHATFLOW_RETRY_BACKOFF_SECONDS` — базовый backoff (сек) для ChatFlow (default: 0.5).
 
 ---
 
@@ -107,9 +118,20 @@ Webhook URL: `https://api.truffles.kz/telegram-webhook`
 ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 100"
 ```
 
-### Перезапуск API
+### Деплой API (prod)
 ```bash
-ssh -p 222 zhan@5.188.241.234 "docker restart truffles-api"
+# CI build/push → pull image
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash ~/restart_api.sh"
+
+# Локальная сборка (fallback)
+ssh -p 222 zhan@5.188.241.234 "docker build -t truffles-api_truffles-api /home/zhan/truffles/truffles-api"
+ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
+```
+`restart_api.sh` поддерживает `IMAGE_NAME` и `PULL_IMAGE=1`.
+
+### Перезапуск API (без обновления кода)
+```bash
+ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 ```
 
 ### Запрос к БД
@@ -119,7 +141,20 @@ ssh -p 222 zhan@5.188.241.234 "docker exec truffles_postgres_1 psql -U n8n -d ch
 
 ### Qdrant
 ```bash
-ssh -p 222 zhan@5.188.241.234 "curl -s -H 'api-key: ${DB_PASSWORD}' 'http://localhost:6333/collections'"
+ssh -p 222 zhan@5.188.241.234 "curl -s -H 'api-key: ${QDRANT_API_KEY}' 'http://localhost:6333/collections'"
+```
+
+---
+
+## Outbox (ACK-first)
+
+- Входящие сообщения только кладутся в outbox (`/webhook*`), обработка идёт отдельным воркером.
+- Планировщик: `/etc/cron.d/truffles-outbox` (каждую минуту вызывает `POST /admin/outbox/process`).
+- При ошибке отправки outbox планирует повтор с backoff (next_attempt_at) до `OUTBOX_MAX_ATTEMPTS`.
+- Ручной запуск (на сервере):
+```bash
+TOKEN=$(/usr/bin/docker exec truffles-api /bin/sh -lc 'echo "$ALERTS_ADMIN_TOKEN"')
+curl -fsS -X POST http://localhost:8000/admin/outbox/process -H "X-Admin-Token: $TOKEN"
 ```
 
 ---

@@ -76,7 +76,7 @@ DATABASE_URL=postgresql://...
 1. Создать `.env` файл на сервере
 2. Добавить `.env` в `.gitignore`
 3. Заменить хардкод на `os.environ`
-4. Обновить `docker-compose.yml` — `env_file: .env`
+4. Обновить `/home/zhan/infrastructure/docker-compose.truffles.yml` — `env_file: .env`
 5. Проверить что в git нет секретов: `git log -p | grep -i "sk-proj\|password\|token"`
 
 ### Список секретов для выноса
@@ -86,7 +86,7 @@ DATABASE_URL=postgresql://...
 | OPENAI_API_KEY | В коде | ai_service.py |
 | TELEGRAM_BOT_TOKEN | В БД (ок) | client_settings |
 | QDRANT_API_KEY | В коде | knowledge_service.py |
-| DATABASE_URL | docker-compose | docker-compose.yml |
+| DATABASE_URL | docker-compose | /home/zhan/infrastructure/docker-compose.truffles.yml |
 | BGE_M3_URL | В коде | knowledge_service.py |
 
 ---
@@ -244,9 +244,9 @@ pytest tests/ --cov=app --cov-report=html
 ### Файл workflow
 
 ```yaml
-# .github/workflows/deploy.yml
+# .github/workflows/ci.yml
 
-name: Test and Deploy
+name: CI
 
 on:
   push:
@@ -254,9 +254,19 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  IMAGE_NAME: ghcr.io/k1ddy/truffles-ai-employee
+
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  test:
+  lint-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: truffles-api
     steps:
       - uses: actions/checkout@v4
       
@@ -264,49 +274,81 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: truffles-api/requirements.txt
       
       - name: Install dependencies
         run: |
-          cd truffles-api
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov
-      
-      - name: Run tests
-        run: |
-          cd truffles-api
-          pytest tests/ -v --cov=app
+          pip install pytest pytest-cov ruff
       
       - name: Lint
-        run: |
-          pip install ruff
-          ruff check truffles-api/app
+        run: ruff check app tests
+      
+      - name: Run tests
+        run: pytest tests/ -q
 
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
+  build-push:
     if: github.ref == 'refs/heads/main'
+    needs: lint-test
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Deploy to server
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Build metadata
+        id: meta
+        run: echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./truffles-api
+          file: ./truffles-api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:main
+            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          build-args: |
+            APP_VERSION=main
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.meta.outputs.build_time }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && secrets.SSH_PRIVATE_KEY != '' && secrets.SERVER_HOST != '' && secrets.SERVER_USER != '' && secrets.SERVER_PORT != ''
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 222
           script: |
-            cd /home/zhan/truffles-api
-            git pull origin main
-            docker compose up -d --build
+            IMAGE_NAME=${{ env.IMAGE_NAME }}:main PULL_IMAGE=1 bash ~/restart_api.sh
 ```
 
 ### Секреты в GitHub
 
-Settings → Secrets → Actions:
-- `SERVER_HOST`: 5.188.241.234
-- `SERVER_USER`: zhan
-- `SSH_PRIVATE_KEY`: (приватный ключ)
+Для CI тестов секреты не нужны. Для deploy через SSH:
+- `SERVER_HOST`
+- `SERVER_USER`
+- `SERVER_PORT`
+- `SSH_PRIVATE_KEY`
 
 ---
 

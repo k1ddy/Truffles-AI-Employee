@@ -1,5 +1,5 @@
 meta:
-  date_generated: "2025-12-21"
+  date_generated: "2025-12-23"
   generated_by: "Codex"
   repo_root: "/home/zhan/truffles"
   repo_commit: "2b16a72e81b56e8a1ccaea1c6bbdca265d235fac"
@@ -23,8 +23,15 @@ runtime:
     user: "zhan"
     evidence:
       - "TECH.md:11-14"
+  deploy:
+    api_restart_script: "/home/zhan/restart_api.sh"
+    build_required_for_code_changes: true
+    evidence:
+      - "STATE.md:27"
+      - "TECH.md:107-114"
   docker:
     compose_file: "/home/zhan/truffles/docker-compose.yml"
+    compose_usage: "local only; prod compose broken (KeyError: 'ContainerConfig'); production uses restart script"
     compose_services:
       - "n8n"
       - "n8n-worker"
@@ -38,7 +45,8 @@ runtime:
       - name: "internal-net"
         type: "bridge"
     evidence:
-      - "docker-compose.yml:3-100"
+      - "docker-compose.yml:3-100 (local reference)"
+      - "STATE.md:27"
   running_containers:
     items:
       - name: "truffles-api"
@@ -64,10 +72,11 @@ runtime:
       - name: "gemini_autonomous_proxy"
         image: "opus45gui-gemini-proxy"
     evidence:
-      - "docker ps (2025-12-21)"
+      - "docker ps (2025-12-23)"
   compose_status:
+    status: "not used in prod"
     evidence:
-      - "docker compose -f docker-compose.yml ps (2025-12-21)"
+      - "STATE.md:27"
   volumes:
     items:
       - name: "truffles_n8n_data"
@@ -98,7 +107,7 @@ network_topology:
   evidence:
     - "docker inspect truffles-api --format '{{json .NetworkSettings.Networks}}' (2025-12-21)"
     - "docker inspect bge-m3 --format '{{json .NetworkSettings.Networks}}' (2025-12-21)"
-    - "docker-compose.yml:3-42"
+    - "docker-compose.yml:3-42 (local reference)"
 
 service_connectivity:
   networks:
@@ -124,10 +133,16 @@ service_connectivity:
     - service: "truffles_pgadmin_1"
       host_ports: "5050:80"
   evidence:
-    - "docker-compose.yml:19-98 (network memberships)"
     - "docker inspect truffles-api --format '{{json .NetworkSettings.Networks}}' (2025-12-21)"
     - "docker inspect bge-m3 --format '{{json .NetworkSettings.Networks}}' (2025-12-21)"
     - "docker ps (published ports) (2025-12-21)"
+outbox:
+  processor: "/etc/cron.d/truffles-outbox"
+  schedule: "*/1"
+  endpoint: "POST /admin/outbox/process"
+  evidence:
+    - "/etc/cron.d/truffles-outbox (2025-12-23)"
+    - "STATE.md:420"
 api_service:
   framework: "FastAPI"
   entrypoint: "truffles-api/app/main.py"
@@ -306,9 +321,9 @@ observability:
       - "truffles-api/app/services/reminder_service.py:18-133"
 
 cicd:
-  github_actions: "NOT_FOUND"
+  github_actions: "PRESENT (.github/workflows/ci.yml: tests + build/push to GHCR)"
   evidence:
-    - "rg --files -g '.github/**' (no output)"
+    - ".github/workflows/ci.yml"
 
 env_vars:
   truffles_api_container:

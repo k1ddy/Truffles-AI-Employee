@@ -24,7 +24,19 @@
 - [ ] Quiet hours для напоминаний — P2
 
 ### Блокеры
-- **docker-compose не работает** — ошибка `KeyError: 'ContainerConfig'`, деплой через `ops/restart_api.sh` (на сервере: `~/restart_api.sh`)
+- **docker-compose** — инфра‑стек жив и разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, `n8n/postgres/redis/qdrant/pgadmin` → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`; API деплой через `/home/zhan/restart_api.sh` + `docker build`; `/home/zhan/truffles/docker-compose.yml` — заглушка
+
+---
+
+## PHASE 0 — RELEASE CRITERIA (DoD)
+
+См. `STRATEGY/REQUIREMENTS.md` → раздел "DEFINITION OF DONE — PHASE 0".
+
+Кратко:
+- Safety/Law: оплата/предоплата/проверка/возврат, перенос, скидки, medical/complaint → только эскалация/шаблон.
+- Core value: truth‑first по базовым вопросам + сбор лида на запись.
+- Reliability: ACK‑first + outbox; coalescing 8s; без дублей/потерь.
+- Evidence: pytest+eval+ruff зелёные + smoke‑check на проде.
 
 ---
 
@@ -116,6 +128,7 @@
 | **Состояние** | `STATE.md` | Каждую сессию |
 | **Структура** | `STRUCTURE.md` | При добавлении/удалении файлов |
 | **Техника** | `TECH.md` | При изменении доступов/команд |
+| **Инфра compose** | `/home/zhan/infrastructure/docker-compose.yml`, `/home/zhan/infrastructure/docker-compose.truffles.yml` | При изменении инфраструктуры |
 | **Контекст** | `docs/IMPERIUM_CONTEXT.yaml` | При изменении фактов/архитектуры |
 | **Решения** | `docs/IMPERIUM_DECISIONS.yaml` | При изменении CEO-level policy |
 | **Gaps** | `docs/IMPERIUM_GAPS.yaml` | При закрытии/открытии критических пробелов |
@@ -127,6 +140,7 @@
 | **Автообучение** | `SPECS/ACTIVE_LEARNING.md` | модерация, Qdrant |
 | **Архитектура** | `SPECS/ARCHITECTURE.md` | новые сервисы, потоки данных |
 | **Инфраструктура** | `SPECS/INFRASTRUCTURE.md` | безопасность, CI/CD, тесты |
+| **CI/CD** | `.github/workflows/ci.yml` | При изменении pipeline |
 | **Мультитенант** | `SPECS/MULTI_TENANT.md` | онбординг, новые клиенты |
 | | | |
 | **Миграции** | `ops/migrations/*.sql` | при изменении схемы БД |
@@ -136,13 +150,37 @@
 | **Продукт** | `STRATEGY/PRODUCT.md` | Тарифы, фичи |
 | **Рынок** | `STRATEGY/MARKET.md` | Исследования, метрики |
 | | | |
-| **База знаний** | `knowledge/*.md` | FAQ, примеры, сленг |
+| **База знаний** | `knowledge/*.md`, `knowledge/demo_salon/*.md` | FAQ, примеры, сленг, демо-салон |
 | **Интенты** | `context/intents/*.txt` | Новые интенты |
 | **Промпты** | `prompts/*.md` | Системный промпт |
 
 ---
 
 ## ИСТОРИЯ СЕССИЙ
+
+### 2025-12-23 — Demo salon truth-first + outbox coalescing (repo)
+
+**Что сделали:**
+- Реализован truth-first/policy-gate для demo_salon (до RAG/LLM) + EVAL pytest
+- Добавлена склейка сообщений в outbox (coalescing по conversation_id, 6–10 сек тишины)
+- Введён канон `knowledge/demo_salon/` для синка (fallback на `ops/demo_salon_docs`)
+- Документы обновлены: `docs/SESSION_START_PROMPT.txt`, `TECH.md`, `STRUCTURE.md`
+
+**Важно:** код в репо обновлён; чтобы изменения заработали на проде, нужен `docker build` + `bash ~/restart_api.sh` (restart без build не подтягивает код).
+
+### 2025-12-23 — Outbound retries/idempotency + EVAL fixes (prod)
+
+**Что сделали:**
+- Добавлены retry/backoff для ChatFlow + msg_id idempotency в webhook/outbox
+- Outbox: повторные попытки с backoff до `OUTBOX_MAX_ATTEMPTS`
+- Исправлены EVAL кейсы demo_salon (guest_policy, бренды, рескейджул, прайс токены)
+- Документы обновлены: `TECH.md`, `docs/IMPERIUM_GAPS.yaml`, `SUMMARY.md`
+
+**Тесты:**
+- `pytest -q` (145 passed; Pydantic warnings)
+
+**Деплой:**
+- `docker build -t truffles-api_truffles-api .` + `bash /home/zhan/restart_api.sh`
 
 ### 2025-12-22 — PR-004: Outbox + ACK-first (prod)
 
@@ -558,7 +596,7 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 ```
 
-**docker-compose НЕ РАБОТАЕТ** — ошибка `KeyError: 'ContainerConfig'`
+**docker-compose:** инфра‑стек жив и разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, `n8n/postgres/redis/qdrant/pgadmin` → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`; `/home/zhan/truffles/docker-compose.yml` — заглушка
 
 ---
 
