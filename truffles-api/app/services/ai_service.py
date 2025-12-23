@@ -102,6 +102,60 @@ ACKNOWLEDGEMENT_RESPONSE = "Ок. Если появится вопрос — н�
 LOW_SIGNAL_RESPONSE = "Понял. Можете уточнить, что именно вас интересует?"
 GREETING_RESPONSE = "Здравствуйте! Чем могу помочь?"
 THANKS_RESPONSE = "Рад помочь. Если нужно что-то ещё — пишите."
+BOT_STATUS_RESPONSE = "Я на связи. Напишите ваш вопрос, и я помогу."
+OUT_OF_DOMAIN_RESPONSE = "Я помогаю по нашим услугам, записи и ценам. Чем могу помочь?"
+
+YES_CONFIRMATION_PHRASES = {
+    "да",
+    "ага",
+    "угу",
+    "ок",
+    "окей",
+    "okay",
+    "yes",
+    "конечно",
+    "давай",
+    "подключай",
+    "подключите",
+}
+
+NO_CONFIRMATION_PHRASES = {
+    "нет",
+    "неа",
+    "no",
+    "не",
+    "не надо",
+    "не нужно",
+    "не хочу",
+    "не сейчас",
+    "потом",
+}
+
+BOT_STATUS_KEYWORDS = {
+    "бот не отвечает",
+    "бот молчит",
+    "не отвечает",
+    "не ответил",
+    "почему не отвечает",
+    "почему не отвечаете",
+    "почему молчит",
+    "почему молчите",
+    "бот молчит",
+    "молчишь",
+    "молчите",
+    "ты здесь",
+    "ты тут",
+    "ты еще здесь",
+    "ты ещё здесь",
+    "вы здесь",
+    "вы тут",
+    "вы еще здесь",
+    "вы ещё здесь",
+    "на связи",
+    "есть кто",
+    "кто-нибудь здесь",
+    "алло",
+}
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
@@ -240,6 +294,35 @@ def _assistant_expects_yes_no(text: str) -> bool:
     return text.strip().endswith("?") and not _assistant_expects_details(text)
 
 
+def classify_confirmation(text: str) -> str:
+    """Classify short confirmation replies as yes/no/unknown."""
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return "unknown"
+
+    if normalized in YES_CONFIRMATION_PHRASES:
+        return "yes"
+    if normalized in NO_CONFIRMATION_PHRASES:
+        return "no"
+
+    if any(token in YES_CONFIRMATION_PHRASES for token in normalized.split()):
+        return "yes"
+    if any(phrase in normalized for phrase in NO_CONFIRMATION_PHRASES):
+        return "no"
+
+    return "unknown"
+
+
+def is_bot_status_question(text: str) -> bool:
+    """Detect questions like 'бот не отвечает/ты тут?' to avoid escalation."""
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return False
+    if normalized in BOT_STATUS_KEYWORDS:
+        return True
+    return any(keyword in normalized for keyword in BOT_STATUS_KEYWORDS)
+
+
 BAD_WORDS = {
     "блять",
     "бля",
@@ -320,6 +403,46 @@ def _build_contextual_search_query(history: List[dict], user_message: str) -> st
 
     # Keep query bounded to avoid oversized embeddings and accidental topic drift.
     return query[:300]
+
+
+def get_rag_confidence(
+    *,
+    db: Session,
+    conversation_id: UUID,
+    client_slug: str,
+    user_message: str,
+) -> tuple[bool, float]:
+    """Return whether RAG has a confident match and its max score."""
+    if not user_message:
+        return False, 0.0
+
+    max_score = 0.0
+    results: list[dict] = []
+
+    query_for_rag = _sanitize_query_for_rag(user_message)
+    try:
+        results = search_knowledge(query_for_rag, client_slug, limit=3)
+        if results:
+            max_score = max(r.get("score", 0.0) for r in results)
+    except Exception as exc:
+        logger.warning(f"RAG confidence check failed: {exc}")
+
+    if not results or max_score < MID_CONFIDENCE_THRESHOLD:
+        if is_low_signal_message(user_message) or _is_context_dependent_message(user_message):
+            history = get_conversation_history(db, conversation_id, limit=10)
+            contextual_query = _build_contextual_search_query(history, user_message)
+            if contextual_query and contextual_query != user_message:
+                contextual_query = _sanitize_query_for_rag(contextual_query)
+                try:
+                    retry_results = search_knowledge(contextual_query, client_slug, limit=3)
+                    if retry_results:
+                        retry_score = max(r.get("score", 0.0) for r in retry_results)
+                        if retry_score > max_score:
+                            max_score = retry_score
+                except Exception as exc:
+                    logger.warning(f"RAG retry confidence check failed: {exc}")
+
+    return max_score >= MID_CONFIDENCE_THRESHOLD, max_score
 
 
 def generate_ai_response(

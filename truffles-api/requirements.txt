@@ -6,6 +6,7 @@ pydantic==2.5.3
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
 httpx==0.26.0
+PyYAML==6.0.2
 redis==5.0.8
 pytest==7.4.4
 pytest-asyncio==0.23.3
