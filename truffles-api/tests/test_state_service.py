@@ -1,24 +1,22 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from datetime import timedelta
 from unittest.mock import Mock, patch
 
 import pytest
 
+from app.routers.webhook import (
+    LOW_CONFIDENCE_RETRY_WINDOW_MINUTES,
+    is_handover_status_question,
+    should_offer_low_confidence_retry,
+    should_process_debounced_message,
+)
 from app.services.state_machine import ConversationState
 from app.services.state_service import (
     check_invariants,
     escalate_to_pending,
     manager_resolve,
     manager_take,
-)
-
-from app.routers.webhook import (
-    LOW_CONFIDENCE_RETRY_WINDOW_MINUTES,
-    is_handover_status_question,
-    should_process_debounced_message,
-    should_offer_low_confidence_retry,
 )
 
 
