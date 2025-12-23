@@ -23,7 +23,12 @@ def get_instance_id(db: Session, client_id: UUID) -> Optional[str]:
     return None
 
 
-def send_whatsapp_message(instance_id: str, remote_jid: str, message: str) -> bool:
+def send_whatsapp_message(
+    instance_id: str,
+    remote_jid: str,
+    message: str,
+    idempotency_key: Optional[str] = None,
+) -> bool:
     """Send message via ChatFlow API."""
     if not CHATFLOW_TOKEN:
         logger.error("ChatFlow token is missing (CHATFLOW_TOKEN env var not set)")
@@ -36,16 +41,16 @@ def send_whatsapp_message(instance_id: str, remote_jid: str, message: str) -> bo
 
     try:
         logger.debug(f"Sending to ChatFlow: jid={remote_jid}, instance_id={instance_id[:20]}...")
+        params = {
+            "token": CHATFLOW_TOKEN,
+            "instance_id": instance_id,
+            "jid": remote_jid,
+            "msg": message,
+        }
+        if idempotency_key:
+            params["msg_id"] = idempotency_key
         with httpx.Client(timeout=30.0) as client:
-            response = client.get(
-                CHATFLOW_API_URL,
-                params={
-                    "token": CHATFLOW_TOKEN,
-                    "instance_id": instance_id,
-                    "jid": remote_jid,
-                    "msg": message,
-                },
-            )
+            response = client.get(CHATFLOW_API_URL, params=params)
             logger.info(
                 f"ChatFlow response: status={response.status_code}, jid={remote_jid}, body={response.text[:200]}"
             )
@@ -56,16 +61,26 @@ def send_whatsapp_message(instance_id: str, remote_jid: str, message: str) -> bo
         return False
 
 
-def send_bot_response(db: Session, client_id: UUID, remote_jid: str, message: str) -> bool:
+def send_bot_response(
+    db: Session,
+    client_id: UUID,
+    remote_jid: str,
+    message: str,
+    *,
+    idempotency_key: Optional[str] = None,
+    raise_on_fail: bool = False,
+) -> bool:
     """Send bot response to WhatsApp user."""
     instance_id = get_instance_id(db, client_id)
     if not instance_id:
         logger.warning(f"No instance_id found for client {client_id}, jid={remote_jid}")
         return False
 
-    ok = send_whatsapp_message(instance_id, remote_jid, message)
+    ok = send_whatsapp_message(instance_id, remote_jid, message, idempotency_key=idempotency_key)
     if not ok:
         logger.warning(f"Failed to deliver via ChatFlow: jid={remote_jid}, client_id={client_id}")
+        if raise_on_fail:
+            raise RuntimeError("ChatFlow delivery failed")
     else:
         logger.info(f"Delivered via ChatFlow: jid={remote_jid}")
     return ok
