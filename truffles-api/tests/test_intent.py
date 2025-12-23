@@ -3,7 +3,16 @@ from app.services.intent_service import ESCALATION_INTENTS, REJECTION_INTENTS, I
 
 class TestIntentEnum:
     def test_all_intents_defined(self):
-        expected = {"human_request", "frustration", "rejection", "question", "greeting", "thanks", "other"}
+        expected = {
+            "human_request",
+            "frustration",
+            "rejection",
+            "question",
+            "greeting",
+            "thanks",
+            "out_of_domain",
+            "other",
+        }
         actual = {i.value for i in Intent}
         assert actual == expected
 

@@ -1,4 +1,6 @@
+import re
 from enum import Enum
+from typing import Any, Iterable, Tuple
 
 from app.logging_config import get_logger
 from app.services.ai_service import get_llm_provider
@@ -13,7 +15,14 @@ class Intent(str, Enum):
     QUESTION = "question"  # Вопрос о продукте/услуге
     GREETING = "greeting"  # Приветствие
     THANKS = "thanks"  # Благодарность
+    OUT_OF_DOMAIN = "out_of_domain"  # Вопрос не по теме
     OTHER = "other"  # Всё остальное
+
+
+class DomainIntent(str, Enum):
+    IN_DOMAIN = "in_domain"
+    OUT_OF_DOMAIN = "out_of_domain"
+    UNKNOWN = "unknown"
 
 
 ESCALATION_INTENTS = {Intent.HUMAN_REQUEST, Intent.FRUSTRATION}
@@ -26,6 +35,7 @@ CLASSIFY_PROMPT = """Классифицируй сообщение клиент�
 - question — вопрос о продукте, услуге, цене, доставке
 - greeting — приветствие (привет, здравствуйте, добрый день)
 - thanks — благодарность (спасибо, благодарю)
+- out_of_domain — сообщение не по теме (погода, рецепты, программирование)
 - other — всё остальное
 
 Примеры:
@@ -38,6 +48,7 @@ CLASSIFY_PROMPT = """Классифицируй сообщение клиент�
 "Какая цена?" → question
 "Привет!" → greeting
 "Спасибо за помощь" → thanks
+"Какая погода в Алматы?" → out_of_domain
 
 Сообщение: {message}
 
@@ -75,3 +86,165 @@ def should_escalate(intent: Intent) -> bool:
 def is_rejection(intent: Intent) -> bool:
     """Check if client is rejecting bot's help."""
     return intent in REJECTION_INTENTS
+
+
+def _normalize_text(text: str) -> str:
+    if not text:
+        return ""
+    normalized = text.strip().casefold()
+    normalized = re.sub(r"[^\w\s]", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+def _ensure_list(value: Any) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value if v]
+    if isinstance(value, tuple):
+        return [str(v) for v in value if v]
+    if isinstance(value, str):
+        return [value]
+    return []
+
+
+def _get_domain_router_config(client_config: dict | None) -> dict:
+    if not isinstance(client_config, dict):
+        return {}
+    nested = client_config.get("domain_router")
+    if isinstance(nested, dict):
+        return nested
+    if any(key in client_config for key in ("anchors_in", "anchors_out", "in_threshold", "out_threshold")):
+        return client_config
+    return {}
+
+
+def _score_against_anchors(text_normalized: str, tokens: set[str], anchors: Iterable[str]) -> tuple[float, str | None]:
+    best_score = 0.0
+    best_anchor = None
+    for anchor in anchors:
+        anchor_normalized = _normalize_text(anchor)
+        if not anchor_normalized:
+            continue
+        if anchor_normalized in text_normalized:
+            score = 0.95
+        else:
+            anchor_tokens = set(anchor_normalized.split())
+            if not anchor_tokens:
+                continue
+            score = len(tokens & anchor_tokens) / max(len(anchor_tokens), 1)
+        if score > best_score:
+            best_score = score
+            best_anchor = anchor
+    return best_score, best_anchor
+
+
+def classify_domain_with_scores(
+    text: str,
+    client_config: dict | None,
+) -> Tuple[DomainIntent, float, float, dict]:
+    """
+    Classify message domain using per-client anchors (no network calls).
+    Returns (domain_intent, in_score, out_score, meta).
+    """
+    config = _get_domain_router_config(client_config)
+    anchors_in = _ensure_list(config.get("anchors_in"))
+    anchors_out = _ensure_list(config.get("anchors_out"))
+    in_threshold = float(config.get("in_threshold", 0.62))
+    out_threshold = float(config.get("out_threshold", 0.62))
+    margin = float(config.get("margin", 0.08))
+    min_len = int(config.get("min_len", 5))
+
+    text_normalized = _normalize_text(text)
+    tokens = set(text_normalized.split()) if text_normalized else set()
+
+    if len(text_normalized) < min_len or (not anchors_in and not anchors_out):
+        return (
+            DomainIntent.UNKNOWN,
+            0.0,
+            0.0,
+            {
+                "in_threshold": in_threshold,
+                "out_threshold": out_threshold,
+                "margin": margin,
+                "anchors_in": len(anchors_in),
+                "anchors_out": len(anchors_out),
+                "message_len": len(text_normalized),
+            },
+        )
+
+    in_score, matched_in = _score_against_anchors(text_normalized, tokens, anchors_in)
+    out_score, matched_out = _score_against_anchors(text_normalized, tokens, anchors_out)
+
+    domain_intent = DomainIntent.UNKNOWN
+    if in_score >= in_threshold and in_score >= out_score + margin:
+        domain_intent = DomainIntent.IN_DOMAIN
+    elif out_score >= out_threshold and out_score >= in_score + margin:
+        domain_intent = DomainIntent.OUT_OF_DOMAIN
+
+    meta = {
+        "in_threshold": in_threshold,
+        "out_threshold": out_threshold,
+        "margin": margin,
+        "anchors_in": len(anchors_in),
+        "anchors_out": len(anchors_out),
+        "matched_in": matched_in,
+        "matched_out": matched_out,
+        "message_len": len(text_normalized),
+    }
+    return domain_intent, in_score, out_score, meta
+
+
+def is_strong_out_of_domain(
+    text: str,
+    domain_intent: DomainIntent,
+    in_score: float,
+    out_score: float,
+    client_config: dict | None,
+) -> tuple[bool, dict]:
+    """
+    Conservative strong out-of-domain gate.
+    Uses stricter thresholds and minimum length to avoid false positives.
+    """
+    config = _get_domain_router_config(client_config)
+    out_threshold = float(config.get("out_threshold", 0.62))
+
+    strict_out_threshold = float(config.get("strict_out_threshold", max(out_threshold, 0.8)))
+    strong_out_threshold = float(config.get("strong_out_threshold", max(out_threshold, 0.72)))
+    strict_margin = float(config.get("strict_margin", 0.18))
+    strong_margin = float(config.get("strong_margin", 0.12))
+    strict_in_max = float(config.get("strict_in_max", 0.4))
+    strong_in_max = float(config.get("strong_in_max", 0.5))
+    strict_min_len = int(config.get("strict_min_len", 6))
+
+    text_normalized = _normalize_text(text)
+    message_len = len(text_normalized)
+
+    strong = False
+    if domain_intent == DomainIntent.OUT_OF_DOMAIN:
+        if (
+            message_len >= strict_min_len
+            and out_score >= strict_out_threshold
+            and out_score >= in_score + strict_margin
+            and in_score <= strict_in_max
+        ):
+            strong = True
+        elif (
+            out_score >= strong_out_threshold
+            and out_score >= in_score + strong_margin
+            and in_score <= strong_in_max
+        ):
+            strong = True
+
+    meta = {
+        "strict_out_threshold": strict_out_threshold,
+        "strong_out_threshold": strong_out_threshold,
+        "strict_margin": strict_margin,
+        "strong_margin": strong_margin,
+        "strict_in_max": strict_in_max,
+        "strong_in_max": strong_in_max,
+        "strict_min_len": strict_min_len,
+        "message_len": message_len,
+    }
+    return strong, meta
