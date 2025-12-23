@@ -79,11 +79,12 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    if: github.ref == 'refs/heads/main' && secrets.SSH_PRIVATE_KEY != '' && secrets.SERVER_HOST != '' && secrets.SERVER_USER != '' && secrets.SERVER_PORT != ''
+    if: github.ref == 'refs/heads/main'
     needs: build-push
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to VPS
+        if: ${{ secrets.SSH_PRIVATE_KEY != '' && secrets.SERVER_HOST != '' && secrets.SERVER_USER != '' && secrets.SERVER_PORT != '' }}
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -92,3 +93,6 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             IMAGE_NAME=${{ env.IMAGE_NAME }}:main PULL_IMAGE=1 bash ~/restart_api.sh
+      - name: Deploy skipped (missing secrets)
+        if: ${{ secrets.SSH_PRIVATE_KEY == '' || secrets.SERVER_HOST == '' || secrets.SERVER_USER == '' || secrets.SERVER_PORT == '' }}
+        run: echo "Deploy skipped: missing SSH secrets."
