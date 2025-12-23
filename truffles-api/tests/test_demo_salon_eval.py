@@ -4,7 +4,6 @@ import yaml
 
 from app.services.demo_salon_knowledge import get_demo_salon_decision
 
-
 EVAL_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_salon" / "EVAL.yaml"
 
 

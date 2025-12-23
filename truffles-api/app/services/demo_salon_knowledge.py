@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-import re
 from typing import Any
 
 import yaml
-
 
 _DEMO_SALON_DIR = Path(__file__).resolve().parents[1] / "knowledge" / "demo_salon"
 _TRUTH_PATH = _DEMO_SALON_DIR / "SALON_TRUTH.yaml"

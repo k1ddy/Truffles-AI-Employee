@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.logging_config import setup_logging
 from app.models import Conversation, Handover, Message, User
-from app.routers import alerts, admin, callback, message, reminders, telegram_webhook, webhook
+from app.routers import admin, alerts, callback, message, reminders, telegram_webhook, webhook
 
 setup_logging()
 

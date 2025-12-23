@@ -2,8 +2,8 @@
 
 import os
 from datetime import datetime, timedelta, timezone
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel

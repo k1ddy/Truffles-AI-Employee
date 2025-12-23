@@ -5,19 +5,13 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.logging_config import get_logger
 from app.models import Client, ClientSettings, Conversation, Handover, Message
 from app.schemas.webhook import WebhookRequest, WebhookResponse
-from app.services.chatflow_service import send_bot_response
-from app.services.conversation_service import (
-    get_or_create_conversation,
-    get_or_create_user,
-)
-from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.ai_service import (
     GREETING_RESPONSE,
     THANKS_RESPONSE,
@@ -26,6 +20,12 @@ from app.services.ai_service import (
     is_low_signal_message,
     is_thanks_message,
 )
+from app.services.chatflow_service import send_bot_response
+from app.services.conversation_service import (
+    get_or_create_conversation,
+    get_or_create_user,
+)
+from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import Intent, classify_intent, is_rejection, should_escalate
 from app.services.message_service import generate_bot_response, save_message
 from app.services.state_machine import ConversationState

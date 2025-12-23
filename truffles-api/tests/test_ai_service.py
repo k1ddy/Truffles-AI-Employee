@@ -2,14 +2,14 @@ from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from app.services.ai_service import (
-    KNOWLEDGE_CONFIDENCE_THRESHOLD,
     ACKNOWLEDGEMENT_RESPONSE,
     GREETING_RESPONSE,
+    KNOWLEDGE_CONFIDENCE_THRESHOLD,
     LOW_SIGNAL_RESPONSE,
+    _sanitize_query_for_rag,
     generate_ai_response,
     get_conversation_history,
     get_system_prompt,
-    _sanitize_query_for_rag,
 )
 from app.services.result import Result
 

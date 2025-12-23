@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.models import ClientSettings, Conversation, Handover, Message
+from app.schemas.reminder import ReminderItem
 from app.services.alert_service import alert_warning
 from app.services.state_machine import ConversationState
-from app.schemas.reminder import ReminderItem
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("reminder_service")

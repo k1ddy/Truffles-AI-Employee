@@ -5,22 +5,14 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from starlette.requests import ClientDisconnect
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from starlette.requests import ClientDisconnect
 
 from app.database import get_db
 from app.logging_config import get_logger
 from app.models import Client, ClientSettings, Conversation, Handover, Message, User
 from app.schemas.webhook import WebhookRequest, WebhookResponse
-from app.services.chatflow_service import send_bot_response
-from app.services.conversation_service import (
-    get_or_create_conversation,
-    get_or_create_user,
-)
-from app.services.demo_salon_knowledge import get_demo_salon_decision
-from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
-from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.ai_service import (
     BOT_STATUS_RESPONSE,
     GREETING_RESPONSE,
@@ -35,6 +27,13 @@ from app.services.ai_service import (
     is_thanks_message,
 )
 from app.services.alert_service import alert_warning
+from app.services.chatflow_service import send_bot_response
+from app.services.conversation_service import (
+    get_or_create_conversation,
+    get_or_create_user,
+)
+from app.services.demo_salon_knowledge import get_demo_salon_decision
+from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
     DomainIntent,
     Intent,
@@ -45,6 +44,7 @@ from app.services.intent_service import (
     should_escalate,
 )
 from app.services.message_service import generate_bot_response, save_message
+from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.state_machine import ConversationState
 from app.services.state_service import escalate_to_pending, manager_resolve
 from app.services.telegram_service import TelegramService
