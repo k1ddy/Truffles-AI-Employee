@@ -1,7 +1,7 @@
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class WebhookMetadata(BaseModel):
@@ -9,6 +9,10 @@ class WebhookMetadata(BaseModel):
     timestamp: Optional[int] = None
     messageId: Optional[str] = None
     remoteJid: Optional[str] = None
+    instanceId: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("instanceId", "instance_id", "instance"),
+    )
 
 
 class WebhookBody(BaseModel):

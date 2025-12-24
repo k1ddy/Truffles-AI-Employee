@@ -177,6 +177,7 @@ truffles-api/
 - `ops/migrations/011_add_webhook_secret.sql` — `client_settings.webhook_secret` для защиты /webhook.
 - `ops/migrations/012_add_outbox_messages.sql` — Outbox для ACK-first обработки.
 - `ops/migrations/013_add_agents_and_learning_queue.sql` — роли/идентичности + очередь обучения + branch_id.
+- `ops/migrations/014_add_branch_routing_settings.sql` — настройки branch routing + auto-approve ролей.
 
 **Старые скрипты:** `.archive/ops_old/` — не в git.
 

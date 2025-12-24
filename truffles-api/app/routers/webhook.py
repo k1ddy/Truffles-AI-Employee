@@ -11,7 +11,7 @@ from starlette.requests import ClientDisconnect
 
 from app.database import get_db
 from app.logging_config import get_logger
-from app.models import Client, ClientSettings, Conversation, Handover, Message, User
+from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.ai_service import (
     BOT_STATUS_RESPONSE,
@@ -155,6 +155,15 @@ def _normalize_chatflow_payload(payload: dict, client_slug: str | None) -> tuple
                 break
     if sender:
         metadata.setdefault("sender", sender)
+
+    instance_id = metadata.get("instanceId") or metadata.get("instance_id")
+    if not instance_id:
+        for key in ("instanceId", "instance_id", "instance", "whatsapp_instance_id"):
+            instance_id = candidate.get(key)
+            if instance_id:
+                break
+    if instance_id:
+        metadata.setdefault("instanceId", instance_id)
 
     message = body.get("message")
     if not isinstance(message, str) or not message.strip():
@@ -640,6 +649,138 @@ def _set_booking_context(context: dict, booking: dict) -> dict:
     return context
 
 
+BRANCH_SELECTION_KEY = "branch_selection"
+BRANCH_CONTEXT_KEY = "branch_id"
+MSG_BRANCH_SELECTED = "Отлично, выбрали филиал {branch_name}. Чем могу помочь?"
+
+
+def _coerce_uuid(value) -> UUID | None:
+    if not value:
+        return None
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_branch_selection(context: dict) -> dict | None:
+    selection = context.get(BRANCH_SELECTION_KEY) if isinstance(context, dict) else None
+    if isinstance(selection, dict):
+        return dict(selection)
+    return None
+
+
+def _set_branch_selection(context: dict, selection: dict | None) -> dict:
+    context = dict(context)
+    if selection:
+        context[BRANCH_SELECTION_KEY] = selection
+    else:
+        context.pop(BRANCH_SELECTION_KEY, None)
+    return context
+
+
+def _get_user_metadata(user: User) -> dict:
+    metadata = user.user_metadata if isinstance(user.user_metadata, dict) else {}
+    return dict(metadata)
+
+
+def _get_user_branch_preference(user: User) -> UUID | None:
+    metadata = _get_user_metadata(user)
+    return _coerce_uuid(metadata.get(BRANCH_CONTEXT_KEY))
+
+
+def _set_user_branch_preference(user: User, branch_id: UUID) -> None:
+    metadata = _get_user_metadata(user)
+    metadata[BRANCH_CONTEXT_KEY] = str(branch_id)
+    user.user_metadata = metadata
+
+
+def _get_active_branches(db: Session, client_id) -> list[Branch]:
+    return (
+        db.query(Branch)
+        .filter(Branch.client_id == client_id, Branch.is_active == True)
+        .order_by(Branch.name.asc())
+        .all()
+    )
+
+
+def _build_branch_prompt(branches: list[Branch]) -> str:
+    lines = ["Пожалуйста, выберите филиал:"]
+    for idx, branch in enumerate(branches, start=1):
+        label = branch.name or branch.slug or f"Филиал {idx}"
+        lines.append(f"{idx}) {label}")
+    lines.append("Ответьте номером или названием филиала.")
+    return "\n".join(lines)
+
+
+def _build_branch_selection(branches: list[Branch], now: datetime) -> dict:
+    return {
+        "options": [str(branch.id) for branch in branches],
+        "asked_at": now.isoformat(),
+    }
+
+
+def _match_branch_choice(
+    message_text: str,
+    branches: list[Branch],
+    selection: dict | None,
+) -> tuple[Branch | None, bool]:
+    normalized = _normalize_text(message_text)
+    if not normalized:
+        return None, False
+
+    if normalized.isdigit():
+        index = int(normalized)
+        options = selection.get("options") if isinstance(selection, dict) else None
+        if isinstance(options, list) and 1 <= index <= len(options):
+            target_id = _coerce_uuid(options[index - 1])
+            if target_id:
+                for branch in branches:
+                    if branch.id == target_id:
+                        return branch, True
+        if 1 <= index <= len(branches):
+            return branches[index - 1], True
+
+    for branch in branches:
+        name_norm = _normalize_text(branch.name or "")
+        slug_norm = _normalize_text(branch.slug or "")
+        if name_norm and name_norm in normalized:
+            return branch, False
+        if slug_norm and slug_norm in normalized:
+            return branch, False
+    return None, False
+
+
+def _is_branch_only_message(message_text: str, branch: Branch, selected_by_index: bool) -> bool:
+    normalized = _normalize_text(message_text)
+    if not normalized:
+        return False
+    if selected_by_index and normalized.isdigit():
+        return True
+    if branch.name and normalized == _normalize_text(branch.name):
+        return True
+    if branch.slug and normalized == _normalize_text(branch.slug):
+        return True
+    return False
+
+
+def _apply_branch_selection(
+    *,
+    conversation: Conversation,
+    user: User,
+    branch: Branch,
+    context: dict,
+    remember_branch: bool,
+) -> None:
+    updated_context = dict(context)
+    updated_context[BRANCH_CONTEXT_KEY] = str(branch.id)
+    updated_context.pop(BRANCH_SELECTION_KEY, None)
+    _set_conversation_context(conversation, updated_context)
+    conversation.branch_id = branch.id
+    if remember_branch:
+        _set_user_branch_preference(user, branch.id)
+
+
 def _update_booking_from_message(booking: dict, message_text: str) -> dict:
     booking = dict(booking)
     last_question = booking.get("last_question")
@@ -958,6 +1099,130 @@ async def _handle_webhook_payload(
     now = datetime.now(timezone.utc)
     previous_last_message_at = conversation.last_message_at
     conversation.last_message_at = now
+
+    # 4.5 Branch routing (instance_id -> branch, or ask user)
+    branch_mode = (
+        settings.branch_resolution_mode if settings and settings.branch_resolution_mode else "hybrid"
+    )
+    remember_branch = (
+        settings.remember_branch_preference
+        if settings and settings.remember_branch_preference is not None
+        else True
+    )
+    context = _get_conversation_context(conversation)
+    branch_id = conversation.branch_id or _coerce_uuid(context.get(BRANCH_CONTEXT_KEY))
+    if not branch_id and remember_branch:
+        branch_id = _get_user_branch_preference(user)
+
+    if branch_id:
+        if conversation.branch_id != branch_id:
+            conversation.branch_id = branch_id
+        if context.get(BRANCH_CONTEXT_KEY) != str(branch_id):
+            context[BRANCH_CONTEXT_KEY] = str(branch_id)
+            _set_conversation_context(conversation, context)
+        if remember_branch and _get_user_branch_preference(user) != branch_id:
+            _set_user_branch_preference(user, branch_id)
+    else:
+        instance_id = metadata.instanceId if metadata else None
+        if branch_mode in {"by_instance", "hybrid"} and instance_id:
+            branch = (
+                db.query(Branch)
+                .filter(
+                    Branch.client_id == client.id,
+                    Branch.instance_id == instance_id,
+                    Branch.is_active == True,
+                )
+                .first()
+            )
+            if branch:
+                _apply_branch_selection(
+                    conversation=conversation,
+                    user=user,
+                    branch=branch,
+                    context=context,
+                    remember_branch=remember_branch,
+                )
+
+        if not conversation.branch_id and branch_mode in {"ask_user", "hybrid"}:
+            branches = _get_active_branches(db, client.id)
+            if len(branches) == 1:
+                _apply_branch_selection(
+                    conversation=conversation,
+                    user=user,
+                    branch=branches[0],
+                    context=context,
+                    remember_branch=remember_branch,
+                )
+            elif len(branches) > 1 and conversation.state == ConversationState.BOT_ACTIVE.value:
+                selection = _get_branch_selection(context)
+                if selection:
+                    matched_branch, selected_by_index = _match_branch_choice(
+                        message_text, branches, selection
+                    )
+                    if matched_branch:
+                        _apply_branch_selection(
+                            conversation=conversation,
+                            user=user,
+                            branch=matched_branch,
+                            context=context,
+                            remember_branch=remember_branch,
+                        )
+                        if _is_branch_only_message(message_text, matched_branch, selected_by_index):
+                            bot_response = MSG_BRANCH_SELECTED.format(
+                                branch_name=matched_branch.name
+                                or matched_branch.slug
+                                or "филиал"
+                            )
+                            save_message(
+                                db, conversation.id, client.id, role="assistant", content=bot_response
+                            )
+                            sent = _send_response(bot_response)
+                            result_message = (
+                                "Branch selected (prompted)" if sent else "Branch selection response failed"
+                            )
+                            db.commit()
+                            return WebhookResponse(
+                                success=True,
+                                message=result_message,
+                                conversation_id=conversation.id,
+                                bot_response=bot_response,
+                            )
+                    else:
+                        prompt = _build_branch_prompt(branches)
+                        context = _set_branch_selection(
+                            context, _build_branch_selection(branches, now)
+                        )
+                        _set_conversation_context(conversation, context)
+                        save_message(db, conversation.id, client.id, role="assistant", content=prompt)
+                        sent = _send_response(prompt)
+                        result_message = (
+                            "Branch selection requested (retry)"
+                            if sent
+                            else "Branch selection prompt failed"
+                        )
+                        db.commit()
+                        return WebhookResponse(
+                            success=True,
+                            message=result_message,
+                            conversation_id=conversation.id,
+                            bot_response=prompt,
+                        )
+                else:
+                    prompt = _build_branch_prompt(branches)
+                    context = _set_branch_selection(context, _build_branch_selection(branches, now))
+                    _set_conversation_context(conversation, context)
+                    save_message(db, conversation.id, client.id, role="assistant", content=prompt)
+                    sent = _send_response(prompt)
+                    result_message = (
+                        "Branch selection requested" if sent else "Branch selection prompt failed"
+                    )
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=prompt,
+                    )
 
     # 5. Check session timeout - reset mute if no messages for 24h+
     bot_response = None

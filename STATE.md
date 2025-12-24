@@ -23,7 +23,9 @@
 - [ ] **⚠️ Склейка сообщений ломает multi‑intent** — demo_salon: price‑ответ перехватывает до booking; “цена+запись” в одном батче даёт только цену → запись теряется
 - [ ] **⚠️ Закрепы заявок в Telegram** — после "Решено" закреп должен сниматься; сейчас иногда остаётся (проверить обработку `unpin` и message_id)
 - [ ] **⚠️ Дубли заявок на одного клиента** — владельцу неудобно; нужен guard: при open handover не создавать новый, а писать в текущий топик
-- [ ] **Branch не подключен** — модель есть, но роутинг идёт через client_id → `SPECS/MULTI_TENANT.md`
+- [ ] **Branch подключен частично** — webhook ставит `conversation.branch_id`, но Telegram per branch + RAG фильтры ещё не wired → `SPECS/MULTI_TENANT.md`
+- [ ] **⚠️ by_instance не сработает без instanceId** — входящие payloadы сейчас не несут `metadata.instanceId`, нужно прокинуть в n8n/ChatFlow
+- [ ] **⚠️ demo_salon truth-gate даёт цену на "как у/в стиле"** — нет правила style_reference, фото не поддерживаются; нужен отдельный ответ/эскалация
 - [ ] Метрики (Quality Deflection, CSAT) — план: `SPECS/ESCALATION.md`, часть 6
 - [ ] Dashboard для заказчика — backlog
 - [ ] Quiet hours для напоминаний — P2
@@ -157,6 +159,7 @@
 | | | |
 | **Миграции** | `ops/migrations/*.sql` | при изменении схемы БД |
 | **Миграции** | `ops/migrations/011_add_webhook_secret.sql` | webhook secret per tenant |
+| **Миграции** | `ops/migrations/014_add_branch_routing_settings.sql` | настройки branch routing + auto-approve |
 | **Требования** | `STRATEGY/REQUIREMENTS.md` | Требования Жанбола |
 | **Roadmap** | `STRATEGY/TECH_ROADMAP.md` | Технический план |
 | **Продукт** | `STRATEGY/PRODUCT.md` | Тарифы, фичи |
@@ -169,6 +172,16 @@
 ---
 
 ## ИСТОРИЯ СЕССИЙ
+
+### 2025-12-24 — Admin settings for branch routing
+
+**Что сделали:**
+- Расширили `/admin/settings` под branch routing + auto-approve роли.
+- Починили маппинг reminder_* → `reminder_timeout_*` в настройках.
+- Добавили миграцию `ops/migrations/014_add_branch_routing_settings.sql`.
+- Встроили branch routing (by_instance/ask_user/hybrid) и remember_branch в `webhook.py`.
+- Дефолт auto-approve обновлён на `owner,admin` (спека/модель/миграция).
+- **Prod fix:** применили миграцию 013/014 (не было `conversations.branch_id` → webhook падал).
 
 ### 2025-12-24 — Спеки + скелет архитектуры обучения
 
@@ -594,6 +607,12 @@ Runbook (если “всё странно” или сессия оборвал
 - Я предположил что это причина — но Жанбол сказал что это хуйня
 - **Я НЕ ЗНАЮ почему обучение не работает**
 
+### Прод (2025-12-24):
+- API падал на `/webhook` из-за отсутствия `conversations.branch_id` (миграция 013 не была применена) — применено, падение исчезло.
+- `/etc/cron.d/truffles-outbox` есть и дергает `/admin/outbox/process` каждую минуту (через `ALERTS_ADMIN_TOKEN`).
+- Inbound payload не несёт `metadata.instanceId`, поэтому by_instance branch routing не может сработать без правки upstream.
+- Demo_salon: запросы вида "как у/в стиле" → отвечают прайсом (truth-gate), нужно отдельное правило.
+
 ---
 
 ## ЧТО МЕНЯЛОСЬ В КОДЕ
@@ -639,6 +658,8 @@ Runbook (если “всё странно” или сессия оборвал
 
 | Приоритет | Задача | Как проверить |
 |-----------|--------|---------------|
+| P0 | Деплой актуального кода из `/home/zhan/truffles-main` на прод | В `/admin/version` новый коммит; поведение соответствует изменениям |
+| P0 | Прокинуть `instanceId` в inbound payload (n8n/ChatFlow) | `payload.body.metadata.instanceId` есть; `conversation.branch_id` ставится |
 | P0 | Понять почему обучение не работает | Логи должны показать "Owner response detected" |
 | P0 | Уменьшить задержку ответов (outbox) | Время ответа и пересылки в Telegram < 10с (coalesce + cron/worker) |
 | P0 | Починить multi‑intent при склейке (цена → запись) | Сообщения “цена+запись” ведут к сбору записи, не теряют контекст |
@@ -646,6 +667,7 @@ Runbook (если “всё странно” или сессия оборвал
 | P1 | Пины в Telegram снимаются после "Решено" | После resolve закреп исчезает всегда |
 | P1 | Проработать UX Telegram для владельца/менеджеров | Спека: как работать с заявками без хаоса |
 | P1 | Добавить базовые фразы в knowledge base | "ты еще здесь?" → бот отвечает сам |
+| P1 | demo_salon: правило style_reference (как у/в стиле) | Ответ без фото/без выдумок, с объяснением зависимости от базы |
 
 ### 3. КАК ДЕПЛОИТЬ
 

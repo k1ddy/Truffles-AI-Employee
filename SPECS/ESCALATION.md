@@ -804,7 +804,7 @@ MSG_MUTED_LONG = "Понял! Если ответа от менеджеров д
 | `max_escalations_per_hour` | 50 | Лимит защиты от спама |
 | `branch_resolution_mode` | `hybrid` | `by_instance` / `ask_user` / `hybrid` |
 | `remember_branch_preference` | true | Сохранять выбранный филиал |
-| `auto_approve_roles` | `owner` | Роли с auto-approve (строка/список) |
+| `auto_approve_roles` | `owner,admin` | Роли с auto-approve (строка/список) |
 | `manager_scope` | `branch` | `branch` / `global` |
 | `require_branch_for_pricing` | true | Без филиала не озвучивать цены/скидки |
 

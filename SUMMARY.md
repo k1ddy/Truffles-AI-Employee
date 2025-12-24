@@ -4,7 +4,14 @@ Session handover (2025-12-24)
 - Decision: roles/identities + learning queue + Telegram per branch; branch routing configurable (by_instance/ask_user/hybrid).
 - Added models: Agent, AgentIdentity, LearnedResponse; added migration `ops/migrations/013_add_agents_and_learning_queue.sql`; added `branch_id` to conversations.
 - Specs updated: `SPECS/ESCALATION.md`, `SPECS/ARCHITECTURE.md`, `SPECS/ACTIVE_LEARNING.md`, `SPECS/MULTI_TENANT.md`, `SPECS/CONSULTANT.md`.
-- Next step: wire branch routing + roles in Telegram flow; extend admin settings for new config.
+- Implemented: `/admin/settings` extended for branch routing + auto-approve; webhook branch routing (by_instance/ask_user/hybrid) + remember_branch.
+- Added migration `ops/migrations/014_add_branch_routing_settings.sql`; default auto-approve = `owner,admin`.
+- Prod fix: applied migration 013/014 to add `conversations.branch_id` (webhook was crashing without it).
+- Prod config: created `branches` row for demo_salon (instance_id + telegram_chat_id), set settings to by_instance + remember_branch.
+- Known blocker: inbound payload currently lacks `metadata.instanceId`, so by_instance cannot resolve branch until upstream is fixed.
+- Known behavior: demo_salon truth-gate отвечает прайсом на "как у/в стиле"; фото не поддерживаются → нужен отдельный rule.
+- Tests: `pytest -q` via `.venv` → 164 passed (2 pydantic deprecation warnings).
+- Next step: wire Telegram flow to use agents/identities + learned_responses queue + branch telegram_chat_id.
 
 Inventory highlights
 - Docker compose: infra split — `/home/zhan/infrastructure/docker-compose.yml` (traefik, website) and `/home/zhan/infrastructure/docker-compose.truffles.yml` (n8n, n8n-worker, postgres, qdrant, redis, pgadmin); `/home/zhan/truffles/docker-compose.yml` is a stub.

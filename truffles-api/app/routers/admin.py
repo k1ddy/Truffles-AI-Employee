@@ -6,7 +6,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -18,6 +18,10 @@ from app.services.outbox_service import claim_pending_outbox_batches, mark_outbo
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = get_logger("outbox")
+
+ALLOWED_BRANCH_MODES = {"by_instance", "ask_user", "hybrid"}
+ALLOWED_MANAGER_SCOPES = {"branch", "global"}
+ALLOWED_AUTO_APPROVE_ROLES = {"owner", "admin", "manager", "support"}
 
 
 # === SCHEMAS ===
@@ -38,6 +42,35 @@ class SettingsUpdate(BaseModel):
     mute_duration_second_hours: Optional[int] = None
     reminder_1_minutes: Optional[int] = None
     reminder_2_minutes: Optional[int] = None
+    branch_resolution_mode: Optional[str] = None
+    remember_branch_preference: Optional[bool] = None
+    manager_scope: Optional[str] = None
+    require_branch_for_pricing: Optional[bool] = None
+    auto_approve_roles: Optional[list[str]] = None
+
+    @field_validator("auto_approve_roles", mode="before")
+    @classmethod
+    def normalize_auto_approve_roles(cls, value: object) -> Optional[list[str]]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            items = [item.strip() for item in value.split(",")]
+        elif isinstance(value, list):
+            items = [str(item).strip() for item in value]
+        else:
+            raise ValueError("auto_approve_roles must be a list or comma-separated string")
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            if not item:
+                continue
+            role = item.lower()
+            if role in seen:
+                continue
+            normalized.append(role)
+            seen.add(role)
+        return normalized
 
 
 class VersionResponse(BaseModel):
@@ -124,21 +157,57 @@ async def get_settings(client_slug: str, db: Session = Depends(get_db)):
 
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
 
-    if not settings:
-        return {
-            "client_slug": client_slug,
-            "mute_duration_first_minutes": 30,
-            "mute_duration_second_hours": 24,
-            "reminder_1_minutes": 15,
-            "reminder_2_minutes": 60,
-        }
+    auto_approve_roles = None
+    if settings and settings.auto_approve_roles is not None:
+        auto_approve_roles = [
+            role.strip().lower()
+            for role in settings.auto_approve_roles.split(",")
+            if role.strip()
+        ]
+    if auto_approve_roles is None:
+        auto_approve_roles = ["owner", "admin"]
 
     return {
         "client_slug": client_slug,
-        "mute_duration_first_minutes": settings.mute_duration_first_minutes or 30,
-        "mute_duration_second_hours": settings.mute_duration_second_hours or 24,
-        "reminder_1_minutes": settings.reminder_1_minutes or 15,
-        "reminder_2_minutes": settings.reminder_2_minutes or 60,
+        "mute_duration_first_minutes": (
+            settings.mute_duration_first_minutes
+            if settings and settings.mute_duration_first_minutes is not None
+            else 30
+        ),
+        "mute_duration_second_hours": (
+            settings.mute_duration_second_hours
+            if settings and settings.mute_duration_second_hours is not None
+            else 24
+        ),
+        "reminder_1_minutes": (
+            settings.reminder_timeout_1
+            if settings and settings.reminder_timeout_1 is not None
+            else 30
+        ),
+        "reminder_2_minutes": (
+            settings.reminder_timeout_2
+            if settings and settings.reminder_timeout_2 is not None
+            else 60
+        ),
+        "branch_resolution_mode": (
+            settings.branch_resolution_mode
+            if settings and settings.branch_resolution_mode
+            else "hybrid"
+        ),
+        "remember_branch_preference": (
+            settings.remember_branch_preference
+            if settings and settings.remember_branch_preference is not None
+            else True
+        ),
+        "manager_scope": (
+            settings.manager_scope if settings and settings.manager_scope else "branch"
+        ),
+        "require_branch_for_pricing": (
+            settings.require_branch_for_pricing
+            if settings and settings.require_branch_for_pricing is not None
+            else True
+        ),
+        "auto_approve_roles": auto_approve_roles,
     }
 
 
@@ -151,6 +220,9 @@ async def update_settings(client_slug: str, data: SettingsUpdate, db: Session = 
     - mute_duration_second_hours: 1-72
     - reminder_1_minutes: 5-60
     - reminder_2_minutes: 30-180
+    - branch_resolution_mode: by_instance/ask_user/hybrid
+    - manager_scope: branch/global
+    - auto_approve_roles: owner/admin/manager/support
     """
     # Find client
     client = db.query(Client).filter(Client.name == client_slug).first()
@@ -174,6 +246,27 @@ async def update_settings(client_slug: str, data: SettingsUpdate, db: Session = 
         if not 30 <= data.reminder_2_minutes <= 180:
             raise HTTPException(status_code=400, detail="reminder_2_minutes must be 30-180")
 
+    if data.branch_resolution_mode is not None:
+        if data.branch_resolution_mode not in ALLOWED_BRANCH_MODES:
+            raise HTTPException(
+                status_code=400,
+                detail="branch_resolution_mode must be by_instance, ask_user, or hybrid",
+            )
+
+    if data.manager_scope is not None:
+        if data.manager_scope not in ALLOWED_MANAGER_SCOPES:
+            raise HTTPException(status_code=400, detail="manager_scope must be branch or global")
+
+    if data.auto_approve_roles is not None:
+        unknown_roles = [
+            role for role in data.auto_approve_roles if role not in ALLOWED_AUTO_APPROVE_ROLES
+        ]
+        if unknown_roles:
+            raise HTTPException(
+                status_code=400,
+                detail=f"auto_approve_roles invalid: {', '.join(unknown_roles)}",
+            )
+
     # Find or create settings
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
 
@@ -187,9 +280,19 @@ async def update_settings(client_slug: str, data: SettingsUpdate, db: Session = 
     if data.mute_duration_second_hours is not None:
         settings.mute_duration_second_hours = data.mute_duration_second_hours
     if data.reminder_1_minutes is not None:
-        settings.reminder_1_minutes = data.reminder_1_minutes
+        settings.reminder_timeout_1 = data.reminder_1_minutes
     if data.reminder_2_minutes is not None:
-        settings.reminder_2_minutes = data.reminder_2_minutes
+        settings.reminder_timeout_2 = data.reminder_2_minutes
+    if data.branch_resolution_mode is not None:
+        settings.branch_resolution_mode = data.branch_resolution_mode
+    if data.remember_branch_preference is not None:
+        settings.remember_branch_preference = data.remember_branch_preference
+    if data.manager_scope is not None:
+        settings.manager_scope = data.manager_scope
+    if data.require_branch_for_pricing is not None:
+        settings.require_branch_for_pricing = data.require_branch_for_pricing
+    if data.auto_approve_roles is not None:
+        settings.auto_approve_roles = ",".join(data.auto_approve_roles)
 
     db.commit()
 
