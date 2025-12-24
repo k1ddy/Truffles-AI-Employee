@@ -92,7 +92,7 @@
 
 ---
 
-## Нода в N8N
+## Нода в сценарии
 
 **Тип:** OpenAI (Message a Model)
 **Название:** Generate Response

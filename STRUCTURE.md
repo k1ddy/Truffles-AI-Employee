@@ -21,6 +21,18 @@
 
 ---
 
+## БЫСТРЫЙ ВХОД (если нужно быстро вкатиться)
+
+| Файл | Зачем читать |
+|------|--------------|
+| `STATE.md` | Базовые факты, текущие блокеры, следующий шаг |
+| `docs/SESSION_START_PROMPT.txt` | Минимальный протокол старта и проверки фактов |
+| `TECH.md` | Доступы, команды, где что работает |
+| `truffles-api/app/routers/webhook.py` | Входящие WhatsApp (direct + legacy) |
+| `truffles-api/app/routers/telegram_webhook.py` | Telegram сообщения/кнопки менеджеров |
+
+---
+
 ## .github/ — CI/CD
 
 | Файл | Назначение |
@@ -77,12 +89,12 @@ truffles-api/
 ├── app/
 │   ├── main.py              # FastAPI entry point
 │   ├── routers/
-│   │   ├── webhook.py           # POST /webhook/{client_slug} (direct), POST /webhook (n8n legacy) — входящие WhatsApp
+│   │   ├── webhook.py           # POST /webhook/{client_slug} (direct), POST /webhook (legacy wrapper) — входящие WhatsApp
 │   │   ├── telegram_webhook.py  # POST /telegram-webhook — сообщения/кнопки менеджеров
 │   │   ├── admin.py             # /admin/* (health/heal/prompt/settings/version)
 │   │   ├── alerts.py            # /alerts/test — проверка алертов (токен)
 │   │   ├── reminders.py         # /reminders/* — cron напоминаний
-│   │   ├── callback.py          # /callback — (legacy/n8n)
+│   │   ├── callback.py          # /callback — legacy
 │   │   └── message.py           # /message — legacy/manual, не основной путь
 │   ├── services/
 │   │   ├── ai_service.py            # LLM + RAG thresholds + guardrails
@@ -159,7 +171,7 @@ truffles-api/
 
 ## ops/ — Операционные скрипты
 
-**90% МУСОР** — одноразовые скрипты для n8n (старая архитектура).
+**90% МУСОР** — одноразовые скрипты (старая архитектура).
 
 **Полезное:**
 | Файл | Назначение |
@@ -279,10 +291,10 @@ droid --droid truffles-coder
 # МУСОР (можно удалить)
 
 ```
-ops/check_*.py        # ~100 файлов — одноразовая отладка n8n
-ops/fix_*.py          # ~50 файлов — одноразовые фиксы n8n
-ops/add_*.py          # ~20 файлов — добавление нод в n8n
-ops/get_*.py          # ~10 файлов — отладка n8n
+ops/check_*.py        # ~100 файлов — одноразовая отладка
+ops/fix_*.py          # ~50 файлов — одноразовые фиксы
+ops/add_*.py          # ~20 файлов — добавление нод
+ops/get_*.py          # ~10 файлов — отладка
 ops/*.sql             # Большинство — одноразовые запросы
 ops/*.sh              # Кроме monitor.sh — одноразовое
 ```

@@ -23,11 +23,10 @@
 | truffles_postgres_1 | postgres:15-alpine | PostgreSQL |
 | truffles_redis_1 | redis:7-alpine | Redis |
 | truffles_qdrant_1 | qdrant/qdrant:latest | Vector DB |
-| truffles_n8n_1 | n8nio/n8n:latest | n8n (роутинг) |
 | bge-m3 | text-embeddings-inference | Embeddings |
 | truffles-traefik | traefik:v2.11 | Reverse proxy |
 
-**Важно:** Инфраструктура разделена: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, `n8n/postgres/redis/qdrant/pgadmin` → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`). API в проде деплоится через `/home/zhan/restart_api.sh`. В `/home/zhan/truffles/docker-compose.yml` — заглушка (не использовать). Ранее был кейс ошибки `KeyError: 'ContainerConfig'` на `up/build`.
+**Важно:** Инфраструктура разделена: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`). API в проде деплоится через `/home/zhan/restart_api.sh`. В `/home/zhan/truffles-main/docker-compose.yml` — заглушка (не использовать). Ранее был кейс ошибки `KeyError: 'ContainerConfig'` на `up/build`.
 
 ---
 
@@ -37,16 +36,16 @@
 |----------|----------|
 | Контейнер | truffles_postgres_1 |
 | База | chatbot |
-| Пользователь | n8n |
+| Пользователь | ${DB_USER} |
 | Пароль | ${DB_POSTGRESDB_PASSWORD} |
 
 ### Подключение
 ```bash
 # Из SSH
-docker exec -it truffles_postgres_1 psql -U n8n -d chatbot
+docker exec -it truffles_postgres_1 psql -U "$DB_USER" -d chatbot
 
 # Запрос
-docker exec truffles_postgres_1 psql -U n8n -d chatbot -c 'SELECT ...'
+docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 ```
 
 ### Таблицы (ключевые)
@@ -74,11 +73,10 @@ docker exec truffles_postgres_1 psql -U n8n -d chatbot -c 'SELECT ...'
 | URL | Назначение |
 |-----|------------|
 | https://api.truffles.kz | Python API |
-| https://n8n.truffles.kz | n8n интерфейс |
 
 ### Endpoints
 - `POST /webhook/{client_slug}` — входящие сообщения от ChatFlow (прямой путь, preferred)
-- `POST /webhook` — входящие сообщения от n8n (legacy)
+- `POST /webhook` — входящие сообщения (legacy wrapper)
 - `POST /telegram-webhook` — callbacks от Telegram
 - `GET /health` — проверка здоровья
 - `GET /admin/health` — health/self-heal метрики
@@ -124,7 +122,7 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 100"
 ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash ~/restart_api.sh"
 
 # Локальная сборка (fallback)
-ssh -p 222 zhan@5.188.241.234 "docker build -t truffles-api_truffles-api /home/zhan/truffles/truffles-api"
+ssh -p 222 zhan@5.188.241.234 "docker build -t truffles-api_truffles-api /home/zhan/truffles-main/truffles-api"
 ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 ```
 `restart_api.sh` поддерживает `IMAGE_NAME` и `PULL_IMAGE=1`.
@@ -136,7 +134,7 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 
 ### Запрос к БД
 ```bash
-ssh -p 222 zhan@5.188.241.234 "docker exec truffles_postgres_1 psql -U n8n -d chatbot -c 'SELECT * FROM clients'"
+ssh -p 222 zhan@5.188.241.234 "docker exec truffles_postgres_1 psql -U \"$DB_USER\" -d chatbot -c 'SELECT * FROM clients'"
 ```
 
 ### Qdrant

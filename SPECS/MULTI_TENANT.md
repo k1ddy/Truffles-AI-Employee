@@ -141,7 +141,7 @@ Python API:
 | Компонент | Почему общий |
 |-----------|--------------|
 | Python API | Логика одинаковая |
-| n8n | Роутинг одинаковый |
+| Webhook вход | Роутинг одинаковый |
 | PostgreSQL | Одна БД, разные записи |
 | Qdrant | Одна коллекция, разные фильтры |
 | LLM (OpenAI) | Один API key |
@@ -381,7 +381,7 @@ cd ~/truffles/ops
 python3 sync_client.py salon_elita ./knowledge/salon_elita/
 ```
 
-Или через n8n Knowledge Sync workflow (ручной запуск).
+Или через ручной sync workflow (ручной запуск).
 
 ## Шаг 8: Настроить ChatFlow
 
@@ -425,7 +425,7 @@ https://api.truffles.kz/webhook/salon_elita?webhook_secret=...
 API извлекает slug → ищет в БД → получает client_id.
 
 **Реализация (preferred):** ChatFlow → Python API (`/webhook/{client_slug}`).
-**Legacy:** n8n 1_Webhook → Python API (`/webhook`).
+**Legacy:** webhook wrapper → Python API (`/webhook`).
 
 ---
 

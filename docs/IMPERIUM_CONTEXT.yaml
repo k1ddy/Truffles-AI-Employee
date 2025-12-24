@@ -1,7 +1,7 @@
 meta:
   date_generated: "2025-12-23"
   generated_by: "Codex"
-  repo_root: "/home/zhan/truffles"
+  repo_root: "/home/zhan/truffles-main"
   repo_commit: "2b16a72e81b56e8a1ccaea1c6bbdca265d235fac"
   evidence:
     - "git rev-parse HEAD (command)"
@@ -30,11 +30,9 @@ runtime:
       - "STATE.md:27"
       - "TECH.md:107-114"
   docker:
-    compose_file: "/home/zhan/truffles/docker-compose.yml"
+    compose_file: "/home/zhan/truffles-main/docker-compose.yml"
     compose_usage: "local only; prod compose broken (KeyError: 'ContainerConfig'); production uses restart script"
     compose_services:
-      - "n8n"
-      - "n8n-worker"
       - "postgres"
       - "qdrant"
       - "redis"
@@ -51,10 +49,6 @@ runtime:
     items:
       - name: "truffles-api"
         image: "truffles-api_truffles-api"
-      - name: "truffles_n8n_1"
-        image: "n8nio/n8n:latest"
-      - name: "truffles_n8n-worker_1"
-        image: "n8nio/n8n:latest"
       - name: "truffles_postgres_1"
         image: "postgres:15-alpine"
       - name: "truffles_qdrant_1"
@@ -79,8 +73,6 @@ runtime:
       - "STATE.md:27"
   volumes:
     items:
-      - name: "truffles_n8n_data"
-        mountpoint: "/var/lib/docker/volumes/truffles_n8n_data/_data"
       - name: "truffles_postgres_data"
         mountpoint: "/var/lib/docker/volumes/truffles_postgres_data/_data"
       - name: "truffles_qdrant_data"
@@ -90,7 +82,7 @@ runtime:
       - name: "ops_bge-m3-data"
         mountpoint: "/var/lib/docker/volumes/ops_bge-m3-data/_data"
     evidence:
-      - "docker volume inspect truffles_n8n_data truffles_postgres_data truffles_qdrant_data truffles_redis_data ops_bge-m3-data (2025-12-21)"
+      - "docker volume inspect truffles_postgres_data truffles_qdrant_data truffles_redis_data ops_bge-m3-data (2025-12-21)"
 
 network_topology:
   docker_networks:
@@ -113,12 +105,9 @@ service_connectivity:
   networks:
     proxy-net:
       members:
-        - "n8n"
         - "truffles-api"
     truffles_internal-net:
       members:
-        - "n8n"
-        - "n8n-worker"
         - "postgres"
         - "qdrant"
         - "redis"
@@ -150,7 +139,7 @@ api_service:
     - path: "/webhook/{client_slug}"
       purpose: "WhatsApp inbound (ChatFlow direct, preferred)"
     - path: "/webhook"
-      purpose: "WhatsApp inbound (n8n legacy)"
+      purpose: "WhatsApp inbound (legacy wrapper)"
     - path: "/telegram-webhook"
       purpose: "Telegram inbound for manager replies"
     - path: "/reminders/process"
@@ -190,7 +179,7 @@ whatsapp_chatflow_integration:
       - "truffles-api/app/routers/webhook.py:610-655"
       - "truffles-api/app/routers/webhook.py:185-240"
       - "truffles-api/app/routers/webhook.py:839-849"
-      - "docker exec truffles_postgres_1 psql -U n8n -d chatbot -c \\dt+ (message_dedup) (2025-12-21)"
+      - "docker exec truffles_postgres_1 psql -U $DB_USER -d chatbot -c \\dt+ (message_dedup) (2025-12-21)"
   outbound_send:
     function: "send_bot_response -> send_whatsapp_message"
     api_url_default: "https://app.chatflow.kz/api/v1/send-text"
@@ -211,7 +200,7 @@ data_stores:
   postgres:
     container: "truffles_postgres_1"
     database: "chatbot"
-    user: "n8n"
+    user: "$DB_USER"
     schemas:
       - "public"
     tables:
@@ -247,8 +236,8 @@ data_stores:
       tool_logs: "message_traces"
       incidents: "error_logs"
     evidence:
-      - "docker exec truffles_postgres_1 psql -U n8n -d chatbot -c \\dn (2025-12-21)"
-      - "docker exec truffles_postgres_1 psql -U n8n -d chatbot -c \\dt+ (2025-12-21)"
+      - "docker exec truffles_postgres_1 psql -U $DB_USER -d chatbot -c \\dn (2025-12-21)"
+      - "docker exec truffles_postgres_1 psql -U $DB_USER -d chatbot -c \\dt+ (2025-12-21)"
       - "TECH.md:36-47"
   qdrant:
     container: "truffles_qdrant_1"

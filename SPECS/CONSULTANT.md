@@ -532,9 +532,7 @@ def detect_stuck(db, conversation_id) -> bool:
 ```
 WhatsApp (ChatFlow)
         ↓
-   n8n 1_Webhook (роутинг)
-        ↓
-   POST /message (Python API)
+   POST /webhook/{client_slug} (Python API)
         ↓
    intent_service.classify_intent()
         ↓

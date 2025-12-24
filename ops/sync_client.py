@@ -146,7 +146,7 @@ def main():
         docs_dir = sys.argv[2]
     else:
         # По умолчанию ищем в ~/truffles/knowledge/<client_slug>
-        docs_dir = f"/home/zhan/truffles/knowledge/{client_slug}"
+        docs_dir = f"/home/zhan/truffles-main/knowledge/{client_slug}"
     
     print(f"=" * 50)
     print(f"СИНХРОНИЗАЦИЯ: {client_slug}")

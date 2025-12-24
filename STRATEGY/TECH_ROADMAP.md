@@ -16,10 +16,8 @@
 ## ФАЗА 1: НАДЁЖНОСТЬ (до первого клиента)
 
 ### 1.1 Переключение на Python
-- [ ] Убрать n8n 2-9 из flow
 - [ ] Все сообщения → Python API
 - [ ] Telegram webhook → Python API
-- [ ] n8n остаётся только как входная точка (1_Webhook)
 
 ### 1.2 Автовосстановление
 - [ ] Docker restart policy: `always`
@@ -50,10 +48,9 @@
 
 ## ФАЗА 2: МАСШТАБИРУЕМОСТЬ (10-100 клиентов)
 
-### 2.1 Убрать n8n полностью
+### 2.1 Убрать legacy workflow engine полностью
 - [ ] WhatsApp webhook напрямую в Python
 - [ ] Дедупликация в Python (Redis)
-- [ ] n8n только для Knowledge Sync (или тоже в Python)
 
 ### 2.2 Message Queue
 - [ ] Redis Queue или RabbitMQ
@@ -106,7 +103,7 @@
 | Компонент | Статус | Приоритет |
 |-----------|--------|-----------|
 | Python API | 80% (частично подключен) | P0 |
-| Telegram webhook | ❌ На n8n | P0 |
+| Telegram webhook | ✅ Python API | P0 |
 | Healthchecks | ❌ Нет | P0 |
 | Алерты | ❌ Нет | P0 |
 | Автоперезапуск | ❌ Нет | P0 |

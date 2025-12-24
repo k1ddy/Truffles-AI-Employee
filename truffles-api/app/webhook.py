@@ -541,7 +541,7 @@ async def debug_webhook(request: Request):
 
 @router.post("/webhook", response_model=WebhookResponse)
 async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db)):
-    """Handle raw webhook from n8n (same format as ChatFlow webhook)."""
+    """Handle legacy webhook wrapper (same format as ChatFlow webhook)."""
     logger.info(f"Webhook received: client_slug={request.client_slug}")
 
     body = request.body

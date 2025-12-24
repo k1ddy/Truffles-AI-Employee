@@ -1,5 +1,5 @@
 -- Migration: Add reminder and mute settings to client_settings
--- Run: psql -U n8n -d chatbot -f add_reminder_settings.sql
+-- Run: psql -U $DB_USER -d chatbot -f add_reminder_settings.sql
 
 -- Add new columns to client_settings
 ALTER TABLE client_settings 

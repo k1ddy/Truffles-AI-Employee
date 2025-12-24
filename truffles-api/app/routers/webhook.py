@@ -162,6 +162,13 @@ def _normalize_chatflow_payload(payload: dict, client_slug: str | None) -> tuple
             instance_id = candidate.get(key)
             if instance_id:
                 break
+    if not instance_id:
+        node_data = candidate.get("nodeData") or body.get("nodeData")
+        if isinstance(node_data, dict):
+            for key in ("instanceId", "instance_id", "instance", "whatsapp_instance_id"):
+                instance_id = node_data.get(key)
+                if instance_id:
+                    break
     if instance_id:
         metadata.setdefault("instanceId", instance_id)
 
@@ -222,6 +229,16 @@ async def _parse_webhook_request(
         return WebhookResponse(success=False, message="Invalid payload format")
 
     body, slug = _normalize_chatflow_payload(payload, client_slug)
+
+    query_instance_id = (
+        request.query_params.get("instanceId")
+        or request.query_params.get("instance_id")
+        or request.query_params.get("instance")
+    )
+    if query_instance_id:
+        metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+        metadata.setdefault("instanceId", query_instance_id)
+        body["metadata"] = metadata
 
     metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
     if not metadata.get("remoteJid") or not body.get("message"):
@@ -920,7 +937,7 @@ async def debug_webhook(request: Request):
 
 @router.post("/webhook/{client_slug}", response_model=WebhookResponse)
 async def handle_webhook_direct(client_slug: str, request: Request, db: Session = Depends(get_db)):
-    """Handle direct ChatFlow webhook without n8n wrapper."""
+    """Handle direct ChatFlow webhook without wrapper."""
     parsed = await _parse_webhook_request(request, client_slug=client_slug)
     if isinstance(parsed, WebhookResponse):
         return parsed
@@ -955,7 +972,7 @@ async def handle_webhook_probe(client_slug: str):
 
 @router.post("/webhook", response_model=WebhookResponse)
 async def handle_webhook(payload: WebhookRequest, http_request: Request, db: Session = Depends(get_db)):
-    """Handle raw webhook from n8n (same format as ChatFlow webhook)."""
+    """Handle legacy webhook wrapper (same format as ChatFlow webhook)."""
     provided_secret = _get_request_webhook_secret(http_request)
     return await _handle_webhook_payload(
         payload,
@@ -976,7 +993,7 @@ async def _handle_webhook_payload(
     skip_persist: bool = False,
     conversation_id: UUID | None = None,
 ) -> WebhookResponse:
-    """Shared webhook processing for inbound ChatFlow/n8n payloads."""
+    """Shared webhook processing for inbound ChatFlow payloads."""
     logger.info(f"Webhook received: client_slug={payload.client_slug}")
 
     # Get client by slug

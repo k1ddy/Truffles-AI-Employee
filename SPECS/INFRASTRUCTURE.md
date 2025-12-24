@@ -117,7 +117,7 @@ CONTAINER="truffles_postgres_1"
 mkdir -p $BACKUP_DIR
 
 # Создать бэкап
-docker exec $CONTAINER pg_dump -U n8n chatbot | gzip > "$BACKUP_DIR/chatbot_$DATE.sql.gz"
+docker exec $CONTAINER pg_dump -U "$DB_USER" chatbot | gzip > "$BACKUP_DIR/chatbot_$DATE.sql.gz"
 
 # Удалить старые (оставить 7 дней)
 find $BACKUP_DIR -name "*.sql.gz" -mtime +7 -delete
@@ -135,7 +135,7 @@ echo "Backup created: chatbot_$DATE.sql.gz"
 ### Восстановление
 
 ```bash
-gunzip -c chatbot_20251211.sql.gz | docker exec -i truffles_postgres_1 psql -U n8n -d chatbot
+gunzip -c chatbot_20251211.sql.gz | docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot
 ```
 
 ## Qdrant бэкап

@@ -6,6 +6,20 @@
 
 ## ТЕКУЩЕЕ СОСТОЯНИЕ
 
+### БАЗОВЫЕ ФАКТЫ (читать первым делом)
+- Входящие WhatsApp идут напрямую в API: `POST /webhook/{client_slug}` (direct ChatFlow). `POST /webhook` — legacy wrapper.
+- `demo_salon` в ChatFlow направлен на `https://api.truffles.kz/webhook/demo_salon` + `webhook_secret` (секрет хранится в ChatFlow, не в git).
+- `metadata.instanceId` в inbound payload сейчас отсутствует → `by_instance` не сработает до правки upstream; API теперь принимает instanceId из query (`instanceId`/`instance_id`/`instance`) и `nodeData`, если передадут.
+- Outbox cron: `/etc/cron.d/truffles-outbox` → `/admin/outbox/process` раз в минуту.
+- Деплой: синк кода в `/home/zhan/truffles-main/truffles-api` → `bash /home/zhan/restart_api.sh` (build+restart).
+- Инфра compose: `/home/zhan/infrastructure/docker-compose.yml` + `/home/zhan/infrastructure/docker-compose.truffles.yml`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
+
+### Что мешало быстрому входу (зафиксировано)
+- Было несколько корней кода и часть ссылок указывала на несуществующие пути (`/home/zhan/truffles`, `/home/zhan/Truffles-AI-Employee`) → команды/доки расходились.
+- Inbound payload сохраняется только для текста; медиа payload целиком не сохраняется, в логах остаются только ключи → трудно восстановить структуру.
+- В репо лежали workflow JSON и упоминания n8n → удалены, чтобы не вводить в заблуждение.
+- В репо сейчас сломан git worktree: `.git` указывает на несуществующий gitdir → git status/commit/push недоступны.
+
 ### Что работает
 - [x] Бот отвечает на сообщения WhatsApp
 - [x] RAG поиск по базе знаний (Qdrant)
@@ -24,14 +38,14 @@
 - [ ] **⚠️ Закрепы заявок в Telegram** — после "Решено" закреп должен сниматься; сейчас иногда остаётся (проверить обработку `unpin` и message_id)
 - [ ] **⚠️ Дубли заявок на одного клиента** — владельцу неудобно; нужен guard: при open handover не создавать новый, а писать в текущий топик
 - [ ] **Branch подключен частично** — webhook ставит `conversation.branch_id`, но Telegram per branch + RAG фильтры ещё не wired → `SPECS/MULTI_TENANT.md`
-- [ ] **⚠️ by_instance не сработает без instanceId** — входящие payloadы сейчас не несут `metadata.instanceId`, нужно прокинуть в n8n/ChatFlow
+- [ ] **⚠️ by_instance не сработает без instanceId** — входящие payloadы сейчас не несут `metadata.instanceId`, нужно прокинуть в ChatFlow
 - [ ] **⚠️ demo_salon truth-gate даёт цену на "как у/в стиле"** — нет правила style_reference, фото не поддерживаются; нужен отдельный ответ/эскалация
 - [ ] Метрики (Quality Deflection, CSAT) — план: `SPECS/ESCALATION.md`, часть 6
 - [ ] Dashboard для заказчика — backlog
 - [ ] Quiet hours для напоминаний — P2
 
 ### Блокеры
-- **docker-compose** — инфра‑стек жив и разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, `n8n/postgres/redis/qdrant/pgadmin` → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`; API деплой через `/home/zhan/restart_api.sh` + `docker build`; `/home/zhan/truffles/docker-compose.yml` — заглушка
+- **docker-compose** — инфра‑стек жив и разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`; API деплой через `/home/zhan/restart_api.sh` + `docker build`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка
 
 ---
 
@@ -211,7 +225,7 @@
 **Проблема:** 401 `invalid_api_key` после CI (ключ утёк).
 
 **Что сделали:**
-- Обновили `OPENAI_API_KEY` в `/home/zhan/truffles/truffles-api/.env` (из `/home/zhan/secrets/openaikey.txt`)
+- Обновили `OPENAI_API_KEY` в `/home/zhan/truffles-main/truffles-api/.env` (из `/home/zhan/secrets/openaikey.txt`)
 - Перезапустили API через `/home/zhan/restart_api.sh`
 - Проверка: `docker logs truffles-api --tail 50` — ошибок 401 нет
 
@@ -305,17 +319,16 @@
 ### 2025-12-21 — Диагностика: inbound молчит
 
 **Диагностика:**
-- n8n workflow `1_Webhook_656fmXR6GPZrJbxm` активен, но последний execution: 2025-12-20 12:16Z
 - В БД по `77015705555@s.whatsapp.net` нет новых user сообщений после 2025-12-20 12:16 (12-21 были тестовые с `sender=test`)
 - Значит ChatFlow не стучится в webhook / не принимает WhatsApp входящие
 
 **Следующий шаг:**
-- Проверить в ChatFlow webhook URL `https://n8n.truffles.kz/webhook/a29b2ad2-9485-476c-897d-34799c3f940b/demo_salon` и статус инстанса
+- Проверить в ChatFlow webhook URL `https://api.truffles.kz/webhook/{client_slug}` и статус инстанса
 
-### 2025-12-21 — Direct webhook без n8n
+### 2025-12-21 — Direct webhook
 
 **Что сделали:**
-- Добавлен endpoint `POST /webhook/{client_slug}` для прямого ChatFlow (без n8n обёртки)
+- Добавлен endpoint `POST /webhook/{client_slug}` для прямого ChatFlow (без промежуточной обёртки)
 - Добавлен fallback-парсер для разных форматов webhook payload + логирование недостающих полей
 - Добавлен CORS middleware + `GET /webhook/{client_slug}` для UI-проверок
 - Для UI-теста с пустым body добавлен мягкий ответ `success=true` ("Empty payload")
@@ -356,32 +369,32 @@
 
 **Диагностика:**
 - `ops/health_check.py` использовал статические IP контейнеров → после рестарта IP меняются, «Connection refused».
-- `https://n8n.truffles.kz/healthz` возвращает 404 → алерты даже при живом n8n.
+- `https://api.truffles.kz/healthz` возвращает 404 → алерты даже при живом API.
 
 **Что сделали:**
 - `ops/health_check.py` теперь получает IP контейнера через `docker inspect`.
-- n8n проверяется по корню домена и допускает 200/30x/401/403.
+- Health-check допускает 200/30x/401/403.
 - Qdrant API key берётся из env (fallback на старый).
 
-### 2025-12-20 — Traefik не видел docker → n8n/api недоступны
+### 2025-12-20 — Traefik не видел docker → API недоступен
 
 **Диагностика:**
-- Traefik отдавал 404 по `n8n.truffles.kz` и `api.truffles.kz`.
+- Traefik отдавал 404 по `api.truffles.kz`.
 - В логах: `client version 1.24 is too old` → docker provider не поднимался.
 
 **Что сделали:**
 - Обновили Traefik до `v2.11` в `/home/zhan/infrastructure/docker-compose.yml`.
 - Перезапустили контейнер, docker provider поднялся, маршруты появились.
 
-### 2025-12-20 — Консолидация: один корень `/home/zhan/truffles`
+### 2025-12-20 — Консолидация: один корень `/home/zhan/truffles-main`
 
 **Диагностика:**
-- Было 3 корня: `/home/zhan/truffles`, `/home/zhan/Truffles-AI-Employee`, `/home/zhan/truffles-api`.
+- Было 3 корня: `/home/zhan/truffles-main`, `/home/zhan/Truffles-AI-Employee`, `/home/zhan/truffles`.
 - Команды/доки ссылались на разные пути → путаница.
 
 **Что сделали:**
-- Скопировали актуальные документы и директории в `/home/zhan/truffles`.
-- Перенесли API‑код в `/home/zhan/truffles/truffles-api`.
+- Скопировали актуальные документы и директории в `/home/zhan/truffles-main`.
+- Перенесли API‑код в `/home/zhan/truffles-main/truffles-api`.
 - Обновили пути в `restart_api.sh` и документах.
 - Архивировали старый `/home/zhan/Truffles-AI-Employee` в `/home/zhan/_trash`.
 
@@ -533,7 +546,7 @@
 
 Протокол проверки (10 минут, без догадок):
 1. Проверить прод-состояние: `curl -s http://localhost:8000/admin/health` (через SSH на сервере).
-2. Если `pending/active > 0` и это тесты — закрыть: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot < ~/truffles/ops/reset.sql`.
+2. Если `pending/active > 0` и это тесты — закрыть: `docker exec -i truffles_postgres_1 psql -U $DB_USER -d chatbot < ~/truffles-main/ops/reset.sql`.
 3. Прогнать WA тест-диалог с номера `+77015705555`: приветствие → попросить менеджера → менеджер ответил → [Решено].
 4. Смотреть `docker logs truffles-api --tail 200` и убедиться что видно `remote_jid`, `state` и что не происходит loop `pending → pending`.
 5. Если есть “молчание”, но нет открытых заявок — выполнить `POST /admin/heal` и проверить инварианты (state/topic/handover).
@@ -541,9 +554,9 @@
 Runbook (если “всё странно” или сессия оборвалась):
 1. Подключиться на прод: `ssh -p 222 zhan@5.188.241.234`.
 2. Быстро понять “это заявка или баг”: `curl -s http://localhost:8000/admin/health`.
-3. Если `handovers.pending/active > 0` и это тестовый мусор — одним выстрелом очистить: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot < ~/truffles/ops/reset.sql`.
+3. Если `handovers.pending/active > 0` и это тестовый мусор — одним выстрелом очистить: `docker exec -i truffles_postgres_1 psql -U $DB_USER -d chatbot < ~/truffles-main/ops/reset.sql`.
 4. Если “бот молчит” у конкретного клиента — проверить состояние диалога (пример для `+77015705555`):
-   `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT c.id, c.state, c.telegram_topic_id, c.last_message_at FROM conversations c JOIN users u ON u.id=c.user_id WHERE u.remote_jid='77015705555@s.whatsapp.net' ORDER BY c.started_at DESC LIMIT 3;"`
+   `docker exec -i truffles_postgres_1 psql -U $DB_USER -d chatbot -c "SELECT c.id, c.state, c.telegram_topic_id, c.last_message_at FROM conversations c JOIN users u ON u.id=c.user_id WHERE u.remote_jid='77015705555@s.whatsapp.net' ORDER BY c.started_at DESC LIMIT 3;"`
 5. Если `state=manager_active` — это НЕ баг: бот обязан молчать, а сообщения должны улетать в Telegram-топик.
 6. Если `state=bot_active`, но бот “молчит” — смотреть логи доставки: `docker logs truffles-api --tail 300`.
 
@@ -602,7 +615,7 @@ Runbook (если “всё странно” или сессия оборвал
 - НО обучение не сработало — непонятно почему
 
 ### Telegram webhook:
-- В ops/README.md написано: webhook на `n8n.truffles.kz/webhook/telegram-callback`
+- В ops/README.md зафиксирован webhook `https://api.truffles.kz/telegram-webhook` (прямой в API)
 - В коде ожидается: `api.truffles.kz/telegram-webhook`
 - Я предположил что это причина — но Жанбол сказал что это хуйня
 - **Я НЕ ЗНАЮ почему обучение не работает**
@@ -612,6 +625,29 @@ Runbook (если “всё странно” или сессия оборвал
 - `/etc/cron.d/truffles-outbox` есть и дергает `/admin/outbox/process` каждую минуту (через `ALERTS_ADMIN_TOKEN`).
 - Inbound payload не несёт `metadata.instanceId`, поэтому by_instance branch routing не может сработать без правки upstream.
 - Demo_salon: запросы вида "как у/в стиле" → отвечают прайсом (truth-gate), нужно отдельное правило.
+
+### Branch routing (DB факт):
+- `demo_salon`: `branch_resolution_mode=by_instance`, `remember_branch_preference=true`, `require_branch_for_pricing=true`, `auto_approve_roles=owner,admin`, `webhook_secret` установлен.
+- `truffles`: `branch_resolution_mode=hybrid`, `remember_branch_preference=true`, `require_branch_for_pricing=true`, `auto_approve_roles=owner,admin`, `webhook_secret` отсутствует.
+
+### Branches (DB факт):
+- `demo_salon` имеет 1 активный branch (`slug=main`) с `instance_id` и `telegram_chat_id`.
+
+### Inbound payload (DB факт):
+- В `outbox_messages.payload_json.body.metadata` есть только `sender`, `messageId`, `remoteJid`, `timestamp` → `instanceId` отсутствует.
+- Проверка:
+```
+SELECT payload_json->'body'->'metadata' AS metadata
+FROM outbox_messages
+ORDER BY created_at DESC
+LIMIT 1;
+```
+- Пример текстового payload (из `outbox_messages.payload_json`):
+```
+{"body": {"message": "вот мое просто сообщение", "metadata": {"sender": "Zh.", "messageId": "3EB0747A962FBC720E44FF", "remoteJid": "77015705555@s.whatsapp.net", "timestamp": 1766582383}, "messageType": "text"}, "client_slug": "demo_salon"}
+```
+- Пример нетекстового payload (из логов, `has_message=false`): ключи `messageType`, `message`, `metadata`, `to`, `mediaData`, `nodeData`.
+- Сейчас такие payload отбрасываются ответом `Empty message` и не попадают в БД/Outbox.
 
 ---
 
@@ -638,7 +674,7 @@ Runbook (если “всё странно” или сессия оборвал
 
 1. **Почему обучение не сработало?** Жанбол писал в топик, сообщение дошло до клиента, но "Owner response detected" в логах нет.
 
-2. **Как сообщение менеджера доходит до клиента?** Через n8n или через Python API? Я не разобрался.
+2. **Как сообщение менеджера доходит до клиента?** Нужна трассировка от Telegram webhook до ChatFlow отправки.
 
 3. **Правильный ли threshold?** Сейчас в коде: MID=0.5, HIGH=0.85. Дальше тюнить только по фактам (сколько эскалаций/качество ответов).
 
@@ -659,7 +695,7 @@ Runbook (если “всё странно” или сессия оборвал
 | Приоритет | Задача | Как проверить |
 |-----------|--------|---------------|
 | P0 | Деплой актуального кода из `/home/zhan/truffles-main` на прод | В `/admin/version` новый коммит; поведение соответствует изменениям |
-| P0 | Прокинуть `instanceId` в inbound payload (n8n/ChatFlow) | `payload.body.metadata.instanceId` есть; `conversation.branch_id` ставится |
+| P0 | Прокинуть `instanceId` в inbound payload (ChatFlow) | `payload.body.metadata.instanceId` есть; `conversation.branch_id` ставится |
 | P0 | Понять почему обучение не работает | Логи должны показать "Owner response detected" |
 | P0 | Уменьшить задержку ответов (outbox) | Время ответа и пересылки в Telegram < 10с (coalesce + cron/worker) |
 | P0 | Починить multi‑intent при склейке (цена → запись) | Сообщения “цена+запись” ведут к сбору записи, не теряют контекст |
@@ -673,7 +709,7 @@ Runbook (если “всё странно” или сессия оборвал
 
 ```bash
 # 1. Скопировать файлы
-scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles/truffles-api/...
+scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles-main/truffles-api/...
 
 # 2. Пересобрать и запустить
 ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
@@ -683,7 +719,7 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 ```
 
-**docker-compose:** инфра‑стек жив и разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, `n8n/postgres/redis/qdrant/pgadmin` → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`; `/home/zhan/truffles/docker-compose.yml` — заглушка
+**docker-compose:** инфра‑стек жив и разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка
 
 ---
 

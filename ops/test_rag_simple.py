@@ -39,7 +39,7 @@ def search_rag(query, limit=3):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=45)
-    parser.add_argument("--test-file", type=str, default="/home/zhan/truffles/tests/test_cases.json")
+    parser.add_argument("--test-file", type=str, default="/home/zhan/truffles-main/tests/test_cases.json")
     args = parser.parse_args()
     
     with open(args.test_file, 'r', encoding='utf-8') as f:

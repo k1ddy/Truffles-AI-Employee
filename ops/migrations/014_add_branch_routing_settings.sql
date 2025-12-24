@@ -1,5 +1,5 @@
 -- Migration 014: branch routing + auto-approve settings
--- Run: psql -U n8n -d chatbot -f ops/migrations/014_add_branch_routing_settings.sql
+-- Run: psql -U $DB_USER -d chatbot -f ops/migrations/014_add_branch_routing_settings.sql
 
 ALTER TABLE client_settings
   ADD COLUMN IF NOT EXISTS branch_resolution_mode TEXT DEFAULT 'hybrid',

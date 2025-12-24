@@ -90,7 +90,7 @@ gaps:
     status: "UNKNOWN"
     why_it_matters: "No trusted trail for manager actions, escalations, or config changes."
     evidence:
-      - "docker exec truffles_postgres_1 psql -U n8n -d chatbot -c \\dt+ (audit_log table) (2025-12-21)"
+      - "docker exec truffles_postgres_1 psql -U $DB_USER -d chatbot -c \\dt+ (audit_log table) (2025-12-21)"
       - "rg -n 'audit_log' truffles-api/app (no matches)"
     proposed_fix_mvp: "Add audit logger in API for handover lifecycle + manager actions."
     acceptance_tests:
@@ -102,7 +102,7 @@ gaps:
     status: "UNKNOWN"
     why_it_matters: "Errors are not persisted for analysis and RCA."
     evidence:
-      - "docker exec truffles_postgres_1 psql -U n8n -d chatbot -c \\dt+ (error_logs, message_traces tables) (2025-12-21)"
+      - "docker exec truffles_postgres_1 psql -U $DB_USER -d chatbot -c \\dt+ (error_logs, message_traces tables) (2025-12-21)"
       - "rg -n 'error_logs|message_traces' truffles-api/app (no matches)"
     proposed_fix_mvp: "Write structured errors to error_logs and per-message traces to message_traces."
     acceptance_tests:

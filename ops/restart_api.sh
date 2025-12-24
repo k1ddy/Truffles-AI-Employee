@@ -1,7 +1,7 @@
 #!/bin/bash
 docker stop truffles-api 2>/dev/null
 docker rm truffles-api 2>/dev/null
-cd /home/zhan/truffles-api
+cd /home/zhan/truffles-main/truffles-api
 docker run -d --name truffles-api \
   --env-file .env \
   --network truffles_internal-net \

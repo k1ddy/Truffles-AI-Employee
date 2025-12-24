@@ -10,7 +10,7 @@ QDRANT_API_KEY = os.environ.get('QDRANT_API_KEY') or os.environ.get('DB_PASSWORD
 POSTGRES_HOST = 'localhost'
 POSTGRES_PORT = 5432
 POSTGRES_DB = 'chatbot'
-POSTGRES_USER = 'n8n'
+POSTGRES_USER = os.environ.get('DB_USER', 'postgres')
 POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD') or os.environ.get('DB_PASSWORD') or ''
 
 # Для использования внутри docker network:

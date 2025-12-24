@@ -40,7 +40,7 @@
 
 | Где | Что |
 |----|-----|
-| `/home/zhan/truffles-api/.env` | Основные секреты (OPENAI_API_KEY, DATABASE_URL, QDRANT_*) |
+| `/home/zhan/truffles-main/truffles-api/.env` | Основные секреты (OPENAI_API_KEY, DATABASE_URL, QDRANT_*) |
 | БД `client_settings` | telegram_bot_token, owner_telegram_id |
 | Код `chatflow_service.py` | CHATFLOW_TOKEN (хардкод — плохо) |
 
@@ -53,10 +53,10 @@
 **Рабочий способ:**
 ```bash
 # 1. Скопировать файлы
-scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles-api/...
+scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles-main/truffles-api/...
 
 # 2. Пересобрать образ (+ метаданные для /admin/version)
-ssh -p 222 zhan@5.188.241.234 "cd /home/zhan/truffles-api && docker build -t truffles-api_truffles-api \
+ssh -p 222 zhan@5.188.241.234 "cd /home/zhan/truffles-main/truffles-api && docker build -t truffles-api_truffles-api \
   --build-arg APP_VERSION=prod \
   --build-arg GIT_COMMIT=unknown \
   --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
@@ -74,7 +74,7 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 #!/bin/bash
 docker stop truffles-api 2>/dev/null
 docker rm truffles-api 2>/dev/null
-cd /home/zhan/truffles-api
+cd /home/zhan/truffles-main/truffles-api
 docker run -d --name truffles-api \
   --env-file .env \
   --network truffles_internal-net \
@@ -107,7 +107,7 @@ WhatsApp клиент
     ↓
 ChatFlow (app.chatflow.kz)
     ↓
-POST /webhook
+POST /webhook/{client_slug} (legacy wrapper: /webhook)
     ↓
 intent_service.classify_intent()
     ↓

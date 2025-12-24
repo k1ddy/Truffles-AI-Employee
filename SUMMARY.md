@@ -10,13 +10,17 @@ Session handover (2025-12-24)
 - Prod config: created `branches` row for demo_salon (instance_id + telegram_chat_id), set settings to by_instance + remember_branch.
 - Known blocker: inbound payload currently lacks `metadata.instanceId`, so by_instance cannot resolve branch until upstream is fixed.
 - Known behavior: demo_salon truth-gate отвечает прайсом на "как у/в стиле"; фото не поддерживаются → нужен отдельный rule.
+- Webhook now ingests instanceId from query params or nodeData into metadata (upstream still needs to send it).
+- Removed legacy workflow artifacts and n8n references (docs/prompts/ops); deleted ops helper tied to workflow JSON.
+- Deploy paths standardized to `/home/zhan/truffles-main/truffles-api`; `/home/zhan/restart_api.sh` updated accordingly.
+- Blocker: git worktree broken (`/home/zhan/truffles-main/.git` points to missing gitdir) → git status/commit/push currently unavailable.
 - Tests: `pytest -q` via `.venv` → 164 passed (2 pydantic deprecation warnings).
 - Next step: wire Telegram flow to use agents/identities + learned_responses queue + branch telegram_chat_id.
 
 Inventory highlights
-- Docker compose: infra split — `/home/zhan/infrastructure/docker-compose.yml` (traefik, website) and `/home/zhan/infrastructure/docker-compose.truffles.yml` (n8n, n8n-worker, postgres, qdrant, redis, pgadmin); `/home/zhan/truffles/docker-compose.yml` is a stub.
-- Running containers include truffles-api, n8n, postgres, qdrant, redis, pgadmin, traefik, bge-m3, truffles-website, gemini proxy.
-- Volumes: truffles_n8n_data, truffles_postgres_data, truffles_qdrant_data, truffles_redis_data, ops_bge-m3-data.
+- Docker compose: infra split — `/home/zhan/infrastructure/docker-compose.yml` (traefik, website) and `/home/zhan/infrastructure/docker-compose.truffles.yml` (core stack); `/home/zhan/truffles-main/docker-compose.yml` is a stub.
+- Running containers include truffles-api, postgres, qdrant, redis, pgadmin, traefik, bge-m3, truffles-website, gemini proxy.
+- Volumes: truffles_postgres_data, truffles_qdrant_data, truffles_redis_data, ops_bge-m3-data.
 - Postgres: single schema public; 23 tables including clients, conversations, messages, handovers, knowledge_versions, knowledge_sync_logs, audit_log, error_logs, message_traces.
 - Qdrant: collection truffles_knowledge, vector size 1024 (Cosine), points_count 111, payload_schema empty.
 - API: FastAPI routes /webhook, /telegram-webhook, /reminders/process, /admin/health, /admin/outbox/process.

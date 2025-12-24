@@ -61,9 +61,9 @@ FILES = [
 ]
 
 # Read files from local copies (already uploaded to Drive)
-docs_base = Path("/home/zhan/truffles/knowledge/demo_salon")
+docs_base = Path("/home/zhan/truffles-main/knowledge/demo_salon")
 if not docs_base.exists():
-    docs_base = Path("/home/zhan/truffles/ops/demo_salon_docs")
+    docs_base = Path("/home/zhan/truffles-main/ops/demo_salon_docs")
 
 LOCAL_FILES = {
     "rules.md": str(docs_base / "rules.md"),

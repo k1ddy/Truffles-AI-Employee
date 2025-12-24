@@ -40,8 +40,8 @@
 
 | Где | Что |
 |----|-----|
-| `/home/zhan/truffles/truffles-api/.env` | Основные секреты (OPENAI_API_KEY, DATABASE_URL, QDRANT_*, ALERT_*, CHATFLOW_*) |
-| `/home/zhan/infrastructure/.env` | Инфра‑секреты (n8n, postgres, qdrant, pgadmin) |
+| `/home/zhan/truffles-main/truffles-api/.env` | Основные секреты (OPENAI_API_KEY, DATABASE_URL, QDRANT_*, ALERT_*, CHATFLOW_*) |
+| `/home/zhan/infrastructure/.env` | Инфра‑секреты (postgres, qdrant, pgadmin, redis, traefik) |
 | БД `client_settings` | telegram_bot_token (global per client) |
 | БД `branches` | telegram_chat_id (группа Telegram на филиал) |
 | БД `agents/agent_identities` | роли и идентичности менеджеров |
@@ -51,15 +51,15 @@
 
 ## 4. Деплой
 
-**docker-compose в проде:** инфра‑стек разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, `n8n/postgres/redis/qdrant/pgadmin` → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`. API деплой — через `restart_api.sh`. `/home/zhan/truffles/docker-compose.yml` — заглушка.
+**docker-compose в проде:** инфра‑стек разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`. API деплой — через `restart_api.sh`. `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 
 **Рабочий способ:**
 ```bash
 # 1. Скопировать файлы
-scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles/truffles-api/...
+scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles-main/truffles-api/...
 
 # 2. Пересобрать образ (+ метаданные для /admin/version)
-ssh -p 222 zhan@5.188.241.234 "cd /home/zhan/truffles/truffles-api && docker build -t truffles-api_truffles-api \
+ssh -p 222 zhan@5.188.241.234 "cd /home/zhan/truffles-main/truffles-api && docker build -t truffles-api_truffles-api \
   --build-arg APP_VERSION=prod \
   --build-arg GIT_COMMIT=unknown \
   --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
@@ -82,7 +82,7 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 #!/bin/bash
 docker stop truffles-api 2>/dev/null
 docker rm truffles-api 2>/dev/null
-cd /home/zhan/truffles/truffles-api
+cd /home/zhan/truffles-main/truffles-api
 docker run -d --name truffles-api \
   --env-file .env \
   --network truffles_internal-net \

@@ -37,11 +37,11 @@
 ## 2) Фактическая база (текущее состояние)
 ### 2.1 Прод рантайм (Docker)
 - Server: `5.188.241.234`, ssh `-p 222` user `zhan`
-- Core services: `truffles-api` (FastAPI), `n8n`, `n8n-worker`, `postgres:15`, `qdrant`, `redis`, `pgadmin`, `bge-m3`
+- Core services: `truffles-api` (FastAPI), `postgres:15`, `qdrant`, `redis`, `pgadmin`, `bge-m3`
 - Networks: `proxy-net` (public routing), `internal-net` (internal services)
 
 ### 2.2 Основные эндпоинты API
-- `POST /webhook` — WhatsApp inbound (ChatFlow/n8n)
+- `POST /webhook` — WhatsApp inbound (legacy wrapper)
 - `POST /telegram-webhook` — вход для менеджерских ответов/кнопок
 - `GET /health`, `GET /admin/health`, `GET /db-check`, `POST /admin/outbox/process`, `POST /reminders/process`
 
@@ -172,7 +172,7 @@ MVP подход (без overengineering):
 ## 6) “Sentinel” (непрерывный мониторинг)
 **GAP-013 Sentinel not implemented**
 
-MVP Sentinel (как отдельный контейнер или n8n cron):
+MVP Sentinel (как отдельный контейнер или cron):
 - ping `/health`
 - ping `/db-check`
 - check Qdrant collection + points_count
