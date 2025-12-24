@@ -6,6 +6,8 @@
 
 ## ТЕКУЩЕЕ СОСТОЯНИЕ
 
+⚠️ Требует проверки: факты ниже нужно подтверждать через API/DB/логи, не полагаться на записи.
+
 ### БАЗОВЫЕ ФАКТЫ (читать первым делом)
 - Входящие WhatsApp идут напрямую в API: `POST /webhook/{client_slug}` (direct ChatFlow). `POST /webhook` — legacy wrapper.
 - `demo_salon` в ChatFlow направлен на `https://api.truffles.kz/webhook/demo_salon` + `webhook_secret` (секрет хранится в ChatFlow, не в git).

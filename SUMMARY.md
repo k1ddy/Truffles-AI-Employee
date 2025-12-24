@@ -1,20 +1,22 @@
 # SUMMARY
 
+⚠️ Этот handover требует проверки. Пункты ниже — ориентир, но их нужно подтвердить по API/DB/логам.
+
 Session handover (2025-12-24)
 - Decision: roles/identities + learning queue + Telegram per branch; branch routing configurable (by_instance/ask_user/hybrid).
 - Added models: Agent, AgentIdentity, LearnedResponse; added migration `ops/migrations/013_add_agents_and_learning_queue.sql`; added `branch_id` to conversations.
 - Specs updated: `SPECS/ESCALATION.md`, `SPECS/ARCHITECTURE.md`, `SPECS/ACTIVE_LEARNING.md`, `SPECS/MULTI_TENANT.md`, `SPECS/CONSULTANT.md`.
 - Implemented: `/admin/settings` extended for branch routing + auto-approve; webhook branch routing (by_instance/ask_user/hybrid) + remember_branch.
 - Added migration `ops/migrations/014_add_branch_routing_settings.sql`; default auto-approve = `owner,admin`.
-- Prod fix: applied migration 013/014 to add `conversations.branch_id` (webhook was crashing without it).
-- Prod config: created `branches` row for demo_salon (instance_id + telegram_chat_id), set settings to by_instance + remember_branch.
+- Prod fix (needs verification): applied migration 013/014 to add `conversations.branch_id` (webhook was crashing without it).
+- Prod config (needs verification): created `branches` row for demo_salon (instance_id + telegram_chat_id), set settings to by_instance + remember_branch.
 - Known blocker: inbound payload currently lacks `metadata.instanceId`, so by_instance cannot resolve branch until upstream is fixed.
 - Known behavior: demo_salon truth-gate отвечает прайсом на "как у/в стиле"; фото не поддерживаются → нужен отдельный rule.
 - Webhook now ingests instanceId from query params or nodeData into metadata (upstream still needs to send it).
 - Removed legacy workflow artifacts and n8n references (docs/prompts/ops); deleted ops helper tied to workflow JSON.
 - Deploy paths standardized to `/home/zhan/truffles-main/truffles-api`; `/home/zhan/restart_api.sh` updated accordingly.
 - Git worktree fixed: `.git` restored from clean clone → git status/commit/push работают.
-- Tests: `pytest -q` via `.venv` → 164 passed (2 pydantic deprecation warnings).
+- Tests: not verified in this session (rerun `pytest -q`).
 - Next step: wire Telegram flow to use agents/identities + learned_responses queue + branch telegram_chat_id.
 
 Inventory highlights
@@ -26,7 +28,7 @@ Inventory highlights
 - API: FastAPI routes /webhook, /telegram-webhook, /reminders/process, /admin/health, /admin/outbox/process.
 - WhatsApp: ACK-first (/webhook enqueues outbox), inbound dedup + webhook secret; outbound via ChatFlow with retries and msg_id idempotency (webhook/outbox).
 - Guardrails: whitelist/low-signal + domain router anchors; low-confidence thresholds 0.85/0.5.
-- Alerts: alert_service configured; /alerts/test exists for runtime check.
+- Alerts: status unknown; verify via `/alerts/test` and Telegram delivery.
 - CI/CD: GitHub Actions `.github/workflows/ci.yml` (ruff + pytest + build/push to GHCR; optional deploy via SSH).
 
 Missing/risks (high-level)
@@ -49,4 +51,4 @@ YAML validation commands
 - python -c "import yaml; yaml.safe_load(open('docs/IMPERIUM_DECISIONS.yaml','r',encoding='utf-8')); print('OK')"
 - python -c "import yaml; yaml.safe_load(open('docs/IMPERIUM_GAPS.yaml','r',encoding='utf-8')); print('OK')"
 
-Validation executed with python3 (python is not in PATH).
+Validation not executed in this session.
