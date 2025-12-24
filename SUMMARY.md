@@ -13,7 +13,7 @@ Session handover (2025-12-24)
 - Webhook now ingests instanceId from query params or nodeData into metadata (upstream still needs to send it).
 - Removed legacy workflow artifacts and n8n references (docs/prompts/ops); deleted ops helper tied to workflow JSON.
 - Deploy paths standardized to `/home/zhan/truffles-main/truffles-api`; `/home/zhan/restart_api.sh` updated accordingly.
-- Blocker: git worktree broken (`/home/zhan/truffles-main/.git` points to missing gitdir) → git status/commit/push currently unavailable.
+- Git worktree fixed: `.git` restored from clean clone → git status/commit/push работают.
 - Tests: `pytest -q` via `.venv` → 164 passed (2 pydantic deprecation warnings).
 - Next step: wire Telegram flow to use agents/identities + learned_responses queue + branch telegram_chat_id.
 
