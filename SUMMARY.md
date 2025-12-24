@@ -1,5 +1,11 @@
 # SUMMARY
 
+Session handover (2025-12-24)
+- Decision: roles/identities + learning queue + Telegram per branch; branch routing configurable (by_instance/ask_user/hybrid).
+- Added models: Agent, AgentIdentity, LearnedResponse; added migration `ops/migrations/013_add_agents_and_learning_queue.sql`; added `branch_id` to conversations.
+- Specs updated: `SPECS/ESCALATION.md`, `SPECS/ARCHITECTURE.md`, `SPECS/ACTIVE_LEARNING.md`, `SPECS/MULTI_TENANT.md`, `SPECS/CONSULTANT.md`.
+- Next step: wire branch routing + roles in Telegram flow; extend admin settings for new config.
+
 Inventory highlights
 - Docker compose: infra split — `/home/zhan/infrastructure/docker-compose.yml` (traefik, website) and `/home/zhan/infrastructure/docker-compose.truffles.yml` (n8n, n8n-worker, postgres, qdrant, redis, pgadmin); `/home/zhan/truffles/docker-compose.yml` is a stub.
 - Running containers include truffles-api, n8n, postgres, qdrant, redis, pgadmin, traefik, bge-m3, truffles-website, gemini proxy.

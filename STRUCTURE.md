@@ -104,6 +104,9 @@ truffles-api/
 │   ├── knowledge/
 │   │   └── demo_salon/          # Канон truth/policy/eval pack (Phase 0)
 │   ├── models/              # SQLAlchemy модели
+│   │   ├── agent.py              # Роли агентов (owner/admin/manager/support)
+│   │   ├── agent_identity.py     # Идентичности агентов (telegram/email)
+│   │   ├── learned_response.py   # Очередь обучения (pending/approved)
 │   │   ├── outbox_message.py     # Outbox таблица (ACK-first)
 │   ├── schemas/             # Pydantic схемы
 │   └── database.py          # Database connection
@@ -173,6 +176,7 @@ truffles-api/
 - `ops/migrations/009_add_conversation_context.sql` — JSONB `conversations.context` для диалогового контекста/слотов.
 - `ops/migrations/011_add_webhook_secret.sql` — `client_settings.webhook_secret` для защиты /webhook.
 - `ops/migrations/012_add_outbox_messages.sql` — Outbox для ACK-first обработки.
+- `ops/migrations/013_add_agents_and_learning_queue.sql` — роли/идентичности + очередь обучения + branch_id.
 
 **Старые скрипты:** `.archive/ops_old/` — не в git.
 

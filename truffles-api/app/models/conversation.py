@@ -12,6 +12,7 @@ class Conversation(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id = Column(UUID(as_uuid=True), nullable=False)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"))
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     channel = Column(Text, nullable=False)  # whatsapp, telegram, instagram
     status = Column(Text, nullable=False)  # active, closed, handover

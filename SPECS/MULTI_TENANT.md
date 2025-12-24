@@ -2,7 +2,7 @@
 
 **Источник правды по архитектуре работы с несколькими заказчиками.**
 **Создано:** 2025-12-07
-**Обновлено:** 2025-12-10
+**Обновлено:** 2025-12-24
 
 ---
 
@@ -65,7 +65,7 @@ Company (ТОО "Truffles") — биллинг, владелец
 Company
   └── Владелец (owner) — видит всё, биллинг
         └── Client
-              └── Админ — управляет клиентом
+              └── Админ — управляет клиентом (может быть branch-scoped)
                     └── Branch
                           └── Руководитель филиала
                                 └── Менеджеры
@@ -128,9 +128,9 @@ Python API:
 | Данные | Где хранится | Как разделяется |
 |--------|--------------|-----------------|
 | Промпт | prompts | WHERE client_id |
-| База знаний | Qdrant | filter: metadata.client_slug |
+| База знаний | Qdrant | filter: metadata.client_slug + knowledge_tag (branch) |
 | Настройки эскалации | client_settings | WHERE client_id |
-| Telegram группа | client_settings.telegram_chat_id | Отдельная группа |
+| Telegram группа | branches.telegram_chat_id | Отдельная группа на филиал |
 | Пользователи | users | WHERE client_id |
 | Диалоги | conversations | WHERE client_id |
 | Сообщения | messages | через conversation → client_id |
@@ -518,6 +518,7 @@ except Exception as e:
 **Решение:** Каждый owner модерирует своих менеджеров.
 
 - Owner ответил → сразу в базу (автомодерация)
+- Админ ответил → pending (или auto-approve, если включено для branch)
 - Менеджер ответил → owner получает кнопки [В базу] [Отклонить]
 
 **Реализация:** План P2 (ACTIVE_LEARNING.md).
@@ -526,17 +527,25 @@ except Exception as e:
 
 ### 9. Несколько номеров у одного заказчика?
 
-**Решение:** Через Branch (филиалы).
+**Решение:** Через Branch (филиалы), режим определяется конфигом.
 
 **Что есть:**
 - Таблица `branches` существует
 - Поля: instance_id, telegram_chat_id, knowledge_tag
 
+**Режимы (config):**
+- `by_instance`: если у филиалов разные номера → branch по instance_id
+- `ask_user`: если номер один → бот спрашивает филиал
+- `hybrid`: если instance_id известен → branch, иначе спрашиваем
+ - `manager_scope`: `branch` (по умолчанию) или `global`
+
 **Что нужно сделать (в плане):**
-- [ ] Conversation.branch_id вместо client_id
-- [ ] Роутинг по instance_id → branch
+- [ ] Conversation.branch_id для маршрутизации
+- [ ] Роутинг по instance_id → branch (by_instance/hybrid)
+- [ ] Ветка “спросить филиал” (ask_user/hybrid)
 - [ ] Эскалация из Branch.telegram_chat_id
 - [ ] RAG фильтр по Branch.knowledge_tag
+- [ ] Сохранение выбранного филиала у пользователя (optional)
 
 **Статус:** В ТЕКУЩЕМ ПЛАНЕ (STATE.md).
 

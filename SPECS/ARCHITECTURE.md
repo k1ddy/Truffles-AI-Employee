@@ -1,7 +1,7 @@
 # ARCHITECTURE — Техническая архитектура Truffles
 
 **Читай это перед любыми изменениями.**
-**Обновлено:** 2025-12-23
+**Обновлено:** 2025-12-24
 
 ---
 
@@ -42,7 +42,9 @@
 |----|-----|
 | `/home/zhan/truffles/truffles-api/.env` | Основные секреты (OPENAI_API_KEY, DATABASE_URL, QDRANT_*, ALERT_*, CHATFLOW_*) |
 | `/home/zhan/infrastructure/.env` | Инфра‑секреты (n8n, postgres, qdrant, pgadmin) |
-| БД `client_settings` | telegram_bot_token, owner_telegram_id |
+| БД `client_settings` | telegram_bot_token (global per client) |
+| БД `branches` | telegram_chat_id (группа Telegram на филиал) |
+| БД `agents/agent_identities` | роли и идентичности менеджеров |
 | Код `chatflow_service.py` | CHATFLOW_TOKEN читается из env |
 
 ---
@@ -149,8 +151,26 @@ find_conversation_by_telegram(chat_id, thread_id)
     ↓
 chatflow_service → WhatsApp клиент
     ↓
-(если owner) learning_service.add_to_knowledge()
+resolve agent_identity → agent.role
+    ↓
+learning: create learned_responses(status=pending)
+    ↓
+if role=owner → auto-approve → add_to_knowledge()
 ```
+
+### Определение филиала (branch routing)
+
+**Варианты:**
+- **by_instance:** если у каждого филиала свой номер/instance_id → сразу `branch_id`
+- **ask_user:** если один номер на все филиалы → спросить филиал у клиента
+- **hybrid:** если instance_id известен → branch_id, иначе спросить
+
+**Хранение:**
+- `conversation.branch_id`
+- `conversation.context.branch_id` (быстрый доступ)
+- `user.metadata.branch_id` (если включено `remember_branch_preference`)
+
+**Гейт:** если `require_branch_for_pricing=true`, без `branch_id` бот не озвучивает цены/скидки/расписание.
 
 ---
 
@@ -160,6 +180,7 @@ chatflow_service → WhatsApp клиент
 ```sql
 id                  UUID PRIMARY KEY
 client_id           UUID
+branch_id           UUID  -- TODO: добавить для маршрутизации на филиал
 user_id             UUID REFERENCES users
 channel             TEXT  -- whatsapp, telegram, instagram
 state               TEXT  -- bot_active, pending, manager_active
@@ -182,12 +203,75 @@ assigned_to         TEXT  -- telegram_id менеджера
 telegram_message_id BIGINT
 ```
 
-### client_settings
+### branches
+```sql
+id                  UUID PRIMARY KEY
+client_id           UUID
+instance_id         TEXT
+telegram_chat_id    TEXT  -- Telegram-группа филиала
+knowledge_tag       TEXT
+```
+
+### agents
+```sql
+id          UUID PRIMARY KEY
+client_id   UUID
+branch_id   UUID  -- NULL = глобальный доступ, иначе филиал
+role        TEXT  -- owner, admin, manager, support
+name        TEXT
+```
+
+### agent_identities
+```sql
+id           UUID PRIMARY KEY
+agent_id     UUID REFERENCES agents(id)
+channel      TEXT  -- telegram, email, crm
+external_id  TEXT
+username     TEXT
+```
+
+### learned_responses
+```sql
+id              UUID PRIMARY KEY
+client_id       UUID
+branch_id       UUID
+handover_id     UUID REFERENCES handovers
+question_text   TEXT
+response_text   TEXT
+status          TEXT  -- pending, approved, rejected
+qdrant_point_id TEXT
+```
+
+### branches
+```sql
+id                  UUID PRIMARY KEY
+client_id           UUID
+telegram_chat_id    TEXT  -- Telegram-группа филиала
+```
+
+### client_settings (legacy)
 ```sql
 client_id           UUID PRIMARY KEY
-telegram_chat_id    TEXT  -- ID группы Telegram
 telegram_bot_token  TEXT
-owner_telegram_id   TEXT  -- для определения owner
+telegram_chat_id    TEXT  -- LEGACY: переносим на branches.telegram_chat_id
+owner_telegram_id   TEXT  -- LEGACY: заменяется agents/agent_identities
+```
+
+### agents
+```sql
+id          UUID PRIMARY KEY
+client_id   UUID
+role        TEXT  -- owner, admin, manager, support
+name        TEXT
+```
+
+### agent_identities
+```sql
+id           UUID PRIMARY KEY
+agent_id     UUID REFERENCES agents(id)
+channel      TEXT  -- telegram, email, crm
+external_id  TEXT  -- telegram user id / email / etc
+username     TEXT
 ```
 
 ---
@@ -197,18 +281,39 @@ owner_telegram_id   TEXT  -- для определения owner
 ### find_conversation_by_telegram
 ```python
 def find_conversation_by_telegram(db, chat_id, message_thread_id=None):
-    # 1. Найти client по chat_id
-    settings = db.query(ClientSettings).filter(
-        ClientSettings.telegram_chat_id == str(chat_id)
+    # 1. Найти branch по chat_id (основной путь)
+    branch = db.query(Branch).filter(
+        Branch.telegram_chat_id == str(chat_id)
     ).first()
+    if branch:
+        client_id = branch.client_id
+        branch_id = branch.id
+    else:
+        # legacy fallback: client_settings.telegram_chat_id
+        settings = db.query(ClientSettings).filter(
+            ClientSettings.telegram_chat_id == str(chat_id)
+        ).first()
+        client_id = settings.client_id if settings else None
+        branch_id = None
     
-    # 2. Найти активный handover
+    # 2. Если есть message_thread_id — найти conversation по топику
+    if message_thread_id:
+        conversation = db.query(Conversation).filter(
+            Conversation.client_id == client_id,
+            Conversation.telegram_topic_id == message_thread_id,
+        ).first()
+        handover = db.query(Handover).filter(
+            Handover.conversation_id == conversation.id,
+            Handover.status.in_(["pending", "active"]),
+        ).order_by(Handover.created_at.desc()).first()
+        return (conversation, handover)
+
+    # 3. Иначе — найти последний активный handover
     handover = db.query(Handover).filter(
-        Handover.client_id == settings.client_id,
+        Handover.client_id == client_id,
         Handover.status.in_(["pending", "active"]),
     ).order_by(Handover.created_at.desc()).first()
-    
-    # 3. Вернуть conversation
+
     conversation = db.query(Conversation).filter(
         Conversation.id == handover.conversation_id
     ).first()
@@ -218,11 +323,25 @@ def find_conversation_by_telegram(db, chat_id, message_thread_id=None):
 
 ### is_owner_response
 ```python
-def is_owner_response(db, client_id, manager_telegram_id):
+def is_owner_response(db, client_id, manager_telegram_id, manager_username=None):
+    identity = db.query(AgentIdentity).filter(
+        AgentIdentity.channel == "telegram",
+        AgentIdentity.external_id == str(manager_telegram_id)
+    ).first()
+    if not identity and manager_username:
+        identity = db.query(AgentIdentity).filter(
+            AgentIdentity.channel == "telegram",
+            AgentIdentity.username == manager_username
+        ).first()
+    if identity:
+        agent = db.query(Agent).filter(Agent.id == identity.agent_id).first()
+        return agent.role == "owner" if agent else False
+
+    # legacy fallback
     settings = db.query(ClientSettings).filter(
         ClientSettings.client_id == client_id
     ).first()
-    return str(manager_telegram_id) == settings.owner_telegram_id
+    return str(manager_telegram_id) == settings.owner_telegram_id if settings else False
 ```
 
 ---
@@ -232,10 +351,11 @@ def is_owner_response(db, client_id, manager_telegram_id):
 | Параметр | Значение |
 |----------|----------|
 | Тип группы | Супергруппа с темами (forum) |
+| Группа | Одна Telegram-группа на филиал (`branches.telegram_chat_id`) |
 | Webhook URL | `https://api.truffles.kz/telegram-webhook` |
-| Кнопки | Inline buttons: `take_{handover_id}`, `resolve_{handover_id}` |
-| Owner detection | `client_settings.owner_telegram_id` == `from_user.id` |
-| Manager | Любой кто пишет в топике |
+| Кнопки | `take_{handover_id}`, `resolve_{handover_id}`, `approve_{learned_id}`, `reject_{learned_id}` |
+| Owner detection | `agent.role == owner` по `agent_identities` |
+| Manager | Любой агент в группе; неизвестные — без auto-approve |
 
 **Проверить webhook:**
 ```bash

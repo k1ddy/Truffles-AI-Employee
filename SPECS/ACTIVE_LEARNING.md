@@ -1,9 +1,9 @@
 # ACTIVE LEARNING — План реализации
 
 **Дата:** 2025-12-08
-**Обновлено:** 2025-12-10
-**Статус:** План (P2)
-**Зависимости:** Эскалация ✅ готова
+**Обновлено:** 2025-12-24
+**Статус:** Решение (P0) + частичная реализация
+**Зависимости:** Эскалация ✅ готова; роли/идентичности — план
 
 ---
 
@@ -12,8 +12,10 @@
 | Компонент | Статус |
 |-----------|--------|
 | Сохранение ответа менеджера | ✅ РЕАЛИЗОВАНО (заполняется в `manager_message_service.py`) |
+| Роли/идентичности (agents) | 📋 ПЛАН |
+| Очередь обучения (learned_responses) | 📋 ПЛАН |
 | Модерация | 📋 ПЛАН |
-| Добавление в Qdrant | ⚠️ ЧАСТИЧНО (owner ответ → авто-upsert в Qdrant; модерация/approval flow — план) |
+| Добавление в Qdrant | ⚠️ ЧАСТИЧНО (owner ответ → авто-upsert в Qdrant; очередь/approval flow — план) |
 | Свой классификатор | 📋 ПЛАН (P3) |
 
 ---
@@ -64,62 +66,53 @@
 
 ## АРХИТЕКТУРА ACTIVE LEARNING
 
-### Использовать существующую таблицу `handovers`
+### Источник данных: `handovers` (как есть)
 
 Поля которые УЖЕ ЕСТЬ:
 ```sql
 -- truffles-api/app/models/handover.py
 
 user_message        TEXT      -- вопрос клиента ✅
-manager_response    TEXT      -- ответ менеджера (нужно заполнять!)
+manager_response    TEXT      -- ответ менеджера ✅
 trigger_type        TEXT      -- причина эскалации ✅
 trigger_value       TEXT      -- детали (intent) ✅
 resolved_by_name    TEXT      -- кто ответил ✅
 resolved_at         TIMESTAMP -- когда ✅
 ```
 
-Поля которые НУЖНО ДОБАВИТЬ:
-```sql
--- Модерация
-moderation_status   TEXT      -- pending, approved, rejected, edited
-moderated_by        TEXT      -- telegram_id модератора
-moderated_at        TIMESTAMP
+**Принцип:** не усложнять `handovers`. Модерация и обучение живут в отдельной очереди.
 
--- Обучение
-added_to_knowledge  BOOLEAN DEFAULT FALSE
-knowledge_point_id  TEXT      -- ID точки в Qdrant
-```
-
-### Таблица `learned_responses` [ПЛАН]
+### Очередь обучения: `learned_responses` (pending/approved/rejected)
 
 ```sql
-CREATE TABLE learned_responses (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  client_id UUID REFERENCES clients(id),
-  handover_id UUID REFERENCES handovers(id),
-  
-  -- Вопрос-ответ
-  question TEXT NOT NULL,
-  answer TEXT NOT NULL,
-  
-  -- Метаданные
-  source TEXT DEFAULT 'manager',     -- manager, owner
-  is_owner_response BOOLEAN,         -- для автомодерации
-  
-  -- Qdrant
-  qdrant_point_id TEXT,              -- ID в Qdrant
-  
-  -- Использование
-  use_count INTEGER DEFAULT 0,
-  last_used_at TIMESTAMP,
-  
-  -- Статус
-  is_active BOOLEAN DEFAULT TRUE,
-  
-  created_at TIMESTAMP DEFAULT NOW()
-);
+-- Очередь кандидатов на обучение
 
-CREATE INDEX idx_learned_responses_client ON learned_responses(client_id);
+id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+client_id       UUID REFERENCES clients(id),
+branch_id       UUID REFERENCES branches(id),
+handover_id     UUID REFERENCES handovers(id),
+
+question_text   TEXT NOT NULL,
+response_text   TEXT NOT NULL,
+
+source          TEXT DEFAULT 'manager',
+source_role     TEXT,
+source_channel  TEXT,
+agent_id        UUID, -- FK → agents
+
+status          TEXT DEFAULT 'pending', -- pending, approved, rejected
+approved_by     UUID,
+approved_at     TIMESTAMP,
+rejected_at     TIMESTAMP,
+
+qdrant_point_id TEXT,
+
+use_count       INTEGER DEFAULT 0,
+last_used_at    TIMESTAMP,
+is_active       BOOLEAN DEFAULT TRUE,
+
+created_at      TIMESTAMP DEFAULT NOW(),
+updated_at      TIMESTAMP DEFAULT NOW()
 ```
 
 ---
@@ -153,43 +146,50 @@ manager_message_service.process_manager_message():
   - Найти handover по topic_id
   - Отправить ответ в WhatsApp
   - ✅ Сохранить manager_response в handover
-  - ✅ Если это owner → авто-добавить в KB (Qdrant) (требует корректного owner_telegram_id)
+  - Создать learned_responses(status=pending)
+  - Если роль owner → auto-approve → add_to_knowledge()
     ↓
 Ответ доставлен клиенту
 ```
 
-**Примечание:** Модерация ответов (approved/rejected/edited) пока по плану.
+**Примечание:** Модерация идёт через очередь `learned_responses`.
 
-### Шаг 3: Определение owner vs остальные [ПЛАН]
+### Шаг 3: Определение роли (agents) [ПЛАН]
 
 ```python
-def is_owner_response(db, client_id, manager_telegram_id):
-    """Проверить является ли менеджер owner."""
-    settings = db.query(ClientSettings).filter(
-        ClientSettings.client_id == client_id
+def resolve_agent_role(db, manager_telegram_id, manager_username=None):
+    identity = db.query(AgentIdentity).filter(
+        AgentIdentity.channel == "telegram",
+        AgentIdentity.external_id == str(manager_telegram_id)
     ).first()
-    
-    if not settings or not settings.owner_telegram_id:
-        return False
-    
-    # owner_telegram_id может быть "@username" или "123456789"
-    owner_id = settings.owner_telegram_id.lstrip('@')
-    return str(manager_telegram_id) == owner_id or f"@{manager_telegram_id}" == settings.owner_telegram_id
+    if not identity and manager_username:
+        identity = db.query(AgentIdentity).filter(
+            AgentIdentity.channel == "telegram",
+            AgentIdentity.username == manager_username
+        ).first()
+    if identity:
+        agent = db.query(Agent).filter(Agent.id == identity.agent_id).first()
+        return agent.role if agent else None
+    return None
 ```
 
 ### Шаг 4: Модерация [ПЛАН]
 
 **Вариант A — Автоматическая (owner):**
 ```
-IF is_owner_response:
-  handover.moderation_status = 'approved'
+IF role == "owner" (или role ∈ auto_approve_roles):
+  learned.status = "approved"
   → сразу в обучение (Шаг 5)
 ```
 
+**Ограничение:** если auto-approve разрешён для `admin`, он действует только в рамках `branch_id` агента.
+
+**Конфиг:** `client_settings.auto_approve_roles` (строка/список).
+
 **Вариант B — Через Telegram (остальные):**
 ```
-IF NOT is_owner_response:
-  handover.moderation_status = 'pending'
+IF role not in auto_approve_roles:
+  learned.status = "pending"
   → Отправить owner сообщение с кнопками:
 
 ┌─────────────────────────────────────┐
@@ -207,74 +207,33 @@ IF NOT is_owner_response:
 
 **Callback обработка:**
 ```python
-# В telegram_webhook.py добавить action="approve_learning"
+# В telegram_webhook.py: approve_{learned_id} / reject_{learned_id}
+if action == "approve":
+    learned.status = "approved"
+    learned.approved_by = agent_id
+    learned.approved_at = now
+    add_to_knowledge(db, learned)
 
-if action == "approve_learning":
-    handover.moderation_status = 'approved'
-    handover.moderated_by = manager_id
-    handover.moderated_at = now
-    # Запустить обучение
-    add_to_knowledge(db, handover)
-
-if action == "reject_learning":
-    handover.moderation_status = 'rejected'
-    handover.moderated_by = manager_id
-    handover.moderated_at = now
+if action == "reject":
+    learned.status = "rejected"
+    learned.rejected_at = now
 ```
 
 ### Шаг 5: Обучение (добавление в Qdrant) [ПЛАН]
 
 ```python
-def add_to_knowledge(db: Session, handover: Handover):
-    """Добавить ответ менеджера в базу знаний."""
-    
-    # 1. Получить client_slug
-    client = db.query(Client).filter(Client.id == handover.client_id).first()
+def add_to_knowledge(db: Session, learned: LearnedResponse):
+    """Добавить approved ответ в базу знаний."""
+    client = db.query(Client).filter(Client.id == learned.client_id).first()
     client_slug = client.slug
-    
-    # 2. Создать текст для индексации
-    content = f"Вопрос: {handover.user_message}\nОтвет: {handover.manager_response}"
-    
-    # 3. Получить embedding
+    content = f"Вопрос: {learned.question_text}\nОтвет: {learned.response_text}"
     embedding = get_embedding(content)
-    
-    # 4. Добавить в Qdrant
     point_id = str(uuid.uuid4())
-    
-    qdrant_client.upsert(
-        collection_name="truffles_knowledge",
-        points=[{
-            "id": point_id,
-            "vector": embedding,
-            "payload": {
-                "content": content,
-                "metadata": {
-                    "client_slug": client_slug,
-                    "source": "learned",
-                    "handover_id": str(handover.id),
-                    "question": handover.user_message,
-                    "answer": handover.manager_response,
-                    "learned_at": datetime.now().isoformat(),
-                }
-            }
-        }]
-    )
-    
-    # 5. Обновить handover
-    handover.added_to_knowledge = True
-    handover.knowledge_point_id = point_id
-    
-    # 6. Создать запись в learned_responses
-    learned = LearnedResponse(
-        client_id=handover.client_id,
-        handover_id=handover.id,
-        question=handover.user_message,
-        answer=handover.manager_response,
-        source="owner" if handover.moderation_status == "auto_approved" else "manager",
-        qdrant_point_id=point_id,
-    )
-    db.add(learned)
-    
+
+    qdrant_client.upsert(...metadata: {"source": "learned", "learned_id": learned.id})
+
+    learned.qdrant_point_id = point_id
+    learned.status = "approved"
     return point_id
 ```
 
@@ -293,7 +252,7 @@ results = search_knowledge(query, client_slug, limit=5)
 # После успешного использования learned_response
 if result.get("metadata", {}).get("source") == "learned":
     learned = db.query(LearnedResponse).filter(
-        LearnedResponse.qdrant_point_id == result["metadata"]["handover_id"]
+        LearnedResponse.qdrant_point_id == result["metadata"]["learned_id"]
     ).first()
     if learned:
         learned.use_count += 1
@@ -377,53 +336,32 @@ def classify_intent(message: str) -> Intent:
 
 ## ПЛАН РЕАЛИЗАЦИИ
 
-### Этап 1: Сохранение ответа менеджера (1-2 часа)
+### Этап 1: Схема данных (P0)
 
-**Файл:** `manager_message_service.py`
+- Таблицы `agents`, `agent_identities`
+- Расширение `learned_responses` (status, agent_id, qdrant_point_id)
+- `conversations.branch_id` для маршрутизации
 
-```python
-# После строки send_whatsapp_message(...)
-handover.manager_response = message_text
+### Этап 2: Роли и идентичности (P0)
 
-# Определить owner или нет
-is_owner = is_owner_response(db, handover.client_id, manager_telegram_id)
-if is_owner:
-    handover.moderation_status = 'auto_approved'
-else:
-    handover.moderation_status = 'pending'
-```
+- Разрешение роли по `agent_identities` (telegram user id/username)
+- Fallback на `client_settings.owner_telegram_id` (legacy)
 
-**Миграция:** Добавить поля в handovers:
-```sql
-ALTER TABLE handovers ADD COLUMN moderation_status TEXT;
-ALTER TABLE handovers ADD COLUMN moderated_by TEXT;
-ALTER TABLE handovers ADD COLUMN moderated_at TIMESTAMP;
-ALTER TABLE handovers ADD COLUMN added_to_knowledge BOOLEAN DEFAULT FALSE;
-ALTER TABLE handovers ADD COLUMN knowledge_point_id TEXT;
-```
+### Этап 3: Очередь обучения (P0)
 
-### Этап 2: Автомодерация для owner (2-3 часа)
+- При ответе менеджера → создать `learned_responses(status=pending)`
+- Если role=owner → auto-approve → `add_to_knowledge()`
 
-1. Функция `is_owner_response()` в `manager_message_service.py`
-2. Если owner → `moderation_status = 'auto_approved'`
-3. Вызвать `add_to_knowledge()` сразу
+### Этап 4: Модерация через Telegram (P1)
 
-### Этап 3: Модерация через Telegram (3-4 часа)
+- Owner получает кнопки approve/reject
+- Callback обновляет `learned_responses.status`
+- При approve → `add_to_knowledge()`
 
-1. После ответа не-owner → отправить owner сообщение с кнопками
-2. Callback `approve_learning` / `reject_learning` в `telegram_webhook.py`
-3. При approve → `add_to_knowledge()`
+### Этап 5: Метрики и контроль (P1)
 
-### Этап 4: Добавление в Qdrant (2-3 часа)
-
-1. Функция `add_to_knowledge()` в новом файле `learning_service.py`
-2. Создать таблицу `learned_responses`
-3. Интеграция с Qdrant
-
-### Этап 5: Метрики (опционально)
-
-1. Счётчик use_count в learned_responses
-2. Dashboard: сколько выучено, сколько используется
+- use_count/last_used_at
+- Отчёт: сколько добавлено/сколько отклонено
 
 ---
 
@@ -442,13 +380,13 @@ ALTER TABLE handovers ADD COLUMN knowledge_point_id TEXT;
 
 | Файл | Что менять | Этап |
 |------|------------|------|
-| `models/handover.py` | Добавить поля модерации | 1 |
-| `migrations/` | ALTER TABLE handovers | 1 |
-| `services/manager_message_service.py` | Сохранять manager_response | 1 |
-| `services/manager_message_service.py` | is_owner_response() | 2 |
-| `services/learning_service.py` | Создать (новый) | 4 |
-| `models/learned_response.py` | Создать (новый) | 4 |
-| `routers/telegram_webhook.py` | Кнопки модерации | 3 |
+| `models/agent.py` | Роли агентов | 1 |
+| `models/agent_identity.py` | Идентичности (telegram/email) | 1 |
+| `models/learned_response.py` | Очередь обучения | 1 |
+| `migrations/` | agents + agent_identities + learned_responses columns | 1 |
+| `services/manager_message_service.py` | Создавать learned_responses | 3 |
+| `services/learning_service.py` | add_to_knowledge(learned) | 3 |
+| `routers/telegram_webhook.py` | approve/reject для learned_responses | 4 |
 
 ---
 
@@ -464,16 +402,17 @@ ALTER TABLE handovers ADD COLUMN knowledge_point_id TEXT;
 
 ## ПРИОРИТЕТЫ
 
-**P2 (после стабилизации):**
-- [x] Поля для модерации в handovers — нужна миграция
-- [ ] Сохранение manager_response
-- [ ] Автомодерация для owner
+**P0 (сейчас):**
+- [ ] Роли/идентичности (agents)
+- [ ] Очередь обучения (learned_responses)
+- [ ] Auto-approve owner → Qdrant
+
+**P1 (после стабилизации):**
 - [ ] Модерация через Telegram
-- [ ] Добавление в Qdrant
+- [ ] Метрики обучения
 
 **P3 (оптимизация):**
 - [ ] Свой классификатор
-- [ ] Метрики и аналитика
 - [ ] Dashboard обучения
 
 ---
@@ -482,9 +421,9 @@ ALTER TABLE handovers ADD COLUMN knowledge_point_id TEXT;
 - `SPECS/ESCALATION.md` — основа эскалации
 - `STRATEGY/REQUIREMENTS.md` — приоритеты
 
-### ?????????? 2025-12-19 ? ?????????? ?????????
+### Замечания (2025-12-24)
 
-- `owner_telegram_id` ????? ???? ??????? ????? ???????/?????? (numeric id ??? @username), ????????? ????????? id, ?????????? mismatch.
-- ?????????? ? KB ?????????? ??????? ???????? Q/A (<5 ????????) ? ???????? skip/?????/??????.
-- ????? ????? ?????? ???????? 2000 ????????, ??????/????? ?????????? ? ?????????? ? ????.
-- ????????? ???? ???, default ? ?????? owner ?????????????; ????????? ???? ??????? ??????? ?????? (????).
+- `owner_telegram_id` в legacy часто ломается (ID vs @username) → нужен `agent_identities`.
+- Короткие Q/A (<5 символов) пропускать, чтобы не засорять KB.
+- Ограничение 2000 символов: длинные ответы триммить.
+- Auto-approve owner должен иметь откат (удаление из KB).

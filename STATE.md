@@ -16,6 +16,7 @@
 - [x] Мультитенант (truffles, demo_salon)
 
 ### Что не работает / в процессе
+- [ ] **⚠️ Новая архитектура эскалации/обучения** — роли/идентичности + очередь обучения + Telegram per branch описаны в спеках, **код не внедрён**
 - [ ] **⚠️ Эскалация всё ещё частая на реальные вопросы** — KB неполная, score часто < 0.5 → создаётся заявка; мелкие сообщения ("спасибо", "ок?") больше не должны создавать заявки (whitelist + guardrails)
 - [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant (код есть), но нет модерации/метрик и нужен факт-пруф по логам на проде
 - [ ] **⚠️ Ответы медленные (outbox)** — cron `/admin/outbox/process` раз в минуту + `OUTBOX_COALESCE_SECONDS=8` → задержка 8–60 сек, страдает пересылка в Telegram при pending/manager_active
@@ -85,6 +86,11 @@
 17. [x] Active Learning — owner ответы автоматически в Qdrant
 18. [ ] Multi-level confidence (в продукте: 0.85/0.5/low_confidence + уточнения)
 19. [ ] Telegram кнопки модерации [В базу] [Отклонить] для не-owner
+
+**АРХИТЕКТУРА ЭСКАЛАЦИИ/ОБУЧЕНИЯ [P0] — НОВОЕ РЕШЕНИЕ**
+20. [ ] Роли + идентичности (agents/agent_identities) в БД
+21. [ ] Очередь обучения (learned_responses: pending/approved/rejected) + auto-approve owner
+22. [ ] Telegram per branch (branches.telegram_chat_id) + routing по branch_id
 
 **⚠️ ПРОБЛЕМА:** Эскалация срабатывает слишком часто — даже на "ты еще здесь?"
 - **Причина:** KB неполная → RAG score часто < 0.5 на реальные вопросы
@@ -163,6 +169,17 @@
 ---
 
 ## ИСТОРИЯ СЕССИЙ
+
+### 2025-12-24 — Спеки + скелет архитектуры обучения
+
+**Что сделали:**
+- Обновили `SPECS/ESCALATION.md`, `SPECS/ARCHITECTURE.md`, `SPECS/ACTIVE_LEARNING.md` (роли/идентичности, очередь обучения, Telegram per branch).
+- Зафиксировали решение в `docs/IMPERIUM_DECISIONS.yaml` (DEC-008).
+- Добавили модели `Agent`, `AgentIdentity`, `LearnedResponse` и миграцию `ops/migrations/013_add_agents_and_learning_queue.sql` (branch_id для агентов и обучения).
+- Обновили `STRUCTURE.md` и `STATE.md`.
+
+**Статус:**
+- Код пока не подключён к потокам Telegram/обучения — это следующий шаг.
 
 ### 2025-12-24 — Sync: latency + multi-intent + git hygiene
 
@@ -499,6 +516,7 @@
 - Если клиент пишет в WA и “бот молчит” — первым делом проверить `conversation.state`: в `manager_active` это ожидаемое поведение.
 - Если заявки зависли и нужно срочно “оживить” бота — использовать `ops/reset.sql`.
 - **Outbox требует планировщика:** cron `*/1` → `POST /admin/outbox/process` (см. `/etc/cron.d/truffles-outbox`).
+- **Новая архитектура эскалации/обучения принята:** роли/идентичности + очередь обучения + Telegram per branch; см. `SPECS/ESCALATION.md`, `SPECS/ARCHITECTURE.md`, `SPECS/ACTIVE_LEARNING.md`, миграция `ops/migrations/013_add_agents_and_learning_queue.sql`.
 
 Протокол проверки (10 минут, без догадок):
 1. Проверить прод-состояние: `curl -s http://localhost:8000/admin/health` (через SSH на сервере).
