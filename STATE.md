@@ -158,6 +158,15 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-24 — Ротация OpenAI ключа (prod)
+
+**Проблема:** 401 `invalid_api_key` после CI (ключ утёк).
+
+**Что сделали:**
+- Обновили `OPENAI_API_KEY` в `/home/zhan/truffles/truffles-api/.env` (из `/home/zhan/secrets/openaikey.txt`)
+- Перезапустили API через `/home/zhan/restart_api.sh`
+- Проверка: `docker logs truffles-api --tail 50` — ошибок 401 нет
+
 ### 2025-12-23 — Hotfix: outbox delivery + ChatFlow idempotency
 
 **Проблема:** бот молчал при обработке outbox.
@@ -762,4 +771,4 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 
 ---
 
-*Последнее обновление: 2025-12-21*
+*Последнее обновление: 2025-12-24*
