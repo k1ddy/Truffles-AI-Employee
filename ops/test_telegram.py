@@ -2,7 +2,7 @@
 """Test Telegram alert"""
 import requests
 
-TELEGRAM_TOKEN = "8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4"
+TELEGRAM_TOKEN = "REDACTED_TELEGRAM_BOT_TOKEN"
 TELEGRAM_CHAT_ID = "1969855532"
 
 url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"

@@ -20,7 +20,7 @@ def get_embedding(text):
 def upsert_to_qdrant(points):
     resp = requests.put(
         f"{QDRANT_URL}/collections/truffles_knowledge/points",
-        headers={"api-key": "Iddqd777!", "Content-Type": "application/json"},
+        headers={"api-key": "REDACTED_PASSWORD", "Content-Type": "application/json"},
         json={"points": points}
     )
     return resp.json()

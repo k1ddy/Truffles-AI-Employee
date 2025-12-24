@@ -5,12 +5,13 @@ Usage: python load_intents.py <openai_api_key>
 """
 
 import json
+import os
 import sys
 import requests
 from typing import List
 
 QDRANT_URL = "http://172.24.0.3:6333"
-QDRANT_API_KEY = "Iddqd777!"
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 COLLECTION = "truffles_intents"
 OPENAI_URL = "https://api.openai.com/v1/embeddings"
 EMBEDDING_MODEL = "text-embedding-3-small"
@@ -46,6 +47,9 @@ def upsert_points(points: List[dict]):
     return response.json()
 
 def main():
+    if not QDRANT_API_KEY:
+        print("Missing QDRANT_API_KEY env var", file=sys.stderr)
+        sys.exit(1)
     if len(sys.argv) < 2:
         print("Usage: python load_intents.py <openai_api_key>")
         sys.exit(1)

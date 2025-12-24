@@ -4,7 +4,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.telegram.org/bot7730378933:AAHG1lZY6u6AmvNDF7DT29veuXUDu8EeqIc/setWebhook?url=https://n8n.truffles.kz/webhook/flow",
+        "url": "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://n8n.truffles.kz/webhook/flow",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",

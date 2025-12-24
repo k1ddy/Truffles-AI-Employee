@@ -3,7 +3,7 @@
 import requests
 
 QDRANT_URL = "http://172.24.0.3:6333"
-QDRANT_API_KEY = "Iddqd777!"
+QDRANT_API_KEY = "REDACTED_PASSWORD"
 COLLECTION = "truffles_knowledge"
 
 headers = {"api-key": QDRANT_API_KEY}

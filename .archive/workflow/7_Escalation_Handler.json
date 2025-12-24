@@ -191,7 +191,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.telegram.org/bot8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4/sendMessage",
+        "url": "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/sendMessage",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
@@ -344,7 +344,7 @@
             "response": "Передаю ваш запрос менеджеру — свяжется в ближайшее время. Если нужно срочно, позвоните +7 775 984 19 26 или напишите на info@truffles.kz."
           },
           "conversation_id": "42f15f30-008c-471f-957e-a955f412907a",
-          "client_id": "499e4744-5e7f-4a97-8466-56ff2cdcf587",
+          "client_id": "<CLIENT_ID>",
           "phone": "77015705555",
           "remoteJid": "77015705555@s.whatsapp.net",
           "message": "Хочу связаться с менеджером.",

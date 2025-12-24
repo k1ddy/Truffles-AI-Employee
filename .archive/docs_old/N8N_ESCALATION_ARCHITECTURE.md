@@ -751,8 +751,8 @@ owner_telegram_id VARCHAR     -- Кого тегать при СРОЧНО
 
 | Что | Значение |
 |-----|----------|
-| Telegram Bot Token | `8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4` |
-| ChatFlow Token | `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzYyMTExNDU2fQ.myOt6xgCLfqbD9IF9EdJxkAyjij3fMty1B7sOhP2iKA` |
+| Telegram Bot Token | `REDACTED_TELEGRAM_BOT_TOKEN` |
+| ChatFlow Token | `REDACTED_JWT` |
 | ChatFlow URL | `https://app.chatflow.kz/api/v1/send-text` |
 | Telegram API | `https://api.telegram.org/bot{token}/{method}` |
 

@@ -4,7 +4,7 @@ import requests
 import sys
 
 QDRANT = 'http://172.24.0.3:6333'
-API_KEY = 'Iddqd777!'
+API_KEY = 'REDACTED_PASSWORD'
 HEADERS = {'api-key': API_KEY, 'Content-Type': 'application/json'}
 
 # Удалить

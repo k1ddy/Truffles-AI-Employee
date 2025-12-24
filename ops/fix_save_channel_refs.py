@@ -3,7 +3,7 @@
 import json
 import urllib.request
 
-API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY1MDc2NzQxfQ.vnXGUX7k77dUNlu0QTw4T6oxMlXAzbHVws4525CyU_4"
+API_KEY = "REDACTED_JWT"
 ADAPTER_ID = "fFPEbTNlkBSjo66A"
 
 url = f"https://n8n.truffles.kz/api/v1/workflows/{ADAPTER_ID}"

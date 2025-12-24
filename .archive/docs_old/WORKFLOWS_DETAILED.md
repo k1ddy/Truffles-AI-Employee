@@ -835,7 +835,7 @@ Body: {
 #### Send Manager Reply to WhatsApp
 **HTTP GET (Chatflow API):**
 ```
-URL: https://api.chatflow.me/v1/messages/text/aLZLzwtwP3RpBXzG6SlmZ5cS96boQyc?token=a29b2ad2-9485-476c-897d-34799c3f940b
+URL: https://api.chatflow.me/v1/messages/text/aLZLzwtwP3RpBXzG6SlmZ5cS96boQyc?token=<CHATFLOW_TOKEN>
 Query params:
   - number: 77015705555
   - text: "Ответ менеджера"
@@ -1002,7 +1002,7 @@ Query params:
 ```
 GET https://api.chatflow.me/v1/messages/text/{instance_id}
 Query params:
-  - token: a29b2ad2-9485-476c-897d-34799c3f940b
+  - token: <CHATFLOW_TOKEN>
   - number: 77015705555
   - text: "Текст сообщения"
 ```

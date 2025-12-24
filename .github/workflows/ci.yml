@@ -41,9 +41,19 @@ jobs:
       - name: Tests
         run: pytest tests -q
 
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          args: --no-git --redact --verbose
+
   build-push:
     if: github.ref == 'refs/heads/main'
-    needs: lint-test
+    needs: [lint-test, secret-scan]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

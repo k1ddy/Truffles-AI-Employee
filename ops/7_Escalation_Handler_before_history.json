@@ -197,7 +197,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.telegram.org/bot8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4/sendMessage",
+        "url": "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/sendMessage",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
@@ -512,7 +512,7 @@
             "response": "\u041f\u0435\u0440\u0435\u0434\u0430\u044e \u0432\u0430\u0448 \u0437\u0430\u043f\u0440\u043e\u0441 \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440\u0443 \u2014 \u0441\u0432\u044f\u0436\u0435\u0442\u0441\u044f \u0432 \u0431\u043b\u0438\u0436\u0430\u0439\u0448\u0435\u0435 \u0432\u0440\u0435\u043c\u044f. \u0415\u0441\u043b\u0438 \u043d\u0443\u0436\u043d\u043e \u0441\u0440\u043e\u0447\u043d\u043e, \u043f\u043e\u0437\u0432\u043e\u043d\u0438\u0442\u0435 +7 775 984 19 26 \u0438\u043b\u0438 \u043d\u0430\u043f\u0438\u0448\u0438\u0442\u0435 \u043d\u0430 info@truffles.kz."
           },
           "conversation_id": "42f15f30-008c-471f-957e-a955f412907a",
-          "client_id": "499e4744-5e7f-4a97-8466-56ff2cdcf587",
+          "client_id": "<CLIENT_ID>",
           "phone": "77015705555",
           "remoteJid": "77015705555@s.whatsapp.net",
           "message": "\u0425\u043e\u0447\u0443 \u0441\u0432\u044f\u0437\u0430\u0442\u044c\u0441\u044f \u0441 \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440\u043e\u043c.",

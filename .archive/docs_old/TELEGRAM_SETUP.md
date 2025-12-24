@@ -21,8 +21,8 @@
 
 | Клиент | Бот | Token | Webhook |
 |--------|-----|-------|---------|
-| truffles | @truffles_kz_bot | 8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4 | https://n8n.truffles.kz/webhook/telegram-callback |
-| demo_salon | @salon_mira_bot | 8249719610:AAGdyGmYTM9xnD5NojlsrIA36tbDcZFnpNk | https://n8n.truffles.kz/webhook/telegram-callback |
+| truffles | @truffles_kz_bot | REDACTED_TELEGRAM_BOT_TOKEN | https://n8n.truffles.kz/webhook/telegram-callback |
+| demo_salon | @salon_mira_bot | REDACTED_TELEGRAM_BOT_TOKEN | https://n8n.truffles.kz/webhook/telegram-callback |
 
 **Webhook один на всех** — 9_Telegram_Callback определяет клиента по topic_id.
 

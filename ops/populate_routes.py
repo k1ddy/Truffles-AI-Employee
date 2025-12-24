@@ -3,7 +3,7 @@ import json
 import os
 
 QDRANT_URL = 'http://172.24.0.3:6333'
-QDRANT_KEY = 'Iddqd777!'
+QDRANT_KEY = 'REDACTED_PASSWORD'
 OPENAI_KEY = os.environ.get('OPENAI_API_KEY', '')
 COLLECTION = 'semantic_routes'
 

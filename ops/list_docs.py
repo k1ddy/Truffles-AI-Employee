@@ -3,7 +3,7 @@
 import requests
 
 QDRANT_URL = 'http://172.24.0.3:6333'
-API_KEY = 'Iddqd777!'
+API_KEY = 'REDACTED_PASSWORD'
 
 resp = requests.post(
     f'{QDRANT_URL}/collections/truffles_knowledge/points/scroll',

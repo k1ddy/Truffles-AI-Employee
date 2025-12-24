@@ -1,6 +1,6 @@
 -- Insert client_settings for demo_salon
 INSERT INTO client_settings (client_id, telegram_chat_id, telegram_bot_token)
-SELECT id, '-1003362579990', '8249719610:AAGdyGmYTM9xnD5NojlsrIA36tbDcZFnpNk'
+SELECT id, '-1003362579990', 'REDACTED_TELEGRAM_BOT_TOKEN'
 FROM clients WHERE name = 'demo_salon'
 ON CONFLICT (client_id) DO UPDATE SET 
   telegram_chat_id = EXCLUDED.telegram_chat_id, 

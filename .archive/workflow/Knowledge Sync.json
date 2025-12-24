@@ -777,7 +777,7 @@
           "parameters": [
             {
               "name": "token",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzYyMTExNDU2fQ.myOt6xgCLfqbD9IF9EdJxkAyjij3fMty1B7sOhP2iKA"
+              "value": "REDACTED_JWT"
             },
             {
               "name": "instance_id",
@@ -807,7 +807,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const chunk = $json;\n\n// 1. Get embedding from BGE-M3\nconst bgeResponse = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'http://bge-m3:80/embed',\n    body: { inputs: chunk.pageContent },\n    json: true\n});\n\n// BGE-M3 returns [[...floats...]], extract first array\nconst vector = bgeResponse[0];\n\n// 2. Generate integer ID\nconst idStr = chunk.metadata.doc_id + '-' + String(chunk.metadata.section_index);\nlet hash = 0;\nfor (let i = 0; i < idStr.length; i++) {\n    hash = ((hash << 5) - hash) + idStr.charCodeAt(i);\n    hash = hash >>> 0;\n}\n\n// 3. Upsert to Qdrant\nconst qdrantPayload = {\n    points: [{\n        id: hash,\n        vector: vector,\n        payload: {\n            content: chunk.pageContent,\n            metadata: chunk.metadata\n        }\n    }]\n};\n\nconst qdrantResponse = await this.helpers.httpRequest({\n    method: 'PUT',\n    url: 'http://qdrant:6333/collections/truffles_knowledge/points',\n    headers: {\n        'api-key': 'Iddqd777!',\n        'Content-Type': 'application/json'\n    },\n    body: qdrantPayload,\n    json: true\n});\n\nreturn {\n    json: {\n        success: true,\n        point_id: hash,\n        qdrant_status: qdrantResponse.status\n    }\n};"
+        "jsCode": "const chunk = $json;\n\n// 1. Get embedding from BGE-M3\nconst bgeResponse = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'http://bge-m3:80/embed',\n    body: { inputs: chunk.pageContent },\n    json: true\n});\n\n// BGE-M3 returns [[...floats...]], extract first array\nconst vector = bgeResponse[0];\n\n// 2. Generate integer ID\nconst idStr = chunk.metadata.doc_id + '-' + String(chunk.metadata.section_index);\nlet hash = 0;\nfor (let i = 0; i < idStr.length; i++) {\n    hash = ((hash << 5) - hash) + idStr.charCodeAt(i);\n    hash = hash >>> 0;\n}\n\n// 3. Upsert to Qdrant\nconst qdrantPayload = {\n    points: [{\n        id: hash,\n        vector: vector,\n        payload: {\n            content: chunk.pageContent,\n            metadata: chunk.metadata\n        }\n    }]\n};\n\nconst qdrantResponse = await this.helpers.httpRequest({\n    method: 'PUT',\n    url: 'http://qdrant:6333/collections/truffles_knowledge/points',\n    headers: {\n        'api-key': 'REDACTED_PASSWORD',\n        'Content-Type': 'application/json'\n    },\n    body: qdrantPayload,\n    json: true\n});\n\nreturn {\n    json: {\n        success: true,\n        point_id: hash,\n        qdrant_status: qdrantResponse.status\n    }\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

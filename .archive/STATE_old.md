@@ -55,7 +55,7 @@ manager_active  — менеджер взял, бот молчит
 | Python API | https://api.truffles.kz |
 | n8n | https://n8n.truffles.kz |
 | Telegram webhook | api.truffles.kz/telegram-webhook |
-| Bot token | 8249719610:AAGdyGmYTM9xnD5NojlsrIA36tbDcZFnpNk |
+| Bot token | REDACTED_TELEGRAM_BOT_TOKEN |
 
 ### Docker контейнеры
 - truffles-api
@@ -104,13 +104,13 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234
 Host: postgres (Docker) или localhost:5432
 DB: chatbot
 User: n8n
-Password: Iddqd777!
+Password: REDACTED_PASSWORD
 ```
 
 ### n8n API
 ```
 URL: https://n8n.truffles.kz
-Key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Key: <N8N_API_KEY>
 ```
 
 ---

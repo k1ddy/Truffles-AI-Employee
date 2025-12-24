@@ -65,7 +65,7 @@ docker exec truffles_postgres_1 psql -U n8n -d chatbot -c 'SELECT ...'
 | name | client_id | telegram_chat_id |
 |------|-----------|------------------|
 | truffles | 499e4744-5e7f-4a97-8466-56ff2cdcf587 | -1003362579990 |
-| demo_salon | c839d5dd-65be-4733-a5d2-72c9f70707f0 | -1003412216010 |
+| demo_salon | <CLIENT_ID> | -1003412216010 |
 
 ---
 
@@ -172,5 +172,5 @@ ADD COLUMN IF NOT EXISTS mute_duration_second_hours INTEGER DEFAULT 24;
 
 После выполнения — обновить owner_telegram_id:
 ```sql
-UPDATE client_settings SET owner_telegram_id = '@ent3rprise' WHERE client_id = '499e4744-5e7f-4a97-8466-56ff2cdcf587';
+UPDATE client_settings SET owner_telegram_id = '@ent3rprise' WHERE client_id = '<CLIENT_ID>';
 ```

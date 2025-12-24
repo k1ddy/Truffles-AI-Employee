@@ -20,7 +20,7 @@ import os
 BGE_URL = "http://172.24.0.8:80/embed"
 QDRANT_URL = "http://172.24.0.3:6333"
 QDRANT_COLLECTION = "truffles_knowledge"
-QDRANT_API_KEY = "Iddqd777!"
+QDRANT_API_KEY = "REDACTED_PASSWORD"
 
 def get_embedding(text):
     """Получить embedding от BGE-M3"""

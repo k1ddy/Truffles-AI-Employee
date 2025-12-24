@@ -2,7 +2,7 @@ import requests
 
 r = requests.post(
     'http://172.24.0.3:6333/collections/truffles_knowledge/points/scroll',
-    headers={'api-key': 'Iddqd777!', 'Content-Type': 'application/json'},
+    headers={'api-key': 'REDACTED_PASSWORD', 'Content-Type': 'application/json'},
     json={'limit': 5, 'with_payload': True}
 )
 data = r.json()

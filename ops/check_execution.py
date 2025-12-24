@@ -14,7 +14,7 @@ import urllib.request
 # Need to add includeData=true to get runData
 url = f"https://n8n.truffles.kz/api/v1/executions/{exec_id}?includeData=true"
 headers = {
-    "X-N8N-API-KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY1MDc2NzQxfQ.vnXGUX7k77dUNlu0QTw4T6oxMlXAzbHVws4525CyU_4"
+    "X-N8N-API-KEY": "REDACTED_JWT"
 }
 
 req = urllib.request.Request(url, headers=headers)

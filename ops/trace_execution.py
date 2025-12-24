@@ -8,7 +8,7 @@ import json
 import requests
 
 API_URL = 'https://n8n.truffles.kz/api/v1'
-API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY0MTkzNjI5fQ.I06M9VWLgBkZKCk14CqahwM3ntuvUn_VcA9XzEHQV0Q'
+API_KEY = 'REDACTED_JWT'
 
 IMPORTANT_NODES = [
     'Parse Input',

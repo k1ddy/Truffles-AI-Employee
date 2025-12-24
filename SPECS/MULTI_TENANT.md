@@ -256,7 +256,7 @@ def search_knowledge(query, client_slug, limit=5):
 | name | slug | client_id | telegram_chat_id | Статус |
 |------|------|-----------|------------------|--------|
 | Truffles | truffles | 499e4744-5e7f-4a97-8466-56ff2cdcf587 | -1003362579990 | Тест (мы) |
-| Demo Salon | demo_salon | c839d5dd-65be-4733-a5d2-72c9f70707f0 | -1003412216010 | Демо |
+| Demo Salon | demo_salon | <CLIENT_ID> | -1003412216010 | Демо |
 
 ## Telegram боты
 

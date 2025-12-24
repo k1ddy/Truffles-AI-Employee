@@ -1,7 +1,7 @@
 import requests
 
 QDRANT_URL = 'http://172.24.0.3:6333'
-API_KEY = 'Iddqd777!'
+API_KEY = 'REDACTED_PASSWORD'
 
 to_delete = ['FAQ_ru', 'semantic_routes', 'truffles_intents']
 

@@ -3,7 +3,7 @@ import requests
 import sys
 
 url = "http://172.24.0.3:6333/collections/truffles_knowledge/points/scroll"
-headers = {"api-key": "Iddqd777!"}
+headers = {"api-key": "REDACTED_PASSWORD"}
 
 doc_name = sys.argv[1] if len(sys.argv) > 1 else "faq.md"
 

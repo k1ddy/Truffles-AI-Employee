@@ -13,7 +13,9 @@
 | `STRUCTURE.md` | Этот файл — карта проекта | Оба (каждую сессию) |
 | `HOW_TO_WORK.md` | Инструкция для Жанбола | Жанбол |
 | `TECH.md` | Доступы, команды, данные сервера | Кодер |
+| `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
+| `CHATGPT_QUESTIONS_ANSWERS.md` | Ответы на анкету (архитектура/операции) | Архитектор |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 

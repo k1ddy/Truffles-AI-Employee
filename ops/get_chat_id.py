@@ -5,8 +5,8 @@ import urllib.request
 import sys
 
 tokens = [
-    ("TrufflesChatBot", "8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4"),
-    ("DemoSalonBot", "8249719610:AAGdyGmYTM9xnD5NojlsrIA36tbDcZFnpNk"),
+    ("TrufflesChatBot", "REDACTED_TELEGRAM_BOT_TOKEN"),
+    ("DemoSalonBot", "REDACTED_TELEGRAM_BOT_TOKEN"),
 ]
 
 for name, token in tokens:

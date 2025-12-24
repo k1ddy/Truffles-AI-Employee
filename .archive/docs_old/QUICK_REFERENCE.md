@@ -178,7 +178,7 @@ docker exec -i truffles_postgres_1 psql -U n8n -d chatbot < ~/truffles/ops/clean
 ### Боты
 | Клиент | Token |
 |--------|-------|
-| demo_salon | 8249719610:AAGdyGmYTM9xnD5NojlsrIA36tbDcZFnpNk |
+| demo_salon | REDACTED_TELEGRAM_BOT_TOKEN |
 
 ### Callback data формат
 ```
@@ -212,7 +212,7 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234
 ### n8n API
 ```
 URL: https://n8n.truffles.kz
-API Key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY1MDc2NzQxfQ.vnXGUX7k77dUNlu0QTw4T6oxMlXAzbHVws4525CyU_4
+API Key: <N8N_API_KEY>
 ```
 
 ### PostgreSQL
@@ -220,12 +220,12 @@ API Key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjND
 Host: postgres (внутри Docker)
 DB: chatbot
 User: n8n
-Password: Iddqd777!
+Password: REDACTED_PASSWORD
 ```
 
 ### Chatflow
 ```
-Token: a29b2ad2-9485-476c-897d-34799c3f940b
+Token: <CHATFLOW_TOKEN>
 API: https://api.chatflow.me/v1/messages/text/{instance_id}
 ```
 

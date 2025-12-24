@@ -26,7 +26,7 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234
 ### n8n API
 ```
 URL: https://n8n.truffles.kz
-API Key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY1MDc2NzQxfQ.vnXGUX7k77dUNlu0QTw4T6oxMlXAzbHVws4525CyU_4
+API Key: <REDACTED>_JWT
 ```
 
 ### PostgreSQL
@@ -34,7 +34,7 @@ API Key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjND
 Container: truffles_postgres_1
 DB: chatbot
 User: n8n
-Password: Iddqd777!
+Password: REDACTED_PASSWORD
 ```
 
 ### Qdrant
@@ -42,14 +42,14 @@ Password: Iddqd777!
 Container: truffles_qdrant_1
 IP: 172.24.0.3 (внутренний)
 Port: 6333
-API Key: Iddqd777!
+API Key: <REDACTED>_PASSWORD
 Collection: truffles_knowledge
 ```
 
 ### Telegram Bots
 ```
-TrufflesChatBot: 8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4
-DemoSalonBot: 8249719610:AAGdyGmYTM9xnD5NojlsrIA36tbDcZFnpNk
+TrufflesChatBot: REDACTED_TELEGRAM_BOT_TOKEN
+DemoSalonBot: REDACTED_TELEGRAM_BOT_TOKEN
 ```
 
 ---
@@ -128,7 +128,7 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s -H 'X-N8N-AP
 
 ### 4. Посмотреть Qdrant коллекции
 ```bash
-ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s -H 'api-key: Iddqd777!' 'http://172.24.0.3:6333/collections'"
+ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s -H 'api-key: <REDACTED>_PASSWORD' 'http://172.24.0.3:6333/collections'"
 ```
 
 ### 5. Настроить Telegram webhook

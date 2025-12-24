@@ -6,7 +6,7 @@ ALTER TABLE client_settings ADD COLUMN IF NOT EXISTS telegram_bot_token TEXT;
 UPDATE client_settings cs
 SET 
   telegram_chat_id = '-1003362579990',
-  telegram_bot_token = '8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4'
+  telegram_bot_token = 'REDACTED_TELEGRAM_BOT_TOKEN'
 FROM clients c
 WHERE cs.client_id = c.id AND c.name = 'truffles';
 
@@ -14,7 +14,7 @@ WHERE cs.client_id = c.id AND c.name = 'truffles';
 UPDATE client_settings cs
 SET 
   telegram_chat_id = '-1003362579990',
-  telegram_bot_token = '8249719610:AAGdyGmYTM9xnD5NojlsrIA36tbDcZFnpNk'
+  telegram_bot_token = 'REDACTED_TELEGRAM_BOT_TOKEN'
 FROM clients c
 WHERE cs.client_id = c.id AND c.name = 'demo_salon';
 

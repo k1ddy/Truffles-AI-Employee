@@ -7,7 +7,7 @@ SET
   config = jsonb_build_object(
     'folder_id', '1JC4FiDcazmFy0nCNcE901cBn9ev-DoXw',
     'whatsapp_instance_id', 'eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InRydWZmbGVzLWNoYXRib3QifQ==',
-    'whatsapp_token', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzYyMTExNDU2fQ.myOt6xgCLfqbD9IF9EdJxkAyjij3fMty1B7sOhP2iKA',
+    'whatsapp_token', 'REDACTED_JWT',
     'escalation_telegram', '1969855532',
     'notify_whatsapp', '77759841926'
   ),

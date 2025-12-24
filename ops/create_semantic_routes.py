@@ -2,7 +2,7 @@ import requests
 import json
 
 QDRANT_URL = 'http://172.24.0.3:6333'
-API_KEY = 'Iddqd777!'
+API_KEY = 'REDACTED_PASSWORD'
 COLLECTION = 'semantic_routes'
 
 headers = {

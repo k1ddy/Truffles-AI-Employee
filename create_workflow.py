@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Create a new workflow in n8n"""
 import json
+import os
 import sys
 import urllib.request
 
-API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY1MDc2NzQxfQ.vnXGUX7k77dUNlu0QTw4T6oxMlXAzbHVws4525CyU_4"
+API_KEY = os.environ.get("N8N_API_KEY")
+if not API_KEY:
+    print("Missing N8N_API_KEY env var", file=sys.stderr)
+    sys.exit(1)
 
 if len(sys.argv) < 2:
     print("Usage: python3 create_workflow.py <workflow.json>")

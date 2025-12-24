@@ -3,7 +3,7 @@
 import json
 import urllib.request
 
-API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY1MDc2NzQxfQ.vnXGUX7k77dUNlu0QTw4T6oxMlXAzbHVws4525CyU_4"
+API_KEY = "REDACTED_JWT"
 WORKFLOW_ID = "HQOWuMDIBPphC86v"
 
 with open('/tmp/callback.json', 'r') as f:
@@ -96,7 +96,7 @@ for node in workflow['nodes']:
     if node['name'] == 'Notify in Chat':
         node['parameters'] = {
             "method": "POST",
-            "url": "=https://api.telegram.org/bot8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4/sendMessage",
+            "url": "=https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/sendMessage",
             "sendBody": True,
             "specifyBody": "json",
             "jsonBody": '''={
@@ -113,7 +113,7 @@ for node in workflow['nodes']:
 remove_buttons_node = {
     "parameters": {
         "method": "POST",
-        "url": "=https://api.telegram.org/bot8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4/editMessageReplyMarkup",
+        "url": "=https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/editMessageReplyMarkup",
         "sendBody": True,
         "specifyBody": "json",
         "jsonBody": '''={

@@ -6,7 +6,7 @@ Fix 10_Handover_Monitor - use correct data references after HTTP requests
 import json
 import requests
 
-API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY1MDc2NzQxfQ.vnXGUX7k77dUNlu0QTw4T6oxMlXAzbHVws4525CyU_4'
+API_KEY = 'REDACTED_JWT'
 
 resp = requests.get(
     'https://n8n.truffles.kz/api/v1/workflows/ZRcuYYCv1o9B0MyY',

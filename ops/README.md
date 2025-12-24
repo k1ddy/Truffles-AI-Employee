@@ -26,6 +26,8 @@ ssh ... "psql < ~/truffles/ops/query.sql"
 
 ## ДОСТУПЫ
 
+**Секреты не храним в git.** Используй env переменные (`N8N_API_KEY`, `QDRANT_API_KEY`, `DB_PASSWORD`, Telegram bot tokens).
+
 ### SSH
 ```bash
 ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234
@@ -34,7 +36,7 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234
 ### n8n API
 ```
 URL: https://n8n.truffles.kz
-API Key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY1MDc2NzQxfQ.vnXGUX7k77dUNlu0QTw4T6oxMlXAzbHVws4525CyU_4
+API Key: env `N8N_API_KEY` (не хранить в git)
 ```
 
 ### PostgreSQL
@@ -50,14 +52,14 @@ Password: ${DB_PASSWORD}
 Container: truffles_qdrant_1
 IP: 172.24.0.3 (внутренний)
 Port: 6333
-API Key: ${DB_PASSWORD}
+API Key: ${QDRANT_API_KEY}
 Collection: truffles_knowledge
 ```
 
 ### Telegram Bots
 ```
-TrufflesChatBot: 8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4
-DemoSalonBot: 8249719610:AAGdyGmYTM9xnD5NojlsrIA36tbDcZFnpNk
+TrufflesChatBot: токен в секретах (не в git)
+DemoSalonBot: токен в секретах (не в git)
 ```
 
 ---
@@ -135,7 +137,7 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s -H 'X-N8N-AP
 
 ### 4. Посмотреть Qdrant коллекции
 ```bash
-ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s -H 'api-key: ${DB_PASSWORD}' 'http://172.24.0.3:6333/collections'"
+ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s -H 'api-key: ${QDRANT_API_KEY}' 'http://172.24.0.3:6333/collections'"
 ```
 
 ### 5. Настроить Telegram webhook

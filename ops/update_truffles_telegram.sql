@@ -1,7 +1,7 @@
 -- Update truffles client_settings with Telegram info
 UPDATE client_settings 
 SET telegram_chat_id = '-1003362579990', 
-    telegram_bot_token = '8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4' 
+    telegram_bot_token = 'REDACTED_TELEGRAM_BOT_TOKEN' 
 WHERE client_id = (SELECT id FROM clients WHERE name = 'truffles');
 
 -- Verify

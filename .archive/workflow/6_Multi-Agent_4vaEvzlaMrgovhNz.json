@@ -80,7 +80,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.telegram.org/bot8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4/setWebhook?url=https://n8n.truffles.kz/webhook/flow",
+        "url": "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://n8n.truffles.kz/webhook/flow",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -284,7 +284,7 @@
           "parameters": [
             {
               "name": "token",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzYyMTExNDU2fQ.myOt6xgCLfqbD9IF9EdJxkAyjij3fMty1B7sOhP2iKA"
+              "value": "REDACTED_JWT"
             },
             {
               "name": "instance_id",
@@ -460,7 +460,7 @@
           "parameters": [
             {
               "name": "token",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzYyMTExNDU2fQ.myOt6xgCLfqbD9IF9EdJxkAyjij3fMty1B7sOhP2iKA"
+              "value": "REDACTED_JWT"
             },
             {
               "name": "instance_id",
@@ -495,7 +495,7 @@
           "parameters": [
             {
               "name": "token",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzYyMTExNDU2fQ.myOt6xgCLfqbD9IF9EdJxkAyjij3fMty1B7sOhP2iKA"
+              "value": "REDACTED_JWT"
             },
             {
               "name": "instance_id",
@@ -530,7 +530,7 @@
           "parameters": [
             {
               "name": "token",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzYyMTExNDU2fQ.myOt6xgCLfqbD9IF9EdJxkAyjij3fMty1B7sOhP2iKA"
+              "value": "REDACTED_JWT"
             },
             {
               "name": "instance_id",
@@ -873,7 +873,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const ctx = $('Build Context').first().json;\nconst clientSlug = $('Parse Input').first().json.client_slug || 'truffles';\n\n// 1. Get embedding from BGE-M3\nconst bgeResponse = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'http://bge-m3:80/embed',\n    body: { inputs: ctx.message },\n    json: true\n});\n\nconst vector = bgeResponse[0];\n\n// 2. Search Qdrant with client filter\nconst searchPayload = {\n    vector: vector,\n    limit: 5,\n    with_payload: true,\n    filter: {\n        must: [\n            { key: 'metadata.client_slug', match: { value: clientSlug } }\n        ]\n    }\n};\n\nconst searchResponse = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'http://qdrant:6333/collections/truffles_knowledge/points/search',\n    headers: {\n        'api-key': 'Iddqd777!',\n        'Content-Type': 'application/json'\n    },\n    body: searchPayload,\n    json: true\n});\n\nconst results = searchResponse.result || [];\n\n// 3. Format knowledge\nconst knowledge = results\n    .map(r => r.payload?.content || '')\n    .filter(t => t)\n    .join('\\n\\n---\\n\\n') || '(нет информации в базе)';\n\nreturn {\n    json: {\n        ...ctx,\n        knowledge: knowledge,\n        rag_scores: results.map(r => r.score),\n        client_slug: clientSlug\n    }\n};"
+        "jsCode": "const ctx = $('Build Context').first().json;\nconst clientSlug = $('Parse Input').first().json.client_slug || 'truffles';\n\n// 1. Get embedding from BGE-M3\nconst bgeResponse = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'http://bge-m3:80/embed',\n    body: { inputs: ctx.message },\n    json: true\n});\n\nconst vector = bgeResponse[0];\n\n// 2. Search Qdrant with client filter\nconst searchPayload = {\n    vector: vector,\n    limit: 5,\n    with_payload: true,\n    filter: {\n        must: [\n            { key: 'metadata.client_slug', match: { value: clientSlug } }\n        ]\n    }\n};\n\nconst searchResponse = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'http://qdrant:6333/collections/truffles_knowledge/points/search',\n    headers: {\n        'api-key': 'REDACTED_PASSWORD',\n        'Content-Type': 'application/json'\n    },\n    body: searchPayload,\n    json: true\n});\n\nconst results = searchResponse.result || [];\n\n// 3. Format knowledge\nconst knowledge = results\n    .map(r => r.payload?.content || '')\n    .filter(t => t)\n    .join('\\n\\n---\\n\\n') || '(нет информации в базе)';\n\nreturn {\n    json: {\n        ...ctx,\n        knowledge: knowledge,\n        rag_scores: results.map(r => r.score),\n        client_slug: clientSlug\n    }\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

@@ -43,7 +43,7 @@ if vector:
     r2 = requests.put(
         'http://172.24.0.3:6333/collections/truffles_knowledge/points',
         json=qdrant_payload,
-        headers={'api-key': 'Iddqd777!'}
+        headers={'api-key': 'REDACTED_PASSWORD'}
     )
     print(f"Qdrant response: {r2.status_code}")
     print(f"Response: {r2.text}")

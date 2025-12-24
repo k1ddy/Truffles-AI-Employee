@@ -12,10 +12,10 @@ import sys
 from datetime import datetime
 
 # Config
-TELEGRAM_TOKEN = "8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4"
+TELEGRAM_TOKEN = "REDACTED_TELEGRAM_BOT_TOKEN"
 TELEGRAM_CHAT_ID = "1969855532"
 DOCKER_NETWORK = os.environ.get("TRUFFLES_DOCKER_NETWORK", "truffles_internal-net")
-QDRANT_API_KEY = os.environ.get("QDRANT__SERVICE__API_KEY") or os.environ.get("QDRANT_API_KEY") or "Iddqd777!"
+QDRANT_API_KEY = os.environ.get("QDRANT__SERVICE__API_KEY") or os.environ.get("QDRANT_API_KEY") or "REDACTED_PASSWORD"
 BGE_PORT = int(os.environ.get("BGE_M3_PORT", "80"))
 QDRANT_PORT = int(os.environ.get("QDRANT_PORT", "6333"))
 N8N_URL = os.environ.get("N8N_HEALTH_URL", "https://n8n.truffles.kz/")

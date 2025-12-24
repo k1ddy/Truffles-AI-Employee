@@ -7,11 +7,11 @@ Flow: Parse Message → Find Handover → Has Handover? → Send to WhatsApp →
 import json
 import urllib.request
 
-API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDE3ODI3YS01ODkzLTRjNDQtYTkwMC05ZDJlYzU0MmRlZTkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY1MDc2NzQxfQ.vnXGUX7k77dUNlu0QTw4T6oxMlXAzbHVws4525CyU_4"
+API_KEY = "REDACTED_JWT"
 WORKFLOW_ID = "HQOWuMDIBPphC86v"
 
 # Chatflow API token (from existing Send to WhatsApp node)
-CHATFLOW_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMiIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzQyMjA3MjAzLCJleHAiOjE4OTk4ODcyMDN9.P4JmKvKBz8anmXbxMRXTz5kuHYaFQyOSCqq4QBmgRgg"
+CHATFLOW_TOKEN = "REDACTED_JWT"
 
 # Download workflow
 url = f"https://n8n.truffles.kz/api/v1/workflows/{WORKFLOW_ID}"

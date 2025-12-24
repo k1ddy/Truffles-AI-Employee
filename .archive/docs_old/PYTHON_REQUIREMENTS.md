@@ -420,7 +420,7 @@ metrics = {
 
 ```bash
 # Database
-DATABASE_URL=postgresql://n8n:Iddqd777!@postgres:5432/chatbot
+DATABASE_URL=postgresql://n8n:REDACTED_PASSWORD@postgres:5432/chatbot
 
 # Redis
 REDIS_URL=redis://redis:6379/0
@@ -434,14 +434,14 @@ ELEVENLABS_API_KEY=...
 # Qdrant
 QDRANT_HOST=qdrant
 QDRANT_PORT=6333
-QDRANT_API_KEY=Iddqd777!
+QDRANT_API_KEY=REDACTED_PASSWORD
 
 # ChatFlow (WhatsApp)
 CHATFLOW_TOKEN=eyJ...
 CHATFLOW_URL=https://app.chatflow.kz/api/v1/send-text
 
 # Telegram
-TELEGRAM_BOT_TOKEN=8045341599:AAGY1vnqoebErB7Ki5iAqHusgLqf9WwA5m4
+TELEGRAM_BOT_TOKEN=<REDACTED>_TELEGRAM_BOT_TOKEN
 
 # App
 DEBUG=false

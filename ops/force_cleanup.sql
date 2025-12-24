@@ -29,4 +29,4 @@ DELETE FROM users WHERE phone = 'undefined';
 SELECT u.phone, c.telegram_topic_id, c.bot_status
 FROM users u
 JOIN conversations c ON c.user_id = u.id
-WHERE c.client_id = 'c839d5dd-65be-4733-a5d2-72c9f70707f0';
+WHERE c.client_id = '<CLIENT_ID>';

@@ -5,7 +5,7 @@ import json
 
 BGE_URL = "http://172.24.0.8:80/embed"
 QDRANT_URL = "http://172.24.0.3:6333"
-QDRANT_KEY = "Iddqd777!"
+QDRANT_KEY = "REDACTED_PASSWORD"
 COLLECTION = "truffles_knowledge"
 
 # Test chunk
