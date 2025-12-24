@@ -164,6 +164,18 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-24 — Sync: latency + multi-intent + git hygiene
+
+**Что выяснили:**
+- Задержка ответов/пересылки в Telegram: ACK-first + cron `/admin/outbox/process` раз в минуту + `OUTBOX_COALESCE_SECONDS=8` → 8–60 сек.
+- Demo_salon multi-intent ломается: coalescing склеивает сообщения, truth-first возвращает цену до booking → запись теряется.
+
+**Что сделали:**
+- Создали `CHATGPT_QUESTIONS_ANSWERS.md` (ответы на анкету).
+- Обновили `STATE.md` и `STRUCTURE.md` (новые проблемы и приоритеты).
+- EVAL: `test_demo_salon_eval.py` — 1 passed (локальный venv).
+- Git hygiene: секреты вынесены в env vars в docs/ops; добавлен gitleaks в CI и pre-commit; `/.venv/` добавлен в `.gitignore`.
+
 ### 2025-12-24 — Ротация OpenAI ключа (prod)
 
 **Проблема:** 401 `invalid_api_key` после CI (ключ утёк).

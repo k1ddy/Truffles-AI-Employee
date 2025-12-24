@@ -1,9 +1,9 @@
 # CHATGPT_QUESTIONS_ANSWERS.md
 
 ## Snapshot
-- Date: 2025-12-24T11:26:43+05:00
+- Date: 2025-12-24T12:39:44+05:00
 - Branch: main-worktree
-- Commit (HEAD): ae26cb0bbc3c3999d445c77cbf769c1e36f42bae
+- Commit (HEAD): b74704701d43cd6394e231ec89ccc52a189d9a4d
 - Prod host/services: 5.188.241.234 (truffles-api, truffles_postgres_1, truffles_redis_1, truffles_qdrant_1, truffles_n8n_1, truffles-traefik, bge-m3); public: https://api.truffles.kz, https://n8n.truffles.kz
 
 ## Outbox
