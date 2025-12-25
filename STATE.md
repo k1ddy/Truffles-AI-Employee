@@ -211,6 +211,11 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-25 — Amnesia-mode checklist
+
+**Что сделали:**
+- Добавили короткий режим "амнезии" в `docs/SESSION_START_PROMPT.txt` для быстрого входа и сохранения знаний.
+
 ### 2025-12-25 — Human_request uses last meaningful message
 
 **Что сделали:**

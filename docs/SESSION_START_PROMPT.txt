@@ -19,3 +19,9 @@ Rules:
 - Use evidence for important statements (file path, command, output, line).
 - Provide a short plan (steps), DoD, and concrete commands for verification.
 - Keep responses concise and outcome-focused.
+
+Amnesia mode (time-boxed, 10-15 minutes):
+- Read: STATE.md, this file, SPECS/CONSULTANT.md, SPECS/ESCALATION.md, SPECS/ARCHITECTURE.md.
+- Do 1-2 evidence checks (DB/logs) before touching code.
+- Fix exactly one issue per session: diagnose -> change -> verify -> record in STATE.md.
+- If bot behavior changed, update EVAL/knowledge files and SPECS/CONSULTANT.md.
