@@ -230,6 +230,40 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-25 — Prod verification: media/manager/TTL checks
+
+**Что проверили:**
+- Диагностика: `python3 ops/diagnose.py` (handovers/pending — пусто).
+- Логи: `docker logs truffles-api --tail 200 | rg -n "Escalated|topic|telegram|handover|media"` → есть "Manager media received" (photo).
+- SQL:
+  - `SELECT ... FROM handovers ORDER BY created_at DESC LIMIT 10;`
+  - `SELECT ... FROM conversations WHERE state IN ('pending','manager_active');`
+  - `SELECT created_at, content, metadata->'media' FROM messages WHERE metadata ? 'media' ORDER BY created_at DESC LIMIT 5;`
+
+**Статус:**
+- В контейнере `MEDIA_SIGNING_SECRET` и `PUBLIC_BASE_URL` отсутствуют → signed URL не генерится, `messages.metadata.media.public_url` пустой.
+- TTL cleanup (dry_run) отрабатывает: `total_files=1`, `total_bytes=59579`, `deleted_files=0`.
+
+**Разбор (шаблон):**
+- Боль/симптом: manager→client медиа не получает `public_url`, signed URL проверить нельзя.
+- Почему важно: клиент не получает медиа, ломается менеджерский поток.
+- Диагноз: env `MEDIA_SIGNING_SECRET`/`PUBLIC_BASE_URL` не заданы в API.
+- Решение: добавить env и перезапустить API.
+- Проверка: менеджер шлёт медиа → в `messages.metadata.media` есть `public_url` и `storage_path`, `curl -I <public_url>` отдаёт файл.
+- Осталось: ручные WA/Telegram проверки (handover + media), повторить SQL/логи после env-фікса.
+
+### 2025-12-25 — Manager→client media: ChatFlow требует caption
+
+**Что нашли:**
+- Логи: `ChatFlow media response: success=false, message="Parameter [token, instance_id, caption, jid, imageurl] are required!"`
+- `public_url` генерится и `/media/...` отдаёт файл, но ChatFlow отказывает без caption.
+
+**Решение:**
+- В `send_whatsapp_media` всегда прокидывать `caption` для image/doc/video (если нет — отправлять пробел).
+
+**Статус:**
+- Код обновлён, нужен деплой и ретест отправки медиа.
+
 ### 2025-12-25 — Manager→client media + signed URL + TTL cleanup
 
 **Что сделали:**

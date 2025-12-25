@@ -155,8 +155,12 @@ def send_whatsapp_media(
         "jid": remote_jid,
         url_param: media_url,
     }
-    if allow_caption and caption:
-        params["caption"] = caption
+    if allow_caption:
+        # ChatFlow rejects image/doc/video requests without a non-empty caption.
+        if caption and caption.strip():
+            params["caption"] = caption.strip()
+        else:
+            params["caption"] = " "
 
     try:
         with httpx.Client(timeout=30.0) as client:
