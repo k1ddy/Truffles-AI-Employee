@@ -148,7 +148,7 @@ chatflow_service → WhatsApp (retries/backoff + msg_id idempotency)
 
 **Дефолты:**
 - фото 8MB, аудио 8MB, документы 10MB
-- лимит 3 медиа / 10 мин, 10 медиа / сутки, 20MB / 10 мин
+- лимит 5 медиа / 10 мин, 20 медиа / сутки, 30MB / 10 мин
 - блокировка 15 мин при превышении
 - storage dir: `/home/zhan/truffles-media`
 

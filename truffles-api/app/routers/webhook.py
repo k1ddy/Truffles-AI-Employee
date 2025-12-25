@@ -118,10 +118,10 @@ MEDIA_TYPE_ALIASES = {
 }
 MEDIA_MAX_DEFAULT_MB = {"photo": 8, "audio": 8, "document": 10}
 MEDIA_RATE_LIMIT_DEFAULTS = {
-    "count": 3,
+    "count": 5,
     "window_seconds": 600,
-    "daily_count": 10,
-    "bytes_mb": 20,
+    "daily_count": 20,
+    "bytes_mb": 30,
     "block_seconds": 900,
 }
 MEDIA_STORAGE_DEFAULT_DIR = "/home/zhan/truffles-media"
@@ -622,7 +622,7 @@ def _send_telegram_media(
             message_thread_id=topic_id,
         )
     if media.media_type == "audio":
-        if media.is_ptt:
+        if media.is_ptt and media.mime and ("ogg" in media.mime or "opus" in media.mime):
             return telegram.send_voice(
                 chat_id=chat_id,
                 voice=source,

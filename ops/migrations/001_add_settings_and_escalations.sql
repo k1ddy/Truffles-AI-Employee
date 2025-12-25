@@ -239,6 +239,17 @@ CREATE INDEX IF NOT EXISTS idx_handovers_moderation ON handovers(moderation_stat
 CREATE INDEX IF NOT EXISTS idx_handovers_learning ON handovers(added_to_knowledge);
 
 -- ============================================================
+-- 8. CHECK: trigger_type (add media)
+-- ============================================================
+
+ALTER TABLE handovers
+  DROP CONSTRAINT IF EXISTS handovers_trigger_type_check;
+
+ALTER TABLE handovers
+  ADD CONSTRAINT handovers_trigger_type_check
+  CHECK (trigger_type = ANY (ARRAY['intent','keyword','manual','timeout','media']));
+
+-- ============================================================
 -- ГОТОВО
 -- ============================================================
 

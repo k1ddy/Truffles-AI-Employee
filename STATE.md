@@ -230,6 +230,24 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-25 — Media: fix trigger_type constraint + rate limits
+
+**Что сделали:**
+- Обновили `handovers_trigger_type_check` (добавили `media`), чтобы эскалации по медиа не падали.
+- Смягчили лимиты медиа: 5/10 мин, 20/сутки, 30MB/10 мин.
+- PTT аудио с `audio/mpeg` теперь шлём как audio (не voice).
+
+**Статус:**
+- Требуется проверка на проде: аудио/документы должны доходить в Telegram как файлы.
+
+**Разбор (шаблон):**
+- Боль/симптом: audio/doc приходят как `[audio]/[document]`, outbox падал по constraint.
+- Почему важно: медиа не доходит менеджеру, outbox ломается.
+- Диагноз: trigger_type не допускает `media`, rate‑limit слишком жёсткий, PTT mime не совпадает с voice.
+- Решение: расширили constraint, подняли лимиты, отправка PTT как audio при `audio/mpeg`.
+- Проверка: отправить фото+аудио+док → в Telegram приходят файлы, в логах нет CheckViolation.
+- Осталось: manager→client media, ASR/обработка.
+
 ### 2025-12-25 — Media guardrails + Telegram forwarding
 
 **Что сделали:**
