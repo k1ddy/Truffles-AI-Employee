@@ -113,6 +113,7 @@ def send_whatsapp_media(
     media_type: str,
     media_url: str,
     caption: Optional[str] = None,
+    timeout_seconds: float = 30.0,
 ) -> bool:
     """Send media via ChatFlow API (image/audio/document/video)."""
     if not CHATFLOW_TOKEN:
@@ -163,7 +164,7 @@ def send_whatsapp_media(
             params["caption"] = " "
 
     try:
-        with httpx.Client(timeout=30.0) as client:
+        with httpx.Client(timeout=timeout_seconds) as client:
             response = client.get(url, params=params)
             logger.info(
                 f"ChatFlow media response: status={response.status_code}, jid={remote_jid}, body={response.text[:200]}"

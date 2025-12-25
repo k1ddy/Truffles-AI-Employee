@@ -264,6 +264,22 @@
 **Статус:**
 - Код обновлён, нужен деплой и ретест отправки медиа.
 
+### 2025-12-25 — Manager→client media: ChatFlow timeout + ложные "Не доставлено"
+
+**Что нашли:**
+- Логи: `Error sending WhatsApp media: The read operation timed out` спустя ~30s после `process_manager_media`.
+- Итог: медиа доходит с задержкой, но в топике появляется `❌ Не доставлено`.
+
+**Диагноз:**
+- ChatFlow media endpoint отвечает дольше 30s; синхронный webhook ловит timeout и считает отправку проваленной.
+
+**Решение:**
+- Отправку медиа от менеджера вынесли в background task (Telegram webhook отвечает сразу).
+- Для ChatFlow media увеличен timeout (env `CHATFLOW_MEDIA_TIMEOUT_SECONDS`, дефолт 90s).
+
+**Проверка:**
+- Отправить фото/док/аудио в топик → нет `❌ Не доставлено`, WA получает медиа; в логах `ChatFlow media response: success=true`.
+
 ### 2025-12-25 — Manager→client media + signed URL + TTL cleanup
 
 **Что сделали:**

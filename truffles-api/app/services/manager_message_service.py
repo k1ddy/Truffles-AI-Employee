@@ -25,6 +25,7 @@ logger = get_logger("manager_message_service")
 
 MEDIA_STORAGE_BASE_DIR = Path(os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media"))
 MEDIA_MANAGER_DIRNAME = "manager"
+CHATFLOW_MEDIA_TIMEOUT_SECONDS = float(os.environ.get("CHATFLOW_MEDIA_TIMEOUT_SECONDS", "90"))
 
 
 def _safe_media_id(value: Optional[str]) -> str:
@@ -442,6 +443,7 @@ def process_manager_media(
         media_type=media_type,
         media_url=signed_url,
         caption=caption,
+        timeout_seconds=CHATFLOW_MEDIA_TIMEOUT_SECONDS,
     )
 
     if sent:

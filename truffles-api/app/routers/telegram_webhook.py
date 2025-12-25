@@ -2,10 +2,10 @@ import json
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.logging_config import get_logger
 from app.models import ClientSettings, Conversation, Handover
 from app.schemas.telegram import TelegramMessage, TelegramUpdate, TelegramWebhookResponse
@@ -42,7 +42,11 @@ async def parse_telegram_update(request: Request) -> Optional[dict]:
 
 
 @router.post("/telegram-webhook", response_model=TelegramWebhookResponse)
-async def handle_telegram_webhook(request: Request, db: Session = Depends(get_db)):
+async def handle_telegram_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """
     Handle Telegram webhook updates:
     - Text messages from managers -> forward to WhatsApp client
@@ -65,7 +69,7 @@ async def handle_telegram_webhook(request: Request, db: Session = Depends(get_db
         if update.message:
             media_payload = _extract_media_payload(update.message)
             if media_payload:
-                return await handle_manager_media(update, media_payload, db)
+                return await handle_manager_media(update, media_payload, db, background_tasks)
             if update.message.text:
                 return await handle_manager_message(update, db)
 
@@ -235,7 +239,92 @@ def _extract_media_payload(message: TelegramMessage) -> Optional[dict]:
     return None
 
 
-async def handle_manager_media(update: TelegramUpdate, media_payload: dict, db: Session) -> TelegramWebhookResponse:
+def _process_manager_media_background(task: dict) -> None:
+    db = SessionLocal()
+    chat_id = task["chat_id"]
+    message_thread_id = task.get("message_thread_id")
+    manager_name = task.get("manager_name") or "Unknown"
+    bot_token = task["bot_token"]
+    reply_to_message_id = task.get("reply_to_message_id")
+
+    try:
+        success, result_message, took_handover, handover = process_manager_media(
+            db=db,
+            chat_id=chat_id,
+            manager_telegram_id=task["manager_telegram_id"],
+            manager_name=manager_name,
+            media_type=task["media_type"],
+            file_id=task["file_id"],
+            bot_token=bot_token,
+            caption=task.get("caption"),
+            file_name=task.get("file_name"),
+            mime_type=task.get("mime_type"),
+            file_size=task.get("file_size"),
+            manager_username=task.get("manager_username"),
+            message_thread_id=message_thread_id,
+            telegram_message_id=task.get("telegram_message_id"),
+        )
+
+        db.commit()
+
+        telegram = TelegramService(bot_token)
+        if success and took_handover and handover and handover.telegram_message_id:
+            telegram._make_request(
+                "editMessageReplyMarkup",
+                {
+                    "chat_id": chat_id,
+                    "message_id": handover.telegram_message_id,
+                    "reply_markup": {
+                        "inline_keyboard": [[{"text": "Решено ✅", "callback_data": f"resolve_{handover.id}"}]]
+                    },
+                },
+            )
+            if message_thread_id:
+                telegram.send_message(
+                    chat_id=str(chat_id),
+                    text=f"👤 <b>{manager_name}</b> взял заявку",
+                    message_thread_id=message_thread_id,
+                )
+
+        if not success:
+            logger.warning(
+                "Manager media delivery failed",
+                extra={
+                    "context": {
+                        "chat_id": chat_id,
+                        "thread_id": message_thread_id,
+                        "reason": result_message,
+                    }
+                },
+            )
+            telegram.send_message(
+                chat_id=str(chat_id),
+                text="❌ Не доставлено",
+                message_thread_id=message_thread_id,
+                reply_to_message_id=reply_to_message_id,
+            )
+    except Exception as exc:
+        logger.error(f"Manager media background error: {exc}", exc_info=True)
+        try:
+            telegram = TelegramService(bot_token)
+            telegram.send_message(
+                chat_id=str(chat_id),
+                text="❌ Не доставлено",
+                message_thread_id=message_thread_id,
+                reply_to_message_id=reply_to_message_id,
+            )
+        except Exception:
+            logger.error("Failed to notify manager about media failure", exc_info=True)
+    finally:
+        db.close()
+
+
+async def handle_manager_media(
+    update: TelegramUpdate,
+    media_payload: dict,
+    db: Session,
+    background_tasks: BackgroundTasks,
+) -> TelegramWebhookResponse:
     message = update.message
     if not message:
         return TelegramWebhookResponse(success=False, message="No message payload")
@@ -286,53 +375,25 @@ async def handle_manager_media(update: TelegramUpdate, media_payload: dict, db: 
     if not bot_token:
         return TelegramWebhookResponse(success=False, message="Bot token not found")
 
-    success, result_message, took_handover, handover = process_manager_media(
-        db=db,
-        chat_id=chat_id,
-        manager_telegram_id=manager_id,
-        manager_name=manager_name,
-        media_type=media_payload.get("media_type") or "document",
-        file_id=media_payload.get("file_id") or "",
-        bot_token=bot_token,
-        caption=media_payload.get("caption"),
-        file_name=media_payload.get("file_name"),
-        mime_type=media_payload.get("mime_type"),
-        file_size=media_payload.get("file_size"),
-        manager_username=manager_username,
-        message_thread_id=message_thread_id,
-        telegram_message_id=media_payload.get("telegram_message_id"),
-    )
+    task = {
+        "chat_id": chat_id,
+        "message_thread_id": message_thread_id,
+        "manager_telegram_id": manager_id,
+        "manager_name": manager_name,
+        "manager_username": manager_username,
+        "media_type": media_payload.get("media_type") or "document",
+        "file_id": media_payload.get("file_id") or "",
+        "bot_token": bot_token,
+        "caption": media_payload.get("caption"),
+        "file_name": media_payload.get("file_name"),
+        "mime_type": media_payload.get("mime_type"),
+        "file_size": media_payload.get("file_size"),
+        "telegram_message_id": media_payload.get("telegram_message_id"),
+        "reply_to_message_id": message.message_id,
+    }
+    background_tasks.add_task(_process_manager_media_background, task)
 
-    db.commit()
-
-    telegram = TelegramService(bot_token)
-    if success and took_handover and handover and handover.telegram_message_id:
-        telegram._make_request(
-            "editMessageReplyMarkup",
-            {
-                "chat_id": chat_id,
-                "message_id": handover.telegram_message_id,
-                "reply_markup": {
-                    "inline_keyboard": [[{"text": "Решено ✅", "callback_data": f"resolve_{handover.id}"}]]
-                },
-            },
-        )
-        if message_thread_id:
-            telegram.send_message(
-                chat_id=str(chat_id),
-                text=f"👤 <b>{manager_name}</b> взял заявку",
-                message_thread_id=message_thread_id,
-            )
-
-    if not success:
-        telegram.send_message(
-            chat_id=str(chat_id),
-            text="❌ Не доставлено",
-            message_thread_id=message_thread_id,
-            reply_to_message_id=message.message_id,
-        )
-
-    return TelegramWebhookResponse(success=success, message=result_message)
+    return TelegramWebhookResponse(success=True, message="Queued")
 
 
 def get_bot_token_by_chat(db: Session, chat_id: int) -> Optional[str]:
