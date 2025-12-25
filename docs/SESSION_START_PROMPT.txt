@@ -19,6 +19,7 @@ Rules:
 - Use evidence for important statements (file path, command, output, line).
 - Provide a short plan (steps), DoD, and concrete commands for verification.
 - Keep responses concise and outcome-focused.
+- Close the session by filling the reasoning template in STATE.md (symptom -> why -> diagnosis -> solution -> verification -> next).
 
 Amnesia mode (time-boxed, 10-15 minutes):
 - Read: STATE.md, this file, SPECS/CONSULTANT.md, SPECS/ESCALATION.md, SPECS/ARCHITECTURE.md.

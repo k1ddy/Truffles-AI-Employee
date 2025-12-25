@@ -445,6 +445,7 @@ MSG_PENDING_LOW_CONFIDENCE = (
 )
 MSG_PENDING_STATUS = "Да, я передал. Сейчас менеджер ещё не взял заявку. Как только возьмёт — ответит здесь. Пока ждём, могу помочь: уточните, что нужно?"
 MSG_AI_ERROR = "Извините, произошла ошибка. Попробуйте позже."
+MSG_MEDIA_UNSUPPORTED = "Пока не умею обрабатывать фото/аудио/документы. Опишите вопрос текстом."
 
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
@@ -1138,10 +1139,16 @@ async def _handle_webhook_payload(
 
     remote_jid = metadata.remoteJid
     message_text = body.message or ""
+    message_type = (body.messageType or "").strip()
+    has_media = bool(body.mediaData) or (message_type and message_type.lower() != "text")
+    is_media_without_text = has_media and not message_text.strip()
     message_id = metadata.messageId
 
-    if not message_text:
+    if not message_text and not is_media_without_text:
         return WebhookResponse(success=False, message="Empty message")
+    if is_media_without_text:
+        media_label = message_type.lower() if message_type else "media"
+        message_text = f"[{media_label}]"
 
     outbound_idempotency_key = message_id or build_inbound_message_id(
         message_id,
@@ -1186,6 +1193,10 @@ async def _handle_webhook_payload(
         message_metadata = metadata.model_dump(exclude_none=True) if metadata else {}
         if message_id:
             message_metadata["message_id"] = message_id
+        if message_type:
+            message_metadata["message_type"] = message_type
+        if has_media:
+            message_metadata["has_media"] = True
         save_message(
             db,
             conversation.id,
@@ -1416,6 +1427,19 @@ async def _handle_webhook_payload(
             message="Bot muted, forwarded to topic" if conversation.telegram_topic_id else "Bot muted",
             conversation_id=conversation.id,
             bot_response=None,
+        )
+
+    if is_media_without_text:
+        bot_response = MSG_MEDIA_UNSUPPORTED
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = _send_response(bot_response)
+        result_message = "Media unsupported response sent" if sent else "Media response failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
         )
 
     # 9.0 Debounce bursty inputs: only the latest message triggers bot logic.

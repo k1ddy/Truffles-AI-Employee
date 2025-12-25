@@ -11,7 +11,8 @@
 ### БАЗОВЫЕ ФАКТЫ (читать первым делом)
 - Входящие WhatsApp идут напрямую в API: `POST /webhook/{client_slug}` (direct ChatFlow). `POST /webhook` — legacy wrapper.
 - `demo_salon` в ChatFlow направлен на `https://api.truffles.kz/webhook/demo_salon` + `webhook_secret` (секрет хранится в ChatFlow, не в git).
-- `metadata.instanceId` в inbound payload сейчас отсутствует → `by_instance` не сработает до правки upstream; API теперь принимает instanceId из query (`instanceId`/`instance_id`/`instance`) и `nodeData`, если передадут.
+- `webhook_secret` всегда генерируем сами (не заказчик); хранится в ChatFlow/DB, не в git.
+- `metadata.instanceId` отсутствует, если ChatFlow не передаёт. API принимает instanceId из query (`instanceId`/`instance_id`/`instance`), metadata или `nodeData`. Проверено: demo_salon после добавления query‑param — instanceId приходит, `conversation.branch_id` ставится.
 - Outbox cron: `/etc/cron.d/truffles-outbox` → `/admin/outbox/process` раз в минуту.
 - Outbox worker в API: фоновой цикл обрабатывает outbox каждые `OUTBOX_WORKER_INTERVAL_SECONDS` (дефолт 2s) при `OUTBOX_WORKER_ENABLED=1`; в pytest отключён.
 - Деплой: синк кода в `/home/zhan/truffles-main/truffles-api` → `bash /home/zhan/restart_api.sh` (build+restart).
@@ -19,7 +20,7 @@
 
 ### Что мешало быстрому входу (зафиксировано)
 - Было несколько корней кода и часть ссылок указывала на несуществующие пути (`/home/zhan/truffles`, `/home/zhan/Truffles-AI-Employee`) → команды/доки расходились.
-- Inbound payload сохраняется только для текста; медиа payload целиком не сохраняется, в логах остаются только ключи → трудно восстановить структуру.
+- Inbound payload для медиа: в коде добавлено сохранение + ответ, но на проде без деплоя всё ещё отбрасывается.
 - В репо лежали workflow JSON и упоминания n8n → удалены, чтобы не вводить в заблуждение.
 - Git worktree был сломан: `.git` указывал на несуществующий gitdir → восстановлено, commit/push работают.
 
@@ -35,14 +36,15 @@
 ### Что не работает / в процессе
 - [ ] **⚠️ Новая архитектура эскалации/обучения** — роли/идентичности + очередь обучения + Telegram per branch описаны в спеках, **код не внедрён**
 - [ ] **⚠️ Эскалация всё ещё частая на реальные вопросы** — KB неполная, score часто < 0.5 → создаётся заявка; мелкие сообщения ("спасибо", "ок?") больше не должны создавать заявки (whitelist + guardrails)
-- [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant (код есть), но нет модерации/метрик и нужен факт-пруф по логам на проде
-- [ ] **⚠️ Ответы медленные (outbox)** — было 8–60 сек (cron + `OUTBOX_COALESCE_SECONDS=8`); в коде добавлен outbox worker (тик 2s) → ожидаемо 8–10 сек после деплоя
+- [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant работает (логи 2025-12-25: "Owner response detected" / "Added to knowledge"), но нет модерации/метрик
+- [ ] **⚠️ Ответы медленные (outbox)** — замер: SENT за последний час avg 17s, p90 25s, max 26s (created_at → updated_at); цель < 10s не достигнута
 - [ ] **⚠️ Склейка сообщений ломает multi‑intent** — demo_salon: price‑ответ перехватывает до booking; “цена+запись” в одном батче даёт только цену → запись теряется
 - [ ] **⚠️ Закрепы заявок в Telegram** — после "Решено" закреп должен сниматься; сейчас иногда остаётся (проверить обработку `unpin` и message_id)
 - [ ] **⚠️ Дубли заявок на одного клиента** — владельцу неудобно; нужен guard: при open handover не создавать новый, а писать в текущий топик
 - [ ] **Branch подключен частично** — webhook ставит `conversation.branch_id`, но Telegram per branch + RAG фильтры ещё не wired → `SPECS/MULTI_TENANT.md`
-- [ ] **⚠️ by_instance не сработает без instanceId** — входящие payloadы сейчас не несут `metadata.instanceId`, нужно прокинуть в ChatFlow
+- [ ] **⚠️ by_instance зависит от instanceId** — demo_salon исправлен (query‑param даёт instanceId), остальным клиентам нужно прокинуть
 - [ ] **⚠️ demo_salon truth-gate даёт цену на "как у/в стиле"** — нет правила style_reference, фото не поддерживаются; нужен отдельный ответ/эскалация
+- [ ] **⚠️ Медиа (аудио/фото/документы)** — fallback “опишите текстом” добавлен в код, но нужен деплой; ASR/OCR/vision отсутствуют
 - [ ] Метрики (Quality Deflection, CSAT) — план: `SPECS/ESCALATION.md`, часть 6
 - [ ] Dashboard для заказчика — backlog
 - [ ] Quiet hours для напоминаний — P2
@@ -211,6 +213,43 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-25 — Media fallback (non-text)
+
+**Что сделали:**
+- Перестали отбрасывать non-text payload: сохраняется в outbox, ответ “опишите текстом”.
+- В messages добавлен `message_type/has_media` в metadata для входящих.
+
+**Статус:**
+- Нужен деплой, чтобы fallback начал работать; ASR/OCR/vision не реализованы.
+
+### 2025-12-25 — Truffles instanceId prep
+
+**Что сделали:**
+- Создали branch `main` для `truffles` с `instance_id`.
+- Сгенерировали `webhook_secret` для `truffles` (значение выдано Жанболу).
+
+**Статус:**
+- Обновили ChatFlow webhook URL и проверили: instanceId приходит, `conversation.branch_id` ставится.
+
+### 2025-12-25 — InstanceId in inbound payload
+
+**Что сделали:**
+- Добавили `instanceId` в webhook (query‑param) для demo_salon.
+- Проверили: instanceId пришёл в payload, `conversation.branch_id` проставился (main).
+
+**Статус:**
+- Работает для demo_salon; нужно повторить для остальных клиентов.
+
+### 2025-12-25 — Outbox latency check
+
+**Что сделали:**
+- Измерили задержку outbox по БД (created_at → updated_at для SENT).
+- Разложили задержку на wait (coalesce+interval) и processing по логам.
+
+**Статус:**
+- Avg 17s, p90 25s, max 26s за последний час; цель <10s не достигнута.
+- Breakdown: wait ~8.7s, processing ~6.6s (выборка 4 батча).
+
 ### 2025-12-25 — Amnesia-mode checklist
 
 **Что сделали:**
@@ -234,7 +273,7 @@
 - Auto-learning: не затирает assigned_to при unknown; fallback на assigned_to для owner-check; поддержка отрицательных ID.
 
 **Статус:**
-- Нужен деплой и проверка: latency < 10с + "Owner response detected" в логах.
+- Проверено по логам: "Owner response detected" + "Added to knowledge" (2025-12-25); latency < 10с ещё не проверена.
 
 ### 2025-12-25 — Demo salon: law-safe KB + policy keywords
 
@@ -637,7 +676,7 @@ Runbook (если “всё странно” или сессия оборвал
 
 Что НЕ работает:
 - Low confidence всё ещё часто уходит в заявку из-за неполной базы знаний (нужно «уточнение перед заявкой»)
-- Active Learning по owner-ответам в коде есть, но нужно проверить на проде логами + решить модерацию
+- Active Learning по owner-ответам подтверждён логами (2025-12-25), но нужна модерация/метрики
 
 ---
 
@@ -665,6 +704,17 @@ Runbook (если “всё странно” или сессия оборвал
 "ты еще здесь?" → эскалация ← ПЛОХО
 ```
 
+### Outbox latency (DB факт):
+- `outbox_messages` SENT за последний час: avg 17s, p90 25s, max 26s (created_at → updated_at)
+- Последние 10 сообщений: 9-21s
+
+### Outbox latency breakdown (логи+DB, выборка 4 батча):
+- Wait до старта обработки (start - last_created): avg 8.7s, p90 9.9s → совпадает с coalesce+interval
+- Processing (processed - start): avg 6.6s, p90 12.7s
+- End-to-end от последнего сообщения: avg 15.4s, p90 21.3s
+- В outbox есть старые `PROCESSING` (3) и `FAILED` (2) записи (возраст ~1.5–1.9 дня) — потенциальный мусор/ретраи
+- Пример (08:55 местн, сообщение “Добрый день. Это мое сообщение”): wait 9.3s, processing 17.7s, total 27.0s
+
 ### Кнопки:
 - Сначала не работали — traefik labels были пустые
 - После `ops/restart_api.sh` — заработали
@@ -672,31 +722,31 @@ Runbook (если “всё странно” или сессия оборвал
 
 ### Обучение (Active Learning):
 - Код написан: `learning_service.py`, вызов в `manager_message_service.py`
-- В логах НЕТ записей "Owner response detected"
+- В логах есть `"Owner response detected"` и `"Added to knowledge"` (2025-12-25) → auto-upsert в Qdrant сработал
 - Жанбол писал "5000 тысяч" в топик — сообщение дошло до клиента
-- НО обучение не сработало — непонятно почему
 
 ### Telegram webhook:
 - В ops/README.md зафиксирован webhook `https://api.truffles.kz/telegram-webhook` (прямой в API)
 - В коде ожидается: `api.truffles.kz/telegram-webhook`
 - Я предположил что это причина — но Жанбол сказал что это хуйня
-- **Я НЕ ЗНАЮ почему обучение не работает**
 
 ### Прод (2025-12-24):
 - API падал на `/webhook` из-за отсутствия `conversations.branch_id` (миграция 013 не была применена) — применено, падение исчезло.
 - `/etc/cron.d/truffles-outbox` есть и дергает `/admin/outbox/process` каждую минуту (через `ALERTS_ADMIN_TOKEN`).
-- Inbound payload не несёт `metadata.instanceId`, поэтому by_instance branch routing не может сработать без правки upstream.
+- Inbound payload не нёс `metadata.instanceId` (раньше), поэтому by_instance не работал; после добавления query‑param для demo_salon instanceId приходит.
 - Demo_salon: запросы вида "как у/в стиле" → отвечают прайсом (truth-gate), нужно отдельное правило.
 
 ### Branch routing (DB факт):
 - `demo_salon`: `branch_resolution_mode=by_instance`, `remember_branch_preference=true`, `require_branch_for_pricing=true`, `auto_approve_roles=owner,admin`, `webhook_secret` установлен.
-- `truffles`: `branch_resolution_mode=hybrid`, `remember_branch_preference=true`, `require_branch_for_pricing=true`, `auto_approve_roles=owner,admin`, `webhook_secret` отсутствует.
+- `truffles`: `branch_resolution_mode=hybrid`, `remember_branch_preference=true`, `require_branch_for_pricing=true`, `auto_approve_roles=owner,admin`, `webhook_secret` установлен; branch `main` с `instance_id` подключён (ChatFlow webhook обновлён).
 
 ### Branches (DB факт):
 - `demo_salon` имеет 1 активный branch (`slug=main`) с `instance_id` и `telegram_chat_id`.
+- `truffles` имеет 1 активный branch (`slug=main`) с `instance_id`.
 
 ### Inbound payload (DB факт):
-- В `outbox_messages.payload_json.body.metadata` есть только `sender`, `messageId`, `remoteJid`, `timestamp` → `instanceId` отсутствует.
+- Ранее в `outbox_messages.payload_json.body.metadata` были только `sender`, `messageId`, `remoteJid`, `timestamp` → `instanceId` отсутствовал.
+- Теперь при webhook с query‑param `instanceId` присутствует (пример: "второе сообщение", 2025‑12‑25 04:22 UTC) и `conversation.branch_id` = `b7f75692-951e-421a-aae6-f5db97394799` (main).
 - Проверка:
 ```
 SELECT payload_json->'body'->'metadata' AS metadata
@@ -709,7 +759,7 @@ LIMIT 1;
 {"body": {"message": "вот мое просто сообщение", "metadata": {"sender": "Zh.", "messageId": "3EB0747A962FBC720E44FF", "remoteJid": "77015705555@s.whatsapp.net", "timestamp": 1766582383}, "messageType": "text"}, "client_slug": "demo_salon"}
 ```
 - Пример нетекстового payload (из логов, `has_message=false`): ключи `messageType`, `message`, `metadata`, `to`, `mediaData`, `nodeData`.
-- Сейчас такие payload отбрасываются ответом `Empty message` и не попадают в БД/Outbox.
+- Сейчас такие payload на проде отбрасываются (“Empty message”); после деплоя будут сохраняться и получать ответ “опишите текстом”.
 
 ---
 
@@ -744,11 +794,9 @@ LIMIT 1;
 
 ## ВОПРОСЫ БЕЗ ОТВЕТА
 
-1. **Почему обучение не сработало?** Вероятно `from_user` отсутствовал (анонимный админ/канал) → owner-check не срабатывал; добавлены sender_chat и fallback на assigned_to, проверить в логах после деплоя.
+1. **Как сообщение менеджера доходит до клиента?** Нужна трассировка от Telegram webhook до ChatFlow отправки.
 
-2. **Как сообщение менеджера доходит до клиента?** Нужна трассировка от Telegram webhook до ChatFlow отправки.
-
-3. **Правильный ли threshold?** Сейчас в коде: MID=0.5, HIGH=0.85. Дальше тюнить только по фактам (сколько эскалаций/качество ответов).
+2. **Правильный ли threshold?** Сейчас в коде: MID=0.5, HIGH=0.85. Дальше тюнить только по фактам (сколько эскалаций/качество ответов).
 
 ---
 
@@ -760,16 +808,14 @@ LIMIT 1;
 1. Прочитать SPECS/ARCHITECTURE.md полностью
 2. Прочитать SPECS/ESCALATION.md
 3. Проследить путь сообщения менеджера в коде
-4. Понять почему обучение не вызывается
 
 ### 2. КОНКРЕТНЫЕ ЗАДАЧИ
 
 | Приоритет | Задача | Как проверить |
 |-----------|--------|---------------|
 | P0 | Деплой актуального кода из `/home/zhan/truffles-main` на прод | В `/admin/version` новый коммит; поведение соответствует изменениям |
-| P0 | Прокинуть `instanceId` в inbound payload (ChatFlow) | `payload.body.metadata.instanceId` есть; `conversation.branch_id` ставится |
-| P0 | Проверить обучение после фикса owner-check | Логи должны показать "Owner response detected" |
-| P0 | Проверить задержку ответов (outbox) после воркера | Время ответа и пересылки в Telegram < 10с (coalesce + worker) |
+| P0 | Прокинуть `instanceId` в inbound payload (ChatFlow) для всех клиентов | `payload.body.metadata.instanceId` есть; `conversation.branch_id` ставится (demo_salon + truffles ok) |
+| P0 | Снизить задержку ответов (outbox): сейчас avg 17s, p90 25s | Avg/p90 < 10s |
 | P0 | Починить multi‑intent при склейке (цена → запись) | Сообщения “цена+запись” ведут к сбору записи, не теряют контекст |
 | P1 | Убрать дубли заявок на одного клиента | При open handover новые не создаются, идёт ответ в существующий топик |
 | P1 | Пины в Telegram снимаются после "Решено" | После resolve закреп исчезает всегда |
