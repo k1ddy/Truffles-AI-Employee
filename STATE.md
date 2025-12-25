@@ -13,6 +13,7 @@
 - `demo_salon` в ChatFlow направлен на `https://api.truffles.kz/webhook/demo_salon` + `webhook_secret` (секрет хранится в ChatFlow, не в git).
 - `metadata.instanceId` в inbound payload сейчас отсутствует → `by_instance` не сработает до правки upstream; API теперь принимает instanceId из query (`instanceId`/`instance_id`/`instance`) и `nodeData`, если передадут.
 - Outbox cron: `/etc/cron.d/truffles-outbox` → `/admin/outbox/process` раз в минуту.
+- Outbox worker в API: фоновой цикл обрабатывает outbox каждые `OUTBOX_WORKER_INTERVAL_SECONDS` (дефолт 2s) при `OUTBOX_WORKER_ENABLED=1`; в pytest отключён.
 - Деплой: синк кода в `/home/zhan/truffles-main/truffles-api` → `bash /home/zhan/restart_api.sh` (build+restart).
 - Инфра compose: `/home/zhan/infrastructure/docker-compose.yml` + `/home/zhan/infrastructure/docker-compose.truffles.yml`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 
@@ -35,7 +36,7 @@
 - [ ] **⚠️ Новая архитектура эскалации/обучения** — роли/идентичности + очередь обучения + Telegram per branch описаны в спеках, **код не внедрён**
 - [ ] **⚠️ Эскалация всё ещё частая на реальные вопросы** — KB неполная, score часто < 0.5 → создаётся заявка; мелкие сообщения ("спасибо", "ок?") больше не должны создавать заявки (whitelist + guardrails)
 - [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant (код есть), но нет модерации/метрик и нужен факт-пруф по логам на проде
-- [ ] **⚠️ Ответы медленные (outbox)** — cron `/admin/outbox/process` раз в минуту + `OUTBOX_COALESCE_SECONDS=8` → задержка 8–60 сек, страдает пересылка в Telegram при pending/manager_active
+- [ ] **⚠️ Ответы медленные (outbox)** — было 8–60 сек (cron + `OUTBOX_COALESCE_SECONDS=8`); в коде добавлен outbox worker (тик 2s) → ожидаемо 8–10 сек после деплоя
 - [ ] **⚠️ Склейка сообщений ломает multi‑intent** — demo_salon: price‑ответ перехватывает до booking; “цена+запись” в одном батче даёт только цену → запись теряется
 - [ ] **⚠️ Закрепы заявок в Telegram** — после "Решено" закреп должен сниматься; сейчас иногда остаётся (проверить обработку `unpin` и message_id)
 - [ ] **⚠️ Дубли заявок на одного клиента** — владельцу неудобно; нужен guard: при open handover не создавать новый, а писать в текущий топик
@@ -48,6 +49,16 @@
 
 ### Блокеры
 - **docker-compose** — инфра‑стек жив и разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`; API деплой через `/home/zhan/restart_api.sh` + `docker build`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка
+
+---
+
+## РЕГЛАМЕНТ: МОЗГИ БОТА (каждая сессия)
+
+- Старт: `docs/SESSION_START_PROMPT.txt`, `SPECS/CONSULTANT.md`, `SPECS/ESCALATION.md`, пакет клиента `truffles-api/app/knowledge/<client_slug>/`.
+- Диагностика (1–2 шага): топ‑20 фраз из логов/эскалаций/low‑confidence; приоритет = частота × риск (LAW).
+- Решение: обновлять существующие артефакты (`SALON_TRUTH.yaml`, `POLICY.md`, `INTENTS_*.yaml`, `EVAL.yaml`, `ops/*_docs/*.md`, keywords в `demo_salon_knowledge.py`); новые файлы не создавать.
+- Проверка: `pytest truffles-api/tests/test_<client>_eval.py` + sync KB в Qdrant (`ops/manual_sync_demo.py` или `ops/sync_client.py`).
+- Закрытие: записать изменения и риски в `STATE.md`.
 
 ---
 
@@ -187,7 +198,41 @@
 
 ---
 
+## ШАБЛОН ДЛЯ ФИКСАЦИИ РАССУЖДЕНИЙ (1–2 минуты)
+
+- Боль/симптом: что именно ломает качество (факт/лог/пример)
+- Почему важно: риск для клиента/бизнеса
+- Диагноз: почему это происходит
+- Решение: что меняем и где (файлы/правила)
+- Проверка: команда/результат
+- Осталось: что ещё не закрыто и следующий шаг
+
+---
+
 ## ИСТОРИЯ СЕССИЙ
+
+### 2025-12-25 — Outbox worker + owner learning fallback
+
+**Что сделали:**
+- Добавили outbox worker в API (тик 2s) и вынесли обработку outbox в общий хелпер.
+- Telegram: sender_chat fallback для идентификации менеджера.
+- Auto-learning: не затирает assigned_to при unknown; fallback на assigned_to для owner-check; поддержка отрицательных ID.
+
+**Статус:**
+- Нужен деплой и проверка: latency < 10с + "Owner response detected" в логах.
+
+### 2025-12-25 — Demo salon: law-safe KB + policy keywords
+
+**Что сделали:**
+- Почистили demo_salon FAQ/возражения/правила: оплаты/перенос/medical/жалобы → эскалация, убран телефон администратора.
+- Обновили `SALON_TRUTH.yaml`: убрали блок оплат, оставили только medical_note.
+- Расширили policy-ключевые слова в `demo_salon_knowledge.py` (оплата/перенос/medical/жалобы/скидки).
+- Обновили фразы и `EVAL.yaml` под новые кейсы.
+- Добавили ответ на “ты тут?/алло” через `is_bot_status_question` в `ai_service.py`.
+- Обновили sync-скрипты: BGE/Qdrant URL берутся из env или docker IP, Qdrant key из env (с trim).
+
+**Статус:**
+- KB demo_salon синхронизирована в Qdrant через `ops/manual_sync_demo.py` (34 points).
 
 ### 2025-12-24 — Admin settings for branch routing
 
@@ -667,6 +712,13 @@ LIMIT 1;
 | `webhook.py` | То же самое (ОБА файла обрабатывают сообщения!) |
 | `learning_service.py` | СОЗДАН: `is_owner_response()`, `add_to_knowledge()` |
 | `manager_message_service.py` | Добавлен вызов `add_to_knowledge()` для owner |
+| `main.py` | Фоновый outbox worker (тик 2s, опционально через env) |
+| `admin.py` | Outbox processing вынесен в общий хелпер |
+| `webhook.py` | Добавлен `_process_outbox_rows()` для reuse в admin/worker |
+| `schemas/telegram.py` | Добавлены `sender_chat`/`author_signature`, username у chat |
+| `telegram_webhook.py` | sender_chat fallback для идентификации менеджера |
+| `manager_message_service.py` | Не затирает assigned_to при unknown, fallback на assigned_to для owner-check |
+| `learning_service.py` | Owner match принимает отрицательные ID (sender_chat) |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 
@@ -674,7 +726,7 @@ LIMIT 1;
 
 ## ВОПРОСЫ БЕЗ ОТВЕТА
 
-1. **Почему обучение не сработало?** Жанбол писал в топик, сообщение дошло до клиента, но "Owner response detected" в логах нет.
+1. **Почему обучение не сработало?** Вероятно `from_user` отсутствовал (анонимный админ/канал) → owner-check не срабатывал; добавлены sender_chat и fallback на assigned_to, проверить в логах после деплоя.
 
 2. **Как сообщение менеджера доходит до клиента?** Нужна трассировка от Telegram webhook до ChatFlow отправки.
 
@@ -698,8 +750,8 @@ LIMIT 1;
 |-----------|--------|---------------|
 | P0 | Деплой актуального кода из `/home/zhan/truffles-main` на прод | В `/admin/version` новый коммит; поведение соответствует изменениям |
 | P0 | Прокинуть `instanceId` в inbound payload (ChatFlow) | `payload.body.metadata.instanceId` есть; `conversation.branch_id` ставится |
-| P0 | Понять почему обучение не работает | Логи должны показать "Owner response detected" |
-| P0 | Уменьшить задержку ответов (outbox) | Время ответа и пересылки в Telegram < 10с (coalesce + cron/worker) |
+| P0 | Проверить обучение после фикса owner-check | Логи должны показать "Owner response detected" |
+| P0 | Проверить задержку ответов (outbox) после воркера | Время ответа и пересылки в Telegram < 10с (coalesce + worker) |
 | P0 | Починить multi‑intent при склейке (цена → запись) | Сообщения “цена+запись” ведут к сбору записи, не теряют контекст |
 | P1 | Убрать дубли заявок на одного клиента | При open handover новые не создаются, идёт ответ в существующий топик |
 | P1 | Пины в Telegram снимаются после "Решено" | После resolve закреп исчезает всегда |

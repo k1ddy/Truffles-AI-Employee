@@ -2,6 +2,13 @@
 
 ⚠️ Этот handover требует проверки. Пункты ниже — ориентир, но их нужно подтвердить по API/DB/логам.
 
+Принципы «мозгов» бота (быстрый контекст)
+- Истина только из Truth-слоя (`SALON_TRUTH.yaml`) + строгое соблюдение LAW.
+- Policy-gate до RAG/LLM: оплаты/перенос/medical/жалобы → всегда эскалация.
+- RAG-документы не должны противоречить LAW; иначе это утечка.
+- Любая правка мозгов = пакет: truth + intents + eval + sync (иначе регресс).
+- Короткие/статусные сообщения не эскалировать (whitelist + bot_status).
+
 Session handover (2025-12-24)
 - Decision: roles/identities + learning queue + Telegram per branch; branch routing configurable (by_instance/ask_user/hybrid).
 - Added models: Agent, AgentIdentity, LearnedResponse; added migration `ops/migrations/013_add_agents_and_learning_queue.sql`; added `branch_id` to conversations.

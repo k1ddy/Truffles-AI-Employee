@@ -119,7 +119,7 @@ POST /webhook (webhook_secret)
     ↓
 enqueue outbox_messages (PENDING)
     ↓
-POST /admin/outbox/process (cron)
+outbox worker (тик 2s) или POST /admin/outbox/process (cron)
     ↓
 _handle_webhook_payload(skip_persist=True)
     ↓
