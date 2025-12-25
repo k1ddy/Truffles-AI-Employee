@@ -213,6 +213,14 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-25 — CI gitleaks warning fix
+
+**Что сделали:**
+- Убрали unsupported `args` из `gitleaks/gitleaks-action@v2` (warning “Unexpected input(s) 'args'”).
+
+**Статус:**
+- Готово, ждём прогон CI.
+
 ### 2025-12-25 — Fast-forward inbound to Telegram (pending/manager_active)
 
 **Что сделали:**
