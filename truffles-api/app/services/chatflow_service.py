@@ -2,8 +2,8 @@ import hashlib
 import hmac
 import os
 import time
-from urllib.parse import quote
 from typing import Optional
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
