@@ -230,6 +230,17 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-25 — Topic binding: one topic per client (P0 safety)
+
+**Что сделали:**
+- Канон: `users.telegram_topic_id`; `conversations.telegram_topic_id` — копия для активного диалога.
+- Убрали fallback “последний handover без топика” в менеджерских ответах: сообщения принимаются только из топика клиента.
+- Эскалация/создание топика теперь используют user‑topic; при пропаже темы пересоздание и синк.
+- Health‑heal восстанавливает `conversation.telegram_topic_id` из `users.telegram_topic_id` вместо сброса стейта.
+
+**Статус:**
+- Нужен деплой и ретест: менеджер пишет только в топике, без темы — “не доставлено”.
+
 ### 2025-12-25 — Prod verification: media/manager/TTL checks
 
 **Что проверили:**
