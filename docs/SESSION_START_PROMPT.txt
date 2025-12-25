@@ -27,6 +27,11 @@ Brain Pack (2-3 minutes, “мозги”):
 - Проверки: `pytest truffles-api/tests/test_demo_salon_eval.py` + sync KB (`ops/sync_client.py`/`ops/manual_sync_demo.py`).
 - Не создавать новые файлы — только обновлять существующие артефакты.
 
+Fast checks (60s, no guesswork):
+- Run: `python3 ops/diagnose.py` (snapshot: handovers + pending conversations).
+- If "менеджер не создался": check last handovers + pending conv in diagnose output, then logs: `docker logs truffles-api --tail 200 | rg -n "Escalated|topic|telegram|handover"`.
+- If media shows as `[audio]/[image]`: DB check `metadata->'media'->'decision'` and logs `rg -n "Media forward|rate limit"`.
+
 Amnesia mode (time-boxed, 10-15 minutes):
 - Read: STATE.md, this file, SPECS/CONSULTANT.md, SPECS/ESCALATION.md, SPECS/ARCHITECTURE.md.
 - Do 1-2 evidence checks (DB/logs) before touching code.

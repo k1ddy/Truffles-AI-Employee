@@ -43,4 +43,53 @@ if result.returncode == 0:
     if len(parts) >= 3:
         print(f"Handovers: {parts[0].strip()} total, {parts[1].strip()} pending, {parts[2].strip()} active")
 
+print("\n🧾 ПОСЛЕДНИЕ HANDOVERS:")
+print("-" * 40)
+result = subprocess.run(
+    [
+        'docker',
+        'exec',
+        '-i',
+        'truffles_postgres_1',
+        'psql',
+        '-U',
+        db_user,
+        '-d',
+        'chatbot',
+        '-t',
+        '-c',
+        "SELECT created_at, status, conversation_id, channel_ref, telegram_message_id "
+        "FROM handovers ORDER BY created_at DESC LIMIT 10;",
+    ],
+    capture_output=True,
+    text=True,
+)
+if result.returncode == 0:
+    print(result.stdout.strip())
+
+print("\n🟡 PENDING/MANAGER_ACTIVE CONVERSATIONS:")
+print("-" * 40)
+result = subprocess.run(
+    [
+        'docker',
+        'exec',
+        '-i',
+        'truffles_postgres_1',
+        'psql',
+        '-U',
+        db_user,
+        '-d',
+        'chatbot',
+        '-t',
+        '-c',
+        "SELECT id, state, telegram_topic_id, last_message_at "
+        "FROM conversations WHERE state IN ('pending','manager_active') "
+        "ORDER BY last_message_at DESC LIMIT 10;",
+    ],
+    capture_output=True,
+    text=True,
+)
+if result.returncode == 0:
+    print(result.stdout.strip())
+
 print("\n" + "=" * 60)
