@@ -15,7 +15,7 @@
 - `metadata.instanceId` отсутствует, если ChatFlow не передаёт. API принимает instanceId из query (`instanceId`/`instance_id`/`instance`), metadata или `nodeData`. Проверено: demo_salon после добавления query‑param — instanceId приходит, `conversation.branch_id` ставится.
 - Outbox cron: `/etc/cron.d/truffles-outbox` → `/admin/outbox/process` раз в минуту.
 - Outbox worker в API: фоновой цикл обрабатывает outbox каждые `OUTBOX_WORKER_INTERVAL_SECONDS` (дефолт 2s) при `OUTBOX_WORKER_ENABLED=1`; в pytest отключён.
-- Деплой: синк кода в `/home/zhan/truffles-main/truffles-api` → `bash /home/zhan/restart_api.sh` (build+restart).
+- Деплой API: CI build/push → на проде `IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash /home/zhan/restart_api.sh` (локальная сборка — fallback; см. `TECH.md`).
 - Инфра compose: `/home/zhan/infrastructure/docker-compose.yml` + `/home/zhan/infrastructure/docker-compose.truffles.yml`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 
 ### КЛЮЧЕВЫЕ МОЗГИ / РИСКИ / ПРОВЕРКИ (быстрый чек)
@@ -67,7 +67,7 @@
 - [ ] Quiet hours для напоминаний — P2
 
 ### Блокеры
-- **docker-compose** — инфра‑стек жив и разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`; API деплой через `/home/zhan/restart_api.sh` + `docker build`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка
+- **docker-compose** — инфра‑стек жив и разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`; API деплой через `/home/zhan/restart_api.sh` (CI image через `IMAGE_NAME` + `PULL_IMAGE=1`, локальный `docker build` — fallback); `/home/zhan/truffles-main/docker-compose.yml` — заглушка
 
 ---
 
@@ -1027,7 +1027,7 @@ LIMIT 1;
 
 | Приоритет | Задача | Как проверить |
 |-----------|--------|---------------|
-| P0 | Деплой актуального кода из `/home/zhan/truffles-main` на прод | В `/admin/version` новый коммит; поведение соответствует изменениям |
+| P0 | Вкатить latest CI image на прод (pull GHCR) | В `/admin/version` новый коммит; поведение соответствует изменениям |
 | P0 | Прокинуть `instanceId` в inbound payload (ChatFlow) для всех клиентов | `payload.body.metadata.instanceId` есть; `conversation.branch_id` ставится (demo_salon + truffles ok) |
 | P0 | Снизить задержку ответов (outbox): сейчас avg 17s, p90 25s | Avg/p90 < 10s |
 | P0 | Починить multi‑intent при склейке (цена → запись) | Сообщения “цена+запись” ведут к сбору записи, не теряют контекст |
@@ -1040,18 +1040,16 @@ LIMIT 1;
 ### 3. КАК ДЕПЛОИТЬ
 
 ```bash
-# 1. Скопировать файлы
-scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles-main/truffles-api/...
+# CI build/push → pull image
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash ~/restart_api.sh"
 
-# 2. Пересобрать и запустить
-ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
-# или скопировать ops/restart_api.sh и запустить
-
-# 3. Проверить логи
+# Проверить логи
 ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
-```
 
-**docker-compose:** инфра‑стек жив и разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка
+# Локальная сборка (fallback)
+ssh -p 222 zhan@5.188.241.234 "docker build -t truffles-api_truffles-api /home/zhan/truffles-main/truffles-api"
+ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
+```
 
 ---
 

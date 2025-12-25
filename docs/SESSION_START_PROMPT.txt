@@ -6,13 +6,15 @@ Minimum start (avoid dumb mistakes):
    - Infra stack is managed from `/home/zhan/infrastructure/docker-compose.yml` (traefik/website) and `/home/zhan/infrastructure/docker-compose.truffles.yml` (core stack); do NOT run `docker compose` in `/home/zhan/truffles-main`.
 1) Read `AGENTS.md` (rules) and `STATE.md` (current status) before any other doc
    - In `STATE.md` first: **БАЗОВЫЕ ФАКТЫ (читать первым делом)**
-2) Before asking questions about runtime: check facts via repo/DB/logs first
-3) If you plan to deploy: read `/home/zhan/restart_api.sh` to confirm whether it builds or only restarts
+2) Preflight (no guesses): run `python3 ops/diagnose.py`
+   - Confirms container status + image and key envs (`PUBLIC_BASE_URL`, `MEDIA_SIGNING_SECRET`, `MEDIA_URL_TTL_SECONDS`, `MEDIA_CLEANUP_TTL_DAYS`, `CHATFLOW_MEDIA_TIMEOUT_SECONDS`)
+3) Before asking questions about runtime: check facts via repo/DB/logs first
+4) If you plan to deploy: read `TECH.md` (Deploy API) and `/home/zhan/restart_api.sh` (flags)
 
 Full context (when doing architecture/debug/review):
-4) Read `docs/IMPERIUM_CONTEXT.yaml`
-5) Read `docs/IMPERIUM_DECISIONS.yaml`
-6) Read `docs/IMPERIUM_GAPS.yaml`
+5) Read `docs/IMPERIUM_CONTEXT.yaml`
+6) Read `docs/IMPERIUM_DECISIONS.yaml`
+7) Read `docs/IMPERIUM_GAPS.yaml`
 
 Rules:
 - Do not invent facts. If unknown, write TBD/NO and add a GAP.
@@ -28,7 +30,7 @@ Brain Pack (2-3 minutes, “мозги”):
 - Не создавать новые файлы — только обновлять существующие артефакты.
 
 Fast checks (60s, no guesswork):
-- Run: `python3 ops/diagnose.py` (snapshot: handovers + pending conversations).
+- Use `ops/diagnose.py` output (handovers + pending conversations).
 - If "менеджер не создался": check last handovers + pending conv in diagnose output, then logs: `docker logs truffles-api --tail 200 | rg -n "Escalated|topic|telegram|handover"`.
 - If media shows as `[audio]/[image]`: DB check `metadata->'media'->'decision'` and logs `rg -n "Media forward|rate limit"`.
 

@@ -10,11 +10,61 @@
 import os
 import subprocess
 
+def run_command(command):
+    return subprocess.run(command, capture_output=True, text=True)
+
 print("=" * 60)
 print("ДИАГНОСТИКА TRUFFLES")
 print("=" * 60)
 
-# 1. Executions
+print("\n🔎 PRE-FLIGHT:")
+print("-" * 40)
+status_result = run_command(
+    ["docker", "inspect", "--format", "{{.State.Status}}", "truffles-api"]
+)
+status = status_result.stdout.strip() if status_result.returncode == 0 else ""
+if status:
+    print(f"truffles-api status: {status}")
+else:
+    print("truffles-api status: NOT FOUND (container missing?)")
+
+image_result = run_command(
+    ["docker", "inspect", "--format", "{{.Config.Image}}", "truffles-api"]
+)
+if image_result.returncode == 0 and image_result.stdout.strip():
+    print(f"truffles-api image: {image_result.stdout.strip()}")
+else:
+    print("truffles-api image: UNKNOWN")
+
+if status == "running":
+    env_checks = [
+        ("PUBLIC_BASE_URL", True),
+        ("MEDIA_SIGNING_SECRET", False),
+        ("MEDIA_URL_TTL_SECONDS", True),
+        ("MEDIA_CLEANUP_TTL_DAYS", True),
+        ("CHATFLOW_MEDIA_TIMEOUT_SECONDS", True),
+    ]
+    for name, show_value in env_checks:
+        if show_value:
+            cmd = (
+                f'if [ -n "${name}" ]; then echo "{name}=${{{name}}}"; '
+                f'else echo "{name}=MISSING"; fi'
+            )
+        else:
+            cmd = (
+                f'if [ -n "${name}" ]; then echo "{name}=SET"; '
+                f'else echo "{name}=MISSING"; fi'
+            )
+        result = run_command(
+            ["docker", "exec", "-i", "truffles-api", "/bin/sh", "-lc", cmd]
+        )
+        if result.returncode == 0:
+            print(result.stdout.strip())
+        else:
+            print(f"{name}=UNKNOWN (env check failed)")
+else:
+    print("Skipping env checks (truffles-api not running).")
+
 # 1. Database state
 print("\n📁 БАЗА ДАННЫХ:")
 print("-" * 40)
