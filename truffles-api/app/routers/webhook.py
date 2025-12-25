@@ -1,9 +1,16 @@
 import asyncio
+import base64
+import hashlib
+import mimetypes
 import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -12,7 +19,7 @@ from starlette.requests import ClientDisconnect
 from app.database import get_db
 from app.logging_config import get_logger
 from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
-from app.schemas.webhook import WebhookRequest, WebhookResponse
+from app.schemas.webhook import WebhookBody, WebhookRequest, WebhookResponse
 from app.services.ai_service import (
     BOT_STATUS_RESPONSE,
     GREETING_RESPONSE,
@@ -90,6 +97,606 @@ def _get_dedup_settings() -> tuple[int, str, float]:
     redis_url = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
     socket_timeout_seconds = float(os.environ.get("DEDUP_SOCKET_TIMEOUT_SECONDS", "0.3"))
     return ttl_seconds, redis_url, socket_timeout_seconds
+
+
+MEDIA_TYPE_ALIASES = {
+    "image": "photo",
+    "photo": "photo",
+    "jpg": "photo",
+    "jpeg": "photo",
+    "png": "photo",
+    "audio": "audio",
+    "voice": "audio",
+    "ptt": "audio",
+    "document": "document",
+    "pdf": "document",
+    "doc": "document",
+    "docx": "document",
+    "xlsx": "document",
+    "xls": "document",
+    "video": "video",
+}
+MEDIA_MAX_DEFAULT_MB = {"photo": 8, "audio": 8, "document": 10}
+MEDIA_RATE_LIMIT_DEFAULTS = {
+    "count": 3,
+    "window_seconds": 600,
+    "daily_count": 10,
+    "bytes_mb": 20,
+    "block_seconds": 900,
+}
+MEDIA_STORAGE_DEFAULT_DIR = "/home/zhan/truffles-media"
+MEDIA_STORAGE_MAX_BYTES = 25 * 1024 * 1024
+
+
+class MediaInfo:
+    def __init__(
+        self,
+        *,
+        raw_type: str,
+        media_type: str,
+        mime: str | None,
+        size_bytes: int | None,
+        url: str | None,
+        file_name: str | None,
+        caption: str | None,
+        base64_data: str | None,
+        is_ptt: bool,
+    ) -> None:
+        self.raw_type = raw_type
+        self.media_type = media_type
+        self.mime = mime
+        self.size_bytes = size_bytes
+        self.url = url
+        self.file_name = file_name
+        self.caption = caption
+        self.base64_data = base64_data
+        self.is_ptt = is_ptt
+
+
+class MediaDecision:
+    def __init__(
+        self,
+        *,
+        allowed: bool,
+        reason: str | None = None,
+        response: str | None = None,
+        retry_after: int | None = None,
+    ) -> None:
+        self.allowed = allowed
+        self.reason = reason
+        self.response = response
+        self.retry_after = retry_after
+
+
+def _coerce_bool(value: object, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _coerce_int(value: object, default: int, *, min_value: int | None = None) -> int:
+    if value is None:
+        result = default
+    else:
+        try:
+            result = int(float(value))
+        except (TypeError, ValueError):
+            result = default
+    if min_value is not None and result < min_value:
+        return min_value
+    return result
+
+
+def _get_media_policy(client: Client | None) -> dict:
+    overrides = {}
+    if client and isinstance(client.config, dict):
+        overrides = client.config.get("media") if isinstance(client.config.get("media"), dict) else {}
+
+    max_size_cfg = overrides.get("max_size_mb") if isinstance(overrides.get("max_size_mb"), dict) else {}
+    rate_cfg = overrides.get("rate_limit") if isinstance(overrides.get("rate_limit"), dict) else {}
+
+    max_sizes_mb = {
+        "photo": _coerce_int(
+            overrides.get("max_photo_mb", max_size_cfg.get("photo")),
+            MEDIA_MAX_DEFAULT_MB["photo"],
+            min_value=1,
+        ),
+        "audio": _coerce_int(
+            overrides.get("max_audio_mb", max_size_cfg.get("audio")),
+            MEDIA_MAX_DEFAULT_MB["audio"],
+            min_value=1,
+        ),
+        "document": _coerce_int(
+            overrides.get("max_document_mb", max_size_cfg.get("document")),
+            MEDIA_MAX_DEFAULT_MB["document"],
+            min_value=1,
+        ),
+    }
+
+    rate_limit = {
+        "count": _coerce_int(rate_cfg.get("count"), MEDIA_RATE_LIMIT_DEFAULTS["count"], min_value=1),
+        "window_seconds": _coerce_int(
+            rate_cfg.get("window_seconds"), MEDIA_RATE_LIMIT_DEFAULTS["window_seconds"], min_value=30
+        ),
+        "daily_count": _coerce_int(rate_cfg.get("daily_count"), MEDIA_RATE_LIMIT_DEFAULTS["daily_count"], min_value=1),
+        "bytes_mb": _coerce_int(rate_cfg.get("bytes_mb"), MEDIA_RATE_LIMIT_DEFAULTS["bytes_mb"], min_value=1),
+        "block_seconds": _coerce_int(
+            rate_cfg.get("block_seconds"), MEDIA_RATE_LIMIT_DEFAULTS["block_seconds"], min_value=60
+        ),
+    }
+
+    storage_dir = overrides.get("storage_dir") or MEDIA_STORAGE_DEFAULT_DIR
+    allowed_hosts = overrides.get("allowed_hosts")
+    if isinstance(allowed_hosts, str):
+        allowed_hosts = [host.strip() for host in allowed_hosts.split(",") if host.strip()]
+    if not isinstance(allowed_hosts, list) or not allowed_hosts:
+        allowed_hosts = ["app.chatflow.kz"]
+
+    return {
+        "enabled": _coerce_bool(overrides.get("enabled"), True),
+        "allow_photo": _coerce_bool(overrides.get("allow_photo"), True),
+        "allow_audio": _coerce_bool(overrides.get("allow_audio"), True),
+        "allow_document": _coerce_bool(overrides.get("allow_document"), True),
+        "forward_to_telegram": _coerce_bool(overrides.get("forward_to_telegram"), True),
+        "store_media": _coerce_bool(overrides.get("store_media"), True),
+        "max_size_mb": max_sizes_mb,
+        "rate_limit": rate_limit,
+        "storage_dir": storage_dir,
+        "allowed_hosts": allowed_hosts,
+    }
+
+
+def _normalize_media_type(raw_type: str | None, mime: str | None) -> str:
+    raw = (raw_type or "").strip().lower()
+    if raw in MEDIA_TYPE_ALIASES:
+        return MEDIA_TYPE_ALIASES[raw]
+    if mime:
+        if mime.startswith("image/"):
+            return "photo"
+        if mime.startswith("audio/"):
+            return "audio"
+        if mime in {"application/pdf", "application/msword"} or mime.startswith(
+            "application/vnd"
+        ):
+            return "document"
+        if mime.startswith("video/"):
+            return "video"
+    return "unknown"
+
+
+def _extract_media_info(body: WebhookBody) -> MediaInfo | None:
+    media = body.mediaData if isinstance(body.mediaData, dict) else None
+    if not media:
+        return None
+    raw_type = (body.messageType or media.get("type") or "").strip().lower()
+    mime = media.get("mimetype") or media.get("mime") or media.get("type")
+    url = media.get("url")
+    file_name = media.get("fileName") or media.get("filename")
+    caption = media.get("caption")
+    base64_data = media.get("base64")
+    is_ptt = bool(media.get("ptt"))
+    size_bytes = None
+    size_value = media.get("size")
+    if size_value is not None:
+        try:
+            size_bytes = int(size_value)
+        except (TypeError, ValueError):
+            size_bytes = None
+    if size_bytes is None and isinstance(base64_data, str) and base64_data:
+        try:
+            size_bytes = (len(base64_data) * 3) // 4
+        except Exception:
+            size_bytes = None
+
+    media_type = _normalize_media_type(raw_type, mime if isinstance(mime, str) else None)
+    return MediaInfo(
+        raw_type=raw_type,
+        media_type=media_type,
+        mime=mime if isinstance(mime, str) else None,
+        size_bytes=size_bytes,
+        url=url if isinstance(url, str) else None,
+        file_name=file_name if isinstance(file_name, str) else None,
+        caption=caption if isinstance(caption, str) else None,
+        base64_data=base64_data if isinstance(base64_data, str) else None,
+        is_ptt=is_ptt,
+    )
+
+
+_media_rate_warned = False
+_media_rate_cache: dict[str, dict[str, float | int]] = {}
+
+
+def _get_media_rate_settings() -> tuple[str, float]:
+    redis_url = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
+    socket_timeout_seconds = float(os.environ.get("MEDIA_RATE_SOCKET_TIMEOUT_SECONDS", "0.5"))
+    return redis_url, socket_timeout_seconds
+
+
+def _purge_media_rate_cache(now_ts: float) -> None:
+    if len(_media_rate_cache) < 5000:
+        return
+    expired = [key for key, item in _media_rate_cache.items() if item.get("expires_at", 0) <= now_ts]
+    for key in expired:
+        _media_rate_cache.pop(key, None)
+
+
+def _check_media_rate_limit_fallback(
+    *,
+    key_base: str,
+    size_bytes: int,
+    rate_limit: dict,
+) -> MediaDecision:
+    now_ts = time.time()
+    _purge_media_rate_cache(now_ts)
+
+    block_key = f"{key_base}:block"
+    block_until = _media_rate_cache.get(block_key, {}).get("expires_at", 0)
+    if block_until and block_until > now_ts:
+        retry_after = int(block_until - now_ts)
+        return MediaDecision(allowed=False, reason="rate_limited", response=MSG_MEDIA_RATE_LIMIT, retry_after=retry_after)
+
+    window_key = f"{key_base}:window"
+    window = _media_rate_cache.get(window_key)
+    if not window or window.get("expires_at", 0) <= now_ts:
+        window = {"count": 0, "bytes": 0, "expires_at": now_ts + rate_limit["window_seconds"]}
+    window["count"] = int(window.get("count", 0)) + 1
+    window["bytes"] = int(window.get("bytes", 0)) + size_bytes
+    _media_rate_cache[window_key] = window
+
+    day_key = f"{key_base}:day"
+    day = _media_rate_cache.get(day_key)
+    if not day or day.get("expires_at", 0) <= now_ts:
+        day = {"count": 0, "expires_at": now_ts + 86400}
+    day["count"] = int(day.get("count", 0)) + 1
+    _media_rate_cache[day_key] = day
+
+    if window["count"] > rate_limit["count"]:
+        _media_rate_cache[block_key] = {"expires_at": now_ts + rate_limit["block_seconds"]}
+        return MediaDecision(allowed=False, reason="rate_limited", response=MSG_MEDIA_RATE_LIMIT, retry_after=rate_limit["block_seconds"])
+
+    if window["bytes"] > rate_limit["bytes_mb"] * 1024 * 1024:
+        _media_rate_cache[block_key] = {"expires_at": now_ts + rate_limit["block_seconds"]}
+        return MediaDecision(allowed=False, reason="rate_limited", response=MSG_MEDIA_RATE_LIMIT, retry_after=rate_limit["block_seconds"])
+
+    if day["count"] > rate_limit["daily_count"]:
+        _media_rate_cache[block_key] = {"expires_at": now_ts + rate_limit["block_seconds"]}
+        return MediaDecision(allowed=False, reason="rate_limited", response=MSG_MEDIA_RATE_LIMIT, retry_after=rate_limit["block_seconds"])
+
+    return MediaDecision(allowed=True)
+
+
+async def _check_media_rate_limit(
+    *,
+    redis_client,
+    key_base: str,
+    size_bytes: int,
+    rate_limit: dict,
+) -> MediaDecision:
+    global _media_rate_warned
+    if not redis_client:
+        if not _media_rate_warned:
+            alert_warning("Media rate limiter disabled (redis unavailable)", {"key": key_base})
+            _media_rate_warned = True
+        return _check_media_rate_limit_fallback(
+            key_base=key_base,
+            size_bytes=size_bytes,
+            rate_limit=rate_limit,
+        )
+
+    block_key = f"{key_base}:block"
+    try:
+        blocked = await redis_client.get(block_key)
+    except Exception as exc:
+        logger.warning("Media rate limit redis check failed", extra={"context": {"error": str(exc)}})
+        return _check_media_rate_limit_fallback(
+            key_base=key_base,
+            size_bytes=size_bytes,
+            rate_limit=rate_limit,
+        )
+
+    if blocked:
+        return MediaDecision(allowed=False, reason="rate_limited", response=MSG_MEDIA_RATE_LIMIT)
+
+    count_key = f"{key_base}:count"
+    bytes_key = f"{key_base}:bytes"
+    day_key = f"{key_base}:day"
+
+    try:
+        count = await redis_client.incr(count_key)
+        if count == 1:
+            await redis_client.expire(count_key, rate_limit["window_seconds"])
+        total_bytes = await redis_client.incrby(bytes_key, size_bytes)
+        if total_bytes == size_bytes:
+            await redis_client.expire(bytes_key, rate_limit["window_seconds"])
+        daily = await redis_client.incr(day_key)
+        if daily == 1:
+            await redis_client.expire(day_key, 86400)
+    except Exception as exc:
+        logger.warning("Media rate limit redis update failed", extra={"context": {"error": str(exc)}})
+        return _check_media_rate_limit_fallback(
+            key_base=key_base,
+            size_bytes=size_bytes,
+            rate_limit=rate_limit,
+        )
+
+    over_limit = (
+        count > rate_limit["count"]
+        or total_bytes > rate_limit["bytes_mb"] * 1024 * 1024
+        or daily > rate_limit["daily_count"]
+    )
+    if over_limit:
+        try:
+            await redis_client.setex(block_key, rate_limit["block_seconds"], "1")
+        except Exception as exc:
+            logger.warning("Media rate limit redis block failed", extra={"context": {"error": str(exc)}})
+        return MediaDecision(allowed=False, reason="rate_limited", response=MSG_MEDIA_RATE_LIMIT, retry_after=rate_limit["block_seconds"])
+
+    return MediaDecision(allowed=True)
+
+
+async def _evaluate_media_decision(
+    *,
+    media: MediaInfo,
+    client_id: UUID,
+    remote_jid: str,
+    policy: dict,
+    redis_client,
+) -> MediaDecision:
+    if not policy.get("enabled"):
+        return MediaDecision(allowed=False, reason="disabled", response=MSG_MEDIA_UNSUPPORTED)
+
+    allowed = {
+        "photo": policy.get("allow_photo", True),
+        "audio": policy.get("allow_audio", True),
+        "document": policy.get("allow_document", True),
+    }
+
+    if media.media_type not in allowed or not allowed.get(media.media_type, False):
+        return MediaDecision(allowed=False, reason="unsupported_type", response=MSG_MEDIA_UNSUPPORTED)
+
+    max_mb = policy.get("max_size_mb", MEDIA_MAX_DEFAULT_MB).get(media.media_type, 8)
+    max_bytes = max_mb * 1024 * 1024
+    size_bytes = media.size_bytes
+    if size_bytes is not None and size_bytes > max_bytes:
+        return MediaDecision(allowed=False, reason="too_large", response=MSG_MEDIA_TOO_LARGE)
+
+    size_for_limit = size_bytes or 0
+    decision = await _check_media_rate_limit(
+        redis_client=redis_client,
+        key_base=f"media:{client_id}:{remote_jid}",
+        size_bytes=size_for_limit,
+        rate_limit=policy.get("rate_limit", MEDIA_RATE_LIMIT_DEFAULTS),
+    )
+    if not decision.allowed:
+        return decision
+
+    return MediaDecision(allowed=True)
+
+
+def _guess_extension(mime: str | None, file_name: str | None) -> str:
+    if file_name:
+        suffix = Path(file_name).suffix
+        if suffix:
+            return suffix
+    if mime:
+        ext = mimetypes.guess_extension(mime.split(";")[0].strip())
+        if ext:
+            return ext
+    return ""
+
+
+def _is_allowed_media_url(url: str, allowed_hosts: list[str]) -> bool:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = parsed.hostname or ""
+    return host in allowed_hosts
+
+
+def _safe_media_id(value: str | None) -> str:
+    if not value:
+        return uuid4().hex
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]", "", value)
+    return cleaned or uuid4().hex
+
+
+async def _store_media_locally(
+    *,
+    media: MediaInfo,
+    policy: dict,
+    client_slug: str,
+    conversation_id: UUID,
+    message_id: str | None,
+) -> dict:
+    if not policy.get("store_media", True):
+        return {"stored": False, "error": "store_disabled"}
+
+    storage_dir = Path(str(policy.get("storage_dir") or MEDIA_STORAGE_DEFAULT_DIR))
+    target_dir = storage_dir / client_slug / str(conversation_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = _guess_extension(media.mime, media.file_name)
+    file_id = _safe_media_id(message_id)
+    target_path = target_dir / f"{file_id}{ext}"
+
+    max_mb = policy.get("max_size_mb", MEDIA_MAX_DEFAULT_MB).get(media.media_type, 8)
+    max_bytes = min(max_mb * 1024 * 1024, MEDIA_STORAGE_MAX_BYTES)
+
+    if media.base64_data:
+        estimated = (len(media.base64_data) * 3) // 4
+        if estimated > max_bytes:
+            return {"stored": False, "error": "too_large"}
+        try:
+            decoded = base64.b64decode(media.base64_data, validate=False)
+        except Exception as exc:
+            return {"stored": False, "error": f"base64_decode_failed:{exc}"}
+        if len(decoded) > max_bytes:
+            return {"stored": False, "error": "too_large"}
+        digest = hashlib.sha256(decoded).hexdigest()
+        target_path.write_bytes(decoded)
+        return {"stored": True, "path": str(target_path), "size_bytes": len(decoded), "sha256": digest}
+
+    if not media.url:
+        return {"stored": False, "error": "missing_url"}
+    allowed_hosts = policy.get("allowed_hosts") if isinstance(policy.get("allowed_hosts"), list) else ["app.chatflow.kz"]
+    if not _is_allowed_media_url(media.url, allowed_hosts):
+        return {"stored": False, "error": "blocked_host"}
+
+    digest = hashlib.sha256()
+    size_bytes = 0
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            async with client.stream("GET", media.url) as response:
+                response.raise_for_status()
+                with target_path.open("wb") as handle:
+                    async for chunk in response.aiter_bytes():
+                        if not chunk:
+                            continue
+                        size_bytes += len(chunk)
+                        if size_bytes > max_bytes:
+                            handle.close()
+                            if target_path.exists():
+                                target_path.unlink()
+                            return {"stored": False, "error": "too_large"}
+                        digest.update(chunk)
+                        handle.write(chunk)
+    except Exception as exc:
+        if target_path.exists():
+            target_path.unlink()
+        return {"stored": False, "error": f"download_failed:{exc}"}
+
+    return {
+        "stored": True,
+        "path": str(target_path),
+        "size_bytes": size_bytes,
+        "sha256": digest.hexdigest(),
+    }
+
+
+def _build_media_caption(message_text: str | None, media: MediaInfo) -> str | None:
+    if media.caption and media.caption.strip():
+        return media.caption.strip()
+    if message_text:
+        text = message_text.strip()
+        if text and not re.fullmatch(r"\[.+\]", text):
+            return text
+    return None
+
+
+def _select_media_source(media: MediaInfo, stored_path: str | None) -> str | None:
+    if stored_path and Path(stored_path).exists():
+        return stored_path
+    if media.url:
+        return media.url
+    return None
+
+
+def _send_telegram_media(
+    *,
+    telegram: TelegramService,
+    chat_id: str,
+    topic_id: int,
+    media: MediaInfo,
+    caption: str | None,
+    stored_path: str | None,
+) -> dict:
+    source = _select_media_source(media, stored_path)
+    if not source:
+        return {"ok": False, "error": "missing_media_source"}
+
+    if media.media_type == "photo":
+        return telegram.send_photo(
+            chat_id=chat_id,
+            photo=source,
+            caption=caption,
+            message_thread_id=topic_id,
+        )
+    if media.media_type == "audio":
+        if media.is_ptt:
+            return telegram.send_voice(
+                chat_id=chat_id,
+                voice=source,
+                caption=caption,
+                message_thread_id=topic_id,
+            )
+        return telegram.send_audio(
+            chat_id=chat_id,
+            audio=source,
+            caption=caption,
+            message_thread_id=topic_id,
+        )
+    if media.media_type == "document":
+        return telegram.send_document(
+            chat_id=chat_id,
+            document=source,
+            caption=caption,
+            message_thread_id=topic_id,
+        )
+    return {"ok": False, "error": f"unsupported_media_type:{media.media_type}"}
+
+
+def _find_message_by_message_id(db: Session, client_id: UUID, message_id: str) -> Message | None:
+    if not message_id:
+        return None
+    return (
+        db.query(Message)
+        .filter(
+            Message.client_id == client_id,
+            Message.message_metadata["message_id"].astext == message_id,
+        )
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+
+
+def _update_message_media_metadata(message: Message, updates: dict) -> None:
+    metadata = dict(message.message_metadata or {})
+    media_meta = dict(metadata.get("media") or {})
+    media_meta.update(updates)
+    metadata["media"] = media_meta
+    message.message_metadata = metadata
+
+
+def _serialize_media_decision(decision: MediaDecision) -> dict:
+    return {
+        "allowed": bool(decision.allowed),
+        "reason": decision.reason,
+        "retry_after": decision.retry_after,
+    }
+
+
+def _media_response_for_reason(reason: str | None) -> str | None:
+    if reason == "too_large":
+        return MSG_MEDIA_TOO_LARGE
+    if reason == "rate_limited":
+        return MSG_MEDIA_RATE_LIMIT
+    if reason in {"unsupported_type", "disabled"}:
+        return MSG_MEDIA_UNSUPPORTED
+    return None
+
+
+def _deserialize_media_decision(data: dict | None) -> MediaDecision | None:
+    if not isinstance(data, dict):
+        return None
+    if "allowed" not in data:
+        return None
+    reason = data.get("reason")
+    return MediaDecision(
+        allowed=bool(data.get("allowed")),
+        reason=reason if isinstance(reason, str) else None,
+        response=_media_response_for_reason(reason if isinstance(reason, str) else None),
+        retry_after=data.get("retry_after") if isinstance(data.get("retry_after"), int) else None,
+    )
 
 
 def _coerce_remote_jid(value) -> str | None:
@@ -445,7 +1052,13 @@ MSG_PENDING_LOW_CONFIDENCE = (
 )
 MSG_PENDING_STATUS = "Да, я передал. Сейчас менеджер ещё не взял заявку. Как только возьмёт — ответит здесь. Пока ждём, могу помочь: уточните, что нужно?"
 MSG_AI_ERROR = "Извините, произошла ошибка. Попробуйте позже."
-MSG_MEDIA_UNSUPPORTED = "Пока не умею обрабатывать фото/аудио/документы. Опишите вопрос текстом."
+MSG_MEDIA_UNSUPPORTED = (
+    "Сейчас принимаем только фото, аудио и документы. Видео не поддерживаются. Опишите вопрос текстом."
+)
+MSG_MEDIA_TOO_LARGE = "Файл слишком большой. Пришлите, пожалуйста, фото/аудио поменьше или опишите текстом."
+MSG_MEDIA_RATE_LIMIT = "Слишком много файлов за короткое время. Давайте продолжим позже или опишите текстом."
+MSG_MEDIA_RECEIVED = "Файл получил и передал администратору. Чтобы ускорить, напишите услугу и удобное время."
+MSG_MEDIA_DOC_RECEIVED = "Документ получил, передал администратору."
 
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
@@ -988,6 +1601,76 @@ async def _process_outbox_rows(
     if not rows:
         return results
 
+    def _row_has_media(row: dict) -> bool:
+        payload_json = row.get("payload_json") or {}
+        try:
+            payload = WebhookRequest.model_validate(payload_json)
+        except Exception:
+            return False
+        message_type = (payload.body.messageType or "").strip().lower()
+        return bool(payload.body.mediaData) or (message_type and message_type != "text")
+
+    async def _process_single_row(row: dict, *, conversation_id: str) -> None:
+        outbox_id = row.get("id")
+        if not outbox_id:
+            return
+        payload_json = row.get("payload_json") or {}
+        try:
+            payload = WebhookRequest.model_validate(payload_json)
+        except Exception as exc:
+            mark_outbox_status(
+                db,
+                outbox_id=outbox_id,
+                status="FAILED",
+                last_error=f"invalid_payload:{exc}"[:500],
+                next_attempt_at=None,
+            )
+            results["failed"] += 1
+            return
+
+        try:
+            response = await _handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=UUID(conversation_id),
+            )
+            if not response.success:
+                raise RuntimeError(response.message)
+            mark_outbox_status(
+                db,
+                outbox_id=outbox_id,
+                status="SENT",
+                last_error=None,
+                next_attempt_at=None,
+            )
+            results["sent"] += 1
+        except Exception as exc:
+            now = datetime.now(timezone.utc)
+            attempts = int(row.get("attempts") or 0)
+            if attempts >= max_attempts:
+                mark_outbox_status(
+                    db,
+                    outbox_id=outbox_id,
+                    status="FAILED",
+                    last_error=str(exc)[:500],
+                    next_attempt_at=None,
+                )
+                results["failed"] += 1
+                return
+            backoff = retry_backoff_seconds * (2 ** max(attempts - 1, 0))
+            next_attempt_at = now + timedelta(seconds=backoff)
+            mark_outbox_status(
+                db,
+                outbox_id=outbox_id,
+                status="PENDING",
+                last_error=str(exc)[:500],
+                next_attempt_at=next_attempt_at,
+            )
+            results["retry_scheduled"] += 1
+
     batches: dict[str, list[dict]] = {}
     for row in rows:
         conversation_id = row.get("conversation_id")
@@ -1002,6 +1685,14 @@ async def _process_outbox_rows(
             if isinstance(r.get("created_at"), datetime)
             else datetime.min.replace(tzinfo=timezone.utc),
         )
+        if any(_row_has_media(row) for row in batch_sorted):
+            for row in batch_sorted:
+                await _process_single_row(row, conversation_id=str(conversation_id))
+            logger.info(
+                "Outbox processed (media rows)",
+                extra={"context": {"conversation_id": conversation_id, "count": len(batch_sorted)}},
+            )
+            continue
         outbox_ids = [row.get("id") for row in batch_sorted]
         message_texts = []
         forwarded_in_batch = False
@@ -1195,6 +1886,9 @@ async def _handle_webhook_payload(
 
     remote_jid = metadata.remoteJid
     message_text = body.message or ""
+    media_info = _extract_media_info(body)
+    if not message_text.strip() and media_info and media_info.caption:
+        message_text = media_info.caption
     message_type = (body.messageType or "").strip()
     has_media = bool(body.mediaData) or (message_type and message_type.lower() != "text")
     is_media_without_text = has_media and not message_text.strip()
@@ -1216,6 +1910,14 @@ async def _handle_webhook_payload(
         message_text,
     )
 
+    media_policy = _get_media_policy(client) if media_info else None
+    media_decision: MediaDecision | None = None
+    saved_message: Message | None = None
+    media_redis_client = None
+    if media_info:
+        redis_url, socket_timeout_seconds = _get_media_rate_settings()
+        media_redis_client = _get_debounce_redis(redis_url, socket_timeout_seconds)
+
     def _send_response(text: str) -> bool:
         return send_bot_response(
             db,
@@ -1235,6 +1937,21 @@ async def _handle_webhook_payload(
         user = db.query(User).filter(User.id == conversation.user_id).first()
         if not user:
             return WebhookResponse(success=False, message="User not found")
+        if media_info and message_id:
+            saved_message = _find_message_by_message_id(db, client.id, message_id)
+            if saved_message:
+                saved_media = saved_message.message_metadata.get("media") if isinstance(saved_message.message_metadata, dict) else None
+                media_decision = _deserialize_media_decision(
+                    saved_media.get("decision") if isinstance(saved_media, dict) else None
+                )
+        if media_info and media_decision is None and media_policy:
+            media_decision = await _evaluate_media_decision(
+                media=media_info,
+                client_id=client.id,
+                remote_jid=remote_jid,
+                policy=media_policy,
+                redis_client=media_redis_client,
+            )
     else:
         if await is_duplicate_message_id(db=db, client_id=client.id, message_id=message_id):
             logger.info(f"Duplicate message_id skipped: {message_id}")
@@ -1248,6 +1965,15 @@ async def _handle_webhook_payload(
         if not conversation:
             conversation = get_or_create_conversation(db, client.id, user.id, "whatsapp")
 
+        if media_info and media_decision is None and media_policy:
+            media_decision = await _evaluate_media_decision(
+                media=media_info,
+                client_id=client.id,
+                remote_jid=remote_jid,
+                policy=media_policy,
+                redis_client=media_redis_client,
+            )
+
         # 3. Save user message (keep message_id for dedup)
         message_metadata = metadata.model_dump(exclude_none=True) if metadata else {}
         if message_id:
@@ -1256,6 +1982,20 @@ async def _handle_webhook_payload(
             message_metadata["message_type"] = message_type
         if has_media:
             message_metadata["has_media"] = True
+        if media_info:
+            media_meta = {
+                "type": media_info.media_type,
+                "raw_type": media_info.raw_type,
+                "mime": media_info.mime,
+                "size_bytes": media_info.size_bytes,
+                "url": media_info.url,
+                "file_name": media_info.file_name,
+                "caption": media_info.caption,
+                "ptt": media_info.is_ptt,
+            }
+            if media_decision:
+                media_meta["decision"] = _serialize_media_decision(media_decision)
+            message_metadata["media"] = media_meta
         save_message(
             db,
             conversation.id,
@@ -1272,37 +2012,51 @@ async def _handle_webhook_payload(
             ):
                 bot_token, chat_id = get_telegram_credentials(db, client.id)
                 if bot_token and chat_id:
-                    telegram = TelegramService(bot_token)
-                    result = telegram.send_message(
-                        chat_id=chat_id,
-                        text=f"👤 <b>Клиент:</b> {message_text}",
-                        message_thread_id=conversation.telegram_topic_id,
-                    )
-                    if result.get("ok"):
-                        if metadata:
-                            metadata.forwarded_to_telegram = True
-                        logger.info(
-                            "Fast-forwarded inbound message to Telegram",
-                            extra={
-                                "context": {
-                                    "conversation_id": str(conversation.id),
-                                    "state": conversation.state,
-                                    "telegram_topic_id": conversation.telegram_topic_id,
-                                }
-                            },
-                        )
-                    else:
-                        logger.warning(
-                            "Fast-forward to Telegram failed",
-                            extra={
-                                "context": {
-                                    "conversation_id": str(conversation.id),
-                                    "state": conversation.state,
-                                    "telegram_topic_id": conversation.telegram_topic_id,
-                                    "error": result.get("description") or result.get("error"),
-                                }
-                            },
-                        )
+                    already_forwarded = bool(metadata and metadata.forwarded_to_telegram)
+                    if not already_forwarded:
+                        telegram = TelegramService(bot_token)
+                        forward_result = None
+                        if media_info and media_decision and media_decision.allowed and (media_policy or {}).get("forward_to_telegram"):
+                            caption = _build_media_caption(message_text, media_info)
+                            forward_result = _send_telegram_media(
+                                telegram=telegram,
+                                chat_id=chat_id,
+                                topic_id=conversation.telegram_topic_id,
+                                media=media_info,
+                                caption=caption,
+                                stored_path=None,
+                            )
+                        else:
+                            forward_result = telegram.send_message(
+                                chat_id=chat_id,
+                                text=f"👤 <b>Клиент:</b> {message_text}",
+                                message_thread_id=conversation.telegram_topic_id,
+                            )
+                        if forward_result and forward_result.get("ok"):
+                            if metadata:
+                                metadata.forwarded_to_telegram = True
+                            logger.info(
+                                "Fast-forwarded inbound message to Telegram",
+                                extra={
+                                    "context": {
+                                        "conversation_id": str(conversation.id),
+                                        "state": conversation.state,
+                                        "telegram_topic_id": conversation.telegram_topic_id,
+                                    }
+                                },
+                            )
+                        else:
+                            logger.warning(
+                                "Fast-forward to Telegram failed",
+                                extra={
+                                    "context": {
+                                        "conversation_id": str(conversation.id),
+                                        "state": conversation.state,
+                                        "telegram_topic_id": conversation.telegram_topic_id,
+                                        "error": forward_result.get("description") if forward_result else None,
+                                    }
+                                },
+                            )
             inbound_message_id = build_inbound_message_id(
                 message_id, remote_jid, metadata.timestamp if metadata else None, message_text
             )
@@ -1501,11 +2255,41 @@ async def _handle_webhook_payload(
             bot_token, chat_id = get_telegram_credentials(db, client.id)
             if bot_token and chat_id:
                 telegram = TelegramService(bot_token)
-                telegram.send_message(
-                    chat_id=chat_id,
-                    text=f"👤 <b>Клиент:</b> {message_text}",
-                    message_thread_id=conversation.telegram_topic_id,
-                )
+                forward_result = None
+                if has_media and media_info and media_decision and media_decision.allowed and (media_policy or {}).get("forward_to_telegram"):
+                    stored_path = None
+                    if saved_message and isinstance(saved_message.message_metadata, dict):
+                        stored_path = (saved_message.message_metadata.get("media") or {}).get("storage_path")
+                    caption = _build_media_caption(message_text, media_info)
+                    forward_result = _send_telegram_media(
+                        telegram=telegram,
+                        chat_id=chat_id,
+                        topic_id=conversation.telegram_topic_id,
+                        media=media_info,
+                        caption=caption,
+                        stored_path=stored_path,
+                    )
+                elif not has_media:
+                    forward_result = telegram.send_message(
+                        chat_id=chat_id,
+                        text=f"👤 <b>Клиент:</b> {message_text}",
+                        message_thread_id=conversation.telegram_topic_id,
+                    )
+                if forward_result and forward_result.get("ok"):
+                    if metadata:
+                        metadata.forwarded_to_telegram = True
+                elif forward_result:
+                    logger.warning(
+                        "Forward to Telegram failed",
+                        extra={
+                            "context": {
+                                "conversation_id": str(conversation.id),
+                                "state": conversation.state,
+                                "telegram_topic_id": conversation.telegram_topic_id,
+                                "error": forward_result.get("description") or forward_result.get("error"),
+                            }
+                        },
+                    )
 
     # 8. Manager active → bot must stay silent (only forwarding above)
     if conversation.state == ConversationState.MANAGER_ACTIVE.value:
@@ -1527,11 +2311,146 @@ async def _handle_webhook_payload(
             bot_response=None,
         )
 
-    if is_media_without_text:
-        bot_response = MSG_MEDIA_UNSUPPORTED
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
-        result_message = "Media unsupported response sent" if sent else "Media response failed"
+    if has_media:
+        if not media_info:
+            bot_response = MSG_MEDIA_UNSUPPORTED
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = _send_response(bot_response)
+            result_message = "Media unsupported response sent" if sent else "Media response failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        if media_decision is None and media_policy:
+            media_decision = await _evaluate_media_decision(
+                media=media_info,
+                client_id=client.id,
+                remote_jid=remote_jid,
+                policy=media_policy,
+                redis_client=media_redis_client,
+            )
+
+        if media_decision and not media_decision.allowed:
+            bot_response = media_decision.response or MSG_MEDIA_UNSUPPORTED
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = _send_response(bot_response)
+            result_message = "Media rejected response sent" if sent else "Media response failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        storage_path = None
+        if saved_message and isinstance(saved_message.message_metadata, dict):
+            storage_path = (saved_message.message_metadata.get("media") or {}).get("storage_path")
+
+        if media_policy and media_policy.get("store_media") and not storage_path:
+            storage_result = await _store_media_locally(
+                media=media_info,
+                policy=media_policy,
+                client_slug=client.name,
+                conversation_id=conversation.id,
+                message_id=message_id,
+            )
+            if storage_result.get("stored"):
+                storage_path = storage_result.get("path")
+            if saved_message:
+                update_payload = {
+                    "storage_path": storage_result.get("path"),
+                    "stored": bool(storage_result.get("stored")),
+                    "storage_error": storage_result.get("error"),
+                    "size_bytes": storage_result.get("size_bytes") or media_info.size_bytes,
+                    "sha256": storage_result.get("sha256"),
+                }
+                _update_message_media_metadata(saved_message, update_payload)
+
+        if conversation.state == ConversationState.BOT_ACTIVE.value:
+            handover_text = message_text.strip()
+            if not handover_text or re.fullmatch(r"\[.+\]", handover_text):
+                handover_text = f"Клиент отправил {media_info.media_type}."
+            result = escalate_to_pending(
+                db=db,
+                conversation=conversation,
+                user_message=handover_text,
+                trigger_type="media",
+                trigger_value=media_info.media_type,
+            )
+            if result.ok:
+                handover = result.value
+                telegram_sent = send_telegram_notification(
+                    db=db,
+                    handover=handover,
+                    conversation=conversation,
+                    user=user,
+                    message=handover_text,
+                )
+                result_message = f"Media escalation, telegram={'sent' if telegram_sent else 'failed'}"
+            else:
+                bot_response = MSG_AI_ERROR
+                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                sent = _send_response(bot_response)
+                result_message = "Media escalation failed" if sent else "Media escalation response failed"
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+
+        if (
+            conversation.telegram_topic_id
+            and not (metadata and metadata.forwarded_to_telegram)
+            and (media_policy or {}).get("forward_to_telegram")
+        ):
+            bot_token, chat_id = get_telegram_credentials(db, client.id)
+            if bot_token and chat_id:
+                telegram = TelegramService(bot_token)
+                caption = _build_media_caption(message_text, media_info)
+                forward_result = _send_telegram_media(
+                    telegram=telegram,
+                    chat_id=chat_id,
+                    topic_id=conversation.telegram_topic_id,
+                    media=media_info,
+                    caption=caption,
+                    stored_path=storage_path,
+                )
+                if forward_result.get("ok"):
+                    if metadata:
+                        metadata.forwarded_to_telegram = True
+                    if saved_message:
+                        _update_message_media_metadata(saved_message, {"forwarded_to_telegram": True})
+                else:
+                    logger.warning(
+                        "Media forward to Telegram failed",
+                        extra={
+                            "context": {
+                                "conversation_id": str(conversation.id),
+                                "state": conversation.state,
+                                "telegram_topic_id": conversation.telegram_topic_id,
+                                "error": forward_result.get("description") or forward_result.get("error"),
+                            }
+                        },
+                    )
+
+        if conversation.state != ConversationState.MANAGER_ACTIVE.value:
+            if media_info.media_type == "document":
+                bot_response = MSG_MEDIA_DOC_RECEIVED
+            else:
+                bot_response = MSG_MEDIA_RECEIVED
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = _send_response(bot_response)
+            result_message = "Media response sent" if sent else "Media response failed"
+        else:
+            result_message = "Media forwarded (manager active)"
+
         db.commit()
         return WebhookResponse(
             success=True,

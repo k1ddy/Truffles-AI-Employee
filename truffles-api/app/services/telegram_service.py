@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
@@ -17,12 +18,15 @@ class TelegramService:
         self.bot_token = bot_token
         self.base_url = self.BASE_URL.format(token=bot_token)
 
-    def _make_request(self, method: str, data: dict) -> dict:
+    def _make_request(self, method: str, data: Optional[dict] = None, files: Optional[dict] = None) -> dict:
         """Make request to Telegram API."""
         url = f"{self.base_url}/{method}"
         try:
             with httpx.Client(timeout=30.0) as client:
-                response = client.post(url, json=data)
+                if files:
+                    response = client.post(url, data=data or {}, files=files)
+                else:
+                    response = client.post(url, json=data or {})
                 return response.json()
         except Exception as e:
             logger.error(f"Telegram API error: {e}")
@@ -51,6 +55,114 @@ class TelegramService:
             data["reply_to_message_id"] = reply_to_message_id
 
         return self._make_request("sendMessage", data)
+
+    def send_photo(
+        self,
+        chat_id: str,
+        photo: str,
+        caption: Optional[str] = None,
+        parse_mode: str = "HTML",
+        message_thread_id: Optional[int] = None,
+        reply_to_message_id: Optional[int] = None,
+    ) -> dict:
+        """Send photo to Telegram chat."""
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption
+            data["parse_mode"] = parse_mode
+        if message_thread_id:
+            data["message_thread_id"] = message_thread_id
+        if reply_to_message_id:
+            data["reply_to_message_id"] = reply_to_message_id
+
+        if photo.startswith("http://") or photo.startswith("https://"):
+            data["photo"] = photo
+            return self._make_request("sendPhoto", data=data)
+
+        path = Path(photo)
+        with path.open("rb") as handle:
+            return self._make_request("sendPhoto", data=data, files={"photo": handle})
+
+    def send_document(
+        self,
+        chat_id: str,
+        document: str,
+        caption: Optional[str] = None,
+        parse_mode: str = "HTML",
+        message_thread_id: Optional[int] = None,
+        reply_to_message_id: Optional[int] = None,
+    ) -> dict:
+        """Send document to Telegram chat."""
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption
+            data["parse_mode"] = parse_mode
+        if message_thread_id:
+            data["message_thread_id"] = message_thread_id
+        if reply_to_message_id:
+            data["reply_to_message_id"] = reply_to_message_id
+
+        if document.startswith("http://") or document.startswith("https://"):
+            data["document"] = document
+            return self._make_request("sendDocument", data=data)
+
+        path = Path(document)
+        with path.open("rb") as handle:
+            return self._make_request("sendDocument", data=data, files={"document": handle})
+
+    def send_audio(
+        self,
+        chat_id: str,
+        audio: str,
+        caption: Optional[str] = None,
+        parse_mode: str = "HTML",
+        message_thread_id: Optional[int] = None,
+        reply_to_message_id: Optional[int] = None,
+    ) -> dict:
+        """Send audio to Telegram chat."""
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption
+            data["parse_mode"] = parse_mode
+        if message_thread_id:
+            data["message_thread_id"] = message_thread_id
+        if reply_to_message_id:
+            data["reply_to_message_id"] = reply_to_message_id
+
+        if audio.startswith("http://") or audio.startswith("https://"):
+            data["audio"] = audio
+            return self._make_request("sendAudio", data=data)
+
+        path = Path(audio)
+        with path.open("rb") as handle:
+            return self._make_request("sendAudio", data=data, files={"audio": handle})
+
+    def send_voice(
+        self,
+        chat_id: str,
+        voice: str,
+        caption: Optional[str] = None,
+        parse_mode: str = "HTML",
+        message_thread_id: Optional[int] = None,
+        reply_to_message_id: Optional[int] = None,
+    ) -> dict:
+        """Send voice note to Telegram chat."""
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption
+            data["parse_mode"] = parse_mode
+        if message_thread_id:
+            data["message_thread_id"] = message_thread_id
+        if reply_to_message_id:
+            data["reply_to_message_id"] = reply_to_message_id
+
+        if voice.startswith("http://") or voice.startswith("https://"):
+            data["voice"] = voice
+            return self._make_request("sendVoice", data=data)
+
+        path = Path(voice)
+        with path.open("rb") as handle:
+            return self._make_request("sendVoice", data=data, files={"voice": handle})
 
     def pin_message(self, chat_id: str, message_id: int) -> dict:
         """Pin message in chat."""

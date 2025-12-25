@@ -25,6 +25,16 @@
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
 
+### MEDIA RUNBOOK (амнезия, 3–5 минут)
+- Точка входа: `truffles-api/app/routers/webhook.py` → `_handle_webhook_payload()` + outbox coalesce.
+- Guardrails: тип/размер/rate‑limit → `clients.config.media` (см. `SPECS/ARCHITECTURE.md`).
+- Хранение: `/home/zhan/truffles-media/<client>/<conversation>/` + мета в `messages.metadata.media`.
+- Forward: Telegram `sendPhoto/sendAudio/sendVoice/sendDocument` (см. `truffles-api/app/services/telegram_service.py`).
+- Outbox: если в батче медиа — обработка по одному (иначе теряются вложения).
+- Быстрые факты (SQL):
+  `SELECT payload_json->'body'->>'messageType', payload_json->'body'->'mediaData' FROM outbox_messages ORDER BY created_at DESC LIMIT 1;`
+  `SELECT metadata->'media' FROM messages ORDER BY created_at DESC LIMIT 1;`
+
 ### Что мешало быстрому входу (зафиксировано)
 - Было несколько корней кода и часть ссылок указывала на несуществующие пути (`/home/zhan/truffles`, `/home/zhan/Truffles-AI-Employee`) → команды/доки расходились.
 - Inbound payload для медиа: в коде добавлено сохранение + ответ, но на проде без деплоя всё ещё отбрасывается.
@@ -51,7 +61,7 @@
 - [ ] **Branch подключен частично** — webhook ставит `conversation.branch_id`, но Telegram per branch + RAG фильтры ещё не wired → `SPECS/MULTI_TENANT.md`
 - [ ] **⚠️ by_instance зависит от instanceId** — demo_salon исправлен (query‑param даёт instanceId), остальным клиентам нужно прокинуть
 - [ ] **⚠️ demo_salon truth-gate даёт цену на "как у/в стиле"** — нет правила style_reference, фото не поддерживаются; нужен отдельный ответ/эскалация
-- [ ] **⚠️ Медиа (аудио/фото/документы)** — fallback “опишите текстом” добавлен в код, но нужен деплой; ASR/OCR/vision отсутствуют
+- [ ] **⚠️ Медиа (аудио/фото/документы)** — guardrails + forward в Telegram + локальное хранение добавлены в код (нужен деплой); manager→client media и ASR/OCR/vision отсутствуют
 - [ ] Метрики (Quality Deflection, CSAT) — план: `SPECS/ESCALATION.md`, часть 6
 - [ ] Dashboard для заказчика — backlog
 - [ ] Quiet hours для напоминаний — P2
@@ -219,6 +229,25 @@
 ---
 
 ## ИСТОРИЯ СЕССИЙ
+
+### 2025-12-25 — Media guardrails + Telegram forwarding
+
+**Что сделали:**
+- Guardrails для медиа: allowlist типов, max‑size, rate‑limit (policy через `clients.config.media`).
+- Отправка медиа в Telegram (sendPhoto/sendAudio/sendDocument/sendVoice) + caption.
+- Локальное хранение медиа + метаданные в `messages.metadata.media`.
+- Outbox: при медиа в батче — обработка по одному (без coalesce), чтобы не терять вложения.
+
+**Статус:**
+- Нужен деплой.
+
+**Разбор (шаблон):**
+- Боль/симптом: фото/аудио/документы не доходили менеджеру и могли убивать ресурсы.
+- Почему важно: теряются лиды и растут риски по ресурсам/стоимости.
+- Диагноз: только текстовый forward, нет лимитов и storage.
+- Решение: guardrails + локальное хранение + Telegram media forward + media‑safe outbox.
+- Проверка: отправить фото/аудио → файл в Telegram топике, бот отвечает шаблоном; лимиты режут спам.
+- Осталось: деплой; TTL очистка хранилища; ChatFlow media API для manager→client; ASR/обработка файлов.
 
 ### 2025-12-25 — CI gitleaks warning fix
 

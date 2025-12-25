@@ -1,7 +1,7 @@
 # СПЕЦИФИКАЦИЯ ЭСКАЛАЦИИ TRUFFLES
 
 **Дата:** 2025-12-06
-**Обновлено:** 2025-12-24
+**Обновлено:** 2025-12-25
 **Статус:** КРИТИЧЕСКИЙ ДОКУМЕНТ
 **Автор:** Жанбол + Droid
 
@@ -127,6 +127,15 @@
 **Реализация:** 
 - `telegram_webhook.py` — `handle_manager_message()`
 - `manager_message_service.py` — `process_manager_message()`
+
+### Медиа (фото/аудио/документы)
+- Фото/аудио/документы принимаем, видео запрещено.
+- В `bot_active`: медиа → handover (`trigger_type="media"`) + форвард в Telegram, бот отвечает шаблоном.
+- В `pending`/`manager_active`: медиа только форвардится в Telegram, бот молчит при `manager_active`.
+- Документы: только пересылка (обработка позже).
+- Ограничения по размеру и rate‑limit до обработки.
+
+**Реализация:** `truffles-api/app/routers/webhook.py` (media guardrails + forward), `truffles-api/app/services/telegram_service.py` (sendPhoto/sendAudio/sendDocument/sendVoice).
 
 ---
 

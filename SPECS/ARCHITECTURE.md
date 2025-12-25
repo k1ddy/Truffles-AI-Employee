@@ -1,7 +1,7 @@
 # ARCHITECTURE — Техническая архитектура Truffles
 
 **Читай это перед любыми изменениями.**
-**Обновлено:** 2025-12-24
+**Обновлено:** 2025-12-25
 
 ---
 
@@ -127,6 +127,34 @@ policy/truth gate → intent → RAG/LLM
     ↓
 chatflow_service → WhatsApp (retries/backoff + msg_id idempotency)
 ```
+
+### Медиа‑контур (фото/аудио/документы)
+**Цель:** безопасность ресурсов + сохранение контекста + управляемая стоимость.
+
+**Поток:**
+1) Входящий payload содержит `mediaData` (`url`, `mimetype`, `size`, `fileName`, `base64`).
+2) Guardrails до обработки: allowlist типов, max‑size, rate‑limit (per user).
+3) Медиа сохраняется локально (storage dir; TTL очистка — план). Метаданные пишутся в `messages.metadata.media`.
+4) Медиа форвардится в Telegram‑топик (sendPhoto/sendAudio/sendDocument).
+5) Документы: только пересылка (обработка позже). Видео: запрещено.
+
+**Конфигурация (per client):**
+`clients.config.media` (JSONB) — overrides по лимитам и флагам:
+- `enabled`, `allow_photo`, `allow_audio`, `allow_document`
+- `max_size_mb.photo/audio/document`
+- `rate_limit.count/window_seconds/daily_count/bytes_mb/block_seconds`
+- `store_media`, `forward_to_telegram`, `storage_dir`
+- `allowed_hosts` (whitelist для скачивания, дефолт `app.chatflow.kz`)
+
+**Дефолты:**
+- фото 8MB, аудио 8MB, документы 10MB
+- лимит 3 медиа / 10 мин, 10 медиа / сутки, 20MB / 10 мин
+- блокировка 15 мин при превышении
+- storage dir: `/home/zhan/truffles-media`
+
+**Важно:**
+- Менеджер → клиент по медиа требует ChatFlow media API (отдельная интеграция, не в этой сессии).
+- URL у ChatFlow может истечь — хранение локально гарантирует доставку в Telegram.
 
 ### Эскалация
 ```
