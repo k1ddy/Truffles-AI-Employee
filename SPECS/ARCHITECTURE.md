@@ -162,7 +162,9 @@ Low confidence (RAG score < MID_CONFIDENCE_THRESHOLD, сейчас 0.5) ИЛИ i
     ↓
 state_service.escalate_to_pending() + escalation_service.send_telegram_notification()
     ↓
-Создать handover + topic в Telegram
+Создать handover
+    ↓
+Topic в Telegram: если у клиента нет topic_id — создать, иначе использовать существующий
     ↓
 Кнопки [Беру] [Решено]
 ```
@@ -175,7 +177,7 @@ POST /telegram-webhook
     ↓
 manager_message_service.process_manager_message()
     ↓
-find_conversation_by_telegram(chat_id, thread_id)
+resolve user/topic → active handover (pending/active)
     ↓
 chatflow_service → WhatsApp клиент
     ↓
@@ -212,10 +214,18 @@ branch_id           UUID  -- TODO: добавить для маршрутиза�
 user_id             UUID REFERENCES users
 channel             TEXT  -- whatsapp, telegram, instagram
 state               TEXT  -- bot_active, pending, manager_active
-telegram_topic_id   BIGINT
+telegram_topic_id   BIGINT  -- копия users.telegram_topic_id для активного диалога
 bot_status          TEXT  -- active, muted
 bot_muted_until     TIMESTAMP
 last_message_at     TIMESTAMP
+```
+
+### users
+```sql
+id                  UUID PRIMARY KEY
+client_id           UUID
+remote_jid          TEXT
+telegram_topic_id   BIGINT  -- канон: один топик на клиента
 ```
 
 ### handovers
@@ -323,29 +333,38 @@ def find_conversation_by_telegram(db, chat_id, message_thread_id=None):
         ).first()
         client_id = settings.client_id if settings else None
         branch_id = None
-    
-    # 2. Если есть message_thread_id — найти conversation по топику
-    if message_thread_id:
-        conversation = db.query(Conversation).filter(
-            Conversation.client_id == client_id,
-            Conversation.telegram_topic_id == message_thread_id,
-        ).first()
-        handover = db.query(Handover).filter(
-            Handover.conversation_id == conversation.id,
-            Handover.status.in_(["pending", "active"]),
-        ).order_by(Handover.created_at.desc()).first()
-        return (conversation, handover)
 
-    # 3. Иначе — найти последний активный handover
-    handover = db.query(Handover).filter(
-        Handover.client_id == client_id,
-        Handover.status.in_(["pending", "active"]),
-    ).order_by(Handover.created_at.desc()).first()
+    # 2. Требуем message_thread_id (топик клиента)
+    if not message_thread_id:
+        return None
 
-    conversation = db.query(Conversation).filter(
-        Conversation.id == handover.conversation_id
+    # 3. Найти user по topic_id (users.telegram_topic_id)
+    user = db.query(User).filter(
+        User.client_id == client_id,
+        User.telegram_topic_id == message_thread_id,
     ).first()
-    
+    if not user:
+        return None
+
+    # 4. Найти активный handover по этому user
+    handover = (
+        db.query(Handover)
+        .join(Conversation, Conversation.id == Handover.conversation_id)
+        .filter(
+            Conversation.user_id == user.id,
+            Handover.status.in_(["pending", "active"]),
+        )
+        .order_by(Handover.created_at.desc())
+        .first()
+    )
+    conversation = (
+        db.query(Conversation)
+        .filter(Conversation.id == handover.conversation_id)
+        .first()
+        if handover
+        else None
+    )
+
     return (conversation, handover)
 ```
 

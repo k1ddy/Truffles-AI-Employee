@@ -143,7 +143,8 @@ escalation_service.escalate_conversation():
 POST /telegram-webhook
     ↓
 manager_message_service.process_manager_message():
-  - Найти handover по topic_id
+  - Найти user по topic_id (users.telegram_topic_id)
+  - Найти активный handover (pending/active) для этого user
   - Отправить ответ в WhatsApp
   - ✅ Сохранить manager_response в handover
   - Создать learned_responses(status=pending)

@@ -126,7 +126,9 @@ Low confidence (RAG score < MID_CONFIDENCE_THRESHOLD, сейчас 0.5) ИЛИ i
     ↓
 state_service.escalate_to_pending() + escalation_service.send_telegram_notification()
     ↓
-Создать handover + topic в Telegram
+Создать handover
+    ↓
+Topic в Telegram: если у клиента нет topic_id — создать, иначе использовать существующий
     ↓
 Кнопки [Беру] [Решено]
 ```
@@ -139,7 +141,7 @@ POST /telegram-webhook
     ↓
 manager_message_service.process_manager_message()
     ↓
-find_conversation_by_telegram(chat_id, thread_id)
+resolve user/topic → active handover (pending/active)
     ↓
 chatflow_service → WhatsApp клиент
     ↓
@@ -157,10 +159,18 @@ client_id           UUID
 user_id             UUID REFERENCES users
 channel             TEXT  -- whatsapp, telegram, instagram
 state               TEXT  -- bot_active, pending, manager_active
-telegram_topic_id   BIGINT
+telegram_topic_id   BIGINT  -- копия users.telegram_topic_id для активного диалога
 bot_status          TEXT  -- active, muted
 bot_muted_until     TIMESTAMP
 last_message_at     TIMESTAMP
+```
+
+### users
+```sql
+id                  UUID PRIMARY KEY
+client_id           UUID
+remote_jid          TEXT
+telegram_topic_id   BIGINT  -- канон: один топик на клиента
 ```
 
 ### handovers
@@ -195,18 +205,38 @@ def find_conversation_by_telegram(db, chat_id, message_thread_id=None):
     settings = db.query(ClientSettings).filter(
         ClientSettings.telegram_chat_id == str(chat_id)
     ).first()
-    
-    # 2. Найти активный handover
-    handover = db.query(Handover).filter(
-        Handover.client_id == settings.client_id,
-        Handover.status.in_(["pending", "active"]),
-    ).order_by(Handover.created_at.desc()).first()
-    
-    # 3. Вернуть conversation
-    conversation = db.query(Conversation).filter(
-        Conversation.id == handover.conversation_id
+
+    # 2. Требуем message_thread_id (топик клиента)
+    if not message_thread_id or not settings:
+        return None
+
+    # 3. Найти user по topic_id
+    user = db.query(User).filter(
+        User.client_id == settings.client_id,
+        User.telegram_topic_id == message_thread_id,
     ).first()
-    
+    if not user:
+        return None
+
+    # 4. Найти активный handover по этому user
+    handover = (
+        db.query(Handover)
+        .join(Conversation, Conversation.id == Handover.conversation_id)
+        .filter(
+            Conversation.user_id == user.id,
+            Handover.status.in_(["pending", "active"]),
+        )
+        .order_by(Handover.created_at.desc())
+        .first()
+    )
+    conversation = (
+        db.query(Conversation)
+        .filter(Conversation.id == handover.conversation_id)
+        .first()
+        if handover
+        else None
+    )
+
     return (conversation, handover)
 ```
 
@@ -229,7 +259,7 @@ def is_owner_response(db, client_id, manager_telegram_id):
 | Webhook URL | `https://api.truffles.kz/telegram-webhook` |
 | Кнопки | Inline buttons: `take_{handover_id}`, `resolve_{handover_id}` |
 | Owner detection | `client_settings.owner_telegram_id` == `from_user.id` |
-| Manager | Любой кто пишет в топике |
+| Manager | Любой кто пишет в топике при активной заявке |
 
 **Проверить webhook:**
 ```bash

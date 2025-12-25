@@ -315,7 +315,7 @@ client_id | priority | role      | user_id | contact
 
 **Решение по группам:**
 - **Одна Telegram-группа на филиал** (`branches.telegram_chat_id`)
-- **Один топик на заявку** (`conversation.telegram_topic_id`)
+- **Один топик на клиента** (`users.telegram_topic_id` — канон; `conversations.telegram_topic_id` — копия для активного диалога)
 
 **Реализация:**
 - `escalation_service.py` — отправка уведомления
@@ -357,9 +357,9 @@ client_id | priority | role      | user_id | contact
 **Реализация:** `telegram_webhook.py` — `handle_callback_query()`, action="resolve"
 
 ### Менеджер просто написал (не брал явно):
-1. Ответ уходит клиенту
-2. Автоматически берёт заявку (status='active', state='manager_active')
-3. Кнопки меняются на [Решено]
+1. Сообщение принимается только в топике клиента
+2. Если есть активная заявка (pending/active) — ответ уходит клиенту и заявка становится active
+3. Если активной заявки нет — ответ не уходит, менеджер видит отказ
 
 **Реализация:** `manager_message_service.py` — `process_manager_message()`
 
@@ -566,7 +566,7 @@ resolution_time_seconds INTEGER
 -- Telegram
 telegram_message_id     BIGINT
 channel_ref             TEXT  -- WhatsApp remote_jid (куда отправлять ответ менеджера клиенту)
--- topic_id для Telegram хранится в conversations.telegram_topic_id
+-- topic_id для Telegram хранится в users.telegram_topic_id (канон), в conversations.telegram_topic_id — копия
 
 -- Напоминания
 reminder_1_sent_at      TIMESTAMP
@@ -595,12 +595,22 @@ bot_muted_until     TIMESTAMP
 no_count            INTEGER  -- счётчик отказов
 
 -- Telegram
-telegram_topic_id   BIGINT  -- ID топика для этого диалога
+telegram_topic_id   BIGINT  -- копия users.telegram_topic_id для активного диалога
 
 -- Мета
 started_at          TIMESTAMP
 last_message_at     TIMESTAMP
 escalated_at        TIMESTAMP
+```
+
+### users (существует)
+```sql
+-- Реализация: truffles-api/app/models/user.py
+
+id                  UUID PRIMARY KEY
+client_id           UUID
+remote_jid          TEXT
+telegram_topic_id   BIGINT  -- канон: один топик на клиента
 ```
 
 ### branches (существует)
