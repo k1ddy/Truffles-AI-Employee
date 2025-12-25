@@ -1,10 +1,9 @@
+import re
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
-
-import re
 
 from app.models import Conversation, Message
 from app.services.ai_service import (
