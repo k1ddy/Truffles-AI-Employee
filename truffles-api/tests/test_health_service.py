@@ -9,6 +9,7 @@ class TestCheckAndHealConversations:
     def test_heals_pending_without_topic(self):
         conversation = Mock()
         conversation.id = "conv-123"
+        conversation.user_id = "user-123"
         conversation.state = ConversationState.PENDING.value
         conversation.telegram_topic_id = None
         conversation.retry_offered_at = datetime.now(timezone.utc)
@@ -20,6 +21,7 @@ class TestCheckAndHealConversations:
             [],  # open_handovers for conv-123
             [],  # conversations_with_state
         ]
+        db.query.return_value.filter.return_value.first.return_value = None
 
         result = check_and_heal_conversations(db)
 
@@ -46,6 +48,30 @@ class TestCheckAndHealConversations:
         assert result["healed_count"] == 1
         assert conversation.state == ConversationState.BOT_ACTIVE.value
         assert conversation.retry_offered_at is None
+
+    def test_restores_topic_from_user(self):
+        conversation = Mock()
+        conversation.id = "conv-789"
+        conversation.user_id = "user-789"
+        conversation.state = ConversationState.PENDING.value
+        conversation.telegram_topic_id = None
+
+        user = Mock()
+        user.id = "user-789"
+        user.telegram_topic_id = 456
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.all.side_effect = [
+            [conversation],  # broken_no_topic
+            [],  # conversations_with_state
+        ]
+        db.query.return_value.filter.return_value.first.return_value = user
+
+        result = check_and_heal_conversations(db)
+
+        assert result["healed_count"] >= 1
+        assert conversation.state == ConversationState.PENDING.value
+        assert conversation.telegram_topic_id == 456
 
     def test_no_healing_needed(self):
         db = MagicMock()

@@ -30,13 +30,16 @@ class TestEscalateToPending:
         mock_telegram_class.return_value = mock_telegram
 
         db = Mock()
-        db.query.return_value.filter.return_value.first.return_value = Mock(name="Test User", phone="123")
+        user = Mock(name="Test User", phone="123")
+        user.telegram_topic_id = None
+        db.query.return_value.filter.return_value.first.return_value = user
 
         conversation = Mock()
         conversation.state = ConversationState.BOT_ACTIVE.value
         conversation.id = "conv-123"
         conversation.client_id = "client-123"
         conversation.user_id = "user-123"
+        conversation.telegram_topic_id = None
         conversation.retry_offered_at = datetime.now(timezone.utc)
 
         result = escalate_to_pending(db, conversation, "Help me", "intent", "human_request")
