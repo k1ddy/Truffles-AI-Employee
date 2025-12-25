@@ -12,8 +12,12 @@ from app.services.conversation_service import (
     get_or_create_user,
 )
 from app.services.escalation_service import escalate_conversation
-from app.services.intent_service import classify_intent, is_rejection, should_escalate
-from app.services.message_service import generate_bot_response, save_message
+from app.services.intent_service import Intent, classify_intent, is_rejection, should_escalate
+from app.services.message_service import (
+    generate_bot_response,
+    save_message,
+    select_handover_user_message,
+)
 from app.services.state_machine import ConversationState, escalate
 
 router = APIRouter()
@@ -93,6 +97,10 @@ def handle_message(request: MessageRequest, db: Session = Depends(get_db)):
 
     # 7. Handle based on intent and state
     if conversation.state == ConversationState.BOT_ACTIVE.value and should_escalate(intent):
+        handover_message = request.content
+        if intent == Intent.HUMAN_REQUEST:
+            handover_message = select_handover_user_message(db, conversation.id, request.content)
+
         # Escalate to pending + create handover + notify Telegram
         new_state = escalate(ConversationState(conversation.state))
         conversation.state = new_state.value
@@ -105,7 +113,7 @@ def handle_message(request: MessageRequest, db: Session = Depends(get_db)):
             user=user,
             trigger_type="intent",  # DB constraint allows only: intent, keyword, manual, timeout
             trigger_value=intent.value,  # Store actual intent here
-            user_message=request.content,
+            user_message=handover_message,
         )
 
         # Send response to client

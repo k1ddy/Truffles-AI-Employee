@@ -43,7 +43,7 @@ from app.services.intent_service import (
     is_strong_out_of_domain,
     should_escalate,
 )
-from app.services.message_service import generate_bot_response, save_message
+from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
 from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message, mark_outbox_status
 from app.services.state_machine import ConversationState
 from app.services.state_service import escalate_to_pending, manager_resolve
@@ -1852,11 +1852,15 @@ async def _handle_webhook_payload(
 
     # 10. Handle based on intent and state
     if conversation.state == ConversationState.BOT_ACTIVE.value and should_escalate(intent):
+        handover_message = message_text
+        if intent == Intent.HUMAN_REQUEST:
+            handover_message = select_handover_user_message(db, conversation.id, message_text)
+
         # Escalate using state_service (atomic transition)
         result = escalate_to_pending(
             db=db,
             conversation=conversation,
-            user_message=message_text,
+            user_message=handover_message,
             trigger_type="intent",
             trigger_value=intent.value,
         )
@@ -1869,7 +1873,7 @@ async def _handle_webhook_payload(
                 handover=handover,
                 conversation=conversation,
                 user=user,
-                message=message_text,
+                message=handover_message,
             )
             bot_response = MSG_ESCALATED
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)

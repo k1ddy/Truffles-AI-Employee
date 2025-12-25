@@ -211,6 +211,16 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-25 — Human_request uses last meaningful message
+
+**Что сделали:**
+- Для handover при `human_request` берём последнее содержательное user-сообщение вместо "позови менеджера".
+- Добавлен helper и тесты для выбора meaningful сообщения.
+- В БД: выставлен `client_settings.owner_telegram_id` для `demo_salon` = `1969855532`.
+
+**Статус:**
+- Требуется деплой и проверка: handover.user_message теперь содержит реальный вопрос клиента.
+
 ### 2025-12-25 — Outbox worker + owner learning fallback
 
 **Что сделали:**
@@ -719,6 +729,9 @@ LIMIT 1;
 | `telegram_webhook.py` | sender_chat fallback для идентификации менеджера |
 | `manager_message_service.py` | Не затирает assigned_to при unknown, fallback на assigned_to для owner-check |
 | `learning_service.py` | Owner match принимает отрицательные ID (sender_chat) |
+| `message_service.py` | Выбор последнего содержательного user-сообщения для handover |
+| `webhook.py` | human_request эскалируется с последним meaningful сообщением |
+| `message.py` | То же поведение для `/message` |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 

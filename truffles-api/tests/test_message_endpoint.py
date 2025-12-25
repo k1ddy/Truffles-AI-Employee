@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.database import get_db
 from app.main import app
 from app.schemas.message import MessageRequest, MessageResponse
+from app.services.message_service import select_handover_user_message
 
 
 @pytest.fixture
@@ -138,3 +139,37 @@ class TestWebhookAuth:
             assert response.status_code == 401
         finally:
             app.dependency_overrides.clear()
+
+
+def _mock_db_with_messages(messages):
+    query = Mock()
+    query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = messages
+
+    db = Mock()
+    db.query.return_value = query
+    return db
+
+
+class TestSelectHandoverUserMessage:
+    def test_uses_previous_meaningful_message(self):
+        messages = [
+            Mock(content="позови менеджера"),
+            Mock(content="а вы можете сделать прическу как майкла джордана?"),
+        ]
+        db = _mock_db_with_messages(messages)
+
+        result = select_handover_user_message(db, uuid4(), "позови менеджера")
+
+        assert result == "а вы можете сделать прическу как майкла джордана?"
+
+    def test_falls_back_when_no_better_message(self):
+        messages = [
+            Mock(content="позови менеджера"),
+            Mock(content="ок"),
+            Mock(content="спасибо"),
+        ]
+        db = _mock_db_with_messages(messages)
+
+        result = select_handover_user_message(db, uuid4(), "позови менеджера")
+
+        assert result == "позови менеджера"
