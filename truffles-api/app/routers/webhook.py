@@ -448,6 +448,7 @@ async def _evaluate_media_decision(
     remote_jid: str,
     policy: dict,
     redis_client,
+    count_rate_limit: bool = True,
 ) -> MediaDecision:
     if not policy.get("enabled"):
         return MediaDecision(allowed=False, reason="disabled", response=MSG_MEDIA_UNSUPPORTED)
@@ -466,6 +467,9 @@ async def _evaluate_media_decision(
     size_bytes = media.size_bytes
     if size_bytes is not None and size_bytes > max_bytes:
         return MediaDecision(allowed=False, reason="too_large", response=MSG_MEDIA_TOO_LARGE)
+
+    if not count_rate_limit:
+        return MediaDecision(allowed=True)
 
     size_for_limit = size_bytes or 0
     decision = await _check_media_rate_limit(
@@ -1914,6 +1918,7 @@ async def _handle_webhook_payload(
     media_decision: MediaDecision | None = None
     saved_message: Message | None = None
     media_redis_client = None
+    count_rate_limit = not skip_persist
     if media_info:
         redis_url, socket_timeout_seconds = _get_media_rate_settings()
         media_redis_client = _get_debounce_redis(redis_url, socket_timeout_seconds)
@@ -1951,6 +1956,7 @@ async def _handle_webhook_payload(
                 remote_jid=remote_jid,
                 policy=media_policy,
                 redis_client=media_redis_client,
+                count_rate_limit=count_rate_limit,
             )
     else:
         if await is_duplicate_message_id(db=db, client_id=client.id, message_id=message_id):
@@ -1972,6 +1978,7 @@ async def _handle_webhook_payload(
                 remote_jid=remote_jid,
                 policy=media_policy,
                 redis_client=media_redis_client,
+                count_rate_limit=count_rate_limit,
             )
 
         # 3. Save user message (keep message_id for dedup)
@@ -1996,7 +2003,7 @@ async def _handle_webhook_payload(
             if media_decision:
                 media_meta["decision"] = _serialize_media_decision(media_decision)
             message_metadata["media"] = media_meta
-        save_message(
+        saved_message = save_message(
             db,
             conversation.id,
             client.id,
@@ -2017,6 +2024,29 @@ async def _handle_webhook_payload(
                         telegram = TelegramService(bot_token)
                         forward_result = None
                         if media_info and media_decision and media_decision.allowed and (media_policy or {}).get("forward_to_telegram"):
+                            storage_path = None
+                            if media_policy and media_policy.get("store_media"):
+                                if saved_message and isinstance(saved_message.message_metadata, dict):
+                                    storage_path = (saved_message.message_metadata.get("media") or {}).get("storage_path")
+                                if not storage_path:
+                                    storage_result = await _store_media_locally(
+                                        media=media_info,
+                                        policy=media_policy,
+                                        client_slug=client.name,
+                                        conversation_id=conversation.id,
+                                        message_id=message_id,
+                                    )
+                                    if storage_result.get("stored"):
+                                        storage_path = storage_result.get("path")
+                                    if saved_message:
+                                        update_payload = {
+                                            "storage_path": storage_result.get("path"),
+                                            "stored": bool(storage_result.get("stored")),
+                                            "storage_error": storage_result.get("error"),
+                                            "size_bytes": storage_result.get("size_bytes") or media_info.size_bytes,
+                                            "sha256": storage_result.get("sha256"),
+                                        }
+                                        _update_message_media_metadata(saved_message, update_payload)
                             caption = _build_media_caption(message_text, media_info)
                             forward_result = _send_telegram_media(
                                 telegram=telegram,
@@ -2024,7 +2054,7 @@ async def _handle_webhook_payload(
                                 topic_id=conversation.telegram_topic_id,
                                 media=media_info,
                                 caption=caption,
-                                stored_path=None,
+                                stored_path=storage_path,
                             )
                         else:
                             forward_result = telegram.send_message(
@@ -2332,6 +2362,7 @@ async def _handle_webhook_payload(
                 remote_jid=remote_jid,
                 policy=media_policy,
                 redis_client=media_redis_client,
+                count_rate_limit=count_rate_limit,
             )
 
         if media_decision and not media_decision.allowed:

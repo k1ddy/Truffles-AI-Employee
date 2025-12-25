@@ -230,6 +230,24 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-25 — Media: rate-limit double count + fast-forward storage
+
+**Что сделали:**
+- В `webhook.py` добавили `count_rate_limit` и выключили счётчик при `skip_persist=True` (outbox), чтобы лимиты не считались повторно.
+- В fast-forward (enqueue_only) сохраняем медиа до отправки в Telegram, используем `stored_path` при отправке.
+- В metadata сообщения пишем `storage_path/stored/storage_error/sha256`, чтобы storage не повторялся.
+
+**Статус:**
+- Нужен деплой и проверка на проде.
+
+**Разбор (шаблон):**
+- Боль/симптом: в Telegram приходят `[image]/[audio]/[document]`, в `messages.metadata.media.decision` — `rate_limited`.
+- Почему важно: менеджер не видит медиа клиента → теряются заявки/контекст.
+- Диагноз: rate‑limit считался повторно при outbox (skip_persist), fast‑forward в `manager_active` форвардил URL без локального хранения.
+- Решение: отключить счётчик лимитов при `skip_persist`, сохранять медиа перед fast‑forward и отправлять файл с диска.
+- Проверка: отправить 3–4 медиа подряд → decision.allowed=true, Telegram получает файл; `storage_path` заполнен.
+- Осталось: ChatFlow media API для manager→client, TTL‑очистка хранилища.
+
 ### 2025-12-25 — Media: fix trigger_type constraint + rate limits
 
 **Что сделали:**
