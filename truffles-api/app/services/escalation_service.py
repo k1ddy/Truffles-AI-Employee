@@ -59,9 +59,19 @@ def get_or_create_topic(
     user: User,
 ) -> Optional[int]:
     """Get existing topic or create new one. Returns topic_id."""
-    # Check if topic already exists
-    if conversation.telegram_topic_id:
-        return conversation.telegram_topic_id
+    if not user:
+        logger.warning(f"Cannot resolve topic: user missing for conversation {conversation.id}")
+        return None
+
+    # Check if topic already exists (canonical: user.telegram_topic_id)
+    topic_id = user.telegram_topic_id or conversation.telegram_topic_id
+    if topic_id:
+        if not user.telegram_topic_id:
+            user.telegram_topic_id = topic_id
+        if conversation.telegram_topic_id != topic_id:
+            conversation.telegram_topic_id = topic_id
+        db.flush()
+        return topic_id
 
     # Create topic name: "77015705555 Жанбол [Truffles]"
     phone = user.phone or "Unknown"
@@ -72,7 +82,8 @@ def get_or_create_topic(
     topic_id = telegram.create_forum_topic(chat_id, topic_name)
 
     if topic_id:
-        # Save to conversation
+        # Save to user (canonical) + conversation copy
+        user.telegram_topic_id = topic_id
         conversation.telegram_topic_id = topic_id
         db.flush()
         logger.info(f"Created topic {topic_id} for conversation {conversation.id}")
@@ -100,6 +111,9 @@ def send_telegram_notification(
 
     # 1. Get or create topic
     topic_id = get_or_create_topic(db, telegram, chat_id, conversation, user)
+    if not topic_id:
+        logger.warning(f"No topic_id for conversation {conversation.id}")
+        return False
 
     # 2. Format message
     text = format_handover_message(
@@ -126,6 +140,8 @@ def send_telegram_notification(
         if "thread not found" in error_desc.lower() or "message_thread_id" in error_desc.lower():
             logger.warning(f"Topic {topic_id} not found, creating new one...")
             # Reset topic_id
+            if user:
+                user.telegram_topic_id = None
             conversation.telegram_topic_id = None
             db.flush()
             # Create new topic

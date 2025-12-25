@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.models import Conversation, Handover, User
-from app.services.escalation_service import get_telegram_credentials
+from app.services.escalation_service import get_or_create_topic, get_telegram_credentials
 from app.services.result import Result
 from app.services.state_machine import ConversationState
 from app.services.telegram_service import TelegramService
@@ -31,10 +31,9 @@ def escalate_to_pending(
 
         telegram = TelegramService(bot_token)
         user = db.query(User).filter(User.id == conversation.user_id).first()
-        user_name = user.name or user.phone if user else "Unknown"
         remote_jid = user.remote_jid if user else None
 
-        topic_id = telegram.create_forum_topic(chat_id, f"💬 {user_name}")
+        topic_id = get_or_create_topic(db, telegram, chat_id, conversation, user)
         if not topic_id:
             return Result.failure("Failed to create topic", "topic_error")
 

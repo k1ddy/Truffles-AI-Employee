@@ -31,6 +31,19 @@ def check_and_heal_conversations(db: Session) -> dict:
     )
 
     for conv in broken_no_topic:
+        user = db.query(User).filter(User.id == conv.user_id).first()
+        if user and user.telegram_topic_id:
+            conv.telegram_topic_id = user.telegram_topic_id
+            healed.append(
+                {
+                    "conversation_id": str(conv.id),
+                    "issue": f"{conv.state}_no_topic",
+                    "action": "restored_topic_from_user",
+                }
+            )
+            logger.warning(f"Restored topic for conversation {conv.id} from user {user.id}")
+            continue
+
         old_state = conv.state
         conv.state = ConversationState.BOT_ACTIVE.value
         conv.retry_offered_at = None

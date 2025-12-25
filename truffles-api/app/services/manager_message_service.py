@@ -85,8 +85,9 @@ def find_conversation_by_telegram(
     Find conversation by Telegram chat_id and optional topic_id.
 
     Strategy:
-    1. If message_thread_id exists - find handover by telegram_message_id in that thread
-    2. Otherwise find by chat_id in client_settings + active handover
+    1. Require message_thread_id (topic per client)
+    2. Resolve user by topic_id
+    3. Find active handover for that user
     """
     # Find client by telegram_chat_id
     settings = db.query(ClientSettings).filter(ClientSettings.telegram_chat_id == str(chat_id)).first()
@@ -95,23 +96,27 @@ def find_conversation_by_telegram(
         logger.warning(f"No client found for telegram chat_id={chat_id}")
         return None
 
-    # Preferred strategy: topic-based routing (avoid cross-client mix-ups)
-    if message_thread_id:
-        conversation = (
-            db.query(Conversation)
-            .filter(
-                Conversation.client_id == settings.client_id,
-                Conversation.telegram_topic_id == message_thread_id,
-            )
-            .first()
+    if not message_thread_id:
+        logger.warning(f"Manager message missing topic_id: chat_id={chat_id}")
+        return None
+
+    conversation = (
+        db.query(Conversation)
+        .filter(
+            Conversation.client_id == settings.client_id,
+            Conversation.telegram_topic_id == message_thread_id,
         )
+        .first()
+    )
 
-        if not conversation:
-            logger.warning(
-                f"No conversation found for client={settings.client_id}, topic_id={message_thread_id}"
-            )
+    if conversation:
+        user = db.query(User).filter(User.id == conversation.user_id).first()
+        if not user:
+            logger.warning(f"Conversation {conversation.id} has no user")
             return None
-
+        if user.telegram_topic_id != message_thread_id:
+            user.telegram_topic_id = message_thread_id
+            db.flush()
         handover = (
             db.query(Handover)
             .filter(
@@ -121,33 +126,47 @@ def find_conversation_by_telegram(
             .order_by(Handover.created_at.desc())
             .first()
         )
+    else:
+        user = (
+            db.query(User)
+            .filter(
+                User.client_id == settings.client_id,
+                User.telegram_topic_id == message_thread_id,
+            )
+            .first()
+        )
 
-        if not handover:
-            logger.warning(f"No active handover for conversation {conversation.id} in topic {message_thread_id}")
+        if not user:
+            logger.warning(
+                f"No user found for client={settings.client_id}, topic_id={message_thread_id}"
+            )
             return None
 
-        return conversation, handover
-
-    # Fallback strategy (no topic): pick latest active handover for this client
-    handover = (
-        db.query(Handover)
-        .filter(
-            Handover.client_id == settings.client_id,
-            Handover.status.in_(["pending", "active"]),
+        handover = (
+            db.query(Handover)
+            .join(Conversation, Conversation.id == Handover.conversation_id)
+            .filter(
+                Conversation.user_id == user.id,
+                Handover.status.in_(["pending", "active"]),
+            )
+            .order_by(Handover.created_at.desc())
+            .first()
         )
-        .order_by(Handover.created_at.desc())
-        .first()
-    )
 
     if not handover:
-        logger.debug(f"No active handover for client {settings.client_id}")
+        logger.warning(f"No active handover for user {user.id} in topic {message_thread_id}")
         return None
 
-    conversation = db.query(Conversation).filter(Conversation.id == handover.conversation_id).first()
+    if not conversation and handover:
+        conversation = db.query(Conversation).filter(Conversation.id == handover.conversation_id).first()
 
     if not conversation:
         logger.warning(f"Conversation not found for handover {handover.id}")
         return None
+
+    if conversation.telegram_topic_id != message_thread_id:
+        conversation.telegram_topic_id = message_thread_id
+        db.flush()
 
     return conversation, handover
 
