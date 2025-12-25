@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect
@@ -34,7 +35,7 @@ from app.services.ai_service import (
     is_thanks_message,
 )
 from app.services.alert_service import alert_warning
-from app.services.chatflow_service import send_bot_response
+from app.services.chatflow_service import send_bot_response, verify_signed_media_path
 from app.services.conversation_service import (
     get_or_create_conversation,
     get_or_create_user,
@@ -124,8 +125,27 @@ MEDIA_RATE_LIMIT_DEFAULTS = {
     "bytes_mb": 30,
     "block_seconds": 900,
 }
-MEDIA_STORAGE_DEFAULT_DIR = "/home/zhan/truffles-media"
+MEDIA_STORAGE_DEFAULT_DIR = os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media")
 MEDIA_STORAGE_MAX_BYTES = 25 * 1024 * 1024
+
+
+@router.get("/media/{media_path:path}")
+async def serve_media(media_path: str, expires: int, sig: str):
+    """Serve locally stored media via signed URLs."""
+    normalized_path = (media_path or "").strip().lstrip("/")
+    if not normalized_path:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing media path")
+    if not verify_signed_media_path(normalized_path, expires, sig):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired signature")
+
+    base_dir = Path(MEDIA_STORAGE_DEFAULT_DIR).resolve()
+    target_path = (base_dir / normalized_path).resolve()
+    if base_dir not in target_path.parents and target_path != base_dir:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid media path")
+    if not target_path.exists() or not target_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found")
+
+    return FileResponse(target_path)
 
 
 class MediaInfo:

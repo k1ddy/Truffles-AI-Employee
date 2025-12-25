@@ -1,4 +1,8 @@
+import hashlib
+import hmac
 import os
+import time
+from urllib.parse import quote
 from typing import Optional
 from uuid import UUID
 
@@ -13,6 +17,10 @@ logger = get_logger("chatflow_service")
 
 CHATFLOW_API_URL = os.environ.get("CHATFLOW_API_URL", "https://app.chatflow.kz/api/v1/send-text")
 CHATFLOW_TOKEN = os.environ.get("CHATFLOW_TOKEN")
+CHATFLOW_MEDIA_BASE_URL = os.environ.get("CHATFLOW_MEDIA_BASE_URL", "https://app.chatflow.kz/api/v1")
+MEDIA_SIGNING_SECRET = os.environ.get("MEDIA_SIGNING_SECRET")
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
+MEDIA_URL_TTL_SECONDS = int(os.environ.get("MEDIA_URL_TTL_SECONDS", "3600"))
 
 
 def get_instance_id(db: Session, client_id: UUID) -> Optional[str]:
@@ -60,6 +68,113 @@ def send_whatsapp_message(
         alert_critical("WhatsApp send failed", {"jid": remote_jid, "error": str(e)})
         return False
 
+
+def _normalize_media_path(path: str) -> str:
+    normalized = (path or "").strip().lstrip("/")
+    return normalized.replace("\\", "/")
+
+
+def _sign_media_path(path: str, expires: int, secret: str) -> str:
+    payload = f"{path}:{expires}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+
+
+def build_signed_media_url(relative_path: str, *, ttl_seconds: Optional[int] = None) -> Optional[str]:
+    """Build signed public URL for media file under MEDIA_STORAGE_DEFAULT_DIR."""
+    if not MEDIA_SIGNING_SECRET:
+        logger.error("MEDIA_SIGNING_SECRET not configured")
+        return None
+    ttl = ttl_seconds if ttl_seconds is not None else MEDIA_URL_TTL_SECONDS
+    expires = int(time.time()) + max(int(ttl), 60)
+    normalized_path = _normalize_media_path(relative_path)
+    signature = _sign_media_path(normalized_path, expires, MEDIA_SIGNING_SECRET)
+    quoted_path = quote(normalized_path, safe="/")
+    return f"{PUBLIC_BASE_URL.rstrip('/')}/media/{quoted_path}?expires={expires}&sig={signature}"
+
+
+def verify_signed_media_path(relative_path: str, expires: int, signature: str) -> bool:
+    if not MEDIA_SIGNING_SECRET:
+        logger.error("MEDIA_SIGNING_SECRET not configured")
+        return False
+    if not signature:
+        return False
+    now_ts = int(time.time())
+    if expires < now_ts:
+        return False
+    normalized_path = _normalize_media_path(relative_path)
+    expected = _sign_media_path(normalized_path, expires, MEDIA_SIGNING_SECRET)
+    return hmac.compare_digest(expected, signature)
+
+
+def send_whatsapp_media(
+    instance_id: str,
+    remote_jid: str,
+    *,
+    media_type: str,
+    media_url: str,
+    caption: Optional[str] = None,
+) -> bool:
+    """Send media via ChatFlow API (image/audio/document/video)."""
+    if not CHATFLOW_TOKEN:
+        logger.error("ChatFlow token is missing (CHATFLOW_TOKEN env var not set)")
+        alert_critical("WhatsApp media send failed", {"jid": remote_jid, "error": "missing_chatflow_token"})
+        return False
+
+    if not instance_id or not remote_jid or not media_url:
+        logger.warning("send_whatsapp_media: missing instance_id, jid, or media_url")
+        return False
+
+    kind = (media_type or "").strip().lower()
+    endpoint = None
+    url_param = None
+    allow_caption = False
+    if kind in {"photo", "image"}:
+        endpoint = "send-image"
+        url_param = "imageurl"
+        allow_caption = True
+    elif kind in {"audio", "voice"}:
+        endpoint = "send-audio"
+        url_param = "audiourl"
+    elif kind in {"document", "doc"}:
+        endpoint = "send-doc"
+        url_param = "docurl"
+        allow_caption = True
+    elif kind == "video":
+        endpoint = "send-video"
+        url_param = "videourl"
+        allow_caption = True
+
+    if not endpoint or not url_param:
+        logger.warning(f"send_whatsapp_media: unsupported media_type={media_type}")
+        return False
+
+    url = f"{CHATFLOW_MEDIA_BASE_URL.rstrip('/')}/{endpoint}"
+    params = {
+        "token": CHATFLOW_TOKEN,
+        "instance_id": instance_id,
+        "jid": remote_jid,
+        url_param: media_url,
+    }
+    if allow_caption and caption:
+        params["caption"] = caption
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(url, params=params)
+            logger.info(
+                f"ChatFlow media response: status={response.status_code}, jid={remote_jid}, body={response.text[:200]}"
+            )
+            if response.status_code != 200:
+                return False
+            try:
+                payload = response.json()
+            except Exception:
+                return False
+            return bool(payload.get("success"))
+    except Exception as e:
+        logger.error(f"Error sending WhatsApp media: {e}")
+        alert_critical("WhatsApp media send failed", {"jid": remote_jid, "error": str(e)})
+        return False
 
 def send_bot_response(
     db: Session,

@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.logging_config import get_logger
 from app.models import ClientSettings, Conversation, Handover
-from app.schemas.telegram import TelegramUpdate, TelegramWebhookResponse
-from app.services.manager_message_service import process_manager_message
+from app.schemas.telegram import TelegramMessage, TelegramUpdate, TelegramWebhookResponse
+from app.services.manager_message_service import process_manager_media, process_manager_message
 from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
@@ -61,9 +61,13 @@ async def handle_telegram_webhook(request: Request, db: Session = Depends(get_db
         if update.callback_query:
             return await handle_callback_query(update, db)
 
-        # Handle text message from manager
-        if update.message and update.message.text:
-            return await handle_manager_message(update, db)
+        # Handle message from manager (media or text)
+        if update.message:
+            media_payload = _extract_media_payload(update.message)
+            if media_payload:
+                return await handle_manager_media(update, media_payload, db)
+            if update.message.text:
+                return await handle_manager_message(update, db)
 
         return TelegramWebhookResponse(success=True, message="No actionable content")
 
@@ -168,6 +172,165 @@ async def handle_manager_message(update: TelegramUpdate, db: Session) -> Telegra
                 message_thread_id=message_thread_id,
                 reply_to_message_id=message.message_id,
             )
+
+    return TelegramWebhookResponse(success=success, message=result_message)
+
+
+def _extract_media_payload(message: TelegramMessage) -> Optional[dict]:
+    if message.photo:
+        photo = message.photo[-1]
+        return {
+            "media_type": "photo",
+            "file_id": photo.file_id,
+            "file_name": None,
+            "mime_type": "image/jpeg",
+            "file_size": photo.file_size,
+            "caption": message.caption,
+            "telegram_message_id": message.message_id,
+        }
+    if message.document:
+        doc = message.document
+        return {
+            "media_type": "document",
+            "file_id": doc.file_id,
+            "file_name": doc.file_name,
+            "mime_type": doc.mime_type,
+            "file_size": doc.file_size,
+            "caption": message.caption,
+            "telegram_message_id": message.message_id,
+        }
+    if message.audio:
+        audio = message.audio
+        return {
+            "media_type": "audio",
+            "file_id": audio.file_id,
+            "file_name": audio.file_name,
+            "mime_type": audio.mime_type,
+            "file_size": audio.file_size,
+            "caption": message.caption,
+            "telegram_message_id": message.message_id,
+        }
+    if message.voice:
+        voice = message.voice
+        return {
+            "media_type": "voice",
+            "file_id": voice.file_id,
+            "file_name": None,
+            "mime_type": voice.mime_type,
+            "file_size": voice.file_size,
+            "caption": message.caption,
+            "telegram_message_id": message.message_id,
+        }
+    if message.video:
+        video = message.video
+        return {
+            "media_type": "video",
+            "file_id": video.file_id,
+            "file_name": None,
+            "mime_type": video.mime_type,
+            "file_size": video.file_size,
+            "caption": message.caption,
+            "telegram_message_id": message.message_id,
+        }
+    return None
+
+
+async def handle_manager_media(update: TelegramUpdate, media_payload: dict, db: Session) -> TelegramWebhookResponse:
+    message = update.message
+    if not message:
+        return TelegramWebhookResponse(success=False, message="No message payload")
+
+    logger.info(
+        "Manager media received",
+        extra={
+            "context": {
+                "chat_id": message.chat.id,
+                "thread_id": message.message_thread_id,
+                "media_type": media_payload.get("media_type"),
+            }
+        },
+    )
+
+    if message.from_user and message.from_user.is_bot:
+        return TelegramWebhookResponse(success=True, message="Ignoring bot message")
+
+    chat_id = message.chat.id
+    message_thread_id = message.message_thread_id
+
+    manager_name = "Unknown"
+    manager_id = 0
+    manager_username = None
+    if message.from_user:
+        manager_id = message.from_user.id
+        manager_name = message.from_user.first_name
+        if message.from_user.last_name:
+            manager_name += f" {message.from_user.last_name}"
+        manager_username = message.from_user.username
+    elif message.sender_chat:
+        manager_id = message.sender_chat.id
+        manager_name = message.sender_chat.title or manager_name
+        manager_username = message.sender_chat.username
+        logger.warning(
+            "Manager media missing from_user; using sender_chat identity",
+            extra={
+                "context": {
+                    "sender_chat_id": message.sender_chat.id,
+                    "sender_chat_title": message.sender_chat.title,
+                }
+            },
+        )
+    else:
+        logger.warning("Manager media missing from_user and sender_chat; auto-learning disabled")
+
+    bot_token = get_bot_token_by_chat(db, chat_id)
+    if not bot_token:
+        return TelegramWebhookResponse(success=False, message="Bot token not found")
+
+    success, result_message, took_handover, handover = process_manager_media(
+        db=db,
+        chat_id=chat_id,
+        manager_telegram_id=manager_id,
+        manager_name=manager_name,
+        media_type=media_payload.get("media_type") or "document",
+        file_id=media_payload.get("file_id") or "",
+        bot_token=bot_token,
+        caption=media_payload.get("caption"),
+        file_name=media_payload.get("file_name"),
+        mime_type=media_payload.get("mime_type"),
+        file_size=media_payload.get("file_size"),
+        manager_username=manager_username,
+        message_thread_id=message_thread_id,
+        telegram_message_id=media_payload.get("telegram_message_id"),
+    )
+
+    db.commit()
+
+    telegram = TelegramService(bot_token)
+    if success and took_handover and handover and handover.telegram_message_id:
+        telegram._make_request(
+            "editMessageReplyMarkup",
+            {
+                "chat_id": chat_id,
+                "message_id": handover.telegram_message_id,
+                "reply_markup": {
+                    "inline_keyboard": [[{"text": "Решено ✅", "callback_data": f"resolve_{handover.id}"}]]
+                },
+            },
+        )
+        if message_thread_id:
+            telegram.send_message(
+                chat_id=str(chat_id),
+                text=f"👤 <b>{manager_name}</b> взял заявку",
+                message_thread_id=message_thread_id,
+            )
+
+    if not success:
+        telegram.send_message(
+            chat_id=str(chat_id),
+            text="❌ Не доставлено",
+            message_thread_id=message_thread_id,
+            reply_to_message_id=message.message_id,
+        )
 
     return TelegramWebhookResponse(success=success, message=result_message)
 

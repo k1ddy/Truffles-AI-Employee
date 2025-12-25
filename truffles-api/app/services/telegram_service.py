@@ -215,6 +215,37 @@ class TelegramService:
             logger.warning(f"Failed to create topic: {result}")
             return None
 
+    def get_file_path(self, file_id: str) -> Optional[str]:
+        """Resolve Telegram file_id to file_path for downloading."""
+        result = self._make_request("getFile", {"file_id": file_id})
+        if not result.get("ok"):
+            logger.warning(f"Failed to get file path: {result}")
+            return None
+        file_path = result.get("result", {}).get("file_path")
+        return file_path if isinstance(file_path, str) and file_path else None
+
+    def download_file(self, file_path: str, target_path: Path) -> dict:
+        """Download a Telegram file_path to target_path."""
+        file_url = f"https://api.telegram.org/file/bot{self.bot_token}/{file_path}"
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        size_bytes = 0
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                with client.stream("GET", file_url) as response:
+                    response.raise_for_status()
+                    with target_path.open("wb") as handle:
+                        for chunk in response.iter_bytes():
+                            if not chunk:
+                                continue
+                            size_bytes += len(chunk)
+                            handle.write(chunk)
+        except Exception as exc:
+            logger.error(f"Telegram file download failed: {exc}")
+            if target_path.exists():
+                target_path.unlink()
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "path": str(target_path), "size_bytes": size_bytes}
+
 
 def build_handover_buttons(handover_id: UUID) -> dict:
     """Build inline keyboard for handover message."""

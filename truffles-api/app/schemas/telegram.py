@@ -20,6 +20,49 @@ class TelegramChat(BaseModel):
     is_forum: Optional[bool] = None
 
 
+class TelegramPhotoSize(BaseModel):
+    file_id: str
+    file_unique_id: str
+    width: int
+    height: int
+    file_size: Optional[int] = None
+
+
+class TelegramDocument(BaseModel):
+    file_id: str
+    file_unique_id: str
+    file_name: Optional[str] = None
+    mime_type: Optional[str] = None
+    file_size: Optional[int] = None
+
+
+class TelegramAudio(BaseModel):
+    file_id: str
+    file_unique_id: str
+    duration: int
+    file_name: Optional[str] = None
+    mime_type: Optional[str] = None
+    file_size: Optional[int] = None
+
+
+class TelegramVoice(BaseModel):
+    file_id: str
+    file_unique_id: str
+    duration: int
+    mime_type: Optional[str] = None
+    file_size: Optional[int] = None
+
+
+class TelegramVideo(BaseModel):
+    file_id: str
+    file_unique_id: str
+    width: int
+    height: int
+    duration: int
+    mime_type: Optional[str] = None
+    file_size: Optional[int] = None
+
+
 class TelegramMessage(BaseModel):
     message_id: int
     date: int
@@ -30,6 +73,12 @@ class TelegramMessage(BaseModel):
     reply_to_message: Optional[Any] = None
     sender_chat: Optional[TelegramChat] = None
     author_signature: Optional[str] = None
+    caption: Optional[str] = None
+    photo: Optional[list[TelegramPhotoSize]] = None
+    document: Optional[TelegramDocument] = None
+    audio: Optional[TelegramAudio] = None
+    voice: Optional[TelegramVoice] = None
+    video: Optional[TelegramVideo] = None
 
     class Config:
         # Allow "from" field from Telegram API

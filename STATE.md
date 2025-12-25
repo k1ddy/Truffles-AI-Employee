@@ -230,6 +230,24 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-25 — Manager→client media + signed URL + TTL cleanup
+
+**Что сделали:**
+- Добавили signed‑URL выдачу медиа (`/media/{path}`) и валидацию подписи.
+- Реализовали manager→client медиа: Telegram file_id → download → локальное хранение → ChatFlow send‑image/audio/doc/video.
+- Добавили admin endpoint `/admin/media/cleanup` для TTL‑очистки и алерта при превышении объёма.
+
+**Статус:**
+- Нужен деплой; требуется `MEDIA_SIGNING_SECRET` + `PUBLIC_BASE_URL` в env.
+
+**Разбор (шаблон):**
+- Боль/симптом: менеджер отправляет медиа → клиент его не получает (нет ChatFlow media API в коде).
+- Почему важно: менеджер не может передавать фото/документы клиенту → ломается процесс.
+- Диагноз: отсутствует Telegram download + public URL, нет ChatFlow send‑media.
+- Решение: download в `/home/zhan/truffles-media`, signed‑URL выдача, ChatFlow send‑media, TTL‑cleanup.
+- Проверка: менеджер шлёт фото/аудио/док/видео → клиент получает файл; `/media/...` отдаёт файл по подписи; cleanup удаляет старые файлы.
+- Осталось: деплой + настройка env; интеграционные проверки.
+
 ### 2025-12-25 — Human request escalation (rule-based fallback)
 
 **Что сделали:**

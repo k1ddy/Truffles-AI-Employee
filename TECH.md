@@ -78,9 +78,11 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `POST /webhook/{client_slug}` — входящие сообщения от ChatFlow (прямой путь, preferred)
 - `POST /webhook` — входящие сообщения (legacy wrapper)
 - `POST /telegram-webhook` — callbacks от Telegram
+- `GET /media/{path}` — выдача локально сохранённого медиа по подписи
 - `GET /health` — проверка здоровья
 - `GET /admin/health` — health/self-heal метрики
 - `POST /admin/outbox/process` — обработка ACK-first очереди (admin token)
+- `POST /admin/media/cleanup` — TTL‑очистка `/home/zhan/truffles-media` (admin token)
 - `POST /reminders/process` — обработка напоминаний
 
 **WhatsApp Webhook URL (ChatFlow):**
@@ -95,6 +97,13 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `ALERTS_ADMIN_TOKEN` — токен для admin/outbox эндпойнтов.
 - `CHATFLOW_RETRY_ATTEMPTS` — количество попыток отправки в ChatFlow (default: 3).
 - `CHATFLOW_RETRY_BACKOFF_SECONDS` — базовый backoff (сек) для ChatFlow (default: 0.5).
+- `CHATFLOW_MEDIA_BASE_URL` — базовый URL ChatFlow media API (default: https://app.chatflow.kz/api/v1).
+- `PUBLIC_BASE_URL` — публичный base URL API для signed media (default: http://localhost:8000).
+- `MEDIA_SIGNING_SECRET` — секрет подписи для `/media/*` (обязателен в проде).
+- `MEDIA_URL_TTL_SECONDS` — TTL подписи для `/media/*` (default: 3600).
+- `MEDIA_STORAGE_DIR` — базовый каталог медиа (default: /home/zhan/truffles-media).
+- `MEDIA_CLEANUP_TTL_DAYS` — TTL очистки локальных медиа (default: 7).
+- `MEDIA_STORAGE_WARN_BYTES` — порог алерта по объёму (default: 5GB).
 
 ---
 

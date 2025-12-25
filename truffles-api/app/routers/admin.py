@@ -1,6 +1,8 @@
 """Admin API endpoints for managing bot configuration."""
 
 import os
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -9,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Client, ClientSettings, Prompt
+from app.services.alert_service import alert_warning
 from app.services.health_service import check_and_heal_conversations, get_system_health
 from app.services.outbox_service import claim_pending_outbox_batches
 
@@ -17,6 +20,9 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 ALLOWED_BRANCH_MODES = {"by_instance", "ask_user", "hybrid"}
 ALLOWED_MANAGER_SCOPES = {"branch", "global"}
 ALLOWED_AUTO_APPROVE_ROLES = {"owner", "admin", "manager", "support"}
+MEDIA_STORAGE_DIR = Path(os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media"))
+MEDIA_CLEANUP_TTL_DAYS = int(os.environ.get("MEDIA_CLEANUP_TTL_DAYS", "7"))
+MEDIA_STORAGE_WARN_BYTES = int(os.environ.get("MEDIA_STORAGE_WARN_BYTES", str(5 * 1024 * 1024 * 1024)))
 
 
 # === SCHEMAS ===
@@ -74,6 +80,17 @@ class VersionResponse(BaseModel):
     build_time: Optional[str] = None
 
 
+class MediaCleanupResponse(BaseModel):
+    ttl_days: int
+    dry_run: bool
+    total_files: int
+    total_bytes: int
+    deleted_files: int
+    deleted_bytes: int
+    remaining_files: int
+    remaining_bytes: int
+
+
 # === PROMPT ENDPOINTS ===
 
 
@@ -83,6 +100,66 @@ def _require_admin_token(provided: Optional[str]) -> None:
         raise HTTPException(status_code=500, detail="ALERTS_ADMIN_TOKEN not configured")
     if not provided or provided != expected:
         raise HTTPException(status_code=401, detail="Invalid admin token")
+
+
+def _cleanup_media_storage(storage_dir: Path, ttl_days: int, dry_run: bool) -> dict:
+    cutoff_ts = (datetime.now(timezone.utc).timestamp()) - (ttl_days * 86400)
+    total_files = 0
+    total_bytes = 0
+    deleted_files = 0
+    deleted_bytes = 0
+
+    if not storage_dir.exists():
+        return {
+            "ttl_days": ttl_days,
+            "dry_run": dry_run,
+            "total_files": 0,
+            "total_bytes": 0,
+            "deleted_files": 0,
+            "deleted_bytes": 0,
+            "remaining_files": 0,
+            "remaining_bytes": 0,
+        }
+
+    for path in storage_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        total_files += 1
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        total_bytes += stat.st_size
+        if stat.st_mtime <= cutoff_ts:
+            deleted_files += 1
+            deleted_bytes += stat.st_size
+            if not dry_run:
+                try:
+                    path.unlink()
+                except OSError:
+                    continue
+
+    if not dry_run:
+        for path in sorted(storage_dir.rglob("*"), reverse=True):
+            if path.is_dir():
+                try:
+                    if not any(path.iterdir()):
+                        path.rmdir()
+                except OSError:
+                    continue
+
+    remaining_files = max(total_files - deleted_files, 0)
+    remaining_bytes = max(total_bytes - deleted_bytes, 0)
+    return {
+        "ttl_days": ttl_days,
+        "dry_run": dry_run,
+        "total_files": total_files,
+        "total_bytes": total_bytes,
+        "deleted_files": deleted_files,
+        "deleted_bytes": deleted_bytes,
+        "remaining_files": remaining_files,
+        "remaining_bytes": remaining_bytes,
+    }
 
 
 @router.get("/prompt/{client_slug}")
@@ -317,6 +394,31 @@ async def process_outbox(
         max_attempts=max_attempts,
         retry_backoff_seconds=retry_backoff_seconds,
     )
+
+
+# === MEDIA CLEANUP ===
+
+
+@router.post("/media/cleanup", response_model=MediaCleanupResponse)
+async def cleanup_media(
+    ttl_days: Optional[int] = None,
+    dry_run: bool = False,
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    _require_admin_token(x_admin_token)
+    effective_ttl = ttl_days if ttl_days is not None else MEDIA_CLEANUP_TTL_DAYS
+    effective_ttl = max(int(effective_ttl), 1)
+    results = _cleanup_media_storage(MEDIA_STORAGE_DIR, effective_ttl, dry_run)
+    if results["remaining_bytes"] > MEDIA_STORAGE_WARN_BYTES:
+        alert_warning(
+            "Media storage exceeds threshold",
+            {
+                "remaining_bytes": results["remaining_bytes"],
+                "threshold_bytes": MEDIA_STORAGE_WARN_BYTES,
+                "storage_dir": str(MEDIA_STORAGE_DIR),
+            },
+        )
+    return results
 
 
 # === HEALTH ENDPOINTS ===
