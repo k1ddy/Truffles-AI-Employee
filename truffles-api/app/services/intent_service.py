@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Any, Iterable, Tuple
 
 from app.logging_config import get_logger
-from app.services.ai_service import get_llm_provider
+from app.services.ai_service import get_llm_provider, normalize_for_matching
 
 logger = get_logger("intent_service")
 
@@ -54,10 +54,27 @@ CLASSIFY_PROMPT = """Классифицируй сообщение клиент�
 
 Ответ (одно слово):"""
 
+HUMAN_REQUEST_PATTERNS = (
+    re.compile(
+        r"\b(менеджер\w*|оператор\w*|админ\w*|администратор\w*|человек\w*|консультант\w*|поддержк\w*|саппорт\w*|жив(ой|ым|ому|ого|ые|ых|ую)\w*)\b"
+    ),
+    re.compile(r"\b(позов|позв|соедин|переключ)\w*\b"),
+)
+
+
+def is_human_request_message(message: str) -> bool:
+    normalized = normalize_for_matching(message)
+    if not normalized:
+        return False
+    return any(pattern.search(normalized) for pattern in HUMAN_REQUEST_PATTERNS)
+
 
 def classify_intent(message: str) -> Intent:
     """Classify user message intent using LLM."""
     try:
+        if is_human_request_message(message):
+            return Intent.HUMAN_REQUEST
+
         llm = get_llm_provider()
 
         prompt = CLASSIFY_PROMPT.format(message=message)

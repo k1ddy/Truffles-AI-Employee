@@ -1,4 +1,11 @@
-from app.services.intent_service import ESCALATION_INTENTS, REJECTION_INTENTS, Intent, is_rejection, should_escalate
+from app.services.intent_service import (
+    ESCALATION_INTENTS,
+    REJECTION_INTENTS,
+    Intent,
+    is_human_request_message,
+    is_rejection,
+    should_escalate,
+)
 
 
 class TestIntentEnum:
@@ -62,3 +69,14 @@ class TestRejectionIntents:
     def test_only_one_rejection_intent(self):
         assert len(REJECTION_INTENTS) == 1
         assert Intent.REJECTION in REJECTION_INTENTS
+
+
+class TestHumanRequestHeuristics:
+    def test_detects_manager_request(self):
+        assert is_human_request_message("можете позвать менеджера пожалуйста") is True
+
+    def test_detects_live_operator_request(self):
+        assert is_human_request_message("хочу поговорить с живым человеком") is True
+
+    def test_ignores_regular_question(self):
+        assert is_human_request_message("сколько стоит маникюр?") is False
