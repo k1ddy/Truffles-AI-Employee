@@ -13,6 +13,10 @@ class WebhookMetadata(BaseModel):
         default=None,
         validation_alias=AliasChoices("instanceId", "instance_id", "instance"),
     )
+    forwarded_to_telegram: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("forwarded_to_telegram", "forwardedToTelegram"),
+    )
 
 
 class WebhookBody(BaseModel):

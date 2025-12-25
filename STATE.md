@@ -213,6 +213,24 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-25 — Fast-forward inbound to Telegram (pending/manager_active)
+
+**Что сделали:**
+- В enqueue_only: если `state=pending/manager_active` и есть `telegram_topic_id` — сообщение сразу форвардится в Telegram.
+- В outbox: переносим `forwarded_to_telegram` и пропускаем повторный форвард.
+- Добавили поле `forwarded_to_telegram` в `WebhookMetadata`.
+
+**Статус:**
+- Нужен деплой.
+
+**Разбор (шаблон):**
+- Боль/симптом: при active/pending сообщение клиента доходит до менеджера с задержкой outbox.
+- Почему важно: менеджер отвечает медленнее → хуже конверсия записи.
+- Диагноз: форвард в Telegram делается только при обработке outbox.
+- Решение: fast-forward на входе + флаг, чтобы не было дублей.
+- Проверка: написать клиентом в WA при `manager_active` и сравнить задержку.
+- Осталось: деплой и проверка на проде.
+
 ### 2025-12-25 — Multi-intent booking (batch-aware)
 
 **Что сделали:**

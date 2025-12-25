@@ -1004,12 +1004,15 @@ async def _process_outbox_rows(
         )
         outbox_ids = [row.get("id") for row in batch_sorted]
         message_texts = []
+        forwarded_in_batch = False
         for row in batch_sorted:
             payload_json = row.get("payload_json") or {}
             try:
                 payload = WebhookRequest.model_validate(payload_json)
             except Exception:
                 continue
+            if payload.body.metadata and payload.body.metadata.forwarded_to_telegram:
+                forwarded_in_batch = True
             text = payload.body.message or ""
             if text.strip():
                 message_texts.append(text.strip())
@@ -1018,6 +1021,8 @@ async def _process_outbox_rows(
         combined_text = " ".join(message_texts).strip()
         if combined_text:
             base_payload.body.message = combined_text
+        if forwarded_in_batch and base_payload.body.metadata:
+            base_payload.body.metadata.forwarded_to_telegram = True
 
         logger.info(
             "Outbox processing start",
@@ -1261,6 +1266,43 @@ async def _handle_webhook_payload(
         )
 
         if enqueue_only:
+            if (
+                conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]
+                and conversation.telegram_topic_id
+            ):
+                bot_token, chat_id = get_telegram_credentials(db, client.id)
+                if bot_token and chat_id:
+                    telegram = TelegramService(bot_token)
+                    result = telegram.send_message(
+                        chat_id=chat_id,
+                        text=f"👤 <b>Клиент:</b> {message_text}",
+                        message_thread_id=conversation.telegram_topic_id,
+                    )
+                    if result.get("ok"):
+                        if metadata:
+                            metadata.forwarded_to_telegram = True
+                        logger.info(
+                            "Fast-forwarded inbound message to Telegram",
+                            extra={
+                                "context": {
+                                    "conversation_id": str(conversation.id),
+                                    "state": conversation.state,
+                                    "telegram_topic_id": conversation.telegram_topic_id,
+                                }
+                            },
+                        )
+                    else:
+                        logger.warning(
+                            "Fast-forward to Telegram failed",
+                            extra={
+                                "context": {
+                                    "conversation_id": str(conversation.id),
+                                    "state": conversation.state,
+                                    "telegram_topic_id": conversation.telegram_topic_id,
+                                    "error": result.get("description") or result.get("error"),
+                                }
+                            },
+                        )
             inbound_message_id = build_inbound_message_id(
                 message_id, remote_jid, metadata.timestamp if metadata else None, message_text
             )
@@ -1451,8 +1493,10 @@ async def _handle_webhook_payload(
     if conversation.bot_status == "muted" or (conversation.bot_muted_until and conversation.bot_muted_until > now):
         is_muted = True
 
+    forwarded_to_telegram = bool(metadata.forwarded_to_telegram) if metadata else False
+
     # 7. Forward to topic if pending/manager_active (always, even if muted)
-    if conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]:
+    if conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value] and not forwarded_to_telegram:
         if conversation.telegram_topic_id:
             bot_token, chat_id = get_telegram_credentials(db, client.id)
             if bot_token and chat_id:
