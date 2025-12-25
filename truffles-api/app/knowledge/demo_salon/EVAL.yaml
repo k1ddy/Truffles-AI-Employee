@@ -867,3 +867,79 @@ eval_cases:
     must_not:
     - сам виноват
     - ничего не сделаем
+- id: E076
+  user: Терминал есть?
+  expected:
+    action: escalate
+    intent: payment
+    must_tell_user_any:
+    - администратор
+    - уточню
+    must_not:
+    - наличные
+    - Kaspi
+    - Visa
+    - Mastercard
+    - QR
+- id: E077
+  user: Нужен счёт на оплату
+  expected:
+    action: escalate
+    intent: payment
+    must_tell_user_any:
+    - администратор
+    - уточню
+    must_not:
+    - наличные
+    - Kaspi
+    - Visa
+    - Mastercard
+    - QR
+- id: E078
+  user: Можно перенести запись на другой день?
+  expected:
+    action: escalate
+    intent: reschedule
+    must_tell_user_any:
+    - администратор
+    - передам
+- id: E079
+  user: Можно поменять дату записи?
+  expected:
+    action: escalate
+    intent: reschedule
+    must_tell_user_any:
+    - администратор
+    - передам
+- id: E080
+  user: Кормлю грудью, можно кератин?
+  expected:
+    action: escalate
+    intent: medical
+    must_tell_user_any:
+    - консультац
+    - администратор
+- id: E081
+  user: Будет ожог или сильная краснота?
+  expected:
+    action: escalate
+    intent: medical
+    must_tell_user_any:
+    - консультац
+    - администратор
+- id: E082
+  user: Мастер опоздал на 20 минут
+  expected:
+    action: escalate
+    intent: complaint
+    must_tell_user_any:
+    - администратор
+    - передам
+- id: E083
+  user: Есть акции?
+  expected:
+    action: reply
+    intent: promotions
+    must_include_any:
+    - Официальные акции
+    - 10%

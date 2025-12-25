@@ -1,15 +1,45 @@
 #!/usr/bin/env python3
 """Manual sync demo_salon to Qdrant - workaround for nested loop bug"""
-import requests
 import hashlib
+import os
 import re
+import subprocess
+
+import requests
 from pathlib import Path
 
 CLIENT_SLUG = "demo_salon"
 
-# Use Docker network IPs
-BGE_URL = "http://172.24.0.8:80/embed"  # bge-m3 container
-QDRANT_URL = "http://172.24.0.3:6333"   # qdrant container
+def _resolve_docker_ip(container_name: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", container_name],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return None
+    ip = result.stdout.strip()
+    return ip or None
+
+
+BGE_URL = os.environ.get("BGE_M3_URL")
+if not BGE_URL:
+    bge_ip = _resolve_docker_ip("bge-m3")
+    BGE_URL = f"http://{bge_ip}:80/embed" if bge_ip else "http://bge-m3:80/embed"
+
+QDRANT_URL = os.environ.get("QDRANT_URL")
+if not QDRANT_URL:
+    qdrant_ip = _resolve_docker_ip("truffles_qdrant_1")
+    QDRANT_URL = f"http://{qdrant_ip}:6333" if qdrant_ip else "http://qdrant:6333"
+
+QDRANT_API_KEY = (
+    os.environ.get("QDRANT_API_KEY")
+    or os.environ.get("QDRANT__SERVICE__API_KEY")
+    or "REDACTED_PASSWORD"
+)
+QDRANT_API_KEY = QDRANT_API_KEY.strip()
 
 # BGE-M3 embedding
 def get_embedding(text):
@@ -20,7 +50,7 @@ def get_embedding(text):
 def upsert_to_qdrant(points):
     resp = requests.put(
         f"{QDRANT_URL}/collections/truffles_knowledge/points",
-        headers={"api-key": "REDACTED_PASSWORD", "Content-Type": "application/json"},
+        headers={"api-key": QDRANT_API_KEY, "Content-Type": "application/json"},
         json={"points": points}
     )
     return resp.json()

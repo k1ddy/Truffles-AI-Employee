@@ -9,18 +9,45 @@
   python3 sync_client.py demo_salon
   python3 sync_client.py demo_salon /path/to/docs
 """
-import subprocess
-import requests
 import hashlib
 import re
 import sys
 import os
+import subprocess
+
+import requests
 
 # === КОНФИГ ===
-BGE_URL = "http://172.24.0.8:80/embed"
-QDRANT_URL = "http://172.24.0.3:6333"
+def _resolve_docker_ip(container_name: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", container_name],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return None
+    ip = result.stdout.strip()
+    return ip or None
+
+
+BGE_URL = os.environ.get("BGE_M3_URL")
+if not BGE_URL:
+    bge_ip = _resolve_docker_ip("bge-m3")
+    BGE_URL = f"http://{bge_ip}:80/embed" if bge_ip else "http://bge-m3:80/embed"
+
+QDRANT_URL = os.environ.get("QDRANT_URL")
+if not QDRANT_URL:
+    qdrant_ip = _resolve_docker_ip("truffles_qdrant_1")
+    QDRANT_URL = f"http://{qdrant_ip}:6333" if qdrant_ip else "http://qdrant:6333"
 QDRANT_COLLECTION = "truffles_knowledge"
-QDRANT_API_KEY = "REDACTED_PASSWORD"
+QDRANT_API_KEY = (
+    os.environ.get("QDRANT_API_KEY")
+    or os.environ.get("QDRANT__SERVICE__API_KEY")
+    or "REDACTED_PASSWORD"
+)
+QDRANT_API_KEY = QDRANT_API_KEY.strip()
 
 def get_embedding(text):
     """Получить embedding от BGE-M3"""

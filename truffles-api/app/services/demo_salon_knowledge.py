@@ -363,11 +363,23 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
         "red",
         "ред",
         "рассроч",
+        "долям",
+        "pay",
         "оплат",
         "предоплат",
         "перевод",
+        "перечис",
+        "квитанц",
         "qr",
         "карт",
+        "терминал",
+        "эквайр",
+        "касса",
+        "счет",
+        "счёт",
+        "реквизит",
+        "iban",
+        "swift",
         "налич",
         "безнал",
         "чек",
@@ -379,13 +391,21 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
         "перенес",
         "перенести",
         "перенос",
+        "переносит",
+        "переносить",
         "перезапис",
         "перезапиш",
+        "перепис",
         "сдвин",
+        "передвин",
+        "перемест",
         "изменить запись",
         "поменять время",
+        "поменять дату",
+        "изменить дату",
         "на другое время",
         "на другой день",
+        "на другую дату",
     ]
     if _contains_any(normalized, reschedule_keywords):
         return "policy_reschedule"
@@ -394,7 +414,34 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
     if _contains_any(normalized, cancel_keywords):
         return "policy_cancel"
 
-    medical_keywords = ["беремен", "аллерг", "противопоказ", "кож", "дермат", "болезн"]
+    medical_keywords = [
+        "беремен",
+        "аллерг",
+        "противопоказ",
+        "кормл",
+        "лактац",
+        "ожог",
+        "ожг",
+        "жжет",
+        "жжёт",
+        "печет",
+        "печёт",
+        "болит",
+        "больно",
+        "кров",
+        "воспал",
+        "покрасн",
+        "сып",
+        "реакц",
+        "раздраж",
+        "анестез",
+        "обезбол",
+        "кож",
+        "дермат",
+        "болезн",
+        "лиценз",
+        "медобраз",
+    ]
     if _contains_any(normalized, medical_keywords):
         return "policy_medical"
 
@@ -404,9 +451,24 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
         "претенз",
         "разочар",
         "плохо",
+        "недовол",
+        "ужас",
+        "кошмар",
+        "хам",
+        "грубо",
         "брак",
         "треснул",
         "отпал",
+        "слезл",
+        "сломал",
+        "испор",
+        "задерж",
+        "жду уже",
+        "не приш",
+        "сожг",
+        "обожг",
+        "порез",
+        "кров",
         "не слыш",
         "одно и то же",
         "одно и тоже",
@@ -414,7 +476,7 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
     if "complaint" in phrase_intents or _contains_any(normalized, complaint_keywords):
         return "policy_complaint"
 
-    discount_keywords = ["скидк", "дешевл", "подешевле", "купон"]
+    discount_keywords = ["скидк", "скидоч", "скидос", "дешевл", "подешевле", "купон", "акци", "промо", "промокод", "торг", "уступ"]
     if _contains_any(normalized, discount_keywords):
         return "policy_discount"
 

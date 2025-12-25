@@ -470,6 +470,9 @@ def generate_ai_response(
     if is_acknowledgement_message(user_message):
         return Result.success((ACKNOWLEDGEMENT_RESPONSE, "medium"))
 
+    if is_bot_status_question(user_message):
+        return Result.success((BOT_STATUS_RESPONSE, "medium"))
+
     followup_confirmation = False
     history: List[dict] | None = None
     if is_low_signal_message(user_message):
