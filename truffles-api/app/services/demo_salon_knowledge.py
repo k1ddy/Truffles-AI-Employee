@@ -699,6 +699,16 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
     return None
 
 
+def get_demo_salon_price_reply(message: str) -> str | None:
+    normalized = _normalize_text(message)
+    if not normalized:
+        return None
+    price_item = _find_best_price_item(message)
+    if not price_item:
+        return None
+    return format_reply_from_truth("price_query", {"price_item": price_item["item"]})
+
+
 def get_truth_reply(message: str) -> str | None:
     decision = get_demo_salon_decision(message)
     if decision and decision.action == "reply":

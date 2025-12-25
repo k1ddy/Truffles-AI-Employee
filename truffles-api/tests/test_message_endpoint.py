@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.database import get_db
 from app.main import app
+from app.routers import webhook as webhook_router
 from app.schemas.message import MessageRequest, MessageResponse
 from app.services.message_service import select_handover_user_message
 
@@ -173,3 +174,15 @@ class TestSelectHandoverUserMessage:
         result = select_handover_user_message(db, uuid4(), "позови менеджера")
 
         assert result == "позови менеджера"
+
+
+class TestBatchBookingSignals:
+    def test_booking_signal_across_messages(self):
+        messages = ["сколько стоит маникюр", "на завтра в 5"]
+        assert webhook_router._has_booking_signal(messages) is True
+
+    def test_booking_updates_across_messages(self):
+        booking = {"active": True}
+        updated = webhook_router._update_booking_from_messages(booking, ["маникюр", "на завтра в 5"])
+        assert updated.get("service")
+        assert updated.get("datetime")

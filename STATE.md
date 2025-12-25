@@ -38,7 +38,7 @@
 - [ ] **⚠️ Эскалация всё ещё частая на реальные вопросы** — KB неполная, score часто < 0.5 → создаётся заявка; мелкие сообщения ("спасибо", "ок?") больше не должны создавать заявки (whitelist + guardrails)
 - [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant работает (логи 2025-12-25: "Owner response detected" / "Added to knowledge"), но нет модерации/метрик
 - [ ] **⚠️ Ответы медленные (outbox)** — замер: SENT за последний час avg 17s, p90 25s, max 26s (created_at → updated_at); цель < 10s не достигнута
-- [ ] **⚠️ Склейка сообщений ломает multi‑intent** — demo_salon: price‑ответ перехватывает до booking; “цена+запись” в одном батче даёт только цену → запись теряется
+- [ ] **⚠️ Склейка сообщений ломает multi‑intent** — demo_salon: price‑ответ перехватывает до booking; “цена+запись” в одном батче даёт только цену → запись теряется (фикс в коде, нужен деплой)
 - [ ] **⚠️ Закрепы заявок в Telegram** — после "Решено" закреп должен сниматься; сейчас иногда остаётся (проверить обработку `unpin` и message_id)
 - [ ] **⚠️ Дубли заявок на одного клиента** — владельцу неудобно; нужен guard: при open handover не создавать новый, а писать в текущий топик
 - [ ] **Branch подключен частично** — webhook ставит `conversation.branch_id`, но Telegram per branch + RAG фильтры ещё не wired → `SPECS/MULTI_TENANT.md`
@@ -212,6 +212,25 @@
 ---
 
 ## ИСТОРИЯ СЕССИЙ
+
+### 2025-12-25 — Multi-intent booking (batch-aware)
+
+**Что сделали:**
+- Добавили batch-aware booking: детект записи по нескольким сообщениям (service+datetime) + предзаполнение слотов.
+- Demo_salon: эскалация policy по каждому сообщению в батче; price sidecar при booking, если найдена конкретная услуга.
+- Outbox: передаёт список сообщений в обработчик (batch_messages).
+- Тесты: добавлены unit-тесты на batch booking helpers.
+
+**Статус:**
+- Нужен деплой; `pytest` недоступен в окружении.
+
+**Разбор (шаблон):**
+- Боль/симптом: multi-intent “цена+запись” теряется при склейке.
+- Почему важно: теряются лиды на запись, растут эскалации.
+- Диагноз: coalescing + demo_salon truth gate отвечают ценой до booking; booking детект только по ключевым словам.
+- Решение: batch-aware сигналы + booking prefill; demo_salon policy → сначала, price sidecar → вместе с booking.
+- Проверка: `pytest truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_demo_salon_eval.py` (не запускалось: `pytest` отсутствует).
+- Осталось: деплой и проверка на проде.
 
 ### 2025-12-25 — Media fallback (non-text)
 
@@ -987,4 +1006,4 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 
 ---
 
-*Последнее обновление: 2025-12-24*
+*Последнее обновление: 2025-12-25*

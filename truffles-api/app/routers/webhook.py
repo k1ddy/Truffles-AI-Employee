@@ -32,7 +32,7 @@ from app.services.conversation_service import (
     get_or_create_conversation,
     get_or_create_user,
 )
-from app.services.demo_salon_knowledge import get_demo_salon_decision
+from app.services.demo_salon_knowledge import get_demo_salon_decision, get_demo_salon_price_reply
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
     DomainIntent,
@@ -556,6 +556,22 @@ def _normalize_text(text: str) -> str:
     return normalized
 
 
+def _coerce_batch_messages(message_text: str, batch_messages: list[str] | None) -> list[str]:
+    raw_messages = batch_messages if batch_messages else ([message_text] if message_text else [])
+    cleaned: list[str] = []
+    for msg in raw_messages:
+        if not msg:
+            continue
+        text = msg.strip()
+        if text:
+            cleaned.append(text)
+    if not cleaned and message_text:
+        fallback = message_text.strip()
+        if fallback:
+            cleaned.append(fallback)
+    return cleaned
+
+
 def _contains_any(normalized: str, keywords: list[str]) -> bool:
     return any(keyword in normalized for keyword in keywords)
 
@@ -590,6 +606,18 @@ def _extract_datetime(text: str) -> str | None:
     if _contains_any(normalized, DATE_KEYWORDS) or TIME_PATTERN.search(text):
         return text.strip()
     return None
+
+
+def _has_booking_signal(messages: list[str]) -> bool:
+    if not messages:
+        return False
+    if any(_is_booking_request(message) for message in messages):
+        return True
+    if len(messages) < 2:
+        return False
+    has_service = any(_extract_service(message) for message in messages)
+    has_datetime = any(_extract_datetime(message) for message in messages)
+    return has_service and has_datetime
 
 
 def _get_conversation_context(conversation: Conversation) -> dict:
@@ -830,6 +858,13 @@ def _update_booking_from_message(booking: dict, message_text: str) -> dict:
     return booking
 
 
+def _update_booking_from_messages(booking: dict, messages: list[str]) -> dict:
+    updated = dict(booking)
+    for message in messages:
+        updated = _update_booking_from_message(updated, message)
+    return updated
+
+
 def _next_booking_prompt(booking: dict) -> tuple[dict, str | None]:
     booking = dict(booking)
     if not booking.get("service"):
@@ -845,11 +880,25 @@ def _next_booking_prompt(booking: dict) -> tuple[dict, str | None]:
     return booking, None
 
 
+def _combine_sidecar(primary: str, sidecar: str | None) -> str:
+    if not sidecar:
+        return primary
+    return f"{sidecar}\n\n{primary}"
+
+
 def _build_booking_summary(booking: dict) -> str:
     service = booking.get("service") or "не указано"
     datetime_pref = booking.get("datetime") or "не указано"
     name = booking.get("name") or "не указано"
     return f"Запись: услуга={service}; дата/время={datetime_pref}; имя={name}."
+
+
+def _get_demo_salon_escalation_decision(messages: list[str]):
+    for message in messages:
+        decision = get_demo_salon_decision(message)
+        if decision and decision.action == "escalate":
+            return decision
+    return None
 
 
 def find_active_conversation_by_channel_ref(db: Session, client_id, remote_jid: str) -> Conversation | None:
@@ -990,6 +1039,7 @@ async def _process_outbox_rows(
                 enforce_secret=False,
                 skip_persist=True,
                 conversation_id=UUID(conversation_id),
+                batch_messages=message_texts,
             )
             if not response.success:
                 raise RuntimeError(response.message)
@@ -1113,6 +1163,7 @@ async def _handle_webhook_payload(
     enqueue_only: bool = False,
     skip_persist: bool = False,
     conversation_id: UUID | None = None,
+    batch_messages: list[str] | None = None,
 ) -> WebhookResponse:
     """Shared webhook processing for inbound ChatFlow payloads."""
     logger.info(f"Webhook received: client_slug={payload.client_slug}")
@@ -1149,6 +1200,9 @@ async def _handle_webhook_payload(
     if is_media_without_text:
         media_label = message_type.lower() if message_type else "media"
         message_text = f"[{media_label}]"
+
+    batch_messages_provided = batch_messages is not None
+    batch_messages = _coerce_batch_messages(message_text, batch_messages)
 
     outbound_idempotency_key = message_id or build_inbound_message_id(
         message_id,
@@ -1498,6 +1552,8 @@ async def _handle_webhook_payload(
                     },
                 )
                 message_text = " ".join(buffered_messages)
+                if not batch_messages_provided:
+                    batch_messages = _coerce_batch_messages(message_text, buffered_messages)
                 append_user_message = False
 
         # Re-check state after waiting: manager could take the request during debounce pause.
@@ -1593,11 +1649,82 @@ async def _handle_webhook_payload(
                 context = _set_handover_confirmation(context, None)
                 _set_conversation_context(conversation, context)
 
+    batch_messages = _coerce_batch_messages(message_text, batch_messages)
+    booking_messages = batch_messages
+    booking_context = None
+    booking = None
+    booking_active = False
+    if conversation.state == ConversationState.BOT_ACTIVE.value:
+        booking_context = _get_conversation_context(conversation)
+        booking = _get_booking_context(booking_context)
+        booking_active = bool(booking.get("active"))
+    booking_signal = _has_booking_signal(booking_messages)
+    booking_wants_flow = (
+        conversation.state == ConversationState.BOT_ACTIVE.value and (booking_active or booking_signal)
+    )
+
     # 9.03 Demo salon policy/truth gate (before booking/RAG).
+    demo_price_sidecar = None
     if payload.client_slug == "demo_salon" and conversation.state in [
         ConversationState.BOT_ACTIVE.value,
         ConversationState.PENDING.value,
     ]:
+        decision = _get_demo_salon_escalation_decision(booking_messages)
+        if decision:
+            bot_response = decision.response
+            _reset_low_confidence_retry(conversation)
+
+            result_message = "Demo salon reply sent"
+            if decision.action == "escalate":
+                if conversation.state == ConversationState.BOT_ACTIVE.value:
+                    result = escalate_to_pending(
+                        db=db,
+                        conversation=conversation,
+                        user_message=message_text,
+                        trigger_type="policy",
+                        trigger_value=decision.intent or "policy",
+                    )
+                    if result.ok:
+                        handover = result.value
+                        telegram_sent = send_telegram_notification(
+                            db=db,
+                            handover=handover,
+                            conversation=conversation,
+                            user=user,
+                            message=message_text,
+                        )
+                        result_message = (
+                            f"Demo salon policy escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                        )
+                    else:
+                        result_message = f"Demo salon policy escalation failed: {result.error}"
+                else:
+                    result_message = "Demo salon policy escalation skipped (already pending)"
+
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = _send_response(bot_response)
+            if not sent:
+                result_message = f"{result_message}; response_send=failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        if booking_wants_flow:
+            for msg in booking_messages:
+                price_reply = get_demo_salon_price_reply(msg)
+                if price_reply:
+                    demo_price_sidecar = price_reply
+                    break
+
+    if (
+        payload.client_slug == "demo_salon"
+        and conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value]
+        and not booking_wants_flow
+    ):
         decision = get_demo_salon_decision(message_text)
         if decision:
             bot_response = decision.response
@@ -1644,13 +1771,13 @@ async def _handle_webhook_payload(
 
     # 9.05 Booking flow: collect slots before intent/LLM.
     if conversation.state == ConversationState.BOT_ACTIVE.value:
-        context = _get_conversation_context(conversation)
-        booking = _get_booking_context(context)
-        booking_active = bool(booking.get("active"))
+        context = booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
+        booking_state = booking if isinstance(booking, dict) else _get_booking_context(context)
+        booking_active = bool(booking_state.get("active"))
 
         if booking_active and _is_booking_cancel(message_text):
-            booking = {"active": False}
-            context = _set_booking_context(context, booking)
+            booking_state = {"active": False}
+            context = _set_booking_context(context, booking_state)
             _set_conversation_context(conversation, context)
             bot_response = MSG_BOOKING_CANCELLED
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
@@ -1661,19 +1788,19 @@ async def _handle_webhook_payload(
                 success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
             )
 
-        if booking_active or _is_booking_request(message_text):
+        if booking_active or booking_signal:
             if not booking_active:
-                booking = dict(booking)
-                booking["active"] = True
-                booking["started_at"] = now.isoformat()
+                booking_state = dict(booking_state)
+                booking_state["active"] = True
+                booking_state["started_at"] = now.isoformat()
 
-            booking = _update_booking_from_message(booking, message_text)
-            booking, prompt = _next_booking_prompt(booking)
-            context = _set_booking_context(context, booking)
+            booking_state = _update_booking_from_messages(booking_state, booking_messages)
+            booking_state, prompt = _next_booking_prompt(booking_state)
+            context = _set_booking_context(context, booking_state)
             _set_conversation_context(conversation, context)
 
             if prompt:
-                bot_response = prompt
+                bot_response = _combine_sidecar(prompt, demo_price_sidecar)
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                 sent = _send_response(bot_response)
                 result_message = "Booking slot requested" if sent else "Booking slot response failed"
@@ -1682,7 +1809,7 @@ async def _handle_webhook_payload(
                     success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
                 )
 
-            booking_summary = _build_booking_summary(booking)
+            booking_summary = _build_booking_summary(booking_state)
             result = escalate_to_pending(
                 db=db,
                 conversation=conversation,
@@ -1700,7 +1827,7 @@ async def _handle_webhook_payload(
                     user=user,
                     message=booking_summary,
                 )
-                bot_response = MSG_ESCALATED
+                bot_response = _combine_sidecar(MSG_ESCALATED, demo_price_sidecar)
                 result_message = f"Booking escalation, telegram={'sent' if telegram_sent else 'failed'}"
             else:
                 bot_response = MSG_AI_ERROR
