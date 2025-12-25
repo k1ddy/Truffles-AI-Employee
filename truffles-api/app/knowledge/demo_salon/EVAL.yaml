@@ -1,3 +1,18 @@
+# Template (copy & edit):
+# - id: EXXX
+#   user: "текст клиента"
+#   expected:
+#     action: reply|escalate
+#     intent: <intent>
+#     must_include: ["обязательная фраза"]
+#     must_include_any: ["вариант 1", "вариант 2"]
+#     must_not: ["запрещено"]
+#     must_tell_user: ["обязательное сообщение"]
+#     must_tell_user_any: ["вариант 1", "вариант 2"]
+#     collect: ["поле 1", "поле 2"]
+#     must_do:
+#     - ask_fields_missing
+#   notes: "контекст/исключения/мульти-интент"
 eval_cases:
 - id: E001
   user: Привет! Сколько стоит маникюр + гель-лак?

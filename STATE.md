@@ -18,6 +18,13 @@
 - Деплой: синк кода в `/home/zhan/truffles-main/truffles-api` → `bash /home/zhan/restart_api.sh` (build+restart).
 - Инфра compose: `/home/zhan/infrastructure/docker-compose.yml` + `/home/zhan/infrastructure/docker-compose.truffles.yml`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 
+### КЛЮЧЕВЫЕ МОЗГИ / РИСКИ / ПРОВЕРКИ (быстрый чек)
+- Мозги: `outbox → _handle_webhook_payload → policy/truth → booking → intent → RAG/LLM`.
+- Риски: payment/reschedule/medical/complaint — только эскалация; не озвучивать способы оплаты; branch‑gate для цен.
+- Проверки качества: `EVAL.yaml` + `pytest truffles-api/tests/test_<client>_eval.py` + sync KB (`ops/sync_client.py`).
+- Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
+- Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
+
 ### Что мешало быстрому входу (зафиксировано)
 - Было несколько корней кода и часть ссылок указывала на несуществующие пути (`/home/zhan/truffles`, `/home/zhan/Truffles-AI-Employee`) → команды/доки расходились.
 - Inbound payload для медиа: в коде добавлено сохранение + ответ, но на проде без деплоя всё ещё отбрасывается.
