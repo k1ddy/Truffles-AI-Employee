@@ -44,7 +44,7 @@ from app.services.intent_service import (
     should_escalate,
 )
 from app.services.message_service import generate_bot_response, save_message
-from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
+from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message, mark_outbox_status
 from app.services.state_machine import ConversationState
 from app.services.state_service import escalate_to_pending, manager_resolve
 from app.services.telegram_service import TelegramService
@@ -925,6 +925,126 @@ def _get_request_webhook_secret(request: Request) -> str | None:
     if query_secret:
         return query_secret.strip()
     return None
+
+
+async def _process_outbox_rows(
+    db: Session,
+    rows: list[dict],
+    *,
+    max_attempts: int,
+    retry_backoff_seconds: float,
+) -> dict[str, int]:
+    results = {"claimed": len(rows), "sent": 0, "failed": 0, "retry_scheduled": 0}
+    if not rows:
+        return results
+
+    batches: dict[str, list[dict]] = {}
+    for row in rows:
+        conversation_id = row.get("conversation_id")
+        if not conversation_id:
+            continue
+        batches.setdefault(str(conversation_id), []).append(row)
+
+    for conversation_id, batch in batches.items():
+        batch_sorted = sorted(
+            batch,
+            key=lambda r: r.get("created_at")
+            if isinstance(r.get("created_at"), datetime)
+            else datetime.min.replace(tzinfo=timezone.utc),
+        )
+        outbox_ids = [row.get("id") for row in batch_sorted]
+        message_texts = []
+        for row in batch_sorted:
+            payload_json = row.get("payload_json") or {}
+            try:
+                payload = WebhookRequest.model_validate(payload_json)
+            except Exception:
+                continue
+            text = payload.body.message or ""
+            if text.strip():
+                message_texts.append(text.strip())
+
+        base_payload = WebhookRequest.model_validate(batch_sorted[-1].get("payload_json") or {})
+        combined_text = " ".join(message_texts).strip()
+        if combined_text:
+            base_payload.body.message = combined_text
+
+        logger.info(
+            "Outbox processing start",
+            extra={
+                "context": {
+                    "outbox_ids": [str(oid) for oid in outbox_ids if oid],
+                    "conversation_id": conversation_id,
+                    "attempts": batch_sorted[-1].get("attempts"),
+                    "coalesced_count": len(batch_sorted),
+                }
+            },
+        )
+
+        try:
+            response = await _handle_webhook_payload(
+                base_payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=UUID(conversation_id),
+            )
+            if not response.success:
+                raise RuntimeError(response.message)
+            for outbox_id in outbox_ids:
+                if outbox_id:
+                    mark_outbox_status(
+                        db,
+                        outbox_id=outbox_id,
+                        status="SENT",
+                        last_error=None,
+                        next_attempt_at=None,
+                    )
+            results["sent"] += len(outbox_ids)
+            logger.info(
+                "Outbox processed",
+                extra={"context": {"conversation_id": conversation_id, "coalesced_count": len(batch_sorted)}},
+            )
+        except Exception as exc:
+            now = datetime.now(timezone.utc)
+            for row in batch_sorted:
+                outbox_id = row.get("id")
+                if not outbox_id:
+                    continue
+                attempts = int(row.get("attempts") or 0)
+                if attempts >= max_attempts:
+                    mark_outbox_status(
+                        db,
+                        outbox_id=outbox_id,
+                        status="FAILED",
+                        last_error=str(exc)[:500],
+                        next_attempt_at=None,
+                    )
+                    results["failed"] += 1
+                    continue
+                backoff = retry_backoff_seconds * (2 ** max(attempts - 1, 0))
+                next_attempt_at = now + timedelta(seconds=backoff)
+                mark_outbox_status(
+                    db,
+                    outbox_id=outbox_id,
+                    status="PENDING",
+                    last_error=str(exc)[:500],
+                    next_attempt_at=next_attempt_at,
+                )
+                results["retry_scheduled"] += 1
+            logger.error(
+                "Outbox processing failed",
+                extra={
+                    "context": {
+                        "conversation_id": conversation_id,
+                        "error": str(exc),
+                        "coalesced_count": len(batch_sorted),
+                    }
+                },
+            )
+
+    return results
 
 
 @router.post("/webhook/debug")

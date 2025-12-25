@@ -129,8 +129,10 @@ def process_manager_message(
     if handover.status == "pending":
         handover.status = "active"
         handover.first_response_at = datetime.now(timezone.utc)
-        handover.assigned_to = str(manager_telegram_id)
-        handover.assigned_to_name = manager_name
+        if manager_telegram_id:
+            handover.assigned_to = str(manager_telegram_id)
+        if manager_name and manager_name != "Unknown":
+            handover.assigned_to_name = manager_name
         took_handover = True
 
         # Update conversation state
@@ -149,11 +151,34 @@ def process_manager_message(
     handover.manager_response = message_text
 
     # Auto-learn from owner responses
-    if is_owner_response(db, handover.client_id, manager_telegram_id, manager_username):
-        logger.info("Owner response detected, auto-adding to knowledge base")
-        point_id = add_to_knowledge(db, handover, source="owner")
-        if point_id:
-            logger.info(f"Successfully added to knowledge: {point_id}")
+    effective_manager_id = manager_telegram_id if manager_telegram_id else None
+    if not effective_manager_id and handover.assigned_to:
+        assigned_raw = str(handover.assigned_to).strip()
+        if assigned_raw.lstrip("-").isdigit():
+            effective_manager_id = int(assigned_raw)
+
+    if effective_manager_id or manager_username:
+        if is_owner_response(
+            db,
+            handover.client_id,
+            effective_manager_id or 0,
+            manager_username,
+        ):
+            logger.info("Owner response detected, auto-adding to knowledge base")
+            point_id = add_to_knowledge(db, handover, source="owner")
+            if point_id:
+                logger.info(f"Successfully added to knowledge: {point_id}")
+    else:
+        logger.info(
+            "Owner response check skipped: missing manager identity",
+            extra={
+                "context": {
+                    "handover_id": str(handover.id),
+                    "chat_id": chat_id,
+                    "thread_id": message_thread_id,
+                }
+            },
+        )
 
     # 4. Get user's WhatsApp JID (authoritative source: user.remote_jid)
     user_remote_jid = get_user_remote_jid(db, conversation.user_id)

@@ -107,8 +107,21 @@ async def handle_manager_message(update: TelegramUpdate, db: Session) -> Telegra
         if message.from_user.last_name:
             manager_name += f" {message.from_user.last_name}"
         manager_username = message.from_user.username
+    elif message.sender_chat:
+        manager_id = message.sender_chat.id
+        manager_name = message.sender_chat.title or manager_name
+        manager_username = message.sender_chat.username
+        logger.warning(
+            "Manager message missing from_user; using sender_chat identity",
+            extra={
+                "context": {
+                    "sender_chat_id": message.sender_chat.id,
+                    "sender_chat_title": message.sender_chat.title,
+                }
+            },
+        )
     else:
-        logger.warning("Manager message missing from_user; auto-learning disabled for this message")
+        logger.warning("Manager message missing from_user and sender_chat; auto-learning disabled")
 
     success, result_message, took_handover, handover = process_manager_message(
         db=db,

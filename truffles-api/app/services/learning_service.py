@@ -69,8 +69,8 @@ def is_owner_response(
     normalized_username = _normalize_telegram_identifier(manager_username) if manager_username else None
 
     for owner_id in owner_ids:
-        # Prefer numeric ID match when owner_telegram_id is a user id.
-        if owner_id.isdigit():
+        # Prefer numeric ID match when owner_telegram_id is a user/chat id.
+        if owner_id.lstrip("-").isdigit():
             if manager_id and manager_id == owner_id:
                 return True
             continue

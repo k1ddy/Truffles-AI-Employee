@@ -16,6 +16,7 @@ class TelegramChat(BaseModel):
     id: int
     type: str  # private, group, supergroup, channel
     title: Optional[str] = None
+    username: Optional[str] = None
     is_forum: Optional[bool] = None
 
 
@@ -27,6 +28,8 @@ class TelegramMessage(BaseModel):
     text: Optional[str] = None
     message_thread_id: Optional[int] = None  # Topic ID for forum groups
     reply_to_message: Optional[Any] = None
+    sender_chat: Optional[TelegramChat] = None
+    author_signature: Optional[str] = None
 
     class Config:
         # Allow "from" field from Telegram API
