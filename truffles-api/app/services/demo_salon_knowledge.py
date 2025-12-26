@@ -68,8 +68,17 @@ def phrase_match_intent(text: str) -> set[str]:
         return set()
     matches: set[str] = set()
     for intent, phrases in _build_phrase_index().items():
-        if any(phrase and phrase in normalized for phrase in phrases):
-            matches.add(intent)
+        for phrase in phrases:
+            if not phrase:
+                continue
+            if len(phrase) <= 3:
+                if re.search(rf"\b{re.escape(phrase)}\b", normalized):
+                    matches.add(intent)
+                    break
+                continue
+            if phrase in normalized:
+                matches.add(intent)
+                break
     return matches
 
 
@@ -383,6 +392,13 @@ def _detect_promotion_intent(normalized: str) -> str | None:
 
 
 def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | None:
+    def _contains_keyword(keyword: str) -> bool:
+        if not keyword:
+            return False
+        if len(keyword) <= 3:
+            return re.search(rf"\b{re.escape(keyword)}\b", normalized) is not None
+        return keyword in normalized
+
     payment_keywords = [
         "kaspi",
         "каспи",
@@ -410,7 +426,7 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
         "безнал",
         "чек",
     ]
-    if "payment" in phrase_intents or _contains_any(normalized, payment_keywords):
+    if "payment" in phrase_intents or any(_contains_keyword(keyword) for keyword in payment_keywords):
         return "policy_payment"
 
     reschedule_keywords = [

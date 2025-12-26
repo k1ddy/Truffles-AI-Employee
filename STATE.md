@@ -1265,6 +1265,8 @@ LIMIT 1;
 | `tests/test_cases.json` | Добавлены автоматизируемые кейсы для golden-прогона |
 | `tests/test_message_endpoint.py` | Автотесты golden-cases (decision/signals) |
 | `schemas/telegram.py` | Перевёл Pydantic Config на ConfigDict (убрал депрекейшн) |
+| `demo_salon_knowledge.py` | Фикс ложной payment-эскалации: короткие ключи/фразы → word-boundary |
+| `EVAL.yaml` | Добавлен кейс “какие услуги” для services_overview |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 

@@ -119,6 +119,14 @@ eval_cases:
     must_include:
     - парикмахер
     - маникюр
+- id: E010b
+  user: Можете сказать какие услуги вы предоставляете?
+  expected:
+    action: reply
+    intent: services_overview
+    must_include:
+    - парикмахер
+    - маникюр
 - id: E011
   user: Как пройти от остановки?
   expected:
