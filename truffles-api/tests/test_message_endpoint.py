@@ -8,6 +8,7 @@ from app.database import get_db
 from app.main import app
 from app.routers import webhook as webhook_router
 from app.schemas.message import MessageRequest, MessageResponse
+from app.services.intent_service import Intent
 from app.services.message_service import select_handover_user_message
 from app.services.state_machine import ConversationState
 
@@ -219,3 +220,10 @@ class TestRoutingPolicy:
     def test_demo_truth_gate_skips_when_booking(self):
         policy = webhook_router._get_routing_policy(ConversationState.PENDING.value)
         assert webhook_router._should_run_demo_truth_gate(policy, booking_wants_flow=True) is False
+
+    def test_escalate_gate_respects_policy(self):
+        pending_policy = webhook_router._get_routing_policy(ConversationState.PENDING.value)
+        active_policy = webhook_router._get_routing_policy(ConversationState.BOT_ACTIVE.value)
+
+        assert webhook_router._should_escalate_to_pending(pending_policy, Intent.HUMAN_REQUEST) is False
+        assert webhook_router._should_escalate_to_pending(active_policy, Intent.HUMAN_REQUEST) is True

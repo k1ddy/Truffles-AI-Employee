@@ -1304,6 +1304,10 @@ def _should_run_demo_truth_gate(policy: dict[str, bool], booking_wants_flow: boo
     return bool(policy.get("allow_truth_gate_reply")) and not booking_wants_flow
 
 
+def _should_escalate_to_pending(policy: dict[str, bool], intent: Intent) -> bool:
+    return bool(policy.get("allow_handover_create")) and should_escalate(intent)
+
+
 def is_handover_status_question(text: str) -> bool:
     """Detect 'did you forward / when manager replies' questions in pending state."""
     if not text:
@@ -3256,7 +3260,7 @@ async def _handle_webhook_payload(
 
     rag_confident = False
     rag_score = 0.0
-    if conversation.state == ConversationState.BOT_ACTIVE.value and out_of_domain_signal:
+    if routing["allow_bot_reply"] and out_of_domain_signal:
         rag_confident, rag_score = get_rag_confidence(
             db=db,
             conversation_id=conversation.id,
@@ -3294,7 +3298,7 @@ async def _handle_webhook_payload(
     # Call POST /admin/heal periodically to fix broken states
 
     # 9.1 Greeting/thanks: always respond politely without escalation
-    if intent in [Intent.GREETING, Intent.THANKS]:
+    if routing["allow_bot_reply"] and intent in [Intent.GREETING, Intent.THANKS]:
         bot_response = GREETING_RESPONSE if intent == Intent.GREETING else THANKS_RESPONSE
         _reset_low_confidence_retry(conversation)
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
@@ -3306,7 +3310,7 @@ async def _handle_webhook_payload(
         )
 
     # 9.2 Pending: answer status questions without AI/escalation
-    if conversation.state == ConversationState.PENDING.value and is_handover_status_question(message_text):
+    if routing["allow_bot_reply"] and conversation.state == ConversationState.PENDING.value and is_handover_status_question(message_text):
         bot_response = MSG_PENDING_STATUS
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
@@ -3317,7 +3321,7 @@ async def _handle_webhook_payload(
         )
 
     # 9.3 Bot status questions: respond without escalation
-    if is_status_question:
+    if routing["allow_bot_reply"] and is_status_question:
         bot_response = BOT_STATUS_RESPONSE
         _reset_low_confidence_retry(conversation)
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
@@ -3329,8 +3333,8 @@ async def _handle_webhook_payload(
         )
 
     if (
-        not has_media
-        and conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value]
+        routing["allow_bot_reply"]
+        and not has_media
         and _is_style_reference_request(message_text, has_media=False)
     ):
         bot_response = MSG_STYLE_REFERENCE_NEED_MEDIA
@@ -3343,7 +3347,7 @@ async def _handle_webhook_payload(
         )
 
     # 9.35 Out-of-domain: respond without escalation only when RAG has no confident match
-    if conversation.state == ConversationState.BOT_ACTIVE.value and out_of_domain_signal and not rag_confident:
+    if routing["allow_bot_reply"] and out_of_domain_signal and not rag_confident:
         bot_response = OUT_OF_DOMAIN_RESPONSE
         _reset_low_confidence_retry(conversation)
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
@@ -3355,7 +3359,7 @@ async def _handle_webhook_payload(
         )
 
     # 10. Handle based on intent and state
-    if conversation.state == ConversationState.BOT_ACTIVE.value and should_escalate(intent):
+    if _should_escalate_to_pending(routing, intent):
         handover_message = message_text
         if intent == Intent.HUMAN_REQUEST:
             handover_message = select_handover_user_message(db, conversation.id, message_text)
@@ -3400,6 +3404,12 @@ async def _handle_webhook_payload(
                 sent = _send_response(bot_response)
             result_message = f"Escalation failed ({result.error_code}), responded normally"
 
+    elif should_escalate(intent) and not routing["allow_handover_create"]:
+        bot_response = MSG_PENDING_STATUS
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = _send_response(bot_response)
+        result_message = "Escalation skipped (pending), status response sent" if sent else "Pending status response failed"
+
     elif is_rejection(intent):
         # Client rejects help
         if conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]:
@@ -3427,7 +3437,7 @@ async def _handle_webhook_payload(
             sent = _send_response(bot_response)
             result_message = f"Muted (rejection #{conversation.no_count})"
 
-    elif conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value]:
+    elif routing["allow_bot_reply"]:
         # Bot responds: normal mode OR pending (bot helps while waiting)
         gen_result = generate_bot_response(
             db,
