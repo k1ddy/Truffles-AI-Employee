@@ -116,6 +116,7 @@
 4. [x] **Confidence threshold** — score < 0.5 → не выдумывать ✅
    - Реализовано в ai_service.py
 5. [x] **Low confidence: уточнить → потом заявка** — теперь 1–2 уточнения + подтверждение перед эскалацией
+6. [x] Контракт поведения: приоритеты интентов + матрица state × intent → action (SPECS/CONSULTANT.md, SPECS/ESCALATION.md)
 
 ### Следующее (по порядку)
 
