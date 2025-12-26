@@ -1271,6 +1271,7 @@ MSG_BOOKING_CANCELLED = "Хорошо, если передумаете — пи�
 SERVICE_HINT_KEY = "last_service_hint"
 SERVICE_HINT_AT_KEY = "last_service_hint_at"
 REENGAGE_CONFIRM_KEY = "reengage_confirmation"
+DECISION_TRACE_KEY = "decision_trace"
 
 ROUTING_MATRIX = {
     ConversationState.BOT_ACTIVE.value: {
@@ -1499,6 +1500,14 @@ def _get_conversation_context(conversation: Conversation) -> dict:
 
 def _set_conversation_context(conversation: Conversation, context: dict) -> None:
     conversation.context = context
+
+
+def _record_decision_trace(conversation: Conversation, trace: dict) -> None:
+    context = _get_conversation_context(conversation)
+    payload = dict(trace)
+    payload["recorded_at"] = datetime.now(timezone.utc).isoformat()
+    context[DECISION_TRACE_KEY] = payload
+    _set_conversation_context(conversation, context)
 
 
 def _get_low_confidence_retry_count(context: dict) -> int:
@@ -2770,6 +2779,15 @@ async def _handle_webhook_payload(
                     batch_messages = _coerce_batch_messages("", stored_messages)
                     signal_messages = list(batch_messages)
                     booking_signal = _has_booking_signal(signal_messages)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "decision": "reengage_confirmed",
+                        "state": conversation.state,
+                        "booking_signal": booking_signal,
+                        "opt_out_in_batch": opt_out_in_batch,
+                    },
+                )
             elif decision == "no":
                 context = _set_reengage_confirmation(context, None)
                 _set_conversation_context(conversation, context)
@@ -2780,6 +2798,15 @@ async def _handle_webhook_payload(
                 else:
                     conversation.bot_muted_until = now + timedelta(hours=mute_second)
                     conversation.no_count += 1
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "decision": "reengage_declined",
+                        "state": conversation.state,
+                        "booking_signal": booking_signal,
+                        "opt_out_in_batch": opt_out_in_batch,
+                    },
+                )
                 bot_response = MSG_REENGAGE_DECLINED
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                 sent = _send_response(bot_response)
@@ -2795,6 +2822,15 @@ async def _handle_webhook_payload(
                 reengage_confirmation["asked_at"] = now.isoformat()
                 context = _set_reengage_confirmation(context, reengage_confirmation)
                 _set_conversation_context(conversation, context)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "decision": "reengage_confirmation_repeat",
+                        "state": conversation.state,
+                        "booking_signal": booking_signal,
+                        "opt_out_in_batch": opt_out_in_batch,
+                    },
+                )
                 bot_response = MSG_REENGAGE_CONFIRM
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                 sent = _send_response(bot_response)
@@ -2817,6 +2853,15 @@ async def _handle_webhook_payload(
             booking_state["active"] = False
             context = _set_booking_context(context, booking_state)
         _set_conversation_context(conversation, context)
+        _record_decision_trace(
+            conversation,
+            {
+                "decision": "reengage_confirmation_requested",
+                "state": conversation.state,
+                "booking_signal": booking_signal,
+                "opt_out_in_batch": opt_out_in_batch,
+            },
+        )
         bot_response = MSG_REENGAGE_CONFIRM
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
@@ -2837,7 +2882,27 @@ async def _handle_webhook_payload(
             conversation.bot_muted_until = None
             conversation.no_count = 0
             is_muted = False
+            _record_decision_trace(
+                conversation,
+                {
+                    "decision": "mute_cleared_for_booking",
+                    "state": conversation.state,
+                    "booking_signal": booking_signal,
+                    "booking_active": booking_active,
+                    "opt_out_in_batch": opt_out_in_batch,
+                },
+            )
         else:
+            _record_decision_trace(
+                conversation,
+                {
+                    "decision": "muted_skip",
+                    "state": conversation.state,
+                    "booking_signal": booking_signal,
+                    "booking_active": booking_active,
+                    "opt_out_in_batch": opt_out_in_batch,
+                },
+            )
             db.commit()
             return WebhookResponse(
                 success=True,
