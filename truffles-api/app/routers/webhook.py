@@ -2959,7 +2959,7 @@ async def _handle_webhook_payload(
                         db=db,
                         conversation=conversation,
                         user_message=message_text,
-                        trigger_type="policy",
+                        trigger_type="intent",
                         trigger_value=decision.intent or "policy",
                     )
                     if result.ok:
@@ -3015,7 +3015,7 @@ async def _handle_webhook_payload(
                         db=db,
                         conversation=conversation,
                         user_message=message_text,
-                        trigger_type="policy",
+                        trigger_type="intent",
                         trigger_value=decision.intent or "policy",
                     )
                     if result.ok:
