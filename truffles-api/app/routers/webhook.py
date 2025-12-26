@@ -2153,7 +2153,6 @@ async def _handle_webhook_payload(
         message_text = f"[{media_label}]"
 
     batch_messages_provided = batch_messages is not None
-    routing = _get_routing_policy(conversation.state)
     batch_messages = _coerce_batch_messages(message_text, batch_messages)
 
     outbound_idempotency_key = message_id or build_inbound_message_id(
@@ -2371,6 +2370,8 @@ async def _handle_webhook_payload(
                 )
             db.commit()
             return WebhookResponse(success=True, message="Accepted", conversation_id=conversation.id, bot_response=None)
+
+    routing = _get_routing_policy(conversation.state)
 
     transcript = None
     if media_info and media_policy and _is_placeholder_text(message_text):
