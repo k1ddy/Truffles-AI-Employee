@@ -87,6 +87,7 @@
 - Старт: минимальный пакет памяти — `docs/SESSION_START_PROMPT.txt` (Brain Pack), `SPECS/CONSULTANT.md`, `SPECS/ESCALATION.md`, пакет клиента `truffles-api/app/knowledge/<client_slug>/`.
 - Паттерн работы: проблема → диагностика (1–2 шага) → решение → тест → запись в `STATE.md`.
 - Источник истины (без дублей): факты только в `SALON_TRUTH.yaml`, политика только в `POLICY.md`, фразы только в `INTENTS_*.yaml`, тесты только в `EVAL.yaml`.
+- Обязательный остаток до "идеального консультанта": см. `SPECS/CONSULTANT.md` → раздел "Идеальный консультант — обязательный остаток".
 - Проверка: `pytest truffles-api/tests/test_<client>_eval.py` + sync KB в Qdrant (`ops/manual_sync_demo.py` или `ops/sync_client.py`).
 
 ---
