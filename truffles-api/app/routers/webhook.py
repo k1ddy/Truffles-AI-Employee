@@ -1506,7 +1506,17 @@ def _record_decision_trace(conversation: Conversation, trace: dict) -> None:
     context = _get_conversation_context(conversation)
     payload = dict(trace)
     payload["recorded_at"] = datetime.now(timezone.utc).isoformat()
-    context[DECISION_TRACE_KEY] = payload
+    existing = context.get(DECISION_TRACE_KEY)
+    if isinstance(existing, list):
+        trace_list = [item for item in existing if isinstance(item, dict)]
+    elif isinstance(existing, dict):
+        trace_list = [existing]
+    else:
+        trace_list = []
+    trace_list.append(payload)
+    if len(trace_list) > 12:
+        trace_list = trace_list[-12:]
+    context[DECISION_TRACE_KEY] = trace_list
     _set_conversation_context(conversation, context)
 
 
@@ -2742,6 +2752,14 @@ async def _handle_webhook_payload(
 
     # 8. Manager active → bot must stay silent (only forwarding above)
     if conversation.state == ConversationState.MANAGER_ACTIVE.value:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "routing",
+                "decision": "manager_active_silent",
+                "state": conversation.state,
+            },
+        )
         db.commit()
         return WebhookResponse(
             success=True,
@@ -3167,6 +3185,17 @@ async def _handle_webhook_payload(
                 conversation.bot_muted_until = None
                 conversation.no_count = 0
             else:
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "routing",
+                        "decision": "muted_skip_after_debounce",
+                        "state": conversation.state,
+                        "booking_signal": booking_signal,
+                        "booking_active": booking_active,
+                        "opt_out_in_batch": opt_out_in_batch,
+                    },
+                )
                 return WebhookResponse(
                     success=True,
                     message="Bot muted (after debounce), forwarded to topic"
@@ -3313,6 +3342,16 @@ async def _handle_webhook_payload(
                 else:
                     result_message = "Demo salon policy escalation skipped (already pending)"
 
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "demo_salon_policy",
+                    "decision": decision.action,
+                    "intent": decision.intent,
+                    "state": conversation.state,
+                    "booking_wants_flow": booking_wants_flow,
+                },
+            )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             if not sent:
@@ -3380,6 +3419,16 @@ async def _handle_webhook_payload(
                 else:
                     result_message = "Demo salon policy escalation skipped (already pending)"
 
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "demo_salon_truth_gate",
+                    "decision": decision.action,
+                    "intent": decision.intent,
+                    "state": conversation.state,
+                    "booking_wants_flow": booking_wants_flow,
+                },
+            )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             if not sent:
@@ -3402,6 +3451,14 @@ async def _handle_webhook_payload(
             booking_state = {"active": False}
             context = _set_booking_context(context, booking_state)
             _set_conversation_context(conversation, context)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "booking",
+                    "decision": "cancelled",
+                    "state": conversation.state,
+                },
+            )
             bot_response = MSG_BOOKING_CANCELLED
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
@@ -3428,6 +3485,15 @@ async def _handle_webhook_payload(
             _set_conversation_context(conversation, context)
 
             if prompt:
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "booking",
+                        "decision": "prompt",
+                        "state": conversation.state,
+                        "missing_slot": booking_state.get("last_question"),
+                    },
+                )
                 bot_response = _combine_sidecar(prompt, demo_price_sidecar)
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                 sent = _send_response(bot_response)
@@ -3458,15 +3524,26 @@ async def _handle_webhook_payload(
                     )
                     bot_response = _combine_sidecar(MSG_ESCALATED, demo_price_sidecar)
                     result_message = f"Booking escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                    trace_decision = "escalated"
                 else:
                     bot_response = MSG_AI_ERROR
                     result_message = f"Booking escalation failed: {result.error}"
+                    trace_decision = "escalation_failed"
             else:
                 bot_response = _combine_sidecar(MSG_ESCALATED, demo_price_sidecar)
                 result_message = "Booking captured while pending"
+                trace_decision = "captured_pending"
 
             context = _set_booking_context(context, {"active": False})
             _set_conversation_context(conversation, context)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "booking",
+                    "decision": trace_decision,
+                    "state": conversation.state,
+                },
+            )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             if not sent:
@@ -3583,6 +3660,18 @@ async def _handle_webhook_payload(
                 },
             )
 
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "intent",
+            "decision": intent.value,
+            "state": conversation.state,
+            "domain_intent": domain_intent.value,
+            "out_of_domain_signal": out_of_domain_signal,
+            "rag_confident": rag_confident,
+        },
+    )
+
     # 10.1 Self-healing moved to health_service.check_and_heal_conversations()
     # Call POST /admin/heal periodically to fix broken states
 
@@ -3590,6 +3679,14 @@ async def _handle_webhook_payload(
     if routing["allow_bot_reply"] and intent in [Intent.GREETING, Intent.THANKS]:
         bot_response = GREETING_RESPONSE if intent == Intent.GREETING else THANKS_RESPONSE
         _reset_low_confidence_retry(conversation)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "smalltalk",
+                "decision": intent.value,
+                "state": conversation.state,
+            },
+        )
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
         result_message = "Greeting response sent" if sent else "Greeting response failed"
@@ -3601,6 +3698,14 @@ async def _handle_webhook_payload(
     # 9.2 Pending: answer status questions without AI/escalation
     if routing["allow_bot_reply"] and conversation.state == ConversationState.PENDING.value and is_handover_status_question(message_text):
         bot_response = MSG_PENDING_STATUS
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "pending_status",
+                "decision": "status_reply",
+                "state": conversation.state,
+            },
+        )
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
         result_message = "Pending status response sent" if sent else "Pending status response failed"
@@ -3613,6 +3718,14 @@ async def _handle_webhook_payload(
     if routing["allow_bot_reply"] and is_status_question:
         bot_response = BOT_STATUS_RESPONSE
         _reset_low_confidence_retry(conversation)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "bot_status",
+                "decision": "status_reply",
+                "state": conversation.state,
+            },
+        )
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
         result_message = "Bot status response sent" if sent else "Bot status response failed"
@@ -3627,6 +3740,14 @@ async def _handle_webhook_payload(
         and _is_style_reference_request(message_text, has_media=False)
     ):
         bot_response = MSG_STYLE_REFERENCE_NEED_MEDIA
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "style_reference",
+                "decision": "need_media",
+                "state": conversation.state,
+            },
+        )
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
         result_message = "Style reference prompt sent" if sent else "Style reference prompt failed"
@@ -3639,6 +3760,15 @@ async def _handle_webhook_payload(
     if routing["allow_bot_reply"] and out_of_domain_signal and not rag_confident:
         bot_response = OUT_OF_DOMAIN_RESPONSE
         _reset_low_confidence_retry(conversation)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "out_of_domain",
+                "decision": "fallback",
+                "state": conversation.state,
+                "rag_confident": rag_confident,
+            },
+        )
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
         result_message = "Out-of-domain response sent" if sent else "Out-of-domain response failed"
@@ -3673,12 +3803,32 @@ async def _handle_webhook_payload(
                 message=handover_message,
             )
             bot_response = MSG_ESCALATED
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "escalation",
+                    "decision": "created",
+                    "state": conversation.state,
+                    "intent": intent.value,
+                    "telegram_sent": telegram_sent,
+                },
+            )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             result_message = f"Escalated ({intent.value}), telegram={'sent' if telegram_sent else 'failed'}"
         else:
             logger.error(f"Escalation failed: {result.error}")
             # Fallback: respond normally
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "escalation",
+                    "decision": "failed",
+                    "state": conversation.state,
+                    "intent": intent.value,
+                    "error": result.error_code,
+                },
+            )
             gen_result = generate_bot_response(
                 db,
                 conversation,
@@ -3695,6 +3845,15 @@ async def _handle_webhook_payload(
 
     elif should_escalate(intent) and not routing["allow_handover_create"]:
         bot_response = MSG_PENDING_ESCALATION if intent == Intent.FRUSTRATION else MSG_PENDING_STATUS
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "escalation",
+                "decision": "skipped_pending",
+                "state": conversation.state,
+                "intent": intent.value,
+            },
+        )
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
         result_message = "Escalation skipped (pending), status response sent" if sent else "Pending status response failed"
@@ -3706,6 +3865,14 @@ async def _handle_webhook_payload(
             if handover:
                 manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
             bot_response = MSG_MUTED_TEMP
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "rejection",
+                    "decision": "cancel_handover",
+                    "state": conversation.state,
+                },
+            )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             result_message = "Request cancelled, bot reactivated"
@@ -3716,12 +3883,23 @@ async def _handle_webhook_payload(
                 conversation.bot_muted_until = now + timedelta(minutes=mute_first)
                 conversation.no_count = 1
                 bot_response = MSG_MUTED_TEMP
+                trace_decision = "muted_first"
             else:
                 # Second rejection: mute (default 24 hours)
                 conversation.bot_muted_until = now + timedelta(hours=mute_second)
                 conversation.no_count += 1
                 bot_response = MSG_MUTED_LONG
+                trace_decision = "muted_second"
 
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "rejection",
+                    "decision": trace_decision,
+                    "state": conversation.state,
+                    "no_count": conversation.no_count,
+                },
+            )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             result_message = f"Muted (rejection #{conversation.no_count})"
@@ -3740,6 +3918,15 @@ async def _handle_webhook_payload(
         if not gen_result.ok:
             # AI error — fallback response
             bot_response = MSG_AI_ERROR
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "ai_response",
+                    "decision": "ai_error",
+                    "state": conversation.state,
+                    "error": gen_result.error,
+                },
+            )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             result_message = f"AI error: {gen_result.error}"
@@ -3750,6 +3937,14 @@ async def _handle_webhook_payload(
                 if conversation.state == ConversationState.PENDING.value:
                     # Already escalated: respond but don't re-escalate
                     bot_response = MSG_PENDING_LOW_CONFIDENCE
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "ai_response",
+                            "decision": "low_confidence_pending",
+                            "state": conversation.state,
+                        },
+                    )
                     save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                     sent = _send_response(bot_response)
                     result_message = "Low confidence while pending, responded without re-escalation"
@@ -3765,6 +3960,15 @@ async def _handle_webhook_payload(
                         conversation.retry_offered_at = now
                         context = _set_low_confidence_retry_count(context, retry_count + 1)
                         _set_conversation_context(conversation, context)
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "ai_response",
+                                "decision": "low_confidence_retry",
+                                "state": conversation.state,
+                                "retry_count": retry_count + 1,
+                            },
+                        )
                         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                         sent = _send_response(bot_response)
                         result_message = "Low confidence: asked clarification before escalation"
@@ -3780,6 +3984,15 @@ async def _handle_webhook_payload(
                         _set_conversation_context(conversation, context)
 
                         bot_response = MSG_HANDOVER_CONFIRM
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "ai_response",
+                                "decision": "low_confidence_handover_confirm",
+                                "state": conversation.state,
+                                "retry_count": retry_count,
+                            },
+                        )
                         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                         sent = _send_response(bot_response)
                         result_message = (
@@ -3789,18 +4002,52 @@ async def _handle_webhook_payload(
                         )
 
             elif confidence == "bot_inactive":
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "ai_response",
+                        "decision": "bot_inactive",
+                        "state": conversation.state,
+                    },
+                )
                 result_message = f"Bot not active (state: {conversation.state})"
 
             elif response_text:
                 bot_response = response_text
                 logger.debug(f"bot_response: {bot_response[:100] if bot_response else 'None/Empty'}...")
                 _reset_low_confidence_retry(conversation)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "ai_response",
+                        "decision": "bot_reply",
+                        "state": conversation.state,
+                        "confidence": confidence,
+                    },
+                )
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                 sent = _send_response(bot_response)
                 result_message = "Message sent" if sent else "Failed to send"
             else:
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "ai_response",
+                        "decision": "no_response",
+                        "state": conversation.state,
+                        "confidence": confidence,
+                    },
+                )
                 result_message = "No response generated"
     else:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "routing",
+                "decision": "unknown_state",
+                "state": conversation.state,
+            },
+        )
         result_message = f"Unknown state: {conversation.state}"
 
     db.commit()

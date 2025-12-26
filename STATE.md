@@ -586,7 +586,7 @@
 ### 2025-12-26 — Decision trace для re-engage/mute
 
 **Что сделали:**
-- В `conversation.context` пишется `decision_trace` для re‑engage и mute (confirmed/declined/skip/unmute).
+- В `conversation.context` пишется `decision_trace` (список до 12 событий) по ключевым веткам: re‑engage, mute, booking, demo truth‑gate, intent/escalation, out‑of‑domain, AI‑ответ.
 - Добавлены manual тесты в `tests/test_cases.json` для hybrid‑сценариев.
 
 **Статус:**
