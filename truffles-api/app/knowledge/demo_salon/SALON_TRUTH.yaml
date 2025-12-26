@@ -1,8 +1,15 @@
 salon:
   name: Мира
   city: Алматы
+  instagram: https://instagram.com/mira_beauty_kz
+  profile:
+    audience: Женщины 20-45, офисные сотрудники, приходят перед мероприятиями.
+    average_check: 12 000-18 000 тг
+    daily_clients: 15-25
+    weekly_clients: 90-140
   address:
     full: Алматы, ул. Абая 150, угол Розыбакиева
+    map_url: https://2gis.kz/almaty/geo/70000001000000000
     entrance: Вход со стороны Розыбакиева, 2 этаж
     signage: вывеска “Mira”
     landmarks:
@@ -15,6 +22,7 @@ salon:
     open: '9:00'
     close: '21:00'
     last_appointment: '20:00–20:30'
+    exceptions: В праздники работаем по обычному графику, редкие изменения публикуем в Instagram.
   amenities:
     waiting_area: true
     toilet: Есть туалет для клиентов внутри салона, рядом с зоной ожидания
@@ -22,6 +30,12 @@ salon:
     drinks: Чай/кофе бесплатно
     gift_certificates: Можно купить сертификат на любую сумму
     retail: Есть средства для домашнего ухода (шампуни/кремы и т.п.)
+  services_summary: Мы салон красоты: парикмахерские услуги, маникюр и педикюр, брови и ресницы, уход за лицом.
+  communication:
+    languages:
+      - ru
+      - kk
+    tone: вы
 promotions:
   stacking: Скидки не суммируются
   items:
@@ -104,6 +118,8 @@ pricing:
 price_list:
 - category: Парикмахерский зал
   items:
+  - name: Женская стрижка
+    price: 5000
   - name: Короткие
     price: 4000
   - name: Средняя длина
@@ -124,6 +140,8 @@ price_list:
     price: 8000
   - name: Окрашивание в один тон (короткие)
     price: 12000
+  - name: Окрашивание в один тон (средняя длина)
+    price: 15000
   - name: Окрашивание в один тон (длинные)
     price: 18000
   - name: Мелирование
@@ -158,6 +176,8 @@ price_list:
     price: 7000
   - name: Укрепление ногтей
     price: 2000
+  - name: Снятие гель-лака
+    price: 1500
   - name: Педикюр классический
     price: 4500
   - name: Педикюр аппаратный

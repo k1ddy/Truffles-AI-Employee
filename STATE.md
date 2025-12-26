@@ -26,6 +26,7 @@
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
 - Детальный бриф салона заполнен эталоном (фейковые данные): `Business/Sales/Бриф_клиента.md`.
+- Demo salon knowledge pack обновлён под эталон (truth/intents/eval + обзор услуг).
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-26)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.

@@ -273,6 +273,19 @@ def format_reply_from_truth(intent: str, slots: dict | None = None) -> str | Non
         open_time = hours.get("open")
         close_time = hours.get("close")
         return f"Работаем {days}, с {open_time} до {close_time}."
+    if intent == "services_overview":
+        summary = truth.get("salon", {}).get("services_summary")
+        if summary:
+            return summary
+        categories = [
+            str(item.get("category", "")).strip()
+            for item in (truth.get("price_list", []) if isinstance(truth, dict) else [])
+            if isinstance(item, dict) and item.get("category")
+        ]
+        categories = [item for item in categories if item]
+        if categories:
+            return "Мы оказываем услуги: " + ", ".join(categories) + "."
+        return "Мы салон красоты. Подскажите, какая услуга интересует?"
     if intent == "last_appointment":
         last_time = truth.get("salon", {}).get("hours", {}).get("last_appointment")
         if last_time:
@@ -616,6 +629,22 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
         reply = format_reply_from_truth("hours")
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="hours")
+
+    if "services_overview" in phrase_intents or _contains_any(
+        normalized,
+        [
+            "чем занимает",
+            "какие услуги",
+            "что вы делаете",
+            "что у вас есть",
+            "какой спектр услуг",
+            "какие процедуры",
+            "что можно сделать",
+        ],
+    ):
+        reply = format_reply_from_truth("services_overview")
+        if reply:
+            return DemoSalonDecision(action="reply", response=reply, intent="services_overview")
 
     if "опозда" in normalized:
         minutes = _extract_minutes(message)

@@ -111,6 +111,14 @@ eval_cases:
     must_include_any:
     - 2 этаж
     - вход со стороны
+- id: E010a
+  user: Чем вы занимаетесь?
+  expected:
+    action: reply
+    intent: services_overview
+    must_include:
+    - парикмахер
+    - маникюр
 - id: E011
   user: Как пройти от остановки?
   expected:
