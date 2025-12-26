@@ -84,11 +84,10 @@
 
 ## РЕГЛАМЕНТ: МОЗГИ БОТА (каждая сессия)
 
-- Старт: `docs/SESSION_START_PROMPT.txt`, `SPECS/CONSULTANT.md`, `SPECS/ESCALATION.md`, пакет клиента `truffles-api/app/knowledge/<client_slug>/`.
-- Диагностика (1–2 шага): топ‑20 фраз из логов/эскалаций/low‑confidence; приоритет = частота × риск (LAW).
-- Решение: обновлять существующие артефакты (`SALON_TRUTH.yaml`, `POLICY.md`, `INTENTS_*.yaml`, `EVAL.yaml`, `ops/*_docs/*.md`, keywords в `demo_salon_knowledge.py`); новые файлы не создавать.
+- Старт: минимальный пакет памяти — `docs/SESSION_START_PROMPT.txt` (Brain Pack), `SPECS/CONSULTANT.md`, `SPECS/ESCALATION.md`, пакет клиента `truffles-api/app/knowledge/<client_slug>/`.
+- Паттерн работы: проблема → диагностика (1–2 шага) → решение → тест → запись в `STATE.md`.
+- Источник истины (без дублей): факты только в `SALON_TRUTH.yaml`, политика только в `POLICY.md`, фразы только в `INTENTS_*.yaml`, тесты только в `EVAL.yaml`.
 - Проверка: `pytest truffles-api/tests/test_<client>_eval.py` + sync KB в Qdrant (`ops/manual_sync_demo.py` или `ops/sync_client.py`).
-- Закрытие: записать изменения и риски в `STATE.md`.
 
 ---
 
