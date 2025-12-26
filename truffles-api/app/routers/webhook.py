@@ -1321,6 +1321,10 @@ def _should_run_truth_gate(policy: dict[str, bool], booking_wants_flow: bool) ->
     return bool(policy.get("allow_truth_gate_reply")) and not booking_wants_flow
 
 
+def _should_run_demo_truth_gate(policy: dict[str, bool], booking_wants_flow: bool) -> bool:
+    return _should_run_truth_gate(policy, booking_wants_flow)
+
+
 def _should_escalate_to_pending(policy: dict[str, bool], intent: Intent) -> bool:
     return bool(policy.get("allow_handover_create")) and should_escalate(intent)
 
