@@ -13,7 +13,7 @@ from app.database import get_db
 from app.models import Client, ClientSettings, Prompt
 from app.services.alert_service import alert_warning
 from app.services.health_service import check_and_heal_conversations, get_system_health
-from app.services.outbox_service import claim_pending_outbox_batches
+from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -384,16 +384,28 @@ async def process_outbox(
     idle_seconds = int(float(os.environ.get("OUTBOX_COALESCE_SECONDS", "8")))
     max_attempts = int(os.environ.get("OUTBOX_MAX_ATTEMPTS", "5"))
     retry_backoff_seconds = float(os.environ.get("OUTBOX_RETRY_BACKOFF_SECONDS", "2"))
+    stale_seconds = int(float(os.environ.get("OUTBOX_STALE_PROCESSING_SECONDS", "120")))
+    stale_seconds = max(stale_seconds, 0)
+    released = release_stale_processing(
+        db,
+        stale_seconds=stale_seconds,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+    )
     rows = claim_pending_outbox_batches(db, limit=limit, idle_seconds=idle_seconds)
 
     from app.routers.webhook import _process_outbox_rows
 
-    return await _process_outbox_rows(
+    results = await _process_outbox_rows(
         db,
         rows,
         max_attempts=max_attempts,
         retry_backoff_seconds=retry_backoff_seconds,
     )
+    if released["released"] or released["failed"]:
+        results["released_stale"] = released["released"]
+        results["failed_stale"] = released["failed"]
+    return results
 
 
 # === MEDIA CLEANUP ===

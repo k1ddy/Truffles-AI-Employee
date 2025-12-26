@@ -1840,6 +1840,13 @@ async def _process_outbox_rows(
             )
             results["sent"] += 1
         except Exception as exc:
+            try:
+                db.rollback()
+            except Exception as rollback_exc:
+                logger.warning(
+                    "Outbox rollback failed",
+                    extra={"context": {"error": str(rollback_exc)}},
+                )
             now = datetime.now(timezone.utc)
             attempts = int(row.get("attempts") or 0)
             if attempts >= max_attempts:
@@ -1946,6 +1953,13 @@ async def _process_outbox_rows(
                 extra={"context": {"conversation_id": conversation_id, "coalesced_count": len(batch_sorted)}},
             )
         except Exception as exc:
+            try:
+                db.rollback()
+            except Exception as rollback_exc:
+                logger.warning(
+                    "Outbox rollback failed",
+                    extra={"context": {"error": str(rollback_exc)}},
+                )
             now = datetime.now(timezone.utc)
             for row in batch_sorted:
                 outbox_id = row.get("id")

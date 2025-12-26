@@ -144,6 +144,65 @@ def claim_pending_outbox_batches(
     return rows
 
 
+def release_stale_processing(
+    db: Session,
+    *,
+    stale_seconds: int,
+    max_attempts: int,
+    retry_backoff_seconds: float,
+) -> dict[str, int]:
+    if stale_seconds <= 0:
+        return {"released": 0, "failed": 0}
+    rows = (
+        db.execute(
+            text(
+                """
+                WITH updated AS (
+                    UPDATE outbox_messages
+                    SET status = CASE
+                            WHEN attempts >= :max_attempts THEN 'FAILED'
+                            ELSE 'PENDING'
+                        END,
+                        last_error = CASE
+                            WHEN attempts >= :max_attempts THEN 'stale_processing:max_attempts'
+                            ELSE 'stale_processing'
+                        END,
+                        next_attempt_at = CASE
+                            WHEN attempts >= :max_attempts THEN NULL
+                            ELSE NOW() + (:retry_backoff_seconds * INTERVAL '1 second')
+                        END,
+                        updated_at = NOW()
+                    WHERE status = 'PROCESSING'
+                      AND updated_at <= NOW() - (:stale_seconds * INTERVAL '1 second')
+                    RETURNING status
+                )
+                SELECT status, COUNT(*) AS count
+                FROM updated
+                GROUP BY status
+                """
+            ),
+            {
+                "stale_seconds": stale_seconds,
+                "max_attempts": max_attempts,
+                "retry_backoff_seconds": retry_backoff_seconds,
+            },
+        )
+        .mappings()
+        .all()
+    )
+    db.commit()
+    released = 0
+    failed = 0
+    for row in rows:
+        status = row.get("status")
+        count = int(row.get("count") or 0)
+        if status == "FAILED":
+            failed += count
+        else:
+            released += count
+    return {"released": released, "failed": failed}
+
+
 def mark_outbox_status(
     db: Session,
     *,

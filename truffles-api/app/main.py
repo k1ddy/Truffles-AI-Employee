@@ -9,7 +9,7 @@ from app.database import SessionLocal, get_db
 from app.logging_config import get_logger, setup_logging
 from app.models import Conversation, Handover, Message, User
 from app.routers import admin, alerts, callback, message, reminders, telegram_webhook, webhook
-from app.services.outbox_service import claim_pending_outbox_batches
+from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
 
 setup_logging()
 
@@ -56,25 +56,45 @@ def _is_outbox_worker_enabled() -> bool:
     return _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=True)
 
 
-def _get_outbox_worker_settings() -> tuple[float, int, int, int, float]:
+def _get_outbox_worker_settings() -> tuple[float, int, int, int, float, int]:
     interval_seconds = float(os.environ.get("OUTBOX_WORKER_INTERVAL_SECONDS", "2"))
     interval_seconds = max(interval_seconds, 0.1)
     limit = int(os.environ.get("OUTBOX_PROCESS_LIMIT", "10"))
     idle_seconds = int(float(os.environ.get("OUTBOX_COALESCE_SECONDS", "8")))
     max_attempts = int(os.environ.get("OUTBOX_MAX_ATTEMPTS", "5"))
     retry_backoff_seconds = float(os.environ.get("OUTBOX_RETRY_BACKOFF_SECONDS", "2"))
-    return interval_seconds, limit, idle_seconds, max_attempts, retry_backoff_seconds
+    stale_seconds = int(float(os.environ.get("OUTBOX_STALE_PROCESSING_SECONDS", "120")))
+    stale_seconds = max(stale_seconds, 0)
+    return interval_seconds, limit, idle_seconds, max_attempts, retry_backoff_seconds, stale_seconds
 
 
 async def _outbox_worker_loop() -> None:
     while True:
         try:
-            interval_seconds, limit, idle_seconds, max_attempts, retry_backoff_seconds = (
+            (
+                interval_seconds,
+                limit,
+                idle_seconds,
+                max_attempts,
+                retry_backoff_seconds,
+                stale_seconds,
+            ) = (
                 _get_outbox_worker_settings()
             )
             await asyncio.sleep(interval_seconds)
             db = SessionLocal()
             try:
+                released = release_stale_processing(
+                    db,
+                    stale_seconds=stale_seconds,
+                    max_attempts=max_attempts,
+                    retry_backoff_seconds=retry_backoff_seconds,
+                )
+                if released["released"] or released["failed"]:
+                    outbox_logger.warning(
+                        "Outbox stale processing released",
+                        extra={"context": {**released, "stale_seconds": stale_seconds}},
+                    )
                 rows = claim_pending_outbox_batches(db, limit=limit, idle_seconds=idle_seconds)
                 if rows:
                     results = await webhook._process_outbox_rows(
