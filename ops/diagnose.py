@@ -70,7 +70,19 @@ print("\n📁 БАЗА ДАННЫХ:")
 print("-" * 40)
 
 # Conversations
-db_user = os.environ.get("DB_USER", "postgres")
+def resolve_db_user():
+    env_user = os.environ.get("DB_USER")
+    if env_user:
+        return env_user
+    result = run_command(
+        ["docker", "exec", "-i", "truffles_postgres_1", "/bin/sh", "-lc", "printf '%s' \"${POSTGRES_USER:-}\""]
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    return "postgres"
+
+db_user = resolve_db_user()
+print(f"DB_USER={db_user}")
 
 result = subprocess.run(
     ['docker', 'exec', '-i', 'truffles_postgres_1', 'psql', '-U', db_user, '-d', 'chatbot', '-t', '-c',

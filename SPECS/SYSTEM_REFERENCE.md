@@ -48,30 +48,36 @@
 
 ## 4. Деплой
 
-**docker-compose НЕ РАБОТАЕТ** — ошибка `KeyError: 'ContainerConfig'`
+**docker-compose в проде:** инфра‑стек разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`. API деплой — через `/home/zhan/restart_api.sh`. `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 
-**Рабочий способ:**
+**Стандарт (CI/GHCR):**
 ```bash
-# 1. Скопировать файлы
-scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles-main/truffles-api/...
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash ~/restart_api.sh"
+```
 
-# 2. Пересобрать образ (+ метаданные для /admin/version)
-ssh -p 222 zhan@5.188.241.234 "cd /home/zhan/truffles-main/truffles-api && docker build -t truffles-api_truffles-api \
-  --build-arg APP_VERSION=prod \
-  --build-arg GIT_COMMIT=unknown \
-  --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  ."
-
-# 3. Перезапустить
+**Fallback (локальная сборка):**
+```bash
+ssh -p 222 zhan@5.188.241.234 "docker build -t truffles-api_truffles-api /home/zhan/truffles-main/truffles-api"
 ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
+```
 
-# 4. Проверить логи
+**Логи:**
+```bash
 ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 ```
+
+`restart_api.sh` поддерживает `IMAGE_NAME` и `PULL_IMAGE=1`.
 
 **restart_api.sh:**
 ```bash
 #!/bin/bash
+IMAGE_NAME="${1:-${IMAGE_NAME:-truffles-api_truffles-api}}"
+PULL_IMAGE="${PULL_IMAGE:-0}"
+
+if [ "$PULL_IMAGE" = "1" ]; then
+  docker pull "$IMAGE_NAME"
+fi
+
 docker stop truffles-api 2>/dev/null
 docker rm truffles-api 2>/dev/null
 cd /home/zhan/truffles-main/truffles-api
@@ -87,7 +93,7 @@ docker run -d --name truffles-api \
   -l traefik.http.routers.truffles-api.tls.certresolver=myresolver \
   -l traefik.http.services.truffles-api.loadbalancer.server.port=8000 \
   -l traefik.docker.network=proxy-net \
-  truffles-api_truffles-api
+  "$IMAGE_NAME"
 ```
 
 **Проверка нового кода:**

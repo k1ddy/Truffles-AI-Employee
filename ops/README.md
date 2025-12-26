@@ -171,10 +171,12 @@ handovers
 
 ## КОПИРОВАНИЕ ФАЙЛОВ
 
+Код деплоится через CI/GHCR; SCP — только для разовых артефактов (логи/дампы).
+
 ```bash
 # Локально → Сервер
-scp -i C:\Users\user\.ssh\id_rsa -P 222 "C:\Users\user\Documents\Truffles-AI-Employee\ops\FILE" zhan@5.188.241.234:~/truffles-main/ops/
+scp -P 222 -i ~/.ssh/id_rsa /path/to/FILE zhan@5.188.241.234:/home/zhan/truffles-main/ops/
 
 # Сервер → Локально  
-scp -i C:\Users\user\.ssh\id_rsa -P 222 zhan@5.188.241.234:~/truffles-main/ops/FILE "C:\Users\user\Documents\Truffles-AI-Employee\ops\"
+scp -P 222 -i ~/.ssh/id_rsa zhan@5.188.241.234:/home/zhan/truffles-main/ops/FILE /path/to/target/
 ```
