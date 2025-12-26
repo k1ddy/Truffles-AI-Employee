@@ -67,7 +67,7 @@
 - [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant работает (логи 2025-12-25: "Owner response detected" / "Added to knowledge"), но нет модерации/метрик
 - [ ] **⚠️ Ответы медленные (outbox)** — замер: SENT за последний час avg 17s, p90 25s, max 26s (created_at → updated_at); цель < 10s не достигнута
 - [ ] **⚠️ Склейка сообщений ломает multi‑intent** — demo_salon: price‑ответ перехватывает до booking; в pending truth‑gate съедает booking; фикс в коде (booking flow в pending + price sidecar), нужен деплой/проверка
-- [ ] **⚠️ Закрепы заявок в Telegram** — после "Решено" закреп должен сниматься; сейчас иногда остаётся (проверить обработку `unpin` и message_id)
+- [ ] **⚠️ Закрепы заявок в Telegram** — фикс в коде: `unpin` теперь использует `handover.telegram_message_id` (fallback на callback message_id); нужен деплой/проверка
 - [ ] **⚠️ Дубли заявок на одного клиента** — владельцу неудобно; нужен guard: при open handover не создавать новый, а писать в текущий топик
 - [ ] **Branch подключен частично** — webhook ставит `conversation.branch_id`, но Telegram per branch + RAG фильтры ещё не wired → `SPECS/MULTI_TENANT.md`
 - [ ] **⚠️ by_instance зависит от instanceId** — demo_salon исправлен (query‑param даёт instanceId), остальным клиентам нужно прокинуть
@@ -1249,6 +1249,7 @@ LIMIT 1;
 | `webhook.py` | Добавлен `_process_outbox_rows()` для reuse в admin/worker |
 | `schemas/telegram.py` | Добавлены `sender_chat`/`author_signature`, username у chat |
 | `telegram_webhook.py` | sender_chat fallback для идентификации менеджера |
+| `telegram_webhook.py` | unpin использует `handover.telegram_message_id` (fallback на callback message_id) |
 | `manager_message_service.py` | Не затирает assigned_to при unknown, fallback на assigned_to для owner-check |
 | `learning_service.py` | Owner match принимает отрицательные ID (sender_chat) |
 | `message_service.py` | Выбор последнего содержательного user-сообщения для handover |

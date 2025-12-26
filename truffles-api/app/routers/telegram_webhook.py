@@ -462,7 +462,9 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
                 "editMessageReplyMarkup",
                 {"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
             )
-            telegram.unpin_message(str(chat_id), message_id)
+        pin_message_id = handover.telegram_message_id or message_id
+        if pin_message_id:
+            telegram.unpin_message(str(chat_id), pin_message_id)
 
         return TelegramWebhookResponse(success=True, message="Already closed", conversation_id=handover.conversation_id)
 
@@ -523,9 +525,10 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
                 {"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
             )
 
-        # Unpin
-        if message_id:
-            telegram.unpin_message(str(chat_id), message_id)
+        # Unpin pinned notification (prefer stored message_id).
+        pin_message_id = handover.telegram_message_id or message_id
+        if pin_message_id:
+            telegram.unpin_message(str(chat_id), pin_message_id)
 
         telegram._make_request("answerCallbackQuery", {"callback_query_id": callback.id, "text": "✅ Заявка решена"})
 
@@ -552,9 +555,10 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
                 {"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
             )
 
-        # Unpin
-        if message_id:
-            telegram.unpin_message(str(chat_id), message_id)
+        # Unpin pinned notification (prefer stored message_id).
+        pin_message_id = handover.telegram_message_id or message_id
+        if pin_message_id:
+            telegram.unpin_message(str(chat_id), pin_message_id)
 
         # Notify in topic
         if topic_id:
