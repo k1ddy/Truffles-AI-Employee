@@ -7,6 +7,11 @@
         "name": "Приветствие",
         "input": "привет",
         "expected": "Бот здоровается, спрашивает чем помочь",
+        "automation": {
+          "check": "decision",
+          "state": "bot_active",
+          "expect_action": "smalltalk"
+        },
         "status": null
       },
       {
@@ -21,6 +26,11 @@
         "name": "Эскалация - человек",
         "input": "позови менеджера",
         "expected": "Сообщение 'Передаю менеджеру', в Telegram появляется заявка с кнопкой [Беру]",
+        "automation": {
+          "check": "decision",
+          "state": "bot_active",
+          "expect_action": "escalate"
+        },
         "status": null
       },
       {
@@ -49,6 +59,11 @@
         "name": "Бот после resolve",
         "input": "привет",
         "expected": "Бот отвечает (не мьютнут)",
+        "automation": {
+          "check": "decision",
+          "state": "bot_active",
+          "expect_action": "smalltalk"
+        },
         "status": null
       },
       {
@@ -77,6 +92,14 @@
         "name": "Hybrid: opt-out + запись",
         "input": "не пиши мне, запишите на завтра",
         "expected": "Бот спрашивает подтверждение 'да/нет'",
+        "automation": {
+          "check": "signals",
+          "messages": [
+            "не пиши мне, запишите на завтра"
+          ],
+          "expect_booking_signal": true,
+          "expect_opt_out": true
+        },
         "status": null
       },
       {
@@ -85,6 +108,14 @@
         "prerequisite": "Бот в мьюте после отказа",
         "input": "запишите на завтра",
         "expected": "Бот размьючивается и продолжает запись",
+        "automation": {
+          "check": "signals",
+          "messages": [
+            "запишите на завтра"
+          ],
+          "expect_booking_signal": true,
+          "expect_opt_out": false
+        },
         "status": null
       },
       {

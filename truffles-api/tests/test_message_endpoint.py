@@ -1,4 +1,6 @@
+import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
@@ -9,7 +11,7 @@ from app.database import get_db
 from app.main import app
 from app.routers import webhook as webhook_router
 from app.schemas.message import MessageRequest, MessageResponse
-from app.services.intent_service import Intent
+from app.services.intent_service import Intent, is_opt_out_message
 from app.services.message_service import select_handover_user_message
 from app.services.state_machine import ConversationState
 
@@ -284,3 +286,47 @@ class TestRoutingPolicy:
 
         assert webhook_router._should_escalate_to_pending(pending_policy, Intent.HUMAN_REQUEST) is False
         assert webhook_router._should_escalate_to_pending(active_policy, Intent.HUMAN_REQUEST) is True
+
+
+def _load_golden_cases() -> list[dict]:
+    path = Path(__file__).resolve().parents[2] / "tests" / "test_cases.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    manual = data.get("manual_tests", {})
+    cases = manual.get("test_cases", []) if isinstance(manual, dict) else []
+    return [case for case in cases if isinstance(case, dict) and case.get("automation")]
+
+
+@pytest.mark.parametrize("case", _load_golden_cases())
+def test_golden_cases(case):
+    automation = case["automation"]
+    check = automation.get("check")
+    if check == "decision":
+        state = automation.get("state", ConversationState.BOT_ACTIVE.value)
+        state_value = state.value if isinstance(state, ConversationState) else state
+        policy = webhook_router._get_routing_policy(state_value)
+        signals = webhook_router._detect_intent_signals(case.get("input", ""))
+        outcome = webhook_router._resolve_action(
+            routing=policy,
+            state=state_value,
+            signals=signals,
+            is_pending_status_question=False,
+            style_reference=False,
+            out_of_domain_signal=False,
+            rag_confident=False,
+        )
+        assert outcome.action == automation["expect_action"]
+        return
+
+    if check == "signals":
+        messages = automation.get("messages") or ([case.get("input")] if case.get("input") else [])
+        messages = [msg for msg in messages if isinstance(msg, str)]
+        booking_signal = webhook_router._has_booking_signal(messages)
+        opt_out = any(is_opt_out_message(msg) for msg in messages)
+
+        if "expect_booking_signal" in automation:
+            assert booking_signal == automation["expect_booking_signal"]
+        if "expect_opt_out" in automation:
+            assert opt_out == automation["expect_opt_out"]
+        return
+
+    pytest.fail(f"Unknown golden automation check: {check}")

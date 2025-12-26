@@ -119,6 +119,7 @@
 6. [x] Контракт поведения: приоритеты интентов + матрица state × intent → action (SPECS/CONSULTANT.md, SPECS/ESCALATION.md)
 7. [x] Policy engine: normalize → detect signals → resolve → action; demo_salon вынесен в policy handler (без client-specific if в flow)
 8. [x] Модель слотов записи: валидаторы service/datetime/name + запрет opt-out/фрустрации в слотах
+9. [x] Golden-scenarios: автопрогон ключевых кейсов из tests/test_cases.json (decision/signals)
 
 ### Следующее (по порядку)
 
@@ -1261,6 +1262,8 @@ LIMIT 1;
 | `webhook.py` | Decision engine (normalize → signals → resolve → action) + policy handler для truth gate |
 | `webhook.py` | Валидация слотов записи (service/datetime/name) + запрет opt-out/фрустрации |
 | `config.py` | Settings: игнорировать лишние env-поля (запуск тестов в окружении с .env) |
+| `tests/test_cases.json` | Добавлены автоматизируемые кейсы для golden-прогона |
+| `tests/test_message_endpoint.py` | Автотесты golden-cases (decision/signals) |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 
