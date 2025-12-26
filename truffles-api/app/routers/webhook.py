@@ -53,6 +53,8 @@ from app.services.intent_service import (
     Intent,
     classify_domain_with_scores,
     classify_intent,
+    is_frustration_message,
+    is_opt_out_message,
     is_rejection,
     is_strong_out_of_domain,
     should_escalate,
@@ -3041,20 +3043,32 @@ async def _handle_webhook_payload(
     booking_context = None
     booking = None
     booking_active = False
+    opt_out_now = is_opt_out_message(message_text)
+    frustration_now = is_frustration_message(message_text)
+    bypass_domain_flows = opt_out_now or frustration_now
     if routing["allow_booking_flow"]:
         booking_context = _get_conversation_context(conversation)
         booking = _get_booking_context(booking_context)
         booking_active = bool(booking.get("active"))
-    booking_signal = _has_booking_signal(booking_messages)
-    booking_wants_flow = _should_run_booking_flow(
-        routing,
-        booking_active=booking_active,
-        booking_signal=booking_signal,
+        if opt_out_now and booking_active:
+            booking_context = _set_booking_context(booking_context, {"active": False})
+            booking_context = _clear_service_hint(booking_context)
+            _set_conversation_context(conversation, booking_context)
+            booking_active = False
+    booking_signal = _has_booking_signal(booking_messages) if not bypass_domain_flows else False
+    booking_wants_flow = (
+        _should_run_booking_flow(
+            routing,
+            booking_active=booking_active,
+            booking_signal=booking_signal,
+        )
+        if not bypass_domain_flows
+        else False
     )
 
     # 9.03 Demo salon policy/truth gate (before booking/RAG).
     demo_price_sidecar = None
-    if payload.client_slug == "demo_salon" and routing["allow_truth_gate_reply"]:
+    if not bypass_domain_flows and payload.client_slug == "demo_salon" and routing["allow_truth_gate_reply"]:
         decision = _get_demo_salon_escalation_decision(booking_messages)
         if decision:
             bot_response = decision.response
@@ -3111,7 +3125,11 @@ async def _handle_webhook_payload(
                         _set_conversation_context(conversation, booking_context)
                     break
 
-    if payload.client_slug == "demo_salon" and _should_run_demo_truth_gate(routing, booking_wants_flow):
+    if (
+        not bypass_domain_flows
+        and payload.client_slug == "demo_salon"
+        and _should_run_demo_truth_gate(routing, booking_wants_flow)
+    ):
         decision = get_demo_salon_decision(message_text)
         if decision:
             if decision.intent == "price_query":
@@ -3163,7 +3181,7 @@ async def _handle_webhook_payload(
             )
 
     # 9.05 Booking flow: collect slots before intent/LLM.
-    if routing["allow_booking_flow"]:
+    if routing["allow_booking_flow"] and not bypass_domain_flows:
         context = booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
         booking_state = booking if isinstance(booking, dict) else _get_booking_context(context)
         booking_active = bool(booking_state.get("active"))

@@ -89,6 +89,7 @@ class TestOptOutHeuristics:
         assert is_opt_out_message("я не хочу чтобы ты писал мне") is True
         assert is_opt_out_message("отпишись") is True
         assert is_opt_out_message("заткнись") is True
+        assert is_opt_out_message("я не хочу чтобы ты писал мне, pfrnyb, иди нахуй") is True
 
     def test_ignores_regular_text(self):
         assert is_opt_out_message("сколько стоит маникюр?") is False
