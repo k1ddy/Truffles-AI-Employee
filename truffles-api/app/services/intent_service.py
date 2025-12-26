@@ -70,6 +70,8 @@ OPT_OUT_EXACT = {
     "mute",
     "не пиши",
     "не пишите",
+    "заткнись",
+    "заткнитесь",
 }
 
 OPT_OUT_SUBSTRINGS = [
@@ -87,6 +89,7 @@ OPT_OUT_SUBSTRINGS = [
     "не надо писать",
     "не нужно писать",
     "удали меня",
+    "заткнис",
 ]
 
 FRUSTRATION_PATTERNS = (

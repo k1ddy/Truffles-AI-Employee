@@ -752,6 +752,16 @@ def get_demo_salon_price_reply(message: str) -> str | None:
     return format_reply_from_truth("price_query", {"price_item": price_item["item"]})
 
 
+def get_demo_salon_price_item(message: str) -> str | None:
+    price_item = _find_best_price_item(message)
+    if not price_item:
+        return None
+    item = price_item.get("item")
+    if not item:
+        return None
+    return str(item).strip() or None
+
+
 def get_truth_reply(message: str) -> str | None:
     decision = get_demo_salon_decision(message)
     if decision and decision.action == "reply":

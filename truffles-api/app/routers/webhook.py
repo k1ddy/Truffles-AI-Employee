@@ -42,7 +42,11 @@ from app.services.conversation_service import (
     get_or_create_conversation,
     get_or_create_user,
 )
-from app.services.demo_salon_knowledge import get_demo_salon_decision, get_demo_salon_price_reply
+from app.services.demo_salon_knowledge import (
+    get_demo_salon_decision,
+    get_demo_salon_price_item,
+    get_demo_salon_price_reply,
+)
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
     DomainIntent,
@@ -1215,6 +1219,7 @@ SESSION_TIMEOUT_HOURS = 24
 LOW_CONFIDENCE_RETRY_WINDOW_MINUTES = 10
 LOW_CONFIDENCE_MAX_RETRIES = 2
 HANDOVER_CONFIRM_WINDOW_MINUTES = 15
+SERVICE_HINT_WINDOW_MINUTES = 120
 MSG_ESCALATED = "Передал менеджеру. Могу чем-то помочь пока ждёте?"
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."
 MSG_MUTED_LONG = "Понял! Если ответа от менеджеров долго нет — лучше звоните напрямую: +7 775 984 19 26"
@@ -1257,6 +1262,9 @@ MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите запис�
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
 MSG_BOOKING_ASK_NAME = "Как вас зовут?"
 MSG_BOOKING_CANCELLED = "Хорошо, если передумаете — пишите."
+
+SERVICE_HINT_KEY = "last_service_hint"
+SERVICE_HINT_AT_KEY = "last_service_hint_at"
 
 ROUTING_MATRIX = {
     ConversationState.BOT_ACTIVE.value: {
@@ -1549,6 +1557,40 @@ def _set_booking_context(context: dict, booking: dict) -> dict:
     context = dict(context)
     context["booking"] = booking
     return context
+
+
+def _set_service_hint(context: dict, service: str, now: datetime) -> dict:
+    context = dict(context)
+    context[SERVICE_HINT_KEY] = service
+    context[SERVICE_HINT_AT_KEY] = now.isoformat()
+    return context
+
+
+def _clear_service_hint(context: dict) -> dict:
+    context = dict(context)
+    context.pop(SERVICE_HINT_KEY, None)
+    context.pop(SERVICE_HINT_AT_KEY, None)
+    return context
+
+
+def _get_recent_service_hint(context: dict, now: datetime) -> str | None:
+    if not isinstance(context, dict):
+        return None
+    value = context.get(SERVICE_HINT_KEY)
+    if not value:
+        return None
+    timestamp_raw = context.get(SERVICE_HINT_AT_KEY)
+    if not timestamp_raw:
+        return None
+    try:
+        timestamp = datetime.fromisoformat(timestamp_raw)
+    except (TypeError, ValueError):
+        return None
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    if (now - timestamp) > timedelta(minutes=SERVICE_HINT_WINDOW_MINUTES):
+        return None
+    return str(value).strip() or None
 
 
 BRANCH_SELECTION_KEY = "branch_selection"
@@ -3062,11 +3104,22 @@ async def _handle_webhook_payload(
                 price_reply = get_demo_salon_price_reply(msg)
                 if price_reply:
                     demo_price_sidecar = price_reply
+                    price_item = get_demo_salon_price_item(msg)
+                    if price_item:
+                        booking_context = booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
+                        booking_context = _set_service_hint(booking_context, price_item, now)
+                        _set_conversation_context(conversation, booking_context)
                     break
 
     if payload.client_slug == "demo_salon" and _should_run_demo_truth_gate(routing, booking_wants_flow):
         decision = get_demo_salon_decision(message_text)
         if decision:
+            if decision.intent == "price_query":
+                price_item = get_demo_salon_price_item(message_text)
+                if price_item:
+                    context = _get_conversation_context(conversation)
+                    context = _set_service_hint(context, price_item, now)
+                    _set_conversation_context(conversation, context)
             bot_response = decision.response
             _reset_low_confidence_retry(conversation)
 
@@ -3135,6 +3188,11 @@ async def _handle_webhook_payload(
                 booking_state["started_at"] = now.isoformat()
 
             booking_state = _update_booking_from_messages(booking_state, booking_messages)
+            if not booking_state.get("service"):
+                service_hint = _get_recent_service_hint(context, now)
+                if service_hint:
+                    booking_state["service"] = service_hint
+                    context = _clear_service_hint(context)
             booking_state, prompt = _next_booking_prompt(booking_state)
             context = _set_booking_context(context, booking_state)
             _set_conversation_context(conversation, context)

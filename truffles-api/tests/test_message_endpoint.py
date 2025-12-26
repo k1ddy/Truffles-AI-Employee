@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
@@ -188,6 +189,27 @@ class TestBatchBookingSignals:
         updated = webhook_router._update_booking_from_messages(booking, ["маникюр", "на завтра в 5"])
         assert updated.get("service")
         assert updated.get("datetime")
+
+
+class TestServiceHints:
+    def test_service_hint_within_window(self):
+        now = datetime.now(timezone.utc)
+        context = webhook_router._set_service_hint({}, "маникюр", now)
+
+        hint = webhook_router._get_recent_service_hint(context, now + timedelta(minutes=30))
+
+        assert hint == "маникюр"
+
+    def test_service_hint_expires(self):
+        now = datetime.now(timezone.utc)
+        context = webhook_router._set_service_hint({}, "маникюр", now)
+
+        hint = webhook_router._get_recent_service_hint(
+            context,
+            now + timedelta(minutes=webhook_router.SERVICE_HINT_WINDOW_MINUTES + 1),
+        )
+
+        assert hint is None
 
 
 class TestRoutingPolicy:
