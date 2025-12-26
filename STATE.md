@@ -25,6 +25,13 @@
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
 
+### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-26)
+- Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
+- Env: `PUBLIC_BASE_URL=https://api.truffles.kz`, `MEDIA_SIGNING_SECRET=SET`, `MEDIA_URL_TTL_SECONDS=3600`, `MEDIA_CLEANUP_TTL_DAYS=7`, `CHATFLOW_MEDIA_TIMEOUT_SECONDS=90`.
+- `/admin/version`: version `main`, git_commit `10ae71a58882efe4c2d4db6ff851fb1b2f5a7d82`, build_time `2025-12-25T12:24:15Z`.
+- `/admin/health`: conversations bot_active 15, pending 0, manager_active 0; handovers pending 0, active 0 (checked_at `2025-12-26T02:05:32.178465+00:00`).
+- DB (ops/diagnose): DB_USER `n8n`; conversations 15 total, 0 muted, 8 with topic; handovers 92 total, 0 pending, 0 active.
+
 ### MEDIA RUNBOOK (амнезия, 3–5 минут)
 - Точка входа: `truffles-api/app/routers/webhook.py` → `_handle_webhook_payload()` + outbox coalesce.
 - Guardrails: тип/размер/rate‑limit → `clients.config.media` (см. `SPECS/ARCHITECTURE.md`).
@@ -40,6 +47,7 @@
 - Inbound payload для медиа: в коде добавлено сохранение + ответ, но на проде без деплоя всё ещё отбрасывается.
 - В репо лежали workflow JSON и упоминания n8n → удалены, чтобы не вводить в заблуждение.
 - Git worktree был сломан: `.git` указывал на несуществующий gitdir → восстановлено, commit/push работают.
+- В спеках и ops были старые инструкции со scp по деплою → выровнено с CI/GHCR и `/home/zhan/restart_api.sh`.
 
 ### Что работает
 - [x] Бот отвечает на сообщения WhatsApp
@@ -61,7 +69,7 @@
 - [ ] **Branch подключен частично** — webhook ставит `conversation.branch_id`, но Telegram per branch + RAG фильтры ещё не wired → `SPECS/MULTI_TENANT.md`
 - [ ] **⚠️ by_instance зависит от instanceId** — demo_salon исправлен (query‑param даёт instanceId), остальным клиентам нужно прокинуть
 - [ ] **⚠️ demo_salon truth-gate даёт цену на "как у/в стиле"** — нет правила style_reference, фото не поддерживаются; нужен отдельный ответ/эскалация
-- [ ] **⚠️ Медиа (аудио/фото/документы)** — guardrails + forward в Telegram + локальное хранение добавлены в код (нужен деплой); manager→client media и ASR/OCR/vision отсутствуют
+- [ ] **⚠️ Медиа (аудио/фото/документы)** — guardrails + Telegram forward + локальное хранение + транскрипция коротких PTT добавлены в код (нужен деплой); длинные аудио/видео и OCR/vision отсутствуют
 - [ ] Метрики (Quality Deflection, CSAT) — план: `SPECS/ESCALATION.md`, часть 6
 - [ ] Dashboard для заказчика — backlog
 - [ ] Quiet hours для напоминаний — P2
@@ -229,6 +237,51 @@
 ---
 
 ## ИСТОРИЯ СЕССИЙ
+
+### 2025-12-26 — Media: без авто‑handover + голосовые транскрипты + safe auto‑learning
+
+**Что сделали:**
+- Входящее медиа в `bot_active` больше не создаёт handover автоматически; референсы/«как на фото» эскалируются, остальное — по смыслу текста/транскрипта.
+- Добавили транскрибацию коротких PTT‑голосовых (env‑гейты) и проброс транскрипта в Telegram.
+- Для pending добавили системный hint: бот собирает детали, не обещает результат.
+- Автообучение фильтрует “мусор” (placeholder/короткие/ack).
+- Обновили спеки и TECH по новым правилам и env.
+
+**Разбор (шаблон):**
+- Боль/симптом: любое медиа сразу открывало заявку и плодило эскалации; голосовые не понимались ботом; автообучение рисковало брать мусор.
+- Почему важно: лишняя нагрузка на менеджера + бот не закрывает 80% вопросов, риск плохих ответов.
+- Диагноз: правило “media → handover” и отсутствие ASR для PTT; слабые фильтры в learning.
+- Решение: перевести медиа на текст‑first (caption/ASR), эскалировать только style‑reference; добавить ASR‑гейты и фильтры learning.
+- Проверка: юнит‑тесты не гонял; требуется деплой + проверка медиа/голосовых на проде.
+- Осталось: задать env для транскрипции и проверить сценарии (бот_active/pending/manager_active).
+
+### 2025-12-26 — Prod: media env values set
+
+**Что сделали:**
+- Добавили `MEDIA_URL_TTL_SECONDS`, `MEDIA_CLEANUP_TTL_DAYS`, `CHATFLOW_MEDIA_TIMEOUT_SECONDS` в `/home/zhan/truffles-main/truffles-api/.env`.
+- Перезапустили API через `/home/zhan/restart_api.sh` на `ghcr.io/k1ddy/truffles-ai-employee:main`.
+
+**Разбор (шаблон):**
+- Боль/симптом: preflight показывал MISSING для media TTL/cleanup/timeout при активном медиа.
+- Почему важно: ссылки могут жить бесконечно, нет регулярной очистки, риск таймаутов при отправке медиа.
+- Диагноз: переменные не заданы в `truffles-api/.env`.
+- Решение: задать значения и перезапустить контейнер.
+- Проверка: `python3 ops/diagnose.py` → значения есть в preflight.
+- Осталось: при необходимости выполнить `/admin/media/cleanup` (dry_run) и проверить отправку медиа.
+
+### 2025-12-26 — Prod: stale pending handover закрыт
+
+**Что сделали:**
+- Закрыли pending handover `27403967-0389-42ee-9d09-a5d4eaf08f26` по conversation `4b355349-15bc-41df-b26d-4c76a6e7be41` через `manager_resolve` (system), добавили `resolution_type=other` и `resolution_notes`.
+- Pending стало 0.
+
+**Разбор (шаблон):**
+- Боль/симптом: один pending handover висел с 2025-12-21.
+- Почему важно: мусор в очереди, риск ложных сигналов и пропущенных действий.
+- Диагноз: менеджер не ответил, заявка не была закрыта.
+- Решение: ручное закрытие handover и возврат conversation в `bot_active`.
+- Проверка: `python3 ops/diagnose.py` → pending=0.
+- Осталось: при необходимости проверить топик 551 в Telegram.
 
 ### 2025-12-25 — Topic binding: one topic per client (P0 safety)
 
@@ -1199,4 +1252,4 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 
 ---
 
-*Последнее обновление: 2025-12-25*
+*Последнее обновление: 2025-12-26*

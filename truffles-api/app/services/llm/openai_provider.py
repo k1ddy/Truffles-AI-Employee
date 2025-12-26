@@ -15,6 +15,7 @@ class OpenAIProvider(LLMProvider):
         self.api_key = api_key
         self.default_model = default_model
         self.base_url = "https://api.openai.com/v1/chat/completions"
+        self.audio_url = "https://api.openai.com/v1/audio/transcriptions"
 
     def generate(
         self,
@@ -67,3 +68,45 @@ class OpenAIProvider(LLMProvider):
                 model=data.get("model", model),
                 usage=data.get("usage"),
             )
+
+    def transcribe_audio(
+        self,
+        *,
+        audio_bytes: bytes,
+        filename: str,
+        mime_type: Optional[str] = None,
+        model: Optional[str] = None,
+        prompt: Optional[str] = None,
+        language: Optional[str] = None,
+    ) -> str:
+        """Transcribe audio using OpenAI speech-to-text."""
+        model = model or "whisper-1"
+        if not audio_bytes:
+            raise ValueError("audio_bytes is empty")
+
+        files = {"file": (filename or "audio", audio_bytes, mime_type or "application/octet-stream")}
+        data = {"model": model, "response_format": "text"}
+        if prompt:
+            data["prompt"] = prompt
+        if language:
+            data["language"] = language
+
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(
+                self.audio_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                },
+                files=files,
+                data=data,
+            )
+
+        logger.debug(f"OpenAI transcription status: {response.status_code}")
+        if response.status_code != 200:
+            logger.error(f"OpenAI transcription error: {response.text}")
+            raise Exception(f"OpenAI transcription error: {response.status_code} - {response.text}")
+
+        transcript = (response.text or "").strip()
+        if not transcript:
+            logger.warning("OpenAI transcription returned empty text")
+        return transcript

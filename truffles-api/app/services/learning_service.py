@@ -21,6 +21,59 @@ logger = get_logger("learning_service")
 MAX_KNOWLEDGE_TEXT_LENGTH = 2000
 MIN_QUESTION_LENGTH = 5
 MIN_ANSWER_LENGTH = 5
+LOW_VALUE_TEXTS = {
+    "ок",
+    "окей",
+    "ok",
+    "okay",
+    "ага",
+    "угу",
+    "да",
+    "нет",
+    "неа",
+    "спасибо",
+    "спасибо большое",
+    "благодарю",
+    "понял",
+    "поняла",
+    "понятно",
+    "ясно",
+    "хорошо",
+    "принято",
+}
+PLACEHOLDER_PATTERNS = (
+    re.compile(r"^\[[^\]]+\]$"),
+    re.compile(r"^клиент отправил", re.IGNORECASE),
+    re.compile(r"^файл получил", re.IGNORECASE),
+    re.compile(r"^документ получил", re.IGNORECASE),
+    re.compile(r"^ошибка вызова вебхука", re.IGNORECASE),
+    re.compile(r"^передал", re.IGNORECASE),
+    re.compile(r"^передали", re.IGNORECASE),
+)
+
+
+def _normalize_text(text: str) -> str:
+    cleaned = (text or "").strip().casefold()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned
+
+
+def _has_letters(text: str) -> bool:
+    return bool(re.search(r"[a-zа-я]", text))
+
+
+def _is_low_value_text(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return True
+    if not _has_letters(normalized):
+        return True
+    if normalized in LOW_VALUE_TEXTS:
+        return True
+    for pattern in PLACEHOLDER_PATTERNS:
+        if pattern.search(normalized):
+            return True
+    return False
 
 
 def _normalize_telegram_identifier(value: Optional[str]) -> Optional[str]:
@@ -159,6 +212,20 @@ def add_to_knowledge(
                 "client_slug": client_slug,
                 "question_len": len(question),
                 "answer_len": len(answer),
+            },
+        )
+        return None
+
+    if _is_low_value_text(question) or _is_low_value_text(answer):
+        logger.info(
+            "Skipped learning: low-value content",
+            extra={
+                "context": {
+                    "client_slug": client_slug,
+                    "handover_id": str(handover.id),
+                    "question_preview": question[:80],
+                    "answer_preview": answer[:80],
+                }
             },
         )
         return None

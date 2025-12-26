@@ -53,25 +53,19 @@
 
 **docker-compose в проде:** инфра‑стек разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`. API деплой — через `restart_api.sh`. `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 
-**Рабочий способ:**
+**Стандарт (CI/GHCR):**
 ```bash
-# 1. Скопировать файлы
-scp -P 222 файл zhan@5.188.241.234:/home/zhan/truffles-main/truffles-api/...
-
-# 2. Пересобрать образ (+ метаданные для /admin/version)
-ssh -p 222 zhan@5.188.241.234 "cd /home/zhan/truffles-main/truffles-api && docker build -t truffles-api_truffles-api \
-  --build-arg APP_VERSION=prod \
-  --build-arg GIT_COMMIT=unknown \
-  --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  ."
-
-# 3. Перезапустить (restart без build не подтягивает код)
-ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
-
-# 4. CI образ (GHCR) → pull + restart
 ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash ~/restart_api.sh"
+```
 
-# 5. Проверить логи
+**Fallback (локальная сборка):**
+```bash
+ssh -p 222 zhan@5.188.241.234 "docker build -t truffles-api_truffles-api /home/zhan/truffles-main/truffles-api"
+ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
+```
+
+**Логи:**
+```bash
 ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 ```
 
@@ -80,6 +74,13 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 **restart_api.sh:**
 ```bash
 #!/bin/bash
+IMAGE_NAME="${1:-${IMAGE_NAME:-truffles-api_truffles-api}}"
+PULL_IMAGE="${PULL_IMAGE:-0}"
+
+if [ "$PULL_IMAGE" = "1" ]; then
+  docker pull "$IMAGE_NAME"
+fi
+
 docker stop truffles-api 2>/dev/null
 docker rm truffles-api 2>/dev/null
 cd /home/zhan/truffles-main/truffles-api
@@ -95,7 +96,7 @@ docker run -d --name truffles-api \
   -l traefik.http.routers.truffles-api.tls.certresolver=myresolver \
   -l traefik.http.services.truffles-api.loadbalancer.server.port=8000 \
   -l traefik.docker.network=proxy-net \
-  truffles-api_truffles-api
+  "$IMAGE_NAME"
 ```
 
 **Проверка нового кода:**
@@ -134,9 +135,10 @@ chatflow_service → WhatsApp (retries/backoff + msg_id idempotency)
 **Поток:**
 1) Входящий payload содержит `mediaData` (`url`, `mimetype`, `size`, `fileName`, `base64`).
 2) Guardrails до обработки: allowlist типов, max‑size, rate‑limit (per user).
-3) Медиа сохраняется локально (storage dir; TTL очистка — план). Метаданные пишутся в `messages.metadata.media`.
-4) Медиа форвардится в Telegram‑топик (sendPhoto/sendAudio/sendDocument).
-5) Документы: только пересылка (обработка позже). Видео: запрещено.
+3) Короткие голосовые (PTT) транскрибируются в текст; транскрипт сохраняется в `messages.metadata.media`.
+4) Медиа сохраняется локально (storage dir; TTL очистка — план). Метаданные пишутся в `messages.metadata.media`.
+5) Медиа форвардится в Telegram‑топик (sendPhoto/sendAudio/sendDocument); для голосовых — отправляется транскрипт.
+6) Документы: только пересылка (обработка позже). Видео: запрещено.
 
 **Конфигурация (per client):**
 `clients.config.media` (JSONB) — overrides по лимитам и флагам:
@@ -155,6 +157,7 @@ chatflow_service → WhatsApp (retries/backoff + msg_id idempotency)
 **Важно:**
 - Менеджер → клиент по медиа требует ChatFlow media API (отдельная интеграция, не в этой сессии).
 - URL у ChatFlow может истечь — хранение локально гарантирует доставку в Telegram.
+- В `bot_active` медиа не создаёт handover автоматически: если есть текст/транскрипт, обрабатываем как обычное сообщение; если нет текста — просим описание. Референсы/«как на фото» → эскалация.
 
 ### Эскалация
 ```

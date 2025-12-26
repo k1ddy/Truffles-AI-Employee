@@ -104,6 +104,11 @@ GREETING_RESPONSE = "Здравствуйте! Чем могу помочь?"
 THANKS_RESPONSE = "Рад помочь. Если нужно что-то ещё — пишите."
 BOT_STATUS_RESPONSE = "Я на связи. Напишите ваш вопрос, и я помогу."
 OUT_OF_DOMAIN_RESPONSE = "Я помогаю по нашим услугам, записи и ценам. Чем могу помочь?"
+PENDING_SYSTEM_HINT = (
+    "Контекст: у клиента уже открыт запрос на менеджера. "
+    "Отвечай кратко, уточняй детали (услуга/дата/время/имя), "
+    "но не давай финальных решений и не обещай результат."
+)
 
 YES_CONFIRMATION_PHRASES = {
     "да",
@@ -169,6 +174,39 @@ def get_llm_provider() -> OpenAIProvider:
     if _llm_provider is None:
         _llm_provider = OpenAIProvider(api_key=OPENAI_API_KEY, default_model="gpt-5-mini")
     return _llm_provider
+
+
+def transcribe_audio(
+    audio_bytes: bytes,
+    *,
+    filename: str,
+    mime_type: Optional[str] = None,
+    model: Optional[str] = None,
+    language: Optional[str] = None,
+) -> Optional[str]:
+    """Transcribe short audio to text. Returns None on failure."""
+    if not OPENAI_API_KEY:
+        logger.warning("Audio transcription skipped: OPENAI_API_KEY missing")
+        return None
+
+    provider = get_llm_provider()
+    if not hasattr(provider, "transcribe_audio"):
+        logger.warning("Audio transcription skipped: provider lacks transcribe_audio")
+        return None
+
+    try:
+        transcript = provider.transcribe_audio(
+            audio_bytes=audio_bytes,
+            filename=filename,
+            mime_type=mime_type,
+            model=model,
+            language=language,
+        )
+        cleaned = (transcript or "").strip()
+        return cleaned or None
+    except Exception as exc:
+        logger.warning(f"Audio transcription failed: {exc}")
+        return None
 
 
 def get_system_prompt(db: Session, client_id: UUID) -> Optional[str]:
@@ -452,6 +490,7 @@ def generate_ai_response(
     conversation_id: UUID,
     user_message: str,
     append_user_message: bool = True,
+    pending_hint: bool = False,
 ) -> Result[Tuple[Optional[str], str]]:
     """
     Generate AI response using LLM with knowledge base.
@@ -553,6 +592,8 @@ def generate_ai_response(
 
         # System prompt with knowledge context
         full_system = system_prompt
+        if pending_hint:
+            full_system = f"{full_system}\n\n{PENDING_SYSTEM_HINT}"
         if knowledge_context:
             full_system += f"\n\n{knowledge_context}"
 

@@ -33,6 +33,8 @@ from app.services.ai_service import (
     is_greeting_message,
     is_low_signal_message,
     is_thanks_message,
+    normalize_for_matching,
+    transcribe_audio,
 )
 from app.services.alert_service import alert_warning
 from app.services.chatflow_service import send_bot_response, verify_signed_media_path
@@ -127,6 +129,16 @@ MEDIA_RATE_LIMIT_DEFAULTS = {
 }
 MEDIA_STORAGE_DEFAULT_DIR = os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media")
 MEDIA_STORAGE_MAX_BYTES = 25 * 1024 * 1024
+AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB = 2.0
+
+STYLE_REFERENCE_PATTERNS = (
+    re.compile(r"\bкак на (фото|картин\w+|примере)\b"),
+    re.compile(r"\bпо (фото|картин\w+|референс\w*)\b"),
+    re.compile(r"\bреференс\w*\b"),
+    re.compile(r"\bреф\b"),
+    re.compile(r"\bв стиле\b"),
+    re.compile(r"\bпохоже на\b"),
+)
 
 
 @router.get("/media/{media_path:path}")
@@ -337,6 +349,151 @@ def _get_media_rate_settings() -> tuple[str, float]:
     redis_url = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
     socket_timeout_seconds = float(os.environ.get("MEDIA_RATE_SOCKET_TIMEOUT_SECONDS", "0.5"))
     return redis_url, socket_timeout_seconds
+
+
+def _get_transcription_settings() -> tuple[bool, int, str, str | None]:
+    enabled = _is_env_enabled(os.environ.get("AUDIO_TRANSCRIPTION_ENABLED"), default=False)
+    raw_max_mb = os.environ.get("AUDIO_TRANSCRIPTION_MAX_MB", str(AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB))
+    try:
+        max_mb = float(raw_max_mb)
+    except (TypeError, ValueError):
+        max_mb = AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB
+    max_bytes = max(0, int(max_mb * 1024 * 1024))
+    model = os.environ.get("AUDIO_TRANSCRIPTION_MODEL", "whisper-1")
+    language = os.environ.get("AUDIO_TRANSCRIPTION_LANGUAGE")
+    return enabled, max_bytes, model, language
+
+
+def _is_placeholder_text(text: str | None) -> bool:
+    if not text:
+        return True
+    cleaned = text.strip()
+    return not cleaned or bool(re.fullmatch(r"\[.+\]", cleaned))
+
+
+def _is_voice_note(media: MediaInfo | None) -> bool:
+    if not media:
+        return False
+    return media.media_type == "audio" and bool(media.is_ptt)
+
+
+def _is_style_reference_request(text: str | None, *, has_media: bool) -> bool:
+    normalized = normalize_for_matching(text or "")
+    if not normalized:
+        return False
+    if not has_media and not any(token in normalized for token in ["фото", "картин", "референс", "реф", "пример"]):
+        return False
+    return any(pattern.search(normalized) for pattern in STYLE_REFERENCE_PATTERNS)
+
+
+def _read_media_bytes_from_storage(storage_path: str | None, max_bytes: int) -> tuple[bytes | None, str | None]:
+    if not storage_path:
+        return None, "missing_path"
+    path = Path(storage_path)
+    if not path.exists():
+        return None, "missing_file"
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return None, f"stat_failed:{exc}"
+    if max_bytes and size > max_bytes:
+        return None, "too_large"
+    try:
+        return path.read_bytes(), None
+    except OSError as exc:
+        return None, f"read_failed:{exc}"
+
+
+async def _download_media_bytes(media: MediaInfo, policy: dict, max_bytes: int) -> tuple[bytes | None, str | None]:
+    if not media.url:
+        return None, "missing_url"
+    allowed_hosts = policy.get("allowed_hosts") if isinstance(policy.get("allowed_hosts"), list) else ["app.chatflow.kz"]
+    if not _is_allowed_media_url(media.url, allowed_hosts):
+        return None, "blocked_host"
+
+    size_bytes = 0
+    data = bytearray()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            async with client.stream("GET", media.url) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
+                    if not chunk:
+                        continue
+                    size_bytes += len(chunk)
+                    if max_bytes and size_bytes > max_bytes:
+                        return None, "too_large"
+                    data.extend(chunk)
+    except Exception as exc:
+        return None, f"download_failed:{exc}"
+
+    return bytes(data), None
+
+
+def _guess_transcript_filename(media: MediaInfo) -> str:
+    ext = _guess_extension(media.mime, media.file_name)
+    return f"voice{ext}"
+
+
+async def _maybe_transcribe_voice(
+    *,
+    media: MediaInfo,
+    policy: dict,
+    media_decision: MediaDecision | None,
+    storage_path: str | None,
+    saved_message: Message | None,
+) -> tuple[str | None, str | None]:
+    enabled, max_bytes, model, language = _get_transcription_settings()
+    if not enabled or not max_bytes:
+        return None, "disabled"
+    if not _is_voice_note(media):
+        return None, "not_voice"
+    if media_decision and not media_decision.allowed:
+        return None, "not_allowed"
+    if media.size_bytes and max_bytes and media.size_bytes > max_bytes:
+        return None, "too_large"
+
+    if saved_message and isinstance(saved_message.message_metadata, dict):
+        media_meta = saved_message.message_metadata.get("media") or {}
+        existing = media_meta.get("transcript")
+        if isinstance(existing, str) and existing.strip():
+            return existing.strip(), "cached"
+
+    audio_bytes = None
+    source_error = None
+    if storage_path:
+        audio_bytes, source_error = _read_media_bytes_from_storage(storage_path, max_bytes)
+    if not audio_bytes:
+        if media.base64_data:
+            try:
+                estimated = (len(media.base64_data) * 3) // 4
+            except Exception:
+                estimated = 0
+            if max_bytes and estimated > max_bytes:
+                return None, "too_large"
+            try:
+                decoded = base64.b64decode(media.base64_data, validate=False)
+            except Exception as exc:
+                return None, f"base64_decode_failed:{exc}"
+            if max_bytes and len(decoded) > max_bytes:
+                return None, "too_large"
+            audio_bytes = decoded
+        else:
+            audio_bytes, source_error = await _download_media_bytes(media, policy, max_bytes)
+
+    if not audio_bytes:
+        return None, source_error or "missing_audio"
+
+    transcript = transcribe_audio(
+        audio_bytes,
+        filename=_guess_transcript_filename(media),
+        mime_type=media.mime,
+        model=model,
+        language=language,
+    )
+    if not transcript:
+        return None, "empty_transcript"
+    return transcript.strip(), "ok"
 
 
 def _purge_media_rate_cache(now_ts: float) -> None:
@@ -1081,8 +1238,19 @@ MSG_MEDIA_UNSUPPORTED = (
 )
 MSG_MEDIA_TOO_LARGE = "Файл слишком большой. Пришлите, пожалуйста, фото/аудио поменьше или опишите текстом."
 MSG_MEDIA_RATE_LIMIT = "Слишком много файлов за короткое время. Давайте продолжим позже или опишите текстом."
-MSG_MEDIA_RECEIVED = "Файл получил и передал администратору. Чтобы ускорить, напишите услугу и удобное время."
-MSG_MEDIA_DOC_RECEIVED = "Документ получил, передал администратору."
+MSG_MEDIA_RECEIVED = "Файл получил. Напишите, пожалуйста, что именно нужно: цена/запись/адрес/мастер/жалоба."
+MSG_MEDIA_DOC_RECEIVED = "Документ получил. Напишите, пожалуйста, что именно нужно."
+MSG_MEDIA_PENDING_NEED_TEXT = (
+    "Я уже передал менеджеру. Чтобы ускорить, напишите, что именно нужно: цена/запись/адрес/мастер/жалоба."
+)
+MSG_MEDIA_STYLE_REFERENCE = (
+    "Спасибо за фото/референс. Передал администратору для подтверждения возможности и деталей. "
+    "Чтобы ускорить, напишите услугу, дату/время и имя."
+)
+MSG_STYLE_REFERENCE_NEED_MEDIA = (
+    "Можем ориентироваться на фото/референс. Пришлите фото и кратко опишите запрос — "
+    "я передам администратору для подтверждения."
+)
 
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
@@ -2143,6 +2311,37 @@ async def _handle_webhook_payload(
             db.commit()
             return WebhookResponse(success=True, message="Accepted", conversation_id=conversation.id, bot_response=None)
 
+    transcript = None
+    if media_info and media_policy and _is_placeholder_text(message_text):
+        stored_path = None
+        if saved_message and isinstance(saved_message.message_metadata, dict):
+            stored_path = (saved_message.message_metadata.get("media") or {}).get("storage_path")
+        transcript, transcript_status = await _maybe_transcribe_voice(
+            media=media_info,
+            policy=media_policy,
+            media_decision=media_decision,
+            storage_path=stored_path,
+            saved_message=saved_message,
+        )
+        if transcript:
+            message_text = transcript
+            if saved_message:
+                saved_message.content = transcript
+                _, _, model, language = _get_transcription_settings()
+                updates = {
+                    "transcript": transcript,
+                    "transcript_model": model,
+                    "transcribed_at": datetime.now(timezone.utc).isoformat(),
+                }
+                if language:
+                    updates["transcript_language"] = language
+                _update_message_media_metadata(saved_message, updates)
+        elif transcript_status not in {"disabled", "not_voice", "not_allowed", "too_large", "missing_audio"}:
+            logger.warning(
+                "Voice transcription skipped",
+                extra={"context": {"status": transcript_status, "conversation_id": str(conversation.id)}},
+            )
+
     # 4. Update last_message_at (keep previous for session timeout check)
     now = datetime.now(timezone.utc)
     previous_last_message_at = conversation.last_message_at
@@ -2306,6 +2505,7 @@ async def _handle_webhook_payload(
             if bot_token and chat_id:
                 telegram = TelegramService(bot_token)
                 forward_result = None
+                caption = None
                 if has_media and media_info and media_decision and media_decision.allowed and (media_policy or {}).get("forward_to_telegram"):
                     stored_path = None
                     if saved_message and isinstance(saved_message.message_metadata, dict):
@@ -2328,9 +2528,52 @@ async def _handle_webhook_payload(
                 if forward_result and forward_result.get("ok"):
                     if metadata:
                         metadata.forwarded_to_telegram = True
+                    if (
+                        transcript
+                        and caption
+                        and _is_voice_note(media_info)
+                        and saved_message
+                        and transcript.strip() == caption.strip()
+                    ):
+                        _update_message_media_metadata(saved_message, {"transcript_forwarded": True})
                 elif forward_result:
                     logger.warning(
                         "Forward to Telegram failed",
+                        extra={
+                            "context": {
+                                "conversation_id": str(conversation.id),
+                                "state": conversation.state,
+                                "telegram_topic_id": conversation.telegram_topic_id,
+                                "error": forward_result.get("description") or forward_result.get("error"),
+                            }
+                        },
+                    )
+
+    if (
+        transcript
+        and media_info
+        and _is_voice_note(media_info)
+        and conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]
+        and conversation.telegram_topic_id
+    ):
+        already_forwarded = False
+        if saved_message and isinstance(saved_message.message_metadata, dict):
+            media_meta = saved_message.message_metadata.get("media") or {}
+            already_forwarded = bool(media_meta.get("transcript_forwarded"))
+        if not already_forwarded:
+            bot_token, chat_id = get_telegram_credentials(db, client.id)
+            if bot_token and chat_id:
+                telegram = TelegramService(bot_token)
+                forward_result = telegram.send_message(
+                    chat_id=chat_id,
+                    text=f"📝 <b>Транскрипт:</b> {transcript}",
+                    message_thread_id=conversation.telegram_topic_id,
+                )
+                if forward_result and forward_result.get("ok") and saved_message:
+                    _update_message_media_metadata(saved_message, {"transcript_forwarded": True})
+                elif forward_result:
+                    logger.warning(
+                        "Transcript forward to Telegram failed",
                         extra={
                             "context": {
                                 "conversation_id": str(conversation.id),
@@ -2422,42 +2665,60 @@ async def _handle_webhook_payload(
                 }
                 _update_message_media_metadata(saved_message, update_payload)
 
+        media_response = None
+        media_escalated = False
+        media_text_placeholder = _is_placeholder_text(message_text)
+
         if conversation.state == ConversationState.BOT_ACTIVE.value:
-            handover_text = message_text.strip()
-            if not handover_text or re.fullmatch(r"\[.+\]", handover_text):
-                handover_text = f"Клиент отправил {media_info.media_type}."
-            result = escalate_to_pending(
-                db=db,
-                conversation=conversation,
-                user_message=handover_text,
-                trigger_type="media",
-                trigger_value=media_info.media_type,
-            )
-            if result.ok:
-                handover = result.value
-                telegram_sent = send_telegram_notification(
+            if _is_style_reference_request(message_text, has_media=True):
+                handover_text = message_text.strip()
+                if media_text_placeholder:
+                    handover_text = "Клиент отправил фото/референс."
+                result = escalate_to_pending(
                     db=db,
-                    handover=handover,
                     conversation=conversation,
-                    user=user,
-                    message=handover_text,
+                    user_message=handover_text,
+                    trigger_type="media",
+                    trigger_value="style_reference",
                 )
-                result_message = f"Media escalation, telegram={'sent' if telegram_sent else 'failed'}"
-            else:
-                bot_response = MSG_AI_ERROR
-                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                sent = _send_response(bot_response)
-                result_message = "Media escalation failed" if sent else "Media escalation response failed"
-                db.commit()
-                return WebhookResponse(
-                    success=True,
-                    message=result_message,
-                    conversation_id=conversation.id,
-                    bot_response=bot_response,
-                )
+                if result.ok:
+                    handover = result.value
+                    telegram_sent = send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=handover_text,
+                    )
+                    result_message = (
+                        f"Style reference escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                    )
+                    media_escalated = True
+                    media_response = MSG_MEDIA_STYLE_REFERENCE
+                else:
+                    bot_response = MSG_AI_ERROR
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = _send_response(bot_response)
+                    result_message = "Style reference escalation failed" if sent else "Media escalation response failed"
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
+            elif media_text_placeholder:
+                if media_info.media_type == "document":
+                    media_response = MSG_MEDIA_DOC_RECEIVED
+                else:
+                    media_response = MSG_MEDIA_RECEIVED
+
+        elif conversation.state == ConversationState.PENDING.value and media_text_placeholder:
+            media_response = MSG_MEDIA_PENDING_NEED_TEXT
 
         if (
-            conversation.telegram_topic_id
+            (conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value] or media_escalated)
+            and conversation.telegram_topic_id
             and not (metadata and metadata.forwarded_to_telegram)
             and (media_policy or {}).get("forward_to_telegram")
         ):
@@ -2491,24 +2752,18 @@ async def _handle_webhook_payload(
                         },
                     )
 
-        if conversation.state != ConversationState.MANAGER_ACTIVE.value:
-            if media_info.media_type == "document":
-                bot_response = MSG_MEDIA_DOC_RECEIVED
-            else:
-                bot_response = MSG_MEDIA_RECEIVED
+        if media_response is not None and conversation.state != ConversationState.MANAGER_ACTIVE.value:
+            bot_response = media_response
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             result_message = "Media response sent" if sent else "Media response failed"
-        else:
-            result_message = "Media forwarded (manager active)"
-
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message=result_message,
-            conversation_id=conversation.id,
-            bot_response=bot_response,
-        )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
 
     # 9.0 Debounce bursty inputs: only the latest message triggers bot logic.
     append_user_message = True
@@ -3003,6 +3258,20 @@ async def _handle_webhook_payload(
             success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
         )
 
+    if (
+        not has_media
+        and conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value]
+        and _is_style_reference_request(message_text, has_media=False)
+    ):
+        bot_response = MSG_STYLE_REFERENCE_NEED_MEDIA
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = _send_response(bot_response)
+        result_message = "Style reference prompt sent" if sent else "Style reference prompt failed"
+        db.commit()
+        return WebhookResponse(
+            success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
+        )
+
     # 9.35 Out-of-domain: respond without escalation only when RAG has no confident match
     if conversation.state == ConversationState.BOT_ACTIVE.value and out_of_domain_signal and not rag_confident:
         bot_response = OUT_OF_DOMAIN_RESPONSE
@@ -3053,6 +3322,7 @@ async def _handle_webhook_payload(
                 message_text,
                 payload.client_slug,
                 append_user_message=append_user_message,
+                pending_hint=conversation.state == ConversationState.PENDING.value,
             )
             if gen_result.ok and gen_result.value[0]:
                 bot_response = gen_result.value[0]
@@ -3095,6 +3365,7 @@ async def _handle_webhook_payload(
             message_text,
             payload.client_slug,
             append_user_message=append_user_message,
+            pending_hint=conversation.state == ConversationState.PENDING.value,
         )
 
         if not gen_result.ok:

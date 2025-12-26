@@ -144,7 +144,12 @@ def handle_message(request: MessageRequest, db: Session = Depends(get_db)):
 
     elif conversation.state == ConversationState.BOT_ACTIVE.value:
         # Normal flow: generate AI response
-        result = generate_bot_response(db, conversation, request.content)
+        result = generate_bot_response(
+            db,
+            conversation,
+            request.content,
+            pending_hint=conversation.state == ConversationState.PENDING.value,
+        )
 
         if not result.ok:
             # AI error — fallback response

@@ -875,6 +875,7 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
                 message_text,
                 request.client_slug,
                 append_user_message=append_user_message,
+                pending_hint=conversation.state == ConversationState.PENDING.value,
             )
             if gen_result.ok and gen_result.value[0]:
                 bot_response = gen_result.value[0]
@@ -917,6 +918,7 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
             message_text,
             request.client_slug,
             append_user_message=append_user_message,
+            pending_hint=conversation.state == ConversationState.PENDING.value,
         )
 
         if not gen_result.ok:

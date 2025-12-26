@@ -107,6 +107,7 @@ def generate_bot_response(
     user_message: str,
     client_slug: str = "truffles",
     append_user_message: bool = True,
+    pending_hint: bool = False,
 ) -> Result[Tuple[Optional[str], str]]:
     """
     Generate bot response using AI.
@@ -130,4 +131,5 @@ def generate_bot_response(
         conversation_id=conversation.id,
         user_message=user_message,
         append_user_message=append_user_message,
+        pending_hint=pending_hint,
     )
