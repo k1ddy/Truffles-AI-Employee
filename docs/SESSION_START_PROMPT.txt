@@ -25,6 +25,7 @@ Rules:
 
 Brain Pack (2-3 minutes, “мозги”):
 - 1 проблема → 1 диагностика (лог/БД) → 1 правка → 1 проверка → запись в STATE.md.
+- Единственные источники истины: факты в `SALON_TRUTH.yaml`, политика в `POLICY.md`, фразы в `INTENTS_*.yaml`, тесты в `EVAL.yaml`.
 - Где править: `knowledge/**`, `prompts/**`, `SPECS/CONSULTANT.md`, `SPECS/ESCALATION.md`, `truffles-api/app/services/*`.
 - Проверки: `pytest truffles-api/tests/test_demo_salon_eval.py` + sync KB (`ops/sync_client.py`/`ops/manual_sync_demo.py`).
 - Не создавать новые файлы — только обновлять существующие артефакты.
@@ -35,7 +36,5 @@ Fast checks (60s, no guesswork):
 - If media shows as `[audio]/[image]`: DB check `metadata->'media'->'decision'` and logs `rg -n "Media forward|rate limit"`.
 
 Amnesia mode (time-boxed, 10-15 minutes):
-- Read: STATE.md, this file, SPECS/CONSULTANT.md, SPECS/ESCALATION.md, SPECS/ARCHITECTURE.md.
-- Do 1-2 evidence checks (DB/logs) before touching code.
-- Fix exactly one issue per session: diagnose -> change -> verify -> record in STATE.md.
+- Follow Brain Pack only: 1 issue, 1-2 evidence checks, then record in STATE.md.
 - If bot behavior changed, update EVAL/knowledge files and SPECS/CONSULTANT.md.
