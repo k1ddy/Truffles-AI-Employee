@@ -55,6 +55,7 @@ from app.services.intent_service import (
     classify_domain_with_scores,
     classify_intent,
     is_frustration_message,
+    is_human_request_message,
     is_opt_out_message,
     is_rejection,
     is_strong_out_of_domain,
@@ -1732,6 +1733,110 @@ def _get_recent_service_hint(context: dict, now: datetime) -> str | None:
     return str(value).strip() or None
 
 
+BOOKING_SLOT_ORDER = ("service", "datetime", "name")
+
+
+def _is_blocked_slot_message(message_text: str) -> bool:
+    return is_opt_out_message(message_text) or is_frustration_message(message_text)
+
+
+def _is_noise_slot_message(message_text: str) -> bool:
+    return (
+        is_low_signal_message(message_text)
+        or is_acknowledgement_message(message_text)
+        or is_greeting_message(message_text)
+        or is_thanks_message(message_text)
+        or is_bot_status_question(message_text)
+        or is_human_request_message(message_text)
+    )
+
+
+def _clean_name_candidate(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-zА-Яа-яЁё\s-]", " ", value or "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def _validate_service_slot(message_text: str, *, allow_freeform: bool) -> str | None:
+    if _is_blocked_slot_message(message_text):
+        return None
+    extracted = _extract_service(message_text)
+    if extracted:
+        return extracted
+    if not allow_freeform:
+        return None
+    if _is_noise_slot_message(message_text):
+        return None
+    if _extract_datetime(message_text):
+        return None
+    candidate = message_text.strip()
+    if len(candidate) < 2 or len(candidate) > 80:
+        return None
+    return candidate
+
+
+def _validate_datetime_slot(message_text: str, *, allow_freeform: bool) -> str | None:
+    if _is_blocked_slot_message(message_text):
+        return None
+    extracted = _extract_datetime(message_text)
+    if extracted:
+        return extracted
+    return None
+
+
+def _validate_name_slot(message_text: str, *, allow_freeform: bool) -> str | None:
+    if _is_blocked_slot_message(message_text):
+        return None
+    if _is_noise_slot_message(message_text):
+        return None
+    if _extract_service(message_text) or _extract_datetime(message_text):
+        return None
+    name_match = NAME_PATTERN.search(message_text)
+    if name_match:
+        candidate = name_match.group(1)
+    elif not allow_freeform:
+        return None
+    else:
+        candidate = message_text
+    cleaned = _clean_name_candidate(candidate)
+    if not cleaned:
+        return None
+    if any(char.isdigit() for char in cleaned):
+        return None
+    normalized = _normalize_text(cleaned)
+    tokens = normalized.split()
+    if not tokens or len(tokens) > 3:
+        return None
+    if any(len(token) < 2 for token in tokens):
+        return None
+    return cleaned
+
+
+BOOKING_SLOT_VALIDATORS = {
+    "service": _validate_service_slot,
+    "datetime": _validate_datetime_slot,
+    "name": _validate_name_slot,
+}
+
+
+def _apply_booking_slot(
+    booking: dict,
+    slot_key: str,
+    message_text: str,
+    *,
+    allow_freeform: bool,
+) -> dict:
+    if booking.get(slot_key):
+        return booking
+    validator = BOOKING_SLOT_VALIDATORS.get(slot_key)
+    if not validator:
+        return booking
+    value = validator(message_text, allow_freeform=allow_freeform)
+    if value:
+        booking[slot_key] = value
+    return booking
+
+
 BRANCH_SELECTION_KEY = "branch_selection"
 BRANCH_CONTEXT_KEY = "branch_id"
 MSG_BRANCH_SELECTED = "Отлично, выбрали филиал {branch_name}. Чем могу помочь?"
@@ -1867,33 +1972,14 @@ def _apply_branch_selection(
 def _update_booking_from_message(booking: dict, message_text: str) -> dict:
     booking = dict(booking)
     last_question = booking.get("last_question")
-    is_opt_out = is_opt_out_message(message_text)
-    is_frustration = is_frustration_message(message_text)
+    if _is_blocked_slot_message(message_text):
+        return booking
 
-    if last_question == "service" and not booking.get("service"):
-        if not is_low_signal_message(message_text) and not is_opt_out and not is_frustration:
-            booking["service"] = message_text.strip()
-    if last_question == "datetime" and not booking.get("datetime"):
-        if not is_low_signal_message(message_text) and not is_opt_out and not is_frustration:
-            booking["datetime"] = message_text.strip()
-    if last_question == "name" and not booking.get("name"):
-        if not is_opt_out and not is_frustration:
-            booking["name"] = message_text.strip()
+    if last_question in BOOKING_SLOT_ORDER:
+        booking = _apply_booking_slot(booking, last_question, message_text, allow_freeform=True)
 
-    if not booking.get("name"):
-        name_match = NAME_PATTERN.search(message_text)
-        if name_match:
-            booking["name"] = name_match.group(1).strip()
-
-    if not booking.get("service"):
-        detected_service = _extract_service(message_text)
-        if detected_service:
-            booking["service"] = detected_service
-
-    if not booking.get("datetime"):
-        detected_datetime = _extract_datetime(message_text)
-        if detected_datetime:
-            booking["datetime"] = detected_datetime
+    for slot_key in BOOKING_SLOT_ORDER:
+        booking = _apply_booking_slot(booking, slot_key, message_text, allow_freeform=False)
 
     return booking
 

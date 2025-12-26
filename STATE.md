@@ -118,6 +118,7 @@
 5. [x] **Low confidence: уточнить → потом заявка** — теперь 1–2 уточнения + подтверждение перед эскалацией
 6. [x] Контракт поведения: приоритеты интентов + матрица state × intent → action (SPECS/CONSULTANT.md, SPECS/ESCALATION.md)
 7. [x] Policy engine: normalize → detect signals → resolve → action; demo_salon вынесен в policy handler (без client-specific if в flow)
+8. [x] Модель слотов записи: валидаторы service/datetime/name + запрет opt-out/фрустрации в слотах
 
 ### Следующее (по порядку)
 
@@ -1258,6 +1259,7 @@ LIMIT 1;
 | `webhook.py` | human_request эскалируется с последним meaningful сообщением |
 | `message.py` | То же поведение для `/message` |
 | `webhook.py` | Decision engine (normalize → signals → resolve → action) + policy handler для truth gate |
+| `webhook.py` | Валидация слотов записи (service/datetime/name) + запрет opt-out/фрустрации |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 
