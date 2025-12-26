@@ -238,6 +238,20 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-26 — Prod: audio transcription enabled
+
+**Что сделали:**
+- Включили ASR для коротких PTT: `AUDIO_TRANSCRIPTION_ENABLED=1`, `AUDIO_TRANSCRIPTION_MAX_MB=2`, `AUDIO_TRANSCRIPTION_MODEL=whisper-1`, `AUDIO_TRANSCRIPTION_LANGUAGE=ru`.
+- Перезапустили API.
+
+**Разбор (шаблон):**
+- Боль/симптом: бот отвечал “файл получил…” на голосовые без понимания.
+- Почему важно: теряем смысл сообщения и точность ответа.
+- Диагноз: транскрибация была выключена (env не задан).
+- Решение: включили ASR и рестарт.
+- Проверка: отправить PTT → в `messages.metadata.media.transcript` появляется текст; бот отвечает по смыслу.
+- Осталось: проверить поведение в `pending/manager_active`.
+
 ### 2025-12-26 — Media: без авто‑handover + голосовые транскрипты + safe auto‑learning
 
 **Что сделали:**
