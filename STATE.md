@@ -1260,6 +1260,7 @@ LIMIT 1;
 | `message.py` | То же поведение для `/message` |
 | `webhook.py` | Decision engine (normalize → signals → resolve → action) + policy handler для truth gate |
 | `webhook.py` | Валидация слотов записи (service/datetime/name) + запрет opt-out/фрустрации |
+| `config.py` | Settings: игнорировать лишние env-поля (запуск тестов в окружении с .env) |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 
