@@ -2668,9 +2668,13 @@ async def _handle_webhook_payload(
         media_response = None
         media_escalated = False
         media_text_placeholder = _is_placeholder_text(message_text)
+        style_request = _is_style_reference_request(
+            message_text,
+            has_media=media_info.media_type == "photo",
+        )
 
         if conversation.state == ConversationState.BOT_ACTIVE.value:
-            if _is_style_reference_request(message_text, has_media=True):
+            if style_request and media_info.media_type == "photo":
                 handover_text = message_text.strip()
                 if media_text_placeholder:
                     handover_text = "Клиент отправил фото/референс."
@@ -2707,14 +2711,19 @@ async def _handle_webhook_payload(
                         conversation_id=conversation.id,
                         bot_response=bot_response,
                     )
+            elif style_request:
+                media_response = MSG_STYLE_REFERENCE_NEED_MEDIA
             elif media_text_placeholder:
                 if media_info.media_type == "document":
                     media_response = MSG_MEDIA_DOC_RECEIVED
                 else:
                     media_response = MSG_MEDIA_RECEIVED
 
-        elif conversation.state == ConversationState.PENDING.value and media_text_placeholder:
-            media_response = MSG_MEDIA_PENDING_NEED_TEXT
+        elif conversation.state == ConversationState.PENDING.value:
+            if style_request:
+                media_response = MSG_STYLE_REFERENCE_NEED_MEDIA
+            elif media_text_placeholder:
+                media_response = MSG_MEDIA_PENDING_NEED_TEXT
 
         if (
             (conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value] or media_escalated)
