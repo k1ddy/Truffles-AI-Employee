@@ -54,6 +54,8 @@
 - Первый отказ → бот молчит 30 мин (настраивается)
 - Второй отказ → бот молчит 24 часа (настраивается)
 - После resolve → счётчик сбрасывается
+- Если после мьюта пришёл **явный запрос записи/цены/адреса** → бот размьючивается и продолжает диалог.
+- Если в одном сообщении есть **opt‑out + запись** → бот просит подтверждение “Хотите снова общаться? да/нет”.
 
 **Реализация:**
 ```python
@@ -69,6 +71,9 @@ if is_rejection(intent):
         conversation.no_count += 1
         bot_response = MSG_MUTED_LONG
 ```
+
+Дополнительно (webhook):
+- re‑engage подтверждение хранится в `conversation.context` (ключ `reengage_confirmation`).
 
 **Настройки:** `client_settings.mute_duration_first_minutes`, `mute_duration_second_hours`
 

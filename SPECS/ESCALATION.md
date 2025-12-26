@@ -152,6 +152,8 @@
 | Первый "нет" в bot_active | Мьют 30 мин (настраивается) |
 | Второй "нет" в bot_active | Мьют 24 часа (настраивается) |
 | 24 часа без сообщений | Сброс счётчика |
+| Явный запрос записи/цены/адреса после мьюта | Размьютить и продолжить диалог |
+| Opt‑out + запись в одном сообщении | Запросить подтверждение “да/нет” |
 
 **Реализация:** 
 - `truffles-api/app/routers/webhook.py` / `truffles-api/app/routers/message.py` — `is_rejection(intent)`
@@ -159,6 +161,7 @@
 - `client_settings.mute_duration_first_minutes`, `mute_duration_second_hours`
 
 **ВАЖНО:** "нет" при открытой заявке (pending/manager_active) — это отмена заявки, НЕ мьют.
+**ВАЖНО:** re‑engage подтверждение хранится в `conversation.context` (ключ `reengage_confirmation`).
 
 ---
 
