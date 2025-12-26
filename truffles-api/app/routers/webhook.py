@@ -5,6 +5,7 @@ import mimetypes
 import os
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -1316,12 +1317,92 @@ def _should_run_booking_flow(
     return bool(policy.get("allow_booking_flow")) and (booking_active or booking_signal)
 
 
-def _should_run_demo_truth_gate(policy: dict[str, bool], booking_wants_flow: bool) -> bool:
+def _should_run_truth_gate(policy: dict[str, bool], booking_wants_flow: bool) -> bool:
     return bool(policy.get("allow_truth_gate_reply")) and not booking_wants_flow
 
 
 def _should_escalate_to_pending(policy: dict[str, bool], intent: Intent) -> bool:
     return bool(policy.get("allow_handover_create")) and should_escalate(intent)
+
+
+@dataclass(frozen=True)
+class DecisionSignals:
+    intent: Intent
+    is_greeting: bool
+    is_thanks: bool
+    is_ack: bool
+    is_low_signal: bool
+    is_status_question: bool
+
+
+@dataclass(frozen=True)
+class DecisionOutcome:
+    action: str
+
+
+def _normalize_message_text(message_text: str | None) -> str:
+    return (message_text or "").strip()
+
+
+def _detect_intent_signals(message_text: str) -> DecisionSignals:
+    is_greeting = is_greeting_message(message_text)
+    is_thanks = is_thanks_message(message_text)
+    is_ack = is_acknowledgement_message(message_text)
+    is_low_signal = is_low_signal_message(message_text)
+    is_status_question = is_bot_status_question(message_text)
+
+    if is_greeting:
+        intent = Intent.GREETING
+        logger.info("Intent shortcut: greeting")
+    elif is_thanks:
+        intent = Intent.THANKS
+        logger.info("Intent shortcut: thanks")
+    elif is_ack or is_low_signal:
+        intent = Intent.OTHER
+        logger.info("Intent shortcut: acknowledgement/low-signal -> other")
+    else:
+        intent = classify_intent(message_text)
+        logger.info(f"Intent classified: {intent.value}")
+
+    return DecisionSignals(
+        intent=intent,
+        is_greeting=is_greeting,
+        is_thanks=is_thanks,
+        is_ack=is_ack,
+        is_low_signal=is_low_signal,
+        is_status_question=is_status_question,
+    )
+
+
+def _resolve_action(
+    *,
+    routing: dict[str, bool],
+    state: str,
+    signals: DecisionSignals,
+    is_pending_status_question: bool,
+    style_reference: bool,
+    out_of_domain_signal: bool,
+    rag_confident: bool,
+) -> DecisionOutcome:
+    if routing["allow_bot_reply"] and (signals.is_greeting or signals.is_thanks):
+        return DecisionOutcome("smalltalk")
+    if routing["allow_bot_reply"] and state == ConversationState.PENDING.value and is_pending_status_question:
+        return DecisionOutcome("pending_status")
+    if routing["allow_bot_reply"] and signals.is_status_question:
+        return DecisionOutcome("bot_status")
+    if routing["allow_bot_reply"] and style_reference:
+        return DecisionOutcome("style_reference")
+    if routing["allow_bot_reply"] and out_of_domain_signal and not rag_confident:
+        return DecisionOutcome("out_of_domain")
+    if _should_escalate_to_pending(routing, signals.intent):
+        return DecisionOutcome("escalate")
+    if should_escalate(signals.intent) and not routing["allow_handover_create"]:
+        return DecisionOutcome("pending_escalation")
+    if is_rejection(signals.intent):
+        return DecisionOutcome("rejection")
+    if routing["allow_bot_reply"]:
+        return DecisionOutcome("ai_response")
+    return DecisionOutcome("unknown_state")
 
 
 def is_handover_status_question(text: str) -> bool:
@@ -1848,12 +1929,55 @@ def _build_booking_summary(booking: dict) -> str:
     return f"Запись: услуга={service}; дата/время={datetime_pref}; имя={name}."
 
 
-def _get_demo_salon_escalation_decision(messages: list[str]):
+def _demo_salon_escalation_gate(messages: list[str]):
     for message in messages:
         decision = get_demo_salon_decision(message)
         if decision and decision.action == "escalate":
             return decision
     return None
+
+
+def _demo_salon_price_sidecar(messages: list[str]) -> tuple[str | None, str | None]:
+    for message in messages:
+        price_reply = get_demo_salon_price_reply(message)
+        if price_reply:
+            return price_reply, get_demo_salon_price_item(message)
+    return None, None
+
+
+_POLICY_HANDLERS = {
+    "demo_salon": {
+        "policy_type": "demo_salon",
+        "escalation_gate": _demo_salon_escalation_gate,
+        "truth_gate": get_demo_salon_decision,
+        "price_item": get_demo_salon_price_item,
+        "price_sidecar": _demo_salon_price_sidecar,
+    }
+}
+
+
+def _get_policy_type(client: Client | None) -> str | None:
+    if not client or not isinstance(client.config, dict):
+        return None
+    policy = client.config.get("policy")
+    if isinstance(policy, dict):
+        policy_type = policy.get("type") or policy.get("policy_type")
+        if isinstance(policy_type, str) and policy_type.strip():
+            return policy_type.strip()
+    legacy = client.config.get("policy_type")
+    if isinstance(legacy, str) and legacy.strip():
+        return legacy.strip()
+    # Legacy fallback to preserve behavior until policy config is set.
+    if client.name == "demo_salon":
+        return "demo_salon"
+    return None
+
+
+def _get_policy_handler(client: Client | None) -> dict | None:
+    policy_type = _get_policy_type(client)
+    if not policy_type:
+        return None
+    return _POLICY_HANDLERS.get(policy_type)
 
 
 def find_active_conversation_by_channel_ref(db: Session, client_id, remote_jid: str) -> Conversation | None:
@@ -3307,15 +3431,18 @@ async def _handle_webhook_payload(
         else False
     )
 
-    # 9.03 Demo salon policy/truth gate (before booking/RAG).
-    demo_price_sidecar = None
-    if not bypass_domain_flows and payload.client_slug == "demo_salon" and routing["allow_truth_gate_reply"]:
-        decision = _get_demo_salon_escalation_decision(booking_messages)
+    # 9.03 Policy/truth gate (before booking/RAG).
+    policy_handler = _get_policy_handler(client)
+    policy_type = policy_handler.get("policy_type") if policy_handler else None
+    policy_price_sidecar = None
+    if not bypass_domain_flows and policy_handler and routing["allow_truth_gate_reply"]:
+        escalation_gate = policy_handler.get("escalation_gate")
+        decision = escalation_gate(booking_messages) if escalation_gate else None
         if decision:
             bot_response = decision.response
             _reset_low_confidence_retry(conversation)
 
-            result_message = "Demo salon reply sent"
+            result_message = "Policy reply sent"
             if decision.action == "escalate":
                 if conversation.state == ConversationState.BOT_ACTIVE.value:
                     result = escalate_to_pending(
@@ -3334,22 +3461,21 @@ async def _handle_webhook_payload(
                             user=user,
                             message=message_text,
                         )
-                        result_message = (
-                            f"Demo salon policy escalation, telegram={'sent' if telegram_sent else 'failed'}"
-                        )
+                        result_message = f"Policy escalation, telegram={'sent' if telegram_sent else 'failed'}"
                     else:
-                        result_message = f"Demo salon policy escalation failed: {result.error}"
+                        result_message = f"Policy escalation failed: {result.error}"
                 else:
-                    result_message = "Demo salon policy escalation skipped (already pending)"
+                    result_message = "Policy escalation skipped (already pending)"
 
             _record_decision_trace(
                 conversation,
                 {
-                    "stage": "demo_salon_policy",
+                    "stage": "policy_gate",
                     "decision": decision.action,
                     "intent": decision.intent,
                     "state": conversation.state,
                     "booking_wants_flow": booking_wants_flow,
+                    "policy_type": policy_type,
                 },
             )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
@@ -3365,26 +3491,23 @@ async def _handle_webhook_payload(
             )
 
         if booking_wants_flow:
-            for msg in booking_messages:
-                price_reply = get_demo_salon_price_reply(msg)
-                if price_reply:
-                    demo_price_sidecar = price_reply
-                    price_item = get_demo_salon_price_item(msg)
-                    if price_item:
-                        booking_context = booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
-                        booking_context = _set_service_hint(booking_context, price_item, now)
-                        _set_conversation_context(conversation, booking_context)
-                    break
+            price_sidecar = policy_handler.get("price_sidecar")
+            if price_sidecar:
+                policy_price_sidecar, price_item = price_sidecar(booking_messages)
+                if price_item:
+                    booking_context = (
+                        booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
+                    )
+                    booking_context = _set_service_hint(booking_context, price_item, now)
+                    _set_conversation_context(conversation, booking_context)
 
-    if (
-        not bypass_domain_flows
-        and payload.client_slug == "demo_salon"
-        and _should_run_demo_truth_gate(routing, booking_wants_flow)
-    ):
-        decision = get_demo_salon_decision(message_text)
+    if not bypass_domain_flows and policy_handler and _should_run_truth_gate(routing, booking_wants_flow):
+        truth_gate = policy_handler.get("truth_gate")
+        decision = truth_gate(message_text) if truth_gate else None
         if decision:
             if decision.intent == "price_query":
-                price_item = get_demo_salon_price_item(message_text)
+                price_item_fn = policy_handler.get("price_item")
+                price_item = price_item_fn(message_text) if price_item_fn else None
                 if price_item:
                     context = _get_conversation_context(conversation)
                     context = _set_service_hint(context, price_item, now)
@@ -3392,7 +3515,7 @@ async def _handle_webhook_payload(
             bot_response = decision.response
             _reset_low_confidence_retry(conversation)
 
-            result_message = "Demo salon reply sent"
+            result_message = "Policy reply sent"
             if decision.action == "escalate":
                 if conversation.state == ConversationState.BOT_ACTIVE.value:
                     result = escalate_to_pending(
@@ -3411,22 +3534,21 @@ async def _handle_webhook_payload(
                             user=user,
                             message=message_text,
                         )
-                        result_message = (
-                            f"Demo salon policy escalation, telegram={'sent' if telegram_sent else 'failed'}"
-                        )
+                        result_message = f"Policy escalation, telegram={'sent' if telegram_sent else 'failed'}"
                     else:
-                        result_message = f"Demo salon policy escalation failed: {result.error}"
+                        result_message = f"Policy escalation failed: {result.error}"
                 else:
-                    result_message = "Demo salon policy escalation skipped (already pending)"
+                    result_message = "Policy escalation skipped (already pending)"
 
             _record_decision_trace(
                 conversation,
                 {
-                    "stage": "demo_salon_truth_gate",
+                    "stage": "truth_gate",
                     "decision": decision.action,
                     "intent": decision.intent,
                     "state": conversation.state,
                     "booking_wants_flow": booking_wants_flow,
+                    "policy_type": policy_type,
                 },
             )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
@@ -3494,7 +3616,7 @@ async def _handle_webhook_payload(
                         "missing_slot": booking_state.get("last_question"),
                     },
                 )
-                bot_response = _combine_sidecar(prompt, demo_price_sidecar)
+                bot_response = _combine_sidecar(prompt, policy_price_sidecar)
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                 sent = _send_response(bot_response)
                 result_message = "Booking slot requested" if sent else "Booking slot response failed"
@@ -3522,7 +3644,7 @@ async def _handle_webhook_payload(
                         user=user,
                         message=booking_summary,
                     )
-                    bot_response = _combine_sidecar(MSG_ESCALATED, demo_price_sidecar)
+                    bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
                     result_message = f"Booking escalation, telegram={'sent' if telegram_sent else 'failed'}"
                     trace_decision = "escalated"
                 else:
@@ -3530,7 +3652,7 @@ async def _handle_webhook_payload(
                     result_message = f"Booking escalation failed: {result.error}"
                     trace_decision = "escalation_failed"
             else:
-                bot_response = _combine_sidecar(MSG_ESCALATED, demo_price_sidecar)
+                bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
                 result_message = "Booking captured while pending"
                 trace_decision = "captured_pending"
 
@@ -3554,24 +3676,14 @@ async def _handle_webhook_payload(
             )
 
     # 10. Classify intent (expensive). Protect against accidental escalations on short/noisy messages.
-    is_greeting = is_greeting_message(message_text)
-    is_thanks = is_thanks_message(message_text)
-    is_ack = is_acknowledgement_message(message_text)
-    is_low_signal = is_low_signal_message(message_text)
-    is_status_question = is_bot_status_question(message_text)
-
-    if is_greeting:
-        intent = Intent.GREETING
-        logger.info("Intent shortcut: greeting")
-    elif is_thanks:
-        intent = Intent.THANKS
-        logger.info("Intent shortcut: thanks")
-    elif is_ack or is_low_signal:
-        intent = Intent.OTHER
-        logger.info("Intent shortcut: acknowledgement/low-signal -> other")
-    else:
-        intent = classify_intent(message_text)
-        logger.info(f"Intent classified: {intent.value}")
+    decision_text = _normalize_message_text(message_text)
+    signals = _detect_intent_signals(decision_text)
+    intent = signals.intent
+    is_greeting = signals.is_greeting
+    is_thanks = signals.is_thanks
+    is_ack = signals.is_ack
+    is_low_signal = signals.is_low_signal
+    is_status_question = signals.is_status_question
 
     domain_intent = DomainIntent.UNKNOWN
     domain_in_score = 0.0
@@ -3675,8 +3787,21 @@ async def _handle_webhook_payload(
     # 10.1 Self-healing moved to health_service.check_and_heal_conversations()
     # Call POST /admin/heal periodically to fix broken states
 
-    # 9.1 Greeting/thanks: always respond politely without escalation
-    if routing["allow_bot_reply"] and intent in [Intent.GREETING, Intent.THANKS]:
+    is_pending_status_question = (
+        conversation.state == ConversationState.PENDING.value and is_handover_status_question(message_text)
+    )
+    style_reference = not has_media and _is_style_reference_request(message_text, has_media=False)
+    decision = _resolve_action(
+        routing=routing,
+        state=conversation.state,
+        signals=signals,
+        is_pending_status_question=is_pending_status_question,
+        style_reference=style_reference,
+        out_of_domain_signal=out_of_domain_signal,
+        rag_confident=rag_confident,
+    )
+
+    if decision.action == "smalltalk":
         bot_response = GREETING_RESPONSE if intent == Intent.GREETING else THANKS_RESPONSE
         _reset_low_confidence_retry(conversation)
         _record_decision_trace(
@@ -3695,8 +3820,7 @@ async def _handle_webhook_payload(
             success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
         )
 
-    # 9.2 Pending: answer status questions without AI/escalation
-    if routing["allow_bot_reply"] and conversation.state == ConversationState.PENDING.value and is_handover_status_question(message_text):
+    if decision.action == "pending_status":
         bot_response = MSG_PENDING_STATUS
         _record_decision_trace(
             conversation,
@@ -3714,8 +3838,7 @@ async def _handle_webhook_payload(
             success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
         )
 
-    # 9.3 Bot status questions: respond without escalation
-    if routing["allow_bot_reply"] and is_status_question:
+    if decision.action == "bot_status":
         bot_response = BOT_STATUS_RESPONSE
         _reset_low_confidence_retry(conversation)
         _record_decision_trace(
@@ -3734,11 +3857,7 @@ async def _handle_webhook_payload(
             success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
         )
 
-    if (
-        routing["allow_bot_reply"]
-        and not has_media
-        and _is_style_reference_request(message_text, has_media=False)
-    ):
+    if decision.action == "style_reference":
         bot_response = MSG_STYLE_REFERENCE_NEED_MEDIA
         _record_decision_trace(
             conversation,
@@ -3756,8 +3875,7 @@ async def _handle_webhook_payload(
             success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
         )
 
-    # 9.35 Out-of-domain: respond without escalation only when RAG has no confident match
-    if routing["allow_bot_reply"] and out_of_domain_signal and not rag_confident:
+    if decision.action == "out_of_domain":
         bot_response = OUT_OF_DOMAIN_RESPONSE
         _reset_low_confidence_retry(conversation)
         _record_decision_trace(
@@ -3778,7 +3896,7 @@ async def _handle_webhook_payload(
         )
 
     # 10. Handle based on intent and state
-    if _should_escalate_to_pending(routing, intent):
+    if decision.action == "escalate":
         handover_message = message_text
         if intent == Intent.HUMAN_REQUEST:
             handover_message = select_handover_user_message(db, conversation.id, message_text)
@@ -3843,7 +3961,7 @@ async def _handle_webhook_payload(
                 sent = _send_response(bot_response)
             result_message = f"Escalation failed ({result.error_code}), responded normally"
 
-    elif should_escalate(intent) and not routing["allow_handover_create"]:
+    elif decision.action == "pending_escalation":
         bot_response = MSG_PENDING_ESCALATION if intent == Intent.FRUSTRATION else MSG_PENDING_STATUS
         _record_decision_trace(
             conversation,
@@ -3858,7 +3976,7 @@ async def _handle_webhook_payload(
         sent = _send_response(bot_response)
         result_message = "Escalation skipped (pending), status response sent" if sent else "Pending status response failed"
 
-    elif is_rejection(intent):
+    elif decision.action == "rejection":
         # Client rejects help
         if conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]:
             handover = get_active_handover(db, conversation.id)
@@ -3904,7 +4022,7 @@ async def _handle_webhook_payload(
             sent = _send_response(bot_response)
             result_message = f"Muted (rejection #{conversation.no_count})"
 
-    elif routing["allow_bot_reply"]:
+    elif decision.action == "ai_response":
         # Bot responds: normal mode OR pending (bot helps while waiting)
         gen_result = generate_bot_response(
             db,
