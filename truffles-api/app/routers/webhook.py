@@ -1257,6 +1257,52 @@ MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удо
 MSG_BOOKING_ASK_NAME = "Как вас зовут?"
 MSG_BOOKING_CANCELLED = "Хорошо, если передумаете — пишите."
 
+ROUTING_MATRIX = {
+    ConversationState.BOT_ACTIVE.value: {
+        "allow_booking_flow": True,
+        "allow_truth_gate_reply": True,
+        "allow_handover_create": True,
+        "allow_bot_reply": True,
+    },
+    ConversationState.PENDING.value: {
+        "allow_booking_flow": True,
+        "allow_truth_gate_reply": True,
+        "allow_handover_create": False,
+        "allow_bot_reply": True,
+    },
+    ConversationState.MANAGER_ACTIVE.value: {
+        "allow_booking_flow": False,
+        "allow_truth_gate_reply": False,
+        "allow_handover_create": False,
+        "allow_bot_reply": False,
+    },
+}
+
+
+def _get_routing_policy(state: str) -> dict[str, bool]:
+    policy = ROUTING_MATRIX.get(state)
+    if policy:
+        return dict(policy)
+    return {
+        "allow_booking_flow": False,
+        "allow_truth_gate_reply": False,
+        "allow_handover_create": False,
+        "allow_bot_reply": False,
+    }
+
+
+def _should_run_booking_flow(
+    policy: dict[str, bool],
+    *,
+    booking_active: bool,
+    booking_signal: bool,
+) -> bool:
+    return bool(policy.get("allow_booking_flow")) and (booking_active or booking_signal)
+
+
+def _should_run_demo_truth_gate(policy: dict[str, bool], booking_wants_flow: bool) -> bool:
+    return bool(policy.get("allow_truth_gate_reply")) and not booking_wants_flow
+
 
 def is_handover_status_question(text: str) -> bool:
     """Detect 'did you forward / when manager replies' questions in pending state."""
@@ -2107,6 +2153,7 @@ async def _handle_webhook_payload(
         message_text = f"[{media_label}]"
 
     batch_messages_provided = batch_messages is not None
+    routing = _get_routing_policy(conversation.state)
     batch_messages = _coerce_batch_messages(message_text, batch_messages)
 
     outbound_idempotency_key = message_id or build_inbound_message_id(
@@ -2946,21 +2993,20 @@ async def _handle_webhook_payload(
     booking_context = None
     booking = None
     booking_active = False
-    if conversation.state == ConversationState.BOT_ACTIVE.value:
+    if routing["allow_booking_flow"]:
         booking_context = _get_conversation_context(conversation)
         booking = _get_booking_context(booking_context)
         booking_active = bool(booking.get("active"))
     booking_signal = _has_booking_signal(booking_messages)
-    booking_wants_flow = (
-        conversation.state == ConversationState.BOT_ACTIVE.value and (booking_active or booking_signal)
+    booking_wants_flow = _should_run_booking_flow(
+        routing,
+        booking_active=booking_active,
+        booking_signal=booking_signal,
     )
 
     # 9.03 Demo salon policy/truth gate (before booking/RAG).
     demo_price_sidecar = None
-    if payload.client_slug == "demo_salon" and conversation.state in [
-        ConversationState.BOT_ACTIVE.value,
-        ConversationState.PENDING.value,
-    ]:
+    if payload.client_slug == "demo_salon" and routing["allow_truth_gate_reply"]:
         decision = _get_demo_salon_escalation_decision(booking_messages)
         if decision:
             bot_response = decision.response
@@ -3012,11 +3058,7 @@ async def _handle_webhook_payload(
                     demo_price_sidecar = price_reply
                     break
 
-    if (
-        payload.client_slug == "demo_salon"
-        and conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value]
-        and not booking_wants_flow
-    ):
+    if payload.client_slug == "demo_salon" and _should_run_demo_truth_gate(routing, booking_wants_flow):
         decision = get_demo_salon_decision(message_text)
         if decision:
             bot_response = decision.response
@@ -3062,7 +3104,7 @@ async def _handle_webhook_payload(
             )
 
     # 9.05 Booking flow: collect slots before intent/LLM.
-    if conversation.state == ConversationState.BOT_ACTIVE.value:
+    if routing["allow_booking_flow"]:
         context = booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
         booking_state = booking if isinstance(booking, dict) else _get_booking_context(context)
         booking_active = bool(booking_state.get("active"))
@@ -3102,28 +3144,32 @@ async def _handle_webhook_payload(
                 )
 
             booking_summary = _build_booking_summary(booking_state)
-            result = escalate_to_pending(
-                db=db,
-                conversation=conversation,
-                user_message=booking_summary,
-                trigger_type="intent",
-                trigger_value="booking",
-            )
-
-            if result.ok:
-                handover = result.value
-                telegram_sent = send_telegram_notification(
+            if routing["allow_handover_create"]:
+                result = escalate_to_pending(
                     db=db,
-                    handover=handover,
                     conversation=conversation,
-                    user=user,
-                    message=booking_summary,
+                    user_message=booking_summary,
+                    trigger_type="intent",
+                    trigger_value="booking",
                 )
-                bot_response = _combine_sidecar(MSG_ESCALATED, demo_price_sidecar)
-                result_message = f"Booking escalation, telegram={'sent' if telegram_sent else 'failed'}"
+
+                if result.ok:
+                    handover = result.value
+                    telegram_sent = send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=booking_summary,
+                    )
+                    bot_response = _combine_sidecar(MSG_ESCALATED, demo_price_sidecar)
+                    result_message = f"Booking escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                else:
+                    bot_response = MSG_AI_ERROR
+                    result_message = f"Booking escalation failed: {result.error}"
             else:
-                bot_response = MSG_AI_ERROR
-                result_message = f"Booking escalation failed: {result.error}"
+                bot_response = _combine_sidecar(MSG_ESCALATED, demo_price_sidecar)
+                result_message = "Booking captured while pending"
 
             context = _set_booking_context(context, {"active": False})
             _set_conversation_context(conversation, context)

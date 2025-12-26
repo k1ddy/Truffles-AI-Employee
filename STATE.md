@@ -66,7 +66,7 @@
 - [ ] **⚠️ Эскалация всё ещё частая на реальные вопросы** — KB неполная, score часто < 0.5 → создаётся заявка; мелкие сообщения ("спасибо", "ок?") больше не должны создавать заявки (whitelist + guardrails)
 - [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant работает (логи 2025-12-25: "Owner response detected" / "Added to knowledge"), но нет модерации/метрик
 - [ ] **⚠️ Ответы медленные (outbox)** — замер: SENT за последний час avg 17s, p90 25s, max 26s (created_at → updated_at); цель < 10s не достигнута
-- [ ] **⚠️ Склейка сообщений ломает multi‑intent** — demo_salon: price‑ответ перехватывает до booking; “цена+запись” в одном батче даёт только цену → запись теряется (фикс в коде, нужен деплой)
+- [ ] **⚠️ Склейка сообщений ломает multi‑intent** — demo_salon: price‑ответ перехватывает до booking; в pending truth‑gate съедает booking; фикс в коде (booking flow в pending + price sidecar), нужен деплой/проверка
 - [ ] **⚠️ Закрепы заявок в Telegram** — после "Решено" закреп должен сниматься; сейчас иногда остаётся (проверить обработку `unpin` и message_id)
 - [ ] **⚠️ Дубли заявок на одного клиента** — владельцу неудобно; нужен guard: при open handover не создавать новый, а писать в текущий топик
 - [ ] **Branch подключен частично** — webhook ставит `conversation.branch_id`, но Telegram per branch + RAG фильтры ещё не wired → `SPECS/MULTI_TENANT.md`
@@ -510,6 +510,24 @@
 - Решение: batch-aware сигналы + booking prefill; demo_salon policy → сначала, price sidecar → вместе с booking.
 - Проверка: `pytest truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_demo_salon_eval.py` (не запускалось: `pytest` отсутствует).
 - Осталось: деплой и проверка на проде.
+
+### 2025-12-26 — Booking flow в pending (price+booking)
+
+**Что сделали:**
+- Разрешили booking flow при `state=pending`, чтобы batch "цена+запись" не перехватывался truth-gate.
+- При pending не создаём новый handover: отвечаем пользователю и закрываем booking context.
+- Добавили routing matrix/gates для booking/truth-gate и unit-тесты на правила.
+
+**Статус:**
+- Нужен деплой и повторный ручной тест; `pytest` отсутствует в окружении.
+
+**Разбор (шаблон):**
+- Боль/симптом: "сколько стоит маникюр" + "запишите на завтра" в pending → ответ "подскажите услугу".
+- Почему важно: теряется контекст услуги, ухудшается конверсия записи.
+- Диагноз: booking flow запускался только в bot_active; в pending срабатывал demo_salon truth gate.
+- Решение: включить booking flow в pending, без создания нового handover.
+- Проверка: повторить тест в pending — должен спросить имя + дать цену (sidecar); тесты не запускались (нет pytest).
+- Осталось: деплой.
 
 ### 2025-12-25 — Media fallback (non-text)
 

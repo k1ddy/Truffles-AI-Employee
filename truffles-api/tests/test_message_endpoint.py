@@ -9,6 +9,7 @@ from app.main import app
 from app.routers import webhook as webhook_router
 from app.schemas.message import MessageRequest, MessageResponse
 from app.services.message_service import select_handover_user_message
+from app.services.state_machine import ConversationState
 
 
 @pytest.fixture
@@ -186,3 +187,35 @@ class TestBatchBookingSignals:
         updated = webhook_router._update_booking_from_messages(booking, ["маникюр", "на завтра в 5"])
         assert updated.get("service")
         assert updated.get("datetime")
+
+
+class TestRoutingPolicy:
+    def test_routing_policy_bot_active(self):
+        policy = webhook_router._get_routing_policy(ConversationState.BOT_ACTIVE.value)
+        assert policy["allow_booking_flow"] is True
+        assert policy["allow_handover_create"] is True
+        assert policy["allow_bot_reply"] is True
+
+    def test_routing_policy_pending(self):
+        policy = webhook_router._get_routing_policy(ConversationState.PENDING.value)
+        assert policy["allow_booking_flow"] is True
+        assert policy["allow_handover_create"] is False
+        assert policy["allow_truth_gate_reply"] is True
+
+    def test_routing_policy_manager_active(self):
+        policy = webhook_router._get_routing_policy(ConversationState.MANAGER_ACTIVE.value)
+        assert policy["allow_bot_reply"] is False
+        assert policy["allow_truth_gate_reply"] is False
+
+    def test_booking_flow_runs_with_signal_in_pending(self):
+        policy = webhook_router._get_routing_policy(ConversationState.PENDING.value)
+        should_run = webhook_router._should_run_booking_flow(
+            policy,
+            booking_active=False,
+            booking_signal=True,
+        )
+        assert should_run is True
+
+    def test_demo_truth_gate_skips_when_booking(self):
+        policy = webhook_router._get_routing_policy(ConversationState.PENDING.value)
+        assert webhook_router._should_run_demo_truth_gate(policy, booking_wants_flow=True) is False
