@@ -71,7 +71,6 @@
 - [ ] **⚠️ by_instance зависит от instanceId** — demo_salon исправлен (query‑param даёт instanceId), остальным клиентам нужно прокинуть
 - [ ] **⚠️ demo_salon truth-gate даёт цену на "как у/в стиле"** — нет правила style_reference, фото не поддерживаются; нужен отдельный ответ/эскалация
 - [ ] **⚠️ Медиа (аудио/фото/документы)** — guardrails + Telegram forward + локальное хранение + транскрипция коротких PTT добавлены в код (нужен деплой); длинные аудио/видео и OCR/vision отсутствуют
-- [ ] **⚠️ demo_salon: "вы сегодня работаете или не работаете" уходило в complaint** — фикс в коде (guardrail), нужен деплой
 - [ ] Метрики (Quality Deflection, CSAT) — план: `SPECS/ESCALATION.md`, часть 6
 - [ ] Dashboard для заказчика — backlog
 - [ ] Quiet hours для напоминаний — P2
