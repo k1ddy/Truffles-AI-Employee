@@ -1,7 +1,7 @@
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class TelegramUser(BaseModel):
@@ -80,9 +80,7 @@ class TelegramMessage(BaseModel):
     voice: Optional[TelegramVoice] = None
     video: Optional[TelegramVideo] = None
 
-    class Config:
-        # Allow "from" field from Telegram API
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
     def __init__(self, **data):
         # Handle "from" -> "from_user" mapping
