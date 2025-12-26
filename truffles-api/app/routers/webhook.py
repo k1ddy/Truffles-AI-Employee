@@ -1231,6 +1231,7 @@ MSG_PENDING_LOW_CONFIDENCE = (
     "Я уже передал менеджеру — он скоро подключится. "
     "Пока ждём, уточните, пожалуйста, что нужно (цена/время/запись/адрес/мастер или жалоба)."
 )
+MSG_PENDING_ESCALATION = "Я уже передал менеджеру — он скоро подключится."
 MSG_PENDING_STATUS = "Да, я передал. Сейчас менеджер ещё не взял заявку. Как только возьмёт — ответит здесь. Пока ждём, могу помочь: уточните, что нужно?"
 MSG_AI_ERROR = "Извините, произошла ошибка. Попробуйте позже."
 MSG_MEDIA_UNSUPPORTED = (
@@ -3405,7 +3406,7 @@ async def _handle_webhook_payload(
             result_message = f"Escalation failed ({result.error_code}), responded normally"
 
     elif should_escalate(intent) and not routing["allow_handover_create"]:
-        bot_response = MSG_PENDING_STATUS
+        bot_response = MSG_PENDING_ESCALATION if intent == Intent.FRUSTRATION else MSG_PENDING_STATUS
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
         result_message = "Escalation skipped (pending), status response sent" if sent else "Pending status response failed"

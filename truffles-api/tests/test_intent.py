@@ -2,7 +2,9 @@ from app.services.intent_service import (
     ESCALATION_INTENTS,
     REJECTION_INTENTS,
     Intent,
+    is_frustration_message,
     is_human_request_message,
+    is_opt_out_message,
     is_rejection,
     should_escalate,
 )
@@ -80,3 +82,21 @@ class TestHumanRequestHeuristics:
 
     def test_ignores_regular_question(self):
         assert is_human_request_message("сколько стоит маникюр?") is False
+
+
+class TestOptOutHeuristics:
+    def test_detects_opt_out(self):
+        assert is_opt_out_message("я не хочу чтобы ты писал мне") is True
+        assert is_opt_out_message("отпишись") is True
+
+    def test_ignores_regular_text(self):
+        assert is_opt_out_message("сколько стоит маникюр?") is False
+
+
+class TestFrustrationHeuristics:
+    def test_detects_frustration(self):
+        assert is_frustration_message("заткнись") is True
+        assert is_frustration_message("заебал") is True
+
+    def test_ignores_regular_text(self):
+        assert is_frustration_message("спасибо") is False

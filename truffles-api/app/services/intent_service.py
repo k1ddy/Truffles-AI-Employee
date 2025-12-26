@@ -61,6 +61,45 @@ HUMAN_REQUEST_PATTERNS = (
     re.compile(r"\b(позов|позв|соедин|переключ)\w*\b"),
 )
 
+OPT_OUT_EXACT = {
+    "стоп",
+    "stop",
+    "unsubscribe",
+    "отпишись",
+    "отписаться",
+    "mute",
+    "не пиши",
+    "не пишите",
+}
+
+OPT_OUT_SUBSTRINGS = [
+    "не хочу чтобы ты писал",
+    "не хочу чтобы вы писали",
+    "не хочу чтобы ты писала",
+    "не хочу чтобы вы писали",
+    "не пиши мне",
+    "не пишите мне",
+    "хватит писать",
+    "перестань писать",
+    "перестаньте писать",
+    "больше не пиши",
+    "больше не пишите",
+    "не надо писать",
+    "не нужно писать",
+    "удали меня",
+]
+
+FRUSTRATION_PATTERNS = (
+    re.compile(r"\bзаткни(сь)?\b"),
+    re.compile(r"\bотъ?еб\w*\b"),
+    re.compile(r"\bза[её]б\w*\b"),
+    re.compile(r"\bнахуй\b"),
+    re.compile(r"\bиди нах\w*\b"),
+    re.compile(r"\bпош[её]л нах\w*\b"),
+    re.compile(r"\bотвали\b"),
+    re.compile(r"\bебан\w*\b"),
+)
+
 
 def is_human_request_message(message: str) -> bool:
     normalized = normalize_for_matching(message)
@@ -69,9 +108,31 @@ def is_human_request_message(message: str) -> bool:
     return any(pattern.search(normalized) for pattern in HUMAN_REQUEST_PATTERNS)
 
 
+def is_opt_out_message(message: str) -> bool:
+    normalized = normalize_for_matching(message)
+    if not normalized:
+        return False
+    if normalized in OPT_OUT_EXACT:
+        return True
+    return any(phrase in normalized for phrase in OPT_OUT_SUBSTRINGS)
+
+
+def is_frustration_message(message: str) -> bool:
+    normalized = normalize_for_matching(message)
+    if not normalized:
+        return False
+    return any(pattern.search(normalized) for pattern in FRUSTRATION_PATTERNS)
+
+
 def classify_intent(message: str) -> Intent:
     """Classify user message intent using LLM."""
     try:
+        if is_opt_out_message(message):
+            return Intent.REJECTION
+
+        if is_frustration_message(message):
+            return Intent.FRUSTRATION
+
         if is_human_request_message(message):
             return Intent.HUMAN_REQUEST
 
