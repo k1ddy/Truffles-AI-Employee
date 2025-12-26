@@ -148,6 +148,16 @@ eval_cases:
     - без выходных
     - '9:00'
     - '21:00'
+- id: E014a
+  user: Вы сегодня работаете или не работаете?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - ежедневно
+    - без выходных
+    - '9:00'
+    - '21:00'
 - id: E015
   user: До скольки вы работаете?
   expected:

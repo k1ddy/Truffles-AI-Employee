@@ -167,6 +167,19 @@ def _contains_any_words(normalized: str, words: list[str]) -> bool:
     return any(_contains_word(normalized, word) for word in words)
 
 
+def _looks_like_hours_question(normalized: str) -> bool:
+    if not normalized:
+        return False
+    if _contains_any(normalized, ["график", "до скольки", "открыты", "открыто"]):
+        return True
+    if "работаете" in normalized:
+        return True
+    if "работает" in normalized and _contains_any(normalized, ["вы", "салон"]):
+        if _contains_any(normalized, ["сегодня", "сейчас", "открыт"]):
+            return True
+    return False
+
+
 def _extract_minutes(text: str) -> int | None:
     match = re.search(r"\b(\d{1,3})\s*(?:мин|минут|м)\b", text, flags=re.IGNORECASE)
     if not match:
@@ -445,6 +458,7 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
     if _contains_any(normalized, medical_keywords):
         return "policy_medical"
 
+    hours_like = _looks_like_hours_question(normalized)
     complaint_keywords = [
         "не понрав",
         "жалоб",
@@ -473,7 +487,7 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
         "одно и то же",
         "одно и тоже",
     ]
-    if "complaint" in phrase_intents or _contains_any(normalized, complaint_keywords):
+    if ("complaint" in phrase_intents or _contains_any(normalized, complaint_keywords)) and not hours_like:
         return "policy_complaint"
 
     discount_keywords = ["скидк", "скидоч", "скидос", "дешевл", "подешевле", "купон", "акци", "промо", "промокод", "торг", "уступ"]
