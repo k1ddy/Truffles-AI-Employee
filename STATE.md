@@ -25,6 +25,7 @@
 - Проверки качества: `EVAL.yaml` + `pytest truffles-api/tests/test_<client>_eval.py` + sync KB (`ops/sync_client.py`).
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
+- Обновлён детальный бриф для салонов: `Business/Sales/Бриф_клиента.md`.
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-26)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
