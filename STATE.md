@@ -238,6 +238,19 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-26 — Outbox: policy trigger_type violation fix
+
+**Что сделали:**
+- В demo_salon policy‑gate поменяли `trigger_type` с `policy` на `intent` (валидное значение).
+
+**Разбор (шаблон):**
+- Боль/симптом: outbox worker падал, voice‑сообщения зависали в PROCESSING; бот “молчал” на голосовые.
+- Почему важно: потеря ответов и зависшие сообщения.
+- Диагноз: `handovers_trigger_type_check` не допускает `policy`, вставка handover падала.
+- Решение: использовать `trigger_type="intent"` с `trigger_value=decision.intent`.
+- Проверка: деплой + голосовые проходят, outbox не падает.
+- Осталось: перевыставить старые PROCESSING при необходимости.
+
 ### 2025-12-26 — Prod: audio transcription enabled
 
 **Что сделали:**
