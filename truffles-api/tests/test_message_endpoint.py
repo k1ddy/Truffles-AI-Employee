@@ -191,6 +191,18 @@ class TestBatchBookingSignals:
         assert updated.get("datetime")
 
 
+class TestBookingSlotGuards:
+    def test_booking_name_skips_opt_out(self):
+        booking = {"active": True, "last_question": "name"}
+        updated = webhook_router._update_booking_from_messages(booking, ["не пиши мне"])
+        assert updated.get("name") is None
+
+    def test_booking_name_skips_frustration(self):
+        booking = {"active": True, "last_question": "name"}
+        updated = webhook_router._update_booking_from_messages(booking, ["иди нахуй"])
+        assert updated.get("name") is None
+
+
 class TestServiceHints:
     def test_service_hint_within_window(self):
         now = datetime.now(timezone.utc)
@@ -210,6 +222,29 @@ class TestServiceHints:
         )
 
         assert hint is None
+
+
+class TestReengageConfirmation:
+    def test_reengage_confirmation_active(self):
+        now = datetime.now(timezone.utc)
+        confirmation = {"asked_at": now.isoformat(), "booking_messages": ["запишите на завтра"]}
+
+        assert webhook_router._is_reengage_confirmation_active(
+            confirmation,
+            now + timedelta(minutes=5),
+        )
+
+    def test_reengage_confirmation_expires(self):
+        now = datetime.now(timezone.utc)
+        confirmation = {"asked_at": now.isoformat(), "booking_messages": ["запишите на завтра"]}
+
+        assert (
+            webhook_router._is_reengage_confirmation_active(
+                confirmation,
+                now + timedelta(minutes=webhook_router.REENGAGE_CONFIRM_WINDOW_MINUTES + 1),
+            )
+            is False
+        )
 
 
 class TestRoutingPolicy:

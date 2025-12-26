@@ -1221,12 +1221,15 @@ SESSION_TIMEOUT_HOURS = 24
 LOW_CONFIDENCE_RETRY_WINDOW_MINUTES = 10
 LOW_CONFIDENCE_MAX_RETRIES = 2
 HANDOVER_CONFIRM_WINDOW_MINUTES = 15
+REENGAGE_CONFIRM_WINDOW_MINUTES = 15
 SERVICE_HINT_WINDOW_MINUTES = 120
 MSG_ESCALATED = "Передал менеджеру. Могу чем-то помочь пока ждёте?"
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."
 MSG_MUTED_LONG = "Понял! Если ответа от менеджеров долго нет — лучше звоните напрямую: +7 775 984 19 26"
 MSG_LOW_CONFIDENCE = "Хороший вопрос! Уточню у коллег и вернусь с ответом."
 MSG_HANDOVER_CONFIRM = "Не уверен, что понял. Подключить менеджера? Ответьте 'да' или 'нет'."
+MSG_REENGAGE_CONFIRM = "Вы просили не писать. Хотите снова общаться? Ответьте 'да' или 'нет'."
+MSG_REENGAGE_DECLINED = "Хорошо, не буду писать. Если передумаете — напишите снова."
 MSG_HANDOVER_DECLINED = (
     "Ок. Напишите, что именно интересует по салону: цена/запись/адрес/мастер/жалоба."
 )
@@ -1267,6 +1270,7 @@ MSG_BOOKING_CANCELLED = "Хорошо, если передумаете — пи�
 
 SERVICE_HINT_KEY = "last_service_hint"
 SERVICE_HINT_AT_KEY = "last_service_hint_at"
+REENGAGE_CONFIRM_KEY = "reengage_confirmation"
 
 ROUTING_MATRIX = {
     ConversationState.BOT_ACTIVE.value: {
@@ -1548,6 +1552,35 @@ def _is_handover_confirmation_active(confirmation: dict, now: datetime) -> bool:
     return (now - asked_at) <= timedelta(minutes=HANDOVER_CONFIRM_WINDOW_MINUTES)
 
 
+def _get_reengage_confirmation(context: dict) -> dict | None:
+    confirmation = context.get(REENGAGE_CONFIRM_KEY) if isinstance(context, dict) else None
+    if isinstance(confirmation, dict):
+        return dict(confirmation)
+    return None
+
+
+def _set_reengage_confirmation(context: dict, confirmation: dict | None) -> dict:
+    context = dict(context)
+    if confirmation:
+        context[REENGAGE_CONFIRM_KEY] = confirmation
+    else:
+        context.pop(REENGAGE_CONFIRM_KEY, None)
+    return context
+
+
+def _is_reengage_confirmation_active(confirmation: dict, now: datetime) -> bool:
+    asked_at_raw = confirmation.get("asked_at")
+    if not asked_at_raw:
+        return False
+    try:
+        asked_at = datetime.fromisoformat(asked_at_raw)
+    except (TypeError, ValueError):
+        return False
+    if asked_at.tzinfo is None:
+        asked_at = asked_at.replace(tzinfo=timezone.utc)
+    return (now - asked_at) <= timedelta(minutes=REENGAGE_CONFIRM_WINDOW_MINUTES)
+
+
 def _get_booking_context(context: dict) -> dict:
     booking = context.get("booking") if isinstance(context, dict) else None
     if isinstance(booking, dict):
@@ -1730,15 +1763,18 @@ def _apply_branch_selection(
 def _update_booking_from_message(booking: dict, message_text: str) -> dict:
     booking = dict(booking)
     last_question = booking.get("last_question")
+    is_opt_out = is_opt_out_message(message_text)
+    is_frustration = is_frustration_message(message_text)
 
     if last_question == "service" and not booking.get("service"):
-        if not is_low_signal_message(message_text):
+        if not is_low_signal_message(message_text) and not is_opt_out and not is_frustration:
             booking["service"] = message_text.strip()
     if last_question == "datetime" and not booking.get("datetime"):
-        if not is_low_signal_message(message_text):
+        if not is_low_signal_message(message_text) and not is_opt_out and not is_frustration:
             booking["datetime"] = message_text.strip()
     if last_question == "name" and not booking.get("name"):
-        booking["name"] = message_text.strip()
+        if not is_opt_out and not is_frustration:
+            booking["name"] = message_text.strip()
 
     if not booking.get("name"):
         name_match = NAME_PATTERN.search(message_text)
@@ -2705,15 +2741,110 @@ async def _handle_webhook_payload(
             bot_response=None,
         )
 
-    # 9. If muted - don't respond, just forward
-    if is_muted:
+    # 8.1 Detect signals early for re-engage and mute decisions.
+    batch_messages = _coerce_batch_messages(message_text, batch_messages)
+    signal_messages = list(batch_messages)
+    opt_out_in_batch = any(is_opt_out_message(msg) for msg in signal_messages)
+    booking_signal = _has_booking_signal(signal_messages)
+    context = _get_conversation_context(conversation)
+    booking_state = _get_booking_context(context)
+    booking_active = bool(booking_state.get("active"))
+    reengage_override = False
+
+    reengage_confirmation = _get_reengage_confirmation(context)
+    if reengage_confirmation:
+        if not _is_reengage_confirmation_active(reengage_confirmation, now):
+            context = _set_reengage_confirmation(context, None)
+            _set_conversation_context(conversation, context)
+        else:
+            decision = classify_confirmation(message_text)
+            if decision == "yes":
+                context = _set_reengage_confirmation(context, None)
+                _set_conversation_context(conversation, context)
+                conversation.bot_status = "active"
+                conversation.bot_muted_until = None
+                conversation.no_count = 0
+                reengage_override = True
+                stored_messages = reengage_confirmation.get("booking_messages")
+                if isinstance(stored_messages, list) and stored_messages:
+                    batch_messages = _coerce_batch_messages("", stored_messages)
+                    signal_messages = list(batch_messages)
+                    booking_signal = _has_booking_signal(signal_messages)
+            elif decision == "no":
+                context = _set_reengage_confirmation(context, None)
+                _set_conversation_context(conversation, context)
+                mute_first, mute_second = get_mute_settings(db, client.id)
+                if conversation.no_count == 0:
+                    conversation.bot_muted_until = now + timedelta(minutes=mute_first)
+                    conversation.no_count = 1
+                else:
+                    conversation.bot_muted_until = now + timedelta(hours=mute_second)
+                    conversation.no_count += 1
+                bot_response = MSG_REENGAGE_DECLINED
+                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                sent = _send_response(bot_response)
+                result_message = "Re-engage declined" if sent else "Re-engage decline send failed"
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+            else:
+                reengage_confirmation["asked_at"] = now.isoformat()
+                context = _set_reengage_confirmation(context, reengage_confirmation)
+                _set_conversation_context(conversation, context)
+                bot_response = MSG_REENGAGE_CONFIRM
+                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                sent = _send_response(bot_response)
+                result_message = "Re-engage confirmation requested" if sent else "Re-engage confirmation failed"
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+
+    if conversation.state == ConversationState.BOT_ACTIVE.value and opt_out_in_batch and booking_signal:
+        confirmation_payload = {
+            "asked_at": now.isoformat(),
+            "booking_messages": signal_messages,
+        }
+        context = _set_reengage_confirmation(context, confirmation_payload)
+        if booking_active:
+            booking_state["active"] = False
+            context = _set_booking_context(context, booking_state)
+        _set_conversation_context(conversation, context)
+        bot_response = MSG_REENGAGE_CONFIRM
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = _send_response(bot_response)
+        result_message = "Re-engage confirmation requested" if sent else "Re-engage confirmation failed"
         db.commit()
         return WebhookResponse(
             success=True,
-            message="Bot muted, forwarded to topic" if conversation.telegram_topic_id else "Bot muted",
+            message=result_message,
             conversation_id=conversation.id,
-            bot_response=None,
+            bot_response=bot_response,
         )
+
+    # 9. If muted - don't respond unless booking flow should re-engage.
+    is_muted = conversation.bot_status == "muted" or (conversation.bot_muted_until and conversation.bot_muted_until > now)
+    if is_muted:
+        if (booking_signal or booking_active) and not opt_out_in_batch:
+            conversation.bot_status = "active"
+            conversation.bot_muted_until = None
+            conversation.no_count = 0
+            is_muted = False
+        else:
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message="Bot muted, forwarded to topic" if conversation.telegram_topic_id else "Bot muted",
+                conversation_id=conversation.id,
+                bot_response=None,
+            )
 
     if has_media:
         if not media_info:
@@ -2956,14 +3087,29 @@ async def _handle_webhook_payload(
                 bot_response=None,
             )
         if conversation.bot_status == "muted" or (conversation.bot_muted_until and conversation.bot_muted_until > now):
-            return WebhookResponse(
-                success=True,
-                message="Bot muted (after debounce), forwarded to topic"
-                if conversation.telegram_topic_id
-                else "Bot muted (after debounce)",
-                conversation_id=conversation.id,
-                bot_response=None,
-            )
+            signal_messages = _coerce_batch_messages(message_text, batch_messages)
+            opt_out_in_batch = any(is_opt_out_message(msg) for msg in signal_messages)
+            booking_signal = _has_booking_signal(signal_messages)
+            context = _get_conversation_context(conversation)
+            booking_active = bool(_get_booking_context(context).get("active"))
+            reengage_confirmation = _get_reengage_confirmation(context)
+            if reengage_confirmation and _is_reengage_confirmation_active(reengage_confirmation, now):
+                conversation.bot_status = "active"
+                conversation.bot_muted_until = None
+                conversation.no_count = 0
+            elif (booking_signal or booking_active) and not opt_out_in_batch:
+                conversation.bot_status = "active"
+                conversation.bot_muted_until = None
+                conversation.no_count = 0
+            else:
+                return WebhookResponse(
+                    success=True,
+                    message="Bot muted (after debounce), forwarded to topic"
+                    if conversation.telegram_topic_id
+                    else "Bot muted (after debounce)",
+                    conversation_id=conversation.id,
+                    bot_response=None,
+                )
 
     # 9.02 Pending handover confirmation before other flows.
     if conversation.state == ConversationState.BOT_ACTIVE.value:
@@ -3043,14 +3189,15 @@ async def _handle_webhook_payload(
     booking_context = None
     booking = None
     booking_active = False
-    opt_out_now = is_opt_out_message(message_text)
-    frustration_now = is_frustration_message(message_text)
-    bypass_domain_flows = opt_out_now or frustration_now
+    opt_out_in_batch = any(is_opt_out_message(msg) for msg in booking_messages)
+    if reengage_override:
+        opt_out_in_batch = False
+    bypass_domain_flows = opt_out_in_batch
     if routing["allow_booking_flow"]:
         booking_context = _get_conversation_context(conversation)
         booking = _get_booking_context(booking_context)
         booking_active = bool(booking.get("active"))
-        if opt_out_now and booking_active:
+        if opt_out_in_batch and booking_active:
             booking_context = _set_booking_context(booking_context, {"active": False})
             booking_context = _clear_service_hint(booking_context)
             _set_conversation_context(conversation, booking_context)
