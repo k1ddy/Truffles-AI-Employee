@@ -127,6 +127,21 @@ eval_cases:
     must_include:
     - парикмахер
     - маникюр
+- id: E010c
+  user: Можете сказать какие услуги вы предоставляете? По оплате уточню у администратора.
+  expected:
+    action: reply
+    intent: services_overview
+    must_include:
+    - парикмахер
+    - маникюр
+- id: E010d
+  user: Какие услуги у вас есть и можно записаться на маникюр завтра?
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
 - id: E011
   user: Как пройти от остановки?
   expected:
@@ -413,6 +428,14 @@ eval_cases:
     - Visa
     - Mastercard
     - QR
+- id: E039a
+  user: Какие способы оплаты?
+  expected:
+    action: escalate
+    intent: payment
+    must_tell_user_any:
+    - по оплате уточню у администратора
+    - передам администратору
 - id: E040
   user: Нужна предоплата для записи?
   expected:

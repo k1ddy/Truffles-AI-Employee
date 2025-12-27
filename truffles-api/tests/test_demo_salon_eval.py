@@ -2,6 +2,7 @@ from pathlib import Path
 
 import yaml
 
+from app.routers import webhook as webhook_router
 from app.services.demo_salon_knowledge import get_demo_salon_decision
 
 EVAL_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_salon" / "EVAL.yaml"
@@ -38,10 +39,20 @@ def test_demo_salon_eval_cases():
         user_text = case.get("user", "")
         expected = case.get("expected", {})
 
+        expected_action = expected.get("action")
+        if expected_action == "booking_flow":
+            messages = [user_text] if user_text else []
+            booking_signal = webhook_router._has_booking_signal(messages)
+            assert booking_signal is True, f"{case_id}: booking signal not detected"
+            booking_state = webhook_router._update_booking_from_messages({}, messages)
+            for slot in expected.get("booking_slots", []):
+                assert booking_state.get(slot), f"{case_id}: booking slot missing '{slot}'"
+            continue
+
         decision = get_demo_salon_decision(user_text)
         assert decision is not None, f"{case_id}: no decision for '{user_text}'"
-        assert decision.action == expected.get("action"), (
-            f"{case_id}: action mismatch: {decision.action} != {expected.get('action')}"
+        assert decision.action == expected_action, (
+            f"{case_id}: action mismatch: {decision.action} != {expected_action}"
         )
 
         response = decision.response or ""

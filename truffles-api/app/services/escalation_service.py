@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.logging_config import get_logger
 from app.models import ClientSettings, Conversation, Handover, User
 from app.services.alert_service import alert_error
+from app.services.state_machine import ConversationState
 from app.services.telegram_service import TelegramService, build_handover_buttons, format_handover_message
 
 logger = get_logger("escalation_service")
@@ -49,6 +50,19 @@ def create_handover(
     db.flush()  # Get ID before commit
 
     return handover
+
+
+def get_active_handover(db: Session, conversation_id: UUID) -> Optional[Handover]:
+    """Get latest pending/active handover for conversation."""
+    return (
+        db.query(Handover)
+        .filter(
+            Handover.conversation_id == conversation_id,
+            Handover.status.in_(["pending", "active"]),
+        )
+        .order_by(Handover.created_at.desc())
+        .first()
+    )
 
 
 def get_or_create_topic(
@@ -189,6 +203,23 @@ def escalate_conversation(
 
     Returns: (handover, telegram_sent)
     """
+    existing_handover = get_active_handover(db, conversation.id)
+    if existing_handover:
+        if conversation.state == ConversationState.BOT_ACTIVE.value:
+            if existing_handover.status == "active":
+                conversation.state = ConversationState.MANAGER_ACTIVE.value
+            else:
+                conversation.state = ConversationState.PENDING.value
+            conversation.escalated_at = datetime.now(timezone.utc)
+        telegram_sent = send_telegram_notification(
+            db=db,
+            handover=existing_handover,
+            conversation=conversation,
+            user=user,
+            message=user_message or "",
+        )
+        return existing_handover, telegram_sent
+
     # 1. Create handover
     handover = create_handover(
         db=db,
