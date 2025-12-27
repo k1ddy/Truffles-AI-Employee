@@ -3,9 +3,9 @@ import time
 from enum import Enum
 from typing import Any, Iterable, Tuple
 
-from app.logging_config import get_logger
 import httpx
 
+from app.logging_config import get_logger
 from app.services.ai_service import (
     FAST_MODEL,
     INTENT_TIMEOUT_SECONDS,
