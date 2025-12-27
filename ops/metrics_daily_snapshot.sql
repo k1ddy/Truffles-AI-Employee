@@ -6,13 +6,19 @@
 --   client_slug = demo_salon
 --   metric_date = yesterday (UTC)
 
+\if :{?client_slug}
+\else
 \set client_slug 'demo_salon'
+\endif
+\if :{?metric_date}
+\else
 \set metric_date ''
+\endif
 
 WITH params AS (
   SELECT
     (SELECT id FROM clients WHERE name = :'client_slug') AS client_id,
-    COALESCE(NULLIF(:'metric_date', ''), (CURRENT_DATE - INTERVAL '1 day')::date) AS metric_date
+    COALESCE(NULLIF(:'metric_date', '')::date, (CURRENT_DATE - INTERVAL '1 day')::date) AS metric_date
 ),
 bounds AS (
   SELECT

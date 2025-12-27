@@ -227,6 +227,8 @@ def _get_llm_cache_client():
     global _llm_cache_client, _llm_cache_url
     if redis is None:
         return None
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
     if not _is_env_enabled(os.environ.get("LLM_CACHE_ENABLED"), default=True):
         return None
     if _llm_cache_client is None or _llm_cache_url != REDIS_URL:
