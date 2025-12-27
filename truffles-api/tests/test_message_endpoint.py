@@ -14,8 +14,8 @@ from app.main import app
 from app.routers import webhook as webhook_router
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
-from app.services.demo_salon_knowledge import DemoSalonDecision
 from app.services import escalation_service
+from app.services.demo_salon_knowledge import DemoSalonDecision
 from app.services.intent_service import Intent, is_opt_out_message
 from app.services.message_service import select_handover_user_message
 from app.services.state_machine import ConversationState
