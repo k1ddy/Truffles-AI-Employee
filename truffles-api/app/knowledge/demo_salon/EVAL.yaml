@@ -1007,3 +1007,69 @@ eval_cases:
     must_include_any:
     - Официальные акции
     - 10%
+- id: E084
+  user: Подскажите, как ухаживать за гель-лаком после процедуры?
+  expected:
+    action: reply
+    intent: aftercare_gel_lac
+    must_include_any:
+    - недел
+    - перчат
+- id: E085
+  user: Сколько держится гель-лак и как продлить результат?
+  expected:
+    action: reply
+    intent: aftercare_gel_lac
+    must_include_any:
+    - недел
+    - продлить
+- id: E086
+  user: Как подготовиться к процедуре бровей/ресниц?
+  expected:
+    action: reply
+    intent: prep_brows_lashes
+    must_include_any:
+    - без макияжа
+    - 24 часа
+    - масла
+- id: E087
+  user: Можно ли совмещать чистку лица и пилинг в один день?
+  expected:
+    action: escalate
+    intent: procedure_combo
+    must_tell_user_any:
+    - администратор
+    - передам
+- id: E088
+  user: А вы можете сделать прическу как Майкла Джордана?
+  expected:
+    action: reply
+    intent: style_reference
+    must_include_any:
+    - фото
+    - референс
+    - пример
+- id: E089
+  user: Сколько стоит маникюр?
+  expected:
+    action: reply
+    intent: price_manicure
+    must_include:
+    - 2 500
+    - 3 500
+- id: E090
+  user: Классический интересует
+  expected:
+    action: reply
+    intent: service_clarify
+    must_include:
+    - маникюр
+    - ресниц
+- id: E091
+  user: ❌ ошибка вызова вебхука
+  expected:
+    action: reply
+    intent: system_error
+    must_include_any:
+    - ошибка
+    - напишите

@@ -900,6 +900,14 @@ def _update_message_media_metadata(message: Message, updates: dict) -> None:
     message.message_metadata = metadata
 
 
+def _update_message_decision_metadata(message: Message, updates: dict) -> None:
+    metadata = dict(message.message_metadata or {})
+    decision_meta = dict(metadata.get("decision_meta") or {})
+    decision_meta.update(updates)
+    metadata["decision_meta"] = decision_meta
+    message.message_metadata = metadata
+
+
 def _serialize_media_decision(decision: MediaDecision) -> dict:
     return {
         "allowed": bool(decision.allowed),
@@ -4198,6 +4206,18 @@ async def _handle_webhook_payload(
                 "policy_type": policy_type,
             },
         )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "action": fast_decision.action,
+                    "intent": fast_decision.intent,
+                    "source": "fast_intent",
+                    "fast_intent": True,
+                    "llm_used": False,
+                    "llm_timeout": False,
+                },
+            )
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
         if not sent:
@@ -4719,6 +4739,22 @@ async def _handle_webhook_payload(
                     },
                 )
                 result_message = "No response generated"
+        if saved_message:
+            llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+            llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+            llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "action": "ai_response",
+                    "intent": intent.value if intent else None,
+                    "source": "llm" if llm_used else "rule",
+                    "fast_intent": False,
+                    "llm_used": llm_used,
+                    "llm_timeout": llm_timeout,
+                    "llm_cache_hit": llm_cache_hit,
+                },
+            )
     else:
         _record_decision_trace(
             conversation,

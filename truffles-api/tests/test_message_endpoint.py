@@ -311,7 +311,7 @@ class TestFastIntent:
         assert decision.intent == expect_intent
 
     def test_fast_intent_fallback_to_llm(self):
-        message = "Как ухаживать за гель-лаком после процедуры?"
+        message = "Есть ли у вас абонементы?"
         decision = webhook_router._detect_fast_intent(
             message,
             policy_type="demo_salon",

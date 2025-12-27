@@ -683,6 +683,8 @@ def generate_ai_response(
     logger.info(f"generate_ai_response: client_id={client_id}, client_slug={client_slug}")
     if timing_context is not None:
         timing_context.setdefault("llm_cache_hit", False)
+        timing_context.setdefault("llm_used", False)
+        timing_context.setdefault("llm_timeout", False)
 
     try:
         # 1. Get system prompt
@@ -775,6 +777,7 @@ def generate_ai_response(
         if cached_response:
             if timing_context is not None:
                 timing_context["llm_cache_hit"] = True
+                timing_context["llm_used"] = False
             _log_timing(
                 "llm_cache_ms",
                 0.0,
@@ -811,6 +814,8 @@ def generate_ai_response(
         logger.debug(f"Calling LLM with {len(messages)} messages")
         llm_start = time.monotonic()
         try:
+            if timing_context is not None:
+                timing_context["llm_used"] = True
             response = llm.generate(
                 messages,
                 temperature=1.0,
@@ -819,6 +824,8 @@ def generate_ai_response(
                 model=model_name,
             )
         except httpx.TimeoutException as exc:
+            if timing_context is not None:
+                timing_context["llm_timeout"] = True
             _log_timing(
                 "llm_ms",
                 (time.monotonic() - llm_start) * 1000,
@@ -834,6 +841,8 @@ def generate_ai_response(
             )
             logger.warning(f"LLM timeout after {LLM_TIMEOUT_SECONDS}s: {exc}")
             return Result.success((None, "low_confidence"))
+        if timing_context is not None:
+            timing_context["llm_timeout"] = False
         _log_timing(
             "llm_ms",
             (time.monotonic() - llm_start) * 1000,

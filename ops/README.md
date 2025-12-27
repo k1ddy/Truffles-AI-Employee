@@ -67,6 +67,7 @@ DemoSalonBot: токен в секретах (не в git)
 | `reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | `psql < reset.sql` |
 | `update_instance_demo.sql` | Обновить instance_id для demo_salon | `psql < update_instance_demo.sql` |
 | `update_truffles_prompt.sql` | Обновить промпт truffles (SQL) | `psql < update_truffles_prompt.sql` |
+| `metrics_daily_snapshot.sql` | Дневной снимок метрик (SLA/LLM/эскалации) | `psql -v client_slug=demo_salon -f metrics_daily_snapshot.sql` |
 
 **Как выполнить SQL:**
 ```bash

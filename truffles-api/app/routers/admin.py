@@ -1,12 +1,14 @@
 """Admin API endpoints for managing bot configuration."""
 
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, field_validator
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -89,6 +91,14 @@ class MediaCleanupResponse(BaseModel):
     deleted_bytes: int
     remaining_files: int
     remaining_bytes: int
+
+
+def _coerce_metric_value(value: object):
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
 
 
 # === PROMPT ENDPOINTS ===
@@ -431,6 +441,68 @@ async def cleanup_media(
             },
         )
     return results
+
+
+# === METRICS ===
+
+
+@router.get("/metrics")
+async def get_metrics(
+    client_slug: str,
+    metric_date: Optional[str] = None,
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    _require_admin_token(x_admin_token)
+    client = db.query(Client).filter(Client.name == client_slug).first()
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Client '{client_slug}' not found")
+
+    if metric_date:
+        try:
+            metric_day = date.fromisoformat(metric_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="metric_date must be YYYY-MM-DD") from exc
+    else:
+        metric_day = datetime.now(timezone.utc).date()
+
+    row = (
+        db.execute(
+            text(
+                """
+                SELECT
+                  metric_date,
+                  outbox_latency_p50,
+                  outbox_latency_p90,
+                  llm_timeout_rate,
+                  llm_used_rate,
+                  escalation_rate,
+                  fast_intent_rate,
+                  total_user_messages,
+                  total_outbox_sent,
+                  total_outbox_failed,
+                  total_llm_used,
+                  total_llm_timeout,
+                  total_handovers,
+                  total_fast_intent,
+                  created_at,
+                  updated_at
+                FROM metrics_daily
+                WHERE client_id = :client_id AND metric_date = :metric_date
+                """
+            ),
+            {"client_id": client.id, "metric_date": metric_day},
+        )
+        .mappings()
+        .first()
+    )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Metrics not found for date/client")
+
+    payload = {key: _coerce_metric_value(value) for key, value in row.items()}
+    payload["client_slug"] = client_slug
+    return payload
 
 
 # === HEALTH ENDPOINTS ===

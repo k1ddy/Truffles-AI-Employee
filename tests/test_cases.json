@@ -193,6 +193,138 @@
           "expect_intent": "location"
         },
         "status": null
+      },
+      {
+        "id": "TC020",
+        "name": "Fast intent: greeting typo",
+        "input": "здравсвтуйте",
+        "expected": "Бот отвечает приветствием без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "smalltalk",
+          "expect_intent": "greeting"
+        },
+        "status": null
+      },
+      {
+        "id": "TC021",
+        "name": "Fast intent: ping",
+        "input": "ping",
+        "expected": "Бот отвечает приветствием без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "smalltalk",
+          "expect_intent": "greeting"
+        },
+        "status": null
+      },
+      {
+        "id": "TC022",
+        "name": "Fast intent: aftercare gel-lac",
+        "input": "Подскажите, как ухаживать за гель-лаком после процедуры?",
+        "expected": "Ответ по уходу без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "reply",
+          "expect_intent": "aftercare_gel_lac"
+        },
+        "status": null
+      },
+      {
+        "id": "TC023",
+        "name": "Fast intent: gel-lac duration",
+        "input": "Сколько держится гель-лак и как продлить результат?",
+        "expected": "Ответ по сроку и уходу без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "reply",
+          "expect_intent": "aftercare_gel_lac"
+        },
+        "status": null
+      },
+      {
+        "id": "TC024",
+        "name": "Fast intent: prep brows/lashes",
+        "input": "Как подготовиться к процедуре бровей/ресниц?",
+        "expected": "Ответ по подготовке без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "reply",
+          "expect_intent": "prep_brows_lashes"
+        },
+        "status": null
+      },
+      {
+        "id": "TC025",
+        "name": "Fast intent: combo clean+peel",
+        "input": "Можно ли совмещать чистку лица и пилинг в один день?",
+        "expected": "Эскалация по процедурам без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "escalate",
+          "expect_intent": "procedure_combo"
+        },
+        "status": null
+      },
+      {
+        "id": "TC026",
+        "name": "Fast intent: style reference",
+        "input": "А вы можете сделать прическу как Майкла Джордана?",
+        "expected": "Просьба прислать референс без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "reply",
+          "expect_intent": "style_reference"
+        },
+        "status": null
+      },
+      {
+        "id": "TC027",
+        "name": "Fast intent: manicure price overview",
+        "input": "Сколько стоит маникюр?",
+        "expected": "Ответ по ценам маникюра без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "reply",
+          "expect_intent": "price_manicure"
+        },
+        "status": null
+      },
+      {
+        "id": "TC028",
+        "name": "Fast intent: classic interest",
+        "input": "Классический интересует",
+        "expected": "Уточняющий вопрос по услуге без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "reply",
+          "expect_intent": "service_clarify"
+        },
+        "status": null
+      },
+      {
+        "id": "TC029",
+        "name": "Fast intent: please",
+        "input": "пожалуйста",
+        "expected": "Короткая благодарность без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "smalltalk",
+          "expect_intent": "thanks"
+        },
+        "status": null
+      },
+      {
+        "id": "TC030",
+        "name": "Fast intent: webhook error",
+        "input": "❌ ошибка вызова вебхука",
+        "expected": "Короткое объяснение ошибки без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "reply",
+          "expect_intent": "system_error"
+        },
+        "status": null
       }
     ]
   },

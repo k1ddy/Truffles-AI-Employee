@@ -180,6 +180,7 @@ truffles-api/
 | `health_check.py` | Проверка здоровья системы |
 | `onboard_client.py` | Онбординг нового заказчика |
 | `update_prompt.py` | Обновление промпта через API |
+| `metrics_daily_snapshot.sql` | Снимок дневных метрик (SLA/LLM/эскалации) |
 | `migrations/` | SQL миграции |
 | `templates/` | Шаблоны (промпты, FAQ) |
 | `LESSONS_LEARNED.md` | Уроки из отладки |
@@ -190,6 +191,7 @@ truffles-api/
 - `ops/migrations/012_add_outbox_messages.sql` — Outbox для ACK-first обработки.
 - `ops/migrations/013_add_agents_and_learning_queue.sql` — роли/идентичности + очередь обучения + branch_id.
 - `ops/migrations/014_add_branch_routing_settings.sql` — настройки branch routing + auto-approve ролей.
+- `ops/migrations/015_add_metrics_daily.sql` — дневные метрики (SLA/LLM/эскалации).
 
 **Старые скрипты:** `.archive/ops_old/` — не в git.
 

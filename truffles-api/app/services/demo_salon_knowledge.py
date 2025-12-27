@@ -295,6 +295,27 @@ def format_reply_from_truth(intent: str, slots: dict | None = None) -> str | Non
         if categories:
             return "Мы оказываем услуги: " + ", ".join(categories) + "."
         return "Мы салон красоты. Подскажите, какая услуга интересует?"
+    if intent == "aftercare_gel_lac":
+        aftercare = truth.get("aftercare", {}).get("gel_lac")
+        return aftercare or "Подскажите, пожалуйста, какую услугу нужно подсказать по уходу?"
+    if intent == "prep_brows_lashes":
+        prep = truth.get("preparation", {}).get("brows_lashes")
+        return prep or "Подскажите, пожалуйста, какую именно процедуру планируете?"
+    if intent == "procedure_combo":
+        combo = truth.get("procedure_compatibility", {}).get("face_cleaning_peel_same_day")
+        return combo or "Такое сочетание лучше уточнить у администратора."
+    if intent == "style_reference":
+        reference = truth.get("style_reference", {}).get("ask_photo")
+        return reference or "Пришлите, пожалуйста, фото-пример желаемого результата."
+    if intent == "service_clarify":
+        clarify = truth.get("service_clarify", {}).get("classic_interest")
+        return clarify or "Уточните, пожалуйста, какую именно услугу вы имеете в виду?"
+    if intent == "price_manicure":
+        quick_price = truth.get("price_quick_answers", {}).get("manicure")
+        return quick_price or "Подскажите, какой именно маникюр интересует?"
+    if intent == "system_error":
+        system_msg = truth.get("system_messages", {}).get("webhook_error")
+        return system_msg or "Похоже, была техническая ошибка. Напишите вопрос ещё раз, я на связи."
     if intent == "last_appointment":
         last_time = truth.get("salon", {}).get("hours", {}).get("last_appointment")
         if last_time:
@@ -692,6 +713,50 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="services_overview")
 
+    if "aftercare_gel_lac" in phrase_intents or (
+        "гель лак" in normalized
+        and _contains_any(normalized, ["ухаж", "продл", "держ", "нос", "срок"])
+    ):
+        reply = format_reply_from_truth("aftercare_gel_lac")
+        if reply:
+            return DemoSalonDecision(action="reply", response=reply, intent="aftercare_gel_lac")
+
+    if "prep_brows_lashes" in phrase_intents or (
+        "подготов" in normalized and _contains_any(normalized, ["бров", "ресниц"])
+    ):
+        reply = format_reply_from_truth("prep_brows_lashes")
+        if reply:
+            return DemoSalonDecision(action="reply", response=reply, intent="prep_brows_lashes")
+
+    if "procedure_combo" in phrase_intents or (
+        _contains_any(normalized, ["совмещ", "в один день"]) and _contains_any(normalized, ["чистк", "пилинг"])
+    ):
+        reply = format_reply_from_truth("procedure_combo")
+        if reply:
+            return DemoSalonDecision(action="escalate", response=reply, intent="procedure_combo")
+
+    if "style_reference" in phrase_intents:
+        reply = format_reply_from_truth("style_reference")
+        if reply:
+            return DemoSalonDecision(action="reply", response=reply, intent="style_reference")
+
+    if "system_error" in phrase_intents or "ошибка вызова вебхука" in normalized:
+        reply = format_reply_from_truth("system_error")
+        if reply:
+            return DemoSalonDecision(action="reply", response=reply, intent="system_error")
+
+    if "service_clarify" in phrase_intents or ("классическ" in normalized and "интерес" in normalized):
+        reply = format_reply_from_truth("service_clarify")
+        if reply:
+            return DemoSalonDecision(action="reply", response=reply, intent="service_clarify")
+
+    if "price_manicure" in phrase_intents or (
+        "маникюр" in normalized and _contains_any(normalized, ["сколько", "цена", "прайс", "стоим", "почем"])
+    ):
+        reply = format_reply_from_truth("price_manicure")
+        if reply:
+            return DemoSalonDecision(action="reply", response=reply, intent="price_manicure")
+
     if "опозда" in normalized:
         minutes = _extract_minutes(message)
         tolerated = load_yaml_truth().get("booking", {}).get("lateness_policy", {}).get("tolerated_minutes", 15)
@@ -766,7 +831,10 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="gift_certificate")
 
-    if "запис" in normalized or "окошк" in normalized or "свободн" in normalized:
+    if (
+        "order_booking" in phrase_intents
+        or _contains_any(normalized, ["запис", "запиш", "окошк", "свободн"])
+    ):
         reply = format_reply_from_truth("booking_intake")
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="booking_intake")

@@ -1207,6 +1207,11 @@ Runbook (если “всё странно” или сессия оборвал
 - Safe intents (SAFE5): total_s 2.72–2.86s
 - LLM ветка (CMPX6-3/6-5/7-4/7-5/8-1): total_s 8.35–9.52s (avg 8.99, p90 9.48)
 
+### 2025-12-27 — Top-вопросы без LLM (demo_salon)
+- Top-30 из DB: добавлены новые truth intents (aftercare/prep/combo/style/manicure/classic/webhook-error) + фразы в INTENTS.
+- Тесты: `python -m pytest /app/tests/test_demo_salon_eval.py /app/tests/test_message_endpoint.py -q` → 52 passed (docker exec).
+- Live-check (7 запросов, новые remote_jid): ответы из truth-gate (aftercare/prep/combo/style/manicure/classic/system_error).
+
 ### Кнопки:
 - Сначала не работали — traefik labels были пустые
 - После `ops/restart_api.sh` — заработали
@@ -1293,6 +1298,17 @@ LIMIT 1;
 | `intent_service.py` | Intent классификация на FAST_MODEL + timeout 2s + timing logs |
 | `services/llm/base.py` | generate() принимает timeout_seconds |
 | `services/llm/openai_provider.py` | timeout_seconds прокинут в httpx |
+| `demo_salon_knowledge.py` | Добавлены truth-intent ответы: уход за гель-лаком, подготовка бровей/ресниц, совмещение процедур, style reference, маникюр-прайс, уточнение “классический”, обработка ошибки вебхука |
+| `SALON_TRUTH.yaml` | Добавлены aftercare/preparation/procedure_compatibility/style_reference/price_quick_answers/system_messages |
+| `INTENTS_PHRASES_DEMO_SALON.yaml` | Расширены фразы (greeting/thanks/booking) + новые intent фразы под top-вопросы |
+| `EVAL.yaml` | Новые кейсы: уход/подготовка/совмещение/style/маникюр/классический/webhook-error |
+| `tests/test_cases.json` | Golden cases для новых fast-intent |
+| `tests/test_message_endpoint.py` | Обновлён fallback case для LLM |
+| `ai_service.py` | Добавлены флаги `llm_used`/`llm_timeout` в timing_context для метрик |
+| `webhook.py` | Запись decision_meta в metadata user-сообщений (fast_intent/LLM) |
+| `admin.py` | Новый /admin/metrics (читает дневные метрики) |
+| `ops/migrations/015_add_metrics_daily.sql` | Таблица дневных метрик SLA/LLM/эскалаций |
+| `ops/metrics_daily_snapshot.sql` | SQL snapshot метрик по дню/клиенту |
 | `tests/test_cases.json` | Добавлены fast_intent golden cases |
 | `tests/test_message_endpoint.py` | Тесты fast_intent + LLM fallback |
 | `.env.example` | Добавлены FAST_MODEL/SLOW_MODEL + таймауты |
