@@ -415,7 +415,7 @@ def _transcribe_with_elevenlabs(
 ) -> tuple[str | None, str | None]:
     if not ELEVENLABS_API_KEY:
         return None, "missing_elevenlabs_key"
-    files = {"audio": (filename or "audio", audio_bytes, mime_type or "application/octet-stream")}
+    files = {"file": (filename or "audio", audio_bytes, mime_type or "application/octet-stream")}
     data: dict[str, str] = {"model_id": ELEVENLABS_ASR_MODEL_ID}
     if language:
         data["language_code"] = language
