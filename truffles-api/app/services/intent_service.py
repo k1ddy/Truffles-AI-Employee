@@ -1,9 +1,17 @@
 import re
+import time
 from enum import Enum
 from typing import Any, Iterable, Tuple
 
 from app.logging_config import get_logger
-from app.services.ai_service import get_llm_provider, normalize_for_matching
+import httpx
+
+from app.services.ai_service import (
+    FAST_MODEL,
+    INTENT_TIMEOUT_SECONDS,
+    get_llm_provider,
+    normalize_for_matching,
+)
 
 logger = get_logger("intent_service")
 
@@ -144,7 +152,44 @@ def classify_intent(message: str) -> Intent:
         prompt = CLASSIFY_PROMPT.format(message=message)
         messages = [{"role": "user", "content": prompt}]
 
-        response = llm.generate(messages, temperature=1.0, max_tokens=100)
+        llm_start = time.monotonic()
+        try:
+            response = llm.generate(
+                messages,
+                temperature=1.0,
+                max_tokens=100,
+                model=FAST_MODEL,
+                timeout_seconds=INTENT_TIMEOUT_SECONDS,
+            )
+        except httpx.TimeoutException as exc:
+            logger.info(
+                "Timing",
+                extra={
+                    "context": {
+                        "stage": "intent_llm_ms",
+                        "elapsed_ms": round((time.monotonic() - llm_start) * 1000, 2),
+                        "model_name": FAST_MODEL,
+                        "model_tier": "fast",
+                        "timeout": True,
+                        "timeout_seconds": INTENT_TIMEOUT_SECONDS,
+                    }
+                },
+            )
+            logger.warning(f"Intent LLM timeout after {INTENT_TIMEOUT_SECONDS}s: {exc}")
+            return Intent.OTHER
+
+        logger.info(
+            "Timing",
+            extra={
+                "context": {
+                    "stage": "intent_llm_ms",
+                    "elapsed_ms": round((time.monotonic() - llm_start) * 1000, 2),
+                    "model_name": FAST_MODEL,
+                    "model_tier": "fast",
+                    "timeout": False,
+                }
+            },
+        )
         result = response.content.strip().lower()
 
         # Parse response

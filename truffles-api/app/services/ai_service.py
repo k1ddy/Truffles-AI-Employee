@@ -165,7 +165,14 @@ BOT_STATUS_KEYWORDS = {
 }
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "8"))
+FAST_MODEL = os.environ.get("FAST_MODEL", "gpt-5-mini")
+SLOW_MODEL = os.environ.get("SLOW_MODEL", "gpt-5-mini")
+FAST_MODEL_MAX_CHARS = int(os.environ.get("FAST_MODEL_MAX_CHARS", "160"))
+INTENT_TIMEOUT_SECONDS = float(os.environ.get("INTENT_TIMEOUT_SECONDS", "2"))
+LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "6"))
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "600"))
+MAX_HISTORY_MESSAGES = int(os.environ.get("LLM_HISTORY_MESSAGES", "6"))
+MAX_KNOWLEDGE_CHARS = int(os.environ.get("LLM_KNOWLEDGE_CHARS", "1500"))
 
 # Global LLM provider instance
 _llm_provider = None
@@ -192,8 +199,26 @@ def get_llm_provider() -> OpenAIProvider:
     """Get or create LLM provider instance."""
     global _llm_provider
     if _llm_provider is None:
-        _llm_provider = OpenAIProvider(api_key=OPENAI_API_KEY, default_model="gpt-5-mini")
+        _llm_provider = OpenAIProvider(api_key=OPENAI_API_KEY, default_model=FAST_MODEL)
     return _llm_provider
+
+
+def _select_generation_model(user_message: str, max_score: float) -> tuple[str, str]:
+    normalized = normalize_for_matching(user_message)
+    if normalized and len(normalized) > FAST_MODEL_MAX_CHARS and max_score < MID_CONFIDENCE_THRESHOLD:
+        return SLOW_MODEL, "slow"
+    return FAST_MODEL, "fast"
+
+
+def _trim_text(text: str, max_chars: int) -> str:
+    if not text or max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    trimmed = text[:max_chars]
+    if "\n" in trimmed:
+        trimmed = trimmed.rsplit("\n", 1)[0]
+    return trimmed.rstrip()
 
 
 def transcribe_audio(
@@ -253,7 +278,7 @@ def get_system_prompt(db: Session, client_id: UUID) -> Optional[str]:
     return prompt.text if prompt else None
 
 
-def get_conversation_history(db: Session, conversation_id: UUID, limit: int = 10) -> List[dict]:
+def get_conversation_history(db: Session, conversation_id: UUID, limit: int = MAX_HISTORY_MESSAGES) -> List[dict]:
     """Get recent conversation history."""
     messages = (
         db.query(Message)
@@ -500,7 +525,7 @@ def get_rag_confidence(
 
     if not results or max_score < MID_CONFIDENCE_THRESHOLD:
         if is_low_signal_message(user_message) or _is_context_dependent_message(user_message):
-            history = get_conversation_history(db, conversation_id, limit=10)
+            history = get_conversation_history(db, conversation_id, limit=MAX_HISTORY_MESSAGES)
             contextual_query = _build_contextual_search_query(history, user_message)
             if contextual_query and contextual_query != user_message:
                 contextual_query = _sanitize_query_for_rag(contextual_query)
@@ -608,7 +633,9 @@ def generate_ai_response(
         # 2.1 If query is a short follow-up and knowledge is weak, retry RAG with recent context.
         if not whitelisted and (not knowledge_results or max_score < MID_CONFIDENCE_THRESHOLD):
             if followup_confirmation or _is_context_dependent_message(user_message):
-                history_for_query = history or get_conversation_history(db, conversation_id, limit=10)
+                history_for_query = history or get_conversation_history(
+                    db, conversation_id, limit=MAX_HISTORY_MESSAGES
+                )
                 contextual_query = _build_contextual_search_query(history_for_query, user_message)
 
                 if contextual_query and contextual_query != user_message:
@@ -649,6 +676,7 @@ def generate_ai_response(
                 f"Knowledge confidence: max_score={max_score:.3f}, thresholds=({MID_CONFIDENCE_THRESHOLD},{HIGH_CONFIDENCE_THRESHOLD}), level={confidence_level}"
             )
             knowledge_context = format_knowledge_context(knowledge_results)
+            knowledge_context = _trim_text(knowledge_context, MAX_KNOWLEDGE_CHARS)
         else:
             logger.info(
                 f"Low confidence (max_score={max_score:.3f}, threshold={MID_CONFIDENCE_THRESHOLD}), whitelisted={whitelisted}"
@@ -656,6 +684,8 @@ def generate_ai_response(
             if not whitelisted:
                 return Result.success((None, "low_confidence"))
             confidence_level = "medium"
+
+        model_name, model_tier = _select_generation_model(user_message, max_score)
 
         # 4. Build messages
         messages = []
@@ -670,7 +700,7 @@ def generate_ai_response(
         messages.append({"role": "system", "content": full_system})
 
         # 5. Add conversation history (last 10 messages for context)
-        history = history or get_conversation_history(db, conversation_id, limit=10)
+        history = history or get_conversation_history(db, conversation_id, limit=MAX_HISTORY_MESSAGES)
         messages.extend(history)
 
         # 6. Add current user message (if not already in history)
@@ -686,8 +716,9 @@ def generate_ai_response(
             response = llm.generate(
                 messages,
                 temperature=1.0,
-                max_tokens=2000,
+                max_tokens=LLM_MAX_TOKENS,
                 timeout_seconds=LLM_TIMEOUT_SECONDS,
+                model=model_name,
             )
         except httpx.TimeoutException as exc:
             _log_timing(
@@ -697,6 +728,8 @@ def generate_ai_response(
                 extra={
                     "phase": "generate",
                     "messages": len(messages),
+                    "model_name": model_name,
+                    "model_tier": model_tier,
                     "timeout": True,
                     "timeout_seconds": LLM_TIMEOUT_SECONDS,
                 },
@@ -707,7 +740,13 @@ def generate_ai_response(
             "llm_ms",
             (time.monotonic() - llm_start) * 1000,
             timing_context=timing_context,
-            extra={"phase": "generate", "messages": len(messages)},
+            extra={
+                "phase": "generate",
+                "messages": len(messages),
+                "model_name": model_name,
+                "model_tier": model_tier,
+                "timeout": False,
+            },
         )
         logger.debug(f"LLM response: {response.content[:100] if response.content else 'EMPTY'}...")
 

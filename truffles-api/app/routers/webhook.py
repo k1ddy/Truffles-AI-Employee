@@ -105,6 +105,48 @@ def _get_message_buffer_settings() -> tuple[bool, int]:
     return enabled, max_messages
 
 
+def _get_outbox_window_merge_seconds() -> float:
+    raw = os.environ.get("OUTBOX_WINDOW_MERGE_SECONDS", "2.5")
+    try:
+        seconds = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, seconds)
+
+
+def _coerce_outbox_created_at(value: datetime | None) -> datetime:
+    if not isinstance(value, datetime):
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _split_outbox_batches(batch_sorted: list[dict], window_seconds: float) -> list[list[dict]]:
+    if not batch_sorted:
+        return []
+    if window_seconds <= 0:
+        return [batch_sorted]
+    groups: list[list[dict]] = []
+    current: list[dict] = []
+    last_created: datetime | None = None
+    for row in batch_sorted:
+        created_at = _coerce_outbox_created_at(row.get("created_at"))
+        if not current:
+            current.append(row)
+            last_created = created_at
+            continue
+        if last_created and (created_at - last_created).total_seconds() <= window_seconds:
+            current.append(row)
+        else:
+            groups.append(current)
+            current = [row]
+        last_created = created_at
+    if current:
+        groups.append(current)
+    return groups
+
+
 def _get_dedup_settings() -> tuple[int, str, float]:
     ttl_seconds = int(float(os.environ.get("DEDUP_TTL_SECONDS", "86400")))
     redis_url = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
@@ -2406,141 +2448,146 @@ async def _process_outbox_rows(
                 extra={"context": {"conversation_id": conversation_id, "count": len(batch_sorted)}},
             )
             continue
-        outbox_ids = [row.get("id") for row in batch_sorted]
-        message_texts = []
-        forwarded_in_batch = False
-        for row in batch_sorted:
-            payload_json = row.get("payload_json") or {}
-            try:
-                payload = WebhookRequest.model_validate(payload_json)
-            except Exception:
-                continue
-            if payload.body.metadata and payload.body.metadata.forwarded_to_telegram:
-                forwarded_in_batch = True
-            text = payload.body.message or ""
-            if text.strip():
-                message_texts.append(text.strip())
 
-        base_payload = WebhookRequest.model_validate(batch_sorted[-1].get("payload_json") or {})
-        combined_text = " ".join(message_texts).strip()
-        if combined_text:
-            base_payload.body.message = combined_text
-        if forwarded_in_batch and base_payload.body.metadata:
-            base_payload.body.metadata.forwarded_to_telegram = True
+        window_seconds = _get_outbox_window_merge_seconds()
+        grouped_batches = _split_outbox_batches(batch_sorted, window_seconds)
+        for group in grouped_batches:
+            outbox_ids = [row.get("id") for row in group]
+            message_texts = []
+            forwarded_in_batch = False
+            for row in group:
+                payload_json = row.get("payload_json") or {}
+                try:
+                    payload = WebhookRequest.model_validate(payload_json)
+                except Exception:
+                    continue
+                if payload.body.metadata and payload.body.metadata.forwarded_to_telegram:
+                    forwarded_in_batch = True
+                text = payload.body.message or ""
+                if text.strip():
+                    message_texts.append(text.strip())
 
-        logger.info(
-            "Outbox processing start",
-            extra={
-                "context": {
-                    "outbox_ids": [str(oid) for oid in outbox_ids if oid],
-                    "conversation_id": conversation_id,
-                    "attempts": batch_sorted[-1].get("attempts"),
-                    "coalesced_count": len(batch_sorted),
-                }
-            },
-        )
+            base_payload = WebhookRequest.model_validate(group[-1].get("payload_json") or {})
+            combined_text = " ".join(message_texts).strip()
+            if combined_text:
+                base_payload.body.message = combined_text
+            if forwarded_in_batch and base_payload.body.metadata:
+                base_payload.body.metadata.forwarded_to_telegram = True
 
-        try:
-            timing_start = time.monotonic()
-            response = await _handle_webhook_payload(
-                base_payload,
-                db,
-                provided_secret=None,
-                enforce_secret=False,
-                skip_persist=True,
-                conversation_id=UUID(conversation_id),
-                batch_messages=message_texts,
-                outbox_ids=[str(oid) for oid in outbox_ids if oid],
-            )
-            if not response.success:
-                raise RuntimeError(response.message)
             logger.info(
-                "Outbox timing",
+                "Outbox processing start",
                 extra={
                     "context": {
                         "outbox_ids": [str(oid) for oid in outbox_ids if oid],
                         "conversation_id": conversation_id,
-                        "client_slug": base_payload.client_slug,
-                        "outbox_total_ms": round((time.monotonic() - timing_start) * 1000, 2),
+                        "attempts": group[-1].get("attempts"),
+                        "coalesced_count": len(group),
+                        "window_merge_seconds": window_seconds,
                     }
                 },
             )
-            for outbox_id in outbox_ids:
-                if outbox_id:
-                    _log_outbox_done(str(outbox_id))
-            for outbox_id in outbox_ids:
-                if outbox_id:
-                    mark_outbox_status(
-                        db,
-                        outbox_id=outbox_id,
-                        status="SENT",
-                        last_error=None,
-                        next_attempt_at=None,
-                    )
-            results["sent"] += len(outbox_ids)
-            logger.info(
-                "Outbox processed",
-                extra={"context": {"conversation_id": conversation_id, "coalesced_count": len(batch_sorted)}},
-            )
-        except Exception as exc:
+
             try:
-                db.rollback()
-            except Exception as rollback_exc:
-                logger.warning(
-                    "Outbox rollback failed",
-                    extra={"context": {"error": str(rollback_exc)}},
-                )
-            logger.info(
-                "Outbox timing",
-                extra={
-                    "context": {
-                        "outbox_ids": [str(oid) for oid in outbox_ids if oid],
-                        "conversation_id": conversation_id,
-                        "client_slug": base_payload.client_slug,
-                        "outbox_total_ms": round((time.monotonic() - timing_start) * 1000, 2),
-                        "error": str(exc),
-                    }
-                },
-            )
-            for outbox_id in outbox_ids:
-                if outbox_id:
-                    _log_outbox_done(str(outbox_id), error=str(exc))
-            now = datetime.now(timezone.utc)
-            for row in batch_sorted:
-                outbox_id = row.get("id")
-                if not outbox_id:
-                    continue
-                attempts = int(row.get("attempts") or 0)
-                if attempts >= max_attempts:
-                    mark_outbox_status(
-                        db,
-                        outbox_id=outbox_id,
-                        status="FAILED",
-                        last_error=str(exc)[:500],
-                        next_attempt_at=None,
-                    )
-                    results["failed"] += 1
-                    continue
-                backoff = retry_backoff_seconds * (2 ** max(attempts - 1, 0))
-                next_attempt_at = now + timedelta(seconds=backoff)
-                mark_outbox_status(
+                timing_start = time.monotonic()
+                response = await _handle_webhook_payload(
+                    base_payload,
                     db,
-                    outbox_id=outbox_id,
-                    status="PENDING",
-                    last_error=str(exc)[:500],
-                    next_attempt_at=next_attempt_at,
+                    provided_secret=None,
+                    enforce_secret=False,
+                    skip_persist=True,
+                    conversation_id=UUID(conversation_id),
+                    batch_messages=message_texts,
+                    outbox_ids=[str(oid) for oid in outbox_ids if oid],
                 )
-                results["retry_scheduled"] += 1
-            logger.error(
-                "Outbox processing failed",
-                extra={
-                    "context": {
-                        "conversation_id": conversation_id,
-                        "error": str(exc),
-                        "coalesced_count": len(batch_sorted),
-                    }
-                },
-            )
+                if not response.success:
+                    raise RuntimeError(response.message)
+                logger.info(
+                    "Outbox timing",
+                    extra={
+                        "context": {
+                            "outbox_ids": [str(oid) for oid in outbox_ids if oid],
+                            "conversation_id": conversation_id,
+                            "client_slug": base_payload.client_slug,
+                            "outbox_total_ms": round((time.monotonic() - timing_start) * 1000, 2),
+                        }
+                    },
+                )
+                for outbox_id in outbox_ids:
+                    if outbox_id:
+                        _log_outbox_done(str(outbox_id))
+                for outbox_id in outbox_ids:
+                    if outbox_id:
+                        mark_outbox_status(
+                            db,
+                            outbox_id=outbox_id,
+                            status="SENT",
+                            last_error=None,
+                            next_attempt_at=None,
+                        )
+                results["sent"] += len(outbox_ids)
+                logger.info(
+                    "Outbox processed",
+                    extra={"context": {"conversation_id": conversation_id, "coalesced_count": len(group)}},
+                )
+            except Exception as exc:
+                try:
+                    db.rollback()
+                except Exception as rollback_exc:
+                    logger.warning(
+                        "Outbox rollback failed",
+                        extra={"context": {"error": str(rollback_exc)}},
+                    )
+                logger.info(
+                    "Outbox timing",
+                    extra={
+                        "context": {
+                            "outbox_ids": [str(oid) for oid in outbox_ids if oid],
+                            "conversation_id": conversation_id,
+                            "client_slug": base_payload.client_slug,
+                            "outbox_total_ms": round((time.monotonic() - timing_start) * 1000, 2),
+                            "error": str(exc),
+                        }
+                    },
+                )
+                for outbox_id in outbox_ids:
+                    if outbox_id:
+                        _log_outbox_done(str(outbox_id), error=str(exc))
+                now = datetime.now(timezone.utc)
+                for row in group:
+                    outbox_id = row.get("id")
+                    if not outbox_id:
+                        continue
+                    attempts = int(row.get("attempts") or 0)
+                    if attempts >= max_attempts:
+                        mark_outbox_status(
+                            db,
+                            outbox_id=outbox_id,
+                            status="FAILED",
+                            last_error=str(exc)[:500],
+                            next_attempt_at=None,
+                        )
+                        results["failed"] += 1
+                        continue
+                    backoff = retry_backoff_seconds * (2 ** max(attempts - 1, 0))
+                    next_attempt_at = now + timedelta(seconds=backoff)
+                    mark_outbox_status(
+                        db,
+                        outbox_id=outbox_id,
+                        status="PENDING",
+                        last_error=str(exc)[:500],
+                        next_attempt_at=next_attempt_at,
+                    )
+                    results["retry_scheduled"] += 1
+                logger.error(
+                    "Outbox processing failed",
+                    extra={
+                        "context": {
+                            "conversation_id": conversation_id,
+                            "error": str(exc),
+                            "coalesced_count": len(group),
+                        }
+                    },
+                )
 
     return results
 
@@ -3532,7 +3579,7 @@ async def _handle_webhook_payload(
 
     # 9.0 Debounce bursty inputs: only the latest message triggers bot logic.
     append_user_message = True
-    if conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value]:
+    if conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value] and not batch_messages_provided:
         # Persist user message + last_message_at before waiting.
         db.commit()
 
