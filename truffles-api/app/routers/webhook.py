@@ -3112,9 +3112,12 @@ async def _handle_webhook_payload(
             if saved_message:
                 saved_message.content = transcript
                 _, _, model, language, _, _, _, _ = _get_transcription_settings()
+                transcript_model = model
+                if asr_meta and asr_meta.get("asr_model"):
+                    transcript_model = asr_meta.get("asr_model")
                 updates = {
                     "transcript": transcript,
-                    "transcript_model": model,
+                    "transcript_model": transcript_model,
                     "transcript_provider": asr_meta.get("asr_provider") if asr_meta else None,
                     "transcribed_at": datetime.now(timezone.utc).isoformat(),
                 }

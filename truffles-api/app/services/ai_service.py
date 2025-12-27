@@ -183,6 +183,11 @@ ASR_TIMEOUT_SECONDS = float(os.environ.get("ASR_TIMEOUT_SECONDS", "6"))
 ASR_MIN_CHARS = int(os.environ.get("ASR_MIN_CHARS", "12"))
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 ELEVENLABS_ASR_URL = "https://api.elevenlabs.io/v1/speech-to-text"
+ELEVENLABS_ASR_MODEL_ID = (
+    os.environ.get("ASR_ELEVENLABS_MODEL_ID")
+    or os.environ.get("ELEVENLABS_ASR_MODEL_ID")
+    or "scribe_v1"
+)
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "600"))
 MAX_HISTORY_MESSAGES = int(os.environ.get("LLM_HISTORY_MESSAGES", "6"))
 MAX_KNOWLEDGE_CHARS = int(os.environ.get("LLM_KNOWLEDGE_CHARS", "1500"))
@@ -411,7 +416,7 @@ def _transcribe_with_elevenlabs(
     if not ELEVENLABS_API_KEY:
         return None, "missing_elevenlabs_key"
     files = {"audio": (filename or "audio", audio_bytes, mime_type or "application/octet-stream")}
-    data: dict[str, str] = {}
+    data: dict[str, str] = {"model_id": ELEVENLABS_ASR_MODEL_ID}
     if language:
         data["language_code"] = language
     try:
@@ -467,6 +472,7 @@ def transcribe_audio_with_fallback(
         "asr_fallback_used": False,
         "asr_failed": False,
         "asr_text_len": 0,
+        "asr_model": None,
     }
 
     if not primary:
@@ -476,14 +482,16 @@ def transcribe_audio_with_fallback(
     transcript = None
     error = None
     if primary == "openai_whisper":
+        openai_model = model or "whisper-1"
         transcript, error = _transcribe_with_openai(
             audio_bytes=audio_bytes,
             filename=filename,
             mime_type=mime_type,
-            model=model,
+            model=openai_model,
             language=language,
             timeout_seconds=timeout,
         )
+        meta["asr_model"] = openai_model
     elif primary == "elevenlabs":
         transcript, error = _transcribe_with_elevenlabs(
             audio_bytes=audio_bytes,
@@ -492,6 +500,7 @@ def transcribe_audio_with_fallback(
             language=language,
             timeout_seconds=timeout,
         )
+        meta["asr_model"] = ELEVENLABS_ASR_MODEL_ID
     else:
         error = "unsupported_primary_provider"
 
@@ -526,14 +535,16 @@ def transcribe_audio_with_fallback(
         meta["asr_fallback_used"] = True
         transcript = None
         if fallback == "openai_whisper":
+            openai_model = model or "whisper-1"
             transcript, error = _transcribe_with_openai(
                 audio_bytes=audio_bytes,
                 filename=filename,
                 mime_type=mime_type,
-                model=model,
+                model=openai_model,
                 language=language,
                 timeout_seconds=timeout,
             )
+            meta["asr_model"] = openai_model
         elif fallback == "elevenlabs":
             transcript, error = _transcribe_with_elevenlabs(
                 audio_bytes=audio_bytes,
@@ -542,6 +553,7 @@ def transcribe_audio_with_fallback(
                 language=language,
                 timeout_seconds=timeout,
             )
+            meta["asr_model"] = ELEVENLABS_ASR_MODEL_ID
         else:
             error = "unsupported_fallback_provider"
 
