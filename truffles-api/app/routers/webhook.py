@@ -892,6 +892,43 @@ def _find_message_by_message_id(db: Session, client_id: UUID, message_id: str) -
     )
 
 
+def _find_message_by_conversation_created_at(
+    db: Session,
+    conversation_id: UUID,
+    created_at: datetime | None,
+    *,
+    message_text: str | None = None,
+    lookback_seconds: int = 120,
+) -> Message | None:
+    if not conversation_id or not created_at:
+        return None
+    window_start = created_at - timedelta(seconds=lookback_seconds)
+    window_end = created_at + timedelta(seconds=lookback_seconds)
+    rows = (
+        db.query(Message)
+        .filter(
+            Message.conversation_id == conversation_id,
+            Message.role == "user",
+            Message.created_at >= window_start,
+            Message.created_at <= window_end,
+        )
+        .order_by(Message.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    if not rows:
+        return None
+    normalized_target = normalize_for_matching(message_text) if message_text else ""
+    if normalized_target:
+        for msg in rows:
+            if normalize_for_matching(msg.content or "") == normalized_target:
+                return msg
+    return min(
+        rows,
+        key=lambda msg: abs((msg.created_at - created_at).total_seconds()) if msg.created_at else float("inf"),
+    )
+
+
 def _update_message_media_metadata(message: Message, updates: dict) -> None:
     metadata = dict(message.message_metadata or {})
     media_meta = dict(metadata.get("media") or {})
@@ -2375,6 +2412,7 @@ async def _process_outbox_rows(
                 skip_persist=True,
                 conversation_id=UUID(conversation_id),
                 outbox_ids=outbox_ids,
+                outbox_created_at=row.get("created_at"),
             )
             if not response.success:
                 raise RuntimeError(response.message)
@@ -2473,12 +2511,16 @@ async def _process_outbox_rows(
             outbox_ids = [row.get("id") for row in group]
             message_texts = []
             forwarded_in_batch = False
+            group_created_at = None
             for row in group:
                 payload_json = row.get("payload_json") or {}
                 try:
                     payload = WebhookRequest.model_validate(payload_json)
                 except Exception:
                     continue
+                created_at = _coerce_outbox_created_at(row.get("created_at"))
+                if created_at and (group_created_at is None or created_at > group_created_at):
+                    group_created_at = created_at
                 if payload.body.metadata and payload.body.metadata.forwarded_to_telegram:
                     forwarded_in_batch = True
                 text = payload.body.message or ""
@@ -2516,6 +2558,7 @@ async def _process_outbox_rows(
                     conversation_id=UUID(conversation_id),
                     batch_messages=message_texts,
                     outbox_ids=[str(oid) for oid in outbox_ids if oid],
+                    outbox_created_at=group_created_at,
                 )
                 if not response.success:
                     raise RuntimeError(response.message)
@@ -2677,6 +2720,7 @@ async def _handle_webhook_payload(
     conversation_id: UUID | None = None,
     batch_messages: list[str] | None = None,
     outbox_ids: list[str] | None = None,
+    outbox_created_at: datetime | None = None,
 ) -> WebhookResponse:
     """Shared webhook processing for inbound ChatFlow payloads."""
     logger.info(f"Webhook received: client_slug={payload.client_slug}")
@@ -2772,13 +2816,20 @@ async def _handle_webhook_payload(
         if not user:
             return WebhookResponse(success=False, message="User not found")
         timing_context["conversation_id"] = str(conversation.id)
-        if media_info and message_id:
+        if message_id:
             saved_message = _find_message_by_message_id(db, client.id, message_id)
-            if saved_message:
-                saved_media = saved_message.message_metadata.get("media") if isinstance(saved_message.message_metadata, dict) else None
-                media_decision = _deserialize_media_decision(
-                    saved_media.get("decision") if isinstance(saved_media, dict) else None
-                )
+        if not saved_message and outbox_created_at:
+            saved_message = _find_message_by_conversation_created_at(
+                db,
+                conversation.id,
+                outbox_created_at,
+                message_text=message_text,
+            )
+        if media_info and saved_message:
+            saved_media = saved_message.message_metadata.get("media") if isinstance(saved_message.message_metadata, dict) else None
+            media_decision = _deserialize_media_decision(
+                saved_media.get("decision") if isinstance(saved_media, dict) else None
+            )
         if media_info and media_decision is None and media_policy:
             media_decision = await _evaluate_media_decision(
                 media=media_info,
@@ -2792,6 +2843,15 @@ async def _handle_webhook_payload(
         if await is_duplicate_message_id(db=db, client_id=client.id, message_id=message_id):
             logger.info(f"Duplicate message_id skipped: {message_id}")
             return WebhookResponse(success=True, message="Duplicate message_id", conversation_id=None, bot_response=None)
+        if not message_id:
+            message_id = build_inbound_message_id(
+                None,
+                remote_jid,
+                metadata.timestamp if metadata else None,
+                message_text,
+            )
+            if metadata:
+                metadata.messageId = message_id
 
         # 1. Get or create user
         user = get_or_create_user(db, client.id, remote_jid)

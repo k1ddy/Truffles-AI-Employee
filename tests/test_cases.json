@@ -195,6 +195,18 @@
         "status": null
       },
       {
+        "id": "TC019a",
+        "name": "Fast intent: hours in weekdays",
+        "input": "Во сколько вы открываетесь в будни?",
+        "expected": "Ответ по часам работы без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "reply",
+          "expect_intent": "hours"
+        },
+        "status": null
+      },
+      {
         "id": "TC020",
         "name": "Fast intent: greeting typo",
         "input": "здравсвтуйте",

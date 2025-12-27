@@ -179,13 +179,44 @@ def _contains_any_words(normalized: str, words: list[str]) -> bool:
 def _looks_like_hours_question(normalized: str) -> bool:
     if not normalized:
         return False
-    if _contains_any(normalized, ["график", "до скольки", "открыты", "открыто"]):
+    if _contains_any(
+        normalized,
+        [
+            "график",
+            "до скольки",
+            "открыты",
+            "открыто",
+            "часы",
+            "часов",
+            "время работы",
+            "во сколько",
+            "открывает",
+            "открываете",
+            "открываетесь",
+            "в будни",
+            "по будням",
+            "в выходные",
+            "по выходным",
+        ],
+    ):
         return True
     if "работаете" in normalized:
         return True
     if "работает" in normalized and _contains_any(normalized, ["вы", "салон"]):
-        if _contains_any(normalized, ["сегодня", "сейчас", "открыт"]):
+        if _contains_any(normalized, ["сегодня", "сейчас", "открыт", "будни", "выходн"]):
             return True
+    return False
+
+
+def _has_price_signal(normalized: str, raw_text: str | None = None) -> bool:
+    price_keywords = ["цена", "прайс", "стоим", "стоимость", "почем", "ценник"]
+    currency_words = ["тг", "тенге", "руб", "рубл", "usd", "eur", "доллар", "евро"]
+    if _contains_any(normalized, price_keywords):
+        return True
+    if _contains_any(normalized, currency_words):
+        return True
+    if raw_text and re.search(r"[₸$€₽]", raw_text):
+        return True
     return False
 
 
@@ -676,23 +707,11 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="last_appointment")
 
-    if _contains_any(
+    hours_like = _looks_like_hours_question(normalized) or _contains_any(
         normalized,
-        [
-            "график",
-            "работаете",
-            "открыты",
-            "открыто",
-            "до скольки",
-            "часы",
-            "часов",
-            "время работы",
-            "ашык",
-            "ашық",
-            "бугин",
-            "бүгін",
-        ],
-    ) and not _contains_any(normalized, ["косметик", "материал", "бренд", "марки"]):
+        ["ашык", "ашық", "бугин", "бүгін"],
+    )
+    if hours_like and not _contains_any(normalized, ["косметик", "материал", "бренд", "марки"]):
         reply = format_reply_from_truth("hours")
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="hours")
@@ -750,8 +769,9 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="service_clarify")
 
+    price_signal = _has_price_signal(normalized, message)
     if "price_manicure" in phrase_intents or (
-        "маникюр" in normalized and _contains_any(normalized, ["сколько", "цена", "прайс", "стоим", "почем"])
+        "маникюр" in normalized and price_signal
     ):
         reply = format_reply_from_truth("price_manicure")
         if reply:
@@ -848,7 +868,7 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
             return DemoSalonDecision(action="reply", response=reply, intent="off_topic")
 
     price_item = _find_best_price_item(message)
-    if price_item or _contains_any(normalized, ["сколько", "цена", "прайс", "стоим", "почем"]):
+    if price_item or price_signal:
         reply = format_reply_from_truth("price_query", {"price_item": price_item["item"]} if price_item else {})
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="price_query")

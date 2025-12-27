@@ -196,6 +196,16 @@ eval_cases:
     intent: hours
     must_include_any:
     - '21:00'
+- id: E015a
+  user: Во сколько вы открываетесь в будни?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - ежедневно
+    - без выходных
+    - '9:00'
+    - '21:00'
 - id: E016
   user: Последняя запись во сколько?
   expected:

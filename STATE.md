@@ -1312,6 +1312,11 @@ LIMIT 1;
 | `tests/test_cases.json` | Добавлены fast_intent golden cases |
 | `tests/test_message_endpoint.py` | Тесты fast_intent + LLM fallback |
 | `.env.example` | Добавлены FAST_MODEL/SLOW_MODEL + таймауты |
+| `webhook.py` | Outbox skip_persist пишет decision_meta (message_id/created_at fallback), messageId добавляется в payload |
+| `demo_salon_knowledge.py` | Часы работы распознаются шире, “сколько” не триггерит прайс без price-сигнала |
+| `EVAL.yaml` | Кейс “Во сколько вы открываетесь в будни?” → hours |
+| `tests/test_cases.json` | Golden‑кейс для hours (fast_intent) |
+| `ai_service.py` | LLM timeout default поднят до 6s |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 
