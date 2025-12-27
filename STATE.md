@@ -65,7 +65,7 @@
 - [ ] **⚠️ Новая архитектура эскалации/обучения** — роли/идентичности + очередь обучения + Telegram per branch описаны в спеках, **код не внедрён**
 - [ ] **⚠️ Эскалация всё ещё частая на реальные вопросы** — KB неполная, score часто < 0.5 → создаётся заявка; мелкие сообщения ("спасибо", "ок?") больше не должны создавать заявки (whitelist + guardrails)
 - [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant работает (логи 2025-12-25: "Owner response detected" / "Added to knowledge"), но нет модерации/метрик
-- [ ] **⚠️ Ответы медленные (outbox)** — замер: SENT за последний час avg 17s, p90 25s, max 26s (created_at → updated_at); цель < 10s не достигнута
+- [ ] **⚠️ Ответы медленные (outbox)** — обновлено: `OUTBOX_COALESCE_SECONDS=3`, `OUTBOX_WORKER_INTERVAL_SECONDS=1`; тайминги (outbox_total_ms 11.9–20.8s) → llm_ms 6.7–15.2s, intent_ms 2.1–3.0s, rag_ms 0.28–0.57s, send_ms 0.59–1.10s; wait_ms (pick-created) ~3.2–3.7s → основной вклад LLM + intent
 - [ ] **⚠️ Склейка сообщений ломает multi‑intent** — demo_salon: price‑ответ перехватывает до booking; в pending truth‑gate съедает booking; фикс в коде (booking flow в pending + price sidecar), нужен деплой/проверка
 - [ ] **⚠️ Закрепы заявок в Telegram** — фикс в коде: `unpin` теперь использует `handover.telegram_message_id` (fallback на callback message_id); нужен деплой/проверка
 - [ ] **⚠️ Дубли заявок на одного клиента** — владельцу неудобно; нужен guard: при open handover не создавать новый, а писать в текущий топик
@@ -1186,6 +1186,10 @@ Runbook (если “всё странно” или сессия оборвал
 - В outbox есть старые `PROCESSING` (3) и `FAILED` (2) записи (возраст ~1.5–1.9 дня) — потенциальный мусор/ретраи
 - Пример (08:55 местн, сообщение “Добрый день. Это мое сообщение”): wait 9.3s, processing 17.7s, total 27.0s
 
+### 2025-12-27 — Fast-intent timing (после LLM timeout + fast-intent)
+- Safe intents (5 кейсов): outbox_total_ms 2160–2241ms, без intent_ms/llm_ms; send_ms ~0.58–0.62s
+- LLM кейс ("как ухаживать за гель-лаком"): intent_ms 8517ms, rag_ms 415ms, llm_ms 8314ms (timeout), outbox_total_ms 19473ms
+
 ### Кнопки:
 - Сначала не работали — traefik labels были пустые
 - После `ops/restart_api.sh` — заработали
@@ -1267,6 +1271,12 @@ LIMIT 1;
 | `schemas/telegram.py` | Перевёл Pydantic Config на ConfigDict (убрал депрекейшн) |
 | `demo_salon_knowledge.py` | Фикс ложной payment-эскалации: короткие ключи/фразы → word-boundary |
 | `EVAL.yaml` | Добавлен кейс “какие услуги” для services_overview |
+| `webhook.py` | Fast-intent: короткий путь (phrase/truth) до LLM |
+| `ai_service.py` | LLM timeout (8s) → low_confidence fallback |
+| `services/llm/base.py` | generate() принимает timeout_seconds |
+| `services/llm/openai_provider.py` | timeout_seconds прокинут в httpx |
+| `tests/test_cases.json` | Добавлены fast_intent golden cases |
+| `tests/test_message_endpoint.py` | Тесты fast_intent + LLM fallback |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 

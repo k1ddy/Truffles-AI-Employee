@@ -44,9 +44,11 @@ from app.services.conversation_service import (
     get_or_create_user,
 )
 from app.services.demo_salon_knowledge import (
+    DemoSalonDecision,
     get_demo_salon_decision,
     get_demo_salon_price_item,
     get_demo_salon_price_reply,
+    phrase_match_intent,
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
@@ -1349,6 +1351,30 @@ def _normalize_message_text(message_text: str | None) -> str:
     return (message_text or "").strip()
 
 
+def _detect_fast_intent(
+    message_text: str,
+    *,
+    policy_type: str | None,
+    booking_wants_flow: bool,
+    bypass_domain_flows: bool,
+) -> DemoSalonDecision | None:
+    if not message_text or booking_wants_flow or bypass_domain_flows:
+        return None
+    if policy_type != "demo_salon":
+        return None
+
+    decision = get_demo_salon_decision(message_text)
+    if decision:
+        return decision
+
+    phrase_intents = phrase_match_intent(message_text)
+    if "greeting" in phrase_intents:
+        return DemoSalonDecision(action="smalltalk", response=GREETING_RESPONSE, intent="greeting")
+    if {"thanks_positive", "thanks_bye"}.intersection(phrase_intents):
+        return DemoSalonDecision(action="smalltalk", response=THANKS_RESPONSE, intent="thanks")
+    return None
+
+
 def _detect_intent_signals(message_text: str) -> DecisionSignals:
     is_greeting = is_greeting_message(message_text)
     is_thanks = is_thanks_message(message_text)
@@ -1570,8 +1596,6 @@ def _has_booking_signal(messages: list[str]) -> bool:
         return False
     if any(_is_booking_request(message) for message in messages):
         return True
-    if len(messages) < 2:
-        return False
     has_service = any(_extract_service(message) for message in messages)
     has_datetime = any(_extract_datetime(message) for message in messages)
     return has_service and has_datetime
@@ -2114,6 +2138,48 @@ def get_active_handover(db: Session, conversation_id) -> Handover | None:
     )
 
 
+def _reuse_active_handover(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    message: str,
+    source: str,
+    intent: str | None = None,
+) -> tuple[Handover | None, bool, bool]:
+    handover = get_active_handover(db, conversation.id)
+    if not handover:
+        return None, False, False
+
+    if conversation.state == ConversationState.BOT_ACTIVE.value:
+        if handover.status == "active":
+            conversation.state = ConversationState.MANAGER_ACTIVE.value
+        else:
+            conversation.state = ConversationState.PENDING.value
+        conversation.escalated_at = conversation.escalated_at or datetime.now(timezone.utc)
+
+    telegram_sent = send_telegram_notification(
+        db=db,
+        handover=handover,
+        conversation=conversation,
+        user=user,
+        message=message,
+    )
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "escalation",
+            "decision": "reuse_handover",
+            "state": conversation.state,
+            "intent": intent,
+            "source": source,
+            "handover_id": str(handover.id),
+            "telegram_sent": telegram_sent,
+        },
+    )
+    return handover, True, telegram_sent
+
+
 def should_offer_low_confidence_retry(conversation: Conversation, now: datetime) -> bool:
     """One clarifying question before creating a handover on low confidence."""
     offered_at = conversation.retry_offered_at
@@ -2157,6 +2223,60 @@ async def _process_outbox_rows(
     if not rows:
         return results
 
+    picked_at = datetime.now(timezone.utc)
+    pick_info: dict[str, dict[str, object]] = {}
+    for row in rows:
+        outbox_id = row.get("id")
+        if not outbox_id:
+            continue
+        payload_json = row.get("payload_json") or {}
+        created_at = row.get("created_at")
+        conversation_id = row.get("conversation_id")
+        outbox_id_str = str(outbox_id)
+        pick_info[outbox_id_str] = {
+            "picked_at": picked_at,
+            "created_at": created_at,
+            "conversation_id": conversation_id,
+            "client_slug": payload_json.get("client_slug"),
+        }
+        logger.info(
+            "Outbox picked",
+            extra={
+                "context": {
+                    "outbox_id": outbox_id_str,
+                    "conversation_id": str(conversation_id) if conversation_id else None,
+                    "client_slug": payload_json.get("client_slug"),
+                    "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
+                    "outbox_picked_at": picked_at.isoformat(),
+                }
+            },
+        )
+
+    def _log_outbox_done(outbox_id: str, *, error: str | None = None) -> None:
+        info = pick_info.get(outbox_id, {})
+        done_at = datetime.now(timezone.utc)
+        created_at = info.get("created_at")
+        picked_at_info = info.get("picked_at")
+        wait_ms = None
+        process_ms = None
+        if isinstance(created_at, datetime) and isinstance(picked_at_info, datetime):
+            wait_ms = (picked_at_info - created_at).total_seconds() * 1000
+        if isinstance(picked_at_info, datetime):
+            process_ms = (done_at - picked_at_info).total_seconds() * 1000
+        context = {
+            "outbox_id": outbox_id,
+            "conversation_id": str(info.get("conversation_id")) if info.get("conversation_id") else None,
+            "client_slug": info.get("client_slug"),
+            "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
+            "outbox_picked_at": picked_at_info.isoformat() if isinstance(picked_at_info, datetime) else picked_at_info,
+            "outbox_done_at": done_at.isoformat(),
+            "wait_ms": round(wait_ms, 2) if wait_ms is not None else None,
+            "process_ms": round(process_ms, 2) if process_ms is not None else None,
+        }
+        if error:
+            context["error"] = error
+        logger.info("Outbox done", extra={"context": context})
+
     def _row_has_media(row: dict) -> bool:
         payload_json = row.get("payload_json") or {}
         try:
@@ -2185,6 +2305,8 @@ async def _process_outbox_rows(
             return
 
         try:
+            outbox_ids = [str(outbox_id)]
+            timing_start = time.monotonic()
             response = await _handle_webhook_payload(
                 payload,
                 db,
@@ -2192,9 +2314,23 @@ async def _process_outbox_rows(
                 enforce_secret=False,
                 skip_persist=True,
                 conversation_id=UUID(conversation_id),
+                outbox_ids=outbox_ids,
             )
             if not response.success:
                 raise RuntimeError(response.message)
+            logger.info(
+                "Outbox timing",
+                extra={
+                    "context": {
+                        "outbox_id": str(outbox_id),
+                        "outbox_ids": outbox_ids,
+                        "conversation_id": conversation_id,
+                        "client_slug": payload.client_slug,
+                        "outbox_total_ms": round((time.monotonic() - timing_start) * 1000, 2),
+                    }
+                },
+            )
+            _log_outbox_done(str(outbox_id))
             mark_outbox_status(
                 db,
                 outbox_id=outbox_id,
@@ -2211,6 +2347,20 @@ async def _process_outbox_rows(
                     "Outbox rollback failed",
                     extra={"context": {"error": str(rollback_exc)}},
                 )
+            logger.info(
+                "Outbox timing",
+                extra={
+                    "context": {
+                        "outbox_id": str(outbox_id),
+                        "outbox_ids": [str(outbox_id)],
+                        "conversation_id": conversation_id,
+                        "client_slug": payload.client_slug,
+                        "outbox_total_ms": round((time.monotonic() - timing_start) * 1000, 2),
+                        "error": str(exc),
+                    }
+                },
+            )
+            _log_outbox_done(str(outbox_id), error=str(exc))
             now = datetime.now(timezone.utc)
             attempts = int(row.get("attempts") or 0)
             if attempts >= max_attempts:
@@ -2291,6 +2441,7 @@ async def _process_outbox_rows(
         )
 
         try:
+            timing_start = time.monotonic()
             response = await _handle_webhook_payload(
                 base_payload,
                 db,
@@ -2299,9 +2450,24 @@ async def _process_outbox_rows(
                 skip_persist=True,
                 conversation_id=UUID(conversation_id),
                 batch_messages=message_texts,
+                outbox_ids=[str(oid) for oid in outbox_ids if oid],
             )
             if not response.success:
                 raise RuntimeError(response.message)
+            logger.info(
+                "Outbox timing",
+                extra={
+                    "context": {
+                        "outbox_ids": [str(oid) for oid in outbox_ids if oid],
+                        "conversation_id": conversation_id,
+                        "client_slug": base_payload.client_slug,
+                        "outbox_total_ms": round((time.monotonic() - timing_start) * 1000, 2),
+                    }
+                },
+            )
+            for outbox_id in outbox_ids:
+                if outbox_id:
+                    _log_outbox_done(str(outbox_id))
             for outbox_id in outbox_ids:
                 if outbox_id:
                     mark_outbox_status(
@@ -2324,6 +2490,21 @@ async def _process_outbox_rows(
                     "Outbox rollback failed",
                     extra={"context": {"error": str(rollback_exc)}},
                 )
+            logger.info(
+                "Outbox timing",
+                extra={
+                    "context": {
+                        "outbox_ids": [str(oid) for oid in outbox_ids if oid],
+                        "conversation_id": conversation_id,
+                        "client_slug": base_payload.client_slug,
+                        "outbox_total_ms": round((time.monotonic() - timing_start) * 1000, 2),
+                        "error": str(exc),
+                    }
+                },
+            )
+            for outbox_id in outbox_ids:
+                if outbox_id:
+                    _log_outbox_done(str(outbox_id), error=str(exc))
             now = datetime.now(timezone.utc)
             for row in batch_sorted:
                 outbox_id = row.get("id")
@@ -2430,6 +2611,7 @@ async def _handle_webhook_payload(
     skip_persist: bool = False,
     conversation_id: UUID | None = None,
     batch_messages: list[str] | None = None,
+    outbox_ids: list[str] | None = None,
 ) -> WebhookResponse:
     """Shared webhook processing for inbound ChatFlow payloads."""
     logger.info(f"Webhook received: client_slug={payload.client_slug}")
@@ -2473,6 +2655,11 @@ async def _handle_webhook_payload(
     batch_messages_provided = batch_messages is not None
     batch_messages = _coerce_batch_messages(message_text, batch_messages)
 
+    timing_context: dict = {"client_slug": payload.client_slug, "remote_jid": remote_jid}
+    if outbox_ids:
+        timing_context["outbox_ids"] = list(outbox_ids)
+        timing_context["outbox_id"] = outbox_ids[0] if len(outbox_ids) == 1 else outbox_ids[0]
+
     outbound_idempotency_key = message_id or build_inbound_message_id(
         message_id,
         remote_jid,
@@ -2489,8 +2676,17 @@ async def _handle_webhook_payload(
         redis_url, socket_timeout_seconds = _get_media_rate_settings()
         media_redis_client = _get_debounce_redis(redis_url, socket_timeout_seconds)
 
+    def _log_timing(stage: str, elapsed_ms: float, extra: dict | None = None) -> None:
+        context = dict(timing_context)
+        if extra:
+            context.update(extra)
+        context["stage"] = stage
+        context["elapsed_ms"] = round(elapsed_ms, 2)
+        logger.info("Timing", extra={"context": context})
+
     def _send_response(text: str) -> bool:
-        return send_bot_response(
+        send_start = time.monotonic()
+        sent = send_bot_response(
             db,
             client.id,
             remote_jid,
@@ -2498,6 +2694,8 @@ async def _handle_webhook_payload(
             idempotency_key=outbound_idempotency_key,
             raise_on_fail=skip_persist,
         )
+        _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": sent})
+        return sent
 
     if skip_persist:
         if not conversation_id:
@@ -2508,6 +2706,7 @@ async def _handle_webhook_payload(
         user = db.query(User).filter(User.id == conversation.user_id).first()
         if not user:
             return WebhookResponse(success=False, message="User not found")
+        timing_context["conversation_id"] = str(conversation.id)
         if media_info and message_id:
             saved_message = _find_message_by_message_id(db, client.id, message_id)
             if saved_message:
@@ -2536,6 +2735,7 @@ async def _handle_webhook_payload(
         conversation = find_active_conversation_by_channel_ref(db, client.id, remote_jid)
         if not conversation:
             conversation = get_or_create_conversation(db, client.id, user.id, "whatsapp")
+        timing_context["conversation_id"] = str(conversation.id)
 
         if media_info and media_decision is None and media_policy:
             media_decision = await _evaluate_media_decision(
@@ -3217,39 +3417,56 @@ async def _handle_webhook_payload(
                 handover_text = message_text.strip()
                 if media_text_placeholder:
                     handover_text = "Клиент отправил фото/референс."
-                result = escalate_to_pending(
+                _, reused, telegram_sent = _reuse_active_handover(
                     db=db,
                     conversation=conversation,
-                    user_message=handover_text,
-                    trigger_type="media",
-                    trigger_value="style_reference",
+                    user=user,
+                    message=handover_text,
+                    source="media_style",
+                    intent="style_reference",
                 )
-                if result.ok:
-                    handover = result.value
-                    telegram_sent = send_telegram_notification(
-                        db=db,
-                        handover=handover,
-                        conversation=conversation,
-                        user=user,
-                        message=handover_text,
-                    )
+                if reused:
                     result_message = (
-                        f"Style reference escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                        f"Style reference reuse, telegram={'sent' if telegram_sent else 'failed'}"
                     )
                     media_escalated = True
                     media_response = MSG_MEDIA_STYLE_REFERENCE
                 else:
-                    bot_response = MSG_AI_ERROR
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
-                    result_message = "Style reference escalation failed" if sent else "Media escalation response failed"
-                    db.commit()
-                    return WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=bot_response,
+                    result = escalate_to_pending(
+                        db=db,
+                        conversation=conversation,
+                        user_message=handover_text,
+                        trigger_type="media",
+                        trigger_value="style_reference",
                     )
+                    if result.ok:
+                        handover = result.value
+                        telegram_sent = send_telegram_notification(
+                            db=db,
+                            handover=handover,
+                            conversation=conversation,
+                            user=user,
+                            message=handover_text,
+                        )
+                        result_message = (
+                            f"Style reference escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                        )
+                        media_escalated = True
+                        media_response = MSG_MEDIA_STYLE_REFERENCE
+                    else:
+                        bot_response = MSG_AI_ERROR
+                        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                        sent = _send_response(bot_response)
+                        result_message = (
+                            "Style reference escalation failed" if sent else "Media escalation response failed"
+                        )
+                        db.commit()
+                        return WebhookResponse(
+                            success=True,
+                            message=result_message,
+                            conversation_id=conversation.id,
+                            bot_response=bot_response,
+                        )
             elif style_request:
                 media_response = MSG_STYLE_REFERENCE_NEED_MEDIA
             elif media_text_placeholder:
@@ -3435,30 +3652,45 @@ async def _handle_webhook_payload(
                     _reset_low_confidence_retry(conversation)
 
                     escalation_message = confirmation.get("user_message") or message_text
-                    esc_result = escalate_to_pending(
+                    _, reused, telegram_sent = _reuse_active_handover(
                         db=db,
                         conversation=conversation,
-                        user_message=escalation_message,
-                        trigger_type="intent",
-                        trigger_value="low_confidence",
+                        user=user,
+                        message=escalation_message,
+                        source="handover_confirmation",
+                        intent="low_confidence",
                     )
 
-                    if esc_result.ok:
-                        handover = esc_result.value
-                        telegram_sent = send_telegram_notification(
-                            db=db,
-                            handover=handover,
-                            conversation=conversation,
-                            user=user,
-                            message=escalation_message,
-                        )
+                    if reused:
                         bot_response = MSG_ESCALATED
                         result_message = (
-                            f"Handover confirmed, telegram={'sent' if telegram_sent else 'failed'}"
+                            f"Handover confirmed (reused), telegram={'sent' if telegram_sent else 'failed'}"
                         )
                     else:
-                        bot_response = MSG_AI_ERROR
-                        result_message = f"Handover confirm escalation failed: {esc_result.error}"
+                        esc_result = escalate_to_pending(
+                            db=db,
+                            conversation=conversation,
+                            user_message=escalation_message,
+                            trigger_type="intent",
+                            trigger_value="low_confidence",
+                        )
+
+                        if esc_result.ok:
+                            handover = esc_result.value
+                            telegram_sent = send_telegram_notification(
+                                db=db,
+                                handover=handover,
+                                conversation=conversation,
+                                user=user,
+                                message=escalation_message,
+                            )
+                            bot_response = MSG_ESCALATED
+                            result_message = (
+                                f"Handover confirmed, telegram={'sent' if telegram_sent else 'failed'}"
+                            )
+                        else:
+                            bot_response = MSG_AI_ERROR
+                            result_message = f"Handover confirm escalation failed: {esc_result.error}"
 
                     save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                     sent = _send_response(bot_response)
@@ -3522,10 +3754,13 @@ async def _handle_webhook_payload(
     )
 
     # 9.03 Policy/truth gate (before booking/RAG).
+    policy_t0 = None
+    policy_logged = False
     policy_handler = _get_policy_handler(client)
     policy_type = policy_handler.get("policy_type") if policy_handler else None
     policy_price_sidecar = None
     if not bypass_domain_flows and policy_handler and routing["allow_truth_gate_reply"]:
+        policy_t0 = time.monotonic()
         escalation_gate = policy_handler.get("escalation_gate")
         decision = escalation_gate(booking_messages) if escalation_gate else None
         if decision:
@@ -3534,7 +3769,17 @@ async def _handle_webhook_payload(
 
             result_message = "Policy reply sent"
             if decision.action == "escalate":
-                if conversation.state == ConversationState.BOT_ACTIVE.value:
+                _, reused, telegram_sent = _reuse_active_handover(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message=message_text,
+                    source="policy_gate",
+                    intent=decision.intent,
+                )
+                if reused:
+                    result_message = f"Policy reuse, telegram={'sent' if telegram_sent else 'failed'}"
+                elif conversation.state == ConversationState.BOT_ACTIVE.value:
                     result = escalate_to_pending(
                         db=db,
                         conversation=conversation,
@@ -3572,6 +3817,12 @@ async def _handle_webhook_payload(
             sent = _send_response(bot_response)
             if not sent:
                 result_message = f"{result_message}; response_send=failed"
+            _log_timing(
+                "policy_gate_ms",
+                (time.monotonic() - policy_t0) * 1000,
+                {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow},
+            )
+            policy_logged = True
             db.commit()
             return WebhookResponse(
                 success=True,
@@ -3592,6 +3843,8 @@ async def _handle_webhook_payload(
                     _set_conversation_context(conversation, booking_context)
 
     if not bypass_domain_flows and policy_handler and _should_run_truth_gate(routing, booking_wants_flow):
+        if policy_t0 is None:
+            policy_t0 = time.monotonic()
         truth_gate = policy_handler.get("truth_gate")
         decision = truth_gate(message_text) if truth_gate else None
         if decision:
@@ -3607,7 +3860,17 @@ async def _handle_webhook_payload(
 
             result_message = "Policy reply sent"
             if decision.action == "escalate":
-                if conversation.state == ConversationState.BOT_ACTIVE.value:
+                _, reused, telegram_sent = _reuse_active_handover(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message=message_text,
+                    source="truth_gate",
+                    intent=decision.intent,
+                )
+                if reused:
+                    result_message = f"Policy reuse, telegram={'sent' if telegram_sent else 'failed'}"
+                elif conversation.state == ConversationState.BOT_ACTIVE.value:
                     result = escalate_to_pending(
                         db=db,
                         conversation=conversation,
@@ -3645,6 +3908,12 @@ async def _handle_webhook_payload(
             sent = _send_response(bot_response)
             if not sent:
                 result_message = f"{result_message}; response_send=failed"
+            _log_timing(
+                "policy_gate_ms",
+                (time.monotonic() - policy_t0) * 1000,
+                {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow},
+            )
+            policy_logged = True
             db.commit()
             return WebhookResponse(
                 success=True,
@@ -3652,9 +3921,18 @@ async def _handle_webhook_payload(
                 conversation_id=conversation.id,
                 bot_response=bot_response,
             )
+    if policy_t0 is not None and not policy_logged:
+        _log_timing(
+            "policy_gate_ms",
+            (time.monotonic() - policy_t0) * 1000,
+            {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow},
+        )
 
     # 9.05 Booking flow: collect slots before intent/LLM.
+    booking_t0 = None
+    booking_logged = False
     if routing["allow_booking_flow"] and not bypass_domain_flows:
+        booking_t0 = time.monotonic()
         context = booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
         booking_state = booking if isinstance(booking, dict) else _get_booking_context(context)
         booking_active = bool(booking_state.get("active"))
@@ -3675,6 +3953,8 @@ async def _handle_webhook_payload(
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             result_message = "Booking cancelled" if sent else "Booking cancel response failed"
+            _log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
+            booking_logged = True
             db.commit()
             return WebhookResponse(
                 success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
@@ -3710,6 +3990,8 @@ async def _handle_webhook_payload(
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                 sent = _send_response(bot_response)
                 result_message = "Booking slot requested" if sent else "Booking slot response failed"
+                _log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
+                booking_logged = True
                 db.commit()
                 return WebhookResponse(
                     success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
@@ -3717,30 +3999,43 @@ async def _handle_webhook_payload(
 
             booking_summary = _build_booking_summary(booking_state)
             if routing["allow_handover_create"]:
-                result = escalate_to_pending(
+                _, reused, telegram_sent = _reuse_active_handover(
                     db=db,
                     conversation=conversation,
-                    user_message=booking_summary,
-                    trigger_type="intent",
-                    trigger_value="booking",
+                    user=user,
+                    message=booking_summary,
+                    source="booking",
+                    intent="booking",
                 )
-
-                if result.ok:
-                    handover = result.value
-                    telegram_sent = send_telegram_notification(
-                        db=db,
-                        handover=handover,
-                        conversation=conversation,
-                        user=user,
-                        message=booking_summary,
-                    )
+                if reused:
                     bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
-                    result_message = f"Booking escalation, telegram={'sent' if telegram_sent else 'failed'}"
-                    trace_decision = "escalated"
+                    result_message = f"Booking reuse, telegram={'sent' if telegram_sent else 'failed'}"
+                    trace_decision = "reuse_handover"
                 else:
-                    bot_response = MSG_AI_ERROR
-                    result_message = f"Booking escalation failed: {result.error}"
-                    trace_decision = "escalation_failed"
+                    result = escalate_to_pending(
+                        db=db,
+                        conversation=conversation,
+                        user_message=booking_summary,
+                        trigger_type="intent",
+                        trigger_value="booking",
+                    )
+
+                    if result.ok:
+                        handover = result.value
+                        telegram_sent = send_telegram_notification(
+                            db=db,
+                            handover=handover,
+                            conversation=conversation,
+                            user=user,
+                            message=booking_summary,
+                        )
+                        bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
+                        result_message = f"Booking escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                        trace_decision = "escalated"
+                    else:
+                        bot_response = MSG_AI_ERROR
+                        result_message = f"Booking escalation failed: {result.error}"
+                        trace_decision = "escalation_failed"
             else:
                 bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
                 result_message = "Booking captured while pending"
@@ -3760,12 +4055,100 @@ async def _handle_webhook_payload(
             sent = _send_response(bot_response)
             if not sent:
                 result_message = f"{result_message}; response_send=failed"
+            _log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
+            booking_logged = True
             db.commit()
             return WebhookResponse(
                 success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
             )
+    if booking_t0 is not None and not booking_logged:
+        _log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
+
+    # 9.06 Fast intent (phrase/truth gate) before LLM classification.
+    fast_decision = None
+    if routing["allow_bot_reply"]:
+        fast_decision = _detect_fast_intent(
+            message_text,
+            policy_type=policy_type,
+            booking_wants_flow=booking_wants_flow,
+            bypass_domain_flows=bypass_domain_flows,
+        )
+
+    if fast_decision:
+        if fast_decision.intent == "price_query" and policy_handler:
+            price_item_fn = policy_handler.get("price_item")
+            price_item = price_item_fn(message_text) if price_item_fn else None
+            if price_item:
+                context = _get_conversation_context(conversation)
+                context = _set_service_hint(context, price_item, now)
+                _set_conversation_context(conversation, context)
+
+        bot_response = fast_decision.response
+        _reset_low_confidence_retry(conversation)
+
+        result_message = "Fast intent reply sent"
+        if fast_decision.action == "smalltalk":
+            result_message = "Fast intent smalltalk sent"
+        elif fast_decision.action == "escalate":
+            result_message = "Fast intent reply sent"
+            _, reused, telegram_sent = _reuse_active_handover(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message=message_text,
+                source="fast_intent",
+                intent=fast_decision.intent,
+            )
+            if reused:
+                result_message = f"Fast intent reuse, telegram={'sent' if telegram_sent else 'failed'}"
+            elif conversation.state == ConversationState.BOT_ACTIVE.value and routing["allow_handover_create"]:
+                result = escalate_to_pending(
+                    db=db,
+                    conversation=conversation,
+                    user_message=message_text,
+                    trigger_type="intent",
+                    trigger_value=fast_decision.intent or "policy",
+                )
+                if result.ok:
+                    handover = result.value
+                    telegram_sent = send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=message_text,
+                    )
+                    result_message = f"Fast intent escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                else:
+                    result_message = f"Fast intent escalation failed: {result.error}"
+            else:
+                result_message = "Fast intent escalation skipped (already pending)"
+
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "fast_intent",
+                "decision": fast_decision.action,
+                "intent": fast_decision.intent,
+                "state": conversation.state,
+                "booking_wants_flow": booking_wants_flow,
+                "policy_type": policy_type,
+            },
+        )
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = _send_response(bot_response)
+        if not sent:
+            result_message = f"{result_message}; response_send=failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
 
     # 10. Classify intent (expensive). Protect against accidental escalations on short/noisy messages.
+    intent_t0 = time.monotonic()
     decision_text = _normalize_message_text(message_text)
     signals = _detect_intent_signals(decision_text)
     intent = signals.intent
@@ -3825,6 +4208,11 @@ async def _handle_webhook_payload(
         out_of_domain_signal = True
     elif intent == Intent.OUT_OF_DOMAIN and domain_intent != DomainIntent.IN_DOMAIN:
         out_of_domain_signal = True
+    _log_timing(
+        "intent_ms",
+        (time.monotonic() - intent_t0) * 1000,
+        {"intent": intent.value, "domain_intent": domain_intent.value, "out_of_domain_signal": out_of_domain_signal},
+    )
 
     rag_confident = False
     rag_score = 0.0
@@ -3834,6 +4222,7 @@ async def _handle_webhook_payload(
             conversation_id=conversation.id,
             client_slug=payload.client_slug,
             user_message=message_text,
+            timing_context=timing_context,
         )
         log_scores = _is_env_enabled(os.environ.get("DOMAIN_ROUTER_LOG_SCORES"), default=False)
         if log_scores:
@@ -3991,65 +4380,83 @@ async def _handle_webhook_payload(
         if intent == Intent.HUMAN_REQUEST:
             handover_message = select_handover_user_message(db, conversation.id, message_text)
 
-        # Escalate using state_service (atomic transition)
-        result = escalate_to_pending(
+        _, reused, telegram_sent = _reuse_active_handover(
             db=db,
             conversation=conversation,
-            user_message=handover_message,
-            trigger_type="intent",
-            trigger_value=intent.value,
+            user=user,
+            message=handover_message,
+            source="intent_escalation",
+            intent=intent.value,
         )
 
-        if result.ok:
-            handover = result.value
-            # Send notification to Telegram
-            telegram_sent = send_telegram_notification(
-                db=db,
-                handover=handover,
-                conversation=conversation,
-                user=user,
-                message=handover_message,
-            )
+        if reused:
             bot_response = MSG_ESCALATED
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "escalation",
-                    "decision": "created",
-                    "state": conversation.state,
-                    "intent": intent.value,
-                    "telegram_sent": telegram_sent,
-                },
-            )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
-            result_message = f"Escalated ({intent.value}), telegram={'sent' if telegram_sent else 'failed'}"
+            result_message = (
+                f"Escalation reused ({intent.value}), telegram={'sent' if telegram_sent else 'failed'}"
+            )
         else:
-            logger.error(f"Escalation failed: {result.error}")
-            # Fallback: respond normally
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "escalation",
-                    "decision": "failed",
-                    "state": conversation.state,
-                    "intent": intent.value,
-                    "error": result.error_code,
-                },
+            # Escalate using state_service (atomic transition)
+            result = escalate_to_pending(
+                db=db,
+                conversation=conversation,
+                user_message=handover_message,
+                trigger_type="intent",
+                trigger_value=intent.value,
             )
-            gen_result = generate_bot_response(
-                db,
-                conversation,
-                message_text,
-                payload.client_slug,
-                append_user_message=append_user_message,
-                pending_hint=conversation.state == ConversationState.PENDING.value,
-            )
-            if gen_result.ok and gen_result.value[0]:
-                bot_response = gen_result.value[0]
+
+            if result.ok:
+                handover = result.value
+                # Send notification to Telegram
+                telegram_sent = send_telegram_notification(
+                    db=db,
+                    handover=handover,
+                    conversation=conversation,
+                    user=user,
+                    message=handover_message,
+                )
+                bot_response = MSG_ESCALATED
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "escalation",
+                        "decision": "created",
+                        "state": conversation.state,
+                        "intent": intent.value,
+                        "telegram_sent": telegram_sent,
+                    },
+                )
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                 sent = _send_response(bot_response)
-            result_message = f"Escalation failed ({result.error_code}), responded normally"
+                result_message = f"Escalated ({intent.value}), telegram={'sent' if telegram_sent else 'failed'}"
+            else:
+                logger.error(f"Escalation failed: {result.error}")
+                # Fallback: respond normally
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "escalation",
+                        "decision": "failed",
+                        "state": conversation.state,
+                        "intent": intent.value,
+                        "error": result.error_code,
+                    },
+                )
+                gen_result = generate_bot_response(
+                    db,
+                    conversation,
+                    message_text,
+                    payload.client_slug,
+                    append_user_message=append_user_message,
+                    pending_hint=conversation.state == ConversationState.PENDING.value,
+                    timing_context=timing_context,
+                )
+                if gen_result.ok and gen_result.value[0]:
+                    bot_response = gen_result.value[0]
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = _send_response(bot_response)
+                result_message = f"Escalation failed ({result.error_code}), responded normally"
 
     elif decision.action == "pending_escalation":
         bot_response = MSG_PENDING_ESCALATION if intent == Intent.FRUSTRATION else MSG_PENDING_STATUS
@@ -4121,6 +4528,7 @@ async def _handle_webhook_payload(
             payload.client_slug,
             append_user_message=append_user_message,
             pending_hint=conversation.state == ConversationState.PENDING.value,
+            timing_context=timing_context,
         )
 
         if not gen_result.ok:

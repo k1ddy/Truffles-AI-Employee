@@ -20,6 +20,7 @@ class LLMProvider(ABC):
         model: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 1000,
+        timeout_seconds: Optional[float] = None,
     ) -> LLMResponse:
         """Generate response from LLM."""
         pass

@@ -11,6 +11,7 @@ from app.database import get_db
 from app.main import app
 from app.routers import webhook as webhook_router
 from app.schemas.message import MessageRequest, MessageResponse
+from app.services import escalation_service
 from app.services.intent_service import Intent, is_opt_out_message
 from app.services.message_service import select_handover_user_message
 from app.services.state_machine import ConversationState
@@ -288,6 +289,44 @@ class TestRoutingPolicy:
         assert webhook_router._should_escalate_to_pending(active_policy, Intent.HUMAN_REQUEST) is True
 
 
+class TestFastIntent:
+    @pytest.mark.parametrize(
+        "message,expect_action,expect_intent",
+        [
+            ("Сәлем!", "smalltalk", "greeting"),
+            ("какие услуги вы оказываете?", "reply", "services_overview"),
+            ("где вы находитесь?", "reply", "location"),
+        ],
+    )
+    def test_fast_intent_matches(self, message, expect_action, expect_intent):
+        decision = webhook_router._detect_fast_intent(
+            message,
+            policy_type="demo_salon",
+            booking_wants_flow=False,
+            bypass_domain_flows=False,
+        )
+
+        assert decision is not None
+        assert decision.action == expect_action
+        assert decision.intent == expect_intent
+
+    def test_fast_intent_fallback_to_llm(self):
+        message = "Как ухаживать за гель-лаком после процедуры?"
+        decision = webhook_router._detect_fast_intent(
+            message,
+            policy_type="demo_salon",
+            booking_wants_flow=False,
+            bypass_domain_flows=False,
+        )
+
+        assert decision is None
+
+        with patch("app.routers.webhook.classify_intent", return_value=Intent.QUESTION) as mock_classify:
+            signals = webhook_router._detect_intent_signals(message)
+            assert signals.intent == Intent.QUESTION
+            mock_classify.assert_called_once()
+
+
 def _load_golden_cases() -> list[dict]:
     path = Path(__file__).resolve().parents[2] / "tests" / "test_cases.json"
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -296,10 +335,67 @@ def _load_golden_cases() -> list[dict]:
     return [case for case in cases if isinstance(case, dict) and case.get("automation")]
 
 
+def test_escalation_reuses_active_handover():
+    db = Mock()
+    conversation = Mock()
+    conversation.id = "conv-id"
+    conversation.client_id = "client-id"
+    conversation.state = ConversationState.BOT_ACTIVE.value
+    conversation.escalated_at = None
+    user = Mock()
+    user.remote_jid = "77000000000@s.whatsapp.net"
+
+    existing = Mock()
+    existing.id = "handover-id"
+    existing.status = "pending"
+
+    with patch("app.services.escalation_service.get_active_handover", return_value=existing), patch(
+        "app.services.escalation_service.create_handover"
+    ) as mock_create, patch(
+        "app.services.escalation_service.send_telegram_notification", return_value=True
+    ) as mock_send:
+        handover, sent = escalation_service.escalate_conversation(
+            db=db,
+            conversation=conversation,
+            user=user,
+            trigger_type="intent",
+            trigger_value="payment",
+            user_message="по оплате уточню",
+        )
+
+        assert handover == existing
+        assert sent is True
+        mock_create.assert_not_called()
+        mock_send.assert_called_once_with(
+            db=db,
+            handover=existing,
+            conversation=conversation,
+            user=user,
+            message="по оплате уточню",
+        )
+        assert conversation.state == ConversationState.PENDING.value
+
+
 @pytest.mark.parametrize("case", _load_golden_cases())
 def test_golden_cases(case):
     automation = case["automation"]
     check = automation.get("check")
+    if check == "fast_intent":
+        decision = webhook_router._detect_fast_intent(
+            case.get("input", ""),
+            policy_type=automation.get("policy_type", "demo_salon"),
+            booking_wants_flow=automation.get("booking_wants_flow", False),
+            bypass_domain_flows=automation.get("bypass_domain_flows", False),
+        )
+        if automation.get("expect_action") is not None:
+            assert decision is not None
+            assert decision.action == automation["expect_action"]
+        if automation.get("expect_intent") is not None:
+            assert decision is not None
+            assert decision.intent == automation["expect_intent"]
+        if automation.get("expect_match") is False:
+            assert decision is None
+        return
     if check == "decision":
         state = automation.get("state", ConversationState.BOT_ACTIVE.value)
         state_value = state.value if isinstance(state, ConversationState) else state
@@ -327,6 +423,20 @@ def test_golden_cases(case):
             assert booking_signal == automation["expect_booking_signal"]
         if "expect_opt_out" in automation:
             assert opt_out == automation["expect_opt_out"]
+        return
+
+    if check == "booking_flow":
+        messages = automation.get("messages") or ([case.get("input")] if case.get("input") else [])
+        messages = [msg for msg in messages if isinstance(msg, str)]
+        booking_signal = webhook_router._has_booking_signal(messages)
+        booking_state = webhook_router._update_booking_from_messages({}, messages)
+
+        if "expect_booking_signal" in automation:
+            assert booking_signal == automation["expect_booking_signal"]
+        if automation.get("expect_service"):
+            assert booking_state.get("service")
+        if automation.get("expect_datetime"):
+            assert booking_state.get("datetime")
         return
 
     pytest.fail(f"Unknown golden automation check: {check}")

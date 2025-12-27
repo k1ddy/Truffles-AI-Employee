@@ -1,8 +1,10 @@
 import os
 import re
+import time
 from typing import List, Optional, Tuple
 from uuid import UUID
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
@@ -163,9 +165,27 @@ BOT_STATUS_KEYWORDS = {
 }
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "8"))
 
 # Global LLM provider instance
 _llm_provider = None
+
+
+def _log_timing(
+    stage: str,
+    elapsed_ms: float,
+    *,
+    timing_context: dict | None = None,
+    extra: dict | None = None,
+) -> None:
+    context: dict = {}
+    if timing_context:
+        context.update(timing_context)
+    if extra:
+        context.update(extra)
+    context["stage"] = stage
+    context["elapsed_ms"] = round(elapsed_ms, 2)
+    logger.info("Timing", extra={"context": context})
 
 
 def get_llm_provider() -> OpenAIProvider:
@@ -449,6 +469,7 @@ def get_rag_confidence(
     conversation_id: UUID,
     client_slug: str,
     user_message: str,
+    timing_context: dict | None = None,
 ) -> tuple[bool, float]:
     """Return whether RAG has a confident match and its max score."""
     if not user_message:
@@ -459,7 +480,19 @@ def get_rag_confidence(
 
     query_for_rag = _sanitize_query_for_rag(user_message)
     try:
+        rag_start = time.monotonic()
         results = search_knowledge(query_for_rag, client_slug, limit=3)
+        _log_timing(
+            "rag_ms",
+            (time.monotonic() - rag_start) * 1000,
+            timing_context=timing_context,
+            extra={
+                "phase": "confidence",
+                "retry": False,
+                "query_len": len(query_for_rag),
+                "results": len(results),
+            },
+        )
         if results:
             max_score = max(r.get("score", 0.0) for r in results)
     except Exception as exc:
@@ -472,7 +505,19 @@ def get_rag_confidence(
             if contextual_query and contextual_query != user_message:
                 contextual_query = _sanitize_query_for_rag(contextual_query)
                 try:
+                    rag_start = time.monotonic()
                     retry_results = search_knowledge(contextual_query, client_slug, limit=3)
+                    _log_timing(
+                        "rag_ms",
+                        (time.monotonic() - rag_start) * 1000,
+                        timing_context=timing_context,
+                        extra={
+                            "phase": "confidence",
+                            "retry": True,
+                            "query_len": len(contextual_query),
+                            "results": len(retry_results),
+                        },
+                    )
                     if retry_results:
                         retry_score = max(r.get("score", 0.0) for r in retry_results)
                         if retry_score > max_score:
@@ -491,6 +536,7 @@ def generate_ai_response(
     user_message: str,
     append_user_message: bool = True,
     pending_hint: bool = False,
+    timing_context: dict | None = None,
 ) -> Result[Tuple[Optional[str], str]]:
     """
     Generate AI response using LLM with knowledge base.
@@ -539,7 +585,19 @@ def generate_ai_response(
         query_for_rag = _sanitize_query_for_rag(user_message)
 
         try:
+            rag_start = time.monotonic()
             knowledge_results = search_knowledge(query_for_rag, client_slug, limit=3)
+            _log_timing(
+                "rag_ms",
+                (time.monotonic() - rag_start) * 1000,
+                timing_context=timing_context,
+                extra={
+                    "phase": "generate",
+                    "retry": False,
+                    "query_len": len(query_for_rag),
+                    "results": len(knowledge_results),
+                },
+            )
             if knowledge_results:
                 max_score = max(r.get("score", 0) for r in knowledge_results)
         except Exception as e:
@@ -556,16 +614,28 @@ def generate_ai_response(
                 if contextual_query and contextual_query != user_message:
                     contextual_query = _sanitize_query_for_rag(contextual_query)
                     try:
+                        rag_start = time.monotonic()
                         retry_results = search_knowledge(contextual_query, client_slug, limit=3)
+                        _log_timing(
+                            "rag_ms",
+                            (time.monotonic() - rag_start) * 1000,
+                            timing_context=timing_context,
+                            extra={
+                                "phase": "generate",
+                                "retry": True,
+                                "query_len": len(contextual_query),
+                                "results": len(retry_results),
+                            },
+                        )
                         if retry_results:
                             retry_score = max(r.get("score", 0) for r in retry_results)
                             if retry_score > max_score:
                                 knowledge_results = retry_results
                                 max_score = retry_score
-                                logger.info(
-                                    "RAG retry improved score: "
-                                    f"max_score={max_score:.3f} (query_len={len(contextual_query)})"
-                                )
+                            logger.info(
+                                "RAG retry improved score: "
+                                f"max_score={max_score:.3f} (query_len={len(contextual_query)})"
+                            )
                     except Exception as e:
                         logger.warning(f"Knowledge retry error: {e}")
 
@@ -611,7 +681,34 @@ def generate_ai_response(
         # 7. Generate response
         llm = get_llm_provider()
         logger.debug(f"Calling LLM with {len(messages)} messages")
-        response = llm.generate(messages, temperature=1.0, max_tokens=2000)
+        llm_start = time.monotonic()
+        try:
+            response = llm.generate(
+                messages,
+                temperature=1.0,
+                max_tokens=2000,
+                timeout_seconds=LLM_TIMEOUT_SECONDS,
+            )
+        except httpx.TimeoutException as exc:
+            _log_timing(
+                "llm_ms",
+                (time.monotonic() - llm_start) * 1000,
+                timing_context=timing_context,
+                extra={
+                    "phase": "generate",
+                    "messages": len(messages),
+                    "timeout": True,
+                    "timeout_seconds": LLM_TIMEOUT_SECONDS,
+                },
+            )
+            logger.warning(f"LLM timeout after {LLM_TIMEOUT_SECONDS}s: {exc}")
+            return Result.success((None, "low_confidence"))
+        _log_timing(
+            "llm_ms",
+            (time.monotonic() - llm_start) * 1000,
+            timing_context=timing_context,
+            extra={"phase": "generate", "messages": len(messages)},
+        )
         logger.debug(f"LLM response: {response.content[:100] if response.content else 'EMPTY'}...")
 
         return Result.success((response.content, confidence_level))

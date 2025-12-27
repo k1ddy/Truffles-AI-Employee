@@ -124,6 +124,75 @@
         "input": "иди нахуй, запишите на завтра",
         "expected": "Бот продолжает запись и не принимает ругань за имя",
         "status": null
+      },
+      {
+        "id": "TC014",
+        "name": "Услуги + self-resolve оплаты",
+        "input": "можете сказать какие услуги вы предоставляете? по оплате уточню у администратора",
+        "expected": "Бот отвечает по услугам, оплаты не эскалирует",
+        "expected_intent": "services_overview",
+        "expected_action": "reply",
+        "status": null
+      },
+      {
+        "id": "TC015",
+        "name": "Оплата - способы",
+        "input": "какие способы оплаты?",
+        "expected": "Бот эскалирует вопрос об оплате",
+        "expected_action": "escalate",
+        "status": null
+      },
+      {
+        "id": "TC016",
+        "name": "Multi-intent: услуги + запись",
+        "input": "Какие услуги у вас есть и можно записаться на маникюр завтра?",
+        "expected": "Бот запускает сбор записи (service+datetime)",
+        "automation": {
+          "check": "booking_flow",
+          "messages": [
+            "Какие услуги у вас есть и можно записаться на маникюр завтра?"
+          ],
+          "expect_booking_signal": true,
+          "expect_service": true,
+          "expect_datetime": true
+        },
+        "status": null
+      },
+      {
+        "id": "TC017",
+        "name": "Fast intent: greeting phrases",
+        "input": "Сәлем!",
+        "expected": "Бот отвечает приветствием без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "smalltalk",
+          "expect_intent": "greeting"
+        },
+        "status": null
+      },
+      {
+        "id": "TC018",
+        "name": "Fast intent: services overview",
+        "input": "какие услуги вы оказываете?",
+        "expected": "Ответ по услугам из truth gate без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "reply",
+          "expect_intent": "services_overview"
+        },
+        "status": null
+      },
+      {
+        "id": "TC019",
+        "name": "Fast intent: address",
+        "input": "где вы находитесь?",
+        "expected": "Ответ по адресу из truth gate без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "reply",
+          "expect_intent": "location"
+        },
+        "status": null
       }
     ]
   },

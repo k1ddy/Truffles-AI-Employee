@@ -23,12 +23,14 @@ class OpenAIProvider(LLMProvider):
         model: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 1000,
+        timeout_seconds: Optional[float] = None,
     ) -> LLMResponse:
         """Generate response from OpenAI."""
 
         model = model or self.default_model
 
-        with httpx.Client(timeout=60.0) as client:
+        timeout = timeout_seconds if timeout_seconds is not None else 60.0
+        with httpx.Client(timeout=timeout) as client:
             payload = {
                 "model": model,
                 "messages": messages,
