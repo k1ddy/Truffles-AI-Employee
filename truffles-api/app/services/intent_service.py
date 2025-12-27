@@ -241,14 +241,33 @@ def _get_domain_router_config(client_config: dict | None) -> dict:
     nested = client_config.get("domain_router")
     if isinstance(nested, dict):
         return nested
-    if any(key in client_config for key in ("anchors_in", "anchors_out", "in_threshold", "out_threshold")):
+    if any(
+        key in client_config
+        for key in (
+            "anchors_in",
+            "anchors_out",
+            "anchors_in_strict",
+            "strict_in_anchors",
+            "in_threshold",
+            "out_threshold",
+            "in_hit_threshold",
+            "out_hit_threshold",
+            "strict_in_hit_threshold",
+        )
+    ):
         return client_config
     return {}
 
 
-def _score_against_anchors(text_normalized: str, tokens: set[str], anchors: Iterable[str]) -> tuple[float, str | None]:
+def _score_against_anchors(
+    text_normalized: str,
+    tokens: set[str],
+    anchors: Iterable[str],
+    hit_threshold: float,
+) -> tuple[float, str | None, int]:
     best_score = 0.0
     best_anchor = None
+    hits = 0
     for anchor in anchors:
         anchor_normalized = _normalize_text(anchor)
         if not anchor_normalized:
@@ -263,7 +282,9 @@ def _score_against_anchors(text_normalized: str, tokens: set[str], anchors: Iter
         if score > best_score:
             best_score = score
             best_anchor = anchor
-    return best_score, best_anchor
+        if score >= hit_threshold:
+            hits += 1
+    return best_score, best_anchor, hits
 
 
 def classify_domain_with_scores(
@@ -277,15 +298,19 @@ def classify_domain_with_scores(
     config = _get_domain_router_config(client_config)
     anchors_in = _ensure_list(config.get("anchors_in"))
     anchors_out = _ensure_list(config.get("anchors_out"))
+    strict_in_anchors = _ensure_list(config.get("anchors_in_strict") or config.get("strict_in_anchors"))
     in_threshold = float(config.get("in_threshold", 0.62))
     out_threshold = float(config.get("out_threshold", 0.62))
     margin = float(config.get("margin", 0.08))
     min_len = int(config.get("min_len", 5))
+    in_hit_threshold = float(config.get("in_hit_threshold", in_threshold))
+    out_hit_threshold = float(config.get("out_hit_threshold", out_threshold))
+    strict_in_hit_threshold = float(config.get("strict_in_hit_threshold", in_threshold))
 
     text_normalized = _normalize_text(text)
     tokens = set(text_normalized.split()) if text_normalized else set()
 
-    if len(text_normalized) < min_len or (not anchors_in and not anchors_out):
+    if not anchors_in and not anchors_out and not strict_in_anchors:
         return (
             DomainIntent.UNKNOWN,
             0.0,
@@ -294,29 +319,52 @@ def classify_domain_with_scores(
                 "in_threshold": in_threshold,
                 "out_threshold": out_threshold,
                 "margin": margin,
+                "in_hit_threshold": in_hit_threshold,
+                "out_hit_threshold": out_hit_threshold,
+                "strict_in_hit_threshold": strict_in_hit_threshold,
                 "anchors_in": len(anchors_in),
                 "anchors_out": len(anchors_out),
+                "strict_in_anchors": len(strict_in_anchors),
+                "in_hits": 0,
+                "out_hits": 0,
+                "strict_in_hits": 0,
                 "message_len": len(text_normalized),
             },
         )
 
-    in_score, matched_in = _score_against_anchors(text_normalized, tokens, anchors_in)
-    out_score, matched_out = _score_against_anchors(text_normalized, tokens, anchors_out)
+    in_score, matched_in, in_hits = _score_against_anchors(
+        text_normalized, tokens, anchors_in, in_hit_threshold
+    )
+    out_score, matched_out, out_hits = _score_against_anchors(
+        text_normalized, tokens, anchors_out, out_hit_threshold
+    )
+    _, matched_strict_in, strict_in_hits = _score_against_anchors(
+        text_normalized, tokens, strict_in_anchors, strict_in_hit_threshold
+    )
 
     domain_intent = DomainIntent.UNKNOWN
-    if in_score >= in_threshold and in_score >= out_score + margin:
-        domain_intent = DomainIntent.IN_DOMAIN
-    elif out_score >= out_threshold and out_score >= in_score + margin:
-        domain_intent = DomainIntent.OUT_OF_DOMAIN
+    if len(text_normalized) >= min_len:
+        if in_score >= in_threshold and in_score >= out_score + margin:
+            domain_intent = DomainIntent.IN_DOMAIN
+        elif out_score >= out_threshold and out_score >= in_score + margin:
+            domain_intent = DomainIntent.OUT_OF_DOMAIN
 
     meta = {
         "in_threshold": in_threshold,
         "out_threshold": out_threshold,
         "margin": margin,
+        "in_hit_threshold": in_hit_threshold,
+        "out_hit_threshold": out_hit_threshold,
+        "strict_in_hit_threshold": strict_in_hit_threshold,
         "anchors_in": len(anchors_in),
         "anchors_out": len(anchors_out),
+        "strict_in_anchors": len(strict_in_anchors),
         "matched_in": matched_in,
         "matched_out": matched_out,
+        "matched_strict_in": matched_strict_in,
+        "in_hits": in_hits,
+        "out_hits": out_hits,
+        "strict_in_hits": strict_in_hits,
         "message_len": len(text_normalized),
     }
     return domain_intent, in_score, out_score, meta
@@ -335,6 +383,11 @@ def is_strong_out_of_domain(
     """
     config = _get_domain_router_config(client_config)
     out_threshold = float(config.get("out_threshold", 0.62))
+    in_threshold = float(config.get("in_threshold", 0.62))
+    anchors_out = _ensure_list(config.get("anchors_out"))
+    strict_in_anchors = _ensure_list(config.get("anchors_in_strict") or config.get("strict_in_anchors"))
+    out_hit_threshold = float(config.get("out_hit_threshold", out_threshold))
+    strict_in_hit_threshold = float(config.get("strict_in_hit_threshold", in_threshold))
 
     strict_out_threshold = float(config.get("strict_out_threshold", max(out_threshold, 0.8)))
     strong_out_threshold = float(config.get("strong_out_threshold", max(out_threshold, 0.72)))
@@ -345,10 +398,18 @@ def is_strong_out_of_domain(
     strict_min_len = int(config.get("strict_min_len", 6))
 
     text_normalized = _normalize_text(text)
+    tokens = set(text_normalized.split()) if text_normalized else set()
     message_len = len(text_normalized)
 
+    _, matched_out, out_hits = _score_against_anchors(text_normalized, tokens, anchors_out, out_hit_threshold)
+    _, matched_strict_in, strict_in_hits = _score_against_anchors(
+        text_normalized, tokens, strict_in_anchors, strict_in_hit_threshold
+    )
+
     strong = False
-    if domain_intent == DomainIntent.OUT_OF_DOMAIN:
+    if out_hits > 0 and strict_in_hits == 0:
+        strong = True
+    elif domain_intent == DomainIntent.OUT_OF_DOMAIN:
         if (
             message_len >= strict_min_len
             and out_score >= strict_out_threshold
@@ -372,5 +433,11 @@ def is_strong_out_of_domain(
         "strong_in_max": strong_in_max,
         "strict_min_len": strict_min_len,
         "message_len": message_len,
+        "out_hit_threshold": out_hit_threshold,
+        "strict_in_hit_threshold": strict_in_hit_threshold,
+        "out_hits": out_hits,
+        "strict_in_hits": strict_in_hits,
+        "matched_out": matched_out,
+        "matched_strict_in": matched_strict_in,
     }
     return strong, meta
