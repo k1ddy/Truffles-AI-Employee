@@ -426,7 +426,9 @@ def _transcribe_with_elevenlabs(
         logger.warning(f"ElevenLabs transcription failed: {exc}")
         return None, "elevenlabs_error"
     if response.status_code != 200:
-        logger.warning(f"ElevenLabs transcription error: {response.status_code} - {response.text}")
+        logger.warning(
+            f"ElevenLabs transcription error: {response.status_code} - {response.text[:200]}"
+        )
         return None, "elevenlabs_status"
     try:
         payload = response.json()
@@ -437,6 +439,8 @@ def _transcribe_with_elevenlabs(
     else:
         transcript = None
     cleaned = (transcript or "").strip()
+    if not cleaned:
+        logger.warning("ElevenLabs transcription returned empty text")
     return cleaned or None, None
 
 
@@ -498,6 +502,8 @@ def transcribe_audio_with_fallback(
     if _is_valid_transcript(transcript, min_chars):
         return transcript, meta, "ok"
 
+    primary_reason = error or ("short_transcript" if transcript else "empty_transcript")
+
     fallback_available = fallback and fallback != primary
     if fallback == "elevenlabs" and not ELEVENLABS_API_KEY:
         fallback_available = False
@@ -505,6 +511,18 @@ def transcribe_audio_with_fallback(
             error = "fallback_missing_key"
 
     if fallback_available:
+        logger.info(
+            "ASR primary failed; trying fallback",
+            extra={
+                "context": {
+                    "primary": primary,
+                    "fallback": fallback,
+                    "status": primary_reason,
+                    "min_chars": min_chars,
+                    "text_len": len(transcript or ""),
+                }
+            },
+        )
         meta["asr_fallback_used"] = True
         transcript = None
         if fallback == "openai_whisper":
@@ -533,7 +551,7 @@ def transcribe_audio_with_fallback(
             return transcript, meta, "ok_fallback"
 
     meta["asr_failed"] = True
-    status = error or ("short_transcript" if transcript else "empty_transcript")
+    status = error or primary_reason
     return None, meta, status
 
 
