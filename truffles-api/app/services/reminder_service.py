@@ -122,6 +122,20 @@ def check_no_response_alerts(db: Session) -> dict:
         context["alerts"] = alerts
         conversation.context = context
 
+        decision_meta = {}
+        if last_user and isinstance(last_user.message_metadata, dict):
+            decision_meta = last_user.message_metadata.get("decision_meta") or {}
+        last_action = None
+        if isinstance(decision_meta, dict):
+            action = decision_meta.get("action")
+            intent = decision_meta.get("intent")
+            if action and intent:
+                last_action = f"{action}:{intent}"
+            else:
+                last_action = action or intent
+        trace = context.get("decision_trace")
+        last_trace = trace[-1] if isinstance(trace, list) and trace else None
+
         alert_warning(
             "No bot response for user message",
             {
@@ -129,6 +143,8 @@ def check_no_response_alerts(db: Session) -> dict:
                 "client_id": str(conversation.client_id),
                 "minutes_waiting": minutes_waiting,
                 "message": (last_user.content or "")[:200],
+                "last_action": last_action or "unknown",
+                "decision_trace": last_trace,
             },
         )
 

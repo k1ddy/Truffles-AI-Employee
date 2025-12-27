@@ -16,7 +16,12 @@ from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
 from app.services import escalation_service
 from app.services.demo_salon_knowledge import DemoSalonDecision
-from app.services.intent_service import Intent, is_opt_out_message
+from app.services.intent_service import (
+    Intent,
+    classify_domain_with_scores,
+    is_opt_out_message,
+    is_strong_out_of_domain,
+)
 from app.services.message_service import select_handover_user_message
 from app.services.state_machine import ConversationState
 
@@ -24,6 +29,53 @@ from app.services.state_machine import ConversationState
 @pytest.fixture
 def client():
     return TestClient(app)
+
+
+DEMO_DOMAIN_ROUTER_CONFIG = {
+    "anchors_in": [
+        "запись на услугу",
+        "записаться на маникюр",
+        "адрес салона",
+        "как добраться",
+        "часы работы",
+        "график работы",
+        "цены на услуги",
+        "прайс салона",
+        "маникюр педикюр",
+        "стрижка окрашивание",
+        "брови ресницы",
+        "уход за лицом",
+        "депиляция шугаринг",
+        "макияж укладка",
+        "референс прически",
+        "прическа как у",
+    ],
+    "anchors_out": [
+        "погода сегодня",
+        "прогноз погоды",
+        "анекдот",
+        "стихотворение",
+        "политика новости",
+        "выборы президент",
+        "рецепт",
+        "как приготовить",
+        "программирование",
+        "напиши код",
+        "python",
+        "личные советы",
+        "совет по отношениям",
+        "ветеринар",
+        "стрижка собаки",
+        "стрижка кошки",
+        "постричь козу",
+        "спасти сестру",
+        "слепая сестра",
+        "слепой сестре",
+    ],
+    "in_threshold": 0.55,
+    "out_threshold": 0.55,
+    "margin": 0.03,
+}
 
 
 class TestMessageEndpoint:
@@ -263,9 +315,10 @@ class TestRoutingPolicy:
 
     def test_routing_policy_pending(self):
         policy = webhook_router._get_routing_policy(ConversationState.PENDING.value)
-        assert policy["allow_booking_flow"] is True
+        assert policy["allow_booking_flow"] is False
         assert policy["allow_handover_create"] is False
-        assert policy["allow_truth_gate_reply"] is True
+        assert policy["allow_truth_gate_reply"] is False
+        assert policy["allow_bot_reply"] is False
 
     def test_routing_policy_manager_active(self):
         policy = webhook_router._get_routing_policy(ConversationState.MANAGER_ACTIVE.value)
@@ -279,7 +332,7 @@ class TestRoutingPolicy:
             booking_active=False,
             booking_signal=True,
         )
-        assert should_run is True
+        assert should_run is False
 
     def test_demo_truth_gate_skips_when_booking(self):
         policy = webhook_router._get_routing_policy(ConversationState.PENDING.value)
@@ -487,6 +540,28 @@ def test_golden_cases(case):
             assert decision.intent == automation["expect_intent"]
         if automation.get("expect_match") is False:
             assert decision is None
+        return
+    if check == "domain_router":
+        router_key = automation.get("domain_router")
+        if router_key == "demo_salon":
+            client_config = {"domain_router": DEMO_DOMAIN_ROUTER_CONFIG}
+        else:
+            client_config = automation.get("domain_router_config", {})
+        domain_intent, in_score, out_score, _ = classify_domain_with_scores(
+            case.get("input", ""),
+            client_config,
+        )
+        strong_out, _ = is_strong_out_of_domain(
+            case.get("input", ""),
+            domain_intent,
+            in_score,
+            out_score,
+            client_config,
+        )
+        if automation.get("expect_out_of_domain") is not None:
+            assert strong_out is automation["expect_out_of_domain"]
+        if automation.get("expect_domain_intent") is not None:
+            assert domain_intent.value == automation["expect_domain_intent"]
         return
     if check == "decision":
         state = automation.get("state", ConversationState.BOT_ACTIVE.value)

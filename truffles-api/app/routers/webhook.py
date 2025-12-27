@@ -1358,6 +1358,7 @@ MSG_PENDING_LOW_CONFIDENCE = (
 )
 MSG_PENDING_ESCALATION = "Я уже передал менеджеру — он скоро подключится."
 MSG_PENDING_STATUS = "Да, я передал. Сейчас менеджер ещё не взял заявку. Как только возьмёт — ответит здесь. Пока ждём, могу помочь: уточните, что нужно?"
+MSG_PENDING_WAIT = "Администратор подключится."
 MSG_AI_ERROR = "Извините, произошла ошибка. Попробуйте позже."
 MSG_MEDIA_UNSUPPORTED = (
     "Сейчас принимаем только фото, аудио и документы. Видео не поддерживаются. Опишите вопрос текстом."
@@ -1382,6 +1383,7 @@ MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите запис�
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
 MSG_BOOKING_ASK_NAME = "Как вас зовут?"
 MSG_BOOKING_CANCELLED = "Хорошо, если передумаете — пишите."
+MSG_BOOKING_REENGAGE = "Хотите продолжить запись? Если да — напишите услугу."
 
 SERVICE_HINT_KEY = "last_service_hint"
 SERVICE_HINT_AT_KEY = "last_service_hint_at"
@@ -1396,10 +1398,10 @@ ROUTING_MATRIX = {
         "allow_bot_reply": True,
     },
     ConversationState.PENDING.value: {
-        "allow_booking_flow": True,
-        "allow_truth_gate_reply": True,
+        "allow_booking_flow": False,
+        "allow_truth_gate_reply": False,
         "allow_handover_create": False,
-        "allow_bot_reply": True,
+        "allow_bot_reply": False,
     },
     ConversationState.MANAGER_ACTIVE.value: {
         "allow_booking_flow": False,
@@ -1962,6 +1964,18 @@ BOOKING_SLOT_VALIDATORS = {
     "datetime": _validate_datetime_slot,
     "name": _validate_name_slot,
 }
+
+
+def _is_booking_related_message(message_text: str) -> bool:
+    if not message_text:
+        return False
+    if _is_booking_request(message_text):
+        return True
+    if _extract_service(message_text) or _extract_datetime(message_text):
+        return True
+    if _validate_name_slot(message_text, allow_freeform=True):
+        return True
+    return False
 
 
 def _apply_booking_slot(
@@ -3341,88 +3355,89 @@ async def _handle_webhook_payload(
     booking_active = bool(booking_state.get("active"))
     reengage_override = False
 
-    reengage_confirmation = _get_reengage_confirmation(context)
-    if reengage_confirmation:
-        if not _is_reengage_confirmation_active(reengage_confirmation, now):
-            context = _set_reengage_confirmation(context, None)
-            _set_conversation_context(conversation, context)
-        else:
-            decision = classify_confirmation(message_text)
-            if decision == "yes":
+    if conversation.state == ConversationState.BOT_ACTIVE.value:
+        reengage_confirmation = _get_reengage_confirmation(context)
+        if reengage_confirmation:
+            if not _is_reengage_confirmation_active(reengage_confirmation, now):
                 context = _set_reengage_confirmation(context, None)
                 _set_conversation_context(conversation, context)
-                conversation.bot_status = "active"
-                conversation.bot_muted_until = None
-                conversation.no_count = 0
-                reengage_override = True
-                stored_messages = reengage_confirmation.get("booking_messages")
-                if isinstance(stored_messages, list) and stored_messages:
-                    batch_messages = _coerce_batch_messages("", stored_messages)
-                    signal_messages = list(batch_messages)
-                    booking_signal = _has_booking_signal(signal_messages)
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "decision": "reengage_confirmed",
-                        "state": conversation.state,
-                        "booking_signal": booking_signal,
-                        "opt_out_in_batch": opt_out_in_batch,
-                    },
-                )
-            elif decision == "no":
-                context = _set_reengage_confirmation(context, None)
-                _set_conversation_context(conversation, context)
-                mute_first, mute_second = get_mute_settings(db, client.id)
-                if conversation.no_count == 0:
-                    conversation.bot_muted_until = now + timedelta(minutes=mute_first)
-                    conversation.no_count = 1
-                else:
-                    conversation.bot_muted_until = now + timedelta(hours=mute_second)
-                    conversation.no_count += 1
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "decision": "reengage_declined",
-                        "state": conversation.state,
-                        "booking_signal": booking_signal,
-                        "opt_out_in_batch": opt_out_in_batch,
-                    },
-                )
-                bot_response = MSG_REENGAGE_DECLINED
-                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                sent = _send_response(bot_response)
-                result_message = "Re-engage declined" if sent else "Re-engage decline send failed"
-                db.commit()
-                return WebhookResponse(
-                    success=True,
-                    message=result_message,
-                    conversation_id=conversation.id,
-                    bot_response=bot_response,
-                )
             else:
-                reengage_confirmation["asked_at"] = now.isoformat()
-                context = _set_reengage_confirmation(context, reengage_confirmation)
-                _set_conversation_context(conversation, context)
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "decision": "reengage_confirmation_repeat",
-                        "state": conversation.state,
-                        "booking_signal": booking_signal,
-                        "opt_out_in_batch": opt_out_in_batch,
-                    },
-                )
-                bot_response = MSG_REENGAGE_CONFIRM
-                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                sent = _send_response(bot_response)
-                result_message = "Re-engage confirmation requested" if sent else "Re-engage confirmation failed"
-                db.commit()
-                return WebhookResponse(
-                    success=True,
-                    message=result_message,
-                    conversation_id=conversation.id,
-                    bot_response=bot_response,
-                )
+                decision = classify_confirmation(message_text)
+                if decision == "yes":
+                    context = _set_reengage_confirmation(context, None)
+                    _set_conversation_context(conversation, context)
+                    conversation.bot_status = "active"
+                    conversation.bot_muted_until = None
+                    conversation.no_count = 0
+                    reengage_override = True
+                    stored_messages = reengage_confirmation.get("booking_messages")
+                    if isinstance(stored_messages, list) and stored_messages:
+                        batch_messages = _coerce_batch_messages("", stored_messages)
+                        signal_messages = list(batch_messages)
+                        booking_signal = _has_booking_signal(signal_messages)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "decision": "reengage_confirmed",
+                            "state": conversation.state,
+                            "booking_signal": booking_signal,
+                            "opt_out_in_batch": opt_out_in_batch,
+                        },
+                    )
+                elif decision == "no":
+                    context = _set_reengage_confirmation(context, None)
+                    _set_conversation_context(conversation, context)
+                    mute_first, mute_second = get_mute_settings(db, client.id)
+                    if conversation.no_count == 0:
+                        conversation.bot_muted_until = now + timedelta(minutes=mute_first)
+                        conversation.no_count = 1
+                    else:
+                        conversation.bot_muted_until = now + timedelta(hours=mute_second)
+                        conversation.no_count += 1
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "decision": "reengage_declined",
+                            "state": conversation.state,
+                            "booking_signal": booking_signal,
+                            "opt_out_in_batch": opt_out_in_batch,
+                        },
+                    )
+                    bot_response = MSG_REENGAGE_DECLINED
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = _send_response(bot_response)
+                    result_message = "Re-engage declined" if sent else "Re-engage decline send failed"
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
+                else:
+                    reengage_confirmation["asked_at"] = now.isoformat()
+                    context = _set_reengage_confirmation(context, reengage_confirmation)
+                    _set_conversation_context(conversation, context)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "decision": "reengage_confirmation_repeat",
+                            "state": conversation.state,
+                            "booking_signal": booking_signal,
+                            "opt_out_in_batch": opt_out_in_batch,
+                        },
+                    )
+                    bot_response = MSG_REENGAGE_CONFIRM
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = _send_response(bot_response)
+                    result_message = "Re-engage confirmation requested" if sent else "Re-engage confirmation failed"
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
 
     if conversation.state == ConversationState.BOT_ACTIVE.value and opt_out_in_batch and booking_signal:
         confirmation_payload = {
@@ -3491,6 +3506,65 @@ async def _handle_webhook_payload(
                 conversation_id=conversation.id,
                 bot_response=None,
             )
+
+    if conversation.state == ConversationState.PENDING.value:
+        if is_opt_out_message(message_text):
+            handover = get_active_handover(db, conversation.id)
+            if handover:
+                manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
+            bot_response = MSG_MUTED_TEMP
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "rejection",
+                    "decision": "cancel_handover",
+                    "state": conversation.state,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="rejection",
+                intent="opt_out",
+                source="pending",
+                fast_intent=False,
+            )
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = _send_response(bot_response)
+            result_message = "Pending opt-out handled" if sent else "Pending opt-out send failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        bot_response = MSG_PENDING_WAIT
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "routing",
+                "decision": "pending_wait",
+                "state": conversation.state,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="pending_wait",
+            intent=None,
+            source="pending",
+            fast_intent=False,
+        )
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = _send_response(bot_response)
+        result_message = "Pending wait response sent" if sent else "Pending wait response failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
 
     if has_media:
         if not media_info:
@@ -3902,6 +3976,66 @@ async def _handle_webhook_payload(
         else False
     )
 
+    early_domain_intent = DomainIntent.UNKNOWN
+    early_out_of_domain = False
+    if (
+        conversation.state == ConversationState.BOT_ACTIVE.value
+        and not bypass_domain_flows
+        and message_text
+    ):
+        if not (
+            is_greeting_message(message_text)
+            or is_thanks_message(message_text)
+            or is_acknowledgement_message(message_text)
+            or is_low_signal_message(message_text)
+            or is_bot_status_question(message_text)
+            or is_human_request_message(message_text)
+            or is_opt_out_message(message_text)
+        ):
+            early_domain_intent, domain_in_score, domain_out_score, _ = classify_domain_with_scores(
+                message_text, client.config if client else None
+            )
+            if early_domain_intent == DomainIntent.OUT_OF_DOMAIN:
+                strong_domain_out, _ = is_strong_out_of_domain(
+                    message_text,
+                    early_domain_intent,
+                    domain_in_score,
+                    domain_out_score,
+                    client.config if client else None,
+                )
+                if strong_domain_out:
+                    early_out_of_domain = True
+
+    if early_out_of_domain:
+        bot_response = OUT_OF_DOMAIN_RESPONSE
+        _reset_low_confidence_retry(conversation)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "out_of_domain",
+                "decision": "early_block",
+                "state": conversation.state,
+                "domain_intent": early_domain_intent.value,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="out_of_domain",
+            intent="out_of_domain",
+            source="domain_router",
+            fast_intent=False,
+        )
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = _send_response(bot_response)
+        result_message = "Out-of-domain early response sent" if sent else "Out-of-domain early response failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
     # 9.03 Policy/truth gate (before booking/RAG).
     policy_t0 = None
     policy_logged = False
@@ -4129,6 +4263,37 @@ async def _handle_webhook_payload(
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             result_message = "Booking cancelled" if sent else "Booking cancel response failed"
+            _log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
+            booking_logged = True
+            db.commit()
+            return WebhookResponse(
+                success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
+            )
+
+        booking_related = any(_is_booking_related_message(msg) for msg in booking_messages)
+        if booking_active and not booking_signal and not booking_related:
+            booking_state = {"active": False}
+            context = _set_booking_context(context, booking_state)
+            _set_conversation_context(conversation, context)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "booking",
+                    "decision": "paused",
+                    "state": conversation.state,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="booking_paused",
+                intent="booking",
+                source="booking",
+                fast_intent=False,
+            )
+            bot_response = MSG_BOOKING_REENGAGE
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = _send_response(bot_response)
+            result_message = "Booking paused" if sent else "Booking pause response failed"
             _log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
             booking_logged = True
             db.commit()
@@ -4843,16 +5008,56 @@ async def _handle_webhook_payload(
                 sent = _send_response(bot_response)
                 result_message = "Message sent" if sent else "Failed to send"
             else:
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "ai_response",
-                        "decision": "no_response",
-                        "state": conversation.state,
-                        "confidence": confidence,
-                    },
-                )
-                result_message = "No response generated"
+                context = _get_conversation_context(conversation)
+                retry_count = _get_low_confidence_retry_count(context)
+                if should_offer_low_confidence_retry(conversation, now):
+                    retry_count = 0
+
+                if retry_count < LOW_CONFIDENCE_MAX_RETRIES:
+                    bot_response = MSG_LOW_CONFIDENCE_RETRY
+                    conversation.retry_offered_at = now
+                    context = _set_low_confidence_retry_count(context, retry_count + 1)
+                    _set_conversation_context(conversation, context)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "ai_response",
+                            "decision": "no_response_retry",
+                            "state": conversation.state,
+                            "retry_count": retry_count + 1,
+                        },
+                    )
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = _send_response(bot_response)
+                    result_message = "No response: asked clarification"
+                else:
+                    confirmation = {
+                        "status": "pending",
+                        "asked_at": now.isoformat(),
+                        "trigger_type": "low_confidence",
+                        "trigger_value": "low_confidence",
+                        "user_message": message_text,
+                    }
+                    context = _set_handover_confirmation(context, confirmation)
+                    _set_conversation_context(conversation, context)
+
+                    bot_response = MSG_HANDOVER_CONFIRM
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "ai_response",
+                            "decision": "no_response_handover_confirm",
+                            "state": conversation.state,
+                            "retry_count": retry_count,
+                        },
+                    )
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = _send_response(bot_response)
+                    result_message = (
+                        "No response: asked for handover confirmation"
+                        if sent
+                        else "No response: handover confirmation send failed"
+                    )
         if saved_message:
             llm_used = bool(timing_context.get("llm_used")) if timing_context else False
             llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False

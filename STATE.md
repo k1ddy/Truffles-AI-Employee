@@ -67,7 +67,9 @@
 - [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant работает (логи 2025-12-25: "Owner response detected" / "Added to knowledge"), но нет модерации/метрик
 - [ ] **⚠️ Ответы медленные (outbox)** — обновлено: `OUTBOX_COALESCE_SECONDS=1`, `OUTBOX_WINDOW_MERGE_SECONDS=2.5`, `OUTBOX_WORKER_INTERVAL_SECONDS=1`; safe intents (SAFE5) total_s 2.72–2.86s; LLM ветка (CMPX6-3/6-5/7-4/7-5/8-1) total_s 8.35–9.52s (avg 8.99, p90 9.48) → SLA <10s для LLM достигнут
 - [ ] **⚠️ Model routing + LLM timeout** — `FAST_MODEL=gpt-5-mini`, `SLOW_MODEL=gpt-5-mini`, `INTENT_TIMEOUT_SECONDS=1.5`, `LLM_TIMEOUT_SECONDS=4`, `FAST_MODEL_MAX_CHARS=160`, `LLM_MAX_TOKENS=600`, `LLM_HISTORY_MESSAGES=6`, `LLM_KNOWLEDGE_CHARS=1500`, `LLM_CACHE_TTL_SECONDS=86400`; llm_ms ~4.3s (timeout=true) → SLA по времени достигнут, но таймауты всё ещё происходят
-- [ ] **⚠️ Склейка сообщений ломает multi‑intent** — demo_salon: price‑ответ перехватывает до booking; в pending truth‑gate съедает booking; фикс в коде (booking flow в pending + price sidecar), нужен деплой/проверка
+- [ ] **⚠️ Склейка сообщений ломает multi‑intent** — coalesce ещё склеивает разнородные фразы; добавлен pause booking при нерелевантных сообщениях и pending‑silence (код обновлён, нужен деплой/проверка)
+- [ ] **⚠️ Out‑of‑domain gate до booking/truth** — ранний OOD‑ответ без LLM (код обновлён, нужен деплой/проверка)
+- [ ] **⚠️ OOD anchors (data-driven)** — demo_salon: anchors_in/out расширены (животные/погода/политика/кулинария/код/советы/анекдоты + style/booking/адрес/часы), offtopic_examples дополнил; SQL зафиксирован в `ops/update_instance_demo.sql`, нужен деплой, если API ещё на старом образе
 - [ ] **⚠️ Закрепы заявок в Telegram** — фикс в коде: `unpin` теперь использует `handover.telegram_message_id` (fallback на callback message_id); нужен деплой/проверка
 - [ ] **⚠️ Дубли заявок на одного клиента** — владельцу неудобно; нужен guard: при open handover не создавать новый, а писать в текущий топик
 - [ ] **Branch подключен частично** — webhook ставит `conversation.branch_id`, но Telegram per branch + RAG фильтры ещё не wired → `SPECS/MULTI_TENANT.md`

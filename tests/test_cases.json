@@ -337,6 +337,71 @@
           "expect_intent": "system_error"
         },
         "status": null
+      },
+      {
+        "id": "TC031",
+        "name": "Domain router: goat out-of-domain",
+        "input": "Можно ли постричь козу?",
+        "expected": "Должен быть OOD",
+        "automation": {
+          "check": "domain_router",
+          "domain_router": "demo_salon",
+          "expect_out_of_domain": true,
+          "expect_domain_intent": "out_of_domain"
+        },
+        "status": null
+      },
+      {
+        "id": "TC032",
+        "name": "Domain router: sister out-of-domain",
+        "input": "Можете помочь моей слепой сестре?",
+        "expected": "Должен быть OOD",
+        "automation": {
+          "check": "domain_router",
+          "domain_router": "demo_salon",
+          "expect_out_of_domain": true,
+          "expect_domain_intent": "out_of_domain"
+        },
+        "status": null
+      },
+      {
+        "id": "TC033",
+        "name": "Domain router: weather out-of-domain",
+        "input": "Какая погода сегодня в Алматы?",
+        "expected": "Должен быть OOD",
+        "automation": {
+          "check": "domain_router",
+          "domain_router": "demo_salon",
+          "expect_out_of_domain": true,
+          "expect_domain_intent": "out_of_domain"
+        },
+        "status": null
+      },
+      {
+        "id": "TC034",
+        "name": "Domain router: joke out-of-domain",
+        "input": "Расскажи анекдот",
+        "expected": "Должен быть OOD",
+        "automation": {
+          "check": "domain_router",
+          "domain_router": "demo_salon",
+          "expect_out_of_domain": true,
+          "expect_domain_intent": "out_of_domain"
+        },
+        "status": null
+      },
+      {
+        "id": "TC035",
+        "name": "Domain router: style reference in-domain",
+        "input": "Можно прическу как у Джордана?",
+        "expected": "Не должен быть OOD",
+        "automation": {
+          "check": "domain_router",
+          "domain_router": "demo_salon",
+          "expect_out_of_domain": false,
+          "expect_domain_intent": "in_domain"
+        },
+        "status": null
       }
     ]
   },

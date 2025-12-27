@@ -1083,3 +1083,43 @@ eval_cases:
     must_include_any:
     - ошибка
     - напишите
+- id: E092
+  user: Можно ли постричь козу?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E093
+  user: Можете помочь моей слепой сестре?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E094
+  user: Какая погода сегодня в Алматы?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E095
+  user: Расскажи анекдот
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
