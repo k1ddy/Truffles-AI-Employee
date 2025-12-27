@@ -945,6 +945,30 @@ def _update_message_decision_metadata(message: Message, updates: dict) -> None:
     message.message_metadata = metadata
 
 
+def _record_message_decision_meta(
+    message: Message | None,
+    *,
+    action: str | None,
+    intent: str | None,
+    source: str,
+    fast_intent: bool,
+) -> None:
+    if not message:
+        return
+    _update_message_decision_metadata(
+        message,
+        {
+            "action": action,
+            "intent": intent,
+            "source": source,
+            "fast_intent": fast_intent,
+            "llm_used": False,
+            "llm_timeout": False,
+            "llm_cache_hit": False,
+        },
+    )
+
+
 def _serialize_media_decision(decision: MediaDecision) -> dict:
     return {
         "allowed": bool(decision.allowed),
@@ -3938,6 +3962,13 @@ async def _handle_webhook_payload(
                     "policy_type": policy_type,
                 },
             )
+            _record_message_decision_meta(
+                saved_message,
+                action=decision.action,
+                intent=decision.intent,
+                source="policy_gate",
+                fast_intent=False,
+            )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             if not sent:
@@ -4035,6 +4066,13 @@ async def _handle_webhook_payload(
                     "policy_type": policy_type,
                 },
             )
+            _record_message_decision_meta(
+                saved_message,
+                action=decision.action,
+                intent=decision.intent,
+                source="truth_gate",
+                fast_intent=False,
+            )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             if not sent:
@@ -4080,6 +4118,13 @@ async def _handle_webhook_payload(
                     "state": conversation.state,
                 },
             )
+            _record_message_decision_meta(
+                saved_message,
+                action="booking_cancelled",
+                intent="booking",
+                source="booking",
+                fast_intent=False,
+            )
             bot_response = MSG_BOOKING_CANCELLED
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
@@ -4116,6 +4161,13 @@ async def _handle_webhook_payload(
                         "state": conversation.state,
                         "missing_slot": booking_state.get("last_question"),
                     },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="booking_prompt",
+                    intent="booking",
+                    source="booking",
+                    fast_intent=False,
                 )
                 bot_response = _combine_sidecar(prompt, policy_price_sidecar)
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
@@ -4181,6 +4233,13 @@ async def _handle_webhook_payload(
                     "decision": trace_decision,
                     "state": conversation.state,
                 },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action=f"booking_{trace_decision}",
+                intent="booking",
+                source="booking",
+                fast_intent=False,
             )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
@@ -4266,18 +4325,13 @@ async def _handle_webhook_payload(
                 "policy_type": policy_type,
             },
         )
-        if saved_message:
-            _update_message_decision_metadata(
-                saved_message,
-                {
-                    "action": fast_decision.action,
-                    "intent": fast_decision.intent,
-                    "source": "fast_intent",
-                    "fast_intent": True,
-                    "llm_used": False,
-                    "llm_timeout": False,
-                },
-            )
+        _record_message_decision_meta(
+            saved_message,
+            action=fast_decision.action,
+            intent=fast_decision.intent,
+            source="fast_intent",
+            fast_intent=True,
+        )
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
         if not sent:
