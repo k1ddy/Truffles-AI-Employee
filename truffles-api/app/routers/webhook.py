@@ -1407,6 +1407,10 @@ def _detect_fast_intent(
 
     decision = get_demo_salon_decision(message_text)
     if decision:
+        if decision.intent == "price_query":
+            price_item = get_demo_salon_price_item(message_text)
+            if not price_item:
+                return DemoSalonDecision(action="escalate", response=MSG_ESCALATED, intent="price_query")
         return decision
 
     phrase_intents = phrase_match_intent(message_text)
@@ -1670,6 +1674,12 @@ def _record_decision_trace(conversation: Conversation, trace: dict) -> None:
         trace_list = trace_list[-12:]
     context[DECISION_TRACE_KEY] = trace_list
     _set_conversation_context(conversation, context)
+
+
+def _attach_llm_cache_flag(trace: dict, timing_context: dict | None) -> dict:
+    if timing_context and "llm_cache_hit" in timing_context:
+        trace["llm_cache_hit"] = timing_context["llm_cache_hit"]
+    return trace
 
 
 def _get_low_confidence_retry_count(context: dict) -> int:
@@ -3902,6 +3912,12 @@ async def _handle_webhook_payload(
                     context = _get_conversation_context(conversation)
                     context = _set_service_hint(context, price_item, now)
                     _set_conversation_context(conversation, context)
+                else:
+                    decision = DemoSalonDecision(
+                        action="escalate",
+                        response=MSG_ESCALATED,
+                        intent="price_query",
+                    )
             bot_response = decision.response
             _reset_low_confidence_retry(conversation)
 
@@ -4679,15 +4695,16 @@ async def _handle_webhook_payload(
                 bot_response = response_text
                 logger.debug(f"bot_response: {bot_response[:100] if bot_response else 'None/Empty'}...")
                 _reset_low_confidence_retry(conversation)
-                _record_decision_trace(
-                    conversation,
+                trace = _attach_llm_cache_flag(
                     {
                         "stage": "ai_response",
                         "decision": "bot_reply",
                         "state": conversation.state,
                         "confidence": confidence,
                     },
+                    timing_context,
                 )
+                _record_decision_trace(conversation, trace)
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                 sent = _send_response(bot_response)
                 result_message = "Message sent" if sent else "Failed to send"

@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 import re
 import time
@@ -15,6 +17,11 @@ from app.services.llm import OpenAIProvider
 from app.services.result import Result
 
 logger = get_logger("ai_service")
+
+try:
+    import redis  # type: ignore
+except Exception:  # pragma: no cover
+    redis = None
 
 # Confidence thresholds
 HIGH_CONFIDENCE_THRESHOLD = 0.85
@@ -168,14 +175,27 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 FAST_MODEL = os.environ.get("FAST_MODEL", "gpt-5-mini")
 SLOW_MODEL = os.environ.get("SLOW_MODEL", "gpt-5-mini")
 FAST_MODEL_MAX_CHARS = int(os.environ.get("FAST_MODEL_MAX_CHARS", "160"))
-INTENT_TIMEOUT_SECONDS = float(os.environ.get("INTENT_TIMEOUT_SECONDS", "2"))
-LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "6"))
+INTENT_TIMEOUT_SECONDS = float(os.environ.get("INTENT_TIMEOUT_SECONDS", "1.5"))
+LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "4"))
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "600"))
 MAX_HISTORY_MESSAGES = int(os.environ.get("LLM_HISTORY_MESSAGES", "6"))
 MAX_KNOWLEDGE_CHARS = int(os.environ.get("LLM_KNOWLEDGE_CHARS", "1500"))
+LLM_CACHE_TTL_SECONDS = int(os.environ.get("LLM_CACHE_TTL_SECONDS", "86400"))
+LLM_CACHE_PREFIX = "truffles:llm_cache"
+LLM_CACHE_SOCKET_TIMEOUT_SECONDS = float(os.environ.get("LLM_CACHE_SOCKET_TIMEOUT_SECONDS", "0.3"))
+REDIS_URL = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
+POLICY_VERSION = os.environ.get("POLICY_VERSION", "v1")
 
 # Global LLM provider instance
 _llm_provider = None
+_llm_cache_client = None
+_llm_cache_url = None
+
+
+def _is_env_enabled(value: str | None, default: bool = True) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _log_timing(
@@ -201,6 +221,70 @@ def get_llm_provider() -> OpenAIProvider:
     if _llm_provider is None:
         _llm_provider = OpenAIProvider(api_key=OPENAI_API_KEY, default_model=FAST_MODEL)
     return _llm_provider
+
+
+def _get_llm_cache_client():
+    global _llm_cache_client, _llm_cache_url
+    if redis is None:
+        return None
+    if not _is_env_enabled(os.environ.get("LLM_CACHE_ENABLED"), default=True):
+        return None
+    if _llm_cache_client is None or _llm_cache_url != REDIS_URL:
+        _llm_cache_url = REDIS_URL
+        _llm_cache_client = redis.Redis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_timeout=LLM_CACHE_SOCKET_TIMEOUT_SECONDS,
+            socket_connect_timeout=LLM_CACHE_SOCKET_TIMEOUT_SECONDS,
+        )
+    return _llm_cache_client
+
+
+def _build_llm_cache_key(text: str, client_slug: str, policy_version: str) -> str:
+    normalized = normalize_for_matching(text)
+    raw_key = f"{client_slug}:{policy_version}:{normalized}"
+    digest = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+    return f"{LLM_CACHE_PREFIX}:{client_slug}:{policy_version}:{digest}"
+
+
+def _read_llm_cache(text: str, client_slug: str) -> tuple[str | None, str | None]:
+    cache = _get_llm_cache_client()
+    if not cache:
+        return None, None
+    key = _build_llm_cache_key(text, client_slug, POLICY_VERSION)
+    try:
+        payload = cache.get(key)
+    except Exception as exc:
+        logger.warning(f"LLM cache read failed: {exc}")
+        return None, None
+    if not payload:
+        return None, None
+    try:
+        data = json.loads(payload)
+    except Exception as exc:
+        logger.warning(f"LLM cache decode failed: {exc}")
+        return None, None
+    response = data.get("response") if isinstance(data, dict) else None
+    confidence = data.get("confidence") if isinstance(data, dict) else None
+    if not isinstance(response, str) or not response.strip():
+        return None, None
+    if not isinstance(confidence, str) or not confidence.strip():
+        confidence = None
+    return response, confidence
+
+
+def _write_llm_cache(text: str, client_slug: str, response: str, confidence: str) -> None:
+    if not response:
+        return
+    cache = _get_llm_cache_client()
+    if not cache:
+        return
+    key = _build_llm_cache_key(text, client_slug, POLICY_VERSION)
+    payload = json.dumps({"response": response, "confidence": confidence}, ensure_ascii=False)
+    try:
+        cache.setex(key, LLM_CACHE_TTL_SECONDS, payload)
+    except Exception as exc:
+        logger.warning(f"LLM cache write failed: {exc}")
 
 
 def _select_generation_model(user_message: str, max_score: float) -> tuple[str, str]:
@@ -597,6 +681,8 @@ def generate_ai_response(
             return Result.success((LOW_SIGNAL_RESPONSE, "medium"))
 
     logger.info(f"generate_ai_response: client_id={client_id}, client_slug={client_slug}")
+    if timing_context is not None:
+        timing_context.setdefault("llm_cache_hit", False)
 
     try:
         # 1. Get system prompt
@@ -685,6 +771,18 @@ def generate_ai_response(
                 return Result.success((None, "low_confidence"))
             confidence_level = "medium"
 
+        cached_response, cached_confidence = _read_llm_cache(user_message, client_slug)
+        if cached_response:
+            if timing_context is not None:
+                timing_context["llm_cache_hit"] = True
+            _log_timing(
+                "llm_cache_ms",
+                0.0,
+                timing_context=timing_context,
+                extra={"cache": "hit"},
+            )
+            return Result.success((cached_response, cached_confidence or confidence_level))
+
         model_name, model_tier = _select_generation_model(user_message, max_score)
 
         # 4. Build messages
@@ -750,6 +848,8 @@ def generate_ai_response(
         )
         logger.debug(f"LLM response: {response.content[:100] if response.content else 'EMPTY'}...")
 
+        if response.content:
+            _write_llm_cache(user_message, client_slug, response.content, confidence_level)
         return Result.success((response.content, confidence_level))
 
     except Exception as e:

@@ -635,7 +635,7 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="location")
 
-    if "остановк" in normalized or "как пройти" in normalized or "как добрать" in normalized:
+    if "остановк" in normalized or "как пройти" in normalized or "как добрат" in normalized or "как доехать" in normalized:
         reply = format_reply_from_truth("location_directions")
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="location_directions")
@@ -657,7 +657,20 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
 
     if _contains_any(
         normalized,
-        ["график", "работаете", "открыты", "открыто", "до скольки", "ашык", "ашық", "бугин", "бүгін"],
+        [
+            "график",
+            "работаете",
+            "открыты",
+            "открыто",
+            "до скольки",
+            "часы",
+            "часов",
+            "время работы",
+            "ашык",
+            "ашық",
+            "бугин",
+            "бүгін",
+        ],
     ) and not _contains_any(normalized, ["косметик", "материал", "бренд", "марки"]):
         reply = format_reply_from_truth("hours")
         if reply:

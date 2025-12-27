@@ -65,8 +65,8 @@
 - [ ] **⚠️ Новая архитектура эскалации/обучения** — роли/идентичности + очередь обучения + Telegram per branch описаны в спеках, **код не внедрён**
 - [ ] **⚠️ Эскалация всё ещё частая на реальные вопросы** — KB неполная, score часто < 0.5 → создаётся заявка; мелкие сообщения ("спасибо", "ок?") больше не должны создавать заявки (whitelist + guardrails)
 - [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant работает (логи 2025-12-25: "Owner response detected" / "Added to knowledge"), но нет модерации/метрик
-- [ ] **⚠️ Ответы медленные (outbox)** — обновлено: `OUTBOX_COALESCE_SECONDS=1`, `OUTBOX_WINDOW_MERGE_SECONDS=2.5`, `OUTBOX_WORKER_INTERVAL_SECONDS=1`; safe intents (SAFE4) total_s 2.19–2.79s; LLM ветка (CMPX3/5) total_s 10.93–12.61s → SLA <10s для LLM не достигнут
-- [ ] **⚠️ Model routing + LLM timeout** — `FAST_MODEL=gpt-5-mini`, `SLOW_MODEL=gpt-5-mini`, `INTENT_TIMEOUT_SECONDS=2`, `LLM_TIMEOUT_SECONDS=6`, `FAST_MODEL_MAX_CHARS=160`, `LLM_MAX_TOKENS=600`, `LLM_HISTORY_MESSAGES=6`, `LLM_KNOWLEDGE_CHARS=1500`; llm_ms 6.31–7.67s (timeout=true) → LLM still упирается в таймаут
+- [ ] **⚠️ Ответы медленные (outbox)** — обновлено: `OUTBOX_COALESCE_SECONDS=1`, `OUTBOX_WINDOW_MERGE_SECONDS=2.5`, `OUTBOX_WORKER_INTERVAL_SECONDS=1`; safe intents (SAFE5) total_s 2.72–2.86s; LLM ветка (CMPX6-3/6-5/7-4/7-5/8-1) total_s 8.35–9.52s (avg 8.99, p90 9.48) → SLA <10s для LLM достигнут
+- [ ] **⚠️ Model routing + LLM timeout** — `FAST_MODEL=gpt-5-mini`, `SLOW_MODEL=gpt-5-mini`, `INTENT_TIMEOUT_SECONDS=1.5`, `LLM_TIMEOUT_SECONDS=4`, `FAST_MODEL_MAX_CHARS=160`, `LLM_MAX_TOKENS=600`, `LLM_HISTORY_MESSAGES=6`, `LLM_KNOWLEDGE_CHARS=1500`, `LLM_CACHE_TTL_SECONDS=86400`; llm_ms ~4.3s (timeout=true) → SLA по времени достигнут, но таймауты всё ещё происходят
 - [ ] **⚠️ Склейка сообщений ломает multi‑intent** — demo_salon: price‑ответ перехватывает до booking; в pending truth‑gate съедает booking; фикс в коде (booking flow в pending + price sidecar), нужен деплой/проверка
 - [ ] **⚠️ Закрепы заявок в Telegram** — фикс в коде: `unpin` теперь использует `handover.telegram_message_id` (fallback на callback message_id); нужен деплой/проверка
 - [ ] **⚠️ Дубли заявок на одного клиента** — владельцу неудобно; нужен guard: при open handover не создавать новый, а писать в текущий топик
@@ -1201,6 +1201,11 @@ Runbook (если “всё странно” или сессия оборвал
 - LLM caps: LLM_MAX_TOKENS=600, LLM_HISTORY_MESSAGES=6, LLM_KNOWLEDGE_CHARS=1500
 - Safe intents (SAFE4): total_s 2.19–2.79s, без llm_ms
 - LLM ветка (CMPX3-1, CMPX5-1/2/4/5): total_s 10.93–12.61s; llm_ms 6.31–7.67s (timeout=true)
+
+### 2025-12-27 — LLM cache + timeout 4s
+- Таймауты: INTENT=1.5s, LLM=4s; cache TTL=24h (key: normalized text + client_slug + policy_version)
+- Safe intents (SAFE5): total_s 2.72–2.86s
+- LLM ветка (CMPX6-3/6-5/7-4/7-5/8-1): total_s 8.35–9.52s (avg 8.99, p90 9.48)
 
 ### Кнопки:
 - Сначала не работали — traefik labels были пустые
