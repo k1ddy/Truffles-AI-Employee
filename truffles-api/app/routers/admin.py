@@ -478,6 +478,7 @@ async def get_metrics(
                   llm_used_rate,
                   escalation_rate,
                   fast_intent_rate,
+                  asr_fail_rate,
                   total_user_messages,
                   total_outbox_sent,
                   total_outbox_failed,
@@ -485,6 +486,8 @@ async def get_metrics(
                   total_llm_timeout,
                   total_handovers,
                   total_fast_intent,
+                  total_asr_used,
+                  total_asr_failed,
                   created_at,
                   updated_at
                 FROM metrics_daily

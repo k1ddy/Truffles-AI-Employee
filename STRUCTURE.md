@@ -192,6 +192,7 @@ truffles-api/
 - `ops/migrations/013_add_agents_and_learning_queue.sql` — роли/идентичности + очередь обучения + branch_id.
 - `ops/migrations/014_add_branch_routing_settings.sql` — настройки branch routing + auto-approve ролей.
 - `ops/migrations/015_add_metrics_daily.sql` — дневные метрики (SLA/LLM/эскалации).
+- `ops/migrations/016_add_asr_metrics.sql` — метрики ASR (fail rate + totals).
 
 **Старые скрипты:** `.archive/ops_old/` — не в git.
 

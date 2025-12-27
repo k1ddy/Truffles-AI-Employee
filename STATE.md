@@ -76,6 +76,7 @@
 - [ ] **⚠️ by_instance зависит от instanceId** — demo_salon исправлен (query‑param даёт instanceId), остальным клиентам нужно прокинуть
 - [ ] **⚠️ demo_salon truth-gate даёт цену на "как у/в стиле"** — нет правила style_reference, фото не поддерживаются; нужен отдельный ответ/эскалация
 - [ ] **⚠️ Медиа (аудио/фото/документы)** — guardrails + Telegram forward + локальное хранение + транскрипция коротких PTT добавлены в код (нужен деплой); длинные аудио/видео и OCR/vision отсутствуют
+- [ ] **⚠️ ASR контур (whisper-1 + ElevenLabs fallback)** — добавлены ASR настройки/таймаут/минимальная длина, цепочка fallback, сообщение при fail, метаданные в messages.metadata.asr + метрика asr_fail_rate (миграция `ops/migrations/016_add_asr_metrics.sql`), нужен деплой/проверка
 - [ ] Метрики (Quality Deflection, CSAT) — план: `SPECS/ESCALATION.md`, часть 6
 - [ ] Dashboard для заказчика — backlog
 - [ ] Quiet hours для напоминаний — P2
@@ -1319,6 +1320,11 @@ LIMIT 1;
 | `EVAL.yaml` | Кейс “Во сколько вы открываетесь в будни?” → hours |
 | `tests/test_cases.json` | Golden‑кейс для hours (fast_intent) |
 | `ai_service.py` | LLM timeout default поднят до 6s |
+| `intent_service.py` | Domain router: подсчёт hit‑якорей + strict in‑anchors для OOD override |
+| `webhook.py` | OOD override по anchor hit + OOD проверка до style_reference; decision_trace/logs расширены |
+| `ops/update_instance_demo.sql` | anchors_in/out расширены, добавлен anchors_in_strict + “кошачий глаз” |
+| `tests/test_message_endpoint.py` | Demo domain_router config обновлён (anchors_in/out + strict) |
+| `tests/test_cases.json` | Кейсы OOD/style/“кошачий глаз” для domain_router и fast_intent |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 

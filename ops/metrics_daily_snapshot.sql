@@ -48,7 +48,19 @@ user_messages AS (
         WHEN COALESCE((m.metadata->'decision_meta'->>'llm_timeout')::boolean, FALSE) THEN 1
         ELSE 0
       END
-    ) AS total_llm_timeout
+    ) AS total_llm_timeout,
+    SUM(
+      CASE
+        WHEN COALESCE((m.metadata->'asr'->>'asr_used')::boolean, FALSE) THEN 1
+        ELSE 0
+      END
+    ) AS total_asr_used,
+    SUM(
+      CASE
+        WHEN COALESCE((m.metadata->'asr'->>'asr_failed')::boolean, FALSE) THEN 1
+        ELSE 0
+      END
+    ) AS total_asr_failed
   FROM messages m
   JOIN bounds b ON m.client_id = b.client_id
   WHERE m.role = 'user'
@@ -90,6 +102,7 @@ INSERT INTO metrics_daily (
   llm_used_rate,
   escalation_rate,
   fast_intent_rate,
+  asr_fail_rate,
   total_user_messages,
   total_outbox_sent,
   total_outbox_failed,
@@ -97,6 +110,8 @@ INSERT INTO metrics_daily (
   total_llm_timeout,
   total_handovers,
   total_fast_intent,
+  total_asr_used,
+  total_asr_failed,
   created_at,
   updated_at
 )
@@ -109,6 +124,7 @@ SELECT
   COALESCE(ROUND(um.total_llm_used::numeric / NULLIF(um.total_user_messages, 0), 4), 0),
   COALESCE(ROUND(h.total_handovers::numeric / NULLIF(um.total_user_messages, 0), 4), 0),
   COALESCE(ROUND(um.total_fast_intent::numeric / NULLIF(um.total_user_messages, 0), 4), 0),
+  COALESCE(ROUND(um.total_asr_failed::numeric / NULLIF(um.total_asr_used, 0), 4), 0),
   COALESCE(um.total_user_messages, 0),
   COALESCE(os.total_outbox_sent, 0),
   COALESCE(ofx.total_outbox_failed, 0),
@@ -116,6 +132,8 @@ SELECT
   COALESCE(um.total_llm_timeout, 0),
   COALESCE(h.total_handovers, 0),
   COALESCE(um.total_fast_intent, 0),
+  COALESCE(um.total_asr_used, 0),
+  COALESCE(um.total_asr_failed, 0),
   NOW(),
   NOW()
 FROM bounds b

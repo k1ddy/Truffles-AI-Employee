@@ -177,6 +177,12 @@ SLOW_MODEL = os.environ.get("SLOW_MODEL", "gpt-5-mini")
 FAST_MODEL_MAX_CHARS = int(os.environ.get("FAST_MODEL_MAX_CHARS", "160"))
 INTENT_TIMEOUT_SECONDS = float(os.environ.get("INTENT_TIMEOUT_SECONDS", "1.5"))
 LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "6"))
+ASR_PRIMARY_PROVIDER = os.environ.get("ASR_PRIMARY_PROVIDER", "openai_whisper")
+ASR_FALLBACK_PROVIDER = os.environ.get("ASR_FALLBACK_PROVIDER", "elevenlabs")
+ASR_TIMEOUT_SECONDS = float(os.environ.get("ASR_TIMEOUT_SECONDS", "6"))
+ASR_MIN_CHARS = int(os.environ.get("ASR_MIN_CHARS", "12"))
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
+ELEVENLABS_ASR_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "600"))
 MAX_HISTORY_MESSAGES = int(os.environ.get("LLM_HISTORY_MESSAGES", "6"))
 MAX_KNOWLEDGE_CHARS = int(os.environ.get("LLM_KNOWLEDGE_CHARS", "1500"))
@@ -314,6 +320,7 @@ def transcribe_audio(
     mime_type: Optional[str] = None,
     model: Optional[str] = None,
     language: Optional[str] = None,
+    timeout_seconds: Optional[float] = None,
 ) -> Optional[str]:
     """Transcribe short audio to text. Returns None on failure."""
     if not OPENAI_API_KEY:
@@ -332,12 +339,202 @@ def transcribe_audio(
             mime_type=mime_type,
             model=model,
             language=language,
+            timeout_seconds=timeout_seconds,
         )
         cleaned = (transcript or "").strip()
         return cleaned or None
     except Exception as exc:
         logger.warning(f"Audio transcription failed: {exc}")
         return None
+
+
+def _normalize_asr_provider(provider: str | None) -> str | None:
+    if not provider:
+        return None
+    cleaned = provider.strip().lower()
+    if cleaned in {"openai", "openai_whisper", "whisper"}:
+        return "openai_whisper"
+    if cleaned in {"elevenlabs", "eleven_labs"}:
+        return "elevenlabs"
+    return cleaned
+
+
+def _is_valid_transcript(text: str | None, min_chars: int) -> bool:
+    if not text:
+        return False
+    cleaned = text.strip()
+    if not cleaned:
+        return False
+    if min_chars <= 0:
+        return True
+    return len(cleaned) >= min_chars
+
+
+def _transcribe_with_openai(
+    *,
+    audio_bytes: bytes,
+    filename: str,
+    mime_type: Optional[str],
+    model: Optional[str],
+    language: Optional[str],
+    timeout_seconds: float | None,
+) -> tuple[str | None, str | None]:
+    if not OPENAI_API_KEY:
+        return None, "missing_openai_key"
+    provider = get_llm_provider()
+    if not hasattr(provider, "transcribe_audio"):
+        return None, "provider_missing_transcribe"
+    try:
+        transcript = provider.transcribe_audio(
+            audio_bytes=audio_bytes,
+            filename=filename,
+            mime_type=mime_type,
+            model=model,
+            language=language,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        logger.warning(f"OpenAI transcription failed: {exc}")
+        return None, "openai_error"
+    cleaned = (transcript or "").strip()
+    return cleaned or None, None
+
+
+def _transcribe_with_elevenlabs(
+    *,
+    audio_bytes: bytes,
+    filename: str,
+    mime_type: Optional[str],
+    language: Optional[str],
+    timeout_seconds: float | None,
+) -> tuple[str | None, str | None]:
+    if not ELEVENLABS_API_KEY:
+        return None, "missing_elevenlabs_key"
+    files = {"audio": (filename or "audio", audio_bytes, mime_type or "application/octet-stream")}
+    data: dict[str, str] = {}
+    if language:
+        data["language_code"] = language
+    try:
+        with httpx.Client(timeout=timeout_seconds or 10.0) as client:
+            response = client.post(
+                ELEVENLABS_ASR_URL,
+                headers={"xi-api-key": ELEVENLABS_API_KEY},
+                files=files,
+                data=data or None,
+            )
+    except Exception as exc:
+        logger.warning(f"ElevenLabs transcription failed: {exc}")
+        return None, "elevenlabs_error"
+    if response.status_code != 200:
+        logger.warning(f"ElevenLabs transcription error: {response.status_code} - {response.text}")
+        return None, "elevenlabs_status"
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        transcript = payload.get("text") or payload.get("transcript") or payload.get("transcription")
+    else:
+        transcript = None
+    cleaned = (transcript or "").strip()
+    return cleaned or None, None
+
+
+def transcribe_audio_with_fallback(
+    audio_bytes: bytes,
+    *,
+    filename: str,
+    mime_type: Optional[str] = None,
+    model: Optional[str] = None,
+    language: Optional[str] = None,
+    primary_provider: str | None = None,
+    fallback_provider: str | None = None,
+    timeout_seconds: float | None = None,
+    min_chars: int | None = None,
+) -> tuple[str | None, dict, str]:
+    primary = _normalize_asr_provider(primary_provider or ASR_PRIMARY_PROVIDER)
+    fallback = _normalize_asr_provider(fallback_provider or ASR_FALLBACK_PROVIDER)
+    timeout = ASR_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+    min_chars = ASR_MIN_CHARS if min_chars is None else min_chars
+
+    meta = {
+        "asr_used": False,
+        "asr_provider": None,
+        "asr_fallback_used": False,
+        "asr_failed": False,
+        "asr_text_len": 0,
+    }
+
+    if not primary:
+        meta["asr_failed"] = True
+        return None, meta, "missing_primary_provider"
+
+    transcript = None
+    error = None
+    if primary == "openai_whisper":
+        transcript, error = _transcribe_with_openai(
+            audio_bytes=audio_bytes,
+            filename=filename,
+            mime_type=mime_type,
+            model=model,
+            language=language,
+            timeout_seconds=timeout,
+        )
+    elif primary == "elevenlabs":
+        transcript, error = _transcribe_with_elevenlabs(
+            audio_bytes=audio_bytes,
+            filename=filename,
+            mime_type=mime_type,
+            language=language,
+            timeout_seconds=timeout,
+        )
+    else:
+        error = "unsupported_primary_provider"
+
+    meta["asr_used"] = True
+    meta["asr_provider"] = primary
+    meta["asr_text_len"] = len(transcript or "")
+
+    if _is_valid_transcript(transcript, min_chars):
+        return transcript, meta, "ok"
+
+    fallback_available = fallback and fallback != primary
+    if fallback == "elevenlabs" and not ELEVENLABS_API_KEY:
+        fallback_available = False
+        if not error:
+            error = "fallback_missing_key"
+
+    if fallback_available:
+        meta["asr_fallback_used"] = True
+        transcript = None
+        if fallback == "openai_whisper":
+            transcript, error = _transcribe_with_openai(
+                audio_bytes=audio_bytes,
+                filename=filename,
+                mime_type=mime_type,
+                model=model,
+                language=language,
+                timeout_seconds=timeout,
+            )
+        elif fallback == "elevenlabs":
+            transcript, error = _transcribe_with_elevenlabs(
+                audio_bytes=audio_bytes,
+                filename=filename,
+                mime_type=mime_type,
+                language=language,
+                timeout_seconds=timeout,
+            )
+        else:
+            error = "unsupported_fallback_provider"
+
+        meta["asr_provider"] = fallback
+        meta["asr_text_len"] = len(transcript or "")
+        if _is_valid_transcript(transcript, min_chars):
+            return transcript, meta, "ok_fallback"
+
+    meta["asr_failed"] = True
+    status = error or ("short_transcript" if transcript else "empty_transcript")
+    return None, meta, status
 
 
 def get_system_prompt(db: Session, client_id: UUID) -> Optional[str]:

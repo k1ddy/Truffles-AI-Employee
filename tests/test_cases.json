@@ -402,6 +402,52 @@
           "expect_domain_intent": "in_domain"
         },
         "status": null
+      },
+      {
+        "id": "TC036",
+        "name": "ASR: аудио без текста",
+        "input": "[voice note без текста]",
+        "expected": "Ответ: не смог разобрать аудио, напишите текстом",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC037",
+        "name": "Domain router: dog haircut style out-of-domain",
+        "input": "можете постричь мою собаку в стиле каре?",
+        "expected": "Должен быть OOD",
+        "automation": {
+          "check": "domain_router",
+          "domain_router": "demo_salon",
+          "expect_out_of_domain": true,
+          "expect_domain_intent": "out_of_domain"
+        },
+        "status": null
+      },
+      {
+        "id": "TC038",
+        "name": "Domain router: cat eye makeup in-domain",
+        "input": "макияж кошачий глаз",
+        "expected": "Не должен быть OOD",
+        "automation": {
+          "check": "domain_router",
+          "domain_router": "demo_salon",
+          "expect_out_of_domain": false,
+          "expect_domain_intent": "in_domain"
+        },
+        "status": null
+      },
+      {
+        "id": "TC039",
+        "name": "Fast intent: style reference Jordan",
+        "input": "в стиле Джордана",
+        "expected": "Просьба прислать референс без LLM",
+        "automation": {
+          "check": "fast_intent",
+          "expect_action": "reply",
+          "expect_intent": "style_reference"
+        },
+        "status": null
       }
     ]
   },

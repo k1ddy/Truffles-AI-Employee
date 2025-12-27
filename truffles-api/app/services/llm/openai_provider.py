@@ -80,6 +80,7 @@ class OpenAIProvider(LLMProvider):
         model: Optional[str] = None,
         prompt: Optional[str] = None,
         language: Optional[str] = None,
+        timeout_seconds: Optional[float] = None,
     ) -> str:
         """Transcribe audio using OpenAI speech-to-text."""
         model = model or "whisper-1"
@@ -93,7 +94,8 @@ class OpenAIProvider(LLMProvider):
         if language:
             data["language"] = language
 
-        with httpx.Client(timeout=30.0) as client:
+        timeout = timeout_seconds if timeout_seconds is not None else 30.0
+        with httpx.Client(timeout=timeout) as client:
             response = client.post(
                 self.audio_url,
                 headers={

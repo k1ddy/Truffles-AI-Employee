@@ -35,7 +35,7 @@ from app.services.ai_service import (
     is_low_signal_message,
     is_thanks_message,
     normalize_for_matching,
-    transcribe_audio,
+    transcribe_audio_with_fallback,
 )
 from app.services.alert_service import alert_warning
 from app.services.chatflow_service import send_bot_response, verify_signed_media_path
@@ -403,7 +403,7 @@ def _get_media_rate_settings() -> tuple[str, float]:
     return redis_url, socket_timeout_seconds
 
 
-def _get_transcription_settings() -> tuple[bool, int, str, str | None]:
+def _get_transcription_settings() -> tuple[bool, int, str, str | None, str, str | None, float, int]:
     enabled = _is_env_enabled(os.environ.get("AUDIO_TRANSCRIPTION_ENABLED"), default=False)
     raw_max_mb = os.environ.get("AUDIO_TRANSCRIPTION_MAX_MB", str(AUDIO_TRANSCRIPTION_DEFAULT_MAX_MB))
     try:
@@ -413,7 +413,17 @@ def _get_transcription_settings() -> tuple[bool, int, str, str | None]:
     max_bytes = max(0, int(max_mb * 1024 * 1024))
     model = os.environ.get("AUDIO_TRANSCRIPTION_MODEL", "whisper-1")
     language = os.environ.get("AUDIO_TRANSCRIPTION_LANGUAGE")
-    return enabled, max_bytes, model, language
+    primary_provider = os.environ.get("ASR_PRIMARY_PROVIDER", "openai_whisper")
+    fallback_provider = os.environ.get("ASR_FALLBACK_PROVIDER")
+    raw_timeout = os.environ.get("ASR_TIMEOUT_SECONDS", "6")
+    try:
+        timeout_seconds = float(raw_timeout)
+    except (TypeError, ValueError):
+        timeout_seconds = 6.0
+    if timeout_seconds <= 0:
+        timeout_seconds = 6.0
+    min_chars = _coerce_int(os.environ.get("ASR_MIN_CHARS"), 12, min_value=0)
+    return enabled, max_bytes, model, language, primary_provider, fallback_provider, timeout_seconds, min_chars
 
 
 def _is_placeholder_text(text: str | None) -> bool:
@@ -494,22 +504,36 @@ async def _maybe_transcribe_voice(
     media_decision: MediaDecision | None,
     storage_path: str | None,
     saved_message: Message | None,
-) -> tuple[str | None, str | None]:
-    enabled, max_bytes, model, language = _get_transcription_settings()
-    if not enabled or not max_bytes:
-        return None, "disabled"
+) -> tuple[str | None, str | None, dict | None]:
+    enabled, max_bytes, model, language, primary_provider, fallback_provider, timeout_seconds, min_chars = (
+        _get_transcription_settings()
+    )
     if not _is_voice_note(media):
-        return None, "not_voice"
+        return None, "not_voice", None
+
+    asr_meta = {
+        "asr_used": False,
+        "asr_provider": primary_provider,
+        "asr_fallback_used": False,
+        "asr_failed": False,
+        "asr_text_len": 0,
+    }
+
+    if not enabled or not max_bytes:
+        return None, "disabled", asr_meta
     if media_decision and not media_decision.allowed:
-        return None, "not_allowed"
+        return None, "not_allowed", asr_meta
     if media.size_bytes and max_bytes and media.size_bytes > max_bytes:
-        return None, "too_large"
+        return None, "too_large", asr_meta
 
     if saved_message and isinstance(saved_message.message_metadata, dict):
         media_meta = saved_message.message_metadata.get("media") or {}
         existing = media_meta.get("transcript")
         if isinstance(existing, str) and existing.strip():
-            return existing.strip(), "cached"
+            asr_meta["asr_used"] = True
+            asr_meta["asr_text_len"] = len(existing.strip())
+            asr_meta["asr_provider"] = media_meta.get("transcript_provider") or media_meta.get("transcript_model")
+            return existing.strip(), "cached", asr_meta
 
     audio_bytes = None
     source_error = None
@@ -522,30 +546,35 @@ async def _maybe_transcribe_voice(
             except Exception:
                 estimated = 0
             if max_bytes and estimated > max_bytes:
-                return None, "too_large"
+                return None, "too_large", asr_meta
             try:
                 decoded = base64.b64decode(media.base64_data, validate=False)
             except Exception as exc:
-                return None, f"base64_decode_failed:{exc}"
+                return None, f"base64_decode_failed:{exc}", asr_meta
             if max_bytes and len(decoded) > max_bytes:
-                return None, "too_large"
+                return None, "too_large", asr_meta
             audio_bytes = decoded
         else:
             audio_bytes, source_error = await _download_media_bytes(media, policy, max_bytes)
 
     if not audio_bytes:
-        return None, source_error or "missing_audio"
+        asr_meta["asr_failed"] = True
+        return None, source_error or "missing_audio", asr_meta
 
-    transcript = transcribe_audio(
+    transcript, asr_meta, status = transcribe_audio_with_fallback(
         audio_bytes,
         filename=_guess_transcript_filename(media),
         mime_type=media.mime,
         model=model,
         language=language,
+        primary_provider=primary_provider,
+        fallback_provider=fallback_provider,
+        timeout_seconds=timeout_seconds,
+        min_chars=min_chars,
     )
     if not transcript:
-        return None, "empty_transcript"
-    return transcript.strip(), "ok"
+        return None, status, asr_meta
+    return transcript.strip(), status, asr_meta
 
 
 def _purge_media_rate_cache(now_ts: float) -> None:
@@ -934,6 +963,14 @@ def _update_message_media_metadata(message: Message, updates: dict) -> None:
     media_meta = dict(metadata.get("media") or {})
     media_meta.update(updates)
     metadata["media"] = media_meta
+    message.message_metadata = metadata
+
+
+def _update_message_asr_metadata(message: Message, updates: dict) -> None:
+    metadata = dict(message.message_metadata or {})
+    asr_meta = dict(metadata.get("asr") or {})
+    asr_meta.update(updates)
+    metadata["asr"] = asr_meta
     message.message_metadata = metadata
 
 
@@ -1367,6 +1404,7 @@ MSG_MEDIA_TOO_LARGE = "Файл слишком большой. Пришлите,
 MSG_MEDIA_RATE_LIMIT = "Слишком много файлов за короткое время. Давайте продолжим позже или опишите текстом."
 MSG_MEDIA_RECEIVED = "Файл получил. Напишите, пожалуйста, что именно нужно: цена/запись/адрес/мастер/жалоба."
 MSG_MEDIA_DOC_RECEIVED = "Документ получил. Напишите, пожалуйста, что именно нужно."
+MSG_MEDIA_TRANSCRIPT_FAILED = "Не смог разобрать аудио. Напишите, пожалуйста, текстом."
 MSG_MEDIA_PENDING_NEED_TEXT = (
     "Я уже передал менеджеру. Чтобы ускорить, напишите, что именно нужно: цена/запись/адрес/мастер/жалоба."
 )
@@ -1538,10 +1576,10 @@ def _resolve_action(
         return DecisionOutcome("pending_status")
     if routing["allow_bot_reply"] and signals.is_status_question:
         return DecisionOutcome("bot_status")
-    if routing["allow_bot_reply"] and style_reference:
-        return DecisionOutcome("style_reference")
     if routing["allow_bot_reply"] and out_of_domain_signal and not rag_confident:
         return DecisionOutcome("out_of_domain")
+    if routing["allow_bot_reply"] and style_reference:
+        return DecisionOutcome("style_reference")
     if _should_escalate_to_pending(routing, signals.intent):
         return DecisionOutcome("escalate")
     if should_escalate(signals.intent) and not routing["allow_handover_create"]:
@@ -3055,25 +3093,29 @@ async def _handle_webhook_payload(
     routing = _get_routing_policy(conversation.state)
 
     transcript = None
+    asr_meta = None
     if media_info and media_policy and _is_placeholder_text(message_text):
         stored_path = None
         if saved_message and isinstance(saved_message.message_metadata, dict):
             stored_path = (saved_message.message_metadata.get("media") or {}).get("storage_path")
-        transcript, transcript_status = await _maybe_transcribe_voice(
+        transcript, transcript_status, asr_meta = await _maybe_transcribe_voice(
             media=media_info,
             policy=media_policy,
             media_decision=media_decision,
             storage_path=stored_path,
             saved_message=saved_message,
         )
+        if saved_message and asr_meta:
+            _update_message_asr_metadata(saved_message, asr_meta)
         if transcript:
             message_text = transcript
             if saved_message:
                 saved_message.content = transcript
-                _, _, model, language = _get_transcription_settings()
+                _, _, model, language, _, _, _, _ = _get_transcription_settings()
                 updates = {
                     "transcript": transcript,
                     "transcript_model": model,
+                    "transcript_provider": asr_meta.get("asr_provider") if asr_meta else None,
                     "transcribed_at": datetime.now(timezone.utc).isoformat(),
                 }
                 if language:
@@ -3630,13 +3672,16 @@ async def _handle_webhook_payload(
         media_response = None
         media_escalated = False
         media_text_placeholder = _is_placeholder_text(message_text)
+        asr_failed = bool(asr_meta and asr_meta.get("asr_failed"))
         style_request = _is_style_reference_request(
             message_text,
             has_media=media_info.media_type == "photo",
         )
 
         if conversation.state == ConversationState.BOT_ACTIVE.value:
-            if style_request and media_info.media_type == "photo":
+            if media_text_placeholder and _is_voice_note(media_info) and asr_failed:
+                media_response = MSG_MEDIA_TRANSCRIPT_FAILED
+            elif style_request and media_info.media_type == "photo":
                 handover_text = message_text.strip()
                 if media_text_placeholder:
                     handover_text = "Клиент отправил фото/референс."
@@ -3699,7 +3744,9 @@ async def _handle_webhook_payload(
                     media_response = MSG_MEDIA_RECEIVED
 
         elif conversation.state == ConversationState.PENDING.value:
-            if style_request:
+            if media_text_placeholder and _is_voice_note(media_info) and asr_failed:
+                media_response = MSG_MEDIA_TRANSCRIPT_FAILED
+            elif style_request:
                 media_response = MSG_STYLE_REFERENCE_NEED_MEDIA
             elif media_text_placeholder:
                 media_response = MSG_MEDIA_PENDING_NEED_TEXT
@@ -3995,16 +4042,15 @@ async def _handle_webhook_payload(
             early_domain_intent, domain_in_score, domain_out_score, _ = classify_domain_with_scores(
                 message_text, client.config if client else None
             )
-            if early_domain_intent == DomainIntent.OUT_OF_DOMAIN:
-                strong_domain_out, _ = is_strong_out_of_domain(
-                    message_text,
-                    early_domain_intent,
-                    domain_in_score,
-                    domain_out_score,
-                    client.config if client else None,
-                )
-                if strong_domain_out:
-                    early_out_of_domain = True
+            strong_domain_out, strong_domain_meta = is_strong_out_of_domain(
+                message_text,
+                early_domain_intent,
+                domain_in_score,
+                domain_out_score,
+                client.config if client else None,
+            )
+            if strong_domain_out:
+                early_out_of_domain = True
 
     if early_out_of_domain:
         bot_response = OUT_OF_DOMAIN_RESPONSE
@@ -4016,6 +4062,8 @@ async def _handle_webhook_payload(
                 "decision": "early_block",
                 "state": conversation.state,
                 "domain_intent": early_domain_intent.value,
+                "out_hits": strong_domain_meta.get("out_hits"),
+                "strict_in_hits": strong_domain_meta.get("strict_in_hits"),
             },
         )
         _record_message_decision_meta(
@@ -4549,31 +4597,48 @@ async def _handle_webhook_payload(
                         "in_threshold": domain_meta.get("in_threshold"),
                         "out_threshold": domain_meta.get("out_threshold"),
                         "margin": domain_meta.get("margin"),
+                        "out_hits": domain_meta.get("out_hits"),
+                        "strict_in_hits": domain_meta.get("strict_in_hits"),
+                        "matched_in": domain_meta.get("matched_in"),
+                        "matched_out": domain_meta.get("matched_out"),
+                        "matched_strict_in": domain_meta.get("matched_strict_in"),
                         "anchors_in": domain_meta.get("anchors_in"),
                         "anchors_out": domain_meta.get("anchors_out"),
+                        "strict_in_anchors": domain_meta.get("strict_in_anchors"),
                         "message_len": len(message_text),
                         "message_preview": message_text[:80],
                     }
                 },
             )
-        if domain_intent == DomainIntent.OUT_OF_DOMAIN:
-            strong_domain_out, strong_domain_meta = is_strong_out_of_domain(
-                message_text,
-                domain_intent,
-                domain_in_score,
-                domain_out_score,
-                client.config if client else None,
-            )
+        strong_domain_out, strong_domain_meta = is_strong_out_of_domain(
+            message_text,
+            domain_intent,
+            domain_in_score,
+            domain_out_score,
+            client.config if client else None,
+        )
+
+    domain_out_hits = int(domain_meta.get("out_hits") or 0)
+    domain_strict_in_hits = int(domain_meta.get("strict_in_hits") or 0)
+    out_hit_override = domain_out_hits > 0 and domain_strict_in_hits == 0
 
     out_of_domain_signal = False
-    if strong_domain_out:
+    if out_hit_override:
         out_of_domain_signal = True
-    elif intent == Intent.OUT_OF_DOMAIN and domain_intent != DomainIntent.IN_DOMAIN:
+    elif strong_domain_out:
+        out_of_domain_signal = True
+    elif intent == Intent.OUT_OF_DOMAIN and domain_intent != DomainIntent.IN_DOMAIN and domain_strict_in_hits == 0:
         out_of_domain_signal = True
     _log_timing(
         "intent_ms",
         (time.monotonic() - intent_t0) * 1000,
-        {"intent": intent.value, "domain_intent": domain_intent.value, "out_of_domain_signal": out_of_domain_signal},
+        {
+            "intent": intent.value,
+            "domain_intent": domain_intent.value,
+            "out_of_domain_signal": out_of_domain_signal,
+            "out_hits": domain_out_hits,
+            "strict_in_hits": domain_strict_in_hits,
+        },
     )
 
     rag_confident = False
@@ -4609,6 +4674,10 @@ async def _handle_webhook_payload(
                         "strong_in_max": strong_domain_meta.get("strong_in_max"),
                         "strict_min_len": strong_domain_meta.get("strict_min_len"),
                         "message_len": strong_domain_meta.get("message_len"),
+                        "out_hits": strong_domain_meta.get("out_hits"),
+                        "strict_in_hits": strong_domain_meta.get("strict_in_hits"),
+                        "matched_out": strong_domain_meta.get("matched_out"),
+                        "matched_strict_in": strong_domain_meta.get("matched_strict_in"),
                     }
                 },
             )
@@ -4622,6 +4691,8 @@ async def _handle_webhook_payload(
             "domain_intent": domain_intent.value,
             "out_of_domain_signal": out_of_domain_signal,
             "rag_confident": rag_confident,
+            "out_hits": domain_out_hits,
+            "strict_in_hits": domain_strict_in_hits,
         },
     )
 
