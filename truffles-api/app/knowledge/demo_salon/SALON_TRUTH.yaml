@@ -45,6 +45,7 @@ services_catalog: &services_catalog
     - парикмахерские услуги
   not_found_reply: "В списке услуг нет такой позиции. Могу уточнить или предложить: {suggestions}."
   duration_clarify: "По времени зависит от услуги. Какая именно?"
+  service_presence_reply: "Да, делаем {service}."
   services:
     - name: Маникюр
       aliases:

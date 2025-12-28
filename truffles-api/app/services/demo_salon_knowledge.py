@@ -67,6 +67,16 @@ def _normalize_text(text: str) -> str:
     return normalized
 
 
+def _split_question_segments(text: str) -> list[str]:
+    if not text:
+        return []
+    segments = [segment.strip() for segment in re.split(r"[?!\.]+", text) if segment.strip()]
+    if segments:
+        return segments
+    cleaned = text.strip()
+    return [cleaned] if cleaned else []
+
+
 @lru_cache(maxsize=4)
 def _load_yaml(path: Path) -> dict:
     if not path.exists():
@@ -671,6 +681,58 @@ def _format_service_duration_reply(service: dict[str, Any] | None) -> str:
     return "По времени зависит от услуги. Какая именно?"
 
 
+def _select_presence_service_name(message: str, candidates: list[str]) -> str | None:
+    if not message or not candidates:
+        return None
+    query_vector = _local_text_embedding(message)
+    if not query_vector:
+        return None
+    best_name = None
+    best_score = 0.0
+    for candidate in candidates:
+        service = _find_catalog_service_by_name(candidate)
+        if not service:
+            continue
+        name = service.get("name") if isinstance(service, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            continue
+        score = _cosine_similarity(query_vector, _local_text_embedding(name))
+        if score > best_score:
+            best_score = score
+            best_name = name.strip()
+    return best_name
+
+
+def _format_service_presence_reply(message: str, match: SemanticServiceMatch | None) -> str | None:
+    if not message or not match:
+        return None
+    candidates: list[str] = []
+    seen: set[str] = set()
+    if isinstance(match.canonical_name, str) and match.canonical_name.strip():
+        cleaned = match.canonical_name.strip()
+        candidates.append(cleaned)
+        seen.add(cleaned)
+    if isinstance(match.suggestions, list):
+        for suggestion in match.suggestions:
+            if isinstance(suggestion, str):
+                cleaned = suggestion.strip()
+                if cleaned and cleaned not in seen:
+                    candidates.append(cleaned)
+                    seen.add(cleaned)
+    service_name = _select_presence_service_name(message, candidates)
+    if not service_name:
+        return None
+    truth = load_yaml_truth()
+    catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
+    template = catalog.get("service_presence_reply") if isinstance(catalog, dict) else None
+    if not isinstance(template, str) or not template.strip():
+        return None
+    template = template.strip()
+    if "{service}" in template:
+        return template.format(service=service_name)
+    return f"{template} {service_name}."
+
+
 def _find_catalog_service_by_name(name: str) -> dict[str, Any] | None:
     if not name:
         return None
@@ -802,6 +864,48 @@ def semantic_service_match(text: str, client_slug: str) -> SemanticServiceMatch 
             )
 
     return None
+
+
+def compose_multi_truth_reply(message: str, client_slug: str | None) -> str | None:
+    if not message or not client_slug:
+        return None
+    segments = _split_question_segments(message)
+    if not segments:
+        return None
+    replies: list[str] = []
+    seen: set[str] = set()
+    info_detected = False
+    for segment in segments:
+        question_type = semantic_question_type(segment, include_kinds={"hours", "pricing", "duration"})
+        service_match = semantic_service_match(segment, client_slug)
+        reply = None
+
+        if question_type:
+            info_detected = True
+            if question_type.kind == "hours":
+                reply = format_reply_from_truth("hours")
+            elif question_type.kind == "pricing":
+                if service_match and service_match.action == "match":
+                    reply = service_match.response
+            elif question_type.kind == "duration":
+                service = None
+                if service_match and service_match.canonical_name:
+                    service = _find_catalog_service_by_name(service_match.canonical_name)
+                reply = _format_service_duration_reply(service)
+        elif service_match and service_match.action == "match":
+            reply = _format_service_presence_reply(segment, service_match)
+
+        if reply:
+            cleaned = reply.strip()
+            if cleaned and cleaned not in seen:
+                replies.append(cleaned)
+                seen.add(cleaned)
+        if len(replies) >= 2:
+            break
+
+    if not info_detected or len(replies) < 2:
+        return None
+    return "\n\n".join(replies[:2])
 
 
 def _looks_like_service_question(normalized: str, raw_text: str | None = None) -> bool:
@@ -1196,7 +1300,7 @@ def get_demo_salon_service_decision(message: str) -> DemoSalonDecision | None:
     return None
 
 
-def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
+def get_demo_salon_decision(message: str, client_slug: str | None = "demo_salon") -> DemoSalonDecision | None:
     normalized = _normalize_text(message)
     if not normalized:
         return None
@@ -1308,6 +1412,27 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="last_appointment")
 
+    multi_reply = compose_multi_truth_reply(message, client_slug or "demo_salon")
+    if multi_reply:
+        return DemoSalonDecision(action="reply", response=multi_reply, intent="multi_truth")
+
+    if "опозда" in normalized:
+        minutes = _extract_minutes(message)
+        tolerated = load_yaml_truth().get("booking", {}).get("lateness_policy", {}).get("tolerated_minutes", 15)
+        try:
+            tolerated = int(tolerated)
+        except (TypeError, ValueError):
+            tolerated = 15
+        if minutes is not None and minutes > tolerated:
+            return DemoSalonDecision(
+                action="escalate",
+                response="Если опоздание больше 15 минут — передам администратору, чтобы уточнить.",
+                intent="lateness_over",
+            )
+        reply = format_reply_from_truth("lateness_ok")
+        if reply:
+            return DemoSalonDecision(action="reply", response=reply, intent="lateness_ok")
+
     hours_like = _looks_like_hours_question(normalized) or _contains_any(
         normalized,
         ["ашык", "ашық", "бугин", "бүгін"],
@@ -1370,6 +1495,23 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="service_clarify")
 
+    if _contains_any(normalized, ["ребен", "ребён"]) or _contains_any_words(
+        normalized, ["муж", "мужем", "мужу", "мужа"]
+    ):
+        reply = format_reply_from_truth("guest_child")
+        if reply:
+            return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
+
+    if _contains_any(normalized, ["собак", "животн"]):
+        reply = format_reply_from_truth("guest_animals")
+        if reply:
+            return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
+
+    if _contains_any(normalized, ["пораньше", "раньше", "подождать"]):
+        reply = format_reply_from_truth("guest_early")
+        if reply:
+            return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
+
     question_type = semantic_question_type(message)
     question_meta: dict[str, Any] | None = None
     if question_type:
@@ -1414,40 +1556,6 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
                 intent="price_manicure",
                 meta=question_meta_for_price,
             )
-
-    if "опозда" in normalized:
-        minutes = _extract_minutes(message)
-        tolerated = load_yaml_truth().get("booking", {}).get("lateness_policy", {}).get("tolerated_minutes", 15)
-        try:
-            tolerated = int(tolerated)
-        except (TypeError, ValueError):
-            tolerated = 15
-        if minutes is not None and minutes > tolerated:
-            return DemoSalonDecision(
-                action="escalate",
-                response="Если опоздание больше 15 минут — передам администратору, чтобы уточнить.",
-                intent="lateness_over",
-            )
-        reply = format_reply_from_truth("lateness_ok")
-        if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="lateness_ok")
-
-    if _contains_any(normalized, ["ребен", "ребён"]) or _contains_any_words(
-        normalized, ["муж", "мужем", "мужу", "мужа"]
-    ):
-        reply = format_reply_from_truth("guest_child")
-        if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
-
-    if _contains_any(normalized, ["собак", "животн"]):
-        reply = format_reply_from_truth("guest_animals")
-        if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
-
-    if _contains_any(normalized, ["пораньше", "раньше", "подождать"]):
-        reply = format_reply_from_truth("guest_early")
-        if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
 
     if _contains_any(normalized, ["стерилиз", "инструмент", "обрабатываете", "дез", "сухожар"]):
         reply = format_reply_from_truth("hygiene")

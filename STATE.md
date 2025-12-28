@@ -1278,8 +1278,11 @@ LIMIT 1;
 
 | Файл | Изменение |
 |------|-----------|
+| `demo_salon_knowledge.py` | Multi-truth: семантика часов/услуги → один reply; presence re-rank по семантике; guest_policy до question_type |
+| `SALON_TRUTH.yaml` | Добавлен шаблон `services_catalog.service_presence_reply` |
+| `EVAL.yaml` | Кейс multi-truth (часы + маникюр) |
+| `tests/test_message_endpoint.py` | Тест multi-truth: часы+услуга без booking, "ислам" не создаёт заявку |
 | `webhook.py` | Booking gate: info-вопросы распознаются по сегментам ?!.; блокировка очищает booking_state и отключает flow |
-| `tests/test_message_endpoint.py` | Тест: info-вопросы не запускают booking и имя следом не создаёт запись/заявку |
 | `conversation.py` | Добавлен `context` (JSONB) для краткого контекста/слотов |
 | `webhook.py` | Слот-филлинг записи + контекст диалога |
 | `state_service.py` | Очистка контекста при resolve |

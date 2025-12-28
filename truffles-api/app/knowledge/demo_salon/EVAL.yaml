@@ -263,6 +263,18 @@ eval_cases:
     - без выходных
     - '9:00'
     - '21:00'
+- id: E014b
+  user: Здравствуйте! Вы сегодня работаете? Вы маникюром занимаетесь?
+  expected:
+    action: reply
+    intent: multi_truth
+    must_include:
+    - маникюр
+    must_include_any:
+    - ежедневно
+    - без выходных
+    - '9:00'
+    - '21:00'
 - id: E015
   user: До скольки вы работаете?
   expected:

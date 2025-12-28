@@ -1287,7 +1287,7 @@ def test_multi_intent_long_message_prioritizes_booking():
     assert "длител" in response.bot_response.casefold()
 
 
-def test_info_questions_block_booking_and_name_followup():
+def test_multi_truth_reply_handles_hours_and_service_without_booking():
     saved_message_first = Mock()
     saved_message_first.message_metadata = {}
     saved_message_second = Mock()
@@ -1312,14 +1312,7 @@ def test_info_questions_block_booking_and_name_followup():
         telegram_topic_id=None,
         escalated_at=None,
         branch_id=None,
-        context={
-            "booking": {
-                "active": True,
-                "last_question": "name",
-                "service": "маникюр",
-                "datetime": "сегодня",
-            }
-        },
+        context={},
     )
     user = SimpleNamespace(id="user-123", user_metadata={})
 
@@ -1356,7 +1349,7 @@ def test_info_questions_block_booking_and_name_followup():
     payload_name = WebhookRequest(
         client_slug="demo_salon",
         body=WebhookBody(
-            message="Жанбол",
+            message="ислам",
             messageType="text",
             metadata=WebhookMetadata(
                 remoteJid="77000000000@s.whatsapp.net",
@@ -1372,13 +1365,30 @@ def test_info_questions_block_booking_and_name_followup():
             return SimpleNamespace(kind="hours", score=0.81, second_score=0.1)
         return None
 
+    def _fake_semantic_service_match(segment: str, client_slug: str):
+        normalized = (segment or "").casefold()
+        if "маник" in normalized:
+            return SemanticServiceMatch(
+                action="match",
+                response="Маникюр — 0 ₸.",
+                score=0.9,
+                canonical_name="Маникюр",
+                suggestions=["Маникюр"],
+            )
+        return None
+
     with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint), patch(
         "app.routers.webhook.semantic_question_type", side_effect=_fake_question_type
     ), patch(
-        "app.routers.webhook._get_policy_handler", return_value=None
+        "app.services.demo_salon_knowledge.semantic_question_type", side_effect=_fake_question_type
+    ), patch(
+        "app.services.demo_salon_knowledge.semantic_service_match", side_effect=_fake_semantic_service_match
     ), patch(
         "app.routers.webhook.generate_bot_response",
-        return_value=Result.success(("ok", "high")),
+        side_effect=[
+            Result.success((None, "low_confidence")),
+            Result.success(("ok", "high")),
+        ],
     ), patch(
         "app.routers.webhook.send_bot_response", return_value=True
     ), patch(
@@ -1417,15 +1427,12 @@ def test_info_questions_block_booking_and_name_followup():
 
     assert response_info.success is True
     assert response_info.bot_response is not None
+    response_text = response_info.bot_response.casefold()
+    assert "маникюр" in response_text
+    assert any(token in response_text for token in ("9:00", "21:00", "ежедневно", "без выходных"))
     assert webhook_router.MSG_BOOKING_ASK_SERVICE not in response_info.bot_response
     assert webhook_router.MSG_BOOKING_ASK_DATETIME not in response_info.bot_response
     assert webhook_router.MSG_BOOKING_ASK_NAME not in response_info.bot_response
-
-    booking_state = conversation.context.get("booking", {})
-    assert booking_state.get("active") is False
-    assert booking_state.get("last_question") is None
-    assert booking_state.get("service") is None
-    assert booking_state.get("datetime") is None
 
     assert response_name.success is True
     mock_reuse.assert_not_called()
