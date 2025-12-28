@@ -221,6 +221,7 @@ class MediaInfo:
         media_type: str,
         mime: str | None,
         size_bytes: int | None,
+        duration_seconds: float | None,
         url: str | None,
         file_name: str | None,
         caption: str | None,
@@ -231,6 +232,7 @@ class MediaInfo:
         self.media_type = media_type
         self.mime = mime
         self.size_bytes = size_bytes
+        self.duration_seconds = duration_seconds
         self.url = url
         self.file_name = file_name
         self.caption = caption
@@ -367,6 +369,20 @@ def _extract_media_info(body: WebhookBody) -> MediaInfo | None:
     caption = media.get("caption")
     base64_data = media.get("base64")
     is_ptt = bool(media.get("ptt"))
+    duration_seconds = None
+    duration_value = (
+        media.get("seconds")
+        or media.get("duration")
+        or media.get("duration_seconds")
+        or media.get("length")
+    )
+    if duration_value is not None:
+        try:
+            duration_seconds = float(duration_value)
+            if duration_seconds <= 0:
+                duration_seconds = None
+        except (TypeError, ValueError):
+            duration_seconds = None
     size_bytes = None
     size_value = media.get("size")
     if size_value is not None:
@@ -386,6 +402,7 @@ def _extract_media_info(body: WebhookBody) -> MediaInfo | None:
         media_type=media_type,
         mime=mime if isinstance(mime, str) else None,
         size_bytes=size_bytes,
+        duration_seconds=duration_seconds,
         url=url if isinstance(url, str) else None,
         file_name=file_name if isinstance(file_name, str) else None,
         caption=caption if isinstance(caption, str) else None,
@@ -438,6 +455,40 @@ def _is_voice_note(media: MediaInfo | None) -> bool:
     if not media:
         return False
     return media.media_type == "audio" and bool(media.is_ptt)
+
+
+def _count_words(text: str) -> int:
+    if not text:
+        return 0
+    return len(re.findall(r"[\w'-]+", text, flags=re.UNICODE))
+
+
+def _non_letter_ratio(text: str) -> float:
+    if not text:
+        return 0.0
+    letters = sum(1 for char in text if char.isalpha())
+    non_letters = sum(1 for char in text if not char.isalpha() and not char.isspace())
+    total = letters + non_letters
+    if total == 0:
+        return 0.0
+    return non_letters / total
+
+
+def _is_asr_low_confidence(text: str, duration_seconds: float | None) -> bool:
+    cleaned = (text or "").strip()
+    compact = re.sub(r"\s+", "", cleaned)
+    if len(compact) < ASR_LOW_CONFIDENCE_MIN_CHARS:
+        return True
+    words = _count_words(cleaned)
+    if (
+        duration_seconds is not None
+        and duration_seconds > ASR_LOW_CONFIDENCE_MIN_DURATION_SECONDS
+        and words < ASR_LOW_CONFIDENCE_MIN_WORDS
+    ):
+        return True
+    if _non_letter_ratio(cleaned) >= ASR_LOW_CONFIDENCE_NON_LETTER_RATIO:
+        return True
+    return False
 
 
 def _is_style_reference_request(text: str | None, *, has_media: bool) -> bool:
@@ -1466,7 +1517,12 @@ LOW_CONFIDENCE_RETRY_WINDOW_MINUTES = 10
 LOW_CONFIDENCE_MAX_RETRIES = 2
 HANDOVER_CONFIRM_WINDOW_MINUTES = 15
 REENGAGE_CONFIRM_WINDOW_MINUTES = 15
+ASR_CONFIRM_WINDOW_MINUTES = 10
 SERVICE_HINT_WINDOW_MINUTES = 120
+ASR_LOW_CONFIDENCE_MIN_CHARS = 6
+ASR_LOW_CONFIDENCE_MIN_WORDS = 3
+ASR_LOW_CONFIDENCE_MIN_DURATION_SECONDS = 6.0
+ASR_LOW_CONFIDENCE_NON_LETTER_RATIO = 0.4
 MSG_ESCALATED = "Передал менеджеру. Могу чем-то помочь пока ждёте?"
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."
 MSG_MUTED_LONG = "Понял! Если ответа от менеджеров долго нет — лучше звоните напрямую: +7 775 984 19 26"
@@ -1494,6 +1550,8 @@ MSG_MEDIA_RATE_LIMIT = "Слишком много файлов за коротк
 MSG_MEDIA_RECEIVED = "Файл получил. Напишите, пожалуйста, что именно нужно: цена/запись/адрес/мастер/жалоба."
 MSG_MEDIA_DOC_RECEIVED = "Документ получил. Напишите, пожалуйста, что именно нужно."
 MSG_MEDIA_TRANSCRIPT_FAILED = "Не смог разобрать аудио. Напишите, пожалуйста, текстом."
+MSG_ASR_CONFIRM = "Я услышал: «{text}». Правильно? (да/нет)"
+MSG_ASR_CONFIRM_DECLINED = "Пожалуйста, напишите текстом или перешлите аудио."
 MSG_MEDIA_PENDING_NEED_TEXT = (
     "Я уже передал менеджеру. Чтобы ускорить, напишите, что именно нужно: цена/запись/адрес/мастер/жалоба."
 )
@@ -1594,6 +1652,7 @@ MSG_BOOKING_REENGAGE = "Хотите продолжить запись? Если
 SERVICE_HINT_KEY = "last_service_hint"
 SERVICE_HINT_AT_KEY = "last_service_hint_at"
 REENGAGE_CONFIRM_KEY = "reengage_confirmation"
+ASR_CONFIRM_KEY = "asr_confirm_pending"
 DECISION_TRACE_KEY = "decision_trace"
 
 ROUTING_MATRIX = {
@@ -2040,6 +2099,35 @@ def _is_reengage_confirmation_active(confirmation: dict, now: datetime) -> bool:
     if asked_at.tzinfo is None:
         asked_at = asked_at.replace(tzinfo=timezone.utc)
     return (now - asked_at) <= timedelta(minutes=REENGAGE_CONFIRM_WINDOW_MINUTES)
+
+
+def _get_asr_confirmation(context: dict) -> dict | None:
+    confirmation = context.get(ASR_CONFIRM_KEY) if isinstance(context, dict) else None
+    if isinstance(confirmation, dict):
+        return dict(confirmation)
+    return None
+
+
+def _set_asr_confirmation(context: dict, confirmation: dict | None) -> dict:
+    context = dict(context)
+    if confirmation:
+        context[ASR_CONFIRM_KEY] = confirmation
+    else:
+        context.pop(ASR_CONFIRM_KEY, None)
+    return context
+
+
+def _is_asr_confirmation_active(confirmation: dict, now: datetime) -> bool:
+    asked_at_raw = confirmation.get("asked_at")
+    if not asked_at_raw:
+        return False
+    try:
+        asked_at = datetime.fromisoformat(asked_at_raw)
+    except (TypeError, ValueError):
+        return False
+    if asked_at.tzinfo is None:
+        asked_at = asked_at.replace(tzinfo=timezone.utc)
+    return (now - asked_at) <= timedelta(minutes=ASR_CONFIRM_WINDOW_MINUTES)
 
 
 def _get_booking_context(context: dict) -> dict:
@@ -3302,6 +3390,10 @@ async def _handle_webhook_payload(
                 extra={"context": {"status": transcript_status, "conversation_id": str(conversation.id)}},
             )
 
+    asr_low_confidence = False
+    if transcript and media_info and _is_voice_note(media_info):
+        asr_low_confidence = _is_asr_low_confidence(transcript, media_info.duration_seconds)
+
     # 4. Update last_message_at (keep previous for session timeout check)
     now = datetime.now(timezone.utc)
     previous_last_message_at = conversation.last_message_at
@@ -3722,6 +3814,87 @@ async def _handle_webhook_payload(
                 message="Bot muted, forwarded to topic" if conversation.telegram_topic_id else "Bot muted",
                 conversation_id=conversation.id,
                 bot_response=None,
+            )
+
+    # 9.01 ASR low-confidence confirmation (bot-active only).
+    context = _get_conversation_context(conversation)
+    asr_confirmation = _get_asr_confirmation(context)
+    if not routing.get("allow_bot_reply"):
+        if asr_confirmation:
+            context = _set_asr_confirmation(context, None)
+            _set_conversation_context(conversation, context)
+    else:
+        if asr_confirmation:
+            if not _is_asr_confirmation_active(asr_confirmation, now):
+                context = _set_asr_confirmation(context, None)
+                _set_conversation_context(conversation, context)
+                asr_confirmation = None
+            else:
+                decision = classify_confirmation(message_text)
+                if decision == "yes":
+                    confirmed_text = (asr_confirmation.get("transcript") or "").strip()
+                    context = _set_asr_confirmation(context, None)
+                    _set_conversation_context(conversation, context)
+                    if confirmed_text:
+                        message_text = confirmed_text
+                        if not batch_messages_provided:
+                            batch_messages = _coerce_batch_messages(message_text, None)
+                    else:
+                        bot_response = MSG_ASR_CONFIRM_DECLINED
+                        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                        sent = _send_response(bot_response)
+                        result_message = (
+                            "ASR confirm missing transcript" if sent else "ASR confirm response failed"
+                        )
+                        db.commit()
+                        return WebhookResponse(
+                            success=True,
+                            message=result_message,
+                            conversation_id=conversation.id,
+                            bot_response=bot_response,
+                        )
+                elif decision == "no":
+                    context = _set_asr_confirmation(context, None)
+                    _set_conversation_context(conversation, context)
+                    bot_response = MSG_ASR_CONFIRM_DECLINED
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = _send_response(bot_response)
+                    result_message = "ASR confirm declined" if sent else "ASR confirm decline failed"
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
+                else:
+                    context = _set_asr_confirmation(context, None)
+                    _set_conversation_context(conversation, context)
+
+        if asr_low_confidence and transcript:
+            attempt = int(asr_confirmation.get("attempt", 0)) + 1 if asr_confirmation else 1
+            confirmation_payload = {
+                "asked_at": now.isoformat(),
+                "transcript": transcript.strip(),
+                "attempt": attempt,
+            }
+            context = _set_asr_confirmation(context, confirmation_payload)
+            _set_conversation_context(conversation, context)
+            bot_response = MSG_ASR_CONFIRM.format(text=confirmation_payload["transcript"])
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {"asr_confirm_requested": True, "asr_low_confidence": True},
+                )
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = _send_response(bot_response)
+            result_message = "ASR confirmation requested" if sent else "ASR confirmation send failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
             )
 
     if conversation.state == ConversationState.PENDING.value:
