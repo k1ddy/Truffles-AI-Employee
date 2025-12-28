@@ -1279,6 +1279,7 @@ LIMIT 1;
 | Файл | Изменение |
 |------|-----------|
 | `demo_salon_knowledge.py` | Multi-truth: семантика часов/услуги → один reply; presence re-rank по семантике; guest_policy до question_type |
+| `demo_salon_knowledge.py` | Multi-truth: fallback на лексическое совпадение услуги для presence/price/duration при недоступных эмбеддингах |
 | `SALON_TRUTH.yaml` | Добавлен шаблон `services_catalog.service_presence_reply` |
 | `EVAL.yaml` | Кейс multi-truth (часы + маникюр) |
 | `tests/test_message_endpoint.py` | Тест multi-truth: часы+услуга без booking, "ислам" не создаёт заявку |

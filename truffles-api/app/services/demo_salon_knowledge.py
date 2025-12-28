@@ -733,6 +733,24 @@ def _format_service_presence_reply(message: str, match: SemanticServiceMatch | N
     return f"{template} {service_name}."
 
 
+def _format_service_presence_from_service(service: dict[str, Any] | None) -> str | None:
+    if not isinstance(service, dict):
+        return None
+    name = service.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    truth = load_yaml_truth()
+    catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
+    template = catalog.get("service_presence_reply") if isinstance(catalog, dict) else None
+    if not isinstance(template, str) or not template.strip():
+        return None
+    template = template.strip()
+    service_name = name.strip()
+    if "{service}" in template:
+        return template.format(service=service_name)
+    return f"{template} {service_name}."
+
+
 def _find_catalog_service_by_name(name: str) -> dict[str, Any] | None:
     if not name:
         return None
@@ -876,8 +894,12 @@ def compose_multi_truth_reply(message: str, client_slug: str | None) -> str | No
     seen: set[str] = set()
     info_detected = False
     for segment in segments:
+        normalized_segment = _normalize_text(segment)
         question_type = semantic_question_type(segment, include_kinds={"hours", "pricing", "duration"})
         service_match = semantic_service_match(segment, client_slug)
+        fallback_service = None
+        if service_match is None:
+            fallback_service = _match_service(normalized_segment)
         reply = None
 
         if question_type:
@@ -887,13 +909,21 @@ def compose_multi_truth_reply(message: str, client_slug: str | None) -> str | No
             elif question_type.kind == "pricing":
                 if service_match and service_match.action == "match":
                     reply = service_match.response
+                elif fallback_service and _has_price_signal(normalized_segment, segment):
+                    reply = _format_service_reply(fallback_service, load_yaml_truth())
+                elif fallback_service:
+                    reply = _format_service_presence_from_service(fallback_service)
             elif question_type.kind == "duration":
                 service = None
                 if service_match and service_match.canonical_name:
                     service = _find_catalog_service_by_name(service_match.canonical_name)
+                elif fallback_service:
+                    service = fallback_service
                 reply = _format_service_duration_reply(service)
         elif service_match and service_match.action == "match":
             reply = _format_service_presence_reply(segment, service_match)
+        elif fallback_service:
+            reply = _format_service_presence_from_service(fallback_service)
 
         if reply:
             cleaned = reply.strip()
