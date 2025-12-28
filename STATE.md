@@ -86,6 +86,7 @@
 - [ ] **⚠️ Медиа (аудио/фото/документы)** — guardrails + Telegram forward + локальное хранение + транскрипция коротких PTT добавлены в код (нужен деплой); длинные аудио/видео и OCR/vision отсутствуют
 - [ ] **⚠️ ASR контур (ElevenLabs scribe_v1 primary + whisper-1 fallback)** — добавлены ASR настройки/таймаут/минимальная длина, цепочка fallback, сообщение при fail, метаданные в messages.metadata.asr + метрика asr_fail_rate (миграция `ops/migrations/016_add_asr_metrics.sql`), нужен деплой/проверка
 - ASR low-confidence → подтверждение распознавания (“Я услышал… да/нет”), `asr_confirm_pending` в `conversation.context`.
+- multi-intent split for long messages (primary intent only, secondary clarified).
 - [ ] Метрики (Quality Deflection, CSAT) — план: `SPECS/ESCALATION.md`, часть 6
 - [ ] Dashboard для заказчика — backlog
 - [ ] Quiet hours для напоминаний — P2

@@ -181,6 +181,8 @@ INTENT_TIMEOUT_SECONDS = float(os.environ.get("INTENT_TIMEOUT_SECONDS", "1.5"))
 LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "6"))
 SERVICE_REWRITE_TIMEOUT_SECONDS = float(os.environ.get("SERVICE_REWRITE_TIMEOUT_SECONDS", "1.2"))
 SERVICE_REWRITE_MAX_TOKENS = int(os.environ.get("SERVICE_REWRITE_MAX_TOKENS", "80"))
+MULTI_INTENT_TIMEOUT_SECONDS = float(os.environ.get("MULTI_INTENT_TIMEOUT_SECONDS", "1.2"))
+MULTI_INTENT_MAX_TOKENS = int(os.environ.get("MULTI_INTENT_MAX_TOKENS", "120"))
 ASR_PRIMARY_PROVIDER = os.environ.get("ASR_PRIMARY_PROVIDER", "elevenlabs")
 ASR_FALLBACK_PROVIDER = os.environ.get("ASR_FALLBACK_PROVIDER", "openai_whisper")
 ASR_TIMEOUT_SECONDS = float(os.environ.get("ASR_TIMEOUT_SECONDS", "6"))
@@ -719,6 +721,106 @@ def rewrite_for_service_match(text: str, client_slug: str) -> str | None:
     if not query or len(query) < 2:
         return None
     return query
+
+
+def detect_multi_intent(text: str) -> dict | None:
+    normalized = (text or "").strip()
+    if not normalized or len(normalized) < 3:
+        return None
+    if not OPENAI_API_KEY:
+        logger.warning("Multi-intent detection skipped: OPENAI_API_KEY missing")
+        return None
+
+    system_prompt = (
+        "Определи, есть ли в сообщении клиента несколько разных интентов. "
+        "Верни ТОЛЬКО JSON строго вида "
+        '{"multi_intent":true/false,"primary_intent":"booking|pricing|duration|location|hours|other","secondary_intents":["..."]}.\n'
+        "Допустимые интенты: booking (запись/перенос/отмена), pricing (цены/стоимость), "
+        "duration (длительность/время процедуры), location (адрес/как добраться), "
+        "hours (график/время работы), other (другое).\n"
+        "multi_intent=true если есть 2+ разных интента. primary_intent — главный/первый. "
+        "secondary_intents — уникальные, без primary. Если не уверен — other."
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": text},
+    ]
+
+    llm = get_llm_provider()
+    llm_start = time.monotonic()
+    try:
+        response = llm.generate(
+            messages,
+            temperature=0.0,
+            max_tokens=MULTI_INTENT_MAX_TOKENS,
+            model=FAST_MODEL,
+            timeout_seconds=MULTI_INTENT_TIMEOUT_SECONDS,
+        )
+    except httpx.TimeoutException as exc:
+        _log_timing(
+            "multi_intent_llm_ms",
+            (time.monotonic() - llm_start) * 1000,
+            extra={
+                "model_name": FAST_MODEL,
+                "model_tier": "fast",
+                "timeout": True,
+                "timeout_seconds": MULTI_INTENT_TIMEOUT_SECONDS,
+            },
+        )
+        logger.warning(f"Multi-intent timeout after {MULTI_INTENT_TIMEOUT_SECONDS}s: {exc}")
+        return None
+
+    _log_timing(
+        "multi_intent_llm_ms",
+        (time.monotonic() - llm_start) * 1000,
+        extra={"model_name": FAST_MODEL, "model_tier": "fast", "timeout": False},
+    )
+
+    content = (response.content or "").strip()
+    if not content:
+        return None
+
+    payload = None
+    try:
+        payload = json.loads(content)
+    except Exception:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                payload = json.loads(match.group(0))
+            except Exception:
+                payload = None
+
+    if not isinstance(payload, dict):
+        return None
+
+    allowed = {"booking", "pricing", "duration", "location", "hours", "other"}
+    multi_intent = payload.get("multi_intent")
+    primary_intent = payload.get("primary_intent")
+    secondary_intents = payload.get("secondary_intents", [])
+
+    if not isinstance(multi_intent, bool):
+        return None
+    if not isinstance(primary_intent, str):
+        return None
+    primary_intent = primary_intent.strip().casefold()
+    if primary_intent not in allowed:
+        primary_intent = "other"
+
+    cleaned_secondary: list[str] = []
+    if isinstance(secondary_intents, list):
+        for item in secondary_intents:
+            if not isinstance(item, str):
+                continue
+            intent = item.strip().casefold()
+            if intent in allowed and intent != primary_intent and intent not in cleaned_secondary:
+                cleaned_secondary.append(intent)
+
+    return {
+        "multi_intent": multi_intent,
+        "primary_intent": primary_intent,
+        "secondary_intents": cleaned_secondary,
+    }
 
 
 def is_acknowledgement_message(text: str) -> bool:

@@ -29,6 +29,7 @@ from app.services.ai_service import (
     OUT_OF_DOMAIN_RESPONSE,
     THANKS_RESPONSE,
     classify_confirmation,
+    detect_multi_intent,
     is_acknowledgement_message,
     is_bot_status_question,
     is_greeting_message,
@@ -1523,6 +1524,7 @@ ASR_LOW_CONFIDENCE_MIN_CHARS = 6
 ASR_LOW_CONFIDENCE_MIN_WORDS = 3
 ASR_LOW_CONFIDENCE_MIN_DURATION_SECONDS = 6.0
 ASR_LOW_CONFIDENCE_NON_LETTER_RATIO = 0.4
+MULTI_INTENT_MIN_CHARS = 350
 MSG_ESCALATED = "Передал менеджеру. Могу чем-то помочь пока ждёте?"
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."
 MSG_MUTED_LONG = "Понял! Если ответа от менеджеров долго нет — лучше звоните напрямую: +7 775 984 19 26"
@@ -2466,6 +2468,32 @@ def _combine_sidecar(primary: str, sidecar: str | None) -> str:
     if not sidecar:
         return primary
     return f"{sidecar}\n\n{primary}"
+
+
+MULTI_INTENT_LABELS = {
+    "booking": "записи",
+    "pricing": "цене",
+    "duration": "длительности",
+    "location": "адресу",
+    "hours": "часам работы",
+    "other": "другому вопросу",
+}
+
+
+def _format_multi_intent_followup(primary: str, secondary: list[str]) -> str | None:
+    if not primary:
+        return None
+    labels = []
+    for intent in secondary:
+        label = MULTI_INTENT_LABELS.get(intent)
+        if label:
+            labels.append(label)
+    if not labels:
+        return "Есть ещё вопрос — уточните, пожалуйста."
+    label_text = ", ".join(labels)
+    if primary == "booking":
+        return f"По {label_text} отвечу после записи."
+    return f"Ещё был вопрос по {label_text}. Уточните, пожалуйста."
 
 
 def _build_booking_summary(booking: dict) -> str:
@@ -4424,6 +4452,7 @@ async def _handle_webhook_payload(
         decision = escalation_gate(booking_messages) if escalation_gate else None
         if decision:
             bot_response = decision.response
+            bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
             _reset_low_confidence_retry(conversation)
 
             result_message = "Policy reply sent"
@@ -4555,6 +4584,55 @@ async def _handle_webhook_payload(
             bot_response=bot_response,
         )
 
+    multi_intent_primary = None
+    multi_intent_secondary: list[str] = []
+    multi_intent_followup = None
+    if (
+        routing["allow_bot_reply"]
+        and not bypass_domain_flows
+        and message_text
+        and len(message_text) >= MULTI_INTENT_MIN_CHARS
+        and not booking_active
+    ):
+        multi_intent_payload = detect_multi_intent(message_text)
+        if isinstance(multi_intent_payload, dict) and multi_intent_payload.get("multi_intent") is True:
+            primary = multi_intent_payload.get("primary_intent")
+            secondary = multi_intent_payload.get("secondary_intents") or []
+            if isinstance(primary, str):
+                multi_intent_primary = primary
+            if isinstance(secondary, list):
+                multi_intent_secondary = [item for item in secondary if isinstance(item, str)]
+            if multi_intent_primary:
+                multi_intent_followup = _format_multi_intent_followup(
+                    multi_intent_primary, multi_intent_secondary
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "multi_intent": True,
+                            "primary_intent": multi_intent_primary,
+                            "secondary_count": len(multi_intent_secondary),
+                        },
+                    )
+                if routing["allow_booking_flow"] and multi_intent_primary == "booking":
+                    booking_signal = True
+                else:
+                    booking_signal = False
+                booking_wants_flow = _should_run_booking_flow(
+                    routing,
+                    booking_active=booking_active,
+                    booking_signal=booking_signal,
+                )
+
+    multi_intent_booking_followup = None
+    multi_intent_other_followup = None
+    if multi_intent_followup:
+        if multi_intent_primary == "booking":
+            multi_intent_booking_followup = multi_intent_followup
+        else:
+            multi_intent_other_followup = multi_intent_followup
+
     policy_price_sidecar = None
     if not bypass_domain_flows and policy_handler and routing["allow_truth_gate_reply"] and booking_wants_flow:
         price_sidecar = policy_handler.get("price_sidecar")
@@ -4595,7 +4673,7 @@ async def _handle_webhook_payload(
                 source="booking",
                 fast_intent=False,
             )
-            bot_response = MSG_BOOKING_CANCELLED
+            bot_response = _combine_sidecar(MSG_BOOKING_CANCELLED, multi_intent_booking_followup)
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             result_message = "Booking cancelled" if sent else "Booking cancel response failed"
@@ -4626,7 +4704,7 @@ async def _handle_webhook_payload(
                 source="booking",
                 fast_intent=False,
             )
-            bot_response = MSG_BOOKING_REENGAGE
+            bot_response = _combine_sidecar(MSG_BOOKING_REENGAGE, multi_intent_booking_followup)
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             result_message = "Booking paused" if sent else "Booking pause response failed"
@@ -4671,6 +4749,7 @@ async def _handle_webhook_payload(
                     fast_intent=False,
                 )
                 bot_response = _combine_sidecar(prompt, policy_price_sidecar)
+                bot_response = _combine_sidecar(bot_response, multi_intent_booking_followup)
                 save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                 sent = _send_response(bot_response)
                 result_message = "Booking slot requested" if sent else "Booking slot response failed"
@@ -4725,6 +4804,7 @@ async def _handle_webhook_payload(
                 result_message = "Booking captured while pending"
                 trace_decision = "captured_pending"
 
+            bot_response = _combine_sidecar(bot_response, multi_intent_booking_followup)
             context = _set_booking_context(context, {"active": False})
             _set_conversation_context(conversation, context)
             _record_decision_trace(
@@ -4817,6 +4897,7 @@ async def _handle_webhook_payload(
         service_decision = service_matcher(message_text) if service_matcher else None
         if service_decision:
             bot_response = service_decision.response
+            bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
             _reset_low_confidence_retry(conversation)
 
             result_message = "Service matcher reply sent"
@@ -4944,6 +5025,7 @@ async def _handle_webhook_payload(
                     )
 
                 bot_response = response_text
+                bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
                 _reset_low_confidence_retry(conversation)
                 trace = _attach_llm_cache_flag(
                     {
