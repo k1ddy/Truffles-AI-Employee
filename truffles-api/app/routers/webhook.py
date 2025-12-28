@@ -1006,6 +1006,96 @@ def _record_message_decision_meta(
     )
 
 
+def _resolve_backlog_language(message: Message | None) -> str:
+    if not message or not isinstance(message.message_metadata, dict):
+        return "unknown"
+    metadata = message.message_metadata
+    for key in ("language", "lang", "locale"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower()
+    media_meta = metadata.get("media")
+    if isinstance(media_meta, dict):
+        transcript_language = media_meta.get("transcript_language")
+        if isinstance(transcript_language, str) and transcript_language.strip():
+            return transcript_language.strip().lower()
+    return "unknown"
+
+
+def _record_knowledge_backlog(
+    db: Session,
+    *,
+    client_id: UUID,
+    conversation_id: UUID,
+    message: Message | None,
+    user_text: str,
+    miss_type: str,
+) -> None:
+    text_value = (user_text or "").strip()
+    if not text_value:
+        return
+    language = _resolve_backlog_language(message)
+    miss_value = (miss_type or "unknown").strip().lower()
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO knowledge_backlog (
+                  id,
+                  client_id,
+                  conversation_id,
+                  message_id,
+                  user_text,
+                  language,
+                  miss_type,
+                  repeat_count,
+                  first_seen_at,
+                  last_seen_at
+                )
+                VALUES (
+                  gen_random_uuid(),
+                  :client_id,
+                  :conversation_id,
+                  :message_id,
+                  :user_text,
+                  :language,
+                  :miss_type,
+                  1,
+                  NOW(),
+                  NOW()
+                )
+                ON CONFLICT (client_id, language, miss_type, user_text)
+                DO UPDATE SET
+                  repeat_count = knowledge_backlog.repeat_count + 1,
+                  last_seen_at = EXCLUDED.last_seen_at,
+                  conversation_id = EXCLUDED.conversation_id,
+                  message_id = EXCLUDED.message_id
+                """
+            ),
+            {
+                "client_id": client_id,
+                "conversation_id": conversation_id,
+                "message_id": message.id if message else None,
+                "user_text": text_value,
+                "language": language,
+                "miss_type": miss_value,
+            },
+        )
+    except Exception:
+        logger.warning(
+            "Knowledge backlog upsert failed",
+            extra={
+                "context": {
+                    "client_id": str(client_id),
+                    "conversation_id": str(conversation_id),
+                    "message_id": str(message.id) if message else None,
+                    "miss_type": miss_type,
+                }
+            },
+            exc_info=True,
+        )
+
+
 def _serialize_media_decision(decision: MediaDecision) -> dict:
     return {
         "allowed": bool(decision.allowed),
@@ -5008,6 +5098,14 @@ async def _handle_webhook_payload(
                 "rag_confident": rag_confident,
             },
         )
+        _record_knowledge_backlog(
+            db,
+            client_id=client.id,
+            conversation_id=conversation.id,
+            message=saved_message,
+            user_text=message_text,
+            miss_type="out_of_domain",
+        )
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
         result_message = "Out-of-domain response sent" if sent else "Out-of-domain response failed"
@@ -5195,6 +5293,19 @@ async def _handle_webhook_payload(
             response_text, confidence = gen_result.value
 
             if confidence == "low_confidence":
+                miss_type = (
+                    "llm_timeout"
+                    if timing_context and timing_context.get("llm_timeout")
+                    else "low_confidence"
+                )
+                _record_knowledge_backlog(
+                    db,
+                    client_id=client.id,
+                    conversation_id=conversation.id,
+                    message=saved_message,
+                    user_text=message_text,
+                    miss_type=miss_type,
+                )
                 if conversation.state == ConversationState.PENDING.value:
                     # Already escalated: respond but don't re-escalate
                     bot_response = MSG_PENDING_LOW_CONFIDENCE
@@ -5292,6 +5403,14 @@ async def _handle_webhook_payload(
                 sent = _send_response(bot_response)
                 result_message = "Message sent" if sent else "Failed to send"
             else:
+                _record_knowledge_backlog(
+                    db,
+                    client_id=client.id,
+                    conversation_id=conversation.id,
+                    message=saved_message,
+                    user_text=message_text,
+                    miss_type="clarify",
+                )
                 context = _get_conversation_context(conversation)
                 retry_count = _get_low_confidence_retry_count(context)
                 if should_offer_low_confidence_retry(conversation, now):

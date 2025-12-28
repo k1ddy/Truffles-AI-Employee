@@ -181,6 +181,7 @@ truffles-api/
 | `onboard_client.py` | Онбординг нового заказчика |
 | `update_prompt.py` | Обновление промпта через API |
 | `metrics_daily_snapshot.sql` | Снимок дневных метрик (SLA/LLM/эскалации) |
+| `knowledge_backlog_top.sql` | Топ‑вопросы knowledge backlog (последние 7 дней) |
 | `migrations/` | SQL миграции |
 | `templates/` | Шаблоны (промпты, FAQ) |
 | `LESSONS_LEARNED.md` | Уроки из отладки |
@@ -193,6 +194,7 @@ truffles-api/
 - `ops/migrations/014_add_branch_routing_settings.sql` — настройки branch routing + auto-approve ролей.
 - `ops/migrations/015_add_metrics_daily.sql` — дневные метрики (SLA/LLM/эскалации).
 - `ops/migrations/016_add_asr_metrics.sql` — метрики ASR (fail rate + totals).
+- `ops/migrations/017_add_knowledge_backlog.sql` — backlog пропусков (low_confidence/out_of_domain/llm_timeout/clarify).
 
 **Старые скрипты:** `.archive/ops_old/` — не в git.
 

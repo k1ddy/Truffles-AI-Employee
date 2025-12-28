@@ -28,6 +28,7 @@
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
 - Детальный бриф салона заполнен эталоном (фейковые данные): `Business/Sales/Бриф_клиента.md`.
 - Demo salon knowledge pack обновлён под эталон (truth/intents/eval + обзор услуг).
+- Knowledge backlog: webhook пишет misses (low_confidence/out_of_domain/llm_timeout/clarify) в `knowledge_backlog` через upsert; отчёт — `/admin/knowledge-backlog` и `ops/knowledge_backlog_top.sql`; безопасно для прода (нет влияния на ответы).
 - `SALON_TRUTH.yaml` теперь разделён на `domain_pack` (общая таксономия/синонимы/типовые вопросы/ООД‑якоря) и `client_pack` (факты demo_salon); старые ключи сохранены, поэтому безопасно для прода.
 - `ops/sync_client.py` получил валидацию обязательных полей `client_pack` (`--validate`/`--validate-only`), без генерации новых файлов.
 

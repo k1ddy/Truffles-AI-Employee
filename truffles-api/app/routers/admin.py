@@ -443,6 +443,57 @@ async def cleanup_media(
     return results
 
 
+# === KNOWLEDGE BACKLOG ===
+
+
+@router.get("/knowledge-backlog")
+async def get_knowledge_backlog(
+    client_slug: str,
+    days: int = 7,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    _require_admin_token(x_admin_token)
+    client = db.query(Client).filter(Client.name == client_slug).first()
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Client '{client_slug}' not found")
+
+    safe_days = max(1, min(int(days), 90))
+    safe_limit = max(1, min(int(limit), 100))
+
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT
+                  miss_type,
+                  user_text,
+                  language,
+                  repeat_count,
+                  first_seen_at,
+                  last_seen_at
+                FROM knowledge_backlog
+                WHERE client_id = :client_id
+                  AND last_seen_at >= (NOW() - (:days * INTERVAL '1 day'))
+                ORDER BY repeat_count DESC, last_seen_at DESC
+                LIMIT :limit
+                """
+            ),
+            {"client_id": client.id, "days": safe_days, "limit": safe_limit},
+        )
+        .mappings()
+        .all()
+    )
+
+    return {
+        "client_slug": client_slug,
+        "days": safe_days,
+        "limit": safe_limit,
+        "items": [dict(row) for row in rows],
+    }
+
+
 # === METRICS ===
 
 
