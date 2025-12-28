@@ -870,6 +870,11 @@ def format_reply_from_truth(intent: str, slots: dict | None = None) -> str | Non
     if intent == "service_clarify":
         clarify = truth.get("service_clarify", {}).get("classic_interest")
         return clarify or "Уточните, пожалуйста, какую именно услугу вы имеете в виду?"
+    if intent == "duration_or_price_clarify":
+        clarify = truth.get("duration_or_price_clarify")
+        if clarify:
+            return str(clarify).strip()
+        return "Вас интересует цена или длительность? Какая услуга?"
     if intent == "price_manicure":
         quick_price = truth.get("price_quick_answers", {}).get("manicure")
         return quick_price or "Подскажите, какой именно маникюр интересует?"
@@ -1335,10 +1340,18 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
                 meta=question_meta,
             )
 
-    question_meta_for_price = question_meta if question_type and question_type.kind == "pricing" else None
-
     price_signal = _has_price_signal(normalized, message)
     price_item = _find_best_price_item(message)
+    if question_type is None and (price_item or price_signal):
+        reply = format_reply_from_truth("duration_or_price_clarify")
+        if reply:
+            return DemoSalonDecision(
+                action="reply",
+                response=reply,
+                intent="duration_or_price_clarify",
+            )
+
+    question_meta_for_price = question_meta if question_type and question_type.kind == "pricing" else None
     if "price_manicure" in phrase_intents or (
         _contains_any(normalized, ["маникюр", "маник"]) and price_signal and not price_item
     ):

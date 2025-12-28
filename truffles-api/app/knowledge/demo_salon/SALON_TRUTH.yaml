@@ -220,6 +220,7 @@ style_reference: &style_reference
   ask_photo: "Сделаем максимально близко, но нужен фото-референс. Пришлите фото/пример, чтобы мастер оценил."
 service_clarify: &service_clarify
   classic_interest: "Уточните, пожалуйста, какая именно услуга интересует (маникюр классический или ресницы классика) и на какую дату/время?"
+duration_or_price_clarify: &duration_or_price_clarify "Вас интересует цена или длительность? Какая услуга?"
 price_quick_answers: &price_quick_answers
   manicure: "Маникюр классический — 2 500 ₸, аппаратный — 3 500 ₸, маникюр + гель-лак — 7 000 ₸."
 system_messages: &system_messages
@@ -656,6 +657,7 @@ client_pack:
   procedure_compatibility: *procedure_compatibility
   style_reference: *style_reference
   service_clarify: *service_clarify
+  duration_or_price_clarify: *duration_or_price_clarify
   price_quick_answers: *price_quick_answers
   system_messages: *system_messages
   pricing: *pricing
