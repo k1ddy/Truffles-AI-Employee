@@ -113,6 +113,29 @@ def _tokenize(text: str) -> list[str]:
     return [token for token in normalized.split() if token]
 
 
+_SERVICE_STOPWORDS = {
+    "и",
+    "или",
+    "на",
+    "по",
+    "за",
+    "до",
+    "от",
+    "для",
+    "у",
+    "в",
+    "во",
+    "к",
+    "с",
+    "со",
+}
+
+
+def _normalize_alias_tokens(text: str) -> list[str]:
+    tokens = _tokenize(text)
+    return [token for token in tokens if token and token not in _SERVICE_STOPWORDS]
+
+
 @lru_cache(maxsize=2)
 def _build_price_index() -> list[dict[str, Any]]:
     truth = load_yaml_truth()
@@ -133,6 +156,98 @@ def _build_price_index() -> list[dict[str, Any]]:
                 }
             )
     return items
+
+
+@lru_cache(maxsize=2)
+def _build_price_name_index() -> dict[str, dict[str, Any]]:
+    truth = load_yaml_truth()
+    index: dict[str, dict[str, Any]] = {}
+    for category in truth.get("price_list", []) if isinstance(truth, dict) else []:
+        for item in category.get("items", []) if isinstance(category, dict) else []:
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            index[_normalize_text(name)] = item
+    return index
+
+
+@lru_cache(maxsize=2)
+def _build_service_index() -> list[dict[str, Any]]:
+    truth = load_yaml_truth()
+    catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
+    services = catalog.get("services") if isinstance(catalog, dict) else None
+    if not isinstance(services, list):
+        return []
+
+    index: list[dict[str, Any]] = []
+    for service in services:
+        if not isinstance(service, dict):
+            continue
+        name = str(service.get("name", "")).strip()
+        if not name:
+            continue
+        aliases: list[str] = [name]
+        extra_aliases = service.get("aliases")
+        if isinstance(extra_aliases, list):
+            aliases.extend([str(alias) for alias in extra_aliases if str(alias).strip()])
+
+        alias_tokens: list[list[str]] = []
+        for alias in aliases:
+            tokens = _normalize_alias_tokens(alias)
+            if tokens:
+                alias_tokens.append(tokens)
+
+        price_items = service.get("price_items")
+        index.append(
+            {
+                "name": name,
+                "aliases": alias_tokens,
+                "quick_price_key": str(service.get("quick_price_key")).strip()
+                if service.get("quick_price_key")
+                else None,
+                "price_items": [str(item) for item in price_items if str(item).strip()]
+                if isinstance(price_items, list)
+                else [],
+                "description": str(service.get("description", "")).strip() or None,
+            }
+        )
+    return index
+
+
+@lru_cache(maxsize=2)
+def _service_tokens() -> set[str]:
+    tokens: set[str] = set()
+    for entry in _build_service_index():
+        for alias in entry.get("aliases", []):
+            tokens.update(alias)
+    return tokens
+
+
+def _message_has_service_token(normalized: str) -> bool:
+    if not normalized:
+        return False
+    message_tokens = normalized.split()
+    for token in _service_tokens():
+        if _token_matches(token, message_tokens):
+            return True
+    return False
+
+
+def _match_service(normalized: str) -> dict[str, Any] | None:
+    if not normalized:
+        return None
+    message_tokens = normalized.split()
+    best = None
+    best_len = 0
+    for entry in _build_service_index():
+        for alias_tokens in entry.get("aliases", []):
+            if not alias_tokens:
+                continue
+            if all(_token_matches(token, message_tokens) for token in alias_tokens):
+                if len(alias_tokens) > best_len:
+                    best = entry
+                    best_len = len(alias_tokens)
+    return best
 
 
 def _token_matches(token: str, message_tokens: list[str]) -> bool:
@@ -213,6 +328,8 @@ def _has_price_signal(normalized: str, raw_text: str | None = None) -> bool:
     currency_words = ["тг", "тенге", "руб", "рубл", "usd", "eur", "доллар", "евро"]
     if _contains_any(normalized, price_keywords):
         return True
+    if "сколько" in normalized and "стоит" in normalized:
+        return True
     if _contains_any(normalized, currency_words):
         return True
     if raw_text and re.search(r"[₸$€₽]", raw_text):
@@ -239,6 +356,69 @@ def _format_price_reply(item: dict[str, Any]) -> str:
         price = _format_money(item.get("price_from"))
         return f"{name} — от {price} ₸."
     return f"{name} — уточните цену у администратора."
+
+
+def _format_service_price_items(item_names: list[str]) -> str | None:
+    if not item_names:
+        return None
+    index = _build_price_name_index()
+    replies: list[str] = []
+    for name in item_names:
+        item = index.get(_normalize_text(name))
+        if item:
+            replies.append(_format_price_reply(item))
+    if replies:
+        return " ".join(replies)
+    return None
+
+
+def _format_service_reply(service: dict[str, Any], truth: dict) -> str | None:
+    quick_key = service.get("quick_price_key")
+    if quick_key:
+        quick_answer = truth.get("price_quick_answers", {}).get(quick_key)
+        if quick_answer:
+            return quick_answer
+    price_items = service.get("price_items") if isinstance(service, dict) else None
+    reply = _format_service_price_items(price_items or [])
+    if reply:
+        return reply
+    description = service.get("description") if isinstance(service, dict) else None
+    if description:
+        return description
+    return None
+
+
+def _format_service_not_found_reply() -> str | None:
+    truth = load_yaml_truth()
+    catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
+    template = None
+    suggestions: list[str] = []
+    if isinstance(catalog, dict):
+        template = catalog.get("not_found_reply")
+        suggestion_items = catalog.get("suggestions")
+        if isinstance(suggestion_items, list):
+            suggestions = [str(item) for item in suggestion_items if str(item).strip()]
+    if not template:
+        template = "В списке услуг нет такой позиции. Могу уточнить или предложить: {suggestions}."
+    suggestions_text = ", ".join(suggestions)
+    if "{suggestions}" in template:
+        return template.format(suggestions=suggestions_text)
+    if suggestions_text:
+        return f"{template} {suggestions_text}."
+    return template
+
+
+def _looks_like_service_question(normalized: str, raw_text: str | None = None) -> bool:
+    if not normalized:
+        return False
+    if not _message_has_service_token(normalized):
+        return False
+    if _has_price_signal(normalized, raw_text):
+        return True
+    service_keywords = ["делаете", "есть ли", "есть", "оказываете", "предоставляете"]
+    if _contains_any(normalized, service_keywords):
+        return True
+    return False
 
 
 def _format_promotions(truth: dict, intent: str | None = None) -> str:
@@ -595,6 +775,26 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
     return None
 
 
+def get_demo_salon_service_decision(message: str) -> DemoSalonDecision | None:
+    normalized = _normalize_text(message)
+    if not normalized:
+        return None
+    if not _looks_like_service_question(normalized, message):
+        return None
+
+    service = _match_service(normalized)
+    truth = load_yaml_truth()
+    if service:
+        reply = _format_service_reply(service, truth)
+        if reply:
+            return DemoSalonDecision(action="reply", response=reply, intent="service_match")
+
+    reply = _format_service_not_found_reply()
+    if reply:
+        return DemoSalonDecision(action="reply", response=reply, intent="service_not_found")
+    return None
+
+
 def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
     normalized = _normalize_text(message)
     if not normalized:
@@ -770,8 +970,9 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
             return DemoSalonDecision(action="reply", response=reply, intent="service_clarify")
 
     price_signal = _has_price_signal(normalized, message)
+    price_item = _find_best_price_item(message)
     if "price_manicure" in phrase_intents or (
-        _contains_any(normalized, ["маникюр", "маник"]) and price_signal
+        _contains_any(normalized, ["маникюр", "маник"]) and price_signal and not price_item
     ):
         reply = format_reply_from_truth("price_manicure")
         if reply:
@@ -859,6 +1060,10 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="booking_intake")
 
+    service_decision = get_demo_salon_service_decision(message)
+    if service_decision:
+        return service_decision
+
     offtopic_keywords = ["чат бот", "ботов", "разработк", "сайт", "crm", "интеграц", "мессенджер"]
     if any(phrase and phrase in normalized for phrase in _offtopic_phrases()) or _contains_any(
         normalized, offtopic_keywords
@@ -867,7 +1072,6 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="off_topic")
 
-    price_item = _find_best_price_item(message)
     if price_item or price_signal:
         reply = format_reply_from_truth("price_query", {"price_item": price_item["item"]} if price_item else {})
         if reply:

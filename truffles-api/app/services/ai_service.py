@@ -188,7 +188,7 @@ ELEVENLABS_ASR_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 ELEVENLABS_ASR_MODEL_ID = (
     os.environ.get("ASR_ELEVENLABS_MODEL_ID")
     or os.environ.get("ELEVENLABS_ASR_MODEL_ID")
-    or "scribe_v1"
+    or "scribe_v2"
 )
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "600"))
 MAX_HISTORY_MESSAGES = int(os.environ.get("LLM_HISTORY_MESSAGES", "6"))

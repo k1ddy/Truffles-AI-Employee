@@ -49,6 +49,34 @@ eval_cases:
     - маникюр
     - 2 500
     - 3 500
+- id: E003b
+  user: Делаете педикюр?
+  expected:
+    action: reply
+    intent: service_match
+    must_include_any:
+    - 4 500
+    - 5 500
+    - 9 000
+- id: E003c
+  user: Делаете массаж ног?
+  expected:
+    action: reply
+    intent: service_not_found
+    must_include_any:
+    - нет такой позиции
+    - нет такой услуги
+    - нет в списке
+    must_include:
+    - педикюр
+- id: E003d
+  user: Чо по адресу?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
 - id: E004
   user: Почему у вас цена «от»?
   expected:

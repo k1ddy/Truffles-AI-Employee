@@ -48,6 +48,7 @@ from app.services.demo_salon_knowledge import (
     get_demo_salon_decision,
     get_demo_salon_price_item,
     get_demo_salon_price_reply,
+    get_demo_salon_service_decision,
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
@@ -2314,6 +2315,7 @@ _POLICY_HANDLERS = {
     "demo_salon": {
         "policy_type": "demo_salon",
         "escalation_gate": _demo_salon_escalation_gate,
+        "service_matcher": get_demo_salon_service_decision,
         "truth_gate": get_demo_salon_decision,
         "price_item": get_demo_salon_price_item,
         "price_sidecar": _demo_salon_price_sidecar,
@@ -4539,6 +4541,46 @@ async def _handle_webhook_payload(
             conversation_id=conversation.id,
             bot_response=bot_response,
         )
+
+    if (
+        routing["allow_bot_reply"]
+        and not booking_wants_flow
+        and not bypass_domain_flows
+        and policy_handler
+    ):
+        service_matcher = policy_handler.get("service_matcher")
+        service_decision = service_matcher(message_text) if service_matcher else None
+        if service_decision:
+            bot_response = service_decision.response
+            _reset_low_confidence_retry(conversation)
+
+            result_message = "Service matcher reply sent"
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "service_matcher",
+                    "decision": service_decision.intent,
+                    "state": conversation.state,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action=service_decision.action,
+                intent=service_decision.intent,
+                source="service_matcher",
+                fast_intent=False,
+            )
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = _send_response(bot_response)
+            if not sent:
+                result_message = f"{result_message}; response_send=failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
 
     if routing["allow_bot_reply"]:
         llm_primary_result = generate_bot_response(

@@ -503,6 +503,94 @@ def test_truth_gate_sets_decision_meta():
     assert updates["llm_timeout"] is False
 
 
+def test_service_matcher_short_circuits_llm():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="hybrid",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    branch_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=branch_id,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Делаете педикюр?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-service",
+                timestamp=1234567890,
+            ),
+        ),
+    )
+
+    policy_handler = {"policy_type": "demo_salon", "service_matcher": webhook_router.get_demo_salon_service_decision}
+
+    with patch("app.routers.webhook._get_policy_handler", return_value=policy_handler), patch(
+        "app.routers.webhook.generate_bot_response"
+    ) as mock_llm, patch(
+        "app.routers.webhook.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook._update_message_decision_metadata"
+    ) as mock_update:
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert "педикюр" in (response.bot_response or "").casefold()
+    mock_llm.assert_not_called()
+    updates = mock_update.call_args[0][1]
+    assert updates["source"] == "service_matcher"
+    assert updates["llm_primary_used"] is False
+
+
 def test_llm_guard_blocks_payment_response():
     saved_message = Mock()
     saved_message.message_metadata = {}

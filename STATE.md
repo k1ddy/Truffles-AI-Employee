@@ -20,7 +20,7 @@
 - Инфра compose: `/home/zhan/infrastructure/docker-compose.yml` + `/home/zhan/infrastructure/docker-compose.truffles.yml`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 
 ### КЛЮЧЕВЫЕ МОЗГИ / РИСКИ / ПРОВЕРКИ (быстрый чек)
-- Мозги: `outbox → _handle_webhook_payload → pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → LLM-first → truth gate fallback → low-confidence уточнение/эскалация`.
+- Мозги: `outbox → _handle_webhook_payload → pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → service matcher (услуги/цены) → LLM-first → truth gate fallback → low-confidence уточнение/эскалация`.
 - Риски: payment/reschedule/medical/complaint — только эскалация; не озвучивать способы оплаты; branch‑gate для цен.
 - LLM‑first критерии: отвечаем только по RAG; если RAG пуст/низкий → уточнение; если ответ содержит payment/medical/complaint/discount/refund → эскалация; decision_meta включает `llm_primary_used`.
 - Проверки качества: `EVAL.yaml` + `pytest truffles-api/tests/test_<client>_eval.py` + sync KB (`ops/sync_client.py`).
@@ -1337,6 +1337,12 @@ LIMIT 1;
 | `tests/test_cases.json` | Fast-intent golden cases обновлены (services/address/hours теперь не матчатся) |
 | `EVAL.yaml` | Добавлены сленговые кейсы: "скок стоит маник", "чо по адресу", "записаться на маник" |
 | `SPECS/CONSULTANT.md` | Зафиксировано: LLM-first с жёсткими правилами и fallback |
+| `SALON_TRUTH.yaml` | Добавлен services_catalog с алиасами и базовыми подсказками услуг |
+| `demo_salon_knowledge.py` | Service matcher по услугам (data-driven) + обработка "сколько стоит" |
+| `webhook.py` | Service matcher в LLM-first до LLM, source=service_matcher |
+| `tests/test_message_endpoint.py` | Тест: service matcher шортсёркит LLM |
+| `EVAL.yaml` | Кейсы: педикюр/массаж ног/адрес |
+| `ai_service.py` | ElevenLabs ASR default model → scribe_v2 |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 
