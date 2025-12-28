@@ -28,6 +28,7 @@ from app.services.intent_service import (
     is_strong_out_of_domain,
 )
 from app.services.message_service import select_handover_user_message
+from app.services.result import Result
 from app.services.state_machine import ConversationState
 
 
@@ -1341,15 +1342,10 @@ def test_asr_low_confidence_requires_confirmation_then_accepts_yes():
         ),
     )
 
-    def fake_service_matcher(text: str):
-        if text == "маникюр":
-            return SimpleNamespace(action="service_match", response="ok", intent="service_match")
-        return None
-
     with patch(
-        "app.routers.webhook.get_demo_salon_service_decision",
-        side_effect=fake_service_matcher,
-    ) as mock_matcher, patch(
+        "app.routers.webhook.generate_bot_response",
+        return_value=Result.success(("ok", "high")),
+    ) as mock_generate, patch(
         "app.routers.webhook.send_bot_response",
         return_value=True,
     ), patch(
@@ -1369,7 +1365,7 @@ def test_asr_low_confidence_requires_confirmation_then_accepts_yes():
 
     assert response.success is True
     assert response.bot_response == "ok"
-    assert mock_matcher.call_args[0][0] == "маникюр"
+    assert mock_generate.call_args[0][2] == "маникюр"
     assert "asr_confirm_pending" not in conversation.context
 
 
