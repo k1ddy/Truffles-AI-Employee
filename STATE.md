@@ -127,7 +127,7 @@
 6. [x] Контракт поведения: приоритеты интентов + матрица state × intent → action (SPECS/CONSULTANT.md, SPECS/ESCALATION.md)
 7. [x] Policy engine: normalize → detect signals → resolve → action; demo_salon вынесен в policy handler (без client-specific if в flow)
 8. [x] Модель слотов записи: валидаторы service/datetime/name + запрет opt-out/фрустрации в слотах
-9. [x] Golden-scenarios: автопрогон ключевых кейсов из tests/test_cases.json (decision/signals)
+9. [x] Golden-scenarios: автопрогон ключевых кейсов из truffles-api/tests/test_cases.json (decision/signals)
 
 ### Следующее (по порядку)
 
@@ -194,7 +194,7 @@
 | Скрипт синхронизации knowledge/ → Qdrant | Автозагрузка базы знаний | P1 | папки |
 | Скрипт загрузки prompts/ → БД | Автозагрузка промптов | P2 | папки |
 | Использовать context/intents/ в классификаторе | Улучшить intent detection | P2 | папки |
-| Автотесты из tests/test_cases.json | Проверка качества бота | P2 | папки |
+| Автотесты из truffles-api/tests/test_cases.json | Проверка качества бота | P2 | папки |
 | Исследование LLM моделей | Найти оптимальные модели для задач | P2 | сессия |
 | Сжатие диалогов (summarizer) | Киллер-фича для длинных разговоров | P2 | сессия |
 | Скрипт update_parameter | Управление параметрами с защитой от дураков | P2 | сессия |
@@ -599,7 +599,7 @@
 
 **Что сделали:**
 - В `conversation.context` пишется `decision_trace` (список до 12 событий) по ключевым веткам: re‑engage, mute, booking, demo truth‑gate, intent/escalation, out‑of‑domain, AI‑ответ.
-- Добавлены manual тесты в `tests/test_cases.json` для hybrid‑сценариев.
+- Добавлены manual тесты в `truffles-api/tests/test_cases.json` для hybrid‑сценариев.
 
 **Статус:**
 - Ruff OK; pytest не запускался (нет pytest).
@@ -1295,7 +1295,7 @@ LIMIT 1;
 | `webhook.py` | Decision engine (normalize → signals → resolve → action) + policy handler для truth gate |
 | `webhook.py` | Валидация слотов записи (service/datetime/name) + запрет opt-out/фрустрации |
 | `config.py` | Settings: игнорировать лишние env-поля (запуск тестов в окружении с .env) |
-| `tests/test_cases.json` | Добавлены автоматизируемые кейсы для golden-прогона |
+| `truffles-api/tests/test_cases.json` | Добавлены автоматизируемые кейсы для golden-прогона |
 | `tests/test_message_endpoint.py` | Автотесты golden-cases (decision/signals) |
 | `schemas/telegram.py` | Перевёл Pydantic Config на ConfigDict (убрал депрекейшн) |
 | `demo_salon_knowledge.py` | Фикс ложной payment-эскалации: короткие ключи/фразы → word-boundary |
@@ -1309,35 +1309,35 @@ LIMIT 1;
 | `SALON_TRUTH.yaml` | Добавлены aftercare/preparation/procedure_compatibility/style_reference/price_quick_answers/system_messages |
 | `INTENTS_PHRASES_DEMO_SALON.yaml` | Расширены фразы (greeting/thanks/booking) + новые intent фразы под top-вопросы |
 | `EVAL.yaml` | Новые кейсы: уход/подготовка/совмещение/style/маникюр/классический/webhook-error |
-| `tests/test_cases.json` | Golden cases для новых fast-intent |
+| `truffles-api/tests/test_cases.json` | Golden cases для новых fast-intent |
 | `tests/test_message_endpoint.py` | Обновлён fallback case для LLM |
 | `ai_service.py` | Добавлены флаги `llm_used`/`llm_timeout` в timing_context для метрик |
 | `webhook.py` | Запись decision_meta в metadata user-сообщений (fast_intent/LLM) |
 | `admin.py` | Новый /admin/metrics (читает дневные метрики) |
 | `ops/migrations/015_add_metrics_daily.sql` | Таблица дневных метрик SLA/LLM/эскалаций |
 | `ops/metrics_daily_snapshot.sql` | SQL snapshot метрик по дню/клиенту |
-| `tests/test_cases.json` | Добавлены fast_intent golden cases |
+| `truffles-api/tests/test_cases.json` | Добавлены fast_intent golden cases |
 | `tests/test_message_endpoint.py` | Тесты fast_intent + LLM fallback |
 | `.env.example` | Добавлены FAST_MODEL/SLOW_MODEL + таймауты |
 | `webhook.py` | Outbox skip_persist пишет decision_meta (message_id/created_at fallback), messageId добавляется в payload |
 | `demo_salon_knowledge.py` | Часы работы распознаются шире, “сколько” не триггерит прайс без price-сигнала |
 | `EVAL.yaml` | Кейс “Во сколько вы открываетесь в будни?” → hours |
-| `tests/test_cases.json` | Golden‑кейс для hours (fast_intent) |
+| `truffles-api/tests/test_cases.json` | Golden‑кейс для hours (fast_intent) |
 | `ai_service.py` | LLM timeout default поднят до 6s |
 | `intent_service.py` | Domain router: подсчёт hit‑якорей + strict in‑anchors для OOD override |
 | `webhook.py` | OOD override по anchor hit + OOD проверка до style_reference; decision_trace/logs расширены |
 | `ops/update_instance_demo.sql` | anchors_in/out расширены, добавлен anchors_in_strict + “кошачий глаз” |
 | `tests/test_message_endpoint.py` | Demo domain_router config обновлён (anchors_in/out + strict) |
-| `tests/test_cases.json` | Кейсы OOD/style/“кошачий глаз” для domain_router и fast_intent |
+| `truffles-api/tests/test_cases.json` | Кейсы OOD/style/“кошачий глаз” для domain_router и fast_intent |
 | `webhook.py` | Порядок гейтов обновлён: было policy/truth → booking → fast_intent → intent/domain → LLM; стало pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → LLM-first → truth gate fallback |
 | `webhook.py` | LLM guard: темы оплат/медиц/жалоб/скидок/возвратов → эскалация + decision_meta `llm_primary_used` |
 | `webhook.py` | Fast-intent теперь только smalltalk (greeting/thanks/ok), booking slang "маник" добавлен в keywords |
 | `ai_service.py` | GREETING_PHRASES расширен ("сәлем") для smalltalk |
 | `ai_service.py` | THANKS_PHRASES расширен ("пожалуйста") для smalltalk |
 | `demo_salon_knowledge.py` | Price сигнал: добавлен сленг "скок/скока", маникюр распознаётся как "маник" |
-| `tests/test_cases.json` | Golden cases: fast-intent оставлен только для smalltalk |
+| `truffles-api/tests/test_cases.json` | Golden cases: fast-intent оставлен только для smalltalk |
 | `tests/test_message_endpoint.py` | Тесты: fast-intent smalltalk, truth-gate fallback после LLM low_confidence, LLM guard эскалирует |
-| `tests/test_cases.json` | Fast-intent golden cases обновлены (services/address/hours теперь не матчатся) |
+| `truffles-api/tests/test_cases.json` | Fast-intent golden cases обновлены (services/address/hours теперь не матчатся) |
 | `EVAL.yaml` | Добавлены сленговые кейсы: "скок стоит маник", "чо по адресу", "записаться на маник" |
 | `SPECS/CONSULTANT.md` | Зафиксировано: LLM-first с жёсткими правилами и fallback |
 | `SALON_TRUTH.yaml` | Добавлен services_catalog с алиасами и базовыми подсказками услуг |

@@ -782,7 +782,7 @@ def test_audio_transcription_failure_returns_prompt():
 
 
 def _load_golden_cases() -> list[dict]:
-    path = Path(__file__).resolve().parents[2] / "tests" / "test_cases.json"
+    path = Path(__file__).resolve().parent / "test_cases.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     manual = data.get("manual_tests", {})
     cases = manual.get("test_cases", []) if isinstance(manual, dict) else []
