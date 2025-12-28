@@ -28,6 +28,8 @@
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
 - Детальный бриф салона заполнен эталоном (фейковые данные): `Business/Sales/Бриф_клиента.md`.
 - Demo salon knowledge pack обновлён под эталон (truth/intents/eval + обзор услуг).
+- `SALON_TRUTH.yaml` теперь разделён на `domain_pack` (общая таксономия/синонимы/типовые вопросы/ООД‑якоря) и `client_pack` (факты demo_salon); старые ключи сохранены, поэтому безопасно для прода.
+- `ops/sync_client.py` получил валидацию обязательных полей `client_pack` (`--validate`/`--validate-only`), без генерации новых файлов.
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-26)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.

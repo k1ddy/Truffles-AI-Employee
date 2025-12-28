@@ -3,19 +3,22 @@
 Синхронизация базы знаний одного клиента.
 
 Использование:
-  python3 sync_client.py <client_slug> [docs_folder]
+  python3 sync_client.py <client_slug> [docs_folder] [--validate] [--validate-only]
 
 Примеры:
   python3 sync_client.py demo_salon
   python3 sync_client.py demo_salon /path/to/docs
+  python3 sync_client.py demo_salon --validate-only
 """
+import argparse
 import hashlib
-import re
-import sys
 import os
+import re
 import subprocess
+import sys
 
 import requests
+import yaml
 
 # === КОНФИГ ===
 def _resolve_docker_ip(container_name: str) -> str | None:
@@ -48,6 +51,80 @@ QDRANT_API_KEY = (
     or "REDACTED_PASSWORD"
 )
 QDRANT_API_KEY = QDRANT_API_KEY.strip()
+
+_REQUIRED_CLIENT_PACK_FIELDS = [
+    "client_pack.salon.name",
+    "client_pack.salon.city",
+    "client_pack.salon.address.full",
+    "client_pack.salon.hours.days",
+    "client_pack.salon.hours.open",
+    "client_pack.salon.hours.close",
+    "client_pack.salon.services_summary",
+    "client_pack.salon.communication.languages",
+    "client_pack.services_catalog.services",
+    "client_pack.booking.collect_fields",
+    "client_pack.booking.bot_can_confirm",
+    "client_pack.price_list",
+]
+
+_MISSING = object()
+
+
+def _get_nested_value(data: dict, path: str):
+    current = data
+    for key in path.split("."):
+        if not isinstance(current, dict) or key not in current:
+            return _MISSING
+        current = current[key]
+    return current
+
+
+def _is_empty_value(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, dict)):
+        return len(value) == 0
+    return False
+
+
+def _truth_path(client_slug: str) -> str:
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    return os.path.join(
+        repo_root,
+        "truffles-api",
+        "app",
+        "knowledge",
+        client_slug,
+        "SALON_TRUTH.yaml",
+    )
+
+
+def validate_client_pack(truth_path: str) -> bool:
+    if not os.path.exists(truth_path):
+        print(f"❌ SALON_TRUTH.yaml не найден: {truth_path}")
+        return False
+    with open(truth_path, "r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    if not isinstance(data, dict):
+        print(f"❌ Некорректный формат YAML: {truth_path}")
+        return False
+
+    missing = []
+    for path in _REQUIRED_CLIENT_PACK_FIELDS:
+        value = _get_nested_value(data, path)
+        if value is _MISSING or _is_empty_value(value):
+            missing.append(path)
+
+    if missing:
+        print("❌ client_pack: отсутствуют обязательные поля")
+        for path in missing:
+            print(f"  - {path}")
+        return False
+
+    print("✅ client_pack валиден")
+    return True
 
 def get_embedding(text):
     """Получить embedding от BGE-M3"""
@@ -161,27 +238,44 @@ def sync_folder(client_slug, docs_dir):
     return len(all_points)
 
 def main():
-    if len(sys.argv) < 2:
-        print("Использование: python3 sync_client.py <client_slug> [docs_folder]")
-        print("Пример: python3 sync_client.py demo_salon ./demo_salon_docs")
-        sys.exit(1)
-    
-    client_slug = sys.argv[1]
-    
+    parser = argparse.ArgumentParser(description="Синхронизация базы знаний одного клиента.")
+    parser.add_argument("client_slug", help="Slug клиента, например demo_salon")
+    parser.add_argument("docs_folder", nargs="?", help="Папка с .md файлами (по умолчанию knowledge/<slug>)")
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Проверить обязательные поля client_pack перед синхронизацией",
+    )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Только проверить client_pack и выйти без синхронизации",
+    )
+    args = parser.parse_args()
+
+    client_slug = args.client_slug
+
     # Папка с документами
-    if len(sys.argv) >= 3:
-        docs_dir = sys.argv[2]
+    if args.docs_folder:
+        docs_dir = args.docs_folder
     else:
         # По умолчанию ищем в ~/truffles/knowledge/<client_slug>
         docs_dir = f"/home/zhan/truffles-main/knowledge/{client_slug}"
-    
+
+    if args.validate or args.validate_only:
+        truth_path = _truth_path(client_slug)
+        if not validate_client_pack(truth_path):
+            sys.exit(2)
+        if args.validate_only:
+            return
+
     print(f"=" * 50)
     print(f"СИНХРОНИЗАЦИЯ: {client_slug}")
     print(f"Папка: {docs_dir}")
     print(f"=" * 50)
-    
+
     total = sync_folder(client_slug, docs_dir)
-    
+
     print(f"\n{'=' * 50}")
     print(f"ИТОГО: {total} chunks")
     print(f"{'=' * 50}")

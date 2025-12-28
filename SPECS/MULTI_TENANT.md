@@ -146,6 +146,15 @@ Python API:
 | Qdrant | Одна коллекция, разные фильтры |
 | LLM (OpenAI) | Один API key |
 
+## Domain Pack / Client Pack (Knowledge)
+
+- **Domain Pack** — общие категории услуг, RU/KZ синонимы, типовые вопросы, OOD‑якоря. **Без фактов.**
+- **Client Pack** — факты конкретного салона: услуги, цены, адрес, часы, правила, акции и т.д.
+- **demo_salon** — dummy Client Pack, используется только для демо/тестов.
+
+**Где лежит:** `truffles-api/app/knowledge/<client_slug>/SALON_TRUTH.yaml`  
+**Формат:** `domain_pack` + `client_pack`, при этом старые ключи остаются для обратной совместимости.
+
 ---
 
 # ЧАСТЬ 3: СТРУКТУРА ДАННЫХ
