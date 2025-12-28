@@ -15,7 +15,12 @@ from app.routers import webhook as webhook_router
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
 from app.services import escalation_service
-from app.services.demo_salon_knowledge import DemoSalonDecision, SemanticServiceMatch, semantic_service_match
+from app.services.demo_salon_knowledge import (
+    DemoSalonDecision,
+    SemanticServiceMatch,
+    get_demo_salon_decision,
+    semantic_service_match,
+)
 from app.services.intent_service import (
     Intent,
     classify_domain_with_scores,
@@ -808,6 +813,36 @@ def test_semantic_service_matcher_allows_short_query_without_keywords():
     assert result is not None
     assert result.action == "match"
     assert result.response == "Маникюр — 2 500 ₸."
+
+
+def test_semantic_question_type_routes_duration_and_price():
+    import app.services.demo_salon_knowledge as demo_salon_knowledge
+
+    def fake_embedding(text: str):
+        normalized = text.casefold()
+        if "дл" in normalized or "время" in normalized:
+            return [1.0, 0.0]
+        if "стоит" in normalized or "цена" in normalized or "прайс" in normalized:
+            return [0.0, 1.0]
+        return [0.1, 0.1]
+
+    with patch("app.services.demo_salon_knowledge.get_embedding", side_effect=fake_embedding):
+        demo_salon_knowledge._question_type_examples.cache_clear()
+        demo_salon_knowledge._question_type_embeddings.cache_clear()
+
+        decision = get_demo_salon_decision("Сколько длится процедура?")
+        assert decision is not None
+        assert decision.intent == "service_duration"
+        assert "по времени" in decision.response.casefold() or "какая именно" in decision.response.casefold()
+
+        decision = get_demo_salon_decision("Сколько стоит процедура?")
+        assert decision is not None
+        assert decision.intent == "price_query"
+
+        decision = get_demo_salon_decision("Сколько по времени маникюр?")
+        assert decision is not None
+        assert decision.intent == "service_duration"
+        assert "маникюр" in decision.response.casefold()
 
 
 def test_service_matcher_short_circuits_llm():

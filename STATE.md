@@ -33,6 +33,7 @@
 - `ops/sync_client.py` получил валидацию обязательных полей `client_pack` (`--validate`/`--validate-only`), без генерации новых файлов.
 - `services_index` (Qdrant) заполняется из `ops/sync_client.py` по `price_list` + `services_catalog`; после LLM low_confidence работает semantic matcher (match/suggest) с `decision_meta.source=service_semantic_matcher`, безопасно для прода (срабатывает только при low_confidence и OOD‑gate).
 - Добавлен rewrite‑layer для semantic matcher (FAST LLM → JSON intent/query, 1.2s) — влияет только на подбор запроса, факты не меняет.
+- Semantic question‑type (price/duration) на эмбеддингах из `domain_pack.typical_questions`; длительности берутся из `services_catalog.duration_text`.
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-26)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.

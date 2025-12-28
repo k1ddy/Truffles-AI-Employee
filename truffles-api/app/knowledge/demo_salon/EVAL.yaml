@@ -77,6 +77,30 @@ eval_cases:
     must_include:
     - Абая 150
     - Розыбакиева
+- id: E003e
+  user: Сколько длится процедура?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include_any:
+    - по времени
+    - какая именно
+- id: E003f
+  user: Сколько стоит процедура?
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - какая услуга
+    - по цене
+- id: E003g
+  user: Сколько по времени маникюр?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include_any:
+    - маникюр
+    - минут
 - id: E004
   user: Почему у вас цена «от»?
   expected:

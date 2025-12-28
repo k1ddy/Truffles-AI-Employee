@@ -4873,18 +4873,18 @@ async def _handle_webhook_payload(
                 else:
                     result_message = "Truth gate escalation skipped (already pending)"
 
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "truth_gate",
-                    "decision": decision.action,
-                    "intent": decision.intent,
-                    "state": conversation.state,
-                    "booking_wants_flow": booking_wants_flow,
-                    "policy_type": policy_type,
-                    "llm_fallback_reason": llm_primary_reason,
-                },
-            )
+            trace_payload = {
+                "stage": "truth_gate",
+                "decision": decision.action,
+                "intent": decision.intent,
+                "state": conversation.state,
+                "booking_wants_flow": booking_wants_flow,
+                "policy_type": policy_type,
+                "llm_fallback_reason": llm_primary_reason,
+            }
+            if isinstance(getattr(decision, "meta", None), dict):
+                trace_payload.update(decision.meta)
+            _record_decision_trace(conversation, trace_payload)
             _record_message_decision_meta(
                 saved_message,
                 action=decision.action,
@@ -4892,6 +4892,8 @@ async def _handle_webhook_payload(
                 source="truth_gate",
                 fast_intent=False,
             )
+            if saved_message and isinstance(getattr(decision, "meta", None), dict):
+                _update_message_decision_metadata(saved_message, decision.meta)
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             if not sent:

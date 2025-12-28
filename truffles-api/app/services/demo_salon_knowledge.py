@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -21,6 +22,8 @@ _SERVICES_COLLECTION = "services_index"
 _SERVICE_MATCH_THRESHOLD = float(os.environ.get("SERVICE_SEMANTIC_MATCH_THRESHOLD", "0.40"))
 _SERVICE_SUGGEST_THRESHOLD = float(os.environ.get("SERVICE_SEMANTIC_SUGGEST_THRESHOLD", "0.25"))
 _SERVICE_SUGGEST_LIMIT = int(os.environ.get("SERVICE_SEMANTIC_SUGGEST_LIMIT", "3"))
+_QUESTION_TYPE_THRESHOLD = float(os.environ.get("QUESTION_TYPE_SEMANTIC_THRESHOLD", "0.55"))
+_QUESTION_TYPE_MARGIN = float(os.environ.get("QUESTION_TYPE_SEMANTIC_MARGIN", "0.08"))
 _QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
 _QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 
@@ -33,6 +36,7 @@ class DemoSalonDecision:
     response: str
     intent: str | None = None
     collect: list[str] | None = None
+    meta: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,13 @@ class SemanticServiceMatch:
     score: float
     canonical_name: str | None = None
     suggestions: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class SemanticQuestionType:
+    kind: str
+    score: float
+    second_score: float
 
 
 def _normalize_text(text: str) -> str:
@@ -232,6 +243,7 @@ def _build_service_index() -> list[dict[str, Any]]:
                 if isinstance(price_items, list)
                 else [],
                 "description": str(service.get("description", "")).strip() or None,
+                "duration_text": str(service.get("duration_text", "")).strip() or None,
             }
         )
     return index
@@ -445,6 +457,132 @@ def _format_service_suggestions_reply(suggestions: list[str]) -> str | None:
     if suggestions_text:
         return f"{template} {suggestions_text}."
     return template
+
+
+@lru_cache(maxsize=2)
+def _question_type_examples() -> dict[str, list[str]]:
+    truth = load_yaml_truth()
+    domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
+    typical = domain_pack.get("typical_questions") if isinstance(domain_pack, dict) else None
+    if not isinstance(typical, dict):
+        return {}
+
+    examples: dict[str, list[str]] = {}
+    for kind in ("pricing", "duration"):
+        phrases: list[str] = []
+        block = typical.get(kind)
+        if isinstance(block, dict):
+            for items in block.values():
+                if isinstance(items, list):
+                    for phrase in items:
+                        text = str(phrase).strip()
+                        if text:
+                            phrases.append(text)
+        elif isinstance(block, list):
+            for phrase in block:
+                text = str(phrase).strip()
+                if text:
+                    phrases.append(text)
+        examples[kind] = phrases
+    return examples
+
+
+@lru_cache(maxsize=2)
+def _question_type_embeddings() -> dict[str, list[list[float]]]:
+    examples = _question_type_examples()
+    embeddings: dict[str, list[list[float]]] = {}
+    for kind, phrases in examples.items():
+        vectors: list[list[float]] = []
+        for phrase in phrases:
+            try:
+                embedding = get_embedding(phrase)
+            except Exception as exc:
+                logger.warning(
+                    "question_type example embedding failed",
+                    extra={"context": {"error": str(exc)}},
+                )
+                continue
+            if not isinstance(embedding, list) or not embedding:
+                continue
+            try:
+                vectors.append([float(value) for value in embedding])
+            except (TypeError, ValueError):
+                continue
+        if vectors:
+            embeddings[kind] = vectors
+    return embeddings
+
+
+def _cosine_similarity(vector_a: list[float], vector_b: list[float]) -> float:
+    if not vector_a or not vector_b:
+        return 0.0
+    dot = sum(a * b for a, b in zip(vector_a, vector_b))
+    norm_a = math.sqrt(sum(a * a for a in vector_a))
+    norm_b = math.sqrt(sum(b * b for b in vector_b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def semantic_question_type(text: str) -> SemanticQuestionType | None:
+    normalized = _normalize_text(text)
+    if not normalized or len(normalized) < 3:
+        return None
+
+    examples = _question_type_embeddings()
+    if not examples:
+        return None
+
+    try:
+        query_embedding = get_embedding(text)
+    except Exception as exc:
+        logger.warning("question_type embedding failed", extra={"context": {"error": str(exc)}})
+        return None
+    if not isinstance(query_embedding, list) or not query_embedding:
+        return None
+
+    try:
+        query_vector = [float(value) for value in query_embedding]
+    except (TypeError, ValueError):
+        return None
+
+    scores: dict[str, float] = {}
+    for kind, vectors in examples.items():
+        best = 0.0
+        for vector in vectors:
+            score = _cosine_similarity(query_vector, vector)
+            if score > best:
+                best = score
+        scores[kind] = best
+
+    if not scores:
+        return None
+
+    sorted_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    top_kind, top_score = sorted_scores[0]
+    second_score = sorted_scores[1][1] if len(sorted_scores) > 1 else 0.0
+    if top_score >= _QUESTION_TYPE_THRESHOLD and (top_score - second_score) >= _QUESTION_TYPE_MARGIN:
+        return SemanticQuestionType(kind=top_kind, score=top_score, second_score=second_score)
+    return None
+
+
+def _format_service_duration_reply(service: dict[str, Any] | None) -> str:
+    truth = load_yaml_truth()
+    catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
+    if service:
+        duration_text = service.get("duration_text") if isinstance(service, dict) else None
+        if isinstance(duration_text, str) and duration_text.strip():
+            duration_text = duration_text.strip()
+            name = service.get("name") or "Услуга"
+            suffix = "" if duration_text.endswith((".", "!", "?")) else "."
+            return f"{name} — {duration_text}{suffix}"
+
+    if isinstance(catalog, dict):
+        clarify = catalog.get("duration_clarify")
+        if isinstance(clarify, str) and clarify.strip():
+            return clarify.strip()
+
+    return "По времени зависит от услуги. Какая именно?"
 
 
 def _find_catalog_service_by_name(name: str) -> dict[str, Any] | None:
@@ -1141,6 +1279,25 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="service_clarify")
 
+    question_type = semantic_question_type(message)
+    question_meta: dict[str, Any] | None = None
+    if question_type:
+        question_meta = {
+            "question_type": question_type.kind,
+            "question_type_score": question_type.score,
+        }
+        if question_type.kind == "duration":
+            service = _match_service(normalized)
+            reply = _format_service_duration_reply(service)
+            return DemoSalonDecision(
+                action="reply",
+                response=reply,
+                intent="service_duration",
+                meta=question_meta,
+            )
+
+    question_meta_for_price = question_meta if question_type and question_type.kind == "pricing" else None
+
     price_signal = _has_price_signal(normalized, message)
     price_item = _find_best_price_item(message)
     if "price_manicure" in phrase_intents or (
@@ -1148,7 +1305,12 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
     ):
         reply = format_reply_from_truth("price_manicure")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="price_manicure")
+            return DemoSalonDecision(
+                action="reply",
+                response=reply,
+                intent="price_manicure",
+                meta=question_meta_for_price,
+            )
 
     if "опозда" in normalized:
         minutes = _extract_minutes(message)
@@ -1247,7 +1409,12 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
     if price_item or price_signal:
         reply = format_reply_from_truth("price_query", {"price_item": price_item["item"]} if price_item else {})
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="price_query")
+            return DemoSalonDecision(
+                action="reply",
+                response=reply,
+                intent="price_query",
+                meta=question_meta_for_price,
+            )
 
     return None
 
