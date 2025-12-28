@@ -1330,6 +1330,9 @@ LIMIT 1;
 | `webhook.py` | LLM guard: темы оплат/медиц/жалоб/скидок/возвратов → эскалация + decision_meta `llm_primary_used` |
 | `webhook.py` | Fast-intent теперь только smalltalk (greeting/thanks/ok), booking slang "маник" добавлен в keywords |
 | `ai_service.py` | GREETING_PHRASES расширен ("сәлем") для smalltalk |
+| `ai_service.py` | THANKS_PHRASES расширен ("пожалуйста") для smalltalk |
+| `demo_salon_knowledge.py` | Price сигнал: добавлен сленг "скок/скока", маникюр распознаётся как "маник" |
+| `tests/test_cases.json` | Golden cases: fast-intent оставлен только для smalltalk |
 | `tests/test_message_endpoint.py` | Тесты: fast-intent smalltalk, truth-gate fallback после LLM low_confidence, LLM guard эскалирует |
 | `tests/test_cases.json` | Fast-intent golden cases обновлены (services/address/hours теперь не матчатся) |
 | `EVAL.yaml` | Добавлены сленговые кейсы: "скок стоит маник", "чо по адресу", "записаться на маник" |

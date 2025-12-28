@@ -218,11 +218,10 @@
         "id": "TC021",
         "name": "Fast intent: ping",
         "input": "ping",
-        "expected": "Бот отвечает приветствием без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "smalltalk",
-          "expect_intent": "greeting"
+          "expect_match": false
         },
         "status": null
       },
@@ -230,11 +229,10 @@
         "id": "TC022",
         "name": "Fast intent: aftercare gel-lac",
         "input": "Подскажите, как ухаживать за гель-лаком после процедуры?",
-        "expected": "Ответ по уходу без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "reply",
-          "expect_intent": "aftercare_gel_lac"
+          "expect_match": false
         },
         "status": null
       },
@@ -242,11 +240,10 @@
         "id": "TC023",
         "name": "Fast intent: gel-lac duration",
         "input": "Сколько держится гель-лак и как продлить результат?",
-        "expected": "Ответ по сроку и уходу без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "reply",
-          "expect_intent": "aftercare_gel_lac"
+          "expect_match": false
         },
         "status": null
       },
@@ -254,11 +251,10 @@
         "id": "TC024",
         "name": "Fast intent: prep brows/lashes",
         "input": "Как подготовиться к процедуре бровей/ресниц?",
-        "expected": "Ответ по подготовке без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "reply",
-          "expect_intent": "prep_brows_lashes"
+          "expect_match": false
         },
         "status": null
       },
@@ -266,11 +262,10 @@
         "id": "TC025",
         "name": "Fast intent: combo clean+peel",
         "input": "Можно ли совмещать чистку лица и пилинг в один день?",
-        "expected": "Эскалация по процедурам без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "escalate",
-          "expect_intent": "procedure_combo"
+          "expect_match": false
         },
         "status": null
       },
@@ -278,11 +273,10 @@
         "id": "TC026",
         "name": "Fast intent: style reference",
         "input": "А вы можете сделать прическу как Майкла Джордана?",
-        "expected": "Просьба прислать референс без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "reply",
-          "expect_intent": "style_reference"
+          "expect_match": false
         },
         "status": null
       },
@@ -290,11 +284,10 @@
         "id": "TC027",
         "name": "Fast intent: manicure price overview",
         "input": "Сколько стоит маникюр?",
-        "expected": "Ответ по ценам маникюра без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "reply",
-          "expect_intent": "price_manicure"
+          "expect_match": false
         },
         "status": null
       },
@@ -302,11 +295,10 @@
         "id": "TC028",
         "name": "Fast intent: classic interest",
         "input": "Классический интересует",
-        "expected": "Уточняющий вопрос по услуге без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "reply",
-          "expect_intent": "service_clarify"
+          "expect_match": false
         },
         "status": null
       },
@@ -326,11 +318,10 @@
         "id": "TC030",
         "name": "Fast intent: webhook error",
         "input": "❌ ошибка вызова вебхука",
-        "expected": "Короткое объяснение ошибки без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "reply",
-          "expect_intent": "system_error"
+          "expect_match": false
         },
         "status": null
       },
@@ -437,11 +428,10 @@
         "id": "TC039",
         "name": "Fast intent: style reference Jordan",
         "input": "в стиле Джордана",
-        "expected": "Просьба прислать референс без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "reply",
-          "expect_intent": "style_reference"
+          "expect_match": false
         },
         "status": null
       }

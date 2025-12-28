@@ -209,7 +209,7 @@ def _looks_like_hours_question(normalized: str) -> bool:
 
 
 def _has_price_signal(normalized: str, raw_text: str | None = None) -> bool:
-    price_keywords = ["цена", "прайс", "стоим", "стоимость", "почем", "ценник"]
+    price_keywords = ["цена", "прайс", "стоим", "стоимость", "почем", "ценник", "скок", "скока"]
     currency_words = ["тг", "тенге", "руб", "рубл", "usd", "eur", "доллар", "евро"]
     if _contains_any(normalized, price_keywords):
         return True
@@ -771,7 +771,7 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
 
     price_signal = _has_price_signal(normalized, message)
     if "price_manicure" in phrase_intents or (
-        "маникюр" in normalized and price_signal
+        _contains_any(normalized, ["маникюр", "маник"]) and price_signal
     ):
         reply = format_reply_from_truth("price_manicure")
         if reply:

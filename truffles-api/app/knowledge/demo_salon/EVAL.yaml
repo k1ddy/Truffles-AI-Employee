@@ -44,7 +44,7 @@ eval_cases:
   user: Скок стоит маник?
   expected:
     action: reply
-    intent: price_query
+    intent: price_manicure
     must_include_any:
     - маникюр
     - 2 500

@@ -46,6 +46,7 @@ THANKS_PHRASES = {
     "спасибо",
     "благодарю",
     "спасибо большое",
+    "пожалуйста",
 }
 
 ACKNOWLEDGEMENT_PHRASES = {
