@@ -23,12 +23,12 @@ from app.logging_config import get_logger
 from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
 from app.schemas.webhook import WebhookBody, WebhookRequest, WebhookResponse
 from app.services.ai_service import (
+    ACKNOWLEDGEMENT_RESPONSE,
     BOT_STATUS_RESPONSE,
     GREETING_RESPONSE,
     OUT_OF_DOMAIN_RESPONSE,
     THANKS_RESPONSE,
     classify_confirmation,
-    get_rag_confidence,
     is_acknowledgement_message,
     is_bot_status_question,
     is_greeting_message,
@@ -48,7 +48,6 @@ from app.services.demo_salon_knowledge import (
     get_demo_salon_decision,
     get_demo_salon_price_item,
     get_demo_salon_price_reply,
-    phrase_match_intent,
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
@@ -60,7 +59,6 @@ from app.services.intent_service import (
     is_human_request_message,
     is_opt_out_message,
     is_rejection,
-    is_strong_out_of_domain,
     should_escalate,
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
@@ -999,6 +997,7 @@ def _record_message_decision_meta(
             "intent": intent,
             "source": source,
             "fast_intent": fast_intent,
+            "llm_primary_used": False,
             "llm_used": False,
             "llm_timeout": False,
             "llm_cache_hit": False,
@@ -1385,13 +1384,10 @@ MSG_REENGAGE_DECLINED = "Хорошо, не буду писать. Если пе
 MSG_HANDOVER_DECLINED = (
     "Ок. Напишите, что именно интересует по салону: цена/запись/адрес/мастер/жалоба."
 )
-MSG_LOW_CONFIDENCE_RETRY = (
-    "Не совсем понял. Напишите, пожалуйста, что именно нужно по салону: "
-    "цена/длительность/запись/адрес/мастер или жалоба."
-)
+MSG_LOW_CONFIDENCE_RETRY = "Уточните, пожалуйста: интересуют услуги/цены или запись/адрес?"
 MSG_PENDING_LOW_CONFIDENCE = (
     "Я уже передал менеджеру — он скоро подключится. "
-    "Пока ждём, уточните, пожалуйста, что нужно (цена/время/запись/адрес/мастер или жалоба)."
+    "Пока ждём, уточните: услуги/цены или запись/адрес."
 )
 MSG_PENDING_ESCALATION = "Я уже передал менеджеру — он скоро подключится."
 MSG_PENDING_STATUS = "Да, я передал. Сейчас менеджер ещё не взял заявку. Как только возьмёт — ответит здесь. Пока ждём, могу помочь: уточните, что нужно?"
@@ -1416,6 +1412,85 @@ MSG_STYLE_REFERENCE_NEED_MEDIA = (
     "Можем ориентироваться на фото/референс. Пришлите фото и кратко опишите запрос — "
     "я передам администратору для подтверждения."
 )
+
+LLM_GUARD_TOPICS = {
+    "payment": [
+        "оплат",
+        "предоплат",
+        "kaspi",
+        "каспи",
+        "перевод",
+        "карт",
+        "карта",
+        "qr",
+        "счет",
+        "счёт",
+        "реквизит",
+        "iban",
+        "swift",
+        "терминал",
+        "эквайр",
+        "касса",
+        "налич",
+        "безнал",
+    ],
+    "medical": [
+        "беремен",
+        "аллерг",
+        "противопоказ",
+        "медицин",
+        "кормл",
+        "лактац",
+        "ожог",
+        "жжет",
+        "жжёт",
+        "болит",
+        "больно",
+        "кров",
+        "воспал",
+        "сып",
+        "реакц",
+        "анестез",
+        "обезбол",
+        "дермат",
+    ],
+    "complaint": [
+        "жалоб",
+        "претенз",
+        "разочар",
+        "недовол",
+        "плохо",
+        "ужас",
+        "кошмар",
+        "хам",
+        "грубо",
+        "брак",
+        "отпал",
+        "слезл",
+        "сломал",
+        "испор",
+    ],
+    "discount": [
+        "скидк",
+        "скидоч",
+        "скидос",
+        "дешевл",
+        "подешевл",
+        "купон",
+        "акци",
+        "промо",
+        "промокод",
+        "торг",
+        "уступ",
+    ],
+    "refund": [
+        "возврат",
+        "верну",
+        "вернем",
+        "вернём",
+        "refund",
+    ],
+}
 
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
@@ -1511,22 +1586,13 @@ def _detect_fast_intent(
 ) -> DemoSalonDecision | None:
     if not message_text or booking_wants_flow or bypass_domain_flows:
         return None
-    if policy_type != "demo_salon":
-        return None
 
-    decision = get_demo_salon_decision(message_text)
-    if decision:
-        if decision.intent == "price_query":
-            price_item = get_demo_salon_price_item(message_text)
-            if not price_item:
-                return DemoSalonDecision(action="escalate", response=MSG_ESCALATED, intent="price_query")
-        return decision
-
-    phrase_intents = phrase_match_intent(message_text)
-    if "greeting" in phrase_intents:
+    if is_greeting_message(message_text):
         return DemoSalonDecision(action="smalltalk", response=GREETING_RESPONSE, intent="greeting")
-    if {"thanks_positive", "thanks_bye"}.intersection(phrase_intents):
+    if is_thanks_message(message_text):
         return DemoSalonDecision(action="smalltalk", response=THANKS_RESPONSE, intent="thanks")
+    if is_acknowledgement_message(message_text):
+        return DemoSalonDecision(action="smalltalk", response=ACKNOWLEDGEMENT_RESPONSE, intent="ack")
     return None
 
 
@@ -1644,6 +1710,7 @@ BOOKING_CANCEL_KEYWORDS = [
 
 SERVICE_KEYWORDS = [
     "маникюр",
+    "маник",
     "педикюр",
     "стриж",
     "окраш",
@@ -1692,6 +1759,17 @@ def _normalize_text(text: str) -> str:
     normalized = re.sub(r"[^\w\s]", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized
+
+
+def _detect_llm_guard_topics(response_text: str) -> list[str]:
+    normalized = _normalize_text(response_text)
+    if not normalized:
+        return []
+    hits: list[str] = []
+    for topic, keywords in LLM_GUARD_TOPICS.items():
+        if any(keyword in normalized for keyword in keywords):
+            hits.append(topic)
+    return hits
 
 
 def _coerce_batch_messages(message_text: str, batch_messages: list[str] | None) -> list[str]:
@@ -4026,59 +4104,44 @@ async def _handle_webhook_payload(
         else False
     )
 
-    early_domain_intent = DomainIntent.UNKNOWN
-    early_out_of_domain = False
+    policy_handler = _get_policy_handler(client)
+    policy_type = policy_handler.get("policy_type") if policy_handler else None
+
     if (
         conversation.state == ConversationState.BOT_ACTIVE.value
-        and not bypass_domain_flows
-        and message_text
+        and opt_out_in_batch
+        and not booking_signal
     ):
-        if not (
-            is_greeting_message(message_text)
-            or is_thanks_message(message_text)
-            or is_acknowledgement_message(message_text)
-            or is_low_signal_message(message_text)
-            or is_bot_status_question(message_text)
-            or is_human_request_message(message_text)
-            or is_opt_out_message(message_text)
-        ):
-            early_domain_intent, domain_in_score, domain_out_score, _ = classify_domain_with_scores(
-                message_text, client.config if client else None
-            )
-            strong_domain_out, strong_domain_meta = is_strong_out_of_domain(
-                message_text,
-                early_domain_intent,
-                domain_in_score,
-                domain_out_score,
-                client.config if client else None,
-            )
-            if strong_domain_out:
-                early_out_of_domain = True
-
-    if early_out_of_domain:
-        bot_response = OUT_OF_DOMAIN_RESPONSE
-        _reset_low_confidence_retry(conversation)
+        mute_first, mute_second = get_mute_settings(db, client.id)
+        if conversation.no_count == 0:
+            conversation.bot_muted_until = now + timedelta(minutes=mute_first)
+            conversation.no_count = 1
+            bot_response = MSG_MUTED_TEMP
+            trace_decision = "muted_first"
+        else:
+            conversation.bot_muted_until = now + timedelta(hours=mute_second)
+            conversation.no_count += 1
+            bot_response = MSG_MUTED_LONG
+            trace_decision = "muted_second"
         _record_decision_trace(
             conversation,
             {
-                "stage": "out_of_domain",
-                "decision": "early_block",
+                "stage": "rejection",
+                "decision": trace_decision,
                 "state": conversation.state,
-                "domain_intent": early_domain_intent.value,
-                "out_hits": strong_domain_meta.get("out_hits"),
-                "strict_in_hits": strong_domain_meta.get("strict_in_hits"),
+                "no_count": conversation.no_count,
             },
         )
         _record_message_decision_meta(
             saved_message,
-            action="out_of_domain",
-            intent="out_of_domain",
-            source="domain_router",
+            action="rejection",
+            intent="opt_out",
+            source="opt_out",
             fast_intent=False,
         )
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
-        result_message = "Out-of-domain early response sent" if sent else "Out-of-domain early response failed"
+        result_message = f"Muted (opt-out #{conversation.no_count})" if sent else "Opt-out response failed"
         db.commit()
         return WebhookResponse(
             success=True,
@@ -4087,12 +4150,7 @@ async def _handle_webhook_payload(
             bot_response=bot_response,
         )
 
-    # 9.03 Policy/truth gate (before booking/RAG).
-    policy_t0 = None
-    policy_logged = False
-    policy_handler = _get_policy_handler(client)
-    policy_type = policy_handler.get("policy_type") if policy_handler else None
-    policy_price_sidecar = None
+    # 9.03 Policy escalation gate (hard signals).
     if not bypass_domain_flows and policy_handler and routing["allow_truth_gate_reply"]:
         policy_t0 = time.monotonic()
         escalation_gate = policy_handler.get("escalation_gate")
@@ -4161,9 +4219,8 @@ async def _handle_webhook_payload(
             _log_timing(
                 "policy_gate_ms",
                 (time.monotonic() - policy_t0) * 1000,
-                {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow},
+                {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow, "gate": "escalation"},
             )
-            policy_logged = True
             db.commit()
             return WebhookResponse(
                 success=True,
@@ -4171,116 +4228,77 @@ async def _handle_webhook_payload(
                 conversation_id=conversation.id,
                 bot_response=bot_response,
             )
-
-        if booking_wants_flow:
-            price_sidecar = policy_handler.get("price_sidecar")
-            if price_sidecar:
-                policy_price_sidecar, price_item = price_sidecar(booking_messages)
-                if price_item:
-                    booking_context = (
-                        booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
-                    )
-                    booking_context = _set_service_hint(booking_context, price_item, now)
-                    _set_conversation_context(conversation, booking_context)
-
-    if not bypass_domain_flows and policy_handler and _should_run_truth_gate(routing, booking_wants_flow):
-        if policy_t0 is None:
-            policy_t0 = time.monotonic()
-        truth_gate = policy_handler.get("truth_gate")
-        decision = truth_gate(message_text) if truth_gate else None
-        if decision:
-            if decision.intent == "price_query":
-                price_item_fn = policy_handler.get("price_item")
-                price_item = price_item_fn(message_text) if price_item_fn else None
-                if price_item:
-                    context = _get_conversation_context(conversation)
-                    context = _set_service_hint(context, price_item, now)
-                    _set_conversation_context(conversation, context)
-                else:
-                    decision = DemoSalonDecision(
-                        action="escalate",
-                        response=MSG_ESCALATED,
-                        intent="price_query",
-                    )
-            bot_response = decision.response
-            _reset_low_confidence_retry(conversation)
-
-            result_message = "Policy reply sent"
-            if decision.action == "escalate":
-                _, reused, telegram_sent = _reuse_active_handover(
-                    db=db,
-                    conversation=conversation,
-                    user=user,
-                    message=message_text,
-                    source="truth_gate",
-                    intent=decision.intent,
-                )
-                if reused:
-                    result_message = f"Policy reuse, telegram={'sent' if telegram_sent else 'failed'}"
-                elif conversation.state == ConversationState.BOT_ACTIVE.value:
-                    result = escalate_to_pending(
-                        db=db,
-                        conversation=conversation,
-                        user_message=message_text,
-                        trigger_type="intent",
-                        trigger_value=decision.intent or "policy",
-                    )
-                    if result.ok:
-                        handover = result.value
-                        telegram_sent = send_telegram_notification(
-                            db=db,
-                            handover=handover,
-                            conversation=conversation,
-                            user=user,
-                            message=message_text,
-                        )
-                        result_message = f"Policy escalation, telegram={'sent' if telegram_sent else 'failed'}"
-                    else:
-                        result_message = f"Policy escalation failed: {result.error}"
-                else:
-                    result_message = "Policy escalation skipped (already pending)"
-
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "truth_gate",
-                    "decision": decision.action,
-                    "intent": decision.intent,
-                    "state": conversation.state,
-                    "booking_wants_flow": booking_wants_flow,
-                    "policy_type": policy_type,
-                },
-            )
-            _record_message_decision_meta(
-                saved_message,
-                action=decision.action,
-                intent=decision.intent,
-                source="truth_gate",
-                fast_intent=False,
-            )
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
-            if not sent:
-                result_message = f"{result_message}; response_send=failed"
-            _log_timing(
-                "policy_gate_ms",
-                (time.monotonic() - policy_t0) * 1000,
-                {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow},
-            )
-            policy_logged = True
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message=result_message,
-                conversation_id=conversation.id,
-                bot_response=bot_response,
-            )
-    if policy_t0 is not None and not policy_logged:
         _log_timing(
             "policy_gate_ms",
             (time.monotonic() - policy_t0) * 1000,
-            {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow},
+            {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow, "gate": "escalation"},
         )
+
+    early_domain_intent = DomainIntent.UNKNOWN
+    early_domain_meta: dict = {}
+    early_out_of_domain = False
+    if (
+        conversation.state == ConversationState.BOT_ACTIVE.value
+        and not bypass_domain_flows
+        and message_text
+    ):
+        if not (
+            is_greeting_message(message_text)
+            or is_thanks_message(message_text)
+            or is_acknowledgement_message(message_text)
+            or is_low_signal_message(message_text)
+            or is_bot_status_question(message_text)
+            or is_human_request_message(message_text)
+            or is_opt_out_message(message_text)
+        ):
+            early_domain_intent, _, _, early_domain_meta = classify_domain_with_scores(
+                message_text, client.config if client else None
+            )
+            early_out_of_domain = bool(int(early_domain_meta.get("out_hits") or 0) > 0)
+
+    if early_out_of_domain:
+        bot_response = OUT_OF_DOMAIN_RESPONSE
+        _reset_low_confidence_retry(conversation)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "out_of_domain",
+                "decision": "early_block",
+                "state": conversation.state,
+                "domain_intent": early_domain_intent.value,
+                "out_hits": early_domain_meta.get("out_hits"),
+                "strict_in_hits": early_domain_meta.get("strict_in_hits"),
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="out_of_domain",
+            intent="out_of_domain",
+            source="domain_router",
+            fast_intent=False,
+        )
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = _send_response(bot_response)
+        result_message = "Out-of-domain early response sent" if sent else "Out-of-domain early response failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    policy_price_sidecar = None
+    if not bypass_domain_flows and policy_handler and routing["allow_truth_gate_reply"] and booking_wants_flow:
+        price_sidecar = policy_handler.get("price_sidecar")
+        if price_sidecar:
+            policy_price_sidecar, price_item = price_sidecar(booking_messages)
+            if price_item:
+                booking_context = (
+                    booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
+                )
+                booking_context = _set_service_hint(booking_context, price_item, now)
+                _set_conversation_context(conversation, booking_context)
 
     # 9.05 Booking flow: collect slots before intent/LLM.
     booking_t0 = None
@@ -4470,7 +4488,11 @@ async def _handle_webhook_payload(
     if booking_t0 is not None and not booking_logged:
         _log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
 
-    # 9.06 Fast intent (phrase/truth gate) before LLM classification.
+    llm_primary_result = None
+    llm_primary_failed = False
+    llm_primary_reason = None
+
+    # 9.06 Fast intent (smalltalk) before LLM to avoid extra calls.
     fast_decision = None
     if routing["allow_bot_reply"]:
         fast_decision = _detect_fast_intent(
@@ -4481,54 +4503,12 @@ async def _handle_webhook_payload(
         )
 
     if fast_decision:
-        if fast_decision.intent == "price_query" and policy_handler:
-            price_item_fn = policy_handler.get("price_item")
-            price_item = price_item_fn(message_text) if price_item_fn else None
-            if price_item:
-                context = _get_conversation_context(conversation)
-                context = _set_service_hint(context, price_item, now)
-                _set_conversation_context(conversation, context)
-
         bot_response = fast_decision.response
         _reset_low_confidence_retry(conversation)
 
         result_message = "Fast intent reply sent"
         if fast_decision.action == "smalltalk":
             result_message = "Fast intent smalltalk sent"
-        elif fast_decision.action == "escalate":
-            result_message = "Fast intent reply sent"
-            _, reused, telegram_sent = _reuse_active_handover(
-                db=db,
-                conversation=conversation,
-                user=user,
-                message=message_text,
-                source="fast_intent",
-                intent=fast_decision.intent,
-            )
-            if reused:
-                result_message = f"Fast intent reuse, telegram={'sent' if telegram_sent else 'failed'}"
-            elif conversation.state == ConversationState.BOT_ACTIVE.value and routing["allow_handover_create"]:
-                result = escalate_to_pending(
-                    db=db,
-                    conversation=conversation,
-                    user_message=message_text,
-                    trigger_type="intent",
-                    trigger_value=fast_decision.intent or "policy",
-                )
-                if result.ok:
-                    handover = result.value
-                    telegram_sent = send_telegram_notification(
-                        db=db,
-                        handover=handover,
-                        conversation=conversation,
-                        user=user,
-                        message=message_text,
-                    )
-                    result_message = f"Fast intent escalation, telegram={'sent' if telegram_sent else 'failed'}"
-                else:
-                    result_message = f"Fast intent escalation failed: {result.error}"
-            else:
-                result_message = "Fast intent escalation skipped (already pending)"
 
         _record_decision_trace(
             conversation,
@@ -4560,6 +4540,246 @@ async def _handle_webhook_payload(
             bot_response=bot_response,
         )
 
+    if routing["allow_bot_reply"]:
+        llm_primary_result = generate_bot_response(
+            db,
+            conversation,
+            message_text,
+            payload.client_slug,
+            append_user_message=append_user_message,
+            pending_hint=conversation.state == ConversationState.PENDING.value,
+            timing_context=timing_context,
+        )
+        if not llm_primary_result.ok:
+            llm_primary_failed = True
+            llm_primary_reason = "ai_error"
+        else:
+            response_text, confidence = llm_primary_result.value
+            if confidence == "bot_inactive":
+                llm_primary_failed = True
+                llm_primary_reason = "bot_inactive"
+            elif response_text and confidence != "low_confidence":
+                blocked_topics = _detect_llm_guard_topics(response_text)
+                if blocked_topics:
+                    bot_response = MSG_ESCALATED
+                    _reset_low_confidence_retry(conversation)
+
+                    result_message = "LLM guard escalation"
+                    _, reused, telegram_sent = _reuse_active_handover(
+                        db=db,
+                        conversation=conversation,
+                        user=user,
+                        message=message_text,
+                        source="llm_guard",
+                        intent="llm_guard",
+                    )
+                    if reused:
+                        result_message = f"LLM guard reuse, telegram={'sent' if telegram_sent else 'failed'}"
+                    elif conversation.state == ConversationState.BOT_ACTIVE.value and routing["allow_handover_create"]:
+                        result = escalate_to_pending(
+                            db=db,
+                            conversation=conversation,
+                            user_message=message_text,
+                            trigger_type="intent",
+                            trigger_value="llm_guard",
+                        )
+                        if result.ok:
+                            handover = result.value
+                            telegram_sent = send_telegram_notification(
+                                db=db,
+                                handover=handover,
+                                conversation=conversation,
+                                user=user,
+                                message=message_text,
+                            )
+                            result_message = f"LLM guard escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                        else:
+                            result_message = f"LLM guard escalation failed: {result.error}"
+                    else:
+                        result_message = "LLM guard escalation skipped (already pending)"
+
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "llm_guard",
+                            "decision": "blocked_topics",
+                            "state": conversation.state,
+                            "blocked_topics": blocked_topics,
+                        },
+                    )
+                    if saved_message:
+                        llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+                        llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+                        llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+                        _update_message_decision_metadata(
+                            saved_message,
+                            {
+                                "action": "escalate",
+                                "intent": "llm_guard",
+                                "source": "llm_guard",
+                                "fast_intent": False,
+                                "llm_primary_used": False,
+                                "llm_used": llm_used,
+                                "llm_timeout": llm_timeout,
+                                "llm_cache_hit": llm_cache_hit,
+                            },
+                        )
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = _send_response(bot_response)
+                    if not sent:
+                        result_message = f"{result_message}; response_send=failed"
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
+
+                bot_response = response_text
+                _reset_low_confidence_retry(conversation)
+                trace = _attach_llm_cache_flag(
+                    {
+                        "stage": "ai_response",
+                        "decision": "bot_reply",
+                        "state": conversation.state,
+                        "confidence": confidence,
+                        "llm_primary_used": True,
+                    },
+                    timing_context,
+                )
+                _record_decision_trace(conversation, trace)
+                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                sent = _send_response(bot_response)
+                result_message = "Message sent" if sent else "Failed to send"
+                if saved_message:
+                    llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+                    llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+                    llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "action": "ai_response",
+                            "intent": intent.value if intent else None,
+                            "source": "llm" if llm_used else "rule",
+                            "fast_intent": False,
+                            "llm_primary_used": True,
+                            "llm_used": llm_used,
+                            "llm_timeout": llm_timeout,
+                            "llm_cache_hit": llm_cache_hit,
+                        },
+                    )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+
+            else:
+                llm_primary_failed = True
+                llm_primary_reason = "low_confidence" if confidence == "low_confidence" else "no_response"
+
+    if llm_primary_failed and not bypass_domain_flows and policy_handler and _should_run_truth_gate(
+        routing, booking_wants_flow
+    ):
+        policy_t0 = time.monotonic()
+        truth_gate = policy_handler.get("truth_gate")
+        decision = truth_gate(message_text) if truth_gate else None
+        if decision:
+            if decision.intent == "price_query":
+                price_item_fn = policy_handler.get("price_item")
+                price_item = price_item_fn(message_text) if price_item_fn else None
+                if price_item:
+                    context = _get_conversation_context(conversation)
+                    context = _set_service_hint(context, price_item, now)
+                    _set_conversation_context(conversation, context)
+                else:
+                    decision = DemoSalonDecision(
+                        action="escalate",
+                        response=MSG_ESCALATED,
+                        intent="price_query",
+                    )
+            bot_response = decision.response
+            _reset_low_confidence_retry(conversation)
+
+            result_message = "Truth gate fallback reply sent"
+            if decision.action == "escalate":
+                _, reused, telegram_sent = _reuse_active_handover(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message=message_text,
+                    source="truth_gate",
+                    intent=decision.intent,
+                )
+                if reused:
+                    result_message = f"Truth gate reuse, telegram={'sent' if telegram_sent else 'failed'}"
+                elif conversation.state == ConversationState.BOT_ACTIVE.value:
+                    result = escalate_to_pending(
+                        db=db,
+                        conversation=conversation,
+                        user_message=message_text,
+                        trigger_type="intent",
+                        trigger_value=decision.intent or "policy",
+                    )
+                    if result.ok:
+                        handover = result.value
+                        telegram_sent = send_telegram_notification(
+                            db=db,
+                            handover=handover,
+                            conversation=conversation,
+                            user=user,
+                            message=message_text,
+                        )
+                        result_message = f"Truth gate escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                    else:
+                        result_message = f"Truth gate escalation failed: {result.error}"
+                else:
+                    result_message = "Truth gate escalation skipped (already pending)"
+
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "truth_gate",
+                    "decision": decision.action,
+                    "intent": decision.intent,
+                    "state": conversation.state,
+                    "booking_wants_flow": booking_wants_flow,
+                    "policy_type": policy_type,
+                    "llm_fallback_reason": llm_primary_reason,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action=decision.action,
+                intent=decision.intent,
+                source="truth_gate",
+                fast_intent=False,
+            )
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = _send_response(bot_response)
+            if not sent:
+                result_message = f"{result_message}; response_send=failed"
+            _log_timing(
+                "policy_gate_ms",
+                (time.monotonic() - policy_t0) * 1000,
+                {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow, "gate": "truth_fallback"},
+            )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+        _log_timing(
+            "policy_gate_ms",
+            (time.monotonic() - policy_t0) * 1000,
+            {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow, "gate": "truth_fallback"},
+        )
+
     # 10. Classify intent (expensive). Protect against accidental escalations on short/noisy messages.
     intent_t0 = time.monotonic()
     decision_text = _normalize_message_text(message_text)
@@ -4575,8 +4795,6 @@ async def _handle_webhook_payload(
     domain_in_score = 0.0
     domain_out_score = 0.0
     domain_meta: dict = {}
-    strong_domain_out = False
-    strong_domain_meta: dict = {}
     if (
         conversation.state == ConversationState.BOT_ACTIVE.value
         and not (is_greeting or is_thanks or is_ack or is_low_signal)
@@ -4613,25 +4831,10 @@ async def _handle_webhook_payload(
                     }
                 },
             )
-        strong_domain_out, strong_domain_meta = is_strong_out_of_domain(
-            message_text,
-            domain_intent,
-            domain_in_score,
-            domain_out_score,
-            client.config if client else None,
-        )
 
     domain_out_hits = int(domain_meta.get("out_hits") or 0)
     domain_strict_in_hits = int(domain_meta.get("strict_in_hits") or 0)
-    out_hit_override = domain_out_hits > 0 and domain_strict_in_hits == 0
-
-    out_of_domain_signal = False
-    if out_hit_override:
-        out_of_domain_signal = True
-    elif strong_domain_out:
-        out_of_domain_signal = True
-    elif intent == Intent.OUT_OF_DOMAIN and domain_intent != DomainIntent.IN_DOMAIN and domain_strict_in_hits == 0:
-        out_of_domain_signal = True
+    out_of_domain_signal = domain_out_hits > 0
     _log_timing(
         "intent_ms",
         (time.monotonic() - intent_t0) * 1000,
@@ -4645,45 +4848,6 @@ async def _handle_webhook_payload(
     )
 
     rag_confident = False
-    rag_score = 0.0
-    if routing["allow_bot_reply"] and out_of_domain_signal:
-        rag_confident, rag_score = get_rag_confidence(
-            db=db,
-            conversation_id=conversation.id,
-            client_slug=payload.client_slug,
-            user_message=message_text,
-            timing_context=timing_context,
-        )
-        log_scores = _is_env_enabled(os.environ.get("DOMAIN_ROUTER_LOG_SCORES"), default=False)
-        if log_scores:
-            logger.info(
-                "Domain out-of-domain gate",
-                extra={
-                    "context": {
-                        "client_slug": payload.client_slug,
-                        "remote_jid": remote_jid,
-                        "intent": intent.value,
-                        "domain_intent": domain_intent.value,
-                        "strong_domain_out": strong_domain_out,
-                        "rag_confident": rag_confident,
-                        "rag_score": round(rag_score, 4),
-                        "in_score": round(domain_in_score, 4),
-                        "out_score": round(domain_out_score, 4),
-                        "strict_out_threshold": strong_domain_meta.get("strict_out_threshold"),
-                        "strong_out_threshold": strong_domain_meta.get("strong_out_threshold"),
-                        "strict_margin": strong_domain_meta.get("strict_margin"),
-                        "strong_margin": strong_domain_meta.get("strong_margin"),
-                        "strict_in_max": strong_domain_meta.get("strict_in_max"),
-                        "strong_in_max": strong_domain_meta.get("strong_in_max"),
-                        "strict_min_len": strong_domain_meta.get("strict_min_len"),
-                        "message_len": strong_domain_meta.get("message_len"),
-                        "out_hits": strong_domain_meta.get("out_hits"),
-                        "strict_in_hits": strong_domain_meta.get("strict_in_hits"),
-                        "matched_out": strong_domain_meta.get("matched_out"),
-                        "matched_strict_in": strong_domain_meta.get("matched_strict_in"),
-                    }
-                },
-            )
 
     _record_decision_trace(
         conversation,
@@ -4957,15 +5121,18 @@ async def _handle_webhook_payload(
 
     elif decision.action == "ai_response":
         # Bot responds: normal mode OR pending (bot helps while waiting)
-        gen_result = generate_bot_response(
-            db,
-            conversation,
-            message_text,
-            payload.client_slug,
-            append_user_message=append_user_message,
-            pending_hint=conversation.state == ConversationState.PENDING.value,
-            timing_context=timing_context,
-        )
+        llm_primary_used = False
+        gen_result = llm_primary_result
+        if gen_result is None:
+            gen_result = generate_bot_response(
+                db,
+                conversation,
+                message_text,
+                payload.client_slug,
+                append_user_message=append_user_message,
+                pending_hint=conversation.state == ConversationState.PENDING.value,
+                timing_context=timing_context,
+            )
 
         if not gen_result.ok:
             # AI error — fallback response
@@ -5068,6 +5235,7 @@ async def _handle_webhook_payload(
                 bot_response = response_text
                 logger.debug(f"bot_response: {bot_response[:100] if bot_response else 'None/Empty'}...")
                 _reset_low_confidence_retry(conversation)
+                llm_primary_used = True
                 trace = _attach_llm_cache_flag(
                     {
                         "stage": "ai_response",
@@ -5143,6 +5311,7 @@ async def _handle_webhook_payload(
                     "intent": intent.value if intent else None,
                     "source": "llm" if llm_used else "rule",
                     "fast_intent": False,
+                    "llm_primary_used": llm_primary_used,
                     "llm_used": llm_used,
                     "llm_timeout": llm_timeout,
                     "llm_cache_hit": llm_cache_hit,

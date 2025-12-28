@@ -174,11 +174,10 @@
         "id": "TC018",
         "name": "Fast intent: services overview",
         "input": "какие услуги вы оказываете?",
-        "expected": "Ответ по услугам из truth gate без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "reply",
-          "expect_intent": "services_overview"
+          "expect_match": false
         },
         "status": null
       },
@@ -186,11 +185,10 @@
         "id": "TC019",
         "name": "Fast intent: address",
         "input": "где вы находитесь?",
-        "expected": "Ответ по адресу из truth gate без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "reply",
-          "expect_intent": "location"
+          "expect_match": false
         },
         "status": null
       },
@@ -198,11 +196,10 @@
         "id": "TC019a",
         "name": "Fast intent: hours in weekdays",
         "input": "Во сколько вы открываетесь в будни?",
-        "expected": "Ответ по часам работы без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "reply",
-          "expect_intent": "hours"
+          "expect_match": false
         },
         "status": null
       },
@@ -210,11 +207,10 @@
         "id": "TC020",
         "name": "Fast intent: greeting typo",
         "input": "здравсвтуйте",
-        "expected": "Бот отвечает приветствием без LLM",
+        "expected": "Fast-intent не срабатывает (ответ через LLM-first или fallback)",
         "automation": {
           "check": "fast_intent",
-          "expect_action": "smalltalk",
-          "expect_intent": "greeting"
+          "expect_match": false
         },
         "status": null
       },

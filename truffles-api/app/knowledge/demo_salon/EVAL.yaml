@@ -40,6 +40,15 @@ eval_cases:
     must_include_any:
     - от 25 000
     - цена от 25 000
+- id: E003a
+  user: Скок стоит маник?
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - маникюр
+    - 2 500
+    - 3 500
 - id: E004
   user: Почему у вас цена «от»?
   expected:
@@ -142,6 +151,19 @@ eval_cases:
     booking_slots:
     - service
     - datetime
+- id: E010e
+  user: ну типа записаться на маник
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+- id: E010f
+  user: чо по адресу?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
 - id: E011
   user: Как пройти от остановки?
   expected:

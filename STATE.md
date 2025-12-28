@@ -20,8 +20,9 @@
 - Инфра compose: `/home/zhan/infrastructure/docker-compose.yml` + `/home/zhan/infrastructure/docker-compose.truffles.yml`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 
 ### КЛЮЧЕВЫЕ МОЗГИ / РИСКИ / ПРОВЕРКИ (быстрый чек)
-- Мозги: `outbox → _handle_webhook_payload → policy/truth → booking → intent → RAG/LLM`.
+- Мозги: `outbox → _handle_webhook_payload → pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → LLM-first → truth gate fallback → low-confidence уточнение/эскалация`.
 - Риски: payment/reschedule/medical/complaint — только эскалация; не озвучивать способы оплаты; branch‑gate для цен.
+- LLM‑first критерии: отвечаем только по RAG; если RAG пуст/низкий → уточнение; если ответ содержит payment/medical/complaint/discount/refund → эскалация; decision_meta включает `llm_primary_used`.
 - Проверки качества: `EVAL.yaml` + `pytest truffles-api/tests/test_<client>_eval.py` + sync KB (`ops/sync_client.py`).
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
@@ -1325,6 +1326,14 @@ LIMIT 1;
 | `ops/update_instance_demo.sql` | anchors_in/out расширены, добавлен anchors_in_strict + “кошачий глаз” |
 | `tests/test_message_endpoint.py` | Demo domain_router config обновлён (anchors_in/out + strict) |
 | `tests/test_cases.json` | Кейсы OOD/style/“кошачий глаз” для domain_router и fast_intent |
+| `webhook.py` | Порядок гейтов обновлён: было policy/truth → booking → fast_intent → intent/domain → LLM; стало pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → LLM-first → truth gate fallback |
+| `webhook.py` | LLM guard: темы оплат/медиц/жалоб/скидок/возвратов → эскалация + decision_meta `llm_primary_used` |
+| `webhook.py` | Fast-intent теперь только smalltalk (greeting/thanks/ok), booking slang "маник" добавлен в keywords |
+| `ai_service.py` | GREETING_PHRASES расширен ("сәлем") для smalltalk |
+| `tests/test_message_endpoint.py` | Тесты: fast-intent smalltalk, truth-gate fallback после LLM low_confidence, LLM guard эскалирует |
+| `tests/test_cases.json` | Fast-intent golden cases обновлены (services/address/hours теперь не матчатся) |
+| `EVAL.yaml` | Добавлены сленговые кейсы: "скок стоит маник", "чо по адресу", "записаться на маник" |
+| `SPECS/CONSULTANT.md` | Зафиксировано: LLM-first с жёсткими правилами и fallback |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 
