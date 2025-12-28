@@ -49,6 +49,7 @@ from app.services.demo_salon_knowledge import (
     get_demo_salon_price_item,
     get_demo_salon_price_reply,
     get_demo_salon_service_decision,
+    semantic_service_match,
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
@@ -5306,6 +5307,53 @@ async def _handle_webhook_payload(
                     user_text=message_text,
                     miss_type=miss_type,
                 )
+                semantic_result = None
+                if not out_of_domain_signal:
+                    semantic_result = semantic_service_match(message_text, payload.client_slug)
+                if semantic_result:
+                    bot_response = semantic_result.response
+                    _reset_low_confidence_retry(conversation)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "service_semantic_matcher",
+                            "decision": semantic_result.action,
+                            "state": conversation.state,
+                            "score": semantic_result.score,
+                            "canonical_name": semantic_result.canonical_name,
+                            "suggestions": semantic_result.suggestions or [],
+                        },
+                    )
+                    if saved_message:
+                        llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+                        llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+                        llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+                        _update_message_decision_metadata(
+                            saved_message,
+                            {
+                                "action": semantic_result.action,
+                                "intent": "service_semantic",
+                                "source": "service_semantic_matcher",
+                                "service_semantic_score": semantic_result.score,
+                                "fast_intent": False,
+                                "llm_primary_used": False,
+                                "llm_used": llm_used,
+                                "llm_timeout": llm_timeout,
+                                "llm_cache_hit": llm_cache_hit,
+                            },
+                        )
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = _send_response(bot_response)
+                    result_message = (
+                        "Service semantic matcher reply sent" if sent else "Service semantic matcher send failed"
+                    )
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
                 if conversation.state == ConversationState.PENDING.value:
                     # Already escalated: respond but don't re-escalate
                     bot_response = MSG_PENDING_LOW_CONFIDENCE

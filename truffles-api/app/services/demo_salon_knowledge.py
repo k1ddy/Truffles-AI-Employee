@@ -1,16 +1,30 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import httpx
 import yaml
+
+from app.logging_config import get_logger
+from app.services.knowledge_service import get_embedding
 
 _DEMO_SALON_DIR = Path(__file__).resolve().parents[1] / "knowledge" / "demo_salon"
 _TRUTH_PATH = _DEMO_SALON_DIR / "SALON_TRUTH.yaml"
 _INTENTS_PATH = _DEMO_SALON_DIR / "INTENTS_PHRASES_DEMO_SALON.yaml"
+_SERVICES_COLLECTION = "services_index"
+
+_SERVICE_MATCH_THRESHOLD = float(os.environ.get("SERVICE_SEMANTIC_MATCH_THRESHOLD", "0.40"))
+_SERVICE_SUGGEST_THRESHOLD = float(os.environ.get("SERVICE_SEMANTIC_SUGGEST_THRESHOLD", "0.25"))
+_SERVICE_SUGGEST_LIMIT = int(os.environ.get("SERVICE_SEMANTIC_SUGGEST_LIMIT", "3"))
+_QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
+_QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
+
+logger = get_logger("demo_salon_knowledge")
 
 
 @dataclass(frozen=True)
@@ -19,6 +33,15 @@ class DemoSalonDecision:
     response: str
     intent: str | None = None
     collect: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class SemanticServiceMatch:
+    action: str
+    response: str
+    score: float
+    canonical_name: str | None = None
+    suggestions: list[str] | None = None
 
 
 def _normalize_text(text: str) -> str:
@@ -406,6 +429,162 @@ def _format_service_not_found_reply() -> str | None:
     if suggestions_text:
         return f"{template} {suggestions_text}."
     return template
+
+
+def _format_service_suggestions_reply(suggestions: list[str]) -> str | None:
+    truth = load_yaml_truth()
+    catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
+    template = None
+    if isinstance(catalog, dict):
+        template = catalog.get("not_found_reply")
+    if not template:
+        template = "В списке услуг нет такой позиции. Возможно, вы имели в виду: {suggestions}."
+    suggestions_text = ", ".join(suggestions)
+    if "{suggestions}" in template:
+        return template.format(suggestions=suggestions_text)
+    if suggestions_text:
+        return f"{template} {suggestions_text}."
+    return template
+
+
+def _find_catalog_service_by_name(name: str) -> dict[str, Any] | None:
+    if not name:
+        return None
+    needle = _normalize_text(name)
+    for entry in _build_service_index():
+        if _normalize_text(entry.get("name") or "") == needle:
+            return entry
+    return None
+
+
+def _format_semantic_service_reply(payload: dict) -> str | None:
+    canonical_name = payload.get("canonical_name") if isinstance(payload, dict) else None
+    if isinstance(canonical_name, str) and canonical_name.strip():
+        service = _find_catalog_service_by_name(canonical_name)
+        if service:
+            reply = _format_service_reply(service, load_yaml_truth())
+            if reply:
+                return reply
+        price_item = _build_price_name_index().get(_normalize_text(canonical_name))
+        if price_item:
+            return _format_price_reply(price_item)
+
+    price_item_payload = payload.get("price_item") if isinstance(payload, dict) else None
+    if isinstance(price_item_payload, dict):
+        return _format_price_reply(price_item_payload)
+    return None
+
+
+def _should_attempt_semantic_match(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    if _has_price_signal(normalized, text):
+        return True
+    service_keywords = ["делаете", "делает", "есть ли", "есть", "оказываете", "предоставляете"]
+    if _contains_any(normalized, service_keywords):
+        return True
+    if _message_has_service_token(normalized):
+        return True
+    return False
+
+
+def _search_services_index(text: str, client_slug: str, limit: int) -> list[dict[str, Any]]:
+    if not text or not client_slug:
+        return []
+    try:
+        embedding = get_embedding(text)
+    except Exception as exc:
+        logger.warning("services_index embedding failed", extra={"context": {"error": str(exc)}})
+        return []
+
+    headers = {}
+    if _QDRANT_API_KEY:
+        headers["api-key"] = _QDRANT_API_KEY
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            response = client.post(
+                f"{_QDRANT_HOST}/collections/{_SERVICES_COLLECTION}/points/search",
+                headers=headers,
+                json={
+                    "vector": embedding,
+                    "limit": limit,
+                    "score_threshold": 0.0,
+                    "filter": {"must": [{"key": "client_slug", "match": {"value": client_slug}}]},
+                    "with_payload": True,
+                },
+            )
+    except Exception as exc:
+        logger.warning("services_index search failed", extra={"context": {"error": str(exc)}})
+        return []
+
+    if response.status_code == 404:
+        return []
+    if response.status_code != 200:
+        logger.warning(
+            "services_index search failed",
+            extra={"context": {"status": response.status_code, "body": response.text[:200]}},
+        )
+        return []
+
+    data = response.json()
+    results: list[dict[str, Any]] = []
+    for point in data.get("result", []):
+        payload = point.get("payload") if isinstance(point, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        results.append(
+            {
+                "score": float(point.get("score") or 0.0),
+                "payload": payload,
+            }
+        )
+    return results
+
+
+def semantic_service_match(text: str, client_slug: str) -> SemanticServiceMatch | None:
+    if not _should_attempt_semantic_match(text):
+        return None
+    results = _search_services_index(text, client_slug, _SERVICE_SUGGEST_LIMIT)
+    if not results:
+        return None
+
+    top = results[0]
+    score = float(top.get("score") or 0.0)
+    payload = top.get("payload") if isinstance(top.get("payload"), dict) else {}
+    suggestions: list[str] = []
+    for item in results:
+        payload_item = item.get("payload") if isinstance(item.get("payload"), dict) else None
+        name = payload_item.get("canonical_name") if isinstance(payload_item, dict) else None
+        if isinstance(name, str) and name.strip():
+            cleaned = name.strip()
+            if cleaned not in suggestions:
+                suggestions.append(cleaned)
+
+    if score >= _SERVICE_MATCH_THRESHOLD:
+        reply = _format_semantic_service_reply(payload)
+        if reply:
+            return SemanticServiceMatch(
+                action="match",
+                response=reply,
+                score=score,
+                canonical_name=payload.get("canonical_name"),
+                suggestions=suggestions,
+            )
+
+    if score >= _SERVICE_SUGGEST_THRESHOLD:
+        reply = _format_service_suggestions_reply(suggestions or [])
+        if reply:
+            return SemanticServiceMatch(
+                action="suggest",
+                response=reply,
+                score=score,
+                canonical_name=payload.get("canonical_name"),
+                suggestions=suggestions,
+            )
+
+    return None
 
 
 def _looks_like_service_question(normalized: str, raw_text: str | None = None) -> bool:

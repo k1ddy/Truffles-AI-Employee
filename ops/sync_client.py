@@ -45,6 +45,7 @@ if not QDRANT_URL:
     qdrant_ip = _resolve_docker_ip("truffles_qdrant_1")
     QDRANT_URL = f"http://{qdrant_ip}:6333" if qdrant_ip else "http://qdrant:6333"
 QDRANT_COLLECTION = "truffles_knowledge"
+SERVICES_COLLECTION = "services_index"
 QDRANT_API_KEY = (
     os.environ.get("QDRANT_API_KEY")
     or os.environ.get("QDRANT__SERVICE__API_KEY")
@@ -126,10 +127,211 @@ def validate_client_pack(truth_path: str) -> bool:
     print("✅ client_pack валиден")
     return True
 
+
 def get_embedding(text):
     """Получить embedding от BGE-M3"""
     resp = requests.post(BGE_URL, json={"inputs": text}, timeout=30)
     return resp.json()[0]
+
+
+def _load_truth_data(client_slug: str) -> dict:
+    path = _truth_path(client_slug)
+    if not os.path.exists(path):
+        print(f"❌ SALON_TRUTH.yaml не найден: {path}")
+        return {}
+    with open(path, "r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    if not isinstance(data, dict):
+        return {}
+    client_pack = data.get("client_pack")
+    if isinstance(client_pack, dict):
+        return client_pack
+    return data
+
+
+def _build_price_category_index(truth: dict) -> dict[str, str]:
+    index: dict[str, str] = {}
+    for category in truth.get("price_list", []) if isinstance(truth, dict) else []:
+        if not isinstance(category, dict):
+            continue
+        category_name = str(category.get("category", "")).strip()
+        for item in category.get("items", []) if isinstance(category.get("items"), list) else []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            if name and category_name:
+                index[name.casefold()] = category_name
+    return index
+
+
+def _collect_service_entries(truth: dict) -> list[dict]:
+    entries: list[dict] = []
+    price_category_index = _build_price_category_index(truth)
+
+    for category in truth.get("price_list", []) if isinstance(truth, dict) else []:
+        if not isinstance(category, dict):
+            continue
+        category_name = str(category.get("category", "")).strip()
+        for item in category.get("items", []) if isinstance(category.get("items"), list) else []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            entries.append(
+                {
+                    "entry_type": "price_item",
+                    "canonical_name": name,
+                    "category": category_name or None,
+                    "price_item": {
+                        "name": name,
+                        "price": item.get("price"),
+                        "price_from": item.get("price_from"),
+                        "note": item.get("note"),
+                    },
+                }
+            )
+
+    catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
+    services = catalog.get("services") if isinstance(catalog, dict) else None
+    if isinstance(services, list):
+        for service in services:
+            if not isinstance(service, dict):
+                continue
+            name = str(service.get("name", "")).strip()
+            if not name:
+                continue
+            category = None
+            price_items = service.get("price_items") if isinstance(service.get("price_items"), list) else []
+            for price_item_name in price_items:
+                if not isinstance(price_item_name, str):
+                    continue
+                category = price_category_index.get(price_item_name.casefold())
+                if category:
+                    break
+            entries.append(
+                {
+                    "entry_type": "service_catalog",
+                    "canonical_name": name,
+                    "category": category,
+                    "price_item": None,
+                }
+            )
+
+    seen: set[tuple[str, str, str | None]] = set()
+    deduped: list[dict] = []
+    for entry in entries:
+        key = (
+            str(entry.get("entry_type") or ""),
+            str(entry.get("canonical_name") or "").casefold(),
+            str(entry.get("category") or "") or None,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(entry)
+    return deduped
+
+
+def _ensure_qdrant_collection(collection: str, vector_size: int) -> bool:
+    resp = requests.get(
+        f"{QDRANT_URL}/collections/{collection}",
+        headers={"api-key": QDRANT_API_KEY},
+        timeout=15,
+    )
+    if resp.status_code == 200:
+        return True
+    if resp.status_code != 404:
+        print(f"❌ Qdrant collection check failed: {resp.status_code} {resp.text}")
+        return False
+
+    create = requests.put(
+        f"{QDRANT_URL}/collections/{collection}",
+        headers={"api-key": QDRANT_API_KEY, "Content-Type": "application/json"},
+        json={"vectors": {"size": vector_size, "distance": "Cosine"}},
+        timeout=30,
+    )
+    if create.status_code not in {200, 201}:
+        print(f"❌ Qdrant create collection failed: {create.status_code} {create.text}")
+        return False
+    print(f"✓ Создана коллекция {collection}")
+    return True
+
+
+def _delete_client_services(client_slug: str) -> None:
+    resp = requests.post(
+        f"{QDRANT_URL}/collections/{SERVICES_COLLECTION}/points/delete",
+        headers={"api-key": QDRANT_API_KEY, "Content-Type": "application/json"},
+        json={"filter": {"must": [{"key": "client_slug", "match": {"value": client_slug}}]}},
+        timeout=30,
+    )
+    if resp.status_code == 200:
+        result = resp.json()
+        if result.get("status") == "ok":
+            print("✓ Старые сервисы удалены")
+
+
+def _upsert_services(points: list[dict]) -> dict:
+    resp = requests.put(
+        f"{QDRANT_URL}/collections/{SERVICES_COLLECTION}/points",
+        headers={"api-key": QDRANT_API_KEY, "Content-Type": "application/json"},
+        json={"points": points},
+        timeout=60,
+    )
+    return resp.json()
+
+
+def sync_services_index(client_slug: str) -> int:
+    truth = _load_truth_data(client_slug)
+    entries = _collect_service_entries(truth)
+    if not entries:
+        print("❌ Нет услуг для синхронизации services_index")
+        return 0
+
+    first_vector = get_embedding(entries[0]["canonical_name"])
+    if not isinstance(first_vector, list):
+        print("❌ Некорректный embedding для services_index")
+        return 0
+
+    vector_size = len(first_vector)
+    if not _ensure_qdrant_collection(SERVICES_COLLECTION, vector_size):
+        return 0
+
+    print(f"Удаляю старые сервисы {client_slug}...")
+    _delete_client_services(client_slug)
+
+    points: list[dict] = []
+    for idx, entry in enumerate(entries):
+        name = entry["canonical_name"]
+        vector = first_vector if idx == 0 else get_embedding(name)
+        point_id_source = f"{client_slug}:{entry.get('entry_type')}:{name}:{entry.get('category') or ''}"
+        point_id = hashlib.md5(point_id_source.encode("utf-8")).hexdigest()
+        payload = {
+            "client_slug": client_slug,
+            "canonical_name": name,
+            "category": entry.get("category"),
+            "price_item": entry.get("price_item"),
+        }
+        entry_type = entry.get("entry_type")
+        if entry_type:
+            payload["entry_type"] = entry_type
+        points.append(
+            {
+                "id": point_id,
+                "vector": vector,
+                "payload": payload,
+            }
+        )
+
+    if points:
+        print(f"Загружаю {len(points)} сервисов в {SERVICES_COLLECTION}...")
+        result = _upsert_services(points)
+        if result.get("status") == "ok":
+            print(f"✅ Успешно загружено {len(points)} сервисов")
+        else:
+            print(f"❌ Ошибка: {result}")
+    return len(points)
+
 
 def delete_client_docs(client_slug):
     """Удалить все документы клиента из Qdrant"""
@@ -275,9 +477,10 @@ def main():
     print(f"=" * 50)
 
     total = sync_folder(client_slug, docs_dir)
+    services_total = sync_services_index(client_slug)
 
     print(f"\n{'=' * 50}")
-    print(f"ИТОГО: {total} chunks")
+    print(f"ИТОГО: {total} chunks, services_index={services_total}")
     print(f"{'=' * 50}")
 
 if __name__ == "__main__":

@@ -434,6 +434,43 @@
           "expect_match": false
         },
         "status": null
+      },
+      {
+        "id": "TC040",
+        "name": "Semantic: manicure typo",
+        "input": "делаете манник?",
+        "expected": "Матч услуги маникюр (без LLM), ответ по прайсу/правде",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC041",
+        "name": "Semantic: dog haircut OOD",
+        "input": "подстричь собаку?",
+        "expected": "OOD ответ, semantic matcher не срабатывает",
+        "automation": {
+          "check": "domain_router",
+          "domain_router": "demo_salon",
+          "expect_out_of_domain": true,
+          "expect_domain_intent": "out_of_domain"
+        },
+        "status": null
+      },
+      {
+        "id": "TC042",
+        "name": "Semantic: foot massage suggest",
+        "input": "делаете массаж ног?",
+        "expected": "Нет в списке → подсказка топ-услуг",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC043",
+        "name": "Semantic: haircut generic",
+        "input": "делаете стрижку?",
+        "expected": "Если услуга есть — match, иначе suggest",
+        "automation": null,
+        "status": null
       }
     ]
   },

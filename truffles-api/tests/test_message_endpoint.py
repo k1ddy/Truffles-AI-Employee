@@ -15,7 +15,7 @@ from app.routers import webhook as webhook_router
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
 from app.services import escalation_service
-from app.services.demo_salon_knowledge import DemoSalonDecision
+from app.services.demo_salon_knowledge import DemoSalonDecision, SemanticServiceMatch
 from app.services.intent_service import (
     Intent,
     classify_domain_with_scores,
@@ -501,6 +501,193 @@ def test_truth_gate_sets_decision_meta():
     assert updates["llm_primary_used"] is False
     assert updates["llm_used"] is False
     assert updates["llm_timeout"] is False
+
+
+def test_semantic_service_matcher_handles_low_confidence_match():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="hybrid",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    branch_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=branch_id,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="делаете манник?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-semantic-1",
+                timestamp=1234567890,
+            ),
+        ),
+    )
+
+    low_confidence = SimpleNamespace(ok=True, value=(None, "low_confidence"))
+    semantic = SemanticServiceMatch(action="match", response="Маникюр — 2 500 ₸.", score=0.52)
+
+    with patch("app.routers.webhook._get_policy_handler", return_value=None), patch(
+        "app.routers.webhook.generate_bot_response", return_value=low_confidence
+    ), patch(
+        "app.routers.webhook.semantic_service_match", return_value=semantic
+    ), patch(
+        "app.routers.webhook.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook._update_message_decision_metadata"
+    ) as mock_update:
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response == semantic.response
+    updates = mock_update.call_args[0][1]
+    assert updates["source"] == "service_semantic_matcher"
+    assert updates["action"] == "match"
+    assert updates["service_semantic_score"] == semantic.score
+
+
+def test_semantic_service_matcher_handles_low_confidence_suggest():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="hybrid",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    branch_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=branch_id,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="делаете массаж ног?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-semantic-2",
+                timestamp=1234567890,
+            ),
+        ),
+    )
+
+    low_confidence = SimpleNamespace(ok=True, value=(None, "low_confidence"))
+    semantic = SemanticServiceMatch(
+        action="suggest",
+        response="В списке услуг нет такой позиции. Возможно, вы имели в виду: уход за лицом.",
+        score=0.31,
+        suggestions=["Уход за лицом"],
+    )
+
+    with patch("app.routers.webhook._get_policy_handler", return_value=None), patch(
+        "app.routers.webhook.generate_bot_response", return_value=low_confidence
+    ), patch(
+        "app.routers.webhook.semantic_service_match", return_value=semantic
+    ), patch(
+        "app.routers.webhook.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook._update_message_decision_metadata"
+    ) as mock_update:
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response == semantic.response
+    updates = mock_update.call_args[0][1]
+    assert updates["source"] == "service_semantic_matcher"
+    assert updates["action"] == "suggest"
+    assert updates["service_semantic_score"] == semantic.score
 
 
 def test_service_matcher_short_circuits_llm():
