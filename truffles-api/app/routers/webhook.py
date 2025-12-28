@@ -4401,6 +4401,11 @@ async def _handle_webhook_payload(
 
     policy_handler = _get_policy_handler(client)
     policy_type = policy_handler.get("policy_type") if policy_handler else None
+    multi_intent_primary = None
+    multi_intent_secondary: list[str] = []
+    multi_intent_followup = None
+    multi_intent_booking_followup = None
+    multi_intent_other_followup = None
 
     if (
         conversation.state == ConversationState.BOT_ACTIVE.value
