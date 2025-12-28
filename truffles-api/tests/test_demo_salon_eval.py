@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
@@ -10,6 +11,23 @@ EVAL_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_sa
 
 def _normalize(text: str) -> str:
     return (text or "").casefold()
+
+
+def _fake_service_hint(text: str, client_slug: str | None) -> str | None:
+    normalized = (text or "").casefold()
+    if "маник" in normalized:
+        return "маникюр"
+    if "педик" in normalized:
+        return "педикюр"
+    if "стриж" in normalized:
+        return "стрижка"
+    if "массаж" in normalized and "ног" in normalized:
+        return "массаж ног"
+    if "бров" in normalized:
+        return "брови"
+    if "ресниц" in normalized:
+        return "ресницы"
+    return None
 
 
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:
@@ -42,9 +60,18 @@ def test_demo_salon_eval_cases():
         expected_action = expected.get("action")
         if expected_action == "booking_flow":
             messages = [user_text] if user_text else []
-            booking_signal = webhook_router._has_booking_signal(messages)
-            assert booking_signal is True, f"{case_id}: booking signal not detected"
-            booking_state = webhook_router._update_booking_from_messages({}, messages)
+            with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
+                booking_signal = webhook_router._has_booking_signal(
+                    messages,
+                    client_slug="demo_salon",
+                    message_text=messages[-1] if messages else None,
+                )
+                assert booking_signal is True, f"{case_id}: booking signal not detected"
+                booking_state = webhook_router._update_booking_from_messages(
+                    {},
+                    messages,
+                    client_slug="demo_salon",
+                )
             for slot in expected.get("booking_slots", []):
                 assert booking_state.get(slot), f"{case_id}: booking slot missing '{slot}'"
             continue

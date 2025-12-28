@@ -51,6 +51,7 @@ from app.services.demo_salon_knowledge import (
     get_demo_salon_price_item,
     get_demo_salon_price_reply,
     get_demo_salon_service_decision,
+    semantic_question_type,
     semantic_service_match,
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
@@ -1903,6 +1904,10 @@ DATE_KEYWORDS = [
 ]
 
 TIME_PATTERN = re.compile(r"\b\d{1,2}[:.]\d{2}\b")
+DATE_PATTERN = re.compile(
+    r"\b(?:сегодня|завтра|послезавтра|понедель\w*|вторник\w*|сред\w*|четверг\w*|пятниц\w*|суббот\w*|воскрес\w*|утром|днем|днём|вечером)\b",
+    re.IGNORECASE,
+)
 NAME_PATTERN = re.compile(r"\bменя зовут\s+([a-zа-яё-]{2,})", re.IGNORECASE)
 
 
@@ -1960,32 +1965,72 @@ def _is_booking_cancel(text: str) -> bool:
     return _contains_any(normalized, BOOKING_CANCEL_KEYWORDS)
 
 
-def _extract_service(text: str) -> str | None:
-    normalized = _normalize_text(text)
-    if not normalized:
+def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
+    if not text or not client_slug:
         return None
-    if _contains_any(normalized, SERVICE_KEYWORDS):
-        return text.strip()
+    match = semantic_service_match(text, client_slug)
+    if not match or match.action != "match":
+        return None
+    canonical_name = match.canonical_name
+    if isinstance(canonical_name, str) and canonical_name.strip():
+        return canonical_name.strip()
     return None
 
 
 def _extract_datetime(text: str) -> str | None:
-    normalized = _normalize_text(text)
-    if not normalized:
+    if not text:
         return None
-    if _contains_any(normalized, DATE_KEYWORDS) or TIME_PATTERN.search(text):
-        return text.strip()
+    time_match = TIME_PATTERN.search(text)
+    if time_match:
+        return time_match.group(0)
+    date_match = DATE_PATTERN.search(text)
+    if date_match:
+        return date_match.group(0)
     return None
 
 
-def _has_booking_signal(messages: list[str]) -> bool:
+BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration"}
+
+
+def _evaluate_booking_signal(
+    messages: list[str],
+    *,
+    client_slug: str | None,
+    message_text: str | None,
+) -> tuple[bool, dict | None]:
     if not messages:
-        return False
+        return False, None
     if any(_is_booking_request(message) for message in messages):
-        return True
-    has_service = any(_extract_service(message) for message in messages)
+        return True, None
+    has_service = any(_extract_service_hint(message, client_slug) for message in messages)
     has_datetime = any(_extract_datetime(message) for message in messages)
-    return has_service and has_datetime
+    booking_signal = has_service and has_datetime
+    if booking_signal and message_text:
+        question_type = semantic_question_type(message_text, include_kinds=BOOKING_INFO_QUESTION_TYPES)
+        if question_type and question_type.kind in BOOKING_INFO_QUESTION_TYPES:
+            return (
+                False,
+                {
+                    "booking_blocked_reason": "info_question",
+                    "question_type": question_type.kind,
+                    "question_type_score": question_type.score,
+                },
+            )
+    return booking_signal, None
+
+
+def _has_booking_signal(
+    messages: list[str],
+    *,
+    client_slug: str | None = None,
+    message_text: str | None = None,
+) -> bool:
+    booking_signal, _ = _evaluate_booking_signal(
+        messages,
+        client_slug=client_slug,
+        message_text=message_text,
+    )
+    return booking_signal
 
 
 def _get_conversation_context(conversation: Conversation) -> dict:
@@ -2203,25 +2248,26 @@ def _clean_name_candidate(value: str) -> str:
     return cleaned
 
 
-def _validate_service_slot(message_text: str, *, allow_freeform: bool) -> str | None:
+def _validate_service_slot(
+    message_text: str,
+    *,
+    allow_freeform: bool,
+    client_slug: str | None,
+) -> str | None:
     if _is_blocked_slot_message(message_text):
         return None
-    extracted = _extract_service(message_text)
+    extracted = _extract_service_hint(message_text, client_slug)
     if extracted:
         return extracted
-    if not allow_freeform:
-        return None
-    if _is_noise_slot_message(message_text):
-        return None
-    if _extract_datetime(message_text):
-        return None
-    candidate = message_text.strip()
-    if len(candidate) < 2 or len(candidate) > 80:
-        return None
-    return candidate
+    return None
 
 
-def _validate_datetime_slot(message_text: str, *, allow_freeform: bool) -> str | None:
+def _validate_datetime_slot(
+    message_text: str,
+    *,
+    allow_freeform: bool,
+    client_slug: str | None,
+) -> str | None:
     if _is_blocked_slot_message(message_text):
         return None
     extracted = _extract_datetime(message_text)
@@ -2230,12 +2276,17 @@ def _validate_datetime_slot(message_text: str, *, allow_freeform: bool) -> str |
     return None
 
 
-def _validate_name_slot(message_text: str, *, allow_freeform: bool) -> str | None:
+def _validate_name_slot(
+    message_text: str,
+    *,
+    allow_freeform: bool,
+    client_slug: str | None,
+) -> str | None:
     if _is_blocked_slot_message(message_text):
         return None
     if _is_noise_slot_message(message_text):
         return None
-    if _extract_service(message_text) or _extract_datetime(message_text):
+    if _extract_service_hint(message_text, client_slug) or _extract_datetime(message_text):
         return None
     name_match = NAME_PATTERN.search(message_text)
     if name_match:
@@ -2265,14 +2316,14 @@ BOOKING_SLOT_VALIDATORS = {
 }
 
 
-def _is_booking_related_message(message_text: str) -> bool:
+def _is_booking_related_message(message_text: str, client_slug: str | None) -> bool:
     if not message_text:
         return False
     if _is_booking_request(message_text):
         return True
-    if _extract_service(message_text) or _extract_datetime(message_text):
+    if _extract_service_hint(message_text, client_slug) or _extract_datetime(message_text):
         return True
-    if _validate_name_slot(message_text, allow_freeform=True):
+    if _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug):
         return True
     return False
 
@@ -2283,13 +2334,14 @@ def _apply_booking_slot(
     message_text: str,
     *,
     allow_freeform: bool,
+    client_slug: str | None,
 ) -> dict:
     if booking.get(slot_key):
         return booking
     validator = BOOKING_SLOT_VALIDATORS.get(slot_key)
     if not validator:
         return booking
-    value = validator(message_text, allow_freeform=allow_freeform)
+    value = validator(message_text, allow_freeform=allow_freeform, client_slug=client_slug)
     if value:
         booking[slot_key] = value
     return booking
@@ -2427,25 +2479,42 @@ def _apply_branch_selection(
         _set_user_branch_preference(user, branch.id)
 
 
-def _update_booking_from_message(booking: dict, message_text: str) -> dict:
+def _update_booking_from_message(booking: dict, message_text: str, *, client_slug: str | None) -> dict:
     booking = dict(booking)
     last_question = booking.get("last_question")
     if _is_blocked_slot_message(message_text):
         return booking
 
     if last_question in BOOKING_SLOT_ORDER:
-        booking = _apply_booking_slot(booking, last_question, message_text, allow_freeform=True)
+        booking = _apply_booking_slot(
+            booking,
+            last_question,
+            message_text,
+            allow_freeform=True,
+            client_slug=client_slug,
+        )
 
     for slot_key in BOOKING_SLOT_ORDER:
-        booking = _apply_booking_slot(booking, slot_key, message_text, allow_freeform=False)
+        booking = _apply_booking_slot(
+            booking,
+            slot_key,
+            message_text,
+            allow_freeform=False,
+            client_slug=client_slug,
+        )
 
     return booking
 
 
-def _update_booking_from_messages(booking: dict, messages: list[str]) -> dict:
+def _update_booking_from_messages(
+    booking: dict,
+    messages: list[str],
+    *,
+    client_slug: str | None,
+) -> dict:
     updated = dict(booking)
     for message in messages:
-        updated = _update_booking_from_message(updated, message)
+        updated = _update_booking_from_message(updated, message, client_slug=client_slug)
     return updated
 
 
@@ -3686,7 +3755,11 @@ async def _handle_webhook_payload(
     batch_messages = _coerce_batch_messages(message_text, batch_messages)
     signal_messages = list(batch_messages)
     opt_out_in_batch = any(is_opt_out_message(msg) for msg in signal_messages)
-    booking_signal = _has_booking_signal(signal_messages)
+    booking_signal, booking_block_meta = _evaluate_booking_signal(
+        signal_messages,
+        client_slug=payload.client_slug,
+        message_text=message_text,
+    )
     context = _get_conversation_context(conversation)
     booking_state = _get_booking_context(context)
     booking_active = bool(booking_state.get("active"))
@@ -3711,7 +3784,11 @@ async def _handle_webhook_payload(
                     if isinstance(stored_messages, list) and stored_messages:
                         batch_messages = _coerce_batch_messages("", stored_messages)
                         signal_messages = list(batch_messages)
-                        booking_signal = _has_booking_signal(signal_messages)
+                        booking_signal, booking_block_meta = _evaluate_booking_signal(
+                            signal_messages,
+                            client_slug=payload.client_slug,
+                            message_text=signal_messages[-1] if signal_messages else message_text,
+                        )
                     _record_decision_trace(
                         conversation,
                         {
@@ -4249,7 +4326,11 @@ async def _handle_webhook_payload(
         if conversation.bot_status == "muted" or (conversation.bot_muted_until and conversation.bot_muted_until > now):
             signal_messages = _coerce_batch_messages(message_text, batch_messages)
             opt_out_in_batch = any(is_opt_out_message(msg) for msg in signal_messages)
-            booking_signal = _has_booking_signal(signal_messages)
+            booking_signal, booking_block_meta = _evaluate_booking_signal(
+                signal_messages,
+                client_slug=payload.client_slug,
+                message_text=message_text,
+            )
             context = _get_conversation_context(conversation)
             booking_active = bool(_get_booking_context(context).get("active"))
             reengage_confirmation = _get_reengage_confirmation(context)
@@ -4388,7 +4469,15 @@ async def _handle_webhook_payload(
             booking_context = _clear_service_hint(booking_context)
             _set_conversation_context(conversation, booking_context)
             booking_active = False
-    booking_signal = _has_booking_signal(booking_messages) if not bypass_domain_flows else False
+    booking_block_meta = None
+    if not bypass_domain_flows:
+        booking_signal, booking_block_meta = _evaluate_booking_signal(
+            booking_messages,
+            client_slug=payload.client_slug,
+            message_text=message_text,
+        )
+    else:
+        booking_signal = False
     booking_wants_flow = (
         _should_run_booking_flow(
             routing,
@@ -4398,6 +4487,23 @@ async def _handle_webhook_payload(
         if not bypass_domain_flows
         else False
     )
+    if booking_block_meta:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "booking_gate",
+                "decision": "booking_blocked",
+                **booking_block_meta,
+            },
+        )
+        if saved_message:
+            existing_meta = (
+                saved_message.message_metadata.get("decision_meta")
+                if isinstance(saved_message.message_metadata, dict)
+                else None
+            )
+            if not isinstance(existing_meta, dict) or "booking_blocked_reason" not in existing_meta:
+                _update_message_decision_metadata(saved_message, booking_block_meta)
 
     policy_handler = _get_policy_handler(client)
     policy_type = policy_handler.get("policy_type") if policy_handler else None
@@ -4689,7 +4795,9 @@ async def _handle_webhook_payload(
                 success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
             )
 
-        booking_related = any(_is_booking_related_message(msg) for msg in booking_messages)
+        booking_related = any(
+            _is_booking_related_message(msg, payload.client_slug) for msg in booking_messages
+        )
         if booking_active and not booking_signal and not booking_related:
             booking_state = {"active": False}
             context = _set_booking_context(context, booking_state)
@@ -4726,7 +4834,11 @@ async def _handle_webhook_payload(
                 booking_state["active"] = True
                 booking_state["started_at"] = now.isoformat()
 
-            booking_state = _update_booking_from_messages(booking_state, booking_messages)
+            booking_state = _update_booking_from_messages(
+                booking_state,
+                booking_messages,
+                client_slug=payload.client_slug,
+            )
             if not booking_state.get("service"):
                 service_hint = _get_recent_service_hint(context, now)
                 if service_hint:

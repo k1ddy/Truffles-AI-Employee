@@ -487,7 +487,7 @@ def _question_type_examples() -> dict[str, list[str]]:
         return {}
 
     examples: dict[str, list[str]] = {}
-    for kind in ("pricing", "duration"):
+    for kind in ("pricing", "duration", "hours"):
         phrases: list[str] = []
         block = typical.get(kind)
         if isinstance(block, dict):
@@ -570,10 +570,13 @@ def _cosine_similarity(vector_a: list[float], vector_b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def semantic_question_type(text: str) -> SemanticQuestionType | None:
+def semantic_question_type(text: str, *, include_kinds: set[str] | None = None) -> SemanticQuestionType | None:
     normalized = _normalize_text(text)
     if not normalized or len(normalized) < 3:
         return None
+
+    if include_kinds is None:
+        include_kinds = {"pricing", "duration"}
 
     query_vector = None
     use_fallback = False
@@ -605,6 +608,8 @@ def semantic_question_type(text: str) -> SemanticQuestionType | None:
 
     scores: dict[str, float] = {}
     for kind, vectors in examples.items():
+        if kind not in include_kinds:
+            continue
         best = 0.0
         for vector in vectors:
             score = _cosine_similarity(query_vector, vector)
@@ -615,11 +620,35 @@ def semantic_question_type(text: str) -> SemanticQuestionType | None:
     if not scores:
         return None
 
-    sorted_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
-    top_kind, top_score = sorted_scores[0]
-    second_score = sorted_scores[1][1] if len(sorted_scores) > 1 else 0.0
-    if top_score >= _QUESTION_TYPE_THRESHOLD and (top_score - second_score) >= _QUESTION_TYPE_MARGIN:
-        return SemanticQuestionType(kind=top_kind, score=top_score, second_score=second_score)
+    def _pick_type(score_map: dict[str, float]) -> SemanticQuestionType | None:
+        if not score_map:
+            return None
+        sorted_scores = sorted(score_map.items(), key=lambda item: item[1], reverse=True)
+        top_kind, top_score = sorted_scores[0]
+        second_score = sorted_scores[1][1] if len(sorted_scores) > 1 else 0.0
+        if top_score >= _QUESTION_TYPE_THRESHOLD and (top_score - second_score) >= _QUESTION_TYPE_MARGIN:
+            return SemanticQuestionType(kind=top_kind, score=top_score, second_score=second_score)
+        return None
+
+    picked = _pick_type(scores)
+    if picked:
+        return picked
+
+    if not use_fallback:
+        fallback_vector = _local_text_embedding(text)
+        fallback_examples = _question_type_embeddings(True)
+        fallback_scores: dict[str, float] = {}
+        for kind, vectors in fallback_examples.items():
+            if kind not in include_kinds:
+                continue
+            best = 0.0
+            for vector in vectors:
+                score = _cosine_similarity(fallback_vector, vector)
+                if score > best:
+                    best = score
+            fallback_scores[kind] = best
+        return _pick_type(fallback_scores)
+
     return None
 
 

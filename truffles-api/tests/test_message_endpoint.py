@@ -111,6 +111,23 @@ DEMO_DOMAIN_ROUTER_CONFIG = {
 }
 
 
+def _fake_service_hint(text: str, client_slug: str | None) -> str | None:
+    normalized = (text or "").casefold()
+    if "маник" in normalized:
+        return "маникюр"
+    if "педик" in normalized:
+        return "педикюр"
+    if "стриж" in normalized:
+        return "стрижка"
+    if "массаж" in normalized and "ног" in normalized:
+        return "массаж ног"
+    if "бров" in normalized:
+        return "брови"
+    if "ресниц" in normalized:
+        return "ресницы"
+    return None
+
+
 class TestMessageEndpoint:
     def test_message_request_validation(self, client):
         # Missing required fields
@@ -274,24 +291,60 @@ class TestSelectHandoverUserMessage:
 class TestBatchBookingSignals:
     def test_booking_signal_across_messages(self):
         messages = ["сколько стоит маникюр", "на завтра в 5"]
-        assert webhook_router._has_booking_signal(messages) is True
+        with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
+            assert (
+                webhook_router._has_booking_signal(
+                    messages,
+                    client_slug="demo_salon",
+                    message_text=messages[-1],
+                )
+                is True
+            )
+
+    def test_booking_signal_blocked_for_info_question(self):
+        messages = ["Вы сегодня работаете? Сколько стоит педикюр?"]
+        with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint), patch(
+            "app.routers.webhook.semantic_question_type",
+            return_value=SimpleNamespace(kind="pricing", score=0.72, second_score=0.1),
+        ):
+            assert (
+                webhook_router._has_booking_signal(
+                    messages,
+                    client_slug="demo_salon",
+                    message_text=messages[0],
+                )
+                is False
+            )
 
     def test_booking_updates_across_messages(self):
         booking = {"active": True}
-        updated = webhook_router._update_booking_from_messages(booking, ["маникюр", "на завтра в 5"])
-        assert updated.get("service")
-        assert updated.get("datetime")
+        with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
+            updated = webhook_router._update_booking_from_messages(
+                booking,
+                ["маникюр", "на завтра в 5"],
+                client_slug="demo_salon",
+            )
+        assert updated.get("service") == "маникюр"
+        assert updated.get("datetime") == "завтра"
 
 
 class TestBookingSlotGuards:
     def test_booking_name_skips_opt_out(self):
         booking = {"active": True, "last_question": "name"}
-        updated = webhook_router._update_booking_from_messages(booking, ["не пиши мне"])
+        updated = webhook_router._update_booking_from_messages(
+            booking,
+            ["не пиши мне"],
+            client_slug="demo_salon",
+        )
         assert updated.get("name") is None
 
     def test_booking_name_skips_frustration(self):
         booking = {"active": True, "last_question": "name"}
-        updated = webhook_router._update_booking_from_messages(booking, ["иди нахуй"])
+        updated = webhook_router._update_booking_from_messages(
+            booking,
+            ["иди нахуй"],
+            client_slug="demo_salon",
+        )
         assert updated.get("name") is None
 
 
@@ -486,6 +539,8 @@ def test_truth_gate_sets_decision_meta():
     ), patch(
         "app.routers.webhook._get_user_branch_preference", return_value=branch_id
     ), patch(
+        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
         "app.routers.webhook._update_message_decision_metadata"
     ) as mock_update:
         response = asyncio.run(
@@ -578,6 +633,8 @@ def test_semantic_service_matcher_handles_low_confidence_match():
         "app.routers.webhook._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook._extract_service_hint", return_value=None
     ), patch(
         "app.routers.webhook._update_message_decision_metadata"
     ) as mock_update:
@@ -674,6 +731,8 @@ def test_semantic_service_matcher_handles_low_confidence_suggest():
         "app.routers.webhook._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook._extract_service_hint", return_value=None
     ), patch(
         "app.routers.webhook._update_message_decision_metadata"
     ) as mock_update:
@@ -772,6 +831,8 @@ def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
         "app.routers.webhook._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook._extract_service_hint", return_value=None
     ), patch(
         "app.routers.webhook._update_message_decision_metadata"
     ) as mock_update:
@@ -1480,7 +1541,12 @@ def test_golden_cases(case):
     if check == "signals":
         messages = automation.get("messages") or ([case.get("input")] if case.get("input") else [])
         messages = [msg for msg in messages if isinstance(msg, str)]
-        booking_signal = webhook_router._has_booking_signal(messages)
+        with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
+            booking_signal = webhook_router._has_booking_signal(
+                messages,
+                client_slug="demo_salon",
+                message_text=messages[-1] if messages else None,
+            )
         opt_out = any(is_opt_out_message(msg) for msg in messages)
 
         if "expect_booking_signal" in automation:
@@ -1492,8 +1558,17 @@ def test_golden_cases(case):
     if check == "booking_flow":
         messages = automation.get("messages") or ([case.get("input")] if case.get("input") else [])
         messages = [msg for msg in messages if isinstance(msg, str)]
-        booking_signal = webhook_router._has_booking_signal(messages)
-        booking_state = webhook_router._update_booking_from_messages({}, messages)
+        with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
+            booking_signal = webhook_router._has_booking_signal(
+                messages,
+                client_slug="demo_salon",
+                message_text=messages[-1] if messages else None,
+            )
+            booking_state = webhook_router._update_booking_from_messages(
+                {},
+                messages,
+                client_slug="demo_salon",
+            )
 
         if "expect_booking_signal" in automation:
             assert booking_signal == automation["expect_booking_signal"]
