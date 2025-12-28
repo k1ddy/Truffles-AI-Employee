@@ -165,6 +165,16 @@ _SERVICE_STOPWORDS = {
     "со",
 }
 
+_OFFTOPIC_KEYWORDS = [
+    "чат бот",
+    "ботов",
+    "разработк",
+    "сайт",
+    "crm",
+    "интеграц",
+    "мессенджер",
+]
+
 
 def _normalize_alias_tokens(text: str) -> list[str]:
     tokens = _tokenize(text)
@@ -267,6 +277,14 @@ def _message_has_service_token(normalized: str) -> bool:
         if _token_matches(token, message_tokens):
             return True
     return False
+
+
+def _is_offtopic_message(normalized: str) -> bool:
+    if not normalized:
+        return False
+    if any(phrase and phrase in normalized for phrase in _offtopic_phrases()):
+        return True
+    return _contains_any(normalized, _OFFTOPIC_KEYWORDS)
 
 
 def _match_service(normalized: str) -> dict[str, Any] | None:
@@ -1343,6 +1361,10 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
     price_signal = _has_price_signal(normalized, message)
     price_item = _find_best_price_item(message)
     if question_type is None and (price_item or price_signal):
+        if _is_offtopic_message(normalized):
+            reply = format_reply_from_truth("off_topic")
+            if reply:
+                return DemoSalonDecision(action="reply", response=reply, intent="off_topic")
         reply = format_reply_from_truth("duration_or_price_clarify")
         if reply:
             return DemoSalonDecision(
@@ -1450,10 +1472,7 @@ def get_demo_salon_decision(message: str) -> DemoSalonDecision | None:
     if service_decision:
         return service_decision
 
-    offtopic_keywords = ["чат бот", "ботов", "разработк", "сайт", "crm", "интеграц", "мессенджер"]
-    if any(phrase and phrase in normalized for phrase in _offtopic_phrases()) or _contains_any(
-        normalized, offtopic_keywords
-    ):
+    if _is_offtopic_message(normalized):
         reply = format_reply_from_truth("off_topic")
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="off_topic")
