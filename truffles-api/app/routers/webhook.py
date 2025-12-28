@@ -414,7 +414,7 @@ def _get_transcription_settings() -> tuple[bool, int, str, str | None, str, str 
     max_bytes = max(0, int(max_mb * 1024 * 1024))
     model = os.environ.get("AUDIO_TRANSCRIPTION_MODEL", "whisper-1")
     language = os.environ.get("AUDIO_TRANSCRIPTION_LANGUAGE")
-    primary_provider = os.environ.get("ASR_PRIMARY_PROVIDER", "openai_whisper")
+    primary_provider = os.environ.get("ASR_PRIMARY_PROVIDER", "elevenlabs")
     fallback_provider = os.environ.get("ASR_FALLBACK_PROVIDER")
     raw_timeout = os.environ.get("ASR_TIMEOUT_SECONDS", "6")
     try:

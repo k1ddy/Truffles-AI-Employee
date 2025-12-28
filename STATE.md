@@ -84,7 +84,7 @@
 - [ ] **⚠️ by_instance зависит от instanceId** — demo_salon исправлен (query‑param даёт instanceId), остальным клиентам нужно прокинуть
 - [ ] **⚠️ demo_salon truth-gate даёт цену на "как у/в стиле"** — нет правила style_reference, фото не поддерживаются; нужен отдельный ответ/эскалация
 - [ ] **⚠️ Медиа (аудио/фото/документы)** — guardrails + Telegram forward + локальное хранение + транскрипция коротких PTT добавлены в код (нужен деплой); длинные аудио/видео и OCR/vision отсутствуют
-- [ ] **⚠️ ASR контур (whisper-1 + ElevenLabs fallback)** — добавлены ASR настройки/таймаут/минимальная длина, цепочка fallback, сообщение при fail, метаданные в messages.metadata.asr + метрика asr_fail_rate (миграция `ops/migrations/016_add_asr_metrics.sql`), нужен деплой/проверка
+- [ ] **⚠️ ASR контур (ElevenLabs scribe_v1 primary + whisper-1 fallback)** — добавлены ASR настройки/таймаут/минимальная длина, цепочка fallback, сообщение при fail, метаданные в messages.metadata.asr + метрика asr_fail_rate (миграция `ops/migrations/016_add_asr_metrics.sql`), нужен деплой/проверка
 - [ ] Метрики (Quality Deflection, CSAT) — план: `SPECS/ESCALATION.md`, часть 6
 - [ ] Dashboard для заказчика — backlog
 - [ ] Quiet hours для напоминаний — P2
@@ -1349,7 +1349,8 @@ LIMIT 1;
 | `webhook.py` | Service matcher в LLM-first до LLM, source=service_matcher |
 | `tests/test_message_endpoint.py` | Тест: service matcher шортсёркит LLM |
 | `EVAL.yaml` | Кейсы: педикюр/массаж ног/адрес |
-| `ai_service.py` | ElevenLabs ASR default model остаётся scribe_v1 (scribe_v2 только realtime) |
+| `ai_service.py` | ASR default provider: ElevenLabs scribe_v1, fallback whisper-1 |
+| `webhook.py` | ASR primary default aligned to ElevenLabs (scribe_v1) |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 
