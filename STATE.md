@@ -1278,6 +1278,8 @@ LIMIT 1;
 
 | Файл | Изменение |
 |------|-----------|
+| `webhook.py` | Booking gate: info-вопросы распознаются по сегментам ?!.; блокировка очищает booking_state и отключает flow |
+| `tests/test_message_endpoint.py` | Тест: info-вопросы не запускают booking и имя следом не создаёт запись/заявку |
 | `conversation.py` | Добавлен `context` (JSONB) для краткого контекста/слотов |
 | `webhook.py` | Слот-филлинг записи + контекст диалога |
 | `state_service.py` | Очистка контекста при resolve |

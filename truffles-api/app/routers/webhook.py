@@ -2006,16 +2006,20 @@ def _evaluate_booking_signal(
     has_datetime = any(_extract_datetime(message) for message in messages)
     booking_signal = has_service and has_datetime
     if booking_signal and message_text:
-        question_type = semantic_question_type(message_text, include_kinds=BOOKING_INFO_QUESTION_TYPES)
-        if question_type and question_type.kind in BOOKING_INFO_QUESTION_TYPES:
-            return (
-                False,
-                {
-                    "booking_blocked_reason": "info_question",
-                    "question_type": question_type.kind,
-                    "question_type_score": question_type.score,
-                },
-            )
+        segments = [segment.strip() for segment in re.split(r"[?!\.]+", message_text) if segment.strip()]
+        if not segments:
+            segments = [message_text.strip()]
+        for segment in segments:
+            question_type = semantic_question_type(segment, include_kinds=BOOKING_INFO_QUESTION_TYPES)
+            if question_type and question_type.kind in BOOKING_INFO_QUESTION_TYPES:
+                return (
+                    False,
+                    {
+                        "booking_blocked_reason": "info_question",
+                        "question_type": question_type.kind,
+                        "question_type_score": question_type.score,
+                    },
+                )
     return booking_signal, None
 
 
@@ -4504,6 +4508,21 @@ async def _handle_webhook_payload(
             )
             if not isinstance(existing_meta, dict) or "booking_blocked_reason" not in existing_meta:
                 _update_message_decision_metadata(saved_message, booking_block_meta)
+        if booking_active:
+            context = booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
+            booking_state = booking if isinstance(booking, dict) else _get_booking_context(context)
+            booking_state = dict(booking_state)
+            booking_state["active"] = False
+            booking_state["last_question"] = None
+            booking_state["service"] = None
+            booking_state["datetime"] = None
+            context = _set_booking_context(context, booking_state)
+            _set_conversation_context(conversation, context)
+            booking_active = False
+            booking = booking_state
+        booking_signal = False
+        booking_wants_flow = False
+    booking_blocked = bool(booking_block_meta)
 
     policy_handler = _get_policy_handler(client)
     policy_type = policy_handler.get("policy_type") if policy_handler else None
@@ -4726,15 +4745,19 @@ async def _handle_webhook_payload(
                             "secondary_count": len(multi_intent_secondary),
                         },
                     )
-                if routing["allow_booking_flow"] and multi_intent_primary == "booking":
-                    booking_signal = True
-                else:
+                if booking_blocked:
                     booking_signal = False
-                booking_wants_flow = _should_run_booking_flow(
-                    routing,
-                    booking_active=booking_active,
-                    booking_signal=booking_signal,
-                )
+                    booking_wants_flow = False
+                else:
+                    if routing["allow_booking_flow"] and multi_intent_primary == "booking":
+                        booking_signal = True
+                    else:
+                        booking_signal = False
+                    booking_wants_flow = _should_run_booking_flow(
+                        routing,
+                        booking_active=booking_active,
+                        booking_signal=booking_signal,
+                    )
 
     multi_intent_booking_followup = None
     multi_intent_other_followup = None
