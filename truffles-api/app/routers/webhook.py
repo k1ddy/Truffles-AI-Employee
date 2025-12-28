@@ -35,6 +35,7 @@ from app.services.ai_service import (
     is_low_signal_message,
     is_thanks_message,
     normalize_for_matching,
+    rewrite_for_service_match,
     transcribe_audio_with_fallback,
 )
 from app.services.alert_service import alert_warning
@@ -5308,9 +5309,15 @@ async def _handle_webhook_payload(
                     miss_type=miss_type,
                 )
                 semantic_result = None
+                rewrite_query = None
                 if not out_of_domain_signal:
                     semantic_result = semantic_service_match(message_text, payload.client_slug)
+                    if not semantic_result:
+                        rewrite_query = rewrite_for_service_match(message_text, payload.client_slug)
+                        if rewrite_query:
+                            semantic_result = semantic_service_match(rewrite_query, payload.client_slug)
                 if semantic_result:
+                    rewrite_used = bool(rewrite_query)
                     bot_response = semantic_result.response
                     _reset_low_confidence_retry(conversation)
                     _record_decision_trace(
@@ -5322,6 +5329,8 @@ async def _handle_webhook_payload(
                             "score": semantic_result.score,
                             "canonical_name": semantic_result.canonical_name,
                             "suggestions": semantic_result.suggestions or [],
+                            "rewrite_used": rewrite_used,
+                            "rewrite_query": rewrite_query,
                         },
                     )
                     if saved_message:
@@ -5335,6 +5344,8 @@ async def _handle_webhook_payload(
                                 "intent": "service_semantic",
                                 "source": "service_semantic_matcher",
                                 "service_semantic_score": semantic_result.score,
+                                "service_semantic_rewrite_used": rewrite_used,
+                                "service_semantic_rewrite_query": rewrite_query,
                                 "fast_intent": False,
                                 "llm_primary_used": False,
                                 "llm_used": llm_used,

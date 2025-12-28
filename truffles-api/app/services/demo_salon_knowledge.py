@@ -479,14 +479,7 @@ def _should_attempt_semantic_match(text: str) -> bool:
     normalized = _normalize_text(text)
     if not normalized:
         return False
-    if _has_price_signal(normalized, text):
-        return True
-    service_keywords = ["делаете", "делает", "есть ли", "есть", "оказываете", "предоставляете"]
-    if _contains_any(normalized, service_keywords):
-        return True
-    if _message_has_service_token(normalized):
-        return True
-    return False
+    return len(normalized) >= 3
 
 
 def _search_services_index(text: str, client_slug: str, limit: int) -> list[dict[str, Any]]:

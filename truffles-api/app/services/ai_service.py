@@ -179,6 +179,8 @@ SLOW_MODEL = os.environ.get("SLOW_MODEL", "gpt-5-mini")
 FAST_MODEL_MAX_CHARS = int(os.environ.get("FAST_MODEL_MAX_CHARS", "160"))
 INTENT_TIMEOUT_SECONDS = float(os.environ.get("INTENT_TIMEOUT_SECONDS", "1.5"))
 LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "6"))
+SERVICE_REWRITE_TIMEOUT_SECONDS = float(os.environ.get("SERVICE_REWRITE_TIMEOUT_SECONDS", "1.2"))
+SERVICE_REWRITE_MAX_TOKENS = int(os.environ.get("SERVICE_REWRITE_MAX_TOKENS", "80"))
 ASR_PRIMARY_PROVIDER = os.environ.get("ASR_PRIMARY_PROVIDER", "openai_whisper")
 ASR_FALLBACK_PROVIDER = os.environ.get("ASR_FALLBACK_PROVIDER", "elevenlabs")
 ASR_TIMEOUT_SECONDS = float(os.environ.get("ASR_TIMEOUT_SECONDS", "6"))
@@ -626,6 +628,97 @@ def normalize_for_matching(text: str) -> str:
     # Make matching robust: "ок?" -> "ок", "салам!" -> "салам"
     normalized = re.sub(r"^[^\w]+|[^\w]+$", "", normalized)
     return normalized
+
+
+def rewrite_for_service_match(text: str, client_slug: str) -> str | None:
+    normalized = normalize_for_matching(text)
+    if not normalized or len(normalized) < 3:
+        return None
+    if not OPENAI_API_KEY:
+        logger.warning("Service rewrite skipped: OPENAI_API_KEY missing")
+        return None
+
+    system_prompt = (
+        "Ты переписываешь текст клиента в короткий запрос для поиска услуги салона. "
+        "Не придумывай факты и услуги. Верни ТОЛЬКО JSON вида "
+        '{"intent":"service_question|other","query":"..."}.\n'
+        'intent=service_question если вопрос про услуги/цены/наличие. '
+        "Если не про услуги — intent=other и query пустая строка.\n"
+        "query — 1-6 слов, только суть услуги (без лишних слов).\n"
+        "Примеры:\n"
+        '"манник?" -> {"intent":"service_question","query":"маникюр"}\n'
+        '"делаете массаж ног?" -> {"intent":"service_question","query":"массаж ног"}\n'
+        '"какая погода?" -> {"intent":"other","query":""}'
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": text},
+    ]
+
+    llm = get_llm_provider()
+    llm_start = time.monotonic()
+    try:
+        response = llm.generate(
+            messages,
+            temperature=0.0,
+            max_tokens=SERVICE_REWRITE_MAX_TOKENS,
+            model=FAST_MODEL,
+            timeout_seconds=SERVICE_REWRITE_TIMEOUT_SECONDS,
+        )
+    except httpx.TimeoutException as exc:
+        _log_timing(
+            "service_rewrite_llm_ms",
+            (time.monotonic() - llm_start) * 1000,
+            extra={
+                "model_name": FAST_MODEL,
+                "model_tier": "fast",
+                "timeout": True,
+                "timeout_seconds": SERVICE_REWRITE_TIMEOUT_SECONDS,
+                "client_slug": client_slug,
+            },
+        )
+        logger.warning(f"Service rewrite timeout after {SERVICE_REWRITE_TIMEOUT_SECONDS}s: {exc}")
+        return None
+
+    _log_timing(
+        "service_rewrite_llm_ms",
+        (time.monotonic() - llm_start) * 1000,
+        extra={
+            "model_name": FAST_MODEL,
+            "model_tier": "fast",
+            "timeout": False,
+            "client_slug": client_slug,
+        },
+    )
+    content = (response.content or "").strip()
+    if not content:
+        return None
+
+    payload = None
+    try:
+        payload = json.loads(content)
+    except Exception:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                payload = json.loads(match.group(0))
+            except Exception:
+                payload = None
+
+    if not isinstance(payload, dict):
+        return None
+    intent = payload.get("intent")
+    query = payload.get("query")
+    if not isinstance(intent, str):
+        return None
+    if intent.strip().casefold() != "service_question":
+        return None
+    if not isinstance(query, str):
+        return None
+    query = re.sub(r"\s+", " ", query).strip()
+    if not query or len(query) < 2:
+        return None
+    return query
 
 
 def is_acknowledgement_message(text: str) -> bool:

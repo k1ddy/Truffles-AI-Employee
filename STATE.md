@@ -32,6 +32,7 @@
 - `SALON_TRUTH.yaml` теперь разделён на `domain_pack` (общая таксономия/синонимы/типовые вопросы/ООД‑якоря) и `client_pack` (факты demo_salon); старые ключи сохранены, поэтому безопасно для прода.
 - `ops/sync_client.py` получил валидацию обязательных полей `client_pack` (`--validate`/`--validate-only`), без генерации новых файлов.
 - `services_index` (Qdrant) заполняется из `ops/sync_client.py` по `price_list` + `services_catalog`; после LLM low_confidence работает semantic matcher (match/suggest) с `decision_meta.source=service_semantic_matcher`, безопасно для прода (срабатывает только при low_confidence и OOD‑gate).
+- Добавлен rewrite‑layer для semantic matcher (FAST LLM → JSON intent/query, 1.2s) — влияет только на подбор запроса, факты не меняет.
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-26)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
