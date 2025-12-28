@@ -401,6 +401,26 @@ def _has_price_signal(normalized: str, raw_text: str | None = None) -> bool:
     return False
 
 
+def _has_duration_signal(normalized: str) -> bool:
+    if not normalized:
+        return False
+    if _contains_any(
+        normalized,
+        [
+            "по времени",
+            "сколько времени",
+            "сколько по времени",
+            "длитель",
+            "как долго",
+            "долго",
+        ],
+    ):
+        return True
+    if _contains_any_words(normalized, ["минут", "минуты", "час", "часа", "часов"]):
+        return True
+    return False
+
+
 def _extract_minutes(text: str) -> int | None:
     match = re.search(r"\b(\d{1,3})\s*(?:мин|минут|м)\b", text, flags=re.IGNORECASE)
     if not match:
@@ -895,34 +915,70 @@ def compose_multi_truth_reply(message: str, client_slug: str | None) -> str | No
     info_detected = False
     for segment in segments:
         normalized_segment = _normalize_text(segment)
-        question_type = semantic_question_type(segment, include_kinds={"hours", "pricing", "duration"})
+        if not normalized_segment:
+            continue
         service_match = semantic_service_match(segment, client_slug)
+        if not (service_match and service_match.action == "match"):
+            service_match = None
         fallback_service = None
         if service_match is None:
             fallback_service = _match_service(normalized_segment)
+        service_present = service_match or fallback_service
+        hours_like = _looks_like_hours_question(normalized_segment)
+        price_like = _has_price_signal(normalized_segment, segment)
+        duration_like = _has_duration_signal(normalized_segment)
+        if not price_like and service_present and "сколько" in normalized_segment:
+            price_like = True
+
+        question_type = None
+        if not (hours_like or price_like or duration_like):
+            question_type = semantic_question_type(segment, include_kinds={"hours", "pricing", "duration"})
         reply = None
 
-        if question_type:
+        if hours_like:
             info_detected = True
-            if question_type.kind == "hours":
-                reply = format_reply_from_truth("hours")
-            elif question_type.kind == "pricing":
-                if service_match and service_match.action == "match":
-                    reply = service_match.response
-                elif fallback_service and _has_price_signal(normalized_segment, segment):
-                    reply = _format_service_reply(fallback_service, load_yaml_truth())
-                elif fallback_service:
+            reply = format_reply_from_truth("hours")
+        elif price_like:
+            info_detected = True
+            if service_match:
+                reply = service_match.response
+            elif fallback_service:
+                reply = _format_service_reply(fallback_service, load_yaml_truth())
+                if not reply:
                     reply = _format_service_presence_from_service(fallback_service)
-            elif question_type.kind == "duration":
-                service = None
-                if service_match and service_match.canonical_name:
-                    service = _find_catalog_service_by_name(service_match.canonical_name)
-                elif fallback_service:
-                    service = fallback_service
-                reply = _format_service_duration_reply(service)
-        elif service_match and service_match.action == "match":
+        elif duration_like:
+            info_detected = True
+            service = None
+            if service_match and service_match.canonical_name:
+                service = _find_catalog_service_by_name(service_match.canonical_name)
+            elif fallback_service:
+                service = fallback_service
+            reply = _format_service_duration_reply(service)
+        elif question_type:
+            if question_type.kind == "hours" and service_present:
+                question_type = None
+            if question_type:
+                info_detected = True
+                if question_type.kind == "hours":
+                    reply = format_reply_from_truth("hours")
+                elif question_type.kind == "pricing":
+                    if service_match:
+                        reply = service_match.response
+                    elif fallback_service:
+                        reply = _format_service_reply(fallback_service, load_yaml_truth())
+                        if not reply:
+                            reply = _format_service_presence_from_service(fallback_service)
+                elif question_type.kind == "duration":
+                    service = None
+                    if service_match and service_match.canonical_name:
+                        service = _find_catalog_service_by_name(service_match.canonical_name)
+                    elif fallback_service:
+                        service = fallback_service
+                    reply = _format_service_duration_reply(service)
+
+        if reply is None and service_match:
             reply = _format_service_presence_reply(segment, service_match)
-        elif fallback_service:
+        elif reply is None and fallback_service:
             reply = _format_service_presence_from_service(fallback_service)
 
         if reply:
