@@ -1342,7 +1342,7 @@ LIMIT 1;
 | `webhook.py` | Service matcher в LLM-first до LLM, source=service_matcher |
 | `tests/test_message_endpoint.py` | Тест: service matcher шортсёркит LLM |
 | `EVAL.yaml` | Кейсы: педикюр/массаж ног/адрес |
-| `ai_service.py` | ElevenLabs ASR default model → scribe_v2 |
+| `ai_service.py` | ElevenLabs ASR default model остаётся scribe_v1 (scribe_v2 только realtime) |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 
