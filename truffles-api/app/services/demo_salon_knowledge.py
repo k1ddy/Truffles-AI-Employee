@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 import re
@@ -487,27 +488,54 @@ def _question_type_examples() -> dict[str, list[str]]:
     return examples
 
 
-@lru_cache(maxsize=2)
-def _question_type_embeddings() -> dict[str, list[list[float]]]:
+def _coerce_embedding(raw: Any) -> list[float] | None:
+    if not isinstance(raw, list) or not raw:
+        return None
+    try:
+        return [float(value) for value in raw]
+    except (TypeError, ValueError):
+        return None
+
+
+def _local_text_embedding(text: str, dim: int = 64) -> list[float]:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return []
+    grams: list[str] = []
+    if len(normalized) >= 3:
+        for index in range(len(normalized) - 2):
+            grams.append(normalized[index : index + 3])
+    else:
+        grams.append(normalized)
+    vector = [0.0] * dim
+    for gram in grams:
+        digest = hashlib.sha256(gram.encode("utf-8")).digest()
+        bucket = int.from_bytes(digest[:4], "little") % dim
+        sign = 1.0 if digest[4] % 2 == 0 else -1.0
+        vector[bucket] += sign
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm:
+        vector = [value / norm for value in vector]
+    return vector
+
+
+@lru_cache(maxsize=4)
+def _question_type_embeddings(use_fallback: bool) -> dict[str, list[list[float]]]:
     examples = _question_type_examples()
     embeddings: dict[str, list[list[float]]] = {}
     for kind, phrases in examples.items():
         vectors: list[list[float]] = []
         for phrase in phrases:
-            try:
-                embedding = get_embedding(phrase)
-            except Exception as exc:
-                logger.warning(
-                    "question_type example embedding failed",
-                    extra={"context": {"error": str(exc)}},
-                )
-                continue
-            if not isinstance(embedding, list) or not embedding:
-                continue
-            try:
-                vectors.append([float(value) for value in embedding])
-            except (TypeError, ValueError):
-                continue
+            vector: list[float] | None = None
+            if use_fallback:
+                vector = _local_text_embedding(phrase)
+            else:
+                try:
+                    vector = _coerce_embedding(get_embedding(phrase))
+                except Exception:
+                    vector = None
+            if vector:
+                vectors.append(vector)
         if vectors:
             embeddings[kind] = vectors
     return embeddings
@@ -529,21 +557,32 @@ def semantic_question_type(text: str) -> SemanticQuestionType | None:
     if not normalized or len(normalized) < 3:
         return None
 
-    examples = _question_type_embeddings()
-    if not examples:
-        return None
-
+    query_vector = None
+    use_fallback = False
+    error_detail = None
     try:
-        query_embedding = get_embedding(text)
+        query_vector = _coerce_embedding(get_embedding(text))
     except Exception as exc:
-        logger.warning("question_type embedding failed", extra={"context": {"error": str(exc)}})
-        return None
-    if not isinstance(query_embedding, list) or not query_embedding:
-        return None
+        error_detail = str(exc)
+        query_vector = None
+    if not query_vector:
+        use_fallback = True
+        query_vector = _local_text_embedding(text)
+        logger.warning(
+            "question_type fallback to local embedding",
+            extra={"context": {"error": error_detail or "embedding_unavailable"}},
+        )
 
-    try:
-        query_vector = [float(value) for value in query_embedding]
-    except (TypeError, ValueError):
+    examples = _question_type_embeddings(use_fallback)
+    if not examples and not use_fallback:
+        use_fallback = True
+        query_vector = _local_text_embedding(text)
+        examples = _question_type_embeddings(True)
+        logger.warning(
+            "question_type fallback to local embedding",
+            extra={"context": {"error": "no_examples_with_bge"}},
+        )
+    if not examples:
         return None
 
     scores: dict[str, float] = {}
