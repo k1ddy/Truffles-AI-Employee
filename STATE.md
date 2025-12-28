@@ -1279,8 +1279,9 @@ LIMIT 1;
 | Файл | Изменение |
 |------|-----------|
 | `demo_salon_knowledge.py` | Multi-truth: семантика часов/услуги → один reply; presence re-rank по семантике; guest_policy до question_type |
-| `demo_salon_knowledge.py` | Multi-truth: явные hours/price/duration сигналы + лексический fallback услуги; ignore hours-эмбеддинг на сервисном сегменте |
+| `demo_salon_knowledge.py` | Multi-truth: только semantic_question_type + semantic_service_match; short-message gate для сервисного матча (len<=2 без ?) |
 | `SALON_TRUTH.yaml` | Добавлен шаблон `services_catalog.service_presence_reply` |
+| `SALON_TRUTH.yaml` | Добавлены RU/KZ примеры для `domain_pack.typical_questions.hours` |
 | `EVAL.yaml` | Кейс multi-truth (часы + маникюр) |
 | `tests/test_message_endpoint.py` | Тест multi-truth: часы+услуга без booking, "ислам" не создаёт заявку |
 | `webhook.py` | Booking gate: info-вопросы распознаются по сегментам ?!.; блокировка очищает booking_state и отключает flow |

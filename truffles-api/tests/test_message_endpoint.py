@@ -1365,24 +1365,20 @@ def test_multi_truth_reply_handles_hours_and_service_without_booking():
             return SimpleNamespace(kind="hours", score=0.81, second_score=0.1)
         return None
 
-    def _fake_semantic_service_match(segment: str, client_slug: str):
-        normalized = (segment or "").casefold()
+    def _fake_search_services_index(text: str, client_slug: str, limit: int):
+        normalized = (text or "").casefold()
         if "маник" in normalized:
-            return SemanticServiceMatch(
-                action="match",
-                response="Маникюр — 0 ₸.",
-                score=0.9,
-                canonical_name="Маникюр",
-                suggestions=["Маникюр"],
-            )
-        return None
+            return [{"score": 0.9, "payload": {"canonical_name": "Маникюр"}}]
+        if "ислам" in normalized:
+            return [{"score": 0.5, "payload": {"canonical_name": "Маникюр"}}]
+        return []
 
     with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint), patch(
         "app.routers.webhook.semantic_question_type", side_effect=_fake_question_type
     ), patch(
         "app.services.demo_salon_knowledge.semantic_question_type", side_effect=_fake_question_type
     ), patch(
-        "app.services.demo_salon_knowledge.semantic_service_match", side_effect=_fake_semantic_service_match
+        "app.services.demo_salon_knowledge._search_services_index", side_effect=_fake_search_services_index
     ), patch(
         "app.routers.webhook.generate_bot_response",
         side_effect=[
@@ -1424,6 +1420,7 @@ def test_multi_truth_reply_handles_hours_and_service_without_booking():
                 conversation_id=conversation_id,
             )
         )
+        islam_match = semantic_service_match("ислам", "demo_salon")
 
     assert response_info.success is True
     assert response_info.bot_response is not None
@@ -1435,6 +1432,11 @@ def test_multi_truth_reply_handles_hours_and_service_without_booking():
     assert webhook_router.MSG_BOOKING_ASK_NAME not in response_info.bot_response
 
     assert response_name.success is True
+    assert response_name.bot_response == "ok"
+    assert webhook_router.MSG_BOOKING_ASK_SERVICE not in response_name.bot_response
+    assert webhook_router.MSG_BOOKING_ASK_DATETIME not in response_name.bot_response
+    assert webhook_router.MSG_BOOKING_ASK_NAME not in response_name.bot_response
+    assert islam_match is None
     mock_reuse.assert_not_called()
     mock_escalate.assert_not_called()
 
