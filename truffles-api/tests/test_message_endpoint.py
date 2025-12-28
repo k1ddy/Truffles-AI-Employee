@@ -818,13 +818,13 @@ def test_semantic_service_matcher_allows_short_query_without_keywords():
 def test_semantic_question_type_routes_duration_and_price():
     import app.services.demo_salon_knowledge as demo_salon_knowledge
 
-        def fake_embedding(text: str):
-            normalized = text.casefold()
-            if "дл" in normalized or "врем" in normalized:
-                return [1.0, 0.0]
-            if "стоит" in normalized or "цена" in normalized or "прайс" in normalized:
-                return [0.0, 1.0]
-            return [0.1, 0.1]
+    def fake_embedding(text: str):
+        normalized = text.casefold()
+        if "дл" in normalized or "врем" in normalized:
+            return [1.0, 0.0]
+        if "стоит" in normalized or "цена" in normalized or "прайс" in normalized:
+            return [0.0, 1.0]
+        return [0.1, 0.1]
 
     with patch("app.services.demo_salon_knowledge.get_embedding", side_effect=fake_embedding):
         demo_salon_knowledge._question_type_examples.cache_clear()
