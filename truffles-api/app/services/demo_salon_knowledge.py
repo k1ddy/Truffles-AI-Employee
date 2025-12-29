@@ -70,7 +70,7 @@ def _normalize_text(text: str) -> str:
 def _split_question_segments(text: str) -> list[str]:
     if not text:
         return []
-    segments = [segment.strip() for segment in re.split(r"[?!\.]+", text) if segment.strip()]
+    segments = [segment.strip() for segment in re.split(r"[?!\.,;]+", text) if segment.strip()]
     if segments:
         return segments
     cleaned = text.strip()
@@ -644,10 +644,7 @@ def semantic_question_type(
         if top_score < _QUESTION_TYPE_THRESHOLD:
             return []
         if return_multi:
-            above_threshold = [item for item in sorted_scores if item[1] >= _QUESTION_TYPE_THRESHOLD]
-            if len(above_threshold) >= 2:
-                picked = above_threshold
-            elif len(sorted_scores) > 1 and (top_score - second_score) <= _QUESTION_TYPE_MARGIN:
+            if len(sorted_scores) > 1 and (top_score - second_score) <= _QUESTION_TYPE_MARGIN:
                 picked = sorted_scores[:2]
             else:
                 picked = sorted_scores[:1]
@@ -754,6 +751,21 @@ def _format_service_presence_reply(message: str, match: SemanticServiceMatch | N
     if "{service}" in template:
         return template.format(service=service_name)
     return f"{template} {service_name}."
+
+
+def _format_service_presence_reply_for_name(service_name: str) -> str | None:
+    if not isinstance(service_name, str) or not service_name.strip():
+        return None
+    truth = load_yaml_truth()
+    catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
+    template = catalog.get("service_presence_reply") if isinstance(catalog, dict) else None
+    if not isinstance(template, str) or not template.strip():
+        return None
+    template = template.strip()
+    cleaned = service_name.strip()
+    if "{service}" in template:
+        return template.format(service=cleaned)
+    return f"{template} {cleaned}."
 
 
 def _find_catalog_service_by_name(name: str) -> dict[str, Any] | None:
@@ -921,6 +933,12 @@ def compose_multi_truth_reply(message: str, client_slug: str | None) -> str | No
             if hasattr(question, "kind") and isinstance(getattr(question, "kind"), str)
         }
         service_match = semantic_service_match(segment, client_slug)
+        fallback_service = _match_service(normalized_segment) if not service_match else None
+        fallback_service_name = None
+        if isinstance(fallback_service, dict):
+            name = fallback_service.get("name")
+            if isinstance(name, str) and name.strip():
+                fallback_service_name = name.strip()
         if kinds:
             info_detected = True
 
@@ -945,11 +963,15 @@ def compose_multi_truth_reply(message: str, client_slug: str | None) -> str | No
             service = None
             if service_match and service_match.canonical_name:
                 service = _find_catalog_service_by_name(service_match.canonical_name)
+            if service is None and fallback_service:
+                service = fallback_service
             _add_reply(_format_service_duration_reply(service))
         if len(replies) >= 2:
             break
         if service_match and service_match.action == "match" and not {"pricing", "duration"} & kinds:
             _add_reply(_format_service_presence_reply(segment, service_match))
+        elif fallback_service_name and not {"pricing", "duration"} & kinds:
+            _add_reply(_format_service_presence_reply_for_name(fallback_service_name))
         if len(replies) >= 2:
             break
 
@@ -1333,6 +1355,24 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
 def get_demo_salon_service_decision(message: str) -> DemoSalonDecision | None:
     normalized = _normalize_text(message)
     if not normalized:
+        return None
+    segments = _split_question_segments(message)
+    kinds_seen: set[str] = set()
+    for segment in segments:
+        question_types = semantic_question_type(
+            segment,
+            include_kinds={"hours", "pricing", "duration"},
+            return_multi=True,
+        )
+        if isinstance(question_types, list):
+            for question in question_types:
+                if hasattr(question, "kind") and isinstance(getattr(question, "kind"), str):
+                    kinds_seen.add(question.kind)
+        elif question_types and hasattr(question_types, "kind"):
+            kind = getattr(question_types, "kind")
+            if isinstance(kind, str):
+                kinds_seen.add(kind)
+    if "hours" in kinds_seen and {"pricing", "duration"} & kinds_seen:
         return None
     if not _looks_like_service_question(normalized, message):
         return None

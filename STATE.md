@@ -33,7 +33,7 @@
 - `ops/sync_client.py` получил валидацию обязательных полей `client_pack` (`--validate`/`--validate-only`), без генерации новых файлов.
 - `services_index` (Qdrant) заполняется из `ops/sync_client.py` по `price_list` + `services_catalog`; после LLM low_confidence работает semantic matcher (match/suggest) с `decision_meta.source=service_semantic_matcher`, безопасно для прода (срабатывает только при low_confidence и OOD‑gate).
 - Добавлен rewrite‑layer для semantic matcher (FAST LLM → JSON intent/query, 1.2s) — влияет только на подбор запроса, факты не меняет.
-- Semantic question‑type (hours/pricing/duration) на эмбеддингах из `domain_pack.typical_questions`; есть multi-type для multi_truth (макс 2 ответа); длительности берутся из `services_catalog.duration_text`.
+- Semantic question‑type (hours/pricing/duration) на эмбеддингах из `domain_pack.typical_questions`; multi_truth объединяет 2 ответа (hours+price/duration), учитывает сегменты/запятые; service matcher пропускает multi hours+price/duration; длительности берутся из `services_catalog.duration_text`.
 - Ambiguous price/duration → clarify (не отвечаем ценой при неуверенном типе).
 - Booking gate блокирует инфо‑вопросы (pricing/hours/duration) без явного booking; service slot только через semantic matcher, datetime — токен; trace/meta `booking_blocked_reason`.
 
