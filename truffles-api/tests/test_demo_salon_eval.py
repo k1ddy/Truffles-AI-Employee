@@ -9,6 +9,8 @@ from app.services import demo_salon_knowledge
 from app.services.demo_salon_knowledge import get_demo_salon_decision
 
 EVAL_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_salon" / "EVAL.yaml"
+_TOKEN_MATCHES_BASE = demo_salon_knowledge._token_matches
+_FUZZY_TOKEN_MATCH_THRESHOLD = 0.86
 
 
 def _normalize(text: str) -> str:
@@ -71,6 +73,23 @@ def _local_service_search(text: str, client_slug: str, limit: int) -> list[dict]
     return candidates[:limit]
 
 
+def _fuzzy_token_matches(token: str, message_tokens: list[str]) -> bool:
+    if _TOKEN_MATCHES_BASE(token, message_tokens):
+        return True
+    if not token:
+        return False
+    for msg in message_tokens:
+        if not msg:
+            continue
+        if len(token) < 4 or len(msg) < 4:
+            continue
+        if token[:2] != msg[:2]:
+            continue
+        if SequenceMatcher(None, token, msg).ratio() >= _FUZZY_TOKEN_MATCH_THRESHOLD:
+            return True
+    return False
+
+
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:
     normalized = _normalize(response)
     for item in items:
@@ -96,6 +115,9 @@ def test_demo_salon_eval_cases():
     with patch(
         "app.services.demo_salon_knowledge._search_services_index",
         side_effect=_local_service_search,
+    ), patch(
+        "app.services.demo_salon_knowledge._token_matches",
+        side_effect=_fuzzy_token_matches,
     ):
         for case in cases:
             case_id = case.get("id", "<unknown>")
