@@ -23,6 +23,7 @@ _SERVICES_COLLECTION = "services_index"
 _SERVICE_MATCH_THRESHOLD = float(os.environ.get("SERVICE_SEMANTIC_MATCH_THRESHOLD", "0.40"))
 _SERVICE_SUGGEST_THRESHOLD = float(os.environ.get("SERVICE_SEMANTIC_SUGGEST_THRESHOLD", "0.25"))
 _SERVICE_SUGGEST_LIMIT = int(os.environ.get("SERVICE_SEMANTIC_SUGGEST_LIMIT", "3"))
+_SERVICE_QUERY_SEMANTIC_THRESHOLD = float(os.environ.get("SERVICE_QUERY_SEMANTIC_THRESHOLD", "0.72"))
 _QUESTION_TYPE_THRESHOLD = float(os.environ.get("QUESTION_TYPE_SEMANTIC_THRESHOLD", "0.55"))
 _QUESTION_TYPE_MARGIN = float(os.environ.get("QUESTION_TYPE_SEMANTIC_MARGIN", "0.08"))
 _QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
@@ -968,11 +969,75 @@ def _extract_intent_decomp(intent_decomp: dict | None) -> tuple[set[str], str | 
     return set(intents), service_query
 
 
+def _clean_service_query(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    if not cleaned or len(cleaned) < 2:
+        return None
+    tokens = cleaned.split()
+    if len(tokens) > 6:
+        cleaned = " ".join(tokens[:6])
+    return cleaned or None
+
+
+def _resolve_service_query_meta(
+    message: str,
+    client_slug: str | None,
+    intent_decomp: dict | None,
+    *,
+    require_query: bool,
+) -> dict[str, Any]:
+    meta: dict[str, Any] = {
+        "service_query": None,
+        "service_query_source": "none",
+        "service_query_score": 0.0,
+    }
+    if isinstance(intent_decomp, dict):
+        cleaned = _clean_service_query(intent_decomp.get("service_query"))
+        if cleaned:
+            meta["service_query"] = cleaned
+            meta["service_query_source"] = "intent_decomp"
+            meta["service_query_score"] = 1.0
+            return meta
+    if require_query and message and client_slug:
+        match = semantic_service_match(message, client_slug)
+        if match and match.action == "match" and match.score >= _SERVICE_QUERY_SEMANTIC_THRESHOLD:
+            candidate = match.canonical_name
+            if not candidate and match.suggestions:
+                candidate = match.suggestions[0]
+            cleaned = _clean_service_query(candidate)
+            if cleaned:
+                meta["service_query"] = cleaned
+                meta["service_query_source"] = "semantic_match"
+                meta["service_query_score"] = match.score
+        if not meta.get("service_query"):
+            fallback_service = _match_service(_normalize_text(message))
+            if isinstance(fallback_service, dict):
+                fallback_name = _clean_service_query(fallback_service.get("name"))
+                if fallback_name:
+                    meta["service_query"] = fallback_name
+                    meta["service_query_source"] = "semantic_match"
+                    meta["service_query_score"] = 1.0
+    return meta
+
+
+def _resolve_service_from_query(service_query: str | None) -> dict[str, Any] | None:
+    if not service_query:
+        return None
+    normalized = _normalize_text(service_query)
+    if not normalized:
+        return None
+    return _match_service(normalized)
+
+
 def compose_multi_truth_reply(
     message: str,
     client_slug: str | None,
     intent_decomp: dict | None = None,
-) -> str | None:
+    *,
+    return_meta: bool = False,
+) -> str | tuple[str, dict[str, Any]] | None:
     if not message or not client_slug:
         return None
     segments = _split_question_segments(message)
@@ -985,8 +1050,8 @@ def compose_multi_truth_reply(
     intent_kinds = {kind for kind in intent_kinds if kind in {"hours", "pricing", "duration"}}
     if not intent_kinds and len(segments) < 2:
         return None
+    normalized_message = _normalize_text(message)
     if intent_kinds:
-        normalized_message = _normalize_text(message)
         if "hours" in intent_kinds:
             hours_like = any(_looks_like_hours_question(_normalize_text(seg)) for seg in segments)
             if not hours_like:
@@ -996,16 +1061,24 @@ def compose_multi_truth_reply(
         if "duration" in intent_kinds and not _has_duration_signal(normalized_message, message):
             intent_kinds.discard("duration")
     info_detected = bool(intent_kinds)
+    needs_service_query = _has_price_signal(normalized_message, message) or _has_duration_signal(
+        normalized_message, message
+    )
+    service_query_meta = _resolve_service_query_meta(
+        message,
+        client_slug,
+        intent_decomp,
+        require_query=needs_service_query,
+    )
+    service_query = service_query_meta.get("service_query")
     service_match_from_query = None
-    fallback_service_from_query = None
+    service_from_query = None
     fallback_service_name_from_query = None
     if service_query:
         service_match_from_query = semantic_service_match(service_query, client_slug)
-        normalized_query = _normalize_text(service_query)
-        if normalized_query:
-            fallback_service_from_query = _match_service(normalized_query)
-        if isinstance(fallback_service_from_query, dict):
-            name = fallback_service_from_query.get("name")
+        service_from_query = _resolve_service_from_query(service_query)
+        if isinstance(service_from_query, dict):
+            name = service_from_query.get("name")
             if isinstance(name, str) and name.strip():
                 fallback_service_name_from_query = name.strip()
     for segment in segments:
@@ -1035,11 +1108,7 @@ def compose_multi_truth_reply(
         if "duration" in kinds and not _has_duration_signal(normalized_segment, segment):
             kinds.discard("duration")
         service_match = semantic_service_match(segment, client_slug)
-        if not service_match and service_match_from_query:
-            service_match = service_match_from_query
         fallback_service = _match_service(normalized_segment) if not service_match else None
-        if not fallback_service and fallback_service_from_query:
-            fallback_service = fallback_service_from_query
         fallback_service_name = None
         if isinstance(fallback_service, dict):
             name = fallback_service.get("name")
@@ -1064,12 +1133,14 @@ def compose_multi_truth_reply(
         if len(replies) >= 2:
             break
         if "pricing" in kinds:
-            if service_match and service_match.action == "match":
-                _add_reply(service_match.response)
+            if not service_query:
+                _add_reply(format_reply_from_truth("service_clarify"))
+            elif service_match_from_query and service_match_from_query.action == "match":
+                _add_reply(service_match_from_query.response)
             else:
                 fallback_reply = None
-                if isinstance(fallback_service, dict):
-                    fallback_reply = _format_service_reply(fallback_service, truth)
+                if isinstance(service_from_query, dict):
+                    fallback_reply = _format_service_reply(service_from_query, truth)
                 if fallback_reply:
                     _add_reply(fallback_reply)
                 else:
@@ -1077,12 +1148,10 @@ def compose_multi_truth_reply(
         if len(replies) >= 2:
             break
         if "duration" in kinds:
-            service = None
-            if service_match and service_match.canonical_name:
-                service = _find_catalog_service_by_name(service_match.canonical_name)
-            if service is None and fallback_service:
-                service = fallback_service
-            _add_reply(_format_service_duration_reply(service))
+            if not service_query:
+                _add_reply(_format_service_duration_reply(None))
+            else:
+                _add_reply(_format_service_duration_reply(service_from_query))
         if len(replies) >= 2:
             break
         if service_match and service_match.action == "match" and not {"pricing", "duration"} & kinds:
@@ -1094,7 +1163,10 @@ def compose_multi_truth_reply(
 
     if not info_detected or len(replies) < 2:
         return None
-    return "\n\n".join(replies[:2])
+    reply = "\n\n".join(replies[:2])
+    if return_meta:
+        return reply, service_query_meta
+    return reply
 
 
 def _looks_like_service_question(normalized: str, raw_text: str | None = None) -> bool:
@@ -1469,7 +1541,11 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
     return None
 
 
-def get_demo_salon_service_decision(message: str) -> DemoSalonDecision | None:
+def get_demo_salon_service_decision(
+    message: str,
+    client_slug: str | None = "demo_salon",
+    intent_decomp: dict | None = None,
+) -> DemoSalonDecision | None:
     normalized = _normalize_text(message)
     if not normalized:
         return None
@@ -1494,16 +1570,32 @@ def get_demo_salon_service_decision(message: str) -> DemoSalonDecision | None:
     if not _looks_like_service_question(normalized, message):
         return None
 
+    service_query_meta = _resolve_service_query_meta(
+        message,
+        client_slug,
+        intent_decomp,
+        require_query=True,
+    )
     service = _match_service(normalized)
     truth = load_yaml_truth()
     if service:
         reply = _format_service_reply(service, truth)
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="service_match")
+            return DemoSalonDecision(
+                action="reply",
+                response=reply,
+                intent="service_match",
+                meta=service_query_meta,
+            )
 
     reply = _format_service_not_found_reply()
     if reply:
-        return DemoSalonDecision(action="reply", response=reply, intent="service_not_found")
+        return DemoSalonDecision(
+            action="reply",
+            response=reply,
+            intent="service_not_found",
+            meta=service_query_meta,
+        )
     return None
 
 
@@ -1623,9 +1715,20 @@ def get_demo_salon_decision(
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="last_appointment")
 
-    multi_reply = compose_multi_truth_reply(message, client_slug or "demo_salon", intent_decomp=intent_decomp)
-    if multi_reply:
-        return DemoSalonDecision(action="reply", response=multi_reply, intent="multi_truth")
+    multi_result = compose_multi_truth_reply(
+        message,
+        client_slug or "demo_salon",
+        intent_decomp=intent_decomp,
+        return_meta=True,
+    )
+    if multi_result:
+        multi_reply, multi_meta = multi_result
+        return DemoSalonDecision(
+            action="reply",
+            response=multi_reply,
+            intent="multi_truth",
+            meta=multi_meta if isinstance(multi_meta, dict) else None,
+        )
 
     if "опозда" in normalized:
         minutes = _extract_minutes(message)
@@ -1731,22 +1834,34 @@ def get_demo_salon_decision(
             "question_type_score": question_type.score,
         }
         if question_type.kind == "duration":
-            service = _match_service(normalized)
+            service_query_meta = _resolve_service_query_meta(
+                message,
+                client_slug,
+                intent_decomp,
+                require_query=True,
+            )
+            service = _resolve_service_from_query(service_query_meta.get("service_query"))
             reply = _format_service_duration_reply(service)
             return DemoSalonDecision(
                 action="reply",
                 response=reply,
                 intent="service_duration",
-                meta=question_meta,
+                meta={**question_meta, **service_query_meta} if question_meta else service_query_meta,
             )
     elif _has_duration_signal(normalized, message):
-        service = _match_service(normalized)
+        service_query_meta = _resolve_service_query_meta(
+            message,
+            client_slug,
+            intent_decomp,
+            require_query=True,
+        )
+        service = _resolve_service_from_query(service_query_meta.get("service_query"))
         reply = _format_service_duration_reply(service)
         return DemoSalonDecision(
             action="reply",
             response=reply,
             intent="service_duration",
-            meta={"question_type": "duration"},
+            meta={"question_type": "duration", **service_query_meta},
         )
 
     price_signal = _has_price_signal(normalized, message)
@@ -1768,14 +1883,22 @@ def get_demo_salon_decision(
     if "price_manicure" in phrase_intents or (
         _contains_any(normalized, ["маникюр", "маник"]) and price_signal and not price_item
     ):
-        reply = format_reply_from_truth("price_manicure")
-        if reply:
-            return DemoSalonDecision(
-                action="reply",
-                response=reply,
-                intent="price_manicure",
-                meta=question_meta_for_price,
-            )
+        service_query_meta = _resolve_service_query_meta(
+            message,
+            client_slug,
+            intent_decomp,
+            require_query=True,
+        )
+        if service_query_meta.get("service_query"):
+            reply = format_reply_from_truth("price_manicure")
+            if reply:
+                meta = {**question_meta_for_price, **service_query_meta} if question_meta_for_price else service_query_meta
+                return DemoSalonDecision(
+                    action="reply",
+                    response=reply,
+                    intent="price_manicure",
+                    meta=meta,
+                )
 
     if _contains_any(normalized, ["стерилиз", "инструмент", "обрабатываете", "дез", "сухожар"]):
         reply = format_reply_from_truth("hygiene")
@@ -1825,7 +1948,11 @@ def get_demo_salon_decision(
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="booking_intake")
 
-    service_decision = get_demo_salon_service_decision(message)
+    service_decision = get_demo_salon_service_decision(
+        message,
+        client_slug=client_slug or "demo_salon",
+        intent_decomp=intent_decomp,
+    )
     if service_decision:
         return service_decision
 
@@ -1835,21 +1962,45 @@ def get_demo_salon_decision(
             return DemoSalonDecision(action="reply", response=reply, intent="off_topic")
 
     if price_item or price_signal:
+        service_query_meta = _resolve_service_query_meta(
+            message,
+            client_slug,
+            intent_decomp,
+            require_query=True,
+        )
+        if not service_query_meta.get("service_query"):
+            reply = format_reply_from_truth("service_clarify")
+            if reply:
+                return DemoSalonDecision(
+                    action="reply",
+                    response=reply,
+                    intent="service_clarify",
+                    meta=service_query_meta,
+                )
         reply = format_reply_from_truth("price_query", {"price_item": price_item["item"]} if price_item else {})
         if reply:
+            meta = {**question_meta_for_price, **service_query_meta} if question_meta_for_price else service_query_meta
             return DemoSalonDecision(
                 action="reply",
                 response=reply,
                 intent="price_query",
-                meta=question_meta_for_price,
+                meta=meta,
             )
 
     return None
 
 
-def get_demo_salon_price_reply(message: str) -> str | None:
+def get_demo_salon_price_reply(message: str, client_slug: str | None = "demo_salon") -> str | None:
     normalized = _normalize_text(message)
     if not normalized:
+        return None
+    service_query_meta = _resolve_service_query_meta(
+        message,
+        client_slug,
+        intent_decomp=None,
+        require_query=True,
+    )
+    if not service_query_meta.get("service_query"):
         return None
     price_item = _find_best_price_item(message)
     if not price_item:

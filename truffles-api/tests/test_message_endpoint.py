@@ -40,7 +40,23 @@ def client():
 
 @pytest.fixture(autouse=True)
 def _fake_intent_decomp():
-    def _detect_stub(text: str):
+    def _extract_service_query(normalized: str) -> str:
+        patterns = [
+            r"(?:сколько стоит|сколько стоят|стоимость|цена|прайс|почем)\s+([^?!.;,]+)",
+            r"(?:сколько длится|сколько по времени|по времени|длительность|сколько времени)\s+([^?!.;,]+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, normalized)
+            if not match:
+                continue
+            candidate = re.sub(r"\s+", " ", match.group(1)).strip()
+            if not candidate:
+                continue
+            tokens = candidate.split()
+            return " ".join(tokens[:6])
+        return ""
+
+    def _detect_stub(text: str, **_kwargs):
         normalized = (text or "").casefold()
         intents: list[str] = []
 
@@ -72,12 +88,13 @@ def _fake_intent_decomp():
 
         primary = intents[0]
         secondary = [intent for intent in intents[1:] if intent != primary]
+        service_query = _extract_service_query(normalized)
         return {
             "multi_intent": len(intents) > 1,
             "primary_intent": primary,
             "secondary_intents": secondary,
             "intents": intents,
-            "service_query": "",
+            "service_query": service_query,
         }
 
     with patch("app.routers.webhook.detect_multi_intent", side_effect=_detect_stub):
@@ -945,7 +962,15 @@ def test_semantic_question_type_routes_duration_and_price():
             return [0.0, 1.0]
         return [0.1, 0.1]
 
-    with patch("app.services.demo_salon_knowledge.get_embedding", side_effect=fake_embedding):
+    def fake_search(text: str, client_slug: str, limit: int):
+        normalized = text.casefold()
+        if "маник" in normalized:
+            return [{"score": 0.9, "payload": {"canonical_name": "Маникюр"}}]
+        return []
+
+    with patch("app.services.demo_salon_knowledge.get_embedding", side_effect=fake_embedding), patch(
+        "app.services.demo_salon_knowledge._search_services_index", side_effect=fake_search
+    ):
         demo_salon_knowledge._question_type_examples.cache_clear()
         demo_salon_knowledge._question_type_embeddings.cache_clear()
 
@@ -956,7 +981,7 @@ def test_semantic_question_type_routes_duration_and_price():
 
         decision = get_demo_salon_decision("Сколько стоит процедура?")
         assert decision is not None
-        assert decision.intent == "price_query"
+        assert decision.intent == "service_clarify"
 
         decision = get_demo_salon_decision("Сколько по времени маникюр?")
         assert decision is not None
@@ -1050,9 +1075,9 @@ def test_service_matcher_short_circuits_llm():
     assert response.success is True
     assert "педикюр" in (response.bot_response or "").casefold()
     mock_llm.assert_not_called()
-    updates = mock_update.call_args[0][1]
-    assert updates["source"] == "service_matcher"
-    assert updates["llm_primary_used"] is False
+    updates = [call_args[0][1] for call_args in mock_update.call_args_list]
+    assert any(update.get("source") == "service_matcher" for update in updates)
+    assert any(update.get("llm_primary_used") is False for update in updates if "llm_primary_used" in update)
 
 
 def test_llm_guard_blocks_payment_response():
@@ -1778,6 +1803,8 @@ def test_intent_decomp_blocks_booking_and_drives_multi_truth():
     assert "hours" in (meta.get("intents") or [])
     assert "pricing" in (meta.get("intents") or [])
     assert meta.get("service_query") == "педикюр"
+    assert meta.get("service_query_source") == "intent_decomp"
+    assert meta.get("service_query_score") == 1.0
     assert meta.get("booking_blocked_reason") == "info_question"
 
     trace = conversation.context.get("decision_trace", [])

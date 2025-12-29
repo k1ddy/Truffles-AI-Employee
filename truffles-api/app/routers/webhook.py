@@ -4491,7 +4491,7 @@ async def _handle_webhook_payload(
     intent_decomp_multi = False
     intent_decomp_used = False
     if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
-        intent_decomp_payload = detect_multi_intent(message_text)
+        intent_decomp_payload = detect_multi_intent(message_text, client_slug=payload.client_slug)
         if isinstance(intent_decomp_payload, dict):
             intent_decomp_used = True
             raw_intents = intent_decomp_payload.get("intents")
@@ -4523,6 +4523,8 @@ async def _handle_webhook_payload(
                 service_query = service_query.strip()
                 if service_query:
                     intent_decomp_service_query = service_query
+            service_query_source = "intent_decomp"
+            service_query_score = 1.0 if intent_decomp_service_query else 0.0
             if saved_message:
                 _update_message_decision_metadata(
                     saved_message,
@@ -4530,6 +4532,8 @@ async def _handle_webhook_payload(
                         "intent_decomp_used": True,
                         "intents": intent_decomp_intents,
                         "service_query": intent_decomp_service_query,
+                        "service_query_source": service_query_source,
+                        "service_query_score": service_query_score,
                     },
                 )
             _record_decision_trace(
@@ -4541,6 +4545,8 @@ async def _handle_webhook_payload(
                     "secondary_intents": intent_decomp_secondary,
                     "multi_intent": intent_decomp_multi,
                     "service_query": intent_decomp_service_query,
+                    "service_query_source": service_query_source,
+                    "service_query_score": service_query_score,
                 },
             )
 
@@ -4808,7 +4814,7 @@ async def _handle_webhook_payload(
     ):
         multi_intent_payload = intent_decomp_payload
         if not multi_intent_payload:
-            multi_intent_payload = detect_multi_intent(message_text)
+            multi_intent_payload = detect_multi_intent(message_text, client_slug=payload.client_slug)
         if isinstance(multi_intent_payload, dict) and multi_intent_payload.get("multi_intent") is True:
             primary = multi_intent_payload.get("primary_intent")
             secondary = multi_intent_payload.get("secondary_intents") or []
@@ -5110,26 +5116,28 @@ async def _handle_webhook_payload(
         if intent_decomp_used and message_text:
             intent_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent}
             if "booking" not in intent_set and "hours" in intent_set and "pricing" in intent_set:
-                multi_reply = compose_multi_truth_reply(
+                multi_result = compose_multi_truth_reply(
                     message_text,
                     payload.client_slug,
                     intent_decomp=intent_decomp_payload,
+                    return_meta=True,
                 )
-                if multi_reply:
+                if multi_result:
+                    multi_reply, multi_meta = multi_result
                     bot_response = multi_reply
                     _reset_low_confidence_retry(conversation)
 
                     result_message = "Multi-truth reply sent"
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "multi_truth",
-                            "decision": "reply",
-                            "intent": "multi_truth",
-                            "state": conversation.state,
-                            "intents": sorted(intent_set),
-                        },
-                    )
+                    trace_payload = {
+                        "stage": "multi_truth",
+                        "decision": "reply",
+                        "intent": "multi_truth",
+                        "state": conversation.state,
+                        "intents": sorted(intent_set),
+                    }
+                    if isinstance(multi_meta, dict):
+                        trace_payload.update(multi_meta)
+                    _record_decision_trace(conversation, trace_payload)
                     _record_message_decision_meta(
                         saved_message,
                         action="reply",
@@ -5137,6 +5145,8 @@ async def _handle_webhook_payload(
                         source="multi_truth",
                         fast_intent=False,
                     )
+                    if saved_message and isinstance(multi_meta, dict):
+                        _update_message_decision_metadata(saved_message, multi_meta)
                     save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                     sent = _send_response(bot_response)
                     if not sent:
@@ -5150,21 +5160,29 @@ async def _handle_webhook_payload(
                     )
 
         service_matcher = policy_handler.get("service_matcher")
-        service_decision = service_matcher(message_text) if service_matcher else None
+        service_decision = (
+            service_matcher(
+                message_text,
+                client_slug=payload.client_slug,
+                intent_decomp=intent_decomp_payload,
+            )
+            if service_matcher
+            else None
+        )
         if service_decision:
             bot_response = service_decision.response
             bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
             _reset_low_confidence_retry(conversation)
 
             result_message = "Service matcher reply sent"
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "service_matcher",
-                    "decision": service_decision.intent,
-                    "state": conversation.state,
-                },
-            )
+            trace_payload = {
+                "stage": "service_matcher",
+                "decision": service_decision.intent,
+                "state": conversation.state,
+            }
+            if isinstance(getattr(service_decision, "meta", None), dict):
+                trace_payload.update(service_decision.meta)
+            _record_decision_trace(conversation, trace_payload)
             _record_message_decision_meta(
                 saved_message,
                 action=service_decision.action,
@@ -5172,6 +5190,8 @@ async def _handle_webhook_payload(
                 source="service_matcher",
                 fast_intent=False,
             )
+            if saved_message and isinstance(getattr(service_decision, "meta", None), dict):
+                _update_message_decision_metadata(saved_message, service_decision.meta)
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             if not sent:

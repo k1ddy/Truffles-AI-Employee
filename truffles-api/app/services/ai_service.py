@@ -723,7 +723,20 @@ def rewrite_for_service_match(text: str, client_slug: str) -> str | None:
     return query
 
 
-def detect_multi_intent(text: str) -> dict | None:
+def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | None:
+    def _clean_service_query(value: str | None) -> str:
+        if not isinstance(value, str):
+            return ""
+        cleaned = re.sub(r"\s+", " ", value).strip()
+        if not cleaned:
+            return ""
+        tokens = cleaned.split()
+        if len(tokens) > 6:
+            cleaned = " ".join(tokens[:6])
+        if len(cleaned) < 2:
+            return ""
+        return cleaned
+
     def _fallback_payload() -> dict:
         normalized = normalize_for_matching(text)
         intents: list[str] = []
@@ -813,8 +826,10 @@ def detect_multi_intent(text: str) -> dict | None:
         "intents — уникальный список всех интентов. "
         "multi_intent=true если есть 2+ разных интента. primary_intent — главный/первый. "
         "secondary_intents — уникальные, без primary.\n"
-        "service_query: 1-6 слов, коротко суть услуги, если речь про услугу/цену/длительность/запись. "
-        "Если не про услугу — пустая строка. Если не уверен — other."
+        "service_query: 1-6 слов, ТОЛЬКО из текста клиента, коротко суть услуги. "
+        "Если в сообщении есть услуга (особенно при pricing/duration/booking) — service_query обязателен, "
+        "даже если есть другие интенты. Если услуги нет — пустая строка. "
+        "Если не уверен в интенте — other."
     )
     messages = [
         {"role": "system", "content": system_prompt},
@@ -924,14 +939,10 @@ def detect_multi_intent(text: str) -> dict | None:
     else:
         multi_intent = len(cleaned_intents) > 1
 
-    service_query = service_query_raw if isinstance(service_query_raw, str) else ""
-    service_query = re.sub(r"\s+", " ", service_query).strip()
-    if service_query:
-        tokens = service_query.split()
-        if len(tokens) > 6:
-            service_query = " ".join(tokens[:6])
-    if len(service_query) < 2:
-        service_query = ""
+    service_query = _clean_service_query(service_query_raw if isinstance(service_query_raw, str) else None)
+    if not service_query and {"pricing", "duration", "booking"} & set(cleaned_intents):
+        rewrite_query = rewrite_for_service_match(text, client_slug or "unknown")
+        service_query = _clean_service_query(rewrite_query)
 
     return {
         "multi_intent": multi_intent,
