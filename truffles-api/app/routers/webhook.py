@@ -29,6 +29,7 @@ from app.services.ai_service import (
     OUT_OF_DOMAIN_RESPONSE,
     THANKS_RESPONSE,
     classify_confirmation,
+    detect_refusal_flags,
     detect_multi_intent,
     is_acknowledgement_message,
     is_bot_status_question,
@@ -1659,6 +1660,11 @@ SERVICE_HINT_AT_KEY = "last_service_hint_at"
 REENGAGE_CONFIRM_KEY = "reengage_confirmation"
 ASR_CONFIRM_KEY = "asr_confirm_pending"
 DECISION_TRACE_KEY = "decision_trace"
+CONTEXT_MANAGER_KEY = "context_manager"
+
+CLARIFY_MAX_ATTEMPTS = 2
+REFUSAL_TTL_MESSAGES = 10
+SUMMARY_MESSAGE_THRESHOLD = 12
 
 ROUTING_MATRIX = {
     ConversationState.BOT_ACTIVE.value: {
@@ -1911,6 +1917,7 @@ DATE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 NAME_PATTERN = re.compile(r"\bменя зовут\s+([a-zа-яё-]{2,})", re.IGNORECASE)
+PHONE_PATTERN = re.compile(r"\+?\d[\d\s\-\(\)]{8,}\d")
 
 
 def _normalize_text(text: str) -> str:
@@ -1992,6 +1999,7 @@ def _extract_datetime(text: str) -> str | None:
 
 
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration"}
+INFO_INTENTS = {"pricing", "hours", "duration", "location"}
 
 
 def _evaluate_booking_signal(
@@ -2052,6 +2060,32 @@ def _set_conversation_context(conversation: Conversation, context: dict) -> None
 
 def _record_decision_trace(conversation: Conversation, trace: dict) -> None:
     context = _get_conversation_context(conversation)
+    context_manager = _get_context_manager(context)
+    message_count = _increment_context_message_count(context_manager)
+    context_manager, refusal_flags, refusal_events = _update_refusal_flags(
+        context_manager,
+        message_text=message_text,
+        now=now,
+        client_slug=payload.client_slug,
+    )
+    context = _set_context_manager(context, context_manager)
+    _set_conversation_context(conversation, context)
+    if refusal_events:
+        _record_context_manager_decision(
+            conversation,
+            saved_message,
+            decision="refusal_flags",
+            updates={"refusal_flags": refusal_flags, "refusal_events": refusal_events},
+        )
+    if message_count == SUMMARY_MESSAGE_THRESHOLD:
+        _update_compact_summary(
+            conversation=conversation,
+            saved_message=saved_message,
+            reason="message_threshold",
+            now=now,
+        )
+        context = _get_conversation_context(conversation)
+    current_goal = context_manager.get("current_goal") if isinstance(context_manager, dict) else None
     payload = dict(trace)
     payload["recorded_at"] = datetime.now(timezone.utc).isoformat()
     existing = context.get(DECISION_TRACE_KEY)
@@ -2066,6 +2100,336 @@ def _record_decision_trace(conversation: Conversation, trace: dict) -> None:
         trace_list = trace_list[-12:]
     context[DECISION_TRACE_KEY] = trace_list
     _set_conversation_context(conversation, context)
+
+
+def _get_context_manager(context: dict) -> dict:
+    manager = context.get(CONTEXT_MANAGER_KEY) if isinstance(context, dict) else None
+    if isinstance(manager, dict):
+        return dict(manager)
+    return {}
+
+
+def _set_context_manager(context: dict, manager: dict) -> dict:
+    context = dict(context)
+    context[CONTEXT_MANAGER_KEY] = manager
+    return context
+
+
+def _increment_context_message_count(manager: dict) -> int:
+    value = manager.get("message_count", 0)
+    try:
+        count = max(0, int(value))
+    except (TypeError, ValueError):
+        count = 0
+    count += 1
+    manager["message_count"] = count
+    return count
+
+
+def _is_refusal_flag_active(refusal_flags: dict | None, field: str) -> bool:
+    if not isinstance(refusal_flags, dict):
+        return False
+    payload = refusal_flags.get(field)
+    if isinstance(payload, dict):
+        return payload.get("value") is True
+    if isinstance(payload, bool):
+        return payload
+    return False
+
+
+def _detect_name_provided(message_text: str, *, client_slug: str | None) -> bool:
+    if not message_text:
+        return False
+    if classify_confirmation(message_text) in {"yes", "no"}:
+        return False
+    return bool(_validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug))
+
+
+def _detect_phone_provided(message_text: str) -> bool:
+    if not message_text:
+        return False
+    match = PHONE_PATTERN.search(message_text)
+    if not match:
+        return False
+    digits = re.sub(r"\D", "", match.group(0))
+    return len(digits) >= 10
+
+
+def _update_refusal_flags(
+    manager: dict,
+    *,
+    message_text: str,
+    now: datetime,
+    client_slug: str | None,
+) -> tuple[dict, dict, list[dict]]:
+    detected = detect_refusal_flags(message_text)
+    name_initiative = _detect_name_provided(message_text, client_slug=client_slug)
+    phone_initiative = _detect_phone_provided(message_text)
+    existing = manager.get("refusal_flags")
+    existing_flags = dict(existing) if isinstance(existing, dict) else {}
+    updated_flags: dict = {}
+    events: list[dict] = []
+
+    for field in ("name", "phone"):
+        data = existing_flags.get(field)
+        payload = dict(data) if isinstance(data, dict) else {}
+        explicit_refusal = bool(detected.get(field))
+        if explicit_refusal:
+            updated_flags[field] = {
+                "value": True,
+                "source": "explicit_refusal",
+                "last_set_at": now.isoformat(),
+                "ttl_remaining": REFUSAL_TTL_MESSAGES,
+            }
+            events.append({"type": "set", "field": field, "source": "explicit_refusal"})
+            continue
+        if field == "name" and name_initiative:
+            if payload.get("value") is True:
+                events.append({"type": "cleared", "field": field, "source": "explicit_initiative"})
+            continue
+        if field == "phone" and phone_initiative:
+            if payload.get("value") is True:
+                events.append({"type": "cleared", "field": field, "source": "explicit_initiative"})
+            continue
+        if payload.get("value") is True:
+            ttl = payload.get("ttl_remaining")
+            if isinstance(ttl, int):
+                ttl = max(0, ttl - 1)
+                if ttl <= 0:
+                    events.append({"type": "cleared", "field": field, "source": "ttl_expired"})
+                    continue
+                payload["ttl_remaining"] = ttl
+            updated_flags[field] = payload
+
+    manager["refusal_flags"] = updated_flags
+    return manager, updated_flags, events
+
+
+def _resolve_current_goal(intent_set: set[str], consult_intent: bool) -> str | None:
+    if consult_intent:
+        return "consult"
+    if "booking" in intent_set:
+        return "booking"
+    if intent_set & INFO_INTENTS:
+        return "info"
+    return None
+
+
+def _get_clarify_attempt_state(manager: dict, intent: str) -> tuple[int, str | None]:
+    attempts = manager.get("clarify_attempts")
+    if not isinstance(attempts, dict):
+        return 0, None
+    payload = attempts.get(intent)
+    if not isinstance(payload, dict):
+        return 0, None
+    value = payload.get("count", 0)
+    try:
+        count = max(0, int(value))
+    except (TypeError, ValueError):
+        count = 0
+    last_at = payload.get("last_at")
+    return count, last_at if isinstance(last_at, str) else None
+
+
+def _set_clarify_attempt(manager: dict, intent: str, count: int, now: datetime) -> dict:
+    attempts = manager.get("clarify_attempts")
+    attempts_map = dict(attempts) if isinstance(attempts, dict) else {}
+    attempts_map[intent] = {"count": max(0, int(count)), "last_at": now.isoformat()}
+    manager["clarify_attempts"] = attempts_map
+    return manager
+
+
+def _should_escalate_for_clarify(manager: dict, intent: str) -> bool:
+    count, _ = _get_clarify_attempt_state(manager, intent)
+    return count >= CLARIFY_MAX_ATTEMPTS
+
+
+def _register_clarify_attempt(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    intent: str,
+    now: datetime,
+    reason: str,
+) -> int:
+    context = _get_conversation_context(conversation)
+    manager = _get_context_manager(context)
+    count, _ = _get_clarify_attempt_state(manager, intent)
+    count += 1
+    manager = _set_clarify_attempt(manager, intent, count, now)
+    context = _set_context_manager(context, manager)
+    _set_conversation_context(conversation, context)
+    attempt_payload = {"intent": intent, "count": count, "last_at": now.isoformat()}
+    _record_context_manager_decision(
+        conversation,
+        saved_message,
+        decision="clarify_attempt",
+        updates={"clarify_attempt": attempt_payload, "clarify_reason": reason},
+    )
+    if count >= CLARIFY_MAX_ATTEMPTS:
+        _update_compact_summary(
+            conversation=conversation,
+            saved_message=saved_message,
+            reason="clarify_limit",
+            now=now,
+        )
+    return count
+
+
+def _build_compact_summary_text(
+    *,
+    booking: dict,
+    refusal_flags: dict,
+    language: str | None,
+) -> str:
+    parts: list[str] = []
+    service = booking.get("service")
+    if isinstance(service, str) and service.strip():
+        parts.append(f"Услуга: {service.strip()}")
+    datetime_pref = booking.get("datetime")
+    if isinstance(datetime_pref, str) and datetime_pref.strip():
+        parts.append(f"Время: {datetime_pref.strip()}")
+    name = booking.get("name")
+    if isinstance(name, str) and name.strip():
+        parts.append(f"Имя: {name.strip()}")
+    if not name and _is_refusal_flag_active(refusal_flags, "name"):
+        parts.append("Имя: отказ")
+    if _is_refusal_flag_active(refusal_flags, "phone"):
+        parts.append("Телефон: отказ")
+    if isinstance(language, str) and language and language != "unknown":
+        parts.append(f"Язык: {language}")
+    return "; ".join(parts).strip()
+
+
+def _update_compact_summary(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    reason: str,
+    now: datetime,
+) -> None:
+    context = _get_conversation_context(conversation)
+    manager = _get_context_manager(context)
+    refusal_flags = manager.get("refusal_flags")
+    refusal_flags = dict(refusal_flags) if isinstance(refusal_flags, dict) else {}
+    booking = _get_booking_context(context)
+    language = _resolve_backlog_language(saved_message) if saved_message else "unknown"
+    summary_text = _build_compact_summary_text(
+        booking=booking,
+        refusal_flags=refusal_flags,
+        language=language,
+    )
+    manager["compact_summary"] = {
+        "text": summary_text,
+        "updated_at": now.isoformat(),
+        "reason": reason,
+    }
+    context = _set_context_manager(context, manager)
+    _set_conversation_context(conversation, context)
+    if saved_message:
+        _update_message_decision_metadata(saved_message, {"summary_updated": reason})
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "context_manager",
+            "decision": "summary_updated",
+            "reason": reason,
+            "summary_text": summary_text,
+        },
+    )
+
+
+def _record_context_manager_decision(
+    conversation: Conversation,
+    saved_message: Message | None,
+    *,
+    decision: str,
+    updates: dict,
+) -> None:
+    if saved_message and updates:
+        _update_message_decision_metadata(saved_message, updates)
+    trace = {"stage": "context_manager", "decision": decision}
+    trace.update(updates)
+    _record_decision_trace(conversation, trace)
+
+
+def _handle_clarify_limit_escalation(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    message_text: str,
+    saved_message: Message | None,
+    source: str,
+    allow_handover: bool,
+    send_response,
+) -> WebhookResponse:
+    bot_response = MSG_ESCALATED
+    _reset_low_confidence_retry(conversation)
+    result_message = f"{source} clarify limit escalation"
+
+    _, reused, telegram_sent = _reuse_active_handover(
+        db=db,
+        conversation=conversation,
+        user=user,
+        message=message_text,
+        source=source,
+        intent="clarify_limit",
+    )
+    if reused:
+        result_message = f"{source} clarify limit reuse, telegram={'sent' if telegram_sent else 'failed'}"
+    elif conversation.state == ConversationState.BOT_ACTIVE.value and allow_handover:
+        result = escalate_to_pending(
+            db=db,
+            conversation=conversation,
+            user_message=message_text,
+            trigger_type="intent",
+            trigger_value="clarify_limit",
+        )
+        if result.ok:
+            handover = result.value
+            telegram_sent = send_telegram_notification(
+                db=db,
+                handover=handover,
+                conversation=conversation,
+                user=user,
+                message=message_text,
+            )
+            result_message = f"{source} clarify limit escalation, telegram={'sent' if telegram_sent else 'failed'}"
+        else:
+            result_message = f"{source} clarify limit escalation failed: {result.error}"
+    else:
+        result_message = f"{source} clarify limit escalation skipped (already pending)"
+
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": source,
+            "decision": "clarify_limit",
+            "intent": "clarify_limit",
+            "state": conversation.state,
+        },
+    )
+    _record_message_decision_meta(
+        saved_message,
+        action="escalate",
+        intent="clarify_limit",
+        source=source,
+        fast_intent=False,
+    )
+    if saved_message:
+        _update_message_decision_metadata(saved_message, {"clarify_limit": True})
+    save_message(db, conversation.id, conversation.client_id, role="assistant", content=bot_response)
+    sent = send_response(bot_response)
+    if not sent:
+        result_message = f"{result_message}; response_send=failed"
+    db.commit()
+    return WebhookResponse(
+        success=True,
+        message=result_message,
+        conversation_id=conversation.id,
+        bot_response=bot_response,
+    )
 
 
 def _attach_llm_cache_flag(trace: dict, timing_context: dict | None) -> dict:
@@ -2327,6 +2691,9 @@ def _is_booking_related_message(message_text: str, client_slug: str | None) -> b
         return False
     if _is_booking_request(message_text):
         return True
+    refusal_flags = detect_refusal_flags(message_text)
+    if refusal_flags.get("name") or refusal_flags.get("phone"):
+        return True
     if _extract_service_hint(message_text, client_slug) or _extract_datetime(message_text):
         return True
     if _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug):
@@ -2524,7 +2891,7 @@ def _update_booking_from_messages(
     return updated
 
 
-def _next_booking_prompt(booking: dict) -> tuple[dict, str | None]:
+def _next_booking_prompt(booking: dict, *, refusal_flags: dict | None = None) -> tuple[dict, str | None]:
     booking = dict(booking)
     if not booking.get("service"):
         booking["last_question"] = "service"
@@ -2533,6 +2900,9 @@ def _next_booking_prompt(booking: dict) -> tuple[dict, str | None]:
         booking["last_question"] = "datetime"
         return booking, MSG_BOOKING_ASK_DATETIME
     if not booking.get("name"):
+        if _is_refusal_flag_active(refusal_flags, "name"):
+            booking["last_question"] = None
+            return booking, None
         booking["last_question"] = "name"
         return booking, MSG_BOOKING_ASK_NAME
     booking["last_question"] = None
@@ -2571,11 +2941,19 @@ def _format_multi_intent_followup(primary: str, secondary: list[str]) -> str | N
     return f"Ещё был вопрос по {label_text}. Уточните, пожалуйста."
 
 
-def _build_booking_summary(booking: dict) -> str:
+def _build_booking_summary(booking: dict, *, refusal_flags: dict | None = None) -> str:
     service = booking.get("service") or "не указано"
     datetime_pref = booking.get("datetime") or "не указано"
-    name = booking.get("name") or "не указано"
-    return f"Запись: услуга={service}; дата/время={datetime_pref}; имя={name}."
+    name = booking.get("name")
+    name_refused = _is_refusal_flag_active(refusal_flags, "name")
+    if not name and name_refused:
+        name_value = "отказ"
+    else:
+        name_value = name or "не указано"
+    summary = f"Запись: услуга={service}; дата/время={datetime_pref}; имя={name_value}."
+    if _is_refusal_flag_active(refusal_flags, "phone"):
+        summary = f"{summary} Телефон: отказ."
+    return summary
 
 
 def _demo_salon_escalation_gate(messages: list[str]):
@@ -4491,6 +4869,9 @@ async def _handle_webhook_payload(
     intent_decomp_service_query = None
     intent_decomp_multi = False
     intent_decomp_used = False
+    consult_intent = False
+    consult_topic = None
+    consult_question = None
     if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
         intent_decomp_payload = detect_multi_intent(message_text, client_slug=payload.client_slug)
         if isinstance(intent_decomp_payload, dict):
@@ -4572,6 +4953,28 @@ async def _handle_webhook_payload(
             )
 
     intent_decomp_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent} if intent_decomp_used else set()
+    if intent_decomp_used:
+        new_goal = _resolve_current_goal(intent_decomp_set, consult_intent)
+        if new_goal and new_goal != current_goal:
+            context = _get_conversation_context(conversation)
+            context_manager = _get_context_manager(context)
+            context_manager["current_goal"] = new_goal
+            context = _set_context_manager(context, context_manager)
+            _set_conversation_context(conversation, context)
+            _record_context_manager_decision(
+                conversation,
+                saved_message,
+                decision="current_goal",
+                updates={"current_goal": new_goal},
+            )
+            _update_compact_summary(
+                conversation=conversation,
+                saved_message=saved_message,
+                reason="intent_change",
+                now=now,
+            )
+            context = _get_conversation_context(conversation)
+            current_goal = new_goal
     intent_decomp_has_booking = "booking" in intent_decomp_set
     intent_decomp_info = intent_decomp_set & BOOKING_INFO_QUESTION_TYPES
     if intent_decomp_has_booking:
@@ -4837,6 +5240,39 @@ async def _handle_webhook_payload(
 
     if consult_decision:
         consult_meta = consult_decision.meta if isinstance(consult_decision.meta, dict) else {}
+        consult_meta = dict(consult_meta)
+        if consult_decision.action == "reply":
+            consult_questions = consult_meta.get("consult_questions")
+            if isinstance(consult_questions, list) and consult_questions:
+                context = _get_conversation_context(conversation)
+                context_manager = _get_context_manager(context)
+                if _should_escalate_for_clarify(context_manager, "consult"):
+                    clarify_count, _ = _get_clarify_attempt_state(context_manager, "consult")
+                    _record_context_manager_decision(
+                        conversation,
+                        saved_message,
+                        decision="clarify_limit",
+                        updates={
+                            "clarify_attempt": {"intent": "consult", "count": clarify_count},
+                            "clarify_reason": "consult",
+                            "clarify_limit": True,
+                        },
+                    )
+                    consult_meta["clarify_limit"] = True
+                    consult_decision = DemoSalonDecision(
+                        action="escalate",
+                        response=MSG_ESCALATED,
+                        intent="clarify_limit",
+                        meta=consult_meta,
+                    )
+                else:
+                    _register_clarify_attempt(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        intent="consult",
+                        now=now,
+                        reason="consult",
+                    )
         consult_trace = {
             "stage": "consult",
             "decision": consult_decision.action,
@@ -5063,11 +5499,43 @@ async def _handle_webhook_payload(
                 if service_hint:
                     booking_state["service"] = service_hint
                     context = _clear_service_hint(context)
-            booking_state, prompt = _next_booking_prompt(booking_state)
+            context_manager = _get_context_manager(context)
+            refusal_flags = context_manager.get("refusal_flags")
+            booking_state, prompt = _next_booking_prompt(booking_state, refusal_flags=refusal_flags)
             context = _set_booking_context(context, booking_state)
             _set_conversation_context(conversation, context)
 
             if prompt:
+                context_manager = _get_context_manager(context)
+                if _should_escalate_for_clarify(context_manager, "booking"):
+                    clarify_count, _ = _get_clarify_attempt_state(context_manager, "booking")
+                    _record_context_manager_decision(
+                        conversation,
+                        saved_message,
+                        decision="clarify_limit",
+                        updates={
+                            "clarify_attempt": {"intent": "booking", "count": clarify_count},
+                            "clarify_reason": "booking_prompt",
+                            "clarify_limit": True,
+                        },
+                    )
+                    return _handle_clarify_limit_escalation(
+                        db=db,
+                        conversation=conversation,
+                        user=user,
+                        message_text=message_text,
+                        saved_message=saved_message,
+                        source="booking",
+                        allow_handover=routing.get("allow_handover_create", False),
+                        send_response=_send_response,
+                    )
+                _register_clarify_attempt(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    intent="booking",
+                    now=now,
+                    reason="booking_prompt",
+                )
                 _record_decision_trace(
                     conversation,
                     {
@@ -5096,7 +5564,9 @@ async def _handle_webhook_payload(
                     success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
                 )
 
-            booking_summary = _build_booking_summary(booking_state)
+            context_manager = _get_context_manager(context)
+            refusal_flags = context_manager.get("refusal_flags")
+            booking_summary = _build_booking_summary(booking_state, refusal_flags=refusal_flags)
             if routing["allow_handover_create"]:
                 _, reused, telegram_sent = _reuse_active_handover(
                     db=db,
@@ -5293,6 +5763,38 @@ async def _handle_webhook_payload(
             result_message = "Service matcher reply sent"
             clarify_reason = None
             if service_decision.intent == "service_clarify":
+                clarify_intent = current_goal or "info"
+                context = _get_conversation_context(conversation)
+                context_manager = _get_context_manager(context)
+                if _should_escalate_for_clarify(context_manager, clarify_intent):
+                    clarify_count, _ = _get_clarify_attempt_state(context_manager, clarify_intent)
+                    _record_context_manager_decision(
+                        conversation,
+                        saved_message,
+                        decision="clarify_limit",
+                        updates={
+                            "clarify_attempt": {"intent": clarify_intent, "count": clarify_count},
+                            "clarify_reason": "service_clarify",
+                            "clarify_limit": True,
+                        },
+                    )
+                    return _handle_clarify_limit_escalation(
+                        db=db,
+                        conversation=conversation,
+                        user=user,
+                        message_text=message_text,
+                        saved_message=saved_message,
+                        source="service_matcher",
+                        allow_handover=routing.get("allow_handover_create", False),
+                        send_response=_send_response,
+                    )
+                _register_clarify_attempt(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    intent=clarify_intent,
+                    now=now,
+                    reason="service_clarify",
+                )
                 service_meta = getattr(service_decision, "meta", None)
                 service_query = None
                 service_source = None
@@ -5512,6 +6014,36 @@ async def _handle_webhook_payload(
                         action="escalate",
                         response=MSG_ESCALATED,
                         intent="price_query",
+                    )
+            if decision.intent == "service_clarify" and decision.action != "escalate":
+                clarify_intent = current_goal or "info"
+                context = _get_conversation_context(conversation)
+                context_manager = _get_context_manager(context)
+                if _should_escalate_for_clarify(context_manager, clarify_intent):
+                    clarify_count, _ = _get_clarify_attempt_state(context_manager, clarify_intent)
+                    _record_context_manager_decision(
+                        conversation,
+                        saved_message,
+                        decision="clarify_limit",
+                        updates={
+                            "clarify_attempt": {"intent": clarify_intent, "count": clarify_count},
+                            "clarify_reason": "service_clarify",
+                            "clarify_limit": True,
+                        },
+                    )
+                    decision = DemoSalonDecision(
+                        action="escalate",
+                        response=MSG_ESCALATED,
+                        intent="clarify_limit",
+                        meta={"clarify_limit": True},
+                    )
+                else:
+                    _register_clarify_attempt(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        intent=clarify_intent,
+                        now=now,
+                        reason="service_clarify",
                     )
             bot_response = decision.response
             _reset_low_confidence_retry(conversation)
@@ -6105,6 +6637,37 @@ async def _handle_webhook_payload(
                             retry_count = 0
 
                         if retry_count < LOW_CONFIDENCE_MAX_RETRIES:
+                            clarify_intent = current_goal or "info"
+                            context_manager = _get_context_manager(context)
+                            if _should_escalate_for_clarify(context_manager, clarify_intent):
+                                clarify_count, _ = _get_clarify_attempt_state(context_manager, clarify_intent)
+                                _record_context_manager_decision(
+                                    conversation,
+                                    saved_message,
+                                    decision="clarify_limit",
+                                    updates={
+                                        "clarify_attempt": {"intent": clarify_intent, "count": clarify_count},
+                                        "clarify_reason": "low_confidence_retry",
+                                        "clarify_limit": True,
+                                    },
+                                )
+                                return _handle_clarify_limit_escalation(
+                                    db=db,
+                                    conversation=conversation,
+                                    user=user,
+                                    message_text=message_text,
+                                    saved_message=saved_message,
+                                    source="ai_response",
+                                    allow_handover=routing.get("allow_handover_create", False),
+                                    send_response=_send_response,
+                                )
+                            _register_clarify_attempt(
+                                conversation=conversation,
+                                saved_message=saved_message,
+                                intent=clarify_intent,
+                                now=now,
+                                reason="low_confidence_retry",
+                            )
                             bot_response = MSG_LOW_CONFIDENCE_RETRY
                             conversation.retry_offered_at = now
                             context = _set_low_confidence_retry_count(context, retry_count + 1)

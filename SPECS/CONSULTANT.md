@@ -112,7 +112,7 @@ if is_rejection(intent):
 
 ---
 
-## Правило 2: Анти-амнезия [ЧАСТИЧНО]
+## Правило 2: Анти-амнезия [ЧАСТИЧНО → УЛУЧШЕНО]
 
 Бот помнит контекст. Не "здравствуйте" каждые 5 минут.
 
@@ -126,6 +126,12 @@ if is_rejection(intent):
 - История последних 10 сообщений передаётся в LLM
 - `conversation.last_message_at` отслеживается
 - Краткий контекст диалога: `conversations.context` (слоты записи + последний вопрос)
+ - **Context Manager (P0):**
+   - `context_manager.current_goal` = info|consult|booking (ставится по intent_decomp)
+   - `context_manager.refusal_flags` (name/phone) — только явные отказы, TTL 10 сообщений или до явной инициативы
+   - `context_manager.clarify_attempts` — счётчик уточнений по intent; после 2 уточнений → эскалация
+   - `context_manager.compact_summary` — детерминированное резюме фактов (услуга/время/имя/язык/отказы)
+   - Все обновления пишутся в `decision_meta` и `decision_trace`
 
 **Реализация:**
 ```python

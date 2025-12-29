@@ -147,6 +147,22 @@ NO_CONFIRMATION_PHRASES = {
     "потом",
 }
 
+REFUSAL_PHRASES = (
+    "не хочу",
+    "не буду",
+    "не стану",
+    "не скажу",
+    "не назову",
+    "не дам",
+    "не оставлю",
+    "не сообщу",
+    "не готов",
+    "не готова",
+)
+
+REFUSAL_NAME_TOKENS = ("имя", "имени")
+REFUSAL_PHONE_TOKENS = ("телефон", "номер", "номера")
+
 BOT_STATUS_KEYWORDS = {
     "бот не отвечает",
     "бот молчит",
@@ -1016,6 +1032,21 @@ def is_low_signal_message(text: str) -> bool:
     if is_greeting_message(text) or is_thanks_message(text):
         return False
     return len(normalized) <= 2
+
+
+def _has_refusal_phrase(normalized: str) -> bool:
+    return any(phrase in normalized for phrase in REFUSAL_PHRASES)
+
+
+def detect_refusal_flags(text: str) -> dict[str, bool]:
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return {"name": False, "phone": False}
+    if not _has_refusal_phrase(normalized):
+        return {"name": False, "phone": False}
+    name_refusal = any(token in normalized for token in REFUSAL_NAME_TOKENS)
+    phone_refusal = any(token in normalized for token in REFUSAL_PHONE_TOKENS)
+    return {"name": name_refusal, "phone": phone_refusal}
 
 
 def is_whitelisted_message(text: str) -> bool:

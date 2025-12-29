@@ -420,6 +420,13 @@ class TestBookingSlotGuards:
         )
         assert updated.get("name") is None
 
+    def test_booking_prompt_skips_name_when_refused(self):
+        booking = {"service": "маникюр", "datetime": "завтра"}
+        refusal_flags = {"name": {"value": True, "source": "explicit_refusal", "last_set_at": "2025-12-29T00:00:00Z"}}
+        updated, prompt = webhook_router._next_booking_prompt(booking, refusal_flags=refusal_flags)
+        assert prompt is None
+        assert updated.get("last_question") is None
+
 
 class TestServiceHints:
     def test_service_hint_within_window(self):
@@ -1289,6 +1296,200 @@ def test_price_clarify_asks_only_service_and_sets_reason():
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("clarify_reason") == "missing_service_query"
     mock_llm.assert_not_called()
+
+
+def test_context_manager_sets_refusal_flag_in_decision_meta():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Не хочу говорить имя",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000002@s.whatsapp.net",
+                messageId="msg-refusal",
+                timestamp=1234567895,
+            ),
+        ),
+    )
+
+    llm_result = SimpleNamespace(ok=True, value=("Понял вас.", "high"))
+
+    with patch("app.routers.webhook._get_policy_handler", return_value=None), patch(
+        "app.routers.webhook.generate_bot_response", return_value=llm_result
+    ), patch(
+        "app.routers.webhook.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    refusal_flags = meta.get("refusal_flags", {})
+    assert refusal_flags.get("name", {}).get("value") is True
+
+
+def test_clarify_limit_escalates_after_two_attempts():
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    service_decision = DemoSalonDecision(
+        action="reply",
+        response="Уточните, пожалуйста, какая услуга интересует?",
+        intent="service_clarify",
+        meta={"service_query": None, "service_query_source": "none", "service_query_score": 0.0},
+    )
+
+    def _service_matcher(*_args, **_kwargs):
+        return service_decision
+
+    policy_handler = {"policy_type": "demo_salon", "service_matcher": _service_matcher}
+
+    def _run(message_id: str, timestamp: int):
+        saved_message = Mock()
+        saved_message.message_metadata = {}
+
+        client_query = Mock()
+        client_query.filter.return_value.first.return_value = client
+        settings_query = Mock()
+        settings_query.filter.return_value.first.return_value = settings
+        conversation_query = Mock()
+        conversation_query.filter.return_value.first.return_value = conversation
+        user_query = Mock()
+        user_query.filter.return_value.first.return_value = user
+
+        db = Mock()
+        db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+        db.add = Mock()
+        db.flush = Mock()
+        db.commit = Mock()
+
+        payload = WebhookRequest(
+            client_slug="demo_salon",
+            body=WebhookBody(
+                message="Сколько стоит?",
+                messageType="text",
+                metadata=WebhookMetadata(
+                    remoteJid="77000000003@s.whatsapp.net",
+                    messageId=message_id,
+                    timestamp=timestamp,
+                ),
+            ),
+        )
+
+        with patch("app.routers.webhook._get_policy_handler", return_value=policy_handler), patch(
+            "app.routers.webhook.send_bot_response", return_value=True
+        ), patch(
+            "app.routers.webhook._reuse_active_handover", return_value=(None, False, False)
+        ), patch(
+            "app.routers.webhook.escalate_to_pending", return_value=SimpleNamespace(ok=True, value=SimpleNamespace())
+        ), patch(
+            "app.routers.webhook.send_telegram_notification", return_value=True
+        ), patch(
+            "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        ), patch(
+            "app.routers.webhook._get_user_branch_preference", return_value=None
+        ), patch(
+            "app.routers.webhook.should_process_debounced_message",
+            AsyncMock(return_value=True),
+        ):
+            response = asyncio.run(
+                webhook_router._handle_webhook_payload(
+                    payload,
+                    db,
+                    provided_secret=None,
+                    enforce_secret=False,
+                    skip_persist=True,
+                    conversation_id=conversation_id,
+                )
+            )
+        return response, saved_message
+
+    _run("msg-clarify-1", 1234567896)
+    _run("msg-clarify-2", 1234567897)
+    response, saved_message = _run("msg-clarify-3", 1234567898)
+
+    assert response.success is True
+    assert response.bot_response == webhook_router.MSG_ESCALATED
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("clarify_limit") is True
+    attempt = meta.get("clarify_attempt", {})
+    assert attempt.get("count") == 2
 
 
 def test_llm_guard_blocks_payment_response():

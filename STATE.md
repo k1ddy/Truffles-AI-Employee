@@ -42,6 +42,7 @@
 - Цена/длительность выдаются только при явном `service_query` (intent_decomp или semantic_match); иначе — уточнение. В decision_meta/decision_trace пишутся `service_query`, `service_query_source`, `service_query_score`.
 - Ambiguous price/duration → clarify (не отвечаем ценой при неуверенном типе).
 - Booking gate блокирует инфо‑вопросы (pricing/hours/duration) без явного booking; сплит сегментов по ,;?!.; service slot только через semantic matcher, datetime — токен; trace/meta `booking_blocked_reason`. (нужен деплой)
+- Context Manager: `current_goal` (info/consult/booking), `refusal_flags` (name/phone, TTL 10 сообщений), `clarify_attempts` (>=2 → эскалация), `compact_summary` (детерминированно; триггеры: intent_change/clarify_limit/12+ сообщений); всё пишется в decision_meta/trace.
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-29)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
@@ -49,6 +50,8 @@
 - `/admin/version`: version `main`, git_commit `c69bc2343871d767a23bb950e8b9d77aa6b57134`, build_time `2025-12-29T10:57:10Z`.
 - `/admin/health`: conversations bot_active 233, pending 1, manager_active 0; handovers pending 1, active 0 (checked_at `2025-12-29T11:06:16.747460+00:00`).
 - Live-check consult mode: care/color → consult replies with consult_intent meta; price → pricing path; booking → clarify; allergy → escalation; consult replies without prices/availability/masters.
+- Tests: `docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q` (78 passed).
+- Tests: `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` (1 passed).
 - DB (ops/diagnose): DB_USER `n8n`; conversations 15 total, 0 muted, 8 with topic; handovers 92 total, 0 pending, 0 active.
 
 ### MEDIA RUNBOOK (амнезия, 3–5 минут)
