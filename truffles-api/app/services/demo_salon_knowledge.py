@@ -1739,6 +1739,15 @@ def get_demo_salon_decision(
                 intent="service_duration",
                 meta=question_meta,
             )
+    elif _has_duration_signal(normalized, message):
+        service = _match_service(normalized)
+        reply = _format_service_duration_reply(service)
+        return DemoSalonDecision(
+            action="reply",
+            response=reply,
+            intent="service_duration",
+            meta={"question_type": "duration"},
+        )
 
     price_signal = _has_price_signal(normalized, message)
     price_item = _find_best_price_item(message)
