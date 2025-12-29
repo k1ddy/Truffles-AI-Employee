@@ -499,7 +499,7 @@ eval_cases:
   user: У меня аллергия. Можно посмотреть состав?
   expected:
     action: escalate
-    intent: medical_allergy
+    intent: medical
     must_tell_user_any:
     - передам администратору
     - нужна консультация
@@ -509,10 +509,10 @@ eval_cases:
   user: Я беременна, можно кератин/ботокс?
   expected:
     action: escalate
-    intent: medical_pregnancy
+    intent: medical
     must_tell_user_any:
     - консультация
-    - разрешение врача
+    - администратор
     must_not:
     - можно без проблем
 - id: E034
@@ -562,7 +562,7 @@ eval_cases:
   user: Можно оплатить Kaspi переводом?
   expected:
     action: escalate
-    intent: payment_methods
+    intent: payment
     must_tell_user_any:
     - по оплате уточню у администратора
     - передам администратору
@@ -584,7 +584,7 @@ eval_cases:
   user: Нужна предоплата для записи?
   expected:
     action: escalate
-    intent: prepayment
+    intent: payment
     must_tell_user_any:
     - по оплате уточню у администратора
     - передам администратору
@@ -974,7 +974,7 @@ eval_cases:
   user: Скока маникюр с гель-лаком?
   expected:
     action: reply
-    intent: routine
+    intent: price_query
     must_include:
     - 7 000
     must_not:
@@ -986,7 +986,7 @@ eval_cases:
   user: Адрес айтасыз ба?
   expected:
     action: reply
-    intent: routine
+    intent: location
     must_include:
     - Абая 150
     - Розыбакиева
@@ -997,7 +997,7 @@ eval_cases:
   user: Бүгін ашықсыздар ма?
   expected:
     action: reply
-    intent: routine
+    intent: hours
     must_include:
     - '9:00'
     - '21:00'
@@ -1008,7 +1008,7 @@ eval_cases:
   user: Есть ли вайфай?
   expected:
     action: reply
-    intent: routine
+    intent: amenities
     must_include:
     - Wi‑Fi
     must_not:
@@ -1018,7 +1018,7 @@ eval_cases:
   user: Снятие чужого покрытия платно?
   expected:
     action: reply
-    intent: routine
+    intent: price_query
     must_include:
     - 1 000
     must_not:
@@ -1029,7 +1029,7 @@ eval_cases:
   user: А есть сертификаты?
   expected:
     action: reply
-    intent: routine
+    intent: gift_certificate
     must_include:
     - сертификат
     must_not:
