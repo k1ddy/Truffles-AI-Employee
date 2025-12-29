@@ -52,6 +52,8 @@
 - Live-check consult mode: care/color → consult replies with consult_intent meta; price → pricing path; booking → clarify; allergy → escalation; consult replies without prices/availability/masters.
 - Tests: `docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q` (78 passed).
 - Tests: `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` (1 passed).
+- CI: `ruff check app tests` passed after webhook context manager fix (commit `c558b03`).
+- Deploy attempt: GHCR pull/restart OK, but `/admin/version` still `c69bc2343871d767a23bb950e8b9d77aa6b57134` (image not updated yet).
 - DB (ops/diagnose): DB_USER `n8n`; conversations 15 total, 0 muted, 8 with topic; handovers 92 total, 0 pending, 0 active.
 
 ### MEDIA RUNBOOK (амнезия, 3–5 минут)
