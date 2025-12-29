@@ -43,11 +43,12 @@
 - Ambiguous price/duration → clarify (не отвечаем ценой при неуверенном типе).
 - Booking gate блокирует инфо‑вопросы (pricing/hours/duration) без явного booking; сплит сегментов по ,;?!.; service slot только через semantic matcher, datetime — токен; trace/meta `booking_blocked_reason`. (нужен деплой)
 
-### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-26)
+### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-29)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
 - Env: `PUBLIC_BASE_URL=https://api.truffles.kz`, `MEDIA_SIGNING_SECRET=SET`, `MEDIA_URL_TTL_SECONDS=3600`, `MEDIA_CLEANUP_TTL_DAYS=7`, `CHATFLOW_MEDIA_TIMEOUT_SECONDS=90`.
-- `/admin/version`: version `main`, git_commit `10ae71a58882efe4c2d4db6ff851fb1b2f5a7d82`, build_time `2025-12-25T12:24:15Z`.
-- `/admin/health`: conversations bot_active 15, pending 0, manager_active 0; handovers pending 0, active 0 (checked_at `2025-12-26T02:05:32.178465+00:00`).
+- `/admin/version`: version `main`, git_commit `c69bc2343871d767a23bb950e8b9d77aa6b57134`, build_time `2025-12-29T10:57:10Z`.
+- `/admin/health`: conversations bot_active 233, pending 1, manager_active 0; handovers pending 1, active 0 (checked_at `2025-12-29T11:06:16.747460+00:00`).
+- Live-check consult mode: care/color → consult replies with consult_intent meta; price → pricing path; booking → clarify; allergy → escalation; consult replies without prices/availability/masters.
 - DB (ops/diagnose): DB_USER `n8n`; conversations 15 total, 0 muted, 8 with topic; handovers 92 total, 0 pending, 0 active.
 
 ### MEDIA RUNBOOK (амнезия, 3–5 минут)
