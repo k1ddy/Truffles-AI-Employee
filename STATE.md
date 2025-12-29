@@ -49,16 +49,17 @@
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-29)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
 - Env: `PUBLIC_BASE_URL=https://api.truffles.kz`, `MEDIA_SIGNING_SECRET=SET`, `MEDIA_URL_TTL_SECONDS=3600`, `MEDIA_CLEANUP_TTL_DAYS=7`, `CHATFLOW_MEDIA_TIMEOUT_SECONDS=90`.
-- `/admin/version`: version `main`, git_commit `5cc5390aedd4e2d18c65dd2e7a0df83f03fb8d8c`, build_time `2025-12-29T17:05:26Z`.
+- `/admin/version`: version `main`, git_commit `6a4b7ef0c05f903355413516d20bbd656ddd4f22`, build_time `2025-12-29T18:37:02Z`.
 - `/admin/health`: conversations bot_active 254, pending 4, manager_active 0; handovers pending 4, active 0 (checked_at `2025-12-29T14:32:29.419424+00:00`).
 - Live-check consult mode: care/color → consult replies with consult_intent meta; price → pricing path; booking → clarify; allergy → escalation; consult replies without prices/availability/masters.
 - Live-check context manager: refusal_flag.name set and booking skips name; 2x clarify → 3rd escalates; booking → consult switch updates current_goal + summary (consult reply, no prices/availability/masters).
 - Live-check PR-3 rewrite+hybrid: address slang → address (rewrite timeout, rag_scores logged); "манник" → service_semantic match; "скок стоит педик" → price; "какая погода" → OOD; "хочу записаться" → booking-clarify.
 - Live-check PR-4 metrics: demo_salon test messages wrote `rag_scores` + `rag_confident`/`rag_reason`; daily snapshot includes rag_low_conf_rate/clarify_rate/clarify_success_rate.
-- Tests: `docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q` (82 passed).
+- Live-check PR-5 consult/booking/carryover: consult precedence ("ничего страшного") → consult reply; booking info interrupt returns duration + booking prompt; duration-only stays info; carryover "сколько стоит?" uses `service_query_source=context` and returns price list; OOD works.
+- Tests: `docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q` (85 passed).
 - Tests: `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` (1 passed).
-- CI: `lint-test/build-push/deploy` passed (commit `5cc5390`).
-- Deploy: prod on `5cc5390aedd4e2d18c65dd2e7a0df83f03fb8d8c`; PR-4 deployed (RAG/clarify metrics).
+- CI: `lint-test/build-push/deploy` passed (commit `6a4b7ef`).
+- Deploy: prod on `6a4b7ef0c05f903355413516d20bbd656ddd4f22`; PR-5 deployed (consult precedence/info interrupt/service carryover).
 - DB (ops/diagnose): DB_USER `n8n`; conversations 15 total, 0 muted, 8 with topic; handovers 92 total, 0 pending, 0 active.
 
 ### MEDIA RUNBOOK (амнезия, 3–5 минут)
