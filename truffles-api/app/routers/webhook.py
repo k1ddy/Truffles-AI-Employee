@@ -4490,17 +4490,7 @@ async def _handle_webhook_payload(
     intent_decomp_service_query = None
     intent_decomp_multi = False
     intent_decomp_used = False
-    if (
-        routing["allow_bot_reply"]
-        and not bypass_domain_flows
-        and message_text
-        and not is_greeting_message(message_text)
-        and not is_thanks_message(message_text)
-        and not is_acknowledgement_message(message_text)
-        and not is_low_signal_message(message_text)
-        and not is_bot_status_question(message_text)
-        and not is_human_request_message(message_text)
-    ):
+    if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
         intent_decomp_payload = detect_multi_intent(message_text)
         if isinstance(intent_decomp_payload, dict):
             intent_decomp_used = True
@@ -4554,26 +4544,25 @@ async def _handle_webhook_payload(
                 },
             )
 
-    if intent_decomp_used:
-        intent_decomp_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent}
-        intent_decomp_has_booking = "booking" in intent_decomp_set
-        intent_decomp_info = intent_decomp_set & BOOKING_INFO_QUESTION_TYPES
-        if intent_decomp_has_booking:
-            booking_signal = True
-            if booking_block_meta and booking_block_meta.get("booking_blocked_reason") == "info_question":
-                booking_block_meta = None
-        else:
-            if booking_signal and not booking_block_meta:
-                if intent_decomp_info:
-                    booking_block_meta = {
-                        "booking_blocked_reason": "info_question",
-                        "question_intents": sorted(intent_decomp_info),
-                    }
-                else:
-                    booking_block_meta = {
-                        "booking_blocked_reason": "intent_decomp_no_booking",
-                    }
-            booking_signal = False
+    intent_decomp_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent} if intent_decomp_used else set()
+    intent_decomp_has_booking = "booking" in intent_decomp_set
+    intent_decomp_info = intent_decomp_set & BOOKING_INFO_QUESTION_TYPES
+    if intent_decomp_has_booking:
+        booking_signal = True
+        if booking_block_meta and booking_block_meta.get("booking_blocked_reason") == "info_question":
+            booking_block_meta = None
+    else:
+        if booking_signal and not booking_block_meta:
+            if intent_decomp_info:
+                booking_block_meta = {
+                    "booking_blocked_reason": "info_question",
+                    "question_intents": sorted(intent_decomp_info),
+                }
+            else:
+                booking_block_meta = {
+                    "booking_blocked_reason": "intent_decomp_missing" if not intent_decomp_used else "intent_decomp_no_booking",
+                }
+        booking_signal = False
 
     booking_wants_flow = (
         _should_run_booking_flow(
@@ -5845,7 +5834,17 @@ async def _handle_webhook_payload(
                 )
                 semantic_result = None
                 rewrite_query = None
-                if not out_of_domain_signal:
+                info_intent_hint = False
+                if isinstance(intent_decomp_payload, dict):
+                    raw_intents = intent_decomp_payload.get("intents")
+                    if isinstance(raw_intents, list):
+                        normalized_intents = {
+                            item.strip().casefold()
+                            for item in raw_intents
+                            if isinstance(item, str) and item.strip()
+                        }
+                        info_intent_hint = bool(normalized_intents & {"hours", "pricing", "duration"})
+                if not out_of_domain_signal and not info_intent_hint:
                     semantic_result = semantic_service_match(message_text, payload.client_slug)
                     if not semantic_result:
                         rewrite_query = rewrite_for_service_match(message_text, payload.client_slug)

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,8 +39,48 @@ def client():
 
 
 @pytest.fixture(autouse=True)
-def _disable_intent_decomp():
-    with patch("app.routers.webhook.detect_multi_intent", return_value=None):
+def _fake_intent_decomp():
+    def _detect_stub(text: str):
+        normalized = (text or "").casefold()
+        intents: list[str] = []
+
+        if re.search(r"\b(запис|запишите|запиши|записать|бронь|заброн)\b", normalized):
+            intents.append("booking")
+        if re.search(r"\b(сегодня|завтра|послезавтра)\b", normalized) and re.search(r"\b\d{1,2}\b", normalized):
+            intents.append("booking")
+
+        if any(keyword in normalized for keyword in ["цена", "стоим", "стоимость", "прайс", "сколько стоит", "почем"]):
+            intents.append("pricing")
+        if any(
+            keyword in normalized
+            for keyword in [
+                "сколько длится",
+                "длится",
+                "длительность",
+                "по времени",
+                "сколько по времени",
+                "сколько времени",
+                "время процедуры",
+            ]
+        ):
+            intents.append("duration")
+        if any(keyword in normalized for keyword in ["работаете", "график", "режим работы", "часы", "во сколько"]):
+            intents.append("hours")
+
+        if not intents:
+            intents = ["other"]
+
+        primary = intents[0]
+        secondary = [intent for intent in intents[1:] if intent != primary]
+        return {
+            "multi_intent": len(intents) > 1,
+            "primary_intent": primary,
+            "secondary_intents": secondary,
+            "intents": intents,
+            "service_query": "",
+        }
+
+    with patch("app.routers.webhook.detect_multi_intent", side_effect=_detect_stub):
         yield
 
 
@@ -571,13 +612,13 @@ def test_truth_gate_sets_decision_meta():
         )
 
     assert response.success is True
-    mock_update.assert_called_once()
-    updates = mock_update.call_args[0][1]
-    assert updates["source"] == "truth_gate"
-    assert updates["fast_intent"] is False
-    assert updates["llm_primary_used"] is False
-    assert updates["llm_used"] is False
-    assert updates["llm_timeout"] is False
+    assert mock_update.call_count >= 1
+    updates = [call.args[1] for call in mock_update.call_args_list]
+    truth_updates = next(item for item in updates if item.get("source") == "truth_gate")
+    assert truth_updates["fast_intent"] is False
+    assert truth_updates["llm_primary_used"] is False
+    assert truth_updates["llm_used"] is False
+    assert truth_updates["llm_timeout"] is False
 
 
 def test_semantic_service_matcher_handles_low_confidence_match():

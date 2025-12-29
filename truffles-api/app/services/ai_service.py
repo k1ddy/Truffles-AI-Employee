@@ -724,12 +724,23 @@ def rewrite_for_service_match(text: str, client_slug: str) -> str | None:
 
 
 def detect_multi_intent(text: str) -> dict | None:
+    def _fallback_payload() -> dict:
+        return {
+            "multi_intent": False,
+            "primary_intent": "other",
+            "secondary_intents": [],
+            "intents": ["other"],
+            "service_query": "",
+        }
+
     normalized = (text or "").strip()
-    if not normalized or len(normalized) < 3:
-        return None
+    if not normalized:
+        return _fallback_payload()
+    if len(normalized) < 3:
+        return _fallback_payload()
     if not OPENAI_API_KEY:
         logger.warning("Multi-intent detection skipped: OPENAI_API_KEY missing")
-        return None
+        return _fallback_payload()
 
     system_prompt = (
         "Разложи сообщение клиента на интенты. Верни ТОЛЬКО JSON строго вида "
@@ -773,7 +784,7 @@ def detect_multi_intent(text: str) -> dict | None:
             },
         )
         logger.warning(f"Multi-intent timeout after {MULTI_INTENT_TIMEOUT_SECONDS}s: {exc}")
-        return None
+        return _fallback_payload()
     except Exception as exc:
         _log_timing(
             "multi_intent_llm_ms",
@@ -781,7 +792,7 @@ def detect_multi_intent(text: str) -> dict | None:
             extra={"model_name": FAST_MODEL, "model_tier": "fast", "timeout": False, "error": str(exc)},
         )
         logger.warning(f"Multi-intent failed: {exc}")
-        return None
+        return _fallback_payload()
 
     _log_timing(
         "multi_intent_llm_ms",
@@ -791,7 +802,7 @@ def detect_multi_intent(text: str) -> dict | None:
 
     content = (response.content or "").strip()
     if not content:
-        return None
+        return _fallback_payload()
 
     payload = None
     try:
@@ -805,7 +816,7 @@ def detect_multi_intent(text: str) -> dict | None:
                 payload = None
 
     if not isinstance(payload, dict):
-        return None
+        return _fallback_payload()
 
     allowed = {"booking", "pricing", "duration", "location", "hours", "other"}
     multi_intent_raw = payload.get("multi_intent")
