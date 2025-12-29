@@ -5844,127 +5844,131 @@ async def _handle_webhook_payload(
                             if isinstance(item, str) and item.strip()
                         }
                         info_intent_hint = bool(normalized_intents & {"hours", "pricing", "duration"})
-                if not out_of_domain_signal and not info_intent_hint:
-                    semantic_result = semantic_service_match(message_text, payload.client_slug)
-                    if not semantic_result:
-                        rewrite_query = rewrite_for_service_match(message_text, payload.client_slug)
-                        if rewrite_query:
-                            semantic_result = semantic_service_match(rewrite_query, payload.client_slug)
-                if semantic_result:
-                    rewrite_used = bool(rewrite_query)
-                    bot_response = semantic_result.response
-                    _reset_low_confidence_retry(conversation)
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "service_semantic_matcher",
-                            "decision": semantic_result.action,
-                            "state": conversation.state,
-                            "score": semantic_result.score,
-                            "canonical_name": semantic_result.canonical_name,
-                            "suggestions": semantic_result.suggestions or [],
-                            "rewrite_used": rewrite_used,
-                            "rewrite_query": rewrite_query,
-                        },
-                    )
-                    if saved_message:
-                        llm_used = bool(timing_context.get("llm_used")) if timing_context else False
-                        llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
-                        llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
-                        _update_message_decision_metadata(
-                            saved_message,
-                            {
-                                "action": semantic_result.action,
-                                "intent": "service_semantic",
-                                "source": "service_semantic_matcher",
-                                "service_semantic_score": semantic_result.score,
-                                "service_semantic_rewrite_used": rewrite_used,
-                                "service_semantic_rewrite_query": rewrite_query,
-                                "fast_intent": False,
-                                "llm_primary_used": False,
-                                "llm_used": llm_used,
-                                "llm_timeout": llm_timeout,
-                                "llm_cache_hit": llm_cache_hit,
-                            },
-                        )
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
-                    result_message = (
-                        "Service semantic matcher reply sent" if sent else "Service semantic matcher send failed"
-                    )
-                    db.commit()
-                    return WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=bot_response,
-                    )
-                if conversation.state == ConversationState.PENDING.value:
-                    # Already escalated: respond but don't re-escalate
-                    bot_response = MSG_PENDING_LOW_CONFIDENCE
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "ai_response",
-                            "decision": "low_confidence_pending",
-                            "state": conversation.state,
-                        },
-                    )
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
-                    result_message = "Low confidence while pending, responded without re-escalation"
+                if info_intent_hint:
+                    llm_primary_failed = True
+                    llm_primary_reason = "low_confidence"
                 else:
-                    # Low RAG confidence — ask clarifying question before escalation (up to a limit).
-                    context = _get_conversation_context(conversation)
-                    retry_count = _get_low_confidence_retry_count(context)
-                    if should_offer_low_confidence_retry(conversation, now):
-                        retry_count = 0
-
-                    if retry_count < LOW_CONFIDENCE_MAX_RETRIES:
-                        bot_response = MSG_LOW_CONFIDENCE_RETRY
-                        conversation.retry_offered_at = now
-                        context = _set_low_confidence_retry_count(context, retry_count + 1)
-                        _set_conversation_context(conversation, context)
+                    if not out_of_domain_signal:
+                        semantic_result = semantic_service_match(message_text, payload.client_slug)
+                        if not semantic_result:
+                            rewrite_query = rewrite_for_service_match(message_text, payload.client_slug)
+                            if rewrite_query:
+                                semantic_result = semantic_service_match(rewrite_query, payload.client_slug)
+                    if semantic_result:
+                        rewrite_used = bool(rewrite_query)
+                        bot_response = semantic_result.response
+                        _reset_low_confidence_retry(conversation)
                         _record_decision_trace(
                             conversation,
                             {
-                                "stage": "ai_response",
-                                "decision": "low_confidence_retry",
+                                "stage": "service_semantic_matcher",
+                                "decision": semantic_result.action,
                                 "state": conversation.state,
-                                "retry_count": retry_count + 1,
+                                "score": semantic_result.score,
+                                "canonical_name": semantic_result.canonical_name,
+                                "suggestions": semantic_result.suggestions or [],
+                                "rewrite_used": rewrite_used,
+                                "rewrite_query": rewrite_query,
                             },
                         )
-                        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                        sent = _send_response(bot_response)
-                        result_message = "Low confidence: asked clarification before escalation"
-                    else:
-                        confirmation = {
-                            "status": "pending",
-                            "asked_at": now.isoformat(),
-                            "trigger_type": "low_confidence",
-                            "trigger_value": "low_confidence",
-                            "user_message": message_text,
-                        }
-                        context = _set_handover_confirmation(context, confirmation)
-                        _set_conversation_context(conversation, context)
-
-                        bot_response = MSG_HANDOVER_CONFIRM
-                        _record_decision_trace(
-                            conversation,
-                            {
-                                "stage": "ai_response",
-                                "decision": "low_confidence_handover_confirm",
-                                "state": conversation.state,
-                                "retry_count": retry_count,
-                            },
-                        )
+                        if saved_message:
+                            llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+                            llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+                            llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+                            _update_message_decision_metadata(
+                                saved_message,
+                                {
+                                    "action": semantic_result.action,
+                                    "intent": "service_semantic",
+                                    "source": "service_semantic_matcher",
+                                    "service_semantic_score": semantic_result.score,
+                                    "service_semantic_rewrite_used": rewrite_used,
+                                    "service_semantic_rewrite_query": rewrite_query,
+                                    "fast_intent": False,
+                                    "llm_primary_used": False,
+                                    "llm_used": llm_used,
+                                    "llm_timeout": llm_timeout,
+                                    "llm_cache_hit": llm_cache_hit,
+                                },
+                            )
                         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                         sent = _send_response(bot_response)
                         result_message = (
-                            "Low confidence: asked for handover confirmation"
-                            if sent
-                            else "Low confidence: handover confirmation send failed"
+                            "Service semantic matcher reply sent" if sent else "Service semantic matcher send failed"
                         )
+                        db.commit()
+                        return WebhookResponse(
+                            success=True,
+                            message=result_message,
+                            conversation_id=conversation.id,
+                            bot_response=bot_response,
+                        )
+                    if conversation.state == ConversationState.PENDING.value:
+                        # Already escalated: respond but don't re-escalate
+                        bot_response = MSG_PENDING_LOW_CONFIDENCE
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "ai_response",
+                                "decision": "low_confidence_pending",
+                                "state": conversation.state,
+                            },
+                        )
+                        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                        sent = _send_response(bot_response)
+                        result_message = "Low confidence while pending, responded without re-escalation"
+                    else:
+                        # Low RAG confidence — ask clarifying question before escalation (up to a limit).
+                        context = _get_conversation_context(conversation)
+                        retry_count = _get_low_confidence_retry_count(context)
+                        if should_offer_low_confidence_retry(conversation, now):
+                            retry_count = 0
+
+                        if retry_count < LOW_CONFIDENCE_MAX_RETRIES:
+                            bot_response = MSG_LOW_CONFIDENCE_RETRY
+                            conversation.retry_offered_at = now
+                            context = _set_low_confidence_retry_count(context, retry_count + 1)
+                            _set_conversation_context(conversation, context)
+                            _record_decision_trace(
+                                conversation,
+                                {
+                                    "stage": "ai_response",
+                                    "decision": "low_confidence_retry",
+                                    "state": conversation.state,
+                                    "retry_count": retry_count + 1,
+                                },
+                            )
+                            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                            sent = _send_response(bot_response)
+                            result_message = "Low confidence: asked clarification before escalation"
+                        else:
+                            confirmation = {
+                                "status": "pending",
+                                "asked_at": now.isoformat(),
+                                "trigger_type": "low_confidence",
+                                "trigger_value": "low_confidence",
+                                "user_message": message_text,
+                            }
+                            context = _set_handover_confirmation(context, confirmation)
+                            _set_conversation_context(conversation, context)
+
+                            bot_response = MSG_HANDOVER_CONFIRM
+                            _record_decision_trace(
+                                conversation,
+                                {
+                                    "stage": "ai_response",
+                                    "decision": "low_confidence_handover_confirm",
+                                    "state": conversation.state,
+                                    "retry_count": retry_count,
+                                },
+                            )
+                            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                            sent = _send_response(bot_response)
+                            result_message = (
+                                "Low confidence: asked for handover confirmation"
+                                if sent
+                                else "Low confidence: handover confirmation send failed"
+                            )
 
             elif confidence == "bot_inactive":
                 _record_decision_trace(
