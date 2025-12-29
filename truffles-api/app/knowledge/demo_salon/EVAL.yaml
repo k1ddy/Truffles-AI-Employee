@@ -78,7 +78,7 @@ eval_cases:
     - Абая 150
     - Розыбакиева
 - id: E003i
-  user: Делаете манник?
+  user: Делаете маник?
   expected:
     action: reply
     intent: service_match
