@@ -401,6 +401,32 @@ def _has_price_signal(normalized: str, raw_text: str | None = None) -> bool:
     return False
 
 
+def _has_duration_signal(normalized: str, raw_text: str | None = None) -> bool:
+    if not normalized:
+        return False
+    duration_keywords = [
+        "длится",
+        "длительность",
+        "сколько по времени",
+        "по времени",
+        "сколько времени",
+        "сколько занимает",
+        "занимает",
+        "как долго",
+        "время процедуры",
+    ]
+    if _contains_any(normalized, duration_keywords):
+        return True
+    if "сколько" in normalized and "времени" in normalized:
+        return True
+    if raw_text:
+        if _extract_minutes(raw_text) is not None:
+            return True
+        if re.search(r"\b(\d{1,2})\s*(?:час|часа|часов|ч)\b", raw_text, flags=re.IGNORECASE):
+            return True
+    return False
+
+
 def _extract_minutes(text: str) -> int | None:
     match = re.search(r"\b(\d{1,3})\s*(?:мин|минут|м)\b", text, flags=re.IGNORECASE)
     if not match:
@@ -905,7 +931,48 @@ def semantic_service_match(text: str, client_slug: str) -> SemanticServiceMatch 
     return None
 
 
-def compose_multi_truth_reply(message: str, client_slug: str | None) -> str | None:
+def _extract_intent_decomp(intent_decomp: dict | None) -> tuple[set[str], str | None]:
+    if not isinstance(intent_decomp, dict):
+        return set(), None
+    allowed = {"booking", "pricing", "duration", "location", "hours", "other"}
+    intents: list[str] = []
+    raw_intents = intent_decomp.get("intents")
+    if isinstance(raw_intents, list):
+        for item in raw_intents:
+            if not isinstance(item, str):
+                continue
+            intent = item.strip().casefold()
+            if intent in allowed and intent not in intents:
+                intents.append(intent)
+    if not intents:
+        primary = intent_decomp.get("primary_intent")
+        if isinstance(primary, str):
+            primary = primary.strip().casefold()
+            if primary in allowed:
+                intents.append(primary)
+        secondary = intent_decomp.get("secondary_intents")
+        if isinstance(secondary, list):
+            for item in secondary:
+                if not isinstance(item, str):
+                    continue
+                intent = item.strip().casefold()
+                if intent in allowed and intent not in intents:
+                    intents.append(intent)
+    service_query = intent_decomp.get("service_query")
+    if isinstance(service_query, str):
+        service_query = service_query.strip()
+        if not service_query:
+            service_query = None
+    else:
+        service_query = None
+    return set(intents), service_query
+
+
+def compose_multi_truth_reply(
+    message: str,
+    client_slug: str | None,
+    intent_decomp: dict | None = None,
+) -> str | None:
     if not message or not client_slug:
         return None
     segments = _split_question_segments(message)
@@ -913,7 +980,33 @@ def compose_multi_truth_reply(message: str, client_slug: str | None) -> str | No
         return None
     replies: list[str] = []
     seen: set[str] = set()
-    info_detected = False
+    intent_kinds, service_query = _extract_intent_decomp(intent_decomp)
+    intent_kinds = {kind for kind in intent_kinds if kind in {"hours", "pricing", "duration"}}
+    if not intent_kinds and len(segments) < 2:
+        return None
+    if intent_kinds:
+        normalized_message = _normalize_text(message)
+        if "hours" in intent_kinds:
+            hours_like = any(_looks_like_hours_question(_normalize_text(seg)) for seg in segments)
+            if not hours_like:
+                intent_kinds.discard("hours")
+        if "pricing" in intent_kinds and not _has_price_signal(normalized_message, message):
+            intent_kinds.discard("pricing")
+        if "duration" in intent_kinds and not _has_duration_signal(normalized_message, message):
+            intent_kinds.discard("duration")
+    info_detected = bool(intent_kinds)
+    service_match_from_query = None
+    fallback_service_from_query = None
+    fallback_service_name_from_query = None
+    if service_query:
+        service_match_from_query = semantic_service_match(service_query, client_slug)
+        normalized_query = _normalize_text(service_query)
+        if normalized_query:
+            fallback_service_from_query = _match_service(normalized_query)
+        if isinstance(fallback_service_from_query, dict):
+            name = fallback_service_from_query.get("name")
+            if isinstance(name, str) and name.strip():
+                fallback_service_name_from_query = name.strip()
     for segment in segments:
         normalized_segment = _normalize_text(segment)
         if not normalized_segment:
@@ -932,13 +1025,27 @@ def compose_multi_truth_reply(message: str, client_slug: str | None) -> str | No
             for question in question_types
             if hasattr(question, "kind") and isinstance(getattr(question, "kind"), str)
         }
+        if intent_kinds:
+            kinds |= intent_kinds
+        if "hours" in kinds and not _looks_like_hours_question(normalized_segment):
+            kinds.discard("hours")
+        if "pricing" in kinds and not _has_price_signal(normalized_segment, segment):
+            kinds.discard("pricing")
+        if "duration" in kinds and not _has_duration_signal(normalized_segment, segment):
+            kinds.discard("duration")
         service_match = semantic_service_match(segment, client_slug)
+        if not service_match and service_match_from_query:
+            service_match = service_match_from_query
         fallback_service = _match_service(normalized_segment) if not service_match else None
+        if not fallback_service and fallback_service_from_query:
+            fallback_service = fallback_service_from_query
         fallback_service_name = None
         if isinstance(fallback_service, dict):
             name = fallback_service.get("name")
             if isinstance(name, str) and name.strip():
                 fallback_service_name = name.strip()
+        if not fallback_service_name and fallback_service_name_from_query:
+            fallback_service_name = fallback_service_name_from_query
         if kinds:
             info_detected = True
 
@@ -955,8 +1062,11 @@ def compose_multi_truth_reply(message: str, client_slug: str | None) -> str | No
             _add_reply(format_reply_from_truth("hours"))
         if len(replies) >= 2:
             break
-        if "pricing" in kinds and service_match and service_match.action == "match":
-            _add_reply(service_match.response)
+        if "pricing" in kinds:
+            if service_match and service_match.action == "match":
+                _add_reply(service_match.response)
+            else:
+                _add_reply(format_reply_from_truth("service_clarify"))
         if len(replies) >= 2:
             break
         if "duration" in kinds:
@@ -1390,7 +1500,11 @@ def get_demo_salon_service_decision(message: str) -> DemoSalonDecision | None:
     return None
 
 
-def get_demo_salon_decision(message: str, client_slug: str | None = "demo_salon") -> DemoSalonDecision | None:
+def get_demo_salon_decision(
+    message: str,
+    client_slug: str | None = "demo_salon",
+    intent_decomp: dict | None = None,
+) -> DemoSalonDecision | None:
     normalized = _normalize_text(message)
     if not normalized:
         return None
@@ -1502,7 +1616,7 @@ def get_demo_salon_decision(message: str, client_slug: str | None = "demo_salon"
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="last_appointment")
 
-    multi_reply = compose_multi_truth_reply(message, client_slug or "demo_salon")
+    multi_reply = compose_multi_truth_reply(message, client_slug or "demo_salon", intent_decomp=intent_decomp)
     if multi_reply:
         return DemoSalonDecision(action="reply", response=multi_reply, intent="multi_truth")
 

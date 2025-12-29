@@ -732,14 +732,18 @@ def detect_multi_intent(text: str) -> dict | None:
         return None
 
     system_prompt = (
-        "Определи, есть ли в сообщении клиента несколько разных интентов. "
-        "Верни ТОЛЬКО JSON строго вида "
-        '{"multi_intent":true/false,"primary_intent":"booking|pricing|duration|location|hours|other","secondary_intents":["..."]}.\n'
-        "Допустимые интенты: booking (запись/перенос/отмена), pricing (цены/стоимость), "
+        "Разложи сообщение клиента на интенты. Верни ТОЛЬКО JSON строго вида "
+        '{"multi_intent":true/false,"primary_intent":"booking|pricing|duration|location|hours|other",'
+        '"secondary_intents":["..."],"intents":["..."],"service_query":"..."}.\n'
+        "Допустимые интенты: booking (запись/перенос/отмена/окошко), pricing (цены/стоимость), "
         "duration (длительность/время процедуры), location (адрес/как добраться), "
         "hours (график/время работы), other (другое).\n"
+        "booking добавляй только если есть явная просьба записать/перенести/отменить запись. "
+        "intents — уникальный список всех интентов. "
         "multi_intent=true если есть 2+ разных интента. primary_intent — главный/первый. "
-        "secondary_intents — уникальные, без primary. Если не уверен — other."
+        "secondary_intents — уникальные, без primary.\n"
+        "service_query: 1-6 слов, коротко суть услуги, если речь про услугу/цену/длительность/запись. "
+        "Если не про услугу — пустая строка. Если не уверен — other."
     )
     messages = [
         {"role": "system", "content": system_prompt},
@@ -747,11 +751,12 @@ def detect_multi_intent(text: str) -> dict | None:
     ]
 
     llm = get_llm_provider()
+    temperature = 1.0 if FAST_MODEL.strip().lower().startswith("gpt-5") else 0.0
     llm_start = time.monotonic()
     try:
         response = llm.generate(
             messages,
-            temperature=0.0,
+            temperature=temperature,
             max_tokens=MULTI_INTENT_MAX_TOKENS,
             model=FAST_MODEL,
             timeout_seconds=MULTI_INTENT_TIMEOUT_SECONDS,
@@ -768,6 +773,14 @@ def detect_multi_intent(text: str) -> dict | None:
             },
         )
         logger.warning(f"Multi-intent timeout after {MULTI_INTENT_TIMEOUT_SECONDS}s: {exc}")
+        return None
+    except Exception as exc:
+        _log_timing(
+            "multi_intent_llm_ms",
+            (time.monotonic() - llm_start) * 1000,
+            extra={"model_name": FAST_MODEL, "model_tier": "fast", "timeout": False, "error": str(exc)},
+        )
+        logger.warning(f"Multi-intent failed: {exc}")
         return None
 
     _log_timing(
@@ -795,31 +808,66 @@ def detect_multi_intent(text: str) -> dict | None:
         return None
 
     allowed = {"booking", "pricing", "duration", "location", "hours", "other"}
-    multi_intent = payload.get("multi_intent")
-    primary_intent = payload.get("primary_intent")
-    secondary_intents = payload.get("secondary_intents", [])
+    multi_intent_raw = payload.get("multi_intent")
+    primary_intent_raw = payload.get("primary_intent")
+    secondary_intents_raw = payload.get("secondary_intents", [])
+    intents_raw = payload.get("intents", [])
+    service_query_raw = payload.get("service_query")
 
-    if not isinstance(multi_intent, bool):
-        return None
-    if not isinstance(primary_intent, str):
-        return None
-    primary_intent = primary_intent.strip().casefold()
-    if primary_intent not in allowed:
-        primary_intent = "other"
+    cleaned_intents: list[str] = []
+    if isinstance(intents_raw, list):
+        for item in intents_raw:
+            if not isinstance(item, str):
+                continue
+            intent = item.strip().casefold()
+            if intent in allowed and intent not in cleaned_intents:
+                cleaned_intents.append(intent)
+
+    primary_intent = None
+    if isinstance(primary_intent_raw, str):
+        primary_intent = primary_intent_raw.strip().casefold()
+        if primary_intent not in allowed:
+            primary_intent = "other"
+    if not primary_intent:
+        primary_intent = cleaned_intents[0] if cleaned_intents else "other"
 
     cleaned_secondary: list[str] = []
-    if isinstance(secondary_intents, list):
-        for item in secondary_intents:
+    if isinstance(secondary_intents_raw, list):
+        for item in secondary_intents_raw:
             if not isinstance(item, str):
                 continue
             intent = item.strip().casefold()
             if intent in allowed and intent != primary_intent and intent not in cleaned_secondary:
                 cleaned_secondary.append(intent)
 
+    if not cleaned_intents:
+        cleaned_intents = [primary_intent] if primary_intent else ["other"]
+    elif primary_intent and primary_intent not in cleaned_intents:
+        cleaned_intents.insert(0, primary_intent)
+
+    if not cleaned_secondary:
+        cleaned_secondary = [intent for intent in cleaned_intents if intent != primary_intent]
+
+    if isinstance(multi_intent_raw, bool):
+        multi_intent = multi_intent_raw
+    else:
+        multi_intent = len(cleaned_intents) > 1
+
+    service_query = service_query_raw if isinstance(service_query_raw, str) else ""
+    service_query = re.sub(r"\s+", " ", service_query).strip()
+    if service_query:
+        tokens = service_query.split()
+        if len(tokens) > 6:
+            service_query = " ".join(tokens[:6])
+    if len(service_query) < 2:
+        service_query = ""
+
     return {
         "multi_intent": multi_intent,
         "primary_intent": primary_intent,
         "secondary_intents": cleaned_secondary,
+        "intents": cleaned_intents,
+        "service_query": service_query,
     }
 
 

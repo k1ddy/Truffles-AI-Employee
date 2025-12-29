@@ -47,6 +47,7 @@ from app.services.conversation_service import (
 )
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
+    compose_multi_truth_reply,
     get_demo_salon_decision,
     get_demo_salon_price_item,
     get_demo_salon_price_reply,
@@ -2006,7 +2007,7 @@ def _evaluate_booking_signal(
     has_datetime = any(_extract_datetime(message) for message in messages)
     booking_signal = has_service and has_datetime
     if booking_signal and message_text:
-        segments = [segment.strip() for segment in re.split(r"[?!\.]+", message_text) if segment.strip()]
+        segments = [segment.strip() for segment in re.split(r"[?!\.,;]+", message_text) if segment.strip()]
         if not segments:
             segments = [message_text.strip()]
         for segment in segments:
@@ -4482,6 +4483,98 @@ async def _handle_webhook_payload(
         )
     else:
         booking_signal = False
+    intent_decomp_payload = None
+    intent_decomp_intents: list[str] = []
+    intent_decomp_primary = None
+    intent_decomp_secondary: list[str] = []
+    intent_decomp_service_query = None
+    intent_decomp_multi = False
+    intent_decomp_used = False
+    if (
+        routing["allow_bot_reply"]
+        and not bypass_domain_flows
+        and message_text
+        and not is_greeting_message(message_text)
+        and not is_thanks_message(message_text)
+        and not is_acknowledgement_message(message_text)
+        and not is_low_signal_message(message_text)
+        and not is_bot_status_question(message_text)
+        and not is_human_request_message(message_text)
+    ):
+        intent_decomp_payload = detect_multi_intent(message_text)
+        if isinstance(intent_decomp_payload, dict):
+            intent_decomp_used = True
+            raw_intents = intent_decomp_payload.get("intents")
+            if isinstance(raw_intents, list):
+                intent_decomp_intents = [
+                    item.strip().casefold()
+                    for item in raw_intents
+                    if isinstance(item, str) and item.strip()
+                ]
+            primary = intent_decomp_payload.get("primary_intent")
+            if isinstance(primary, str):
+                intent_decomp_primary = primary.strip().casefold()
+            secondary = intent_decomp_payload.get("secondary_intents") or []
+            if isinstance(secondary, list):
+                intent_decomp_secondary = [
+                    item.strip().casefold()
+                    for item in secondary
+                    if isinstance(item, str) and item.strip()
+                ]
+            if not intent_decomp_intents:
+                if intent_decomp_primary:
+                    intent_decomp_intents.append(intent_decomp_primary)
+                for item in intent_decomp_secondary:
+                    if item not in intent_decomp_intents:
+                        intent_decomp_intents.append(item)
+            intent_decomp_multi = bool(intent_decomp_payload.get("multi_intent") is True)
+            service_query = intent_decomp_payload.get("service_query")
+            if isinstance(service_query, str):
+                service_query = service_query.strip()
+                if service_query:
+                    intent_decomp_service_query = service_query
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "intent_decomp_used": True,
+                        "intents": intent_decomp_intents,
+                        "service_query": intent_decomp_service_query,
+                    },
+                )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "intent_decomposition",
+                    "intents": intent_decomp_intents,
+                    "primary_intent": intent_decomp_primary,
+                    "secondary_intents": intent_decomp_secondary,
+                    "multi_intent": intent_decomp_multi,
+                    "service_query": intent_decomp_service_query,
+                },
+            )
+
+    if intent_decomp_used:
+        intent_decomp_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent}
+        intent_decomp_has_booking = "booking" in intent_decomp_set
+        intent_decomp_info = intent_decomp_set & BOOKING_INFO_QUESTION_TYPES
+        if intent_decomp_has_booking:
+            booking_signal = True
+            if booking_block_meta and booking_block_meta.get("booking_blocked_reason") == "info_question":
+                booking_block_meta = None
+        else:
+            if booking_signal and not booking_block_meta:
+                if intent_decomp_info:
+                    booking_block_meta = {
+                        "booking_blocked_reason": "info_question",
+                        "question_intents": sorted(intent_decomp_info),
+                    }
+                else:
+                    booking_block_meta = {
+                        "booking_blocked_reason": "intent_decomp_no_booking",
+                    }
+            booking_signal = False
+
     booking_wants_flow = (
         _should_run_booking_flow(
             routing,
@@ -4724,7 +4817,9 @@ async def _handle_webhook_payload(
         and len(message_text) >= MULTI_INTENT_MIN_CHARS
         and not booking_active
     ):
-        multi_intent_payload = detect_multi_intent(message_text)
+        multi_intent_payload = intent_decomp_payload
+        if not multi_intent_payload:
+            multi_intent_payload = detect_multi_intent(message_text)
         if isinstance(multi_intent_payload, dict) and multi_intent_payload.get("multi_intent") is True:
             primary = multi_intent_payload.get("primary_intent")
             secondary = multi_intent_payload.get("secondary_intents") or []
@@ -4748,16 +4843,6 @@ async def _handle_webhook_payload(
                 if booking_blocked:
                     booking_signal = False
                     booking_wants_flow = False
-                else:
-                    if routing["allow_booking_flow"] and multi_intent_primary == "booking":
-                        booking_signal = True
-                    else:
-                        booking_signal = False
-                    booking_wants_flow = _should_run_booking_flow(
-                        routing,
-                        booking_active=booking_active,
-                        booking_signal=booking_signal,
-                    )
 
     multi_intent_booking_followup = None
     multi_intent_other_followup = None
@@ -5033,6 +5118,48 @@ async def _handle_webhook_payload(
         and not bypass_domain_flows
         and policy_handler
     ):
+        if intent_decomp_used and message_text:
+            intent_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent}
+            if "booking" not in intent_set and "hours" in intent_set and "pricing" in intent_set:
+                multi_reply = compose_multi_truth_reply(
+                    message_text,
+                    payload.client_slug,
+                    intent_decomp=intent_decomp_payload,
+                )
+                if multi_reply:
+                    bot_response = multi_reply
+                    _reset_low_confidence_retry(conversation)
+
+                    result_message = "Multi-truth reply sent"
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "multi_truth",
+                            "decision": "reply",
+                            "intent": "multi_truth",
+                            "state": conversation.state,
+                            "intents": sorted(intent_set),
+                        },
+                    )
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="reply",
+                        intent="multi_truth",
+                        source="multi_truth",
+                        fast_intent=False,
+                    )
+                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                    sent = _send_response(bot_response)
+                    if not sent:
+                        result_message = f"{result_message}; response_send=failed"
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
+
         service_matcher = policy_handler.get("service_matcher")
         service_decision = service_matcher(message_text) if service_matcher else None
         if service_decision:
@@ -5215,7 +5342,16 @@ async def _handle_webhook_payload(
     ):
         policy_t0 = time.monotonic()
         truth_gate = policy_handler.get("truth_gate")
-        decision = truth_gate(message_text) if truth_gate else None
+        decision = None
+        if truth_gate:
+            if policy_type == "demo_salon":
+                decision = truth_gate(
+                    message_text,
+                    client_slug=payload.client_slug,
+                    intent_decomp=intent_decomp_payload,
+                )
+            else:
+                decision = truth_gate(message_text)
         if decision:
             if decision.intent == "price_query":
                 price_item_fn = policy_handler.get("price_item")
@@ -5277,6 +5413,8 @@ async def _handle_webhook_payload(
                 "policy_type": policy_type,
                 "llm_fallback_reason": llm_primary_reason,
             }
+            if decision.intent == "multi_truth":
+                trace_payload["multi_truth"] = True
             if isinstance(getattr(decision, "meta", None), dict):
                 trace_payload.update(decision.meta)
             _record_decision_trace(conversation, trace_payload)

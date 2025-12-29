@@ -275,6 +275,19 @@ eval_cases:
     - без выходных
     - '9:00'
     - '21:00'
+- id: E014c
+  user: Здравствуйте! Вы сегодня работаете? Сколько стоит педикюр?
+  expected:
+    action: reply
+    intent: multi_truth
+    must_include:
+    - педикюр
+    - ₸
+    must_include_any:
+    - ежедневно
+    - без выходных
+    - '9:00'
+    - '21:00'
 - id: E015
   user: До скольки вы работаете?
   expected:

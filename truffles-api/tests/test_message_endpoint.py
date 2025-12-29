@@ -37,6 +37,18 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _disable_intent_decomp():
+    with patch("app.routers.webhook.detect_multi_intent", return_value=None):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _disable_debounce_redis():
+    with patch("app.routers.webhook._get_debounce_redis", return_value=None):
+        yield
+
+
 DEMO_DOMAIN_ROUTER_CONFIG = {
     "anchors_in": [
         "запись на услугу",
@@ -527,7 +539,11 @@ def test_truth_gate_sets_decision_meta():
     )
 
     decision = DemoSalonDecision(action="reply", response="OK", intent="services_overview")
-    policy_handler = {"policy_type": "demo_salon", "truth_gate": lambda _: decision}
+
+    def _truth_gate(_message: str, *, client_slug: str | None = None, intent_decomp: dict | None = None):
+        return decision
+
+    policy_handler = {"policy_type": "demo_salon", "truth_gate": _truth_gate}
     low_confidence = SimpleNamespace(ok=True, value=(None, "low_confidence"))
 
     with patch("app.routers.webhook._get_policy_handler", return_value=policy_handler), patch(
@@ -973,6 +989,9 @@ def test_service_matcher_short_circuits_llm():
         "app.routers.webhook._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook.should_process_debounced_message",
+        AsyncMock(return_value=True),
     ), patch(
         "app.routers.webhook._update_message_decision_metadata"
     ) as mock_update:
@@ -1579,6 +1598,152 @@ def test_multi_truth_reply_handles_hours_and_price_in_single_segment():
     assert any(
         entry.get("intent") == "multi_truth" for entry in trace if isinstance(entry, dict)
     )
+    mock_reuse.assert_not_called()
+    mock_escalate.assert_not_called()
+
+
+def test_intent_decomp_blocks_booking_and_drives_multi_truth():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", user_metadata={})
+
+    def make_db():
+        client_query = Mock()
+        client_query.filter.return_value.first.return_value = client
+        settings_query = Mock()
+        settings_query.filter.return_value.first.return_value = settings
+        conversation_query = Mock()
+        conversation_query.filter.return_value.first.return_value = conversation
+        user_query = Mock()
+        user_query.filter.return_value.first.return_value = user
+
+        db = Mock()
+        db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+        db.add = Mock()
+        db.flush = Mock()
+        db.commit = Mock()
+        db.refresh = Mock()
+        return db
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Здравствуйте! Вы сегодня работаете? Сколько стоит педикюр?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-info-4",
+                timestamp=1234567893,
+            ),
+        ),
+    )
+
+    def _empty_question_type(*args, **kwargs):
+        return [] if kwargs.get("return_multi") else None
+
+    semantic_match = SemanticServiceMatch(
+        action="match",
+        response="Педикюр — 5 000 ₸.",
+        score=0.91,
+        canonical_name="Педикюр",
+        suggestions=["Педикюр"],
+    )
+
+    def _fake_semantic_match(text: str, client_slug: str):
+        normalized = (text or "").casefold()
+        if "педик" in normalized:
+            return semantic_match
+        return None
+
+    intent_decomp = {
+        "multi_intent": True,
+        "primary_intent": "hours",
+        "secondary_intents": ["pricing"],
+        "intents": ["hours", "pricing"],
+        "service_query": "педикюр",
+    }
+
+    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook.semantic_question_type", side_effect=_empty_question_type
+    ), patch(
+        "app.services.demo_salon_knowledge.semantic_question_type", side_effect=_empty_question_type
+    ), patch(
+        "app.routers.webhook.semantic_service_match", side_effect=_fake_semantic_match
+    ), patch(
+        "app.services.demo_salon_knowledge.semantic_service_match", side_effect=_fake_semantic_match
+    ), patch(
+        "app.routers.webhook.generate_bot_response",
+        return_value=Result.success(("llm", "high")),
+    ), patch(
+        "app.routers.webhook.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._find_message_by_message_id",
+        return_value=saved_message,
+    ), patch(
+        "app.routers.webhook.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ), patch(
+        "app.routers.webhook._reuse_active_handover"
+    ) as mock_reuse, patch(
+        "app.routers.webhook.escalate_to_pending"
+    ) as mock_escalate:
+        mock_reuse.return_value = (None, False, False)
+        mock_escalate.return_value = SimpleNamespace(ok=False, error="test")
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                make_db(),
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response is not None
+    response_text = response.bot_response.casefold()
+    assert "педикюр" in response_text
+    assert "5 000" in response.bot_response
+    assert any(token in response_text for token in ("9:00", "21:00", "ежедневно", "без выходных"))
+    assert webhook_router.MSG_BOOKING_ASK_SERVICE not in response.bot_response
+    assert webhook_router.MSG_BOOKING_ASK_DATETIME not in response.bot_response
+    assert webhook_router.MSG_BOOKING_ASK_NAME not in response.bot_response
+
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("intent_decomp_used") is True
+    assert "hours" in (meta.get("intents") or [])
+    assert "pricing" in (meta.get("intents") or [])
+    assert meta.get("service_query") == "педикюр"
+    assert meta.get("booking_blocked_reason") == "info_question"
+
+    trace = conversation.context.get("decision_trace", [])
+    assert any(
+        entry.get("stage") == "intent_decomposition" for entry in trace if isinstance(entry, dict)
+    )
+    assert any(entry.get("stage") == "multi_truth" for entry in trace if isinstance(entry, dict))
     mock_reuse.assert_not_called()
     mock_escalate.assert_not_called()
 

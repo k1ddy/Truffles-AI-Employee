@@ -35,7 +35,7 @@
 - Добавлен rewrite‑layer для semantic matcher (FAST LLM → JSON intent/query, 1.2s) — влияет только на подбор запроса, факты не меняет.
 - Semantic question‑type (hours/pricing/duration) на эмбеддингах из `domain_pack.typical_questions`; multi_truth объединяет 2 ответа (hours+price/duration), учитывает сегменты/запятые; service matcher пропускает multi hours+price/duration; длительности берутся из `services_catalog.duration_text`.
 - Ambiguous price/duration → clarify (не отвечаем ценой при неуверенном типе).
-- Booking gate блокирует инфо‑вопросы (pricing/hours/duration) без явного booking; service slot только через semantic matcher, datetime — токен; trace/meta `booking_blocked_reason`.
+- Booking gate блокирует инфо‑вопросы (pricing/hours/duration) без явного booking; сплит сегментов по ,;?!.; service slot только через semantic matcher, datetime — токен; trace/meta `booking_blocked_reason`. (нужен деплой)
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-26)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
