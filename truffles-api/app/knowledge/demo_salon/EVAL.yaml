@@ -1293,3 +1293,939 @@ eval_cases:
     must_tell_user_any:
     - администратор
     - передам
+- id: E100
+  user: Сколько стоит женская стрижка?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 5 000
+- id: E101
+  user: Цена на мужскую стрижку?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 3 000
+- id: E102
+  user: Сколько стоит детская стрижка?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 500
+- id: E103
+  user: Сколько стоит подравнивание кончиков?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 500
+- id: E104
+  user: Сколько стоит чёлка?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 1 000
+- id: E105
+  user: Сколько стоит стрижка машинкой?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 000
+- id: E106
+  user: Цена на окрашивание корней?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 8 000
+- id: E107
+  user: Сколько стоит окрашивание в один тон короткие?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 12 000
+- id: E108
+  user: Цена на окрашивание в один тон средняя длина?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 15 000
+- id: E109
+  user: Сколько стоит окрашивание в один тон длинные?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 18 000
+- id: E110
+  user: Сколько стоит мелирование?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 15 000
+- id: E111
+  user: Цена на балаяж?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 25 000
+- id: E112
+  user: Сколько стоит тонирование?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 8 000
+- id: E113
+  user: Сколько стоит укладка феном?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 3 500
+- id: E114
+  user: Сколько стоит вечерняя причёска?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 10 000
+- id: E115
+  user: Сколько стоит полировка волос?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 4 000
+- id: E116
+  user: Сколько стоит ботокс для волос?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 15 000
+- id: E117
+  user: Цена на кератин?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 25 000
+- id: E118
+  user: Сколько стоит чистка лица?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 8 000
+- id: E119
+  user: Сколько стоит пилинг?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 6 000
+- id: E120
+  user: Сколько стоит маникюр классический?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 500
+- id: E121
+  user: Цена на маникюр аппаратный?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 3 500
+- id: E122
+  user: Сколько стоит покрытие гель-лак?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 4 500
+- id: E123
+  user: Сколько стоит маникюр + гель-лак?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 7 000
+- id: E124
+  user: Цена на укрепление ногтей?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 000
+- id: E125
+  user: Сколько стоит снятие гель-лака?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 1 500
+- id: E126
+  user: Сколько стоит педикюр классический?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 4 500
+- id: E127
+  user: Цена на педикюр аппаратный?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 5 500
+- id: E128
+  user: Сколько стоит педикюр + гель-лак?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 9 000
+- id: E129
+  user: Сколько стоит наращивание гелем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 12 000
+- id: E130
+  user: Цена на наращивание полигелем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 13 000
+- id: E131
+  user: Сколько стоит дизайн ногтей?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 300
+- id: E132
+  user: Сколько стоит снятие чужого покрытия?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 1 000
+- id: E133
+  user: Сколько стоит коррекция бровей?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 000
+- id: E134
+  user: Цена на окрашивание бровей?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 000
+- id: E135
+  user: Сколько стоит коррекция + окрашивание?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 4 000
+- id: E136
+  user: Сколько стоит ламинирование бровей?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 5 000
+- id: E137
+  user: Цена на ламинирование ресниц?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 6 000
+- id: E138
+  user: Сколько стоит наращивание ресниц классика?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 8 000
+- id: E139
+  user: Сколько стоит наращивание ресниц 3D?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 12 000
+- id: E140
+  user: Посоветуйте уход после окрашивания
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекомендац
+    - окрашив
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E141
+  user: Нужен уход за окрашенными волосами
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - уход
+    - окрашив
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E142
+  user: Как сохранить цвет после окрашивания?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - цвет
+    - окрашив
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E143
+  user: После покраски чем ухаживать?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - уход
+    - окрашив
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E144
+  user: После окрашивания волосы сухие, что посоветуете?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекомендац
+    - окрашив
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E145
+  user: Бояудан кейін күтім керек
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекомендац
+    - окрашив
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E146
+  user: После окрашивания как сохранить оттенок?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - оттен
+    - окрашив
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E147
+  user: Подскажите уход после окрашивания волос
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - уход
+    - окрашив
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E148
+  user: Уход после окрашивания — что лучше?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - уход
+    - рекомендац
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E149
+  user: Как ухаживать после покраски?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - уход
+    - окрашив
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E150
+  user: Какой цвет волос мне подойдёт?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - подбор
+    - цвет
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E151
+  user: Какой цвет мне подойдет?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - подбор
+    - цвет
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E152
+  user: Подобрать оттенок можете?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - подбор
+    - оттен
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E153
+  user: Какой оттенок выбрать?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - подбор
+    - оттен
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E154
+  user: Какой оттенок мне подойдёт?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - подбор
+    - оттен
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E155
+  user: Подойдет цвет волос тёплый или холодный?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - подбор
+    - цвет
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E156
+  user: Подойдёт цвет под тон кожи?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - подбор
+    - цвет
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E157
+  user: Подойдет оттенок волос?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - подбор
+    - оттен
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E158
+  user: Какой цвет волос лучше выбрать?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - подбор
+    - цвет
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E159
+  user: Какой цвет мне подойдёт для карих глаз?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - подбор
+    - цвет
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E160
+  user: Запишите на маникюр завтра
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
+- id: E161
+  user: Хочу записаться на педикюр в 15:30
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
+- id: E162
+  user: Можно записаться на стрижку в пятницу?
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
+- id: E163
+  user: Запись на брови сегодня
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
+- id: E164
+  user: Запишите на ресницы вечером
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
+- id: E165
+  user: Запишите на маник
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+- id: E166
+  user: Мне нужна запись на педик
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+- id: E167
+  user: Хочу записаться на стрижку
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+- id: E168
+  user: Запишите на массаж ног завтра
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
+- id: E169
+  user: Нужно записаться на брови в 12:00
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
+- id: E170
+  user: Хочу бронь на ресницы 18:00
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
+- id: E171
+  user: Записаться на маникюр в субботу
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
+- id: E172
+  user: Есть окошко на педикюр утром?
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
+- id: E173
+  user: Запиши на брови и ресницы завтра
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
+- id: E174
+  user: Запишите на стрижку 10:30
+  expected:
+    action: booking_flow
+    booking_slots:
+    - service
+    - datetime
+- id: E175
+  user: Можно оплатить через Kaspi?
+  expected:
+    action: escalate
+    intent: payment
+    must_include_any:
+    - оплате
+    - администратор
+    must_not:
+    - Kaspi
+    - перевод
+- id: E176
+  user: Принимаете оплату переводом?
+  expected:
+    action: escalate
+    intent: payment
+    must_include_any:
+    - оплате
+    - администратор
+    must_not:
+    - Kaspi
+    - перевод
+- id: E177
+  user: Можно оплатить картой?
+  expected:
+    action: escalate
+    intent: payment
+    must_include_any:
+    - оплате
+    - администратор
+    must_not:
+    - Kaspi
+    - перевод
+- id: E178
+  user: Скидка при оплате Kaspi есть?
+  expected:
+    action: escalate
+    intent: payment
+    must_include_any:
+    - оплате
+    - администратор
+    must_not:
+    - Kaspi
+    - перевод
+- id: E179
+  user: Можно перенести запись на другой день?
+  expected:
+    action: escalate
+    intent: reschedule
+    must_include_any:
+    - перенос
+    - администратор
+    must_not:
+    - Kaspi
+    - перевод
+- id: E180
+  user: Хочу сдвинуть время записи
+  expected:
+    action: escalate
+    intent: reschedule
+    must_include_any:
+    - перенос
+    - администратор
+    must_not:
+    - Kaspi
+    - перевод
+- id: E181
+  user: Хочу отменить запись
+  expected:
+    action: escalate
+    intent: cancel_request
+    collect:
+    - имя
+    - услуга
+    - контактный номер
+    must_not:
+    - Kaspi
+    - перевод
+- id: E182
+  user: У меня аллергия на состав
+  expected:
+    action: escalate
+    intent: medical
+    must_include_any:
+    - консультация
+    - администратор
+    must_not:
+    - Kaspi
+    - перевод
+- id: E183
+  user: Можно ли беременным делать окрашивание?
+  expected:
+    action: escalate
+    intent: medical
+    must_include_any:
+    - консультация
+    - администратор
+    must_not:
+    - Kaspi
+    - перевод
+- id: E184
+  user: Очень плохо сделали маникюр
+  expected:
+    action: escalate
+    intent: complaint
+    must_include_any:
+    - жаль
+    - администратор
+    must_not:
+    - Kaspi
+    - перевод
+- id: E185
+  user: Какая погода сегодня?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E186
+  user: Расскажи анекдот
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E187
+  user: Напиши код на python
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E188
+  user: Можно постричь козу?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E189
+  user: Рецепт борща
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E190
+  user: Как сделать сайт?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E191
+  user: Доставка есть?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E192
+  user: С чем интегрируется ваш сервис?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E193
+  user: Расскажите о себе
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E194
+  user: Как заказать у вас бота?
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
+- id: E195
+  user: Вы сегодня работаете? Сколько стоит маникюр?
+  expected:
+    action: reply
+    intent: multi_truth
+    must_include:
+    - маникюр
+    must_include_any:
+    - ежедневно
+    - без выходных
+    - '9:00'
+    - '21:00'
+- id: E196
+  user: До скольки открыты? Сколько стоит педикюр?
+  expected:
+    action: reply
+    intent: multi_truth
+    must_include:
+    - педикюр
+    must_include_any:
+    - ежедневно
+    - без выходных
+    - '9:00'
+    - '21:00'
+- id: E197
+  user: Вы сегодня работаете? Сколько по времени длится стрижка?
+  expected:
+    action: reply
+    intent: multi_truth
+    must_include:
+    - стрижка
+    - минут
+    must_include_any:
+    - ежедневно
+    - без выходных
+    - '9:00'
+    - '21:00'
+- id: E198
+  user: Во сколько вы работаете? Сколько стоит чистка лица?
+  expected:
+    action: reply
+    intent: multi_truth
+    must_include:
+    - чистка
+    - ₸
+    must_include_any:
+    - ежедневно
+    - без выходных
+    - '9:00'
+    - '21:00'
+- id: E199
+  user: Сегодня открыты? Сколько по времени длится окрашивание?
+  expected:
+    action: reply
+    intent: multi_truth
+    must_include:
+    - окрашив
+    - час
+    must_include_any:
+    - ежедневно
+    - без выходных
+    - '9:00'
+    - '21:00'

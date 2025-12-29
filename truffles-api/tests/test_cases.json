@@ -471,6 +471,206 @@
         "expected": "Если услуга есть — match, иначе suggest",
         "automation": null,
         "status": null
+      },
+      {
+        "id": "TC044",
+        "name": "Consult: уход после окрашивания",
+        "input": "Посоветуйте уход после окрашивания",
+        "expected": "Consult-ответ с вопросами и вариантами, без цен/мастеров",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC045",
+        "name": "Consult: подбор цвета волос",
+        "input": "Какой цвет волос мне подойдет?",
+        "expected": "Consult-ответ с вопросами, без фактов и цен",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC046",
+        "name": "Info: адрес",
+        "input": "Где вы находитесь?",
+        "expected": "Адрес Абая 150, вход со стороны Розыбакиева",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC047",
+        "name": "Info: часы работы",
+        "input": "До скольки вы работаете?",
+        "expected": "График 9:00–21:00, ежедневно",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC048",
+        "name": "Info: парковка",
+        "input": "Есть парковка?",
+        "expected": "Есть бесплатная парковка во дворе",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC049",
+        "name": "Info: стерилизация",
+        "input": "Как стерилизуете инструменты?",
+        "expected": "Ответ про стерилизацию/сухожар и одноразовые пилки",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC050",
+        "name": "Info: бренды",
+        "input": "Какими брендами работаете?",
+        "expected": "Список брендов по волосам/ногтям/лицу",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC051",
+        "name": "Booking: маникюр завтра",
+        "input": "Запишите на маникюр завтра",
+        "expected": "Запуск записи, сбор услуги/даты/времени/имени/контакта",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC052",
+        "name": "Booking: без услуги",
+        "input": "Хочу записаться",
+        "expected": "Уточнение услуги",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC053",
+        "name": "Carryover: цена после услуги",
+        "input": "Делаете маникюр? Сколько стоит?",
+        "expected": "Цена по последней услуге (маникюр)",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC054",
+        "name": "LAW: оплата Kaspi",
+        "input": "Можно оплатить через Kaspi?",
+        "expected": "Эскалация по оплате",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC055",
+        "name": "LAW: перенос записи",
+        "input": "Можно перенести запись на другой день?",
+        "expected": "Эскалация переноса",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC056",
+        "name": "LAW: аллергия",
+        "input": "У меня аллергия на состав",
+        "expected": "Эскалация, консультация мастера/администратора",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC057",
+        "name": "LAW: жалоба",
+        "input": "Очень плохо сделали маникюр",
+        "expected": "Эскалация жалобы",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC058",
+        "name": "OOD: погода",
+        "input": "Какая погода сегодня?",
+        "expected": "OOD-ответ, только про услуги салона",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC059",
+        "name": "OOD: анекдот",
+        "input": "Расскажи анекдот",
+        "expected": "OOD-ответ, только про услуги салона",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC060",
+        "name": "Multi-intent: часы + цена",
+        "input": "Вы сегодня работаете? Сколько стоит педикюр?",
+        "expected": "Ответ про часы работы и цену",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC061",
+        "name": "Duration: педикюр",
+        "input": "Сколько по времени длится педикюр?",
+        "expected": "Ответ с длительностью педикюра",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC062",
+        "name": "Price clarify: без услуги",
+        "input": "Сколько стоит?",
+        "expected": "Уточнение услуги",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC063",
+        "name": "Service not found: массаж ног",
+        "input": "Делаете массаж ног?",
+        "expected": "Нет такой услуги + предложения из списка",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC064",
+        "name": "Gift: сертификаты",
+        "input": "Есть подарочные сертификаты?",
+        "expected": "Сертификаты на любую сумму",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC065",
+        "name": "Amenities: Wi-Fi",
+        "input": "Есть Wi-Fi?",
+        "expected": "Бесплатный Wi-Fi",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC066",
+        "name": "Policy: животные",
+        "input": "Можно с животными?",
+        "expected": "С животными нельзя",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC067",
+        "name": "Same-day booking",
+        "input": "Есть свободное время сегодня?",
+        "expected": "Эскалация на администратора и запрос услуги/времени",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC068",
+        "name": "Cancel booking",
+        "input": "Хочу отменить запись",
+        "expected": "Эскалация, запрос имени/услуги/контактного номера",
+        "automation": null,
+        "status": null
       }
     ]
   },

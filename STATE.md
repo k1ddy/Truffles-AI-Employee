@@ -31,6 +31,7 @@
 - RAG: добавлен query-rewrite (FAST LLM ≤1s) + hybrid retrieval (vector+BM25); rewrite только для retrieval, в decision_meta/trace пишутся `rewrite_used`, `rewrite_text`, `rag_scores`, `rag_confident`, `rag_reason`.
 - Метрики качества (день, target): rag_low_conf_rate <= 0.35; clarify_rate 0.05-0.20; clarify_success_rate >= 0.60.
 - Проверки качества: `EVAL.yaml` + `pytest truffles-api/tests/test_<client>_eval.py` + sync KB (`ops/sync_client.py`).
+- Battery v0: добавлены 100 кейсов в `truffles-api/app/knowledge/demo_salon/EVAL.yaml` + 25 manual в `truffles-api/tests/test_cases.json` (без изменения логики).
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
 - Детальный бриф салона заполнен эталоном (фейковые данные): `Business/Sales/Бриф_клиента.md`.
