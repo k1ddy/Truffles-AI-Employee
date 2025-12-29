@@ -6539,11 +6539,18 @@ async def _handle_webhook_payload(
             if decision.intent == "price_query":
                 price_item_fn = policy_handler.get("price_item")
                 price_item = price_item_fn(message_text) if price_item_fn else None
+                if not price_item and price_item_fn and isinstance(getattr(decision, "meta", None), dict):
+                    service_query = decision.meta.get("service_query")
+                    if isinstance(service_query, str) and service_query.strip():
+                        price_item = price_item_fn(service_query)
                 if price_item:
                     context = _get_conversation_context(conversation)
                     context = _set_service_hint(context, price_item, now)
                     _set_conversation_context(conversation, context)
-                else:
+                elif not (
+                    isinstance(getattr(decision, "meta", None), dict)
+                    and decision.meta.get("service_query")
+                ):
                     decision = DemoSalonDecision(
                         action="escalate",
                         response=MSG_ESCALATED,

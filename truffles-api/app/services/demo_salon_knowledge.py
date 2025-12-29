@@ -2135,6 +2135,16 @@ def get_demo_salon_decision(
 
     price_signal = _has_price_signal(normalized, message)
     price_item = _find_best_price_item(message)
+    if not price_item and isinstance(intent_decomp, dict):
+        price_service_meta = _resolve_service_query_meta(
+            message,
+            client_slug,
+            intent_decomp,
+            require_query=False,
+        )
+        service_query = price_service_meta.get("service_query") if isinstance(price_service_meta, dict) else None
+        if isinstance(service_query, str) and service_query.strip():
+            price_item = _find_best_price_item(service_query)
     if question_type is None and (price_item or price_signal):
         if _is_offtopic_message(normalized):
             reply = format_reply_from_truth("off_topic")

@@ -880,6 +880,7 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
         "что выбрать",
         "как выбрать",
         "уход",
+        "ничего страш",
     )
     consult_intent_blockers = (
         "запис",
