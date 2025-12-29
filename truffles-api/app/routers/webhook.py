@@ -5175,6 +5175,26 @@ async def _handle_webhook_payload(
             _reset_low_confidence_retry(conversation)
 
             result_message = "Service matcher reply sent"
+            clarify_reason = None
+            if service_decision.intent == "service_clarify":
+                service_meta = getattr(service_decision, "meta", None)
+                service_query = None
+                service_source = None
+                if isinstance(service_meta, dict):
+                    service_query = service_meta.get("service_query")
+                    service_source = service_meta.get("service_query_source")
+                if not service_query and service_source in (None, "", "none"):
+                    clarify_reason = "missing_service_query"
+                elif not service_query and intent_decomp_used:
+                    decomp_query = (
+                        intent_decomp_payload.get("service_query")
+                        if isinstance(intent_decomp_payload, dict)
+                        else None
+                    )
+                    if not decomp_query:
+                        intent_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent}
+                        if "pricing" in intent_set or "duration" in intent_set:
+                            clarify_reason = "missing_service_query"
             trace_payload = {
                 "stage": "service_matcher",
                 "decision": service_decision.intent,
@@ -5192,6 +5212,8 @@ async def _handle_webhook_payload(
             )
             if saved_message and isinstance(getattr(service_decision, "meta", None), dict):
                 _update_message_decision_metadata(saved_message, service_decision.meta)
+            if saved_message and clarify_reason:
+                _update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             if not sent:
@@ -5436,6 +5458,28 @@ async def _handle_webhook_payload(
             )
             if saved_message and isinstance(getattr(decision, "meta", None), dict):
                 _update_message_decision_metadata(saved_message, decision.meta)
+            if saved_message and decision.intent == "service_clarify":
+                clarify_reason = None
+                service_meta = getattr(decision, "meta", None)
+                service_query = None
+                service_source = None
+                if isinstance(service_meta, dict):
+                    service_query = service_meta.get("service_query")
+                    service_source = service_meta.get("service_query_source")
+                if not service_query and service_source in (None, "", "none"):
+                    clarify_reason = "missing_service_query"
+                elif not service_query and intent_decomp_used:
+                    decomp_query = (
+                        intent_decomp_payload.get("service_query")
+                        if isinstance(intent_decomp_payload, dict)
+                        else None
+                    )
+                    if not decomp_query:
+                        intent_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent}
+                        if "pricing" in intent_set or "duration" in intent_set:
+                            clarify_reason = "missing_service_query"
+                if clarify_reason:
+                    _update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             if not sent:

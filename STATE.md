@@ -13,6 +13,7 @@
 - Тесты запускать внутри контейнера `truffles-api`: `docker exec -i truffles-api pytest ...` (на хосте python может отсутствовать).
 - Источник истины по деплою/коммиту: `GET /admin/version` (git_commit).
 - Для проверок метаданных: `messages.metadata.decision_meta` пишется на user‑сообщении, `conversation.context.decision_trace` — на диалоге.
+- Price‑clarify спрашивает только услугу (без даты/времени).
 - Входящие WhatsApp идут напрямую в API: `POST /webhook/{client_slug}` (direct ChatFlow). `POST /webhook` — legacy wrapper.
 - `demo_salon` в ChatFlow направлен на `https://api.truffles.kz/webhook/demo_salon` + `webhook_secret` (секрет хранится в ChatFlow, не в git).
 - `webhook_secret` всегда генерируем сами (не заказчик); хранится в ChatFlow/DB, не в git.
