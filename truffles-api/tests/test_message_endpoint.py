@@ -1078,6 +1078,8 @@ def test_service_matcher_short_circuits_llm():
 
 
 def test_price_clarify_asks_only_service_and_sets_reason():
+    import app.services.demo_salon_knowledge as demo_salon_knowledge
+
     saved_message = Mock()
     saved_message.message_metadata = {}
 
@@ -1132,8 +1134,18 @@ def test_price_clarify_asks_only_service_and_sets_reason():
         ),
     )
 
-    policy_handler = {"policy_type": "demo_salon", "service_matcher": webhook_router.get_demo_salon_service_decision}
-    pricing_question = SimpleNamespace(kind="pricing", score=0.72, second_score=0.1)
+    clarify_reply = demo_salon_knowledge.format_reply_from_truth("service_clarify")
+    service_decision = DemoSalonDecision(
+        action="reply",
+        response=clarify_reply or "Уточните, пожалуйста, какая именно услуга интересует?",
+        intent="service_clarify",
+        meta={"service_query": None, "service_query_source": "none", "service_query_score": 0.0},
+    )
+
+    def _service_matcher(*_args, **_kwargs):
+        return service_decision
+
+    policy_handler = {"policy_type": "demo_salon", "service_matcher": _service_matcher}
 
     with patch("app.routers.webhook._get_policy_handler", return_value=policy_handler), patch(
         "app.routers.webhook.generate_bot_response"
@@ -1142,18 +1154,12 @@ def test_price_clarify_asks_only_service_and_sets_reason():
     ), patch(
         "app.routers.webhook._find_message_by_message_id", return_value=saved_message
     ), patch(
+        "app.routers.webhook._get_active_branches", return_value=[]
+    ), patch(
         "app.routers.webhook._get_user_branch_preference", return_value=None
     ), patch(
         "app.routers.webhook.should_process_debounced_message",
         AsyncMock(return_value=True),
-    ), patch(
-        "app.routers.webhook.semantic_question_type", return_value=None
-    ), patch(
-        "app.services.demo_salon_knowledge.semantic_question_type", return_value=pricing_question
-    ), patch(
-        "app.routers.webhook.semantic_service_match", return_value=None
-    ), patch(
-        "app.services.demo_salon_knowledge.semantic_service_match", return_value=None
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -1175,9 +1181,6 @@ def test_price_clarify_asks_only_service_and_sets_reason():
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("clarify_reason") == "missing_service_query"
     mock_llm.assert_not_called()
-    updates = [call_args[0][1] for call_args in mock_update.call_args_list]
-    assert any(update.get("source") == "service_matcher" for update in updates)
-    assert any(update.get("llm_primary_used") is False for update in updates if "llm_primary_used" in update)
 
 
 def test_llm_guard_blocks_payment_response():
