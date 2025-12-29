@@ -412,11 +412,12 @@ def _has_duration_signal(normalized: str, raw_text: str | None = None) -> bool:
         "по времени",
         "сколько времени",
         "сколько занимает",
-        "занимает",
         "как долго",
         "время процедуры",
     ]
     if _contains_any(normalized, duration_keywords):
+        return True
+    if re.search(r"\bзанимает\b", normalized):
         return True
     if "сколько" in normalized and "времени" in normalized:
         return True
@@ -1019,6 +1020,14 @@ def _resolve_service_query_meta(
                     meta["service_query"] = fallback_name
                     meta["service_query_source"] = "semantic_match"
                     meta["service_query_score"] = 1.0
+        if not meta.get("service_query"):
+            price_item = _find_best_price_item(message)
+            if isinstance(price_item, dict):
+                fallback_name = _clean_service_query(price_item.get("name"))
+                if fallback_name:
+                    meta["service_query"] = fallback_name
+                    meta["service_query_source"] = "semantic_match"
+                    meta["service_query_score"] = 1.0
     return meta
 
 
@@ -1154,9 +1163,14 @@ def compose_multi_truth_reply(
                 _add_reply(_format_service_duration_reply(service_from_query))
         if len(replies) >= 2:
             break
-        if service_match and service_match.action == "match" and not {"pricing", "duration"} & kinds:
+        if (
+            not needs_service_query
+            and service_match
+            and service_match.action == "match"
+            and not {"pricing", "duration"} & kinds
+        ):
             _add_reply(_format_service_presence_reply(segment, service_match))
-        elif fallback_service_name and not {"pricing", "duration"} & kinds:
+        elif not needs_service_query and fallback_service_name and not {"pricing", "duration"} & kinds:
             _add_reply(_format_service_presence_reply_for_name(fallback_service_name))
         if len(replies) >= 2:
             break
