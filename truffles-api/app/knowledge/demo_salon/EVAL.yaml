@@ -1334,7 +1334,7 @@ eval_cases:
     action: reply
     intent: price_query
     must_include:
-    - 2 000
+    - 3 000
 - id: E106
   user: Сколько стоит окрашивание корней?
   expected:
