@@ -29,8 +29,8 @@ from app.services.ai_service import (
     OUT_OF_DOMAIN_RESPONSE,
     THANKS_RESPONSE,
     classify_confirmation,
-    detect_refusal_flags,
     detect_multi_intent,
+    detect_refusal_flags,
     is_acknowledgement_message,
     is_bot_status_question,
     is_greeting_message,
@@ -2060,32 +2060,6 @@ def _set_conversation_context(conversation: Conversation, context: dict) -> None
 
 def _record_decision_trace(conversation: Conversation, trace: dict) -> None:
     context = _get_conversation_context(conversation)
-    context_manager = _get_context_manager(context)
-    message_count = _increment_context_message_count(context_manager)
-    context_manager, refusal_flags, refusal_events = _update_refusal_flags(
-        context_manager,
-        message_text=message_text,
-        now=now,
-        client_slug=payload.client_slug,
-    )
-    context = _set_context_manager(context, context_manager)
-    _set_conversation_context(conversation, context)
-    if refusal_events:
-        _record_context_manager_decision(
-            conversation,
-            saved_message,
-            decision="refusal_flags",
-            updates={"refusal_flags": refusal_flags, "refusal_events": refusal_events},
-        )
-    if message_count == SUMMARY_MESSAGE_THRESHOLD:
-        _update_compact_summary(
-            conversation=conversation,
-            saved_message=saved_message,
-            reason="message_threshold",
-            now=now,
-        )
-        context = _get_conversation_context(conversation)
-    current_goal = context_manager.get("current_goal") if isinstance(context_manager, dict) else None
     payload = dict(trace)
     payload["recorded_at"] = datetime.now(timezone.utc).isoformat()
     existing = context.get(DECISION_TRACE_KEY)
@@ -3879,6 +3853,33 @@ async def _handle_webhook_payload(
     now = datetime.now(timezone.utc)
     previous_last_message_at = conversation.last_message_at
     conversation.last_message_at = now
+    context = _get_conversation_context(conversation)
+    context_manager = _get_context_manager(context)
+    message_count = _increment_context_message_count(context_manager)
+    context_manager, refusal_flags, refusal_events = _update_refusal_flags(
+        context_manager,
+        message_text=message_text,
+        now=now,
+        client_slug=payload.client_slug,
+    )
+    context = _set_context_manager(context, context_manager)
+    _set_conversation_context(conversation, context)
+    if refusal_events:
+        _record_context_manager_decision(
+            conversation,
+            saved_message,
+            decision="refusal_flags",
+            updates={"refusal_flags": refusal_flags, "refusal_events": refusal_events},
+        )
+    if message_count == SUMMARY_MESSAGE_THRESHOLD:
+        _update_compact_summary(
+            conversation=conversation,
+            saved_message=saved_message,
+            reason="message_threshold",
+            now=now,
+        )
+        context = _get_conversation_context(conversation)
+    current_goal = context_manager.get("current_goal") if isinstance(context_manager, dict) else None
 
     # 4.5 Branch routing (instance_id -> branch, or ask user)
     branch_mode = (
