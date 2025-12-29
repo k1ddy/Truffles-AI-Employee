@@ -1140,9 +1140,17 @@ def _resolve_service_query_meta(
     if isinstance(intent_decomp, dict):
         cleaned = _clean_service_query(intent_decomp.get("service_query"))
         if cleaned:
+            source_override = intent_decomp.get("service_query_source")
+            score_override = intent_decomp.get("service_query_score")
+            source = "intent_decomp"
+            if isinstance(source_override, str) and source_override in {"intent_decomp", "context"}:
+                source = source_override
             meta["service_query"] = cleaned
-            meta["service_query_source"] = "intent_decomp"
-            meta["service_query_score"] = 1.0
+            meta["service_query_source"] = source
+            if isinstance(score_override, (int, float)):
+                meta["service_query_score"] = float(score_override)
+            else:
+                meta["service_query_score"] = 1.0
             return meta
     if require_query and message and client_slug:
         match = semantic_service_match(message, client_slug)

@@ -128,6 +128,14 @@ eval_cases:
     must_include_any:
     - уточните
     - какая именно услуга
+- id: E003k
+  user: Посоветуйте уход после окрашивания
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекомендац
+    - уход
 - id: E004
   user: Почему у вас цена «от»?
   expected:

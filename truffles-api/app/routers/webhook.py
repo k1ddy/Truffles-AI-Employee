@@ -2045,6 +2045,14 @@ def _extract_datetime(text: str) -> str | None:
 
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration"}
 INFO_INTENTS = {"pricing", "hours", "duration", "location"}
+SERVICE_CARRYOVER_KEY = "service_carryover"
+SERVICE_CARRYOVER_TTL_MESSAGES = 4
+SERVICE_CARRYOVER_INTENTS = {"pricing", "duration"}
+SERVICE_CARRYOVER_SKIP_INTENTS = {
+    "service_clarify",
+    "duration_or_price_clarify",
+    "service_not_found",
+}
 
 
 def _evaluate_booking_signal(
@@ -2143,6 +2151,132 @@ def _increment_context_message_count(manager: dict) -> int:
     count += 1
     manager["message_count"] = count
     return count
+
+
+def _prune_service_carryover(manager: dict, *, message_count: int) -> tuple[dict, dict | None]:
+    payload = manager.get(SERVICE_CARRYOVER_KEY)
+    if not isinstance(payload, dict):
+        return manager, None
+    service_query = payload.get("service_query")
+    if not isinstance(service_query, str) or not service_query.strip():
+        manager = dict(manager)
+        manager.pop(SERVICE_CARRYOVER_KEY, None)
+        return manager, {"reason": "invalid"}
+    try:
+        last_count = int(payload.get("message_count"))
+    except (TypeError, ValueError):
+        manager = dict(manager)
+        manager.pop(SERVICE_CARRYOVER_KEY, None)
+        return manager, {"reason": "invalid"}
+    ttl = payload.get("ttl", SERVICE_CARRYOVER_TTL_MESSAGES)
+    try:
+        ttl = int(ttl)
+    except (TypeError, ValueError):
+        ttl = SERVICE_CARRYOVER_TTL_MESSAGES
+    if ttl <= 0:
+        ttl = SERVICE_CARRYOVER_TTL_MESSAGES
+    age = message_count - last_count
+    if age > ttl:
+        manager = dict(manager)
+        manager.pop(SERVICE_CARRYOVER_KEY, None)
+        return manager, {"reason": "expired", "age": age, "ttl": ttl, "service_query": service_query}
+    return manager, None
+
+
+def _get_service_carryover(manager: dict, *, message_count: int) -> dict | None:
+    payload = manager.get(SERVICE_CARRYOVER_KEY)
+    if not isinstance(payload, dict):
+        return None
+    service_query = payload.get("service_query")
+    if not isinstance(service_query, str) or not service_query.strip():
+        return None
+    try:
+        last_count = int(payload.get("message_count"))
+    except (TypeError, ValueError):
+        return None
+    ttl = payload.get("ttl", SERVICE_CARRYOVER_TTL_MESSAGES)
+    try:
+        ttl = int(ttl)
+    except (TypeError, ValueError):
+        return None
+    if ttl <= 0:
+        return None
+    age = message_count - last_count
+    if age <= 0 or age > ttl:
+        return None
+    remaining = max(ttl - age + 1, 0)
+    return {
+        "service_query": service_query.strip(),
+        "service_query_source": payload.get("service_query_source"),
+        "service_query_score": payload.get("service_query_score"),
+        "age": age,
+        "ttl": ttl,
+        "remaining": remaining,
+    }
+
+
+def _set_service_carryover(
+    manager: dict,
+    *,
+    service_query: str,
+    source: str | None,
+    score: float | None,
+    message_count: int,
+) -> dict:
+    manager = dict(manager)
+    score_value = 0.0
+    if isinstance(score, (int, float)):
+        score_value = float(score)
+    manager[SERVICE_CARRYOVER_KEY] = {
+        "service_query": service_query,
+        "service_query_source": source or "unknown",
+        "service_query_score": score_value,
+        "message_count": message_count,
+        "ttl": SERVICE_CARRYOVER_TTL_MESSAGES,
+    }
+    return manager
+
+
+def _maybe_store_service_carryover(
+    *,
+    conversation: Conversation,
+    service_meta: dict | None,
+    intent: str | None,
+    message_count: int,
+    reason: str,
+) -> None:
+    if not isinstance(service_meta, dict):
+        return
+    service_query = service_meta.get("service_query")
+    if not isinstance(service_query, str) or not service_query.strip():
+        return
+    if intent and intent in SERVICE_CARRYOVER_SKIP_INTENTS:
+        return
+    source = service_meta.get("service_query_source")
+    score = service_meta.get("service_query_score")
+    context = _get_conversation_context(conversation)
+    context_manager = _get_context_manager(context)
+    context_manager = _set_service_carryover(
+        context_manager,
+        service_query=service_query.strip(),
+        source=source if isinstance(source, str) else None,
+        score=score if isinstance(score, (int, float)) else None,
+        message_count=message_count,
+    )
+    context = _set_context_manager(context, context_manager)
+    _set_conversation_context(conversation, context)
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "service_carryover",
+            "decision": "set",
+            "service_query": service_query.strip(),
+            "service_query_source": source,
+            "service_query_score": score,
+            "ttl": SERVICE_CARRYOVER_TTL_MESSAGES,
+            "reason": reason,
+        },
+    )
 
 
 def _is_refusal_flag_active(refusal_flags: dict | None, field: str) -> bool:
@@ -3959,6 +4093,10 @@ async def _handle_webhook_payload(
         now=now,
         client_slug=payload.client_slug,
     )
+    context_manager, carryover_event = _prune_service_carryover(
+        context_manager,
+        message_count=message_count,
+    )
     context = _set_context_manager(context, context_manager)
     _set_conversation_context(conversation, context)
     if refusal_events:
@@ -3967,6 +4105,15 @@ async def _handle_webhook_payload(
             saved_message,
             decision="refusal_flags",
             updates={"refusal_flags": refusal_flags, "refusal_events": refusal_events},
+        )
+    if carryover_event:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "service_carryover",
+                "decision": "expired",
+                **carryover_event,
+            },
         )
     if message_count == SUMMARY_MESSAGE_THRESHOLD:
         _update_compact_summary(
@@ -5077,6 +5224,52 @@ async def _handle_webhook_payload(
         booking_context = _get_conversation_context(conversation)
         booking = _get_booking_context(booking_context)
         booking_active = bool(booking.get("active"))
+
+    if (
+        intent_decomp_used
+        and not consult_intent
+        and not intent_decomp_service_query
+        and intent_decomp_set & SERVICE_CARRYOVER_INTENTS
+    ):
+        context = _get_conversation_context(conversation)
+        context_manager = _get_context_manager(context)
+        carryover = _get_service_carryover(context_manager, message_count=message_count)
+        if carryover and isinstance(intent_decomp_payload, dict):
+            intent_decomp_payload = dict(intent_decomp_payload)
+            intent_decomp_payload["service_query"] = carryover["service_query"]
+            intent_decomp_payload["service_query_source"] = "context"
+            carryover_score = carryover.get("service_query_score")
+            if isinstance(carryover_score, (int, float)):
+                intent_decomp_payload["service_query_score"] = carryover_score
+            intent_decomp_service_query = carryover["service_query"]
+            service_query_score = (
+                float(carryover_score)
+                if isinstance(carryover_score, (int, float))
+                else 1.0
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "service_query": carryover["service_query"],
+                        "service_query_source": "context",
+                        "service_query_score": service_query_score,
+                        "service_query_ttl": carryover.get("ttl"),
+                        "service_query_ttl_remaining": carryover.get("remaining"),
+                    },
+                )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "service_carryover",
+                    "decision": "used",
+                    "service_query": carryover["service_query"],
+                    "service_query_source": "context",
+                    "service_query_score": service_query_score,
+                    "ttl": carryover.get("ttl"),
+                    "ttl_remaining": carryover.get("remaining"),
+                },
+            )
     intent_decomp_has_booking = "booking" in intent_decomp_set
     intent_decomp_info = intent_decomp_set & BOOKING_INFO_QUESTION_TYPES
     if intent_decomp_has_booking:
@@ -5331,10 +5524,10 @@ async def _handle_webhook_payload(
     consult_decision = None
     if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
         consult_blocked = bool(booking_wants_flow or booking_active or booking_signal)
-        if intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}:
-            consult_blocked = True
-        if consult_intent and not (intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}):
+        if consult_intent:
             consult_blocked = False
+        elif intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}:
+            consult_blocked = True
         if not consult_blocked:
             consult_decision = build_consult_reply(
                 message_text,
@@ -5502,6 +5695,227 @@ async def _handle_webhook_payload(
             multi_intent_booking_followup = multi_intent_followup
         else:
             multi_intent_other_followup = multi_intent_followup
+
+    if (
+        routing["allow_booking_flow"]
+        and not bypass_domain_flows
+        and booking_wants_flow
+        and not consult_intent
+        and intent_decomp_used
+    ):
+        booking_info_intents = sorted(intent_decomp_set & INFO_INTENTS)
+        if booking_info_intents and policy_handler and routing["allow_truth_gate_reply"]:
+            info_decision = None
+            info_source = None
+            if "hours" in booking_info_intents and {"pricing", "duration"} & set(booking_info_intents):
+                multi_result = compose_multi_truth_reply(
+                    message_text,
+                    payload.client_slug,
+                    intent_decomp=intent_decomp_payload,
+                    return_meta=True,
+                )
+                if multi_result:
+                    multi_reply, multi_meta = multi_result
+                    info_decision = DemoSalonDecision(
+                        action="reply",
+                        response=multi_reply,
+                        intent="multi_truth",
+                        meta=multi_meta if isinstance(multi_meta, dict) else None,
+                    )
+                    info_source = "multi_truth"
+            if not info_decision:
+                service_matcher = policy_handler.get("service_matcher")
+                if service_matcher:
+                    info_decision = service_matcher(
+                        message_text,
+                        client_slug=payload.client_slug,
+                        intent_decomp=intent_decomp_payload,
+                    )
+                    if info_decision:
+                        info_source = "service_matcher"
+            if not info_decision:
+                truth_gate = policy_handler.get("truth_gate")
+                if truth_gate:
+                    if policy_type == "demo_salon":
+                        info_decision = truth_gate(
+                            message_text,
+                            client_slug=payload.client_slug,
+                            intent_decomp=intent_decomp_payload,
+                        )
+                    else:
+                        info_decision = truth_gate(message_text)
+                    if info_decision:
+                        info_source = "truth_gate"
+
+            if info_decision and info_decision.action == "reply":
+                info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}
+                info_meta = dict(info_meta)
+
+                context = booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
+                booking_state = booking if isinstance(booking, dict) else _get_booking_context(context)
+                booking_active = bool(booking_state.get("active"))
+                if not booking_active:
+                    booking_state = dict(booking_state)
+                    booking_state["active"] = True
+                    booking_state["started_at"] = now.isoformat()
+                booking_state = _update_booking_from_messages(
+                    booking_state,
+                    booking_messages,
+                    client_slug=payload.client_slug,
+                )
+                if not booking_state.get("service"):
+                    service_hint = _get_recent_service_hint(context, now)
+                    if service_hint:
+                        booking_state["service"] = service_hint
+                        context = _clear_service_hint(context)
+                context_manager = _get_context_manager(context)
+                refusal_flags = context_manager.get("refusal_flags")
+                booking_state, prompt = _next_booking_prompt(booking_state, refusal_flags=refusal_flags)
+                context = _set_booking_context(context, booking_state)
+                _set_conversation_context(conversation, context)
+
+                if info_decision.intent in {"service_clarify", "duration_or_price_clarify"}:
+                    clarify_intent = current_goal or "info"
+                    context_manager = _get_context_manager(context)
+                    if _should_escalate_for_clarify(context_manager, clarify_intent):
+                        clarify_count, _ = _get_clarify_attempt_state(context_manager, clarify_intent)
+                        _record_context_manager_decision(
+                            conversation,
+                            saved_message,
+                            decision="clarify_limit",
+                            updates={
+                                "clarify_attempt": {"intent": clarify_intent, "count": clarify_count},
+                                "clarify_reason": "service_clarify",
+                                "clarify_limit": True,
+                            },
+                        )
+                        return _handle_clarify_limit_escalation(
+                            db=db,
+                            conversation=conversation,
+                            user=user,
+                            message_text=message_text,
+                            saved_message=saved_message,
+                            source=info_source or "booking_interrupt",
+                            allow_handover=routing.get("allow_handover_create", False),
+                            send_response=_send_response,
+                        )
+                    _register_clarify_attempt(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        intent=clarify_intent,
+                        now=now,
+                        reason="service_clarify",
+                    )
+                    prompt = None
+
+                if prompt:
+                    context_manager = _get_context_manager(context)
+                    if _should_escalate_for_clarify(context_manager, "booking"):
+                        clarify_count, _ = _get_clarify_attempt_state(context_manager, "booking")
+                        _record_context_manager_decision(
+                            conversation,
+                            saved_message,
+                            decision="clarify_limit",
+                            updates={
+                                "clarify_attempt": {"intent": "booking", "count": clarify_count},
+                                "clarify_reason": "booking_prompt",
+                                "clarify_limit": True,
+                            },
+                        )
+                        return _handle_clarify_limit_escalation(
+                            db=db,
+                            conversation=conversation,
+                            user=user,
+                            message_text=message_text,
+                            saved_message=saved_message,
+                            source="booking",
+                            allow_handover=routing.get("allow_handover_create", False),
+                            send_response=_send_response,
+                        )
+                    _register_clarify_attempt(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        intent="booking",
+                        now=now,
+                        reason="booking_prompt",
+                    )
+
+                trace_payload = {
+                    "stage": "booking_interrupt",
+                    "decision": "info_reply",
+                    "state": conversation.state,
+                    "info_intents": booking_info_intents,
+                    "booking_prompt": prompt,
+                }
+                _record_decision_trace(conversation, trace_payload)
+
+                if info_source == "service_matcher":
+                    matcher_trace = {
+                        "stage": "service_matcher",
+                        "decision": info_decision.intent,
+                        "state": conversation.state,
+                    }
+                    matcher_trace.update(info_meta)
+                    _record_decision_trace(conversation, matcher_trace)
+                elif info_source == "truth_gate":
+                    gate_trace = {
+                        "stage": "truth_gate",
+                        "decision": info_decision.action,
+                        "intent": info_decision.intent,
+                        "state": conversation.state,
+                        "booking_wants_flow": booking_wants_flow,
+                        "policy_type": policy_type,
+                    }
+                    gate_trace.update(info_meta)
+                    _record_decision_trace(conversation, gate_trace)
+                elif info_source == "multi_truth":
+                    multi_trace = {
+                        "stage": "multi_truth",
+                        "decision": "reply",
+                        "intent": "multi_truth",
+                        "state": conversation.state,
+                        "intents": booking_info_intents,
+                    }
+                    multi_trace.update(info_meta)
+                    _record_decision_trace(conversation, multi_trace)
+
+                _record_message_decision_meta(
+                    saved_message,
+                    action=info_decision.action,
+                    intent=info_decision.intent,
+                    source=info_source or "booking_interrupt",
+                    fast_intent=False,
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            **info_meta,
+                            "booking_info_interrupt": True,
+                            "booking_info_intents": booking_info_intents,
+                        },
+                    )
+                _maybe_store_service_carryover(
+                    conversation=conversation,
+                    service_meta=info_meta,
+                    intent=info_decision.intent,
+                    message_count=message_count,
+                    reason="booking_interrupt",
+                )
+
+                bot_response = _combine_sidecar(prompt or "", info_decision.response or "")
+                bot_response = bot_response.strip()
+                _reset_low_confidence_retry(conversation)
+                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                sent = _send_response(bot_response)
+                result_message = "Booking info interrupt sent" if sent else "Booking info interrupt failed"
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
 
     policy_price_sidecar = None
     if not bypass_domain_flows and policy_handler and routing["allow_truth_gate_reply"] and booking_wants_flow:
@@ -5837,6 +6251,13 @@ async def _handle_webhook_payload(
                     )
                     if saved_message and isinstance(multi_meta, dict):
                         _update_message_decision_metadata(saved_message, multi_meta)
+                    _maybe_store_service_carryover(
+                        conversation=conversation,
+                        service_meta=multi_meta if isinstance(multi_meta, dict) else None,
+                        intent="multi_truth",
+                        message_count=message_count,
+                        reason="multi_truth",
+                    )
                     save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
                     sent = _send_response(bot_response)
                     if not sent:
@@ -5936,6 +6357,13 @@ async def _handle_webhook_payload(
                 _update_message_decision_metadata(saved_message, service_decision.meta)
             if saved_message and clarify_reason:
                 _update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})
+            _maybe_store_service_carryover(
+                conversation=conversation,
+                service_meta=service_decision.meta if isinstance(service_decision.meta, dict) else None,
+                intent=service_decision.intent,
+                message_count=message_count,
+                reason="service_matcher",
+            )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             if not sent:
@@ -6234,6 +6662,13 @@ async def _handle_webhook_payload(
                             clarify_reason = "missing_service_query"
                 if clarify_reason:
                     _update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})
+            _maybe_store_service_carryover(
+                conversation=conversation,
+                service_meta=decision.meta if isinstance(decision.meta, dict) else None,
+                intent=decision.intent,
+                message_count=message_count,
+                reason="truth_gate",
+            )
             save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
             sent = _send_response(bot_response)
             if not sent:
