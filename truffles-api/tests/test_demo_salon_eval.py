@@ -1,3 +1,4 @@
+from difflib import SequenceMatcher
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,6 +38,7 @@ def _local_service_search(text: str, client_slug: str, limit: int) -> list[dict]
     query_vec = demo_salon_knowledge._local_text_embedding(text)
     if not query_vec:
         return []
+    query_tokens = demo_salon_knowledge._tokenize(text)
     candidates: list[dict] = []
     for entry in demo_salon_knowledge._build_service_index():
         name = entry.get("name")
@@ -49,6 +51,18 @@ def _local_service_search(text: str, client_slug: str, limit: int) -> list[dict]
             alias_text = " ".join(alias_tokens)
             alias_vec = demo_salon_knowledge._local_text_embedding(alias_text)
             score = demo_salon_knowledge._cosine_similarity(query_vec, alias_vec)
+            if query_tokens:
+                for query_token in query_tokens:
+                    if len(query_token) < 4:
+                        continue
+                    for alias_token in alias_tokens:
+                        if len(alias_token) < 4:
+                            continue
+                        if query_token[:2] != alias_token[:2]:
+                            continue
+                        fuzzy_score = SequenceMatcher(None, query_token, alias_token).ratio()
+                        if fuzzy_score > score:
+                            score = fuzzy_score
             if score > best_score:
                 best_score = score
         if best_score > 0:
