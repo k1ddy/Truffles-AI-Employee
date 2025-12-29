@@ -1045,6 +1045,123 @@ def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
     assert updates["service_semantic_rewrite_query"] == "маникюр"
 
 
+def test_rag_rewrite_and_scores_logged():
+    saved_message = SimpleNamespace(message_metadata={})
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=False,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", user_metadata={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="чо по адресу",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-rag-1",
+                timestamp=1234567890,
+            ),
+        ),
+    )
+
+    def fake_generate_bot_response(*args, **kwargs):
+        timing_context = kwargs.get("timing_context")
+        if isinstance(timing_context, dict):
+            timing_context["rag_trace"] = [
+                {
+                    "stage": "rag_retrieve",
+                    "phase": "generate",
+                    "retry": False,
+                    "query": "адрес салона",
+                    "results": 1,
+                    "rag_scores": {"vector_max": 0.6, "bm25_max": 1.2},
+                }
+            ]
+            timing_context["rag_scores"] = {"vector_max": 0.6, "bm25_max": 1.2}
+        return Result.success(("Адрес: Абая 150", "high"))
+
+    intent_decomp = {
+        "multi_intent": False,
+        "primary_intent": "other",
+        "secondary_intents": [],
+        "intents": ["other"],
+        "service_query": "",
+    }
+
+    with patch(
+        "app.routers.webhook.rewrite_query_for_retrieval",
+        return_value={"rewrite_used": True, "rewrite_text": "адрес салона", "reason": "rewritten"},
+    ), patch(
+        "app.routers.webhook.generate_bot_response",
+        side_effect=fake_generate_bot_response,
+    ), patch(
+        "app.routers.webhook.detect_multi_intent",
+        return_value=intent_decomp,
+    ), patch(
+        "app.routers.webhook.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._find_message_by_message_id",
+        return_value=saved_message,
+    ), patch(
+        "app.routers.webhook.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("rewrite_used") is True
+    assert meta.get("rewrite_text") == "адрес салона"
+    assert meta.get("rag_scores") == {"vector_max": 0.6, "bm25_max": 1.2}
+    trace = conversation.context.get("decision_trace", [])
+    assert any(entry.get("stage") == "rewrite" for entry in trace if isinstance(entry, dict))
+    assert any(entry.get("stage") == "rag_retrieve" for entry in trace if isinstance(entry, dict))
+
+
 def test_semantic_service_matcher_allows_short_query_without_keywords():
     results = [
         {

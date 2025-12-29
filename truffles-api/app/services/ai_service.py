@@ -197,6 +197,8 @@ INTENT_TIMEOUT_SECONDS = float(os.environ.get("INTENT_TIMEOUT_SECONDS", "1.5"))
 LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "6"))
 SERVICE_REWRITE_TIMEOUT_SECONDS = float(os.environ.get("SERVICE_REWRITE_TIMEOUT_SECONDS", "1.2"))
 SERVICE_REWRITE_MAX_TOKENS = int(os.environ.get("SERVICE_REWRITE_MAX_TOKENS", "80"))
+RAG_REWRITE_TIMEOUT_SECONDS = float(os.environ.get("RAG_REWRITE_TIMEOUT_SECONDS", "1.0"))
+RAG_REWRITE_MAX_TOKENS = int(os.environ.get("RAG_REWRITE_MAX_TOKENS", "80"))
 MULTI_INTENT_TIMEOUT_SECONDS = float(os.environ.get("MULTI_INTENT_TIMEOUT_SECONDS", "1.2"))
 MULTI_INTENT_MAX_TOKENS = int(os.environ.get("MULTI_INTENT_MAX_TOKENS", "120"))
 ASR_PRIMARY_PROVIDER = os.environ.get("ASR_PRIMARY_PROVIDER", "elevenlabs")
@@ -739,6 +741,103 @@ def rewrite_for_service_match(text: str, client_slug: str) -> str | None:
     return query
 
 
+def rewrite_query_for_retrieval(text: str, client_slug: str | None = None) -> dict:
+    normalized = normalize_for_matching(text)
+    if not normalized or len(normalized) < 3:
+        return {"rewrite_used": False, "rewrite_text": "", "reason": "too_short"}
+    if not OPENAI_API_KEY:
+        logger.warning("RAG rewrite skipped: OPENAI_API_KEY missing")
+        return {"rewrite_used": False, "rewrite_text": "", "reason": "missing_api_key"}
+
+    system_prompt = (
+        "Ты переписываешь запрос клиента для поиска по базе знаний. "
+        "Исправляй сленг, опечатки, ASR-ошибки и сокращения, "
+        "но не добавляй новые факты. "
+        "Верни ТОЛЬКО JSON вида {\"rewrite\":\"...\",\"rewrite_used\":true/false}.\n"
+        "rewrite_used=true только если текст реально улучшен.\n"
+        "rewrite — 2-12 слов, сохраняй язык (RU/KZ), не добавляй цены/адреса/наличие.\n"
+        "Примеры:\n"
+        "\"чо по адресу\" -> {\"rewrite\":\"адрес салона\",\"rewrite_used\":true}\n"
+        "\"делаете манник\" -> {\"rewrite\":\"делаете маникюр\",\"rewrite_used\":true}\n"
+        "\"скок стоит педик\" -> {\"rewrite\":\"сколько стоит педикюр\",\"rewrite_used\":true}\n"
+        "\"какая погода\" -> {\"rewrite\":\"какая погода\",\"rewrite_used\":false}"
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": text},
+    ]
+
+    llm = get_llm_provider()
+    llm_start = time.monotonic()
+    try:
+        response = llm.generate(
+            messages,
+            temperature=0.0,
+            max_tokens=RAG_REWRITE_MAX_TOKENS,
+            model=FAST_MODEL,
+            timeout_seconds=RAG_REWRITE_TIMEOUT_SECONDS,
+        )
+    except httpx.TimeoutException as exc:
+        _log_timing(
+            "rag_rewrite_llm_ms",
+            (time.monotonic() - llm_start) * 1000,
+            extra={
+                "model_name": FAST_MODEL,
+                "model_tier": "fast",
+                "timeout": True,
+                "timeout_seconds": RAG_REWRITE_TIMEOUT_SECONDS,
+                "client_slug": client_slug,
+            },
+        )
+        logger.warning(f"RAG rewrite timeout after {RAG_REWRITE_TIMEOUT_SECONDS}s: {exc}")
+        return {"rewrite_used": False, "rewrite_text": "", "reason": "timeout"}
+
+    _log_timing(
+        "rag_rewrite_llm_ms",
+        (time.monotonic() - llm_start) * 1000,
+        extra={
+            "model_name": FAST_MODEL,
+            "model_tier": "fast",
+            "timeout": False,
+            "client_slug": client_slug,
+        },
+    )
+
+    content = (response.content or "").strip()
+    if not content:
+        return {"rewrite_used": False, "rewrite_text": "", "reason": "empty"}
+
+    payload = None
+    try:
+        payload = json.loads(content)
+    except Exception:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                payload = json.loads(match.group(0))
+            except Exception:
+                payload = None
+
+    if not isinstance(payload, dict):
+        return {"rewrite_used": False, "rewrite_text": "", "reason": "invalid_json"}
+
+    rewrite_text = payload.get("rewrite")
+    rewrite_used = payload.get("rewrite_used") is True
+    if not isinstance(rewrite_text, str):
+        rewrite_text = ""
+    rewrite_text = re.sub(r"\s+", " ", rewrite_text).strip()
+    if not rewrite_text or len(rewrite_text) < 2:
+        return {"rewrite_used": False, "rewrite_text": "", "reason": "too_short"}
+
+    if normalize_for_matching(rewrite_text) == normalized:
+        return {"rewrite_used": False, "rewrite_text": "", "reason": "unchanged"}
+
+    if not rewrite_used:
+        return {"rewrite_used": False, "rewrite_text": "", "reason": "model_skipped"}
+
+    return {"rewrite_used": True, "rewrite_text": rewrite_text, "reason": "rewritten"}
+
+
 def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | None:
     def _clean_service_query(value: str | None) -> str:
         if not isinstance(value, str):
@@ -1198,6 +1297,44 @@ def _sanitize_query_for_rag(text: str) -> str:
     return cleaned or text
 
 
+def _resolve_rag_query(user_message: str, timing_context: dict | None) -> str:
+    rewrite_meta = timing_context.get("rag_rewrite") if timing_context else None
+    rewrite_text = None
+    if isinstance(rewrite_meta, dict) and rewrite_meta.get("rewrite_used"):
+        rewrite_text = rewrite_meta.get("rewrite_text")
+    query = rewrite_text if isinstance(rewrite_text, str) and rewrite_text.strip() else user_message
+    return _sanitize_query_for_rag(query)
+
+
+def _record_rag_trace(
+    *,
+    timing_context: dict | None,
+    phase: str,
+    retry: bool,
+    query: str,
+    results: list[dict],
+    rag_scores: dict | None,
+) -> None:
+    if timing_context is None:
+        return
+    trace_payload = {
+        "stage": "rag_retrieve",
+        "phase": phase,
+        "retry": retry,
+        "query": query,
+        "results": len(results),
+    }
+    if isinstance(rag_scores, dict):
+        trace_payload["rag_scores"] = rag_scores
+    timing_context.setdefault("rag_trace", []).append(trace_payload)
+    if isinstance(rag_scores, dict):
+        best_score = max((r.get("score", 0.0) for r in results), default=0.0)
+        previous_best = timing_context.get("rag_best_score", 0.0)
+        if best_score >= previous_best:
+            timing_context["rag_best_score"] = best_score
+            timing_context["rag_scores"] = rag_scores
+
+
 def _is_context_dependent_message(text: str) -> bool:
     """
     Detect short follow-up replies that often require previous context.
@@ -1267,10 +1404,18 @@ def get_rag_confidence(
     max_score = 0.0
     results: list[dict] = []
 
-    query_for_rag = _sanitize_query_for_rag(user_message)
+    query_for_rag = _resolve_rag_query(user_message, timing_context)
     try:
         rag_start = time.monotonic()
-        results = search_knowledge(query_for_rag, client_slug, limit=3)
+        vector_results = search_knowledge(query_for_rag, client_slug, limit=3)
+        from app.services.intent_service import hybrid_retrieve_knowledge
+
+        results, rag_scores = hybrid_retrieve_knowledge(
+            query=query_for_rag,
+            client_slug=client_slug,
+            vector_results=vector_results,
+            limit=3,
+        )
         _log_timing(
             "rag_ms",
             (time.monotonic() - rag_start) * 1000,
@@ -1281,6 +1426,14 @@ def get_rag_confidence(
                 "query_len": len(query_for_rag),
                 "results": len(results),
             },
+        )
+        _record_rag_trace(
+            timing_context=timing_context,
+            phase="confidence",
+            retry=False,
+            query=query_for_rag,
+            results=results,
+            rag_scores=rag_scores if isinstance(rag_scores, dict) else None,
         )
         if results:
             max_score = max(r.get("score", 0.0) for r in results)
@@ -1295,7 +1448,15 @@ def get_rag_confidence(
                 contextual_query = _sanitize_query_for_rag(contextual_query)
                 try:
                     rag_start = time.monotonic()
-                    retry_results = search_knowledge(contextual_query, client_slug, limit=3)
+                    vector_results = search_knowledge(contextual_query, client_slug, limit=3)
+                    from app.services.intent_service import hybrid_retrieve_knowledge
+
+                    retry_results, rag_scores = hybrid_retrieve_knowledge(
+                        query=contextual_query,
+                        client_slug=client_slug,
+                        vector_results=vector_results,
+                        limit=3,
+                    )
                     _log_timing(
                         "rag_ms",
                         (time.monotonic() - rag_start) * 1000,
@@ -1306,6 +1467,14 @@ def get_rag_confidence(
                             "query_len": len(contextual_query),
                             "results": len(retry_results),
                         },
+                    )
+                    _record_rag_trace(
+                        timing_context=timing_context,
+                        phase="confidence",
+                        retry=True,
+                        query=contextual_query,
+                        results=retry_results,
+                        rag_scores=rag_scores if isinstance(rag_scores, dict) else None,
                     )
                     if retry_results:
                         retry_score = max(r.get("score", 0.0) for r in retry_results)
@@ -1375,11 +1544,19 @@ def generate_ai_response(
         # 2. Search knowledge base
         knowledge_results = []
         max_score = 0.0
-        query_for_rag = _sanitize_query_for_rag(user_message)
+        query_for_rag = _resolve_rag_query(user_message, timing_context)
 
         try:
             rag_start = time.monotonic()
-            knowledge_results = search_knowledge(query_for_rag, client_slug, limit=3)
+            vector_results = search_knowledge(query_for_rag, client_slug, limit=3)
+            from app.services.intent_service import hybrid_retrieve_knowledge
+
+            knowledge_results, rag_scores = hybrid_retrieve_knowledge(
+                query=query_for_rag,
+                client_slug=client_slug,
+                vector_results=vector_results,
+                limit=3,
+            )
             _log_timing(
                 "rag_ms",
                 (time.monotonic() - rag_start) * 1000,
@@ -1390,6 +1567,14 @@ def generate_ai_response(
                     "query_len": len(query_for_rag),
                     "results": len(knowledge_results),
                 },
+            )
+            _record_rag_trace(
+                timing_context=timing_context,
+                phase="generate",
+                retry=False,
+                query=query_for_rag,
+                results=knowledge_results,
+                rag_scores=rag_scores if isinstance(rag_scores, dict) else None,
             )
             if knowledge_results:
                 max_score = max(r.get("score", 0) for r in knowledge_results)
@@ -1410,7 +1595,15 @@ def generate_ai_response(
                     contextual_query = _sanitize_query_for_rag(contextual_query)
                     try:
                         rag_start = time.monotonic()
-                        retry_results = search_knowledge(contextual_query, client_slug, limit=3)
+                        vector_results = search_knowledge(contextual_query, client_slug, limit=3)
+                        from app.services.intent_service import hybrid_retrieve_knowledge
+
+                        retry_results, rag_scores = hybrid_retrieve_knowledge(
+                            query=contextual_query,
+                            client_slug=client_slug,
+                            vector_results=vector_results,
+                            limit=3,
+                        )
                         _log_timing(
                             "rag_ms",
                             (time.monotonic() - rag_start) * 1000,
@@ -1421,6 +1614,14 @@ def generate_ai_response(
                                 "query_len": len(contextual_query),
                                 "results": len(retry_results),
                             },
+                        )
+                        _record_rag_trace(
+                            timing_context=timing_context,
+                            phase="generate",
+                            retry=True,
+                            query=contextual_query,
+                            results=retry_results,
+                            rag_scores=rag_scores if isinstance(rag_scores, dict) else None,
                         )
                         if retry_results:
                             retry_score = max(r.get("score", 0) for r in retry_results)

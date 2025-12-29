@@ -28,6 +28,7 @@
 - Мозги: `outbox → _handle_webhook_payload → pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → service matcher (услуги/цены) → LLM-first → truth gate fallback → low-confidence уточнение/эскалация`.
 - Риски: payment/reschedule/medical/complaint — только эскалация; не озвучивать способы оплаты; branch‑gate для цен.
 - LLM‑first критерии: отвечаем только по RAG; если RAG пуст/низкий → уточнение; если ответ содержит payment/medical/complaint/discount/refund → эскалация; decision_meta включает `llm_primary_used`.
+- RAG: добавлен query-rewrite (FAST LLM ≤1s) + hybrid retrieval (vector+BM25); rewrite только для retrieval, в decision_meta/trace пишутся `rewrite_used`, `rewrite_text`, `rag_scores`.
 - Проверки качества: `EVAL.yaml` + `pytest truffles-api/tests/test_<client>_eval.py` + sync KB (`ops/sync_client.py`).
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
@@ -54,7 +55,8 @@
 - Tests: `docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q` (81 passed).
 - Tests: `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` (1 passed).
 - CI: `ruff check app tests` passed after webhook context manager fix (commit `c558b03`).
-- Deploy attempt: GHCR pull/restart OK, but `/admin/version` still `c69bc2343871d767a23bb950e8b9d77aa6b57134` (image not updated yet).
+- Deploy: prod on `8457ec9eb811769f2698a9789eee06eb1e33fd70`; PR-3 not deployed yet.
+- PR-3 (rewrite+hybrid retrieval) implemented and tests passed locally; prod deploy not done yet.
 - DB (ops/diagnose): DB_USER `n8n`; conversations 15 total, 0 muted, 8 with topic; handovers 92 total, 0 pending, 0 active.
 
 ### MEDIA RUNBOOK (амнезия, 3–5 минут)

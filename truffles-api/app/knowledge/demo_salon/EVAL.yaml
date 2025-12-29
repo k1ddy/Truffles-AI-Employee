@@ -77,6 +77,25 @@ eval_cases:
     must_include:
     - Абая 150
     - Розыбакиева
+- id: E003i
+  user: Делаете манник?
+  expected:
+    action: reply
+    intent: service_match
+    must_include_any:
+    - маникюр
+    - 2 500
+    - 3 500
+- id: E003j
+  user: Скок стоит педик?
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - педикюр
+    - 4 500
+    - 5 500
+    - 9 000
 - id: E003e
   user: Сколько длится процедура?
   expected:

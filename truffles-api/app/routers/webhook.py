@@ -38,6 +38,7 @@ from app.services.ai_service import (
     is_thanks_message,
     normalize_for_matching,
     rewrite_for_service_match,
+    rewrite_query_for_retrieval,
     transcribe_audio_with_fallback,
 )
 from app.services.alert_service import alert_warning
@@ -3597,6 +3598,43 @@ async def _handle_webhook_payload(
         _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": sent})
         return sent
 
+    def _ensure_rag_rewrite() -> None:
+        if timing_context.get("rag_rewrite_logged"):
+            return
+        rag_rewrite_meta = rewrite_query_for_retrieval(message_text, client_slug=payload.client_slug)
+        if not isinstance(rag_rewrite_meta, dict):
+            return
+        timing_context["rag_rewrite"] = rag_rewrite_meta
+        timing_context["rag_rewrite_logged"] = True
+        rewrite_used = rag_rewrite_meta.get("rewrite_used") is True
+        rewrite_text = rag_rewrite_meta.get("rewrite_text") if rewrite_used else ""
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "rewrite",
+                "decision": "used" if rewrite_used else "skipped",
+                "rewrite_used": rewrite_used,
+                "rewrite_text": rewrite_text,
+                "reason": rag_rewrite_meta.get("reason"),
+            },
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {"rewrite_used": rewrite_used, "rewrite_text": rewrite_text},
+            )
+
+    def _record_rag_meta() -> None:
+        rag_trace = timing_context.get("rag_trace") if isinstance(timing_context, dict) else None
+        if isinstance(rag_trace, list) and rag_trace:
+            for entry in rag_trace:
+                if isinstance(entry, dict):
+                    _record_decision_trace(conversation, entry)
+            timing_context["rag_trace"] = []
+        rag_scores = timing_context.get("rag_scores") if isinstance(timing_context, dict) else None
+        if saved_message and isinstance(rag_scores, dict):
+            _update_message_decision_metadata(saved_message, {"rag_scores": rag_scores})
+
     if skip_persist:
         if not conversation_id:
             return WebhookResponse(success=False, message="Missing conversation_id")
@@ -5852,6 +5890,7 @@ async def _handle_webhook_payload(
             )
 
     if routing["allow_bot_reply"]:
+        _ensure_rag_rewrite()
         llm_primary_result = generate_bot_response(
             db,
             conversation,
@@ -5861,6 +5900,7 @@ async def _handle_webhook_payload(
             pending_hint=conversation.state == ConversationState.PENDING.value,
             timing_context=timing_context,
         )
+        _record_rag_meta()
         if not llm_primary_result.ok:
             llm_primary_failed = True
             llm_primary_reason = "ai_error"
@@ -6428,6 +6468,7 @@ async def _handle_webhook_payload(
                         "error": result.error_code,
                     },
                 )
+                _ensure_rag_rewrite()
                 gen_result = generate_bot_response(
                     db,
                     conversation,
@@ -6437,6 +6478,7 @@ async def _handle_webhook_payload(
                     pending_hint=conversation.state == ConversationState.PENDING.value,
                     timing_context=timing_context,
                 )
+                _record_rag_meta()
                 if gen_result.ok and gen_result.value[0]:
                     bot_response = gen_result.value[0]
                     save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
@@ -6509,6 +6551,7 @@ async def _handle_webhook_payload(
         llm_primary_used = False
         gen_result = llm_primary_result
         if gen_result is None:
+            _ensure_rag_rewrite()
             gen_result = generate_bot_response(
                 db,
                 conversation,
@@ -6518,6 +6561,7 @@ async def _handle_webhook_payload(
                 pending_hint=conversation.state == ConversationState.PENDING.value,
                 timing_context=timing_context,
             )
+            _record_rag_meta()
 
         if not gen_result.ok:
             # AI error — fallback response

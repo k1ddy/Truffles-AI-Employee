@@ -1,3 +1,5 @@
+import math
+import os
 import re
 import time
 from enum import Enum
@@ -14,6 +16,22 @@ from app.services.ai_service import (
 )
 
 logger = get_logger("intent_service")
+
+QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
+QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "truffles_knowledge")
+
+RAG_BM25_LIMIT = int(os.environ.get("RAG_BM25_LIMIT", "5"))
+RAG_BM25_MAX_DOCS = int(os.environ.get("RAG_BM25_MAX_DOCS", "200"))
+RAG_BM25_TIMEOUT_SECONDS = float(os.environ.get("RAG_BM25_TIMEOUT_SECONDS", "0.8"))
+RAG_HYBRID_VECTOR_WEIGHT = float(os.environ.get("RAG_HYBRID_VECTOR_WEIGHT", "0.6"))
+RAG_HYBRID_BM25_WEIGHT = float(os.environ.get("RAG_HYBRID_BM25_WEIGHT", "0.4"))
+
+
+def _is_env_enabled(value: str | None, default: bool = True) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
 class Intent(str, Enum):
@@ -441,3 +459,203 @@ def is_strong_out_of_domain(
         "matched_strict_in": matched_strict_in,
     }
     return strong, meta
+
+
+def _tokenize_for_bm25(text: str) -> list[str]:
+    if not text:
+        return []
+    tokens = re.findall(r"[\w]+", text.casefold())
+    return [token for token in tokens if len(token) > 1]
+
+
+def _fetch_bm25_corpus(client_slug: str, *, max_docs: int) -> list[dict]:
+    if not client_slug or max_docs <= 0:
+        return []
+    headers = {"api-key": QDRANT_API_KEY} if QDRANT_API_KEY else None
+    points: list[dict] = []
+    offset = None
+    limit = min(100, max_docs)
+    with httpx.Client(timeout=RAG_BM25_TIMEOUT_SECONDS) as client:
+        while len(points) < max_docs:
+            payload = {
+                "limit": limit,
+                "with_payload": True,
+                "with_vectors": False,
+                "filter": {"must": [{"key": "metadata.client_slug", "match": {"value": client_slug}}]},
+            }
+            if offset is not None:
+                payload["offset"] = offset
+            response = client.post(
+                f"{QDRANT_HOST}/collections/{QDRANT_COLLECTION}/points/scroll",
+                headers=headers,
+                json=payload,
+            )
+            if response.status_code != 200:
+                logger.warning(
+                    "BM25 scroll failed",
+                    extra={"context": {"status": response.status_code, "client_slug": client_slug}},
+                )
+                break
+            data = response.json().get("result") or {}
+            batch = data.get("points") or []
+            points.extend(batch)
+            offset = data.get("next_page_offset")
+            if not offset or not batch:
+                break
+            limit = min(100, max_docs - len(points))
+    return points[:max_docs]
+
+
+def _bm25_search(query: str, client_slug: str) -> list[dict]:
+    query_tokens = _tokenize_for_bm25(query)
+    if not query_tokens:
+        return []
+    try:
+        corpus = _fetch_bm25_corpus(client_slug, max_docs=RAG_BM25_MAX_DOCS)
+    except Exception as exc:
+        logger.warning(f"BM25 corpus fetch failed: {exc}")
+        return []
+    if not corpus:
+        return []
+
+    doc_tokens: list[list[str]] = []
+    doc_meta: list[dict] = []
+    for point in corpus:
+        payload = point.get("payload") or {}
+        text = payload.get("content") or ""
+        tokens = _tokenize_for_bm25(text)
+        if not tokens:
+            continue
+        doc_tokens.append(tokens)
+        doc_meta.append(
+            {
+                "id": point.get("id"),
+                "text": text,
+                "source": payload.get("metadata", {}).get("doc_name"),
+                "metadata": payload.get("metadata", {}),
+            }
+        )
+
+    if not doc_tokens:
+        return []
+
+    doc_count = len(doc_tokens)
+    avg_len = sum(len(tokens) for tokens in doc_tokens) / max(doc_count, 1)
+    df: dict[str, int] = {}
+    for tokens in doc_tokens:
+        for token in set(tokens):
+            df[token] = df.get(token, 0) + 1
+
+    k1 = 1.5
+    b = 0.75
+    scores: list[tuple[int, float]] = []
+    for idx, tokens in enumerate(doc_tokens):
+        dl = len(tokens)
+        tf: dict[str, int] = {}
+        for token in tokens:
+            tf[token] = tf.get(token, 0) + 1
+        score = 0.0
+        for term in query_tokens:
+            term_df = df.get(term, 0)
+            if term_df == 0:
+                continue
+            idf = math.log((doc_count - term_df + 0.5) / (term_df + 0.5) + 1)
+            freq = tf.get(term, 0)
+            if freq == 0:
+                continue
+            denom = freq + k1 * (1 - b + b * (dl / max(avg_len, 1)))
+            score += idf * ((freq * (k1 + 1)) / max(denom, 1e-9))
+        if score > 0:
+            scores.append((idx, score))
+
+    if not scores:
+        return []
+    scores.sort(key=lambda item: item[1], reverse=True)
+    top = scores[: max(RAG_BM25_LIMIT, 1)]
+    results: list[dict] = []
+    for idx, score in top:
+        meta = dict(doc_meta[idx])
+        meta["bm25_score"] = score
+        results.append(meta)
+    return results
+
+
+def hybrid_retrieve_knowledge(
+    *,
+    query: str,
+    client_slug: str,
+    vector_results: list[dict],
+    limit: int = 5,
+) -> tuple[list[dict], dict]:
+    bm25_enabled = _is_env_enabled(os.environ.get("RAG_BM25_ENABLED"), default=True)
+    if not QDRANT_API_KEY or os.environ.get("PYTEST_CURRENT_TEST"):
+        bm25_enabled = False
+    bm25_results: list[dict] = []
+    if bm25_enabled:
+        try:
+            bm25_results = _bm25_search(query, client_slug)
+        except Exception as exc:
+            logger.warning(f"BM25 search failed: {exc}")
+
+    by_key: dict[tuple[str | None, str | None], dict] = {}
+    vector_max = 0.0
+    for item in vector_results or []:
+        text = item.get("text")
+        source = item.get("source")
+        key = (source, text)
+        vector_score = float(item.get("score") or 0.0)
+        vector_max = max(vector_max, vector_score)
+        merged = dict(item)
+        merged["vector_score"] = vector_score
+        merged["bm25_score"] = 0.0
+        by_key[key] = merged
+
+    bm25_max = 0.0
+    for item in bm25_results:
+        text = item.get("text")
+        source = item.get("source")
+        key = (source, text)
+        bm25_score = float(item.get("bm25_score") or 0.0)
+        bm25_max = max(bm25_max, bm25_score)
+        if key in by_key:
+            by_key[key]["bm25_score"] = bm25_score
+            continue
+        merged = dict(item)
+        merged.setdefault("metadata", {})
+        merged["vector_score"] = 0.0
+        merged["bm25_score"] = bm25_score
+        by_key[key] = merged
+
+    vector_weight = max(RAG_HYBRID_VECTOR_WEIGHT, 0.0)
+    bm25_weight = max(RAG_HYBRID_BM25_WEIGHT, 0.0)
+    if vector_weight + bm25_weight <= 0:
+        vector_weight = 0.6
+        bm25_weight = 0.4
+
+    for item in by_key.values():
+        vector_score = item.get("vector_score", 0.0)
+        vector_norm = vector_score / vector_max if vector_max > 0 else 0.0
+        bm25_norm = item.get("bm25_score", 0.0) / bm25_max if bm25_max > 0 else 0.0
+        item["hybrid_score"] = (vector_weight * vector_norm) + (bm25_weight * bm25_norm)
+        item["score"] = max(vector_score, bm25_norm)
+
+    merged_results = sorted(
+        by_key.values(),
+        key=lambda item: item.get("hybrid_score", 0.0),
+        reverse=True,
+    )
+    merged_results = merged_results[: max(limit, 1)]
+
+    bm25_max_norm = 1.0 if bm25_max > 0 else 0.0
+    rag_scores = {
+        "vector_max": vector_max,
+        "bm25_max": bm25_max,
+        "bm25_max_norm": bm25_max_norm,
+        "hybrid_max": merged_results[0]["hybrid_score"] if merged_results else 0.0,
+        "vector_count": len(vector_results or []),
+        "bm25_count": len(bm25_results),
+        "vector_weight": vector_weight,
+        "bm25_weight": bm25_weight,
+        "bm25_enabled": bm25_enabled,
+    }
+    return merged_results, rag_scores
