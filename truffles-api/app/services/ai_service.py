@@ -766,6 +766,50 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
             return ""
         return cleaned
 
+    consult_intent_cues = (
+        "посовет",
+        "рекоменд",
+        "подскаж",
+        "подберите",
+        "подбор",
+        "совет",
+        "подойд",
+        "какой цвет",
+        "какой оттен",
+        "что выбрать",
+        "как выбрать",
+        "уход",
+    )
+    consult_intent_blockers = (
+        "запис",
+        "перенос",
+        "отмен",
+        "окошк",
+        "цена",
+        "стоим",
+        "сколько",
+        "прайс",
+        "адрес",
+        "где",
+        "наход",
+        "график",
+        "часы",
+        "во сколько",
+        "до сколь",
+        "длител",
+        "минут",
+    )
+
+    def _should_force_consult_intent(raw_text: str, intents: list[str]) -> bool:
+        if intents and {"booking", "pricing", "duration", "location", "hours"} & set(intents):
+            return False
+        normalized = normalize_for_matching(raw_text)
+        if not normalized:
+            return False
+        if any(keyword in normalized for keyword in consult_intent_blockers):
+            return False
+        return any(keyword in normalized for keyword in consult_intent_cues)
+
     def _fallback_payload() -> dict:
         normalized = normalize_for_matching(text)
         intents: list[str] = []
@@ -988,6 +1032,8 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
         service_query = _clean_service_query(rewrite_query)
 
     consult_intent = consult_intent_raw is True
+    if not consult_intent and _should_force_consult_intent(text, cleaned_intents):
+        consult_intent = True
     consult_topic = _clean_consult_text(consult_topic_raw if isinstance(consult_topic_raw, str) else None, max_words=4)
     consult_question = _clean_consult_text(
         consult_question_raw if isinstance(consult_question_raw, str) else None, max_words=12
