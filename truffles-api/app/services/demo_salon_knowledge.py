@@ -2247,7 +2247,8 @@ def get_demo_salon_decision(
             intent_decomp,
             require_query=True,
         )
-        if not service_query_meta.get("service_query"):
+        service_query_value = service_query_meta.get("service_query")
+        if not service_query_value:
             reply = format_reply_from_truth("service_clarify")
             if reply:
                 return DemoSalonDecision(
@@ -2256,6 +2257,23 @@ def get_demo_salon_decision(
                     intent="service_clarify",
                     meta=service_query_meta,
                 )
+        if not price_item and isinstance(service_query_value, str):
+            service = _resolve_service_from_query(service_query_value)
+            if service:
+                truth = load_yaml_truth()
+                service_reply = _format_service_reply(service, truth)
+                if service_reply:
+                    meta = (
+                        {**question_meta_for_price, **service_query_meta}
+                        if question_meta_for_price
+                        else service_query_meta
+                    )
+                    return DemoSalonDecision(
+                        action="reply",
+                        response=service_reply,
+                        intent="price_query",
+                        meta=meta,
+                    )
         reply = format_reply_from_truth("price_query", {"price_item": price_item["item"]} if price_item else {})
         if reply:
             meta = {**question_meta_for_price, **service_query_meta} if question_meta_for_price else service_query_meta
