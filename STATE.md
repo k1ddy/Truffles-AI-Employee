@@ -499,6 +499,14 @@
 **Статус:**
 - Готово, ждём прогон CI.
 
+### 2025-12-29 — CI gitleaks license
+
+**Что сделали:**
+- В CI secret-scan добавили прокидывание `GITLEAKS_LICENSE` из GitHub Secrets.
+
+**Статус:**
+- Нужно добавить секрет `GITLEAKS_LICENSE` в GitHub и повторить прогон CI.
+
 ### 2025-12-25 — Fast-forward inbound to Telegram (pending/manager_active)
 
 **Что сделали:**
