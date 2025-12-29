@@ -185,6 +185,15 @@ def _tokenize(text: str) -> list[str]:
     return [token for token in normalized.split() if token]
 
 
+_REPEAT_LETTERS_RE = re.compile(r"(.)\1{1,}")
+
+
+def _collapse_repeated_letters(token: str) -> str:
+    if not token:
+        return ""
+    return _REPEAT_LETTERS_RE.sub(r"\1", token)
+
+
 _SERVICE_STOPWORDS = {
     "и",
     "или",
@@ -342,6 +351,7 @@ def _match_service(normalized: str) -> dict[str, Any] | None:
 
 
 def _token_matches(token: str, message_tokens: list[str]) -> bool:
+    collapsed_token: str | None = None
     for msg in message_tokens:
         if msg == token:
             return True
@@ -349,6 +359,16 @@ def _token_matches(token: str, message_tokens: list[str]) -> bool:
             return True
         if len(msg) >= 3 and token.startswith(msg):
             return True
+        if len(msg) >= 4 or len(token) >= 4:
+            if collapsed_token is None:
+                collapsed_token = _collapse_repeated_letters(token)
+            collapsed_msg = _collapse_repeated_letters(msg)
+            if collapsed_msg == collapsed_token:
+                return True
+            if len(collapsed_token) >= 3 and collapsed_msg.startswith(collapsed_token):
+                return True
+            if len(collapsed_msg) >= 3 and collapsed_token.startswith(collapsed_msg):
+                return True
     return False
 
 
