@@ -47,10 +47,11 @@
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-29)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
 - Env: `PUBLIC_BASE_URL=https://api.truffles.kz`, `MEDIA_SIGNING_SECRET=SET`, `MEDIA_URL_TTL_SECONDS=3600`, `MEDIA_CLEANUP_TTL_DAYS=7`, `CHATFLOW_MEDIA_TIMEOUT_SECONDS=90`.
-- `/admin/version`: version `main`, git_commit `c69bc2343871d767a23bb950e8b9d77aa6b57134`, build_time `2025-12-29T10:57:10Z`.
+- `/admin/version`: version `main`, git_commit `8457ec9eb811769f2698a9789eee06eb1e33fd70`, build_time `2025-12-29T12:48:51Z`.
 - `/admin/health`: conversations bot_active 233, pending 1, manager_active 0; handovers pending 1, active 0 (checked_at `2025-12-29T11:06:16.747460+00:00`).
 - Live-check consult mode: care/color → consult replies with consult_intent meta; price → pricing path; booking → clarify; allergy → escalation; consult replies without prices/availability/masters.
-- Tests: `docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q` (78 passed).
+- Live-check context manager: refusal_flag.name set and booking skips name; 2x clarify → 3rd escalates; booking → consult switch updates current_goal + summary (consult reply, no prices/availability/masters).
+- Tests: `docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q` (81 passed).
 - Tests: `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` (1 passed).
 - CI: `ruff check app tests` passed after webhook context manager fix (commit `c558b03`).
 - Deploy attempt: GHCR pull/restart OK, but `/admin/version` still `c69bc2343871d767a23bb950e8b9d77aa6b57134` (image not updated yet).
