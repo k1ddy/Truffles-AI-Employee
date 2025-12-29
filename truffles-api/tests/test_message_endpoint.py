@@ -2256,7 +2256,7 @@ def test_multi_intent_long_message_prioritizes_booking():
             webhook_router.MSG_BOOKING_ASK_NAME,
         )
     )
-    assert "длител" in response.bot_response.casefold()
+    assert "минут" in response.bot_response.casefold()
 
 
 def test_multi_truth_reply_handles_hours_and_service_without_booking():
