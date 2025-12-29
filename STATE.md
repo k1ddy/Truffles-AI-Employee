@@ -28,7 +28,8 @@
 - Мозги: `outbox → _handle_webhook_payload → pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → service matcher (услуги/цены) → LLM-first → truth gate fallback → low-confidence уточнение/эскалация`.
 - Риски: payment/reschedule/medical/complaint — только эскалация; не озвучивать способы оплаты; branch‑gate для цен.
 - LLM‑first критерии: отвечаем только по RAG; если RAG пуст/низкий → уточнение; если ответ содержит payment/medical/complaint/discount/refund → эскалация; decision_meta включает `llm_primary_used`.
-- RAG: добавлен query-rewrite (FAST LLM ≤1s) + hybrid retrieval (vector+BM25); rewrite только для retrieval, в decision_meta/trace пишутся `rewrite_used`, `rewrite_text`, `rag_scores`.
+- RAG: добавлен query-rewrite (FAST LLM ≤1s) + hybrid retrieval (vector+BM25); rewrite только для retrieval, в decision_meta/trace пишутся `rewrite_used`, `rewrite_text`, `rag_scores`, `rag_confident`, `rag_reason`.
+- Метрики качества (день, target): rag_low_conf_rate <= 0.35; clarify_rate 0.05-0.20; clarify_success_rate >= 0.60.
 - Проверки качества: `EVAL.yaml` + `pytest truffles-api/tests/test_<client>_eval.py` + sync KB (`ops/sync_client.py`).
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.

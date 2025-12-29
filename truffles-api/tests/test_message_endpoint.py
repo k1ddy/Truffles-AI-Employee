@@ -1109,10 +1109,12 @@ def test_rag_rewrite_and_scores_logged():
                     "retry": False,
                     "query": "адрес салона",
                     "results": 1,
-                    "rag_scores": {"vector_max": 0.6, "bm25_max": 1.2},
+                    "rag_scores": {"vector_max": 0.6, "bm25_max": 1.2, "hybrid_max": 0.8},
                 }
             ]
-            timing_context["rag_scores"] = {"vector_max": 0.6, "bm25_max": 1.2}
+            timing_context["rag_scores"] = {"vector_max": 0.6, "bm25_max": 1.2, "hybrid_max": 0.8}
+            timing_context["rag_best_score"] = 0.6
+            timing_context["rag_attempted"] = True
         return Result.success(("Адрес: Абая 150", "high"))
 
     intent_decomp = {
@@ -1156,7 +1158,9 @@ def test_rag_rewrite_and_scores_logged():
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("rewrite_used") is True
     assert meta.get("rewrite_text") == "адрес салона"
-    assert meta.get("rag_scores") == {"vector_max": 0.6, "bm25_max": 1.2}
+    assert meta.get("rag_scores") == {"vector_max": 0.6, "bm25_max": 1.2, "hybrid_max": 0.8}
+    assert meta.get("rag_confident") is True
+    assert meta.get("rag_reason") is None
     trace = conversation.context.get("decision_trace", [])
     assert any(entry.get("stage") == "rewrite" for entry in trace if isinstance(entry, dict))
     assert any(entry.get("stage") == "rag_retrieve" for entry in trace if isinstance(entry, dict))

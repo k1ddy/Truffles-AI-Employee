@@ -15,6 +15,11 @@
 \set metric_date ''
 \endif
 
+ALTER TABLE metrics_daily
+  ADD COLUMN IF NOT EXISTS rag_low_conf_rate NUMERIC(6, 4),
+  ADD COLUMN IF NOT EXISTS clarify_rate NUMERIC(6, 4),
+  ADD COLUMN IF NOT EXISTS clarify_success_rate NUMERIC(6, 4);
+
 WITH params AS (
   SELECT
     (SELECT id FROM clients WHERE name = :'client_slug') AS client_id,
@@ -60,7 +65,31 @@ user_messages AS (
         WHEN COALESCE((m.metadata->'asr'->>'asr_failed')::boolean, FALSE) THEN 1
         ELSE 0
       END
-    ) AS total_asr_failed
+    ) AS total_asr_failed,
+    SUM(
+      CASE
+        WHEN COALESCE((m.metadata->'decision_meta'->>'rag_confident')::boolean, FALSE) = FALSE
+          AND (m.metadata->'decision_meta'->>'rag_reason') IN ('low_score', 'empty')
+          THEN 1
+        ELSE 0
+      END
+    ) AS total_rag_low_conf,
+    SUM(
+      CASE
+        WHEN NULLIF(m.metadata->'decision_meta'->>'clarify_reason', '') IS NOT NULL
+          OR COALESCE((m.metadata->'decision_meta'->>'clarify_limit')::boolean, FALSE)
+          THEN 1
+        ELSE 0
+      END
+    ) AS total_clarify,
+    SUM(
+      CASE
+        WHEN NULLIF(m.metadata->'decision_meta'->>'clarify_reason', '') IS NOT NULL
+          AND NOT COALESCE((m.metadata->'decision_meta'->>'clarify_limit')::boolean, FALSE)
+          THEN 1
+        ELSE 0
+      END
+    ) AS total_clarify_success
   FROM messages m
   JOIN bounds b ON m.client_id = b.client_id
   WHERE m.role = 'user'
@@ -103,6 +132,9 @@ INSERT INTO metrics_daily (
   escalation_rate,
   fast_intent_rate,
   asr_fail_rate,
+  rag_low_conf_rate,
+  clarify_rate,
+  clarify_success_rate,
   total_user_messages,
   total_outbox_sent,
   total_outbox_failed,
@@ -125,6 +157,9 @@ SELECT
   COALESCE(ROUND(h.total_handovers::numeric / NULLIF(um.total_user_messages, 0), 4), 0),
   COALESCE(ROUND(um.total_fast_intent::numeric / NULLIF(um.total_user_messages, 0), 4), 0),
   COALESCE(ROUND(um.total_asr_failed::numeric / NULLIF(um.total_asr_used, 0), 4), 0),
+  COALESCE(ROUND(um.total_rag_low_conf::numeric / NULLIF(um.total_user_messages, 0), 4), 0),
+  COALESCE(ROUND(um.total_clarify::numeric / NULLIF(um.total_user_messages, 0), 4), 0),
+  COALESCE(ROUND(um.total_clarify_success::numeric / NULLIF(um.total_clarify, 0), 4), 0),
   COALESCE(um.total_user_messages, 0),
   COALESCE(os.total_outbox_sent, 0),
   COALESCE(ofx.total_outbox_failed, 0),
@@ -148,6 +183,9 @@ ON CONFLICT (metric_date, client_id) DO UPDATE SET
   llm_used_rate = EXCLUDED.llm_used_rate,
   escalation_rate = EXCLUDED.escalation_rate,
   fast_intent_rate = EXCLUDED.fast_intent_rate,
+  rag_low_conf_rate = EXCLUDED.rag_low_conf_rate,
+  clarify_rate = EXCLUDED.clarify_rate,
+  clarify_success_rate = EXCLUDED.clarify_success_rate,
   total_user_messages = EXCLUDED.total_user_messages,
   total_outbox_sent = EXCLUDED.total_outbox_sent,
   total_outbox_failed = EXCLUDED.total_outbox_failed,

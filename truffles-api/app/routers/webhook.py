@@ -26,6 +26,7 @@ from app.services.ai_service import (
     ACKNOWLEDGEMENT_RESPONSE,
     BOT_STATUS_RESPONSE,
     GREETING_RESPONSE,
+    MID_CONFIDENCE_THRESHOLD,
     OUT_OF_DOMAIN_RESPONSE,
     THANKS_RESPONSE,
     classify_confirmation,
@@ -1038,6 +1039,49 @@ def _update_message_decision_metadata(message: Message, updates: dict) -> None:
     decision_meta.update(updates)
     metadata["decision_meta"] = decision_meta
     message.message_metadata = metadata
+
+
+_DEFAULT_RAG_SCORES = {"bm25_max": 0.0, "vector_max": 0.0, "hybrid_max": 0.0}
+
+
+def _merge_rag_scores(rag_scores: dict | None) -> dict:
+    merged = dict(rag_scores) if isinstance(rag_scores, dict) else {}
+    for key, value in _DEFAULT_RAG_SCORES.items():
+        if not isinstance(merged.get(key), (int, float)):
+            merged[key] = value
+    return merged if merged else dict(_DEFAULT_RAG_SCORES)
+
+
+def _derive_rag_status(
+    *,
+    rag_scores: dict,
+    rag_best_score: float | None,
+    rag_attempted: bool,
+) -> tuple[bool, str | None]:
+    if not rag_attempted:
+        return False, "overridden_by_gate"
+    best_score = float(rag_best_score or 0.0)
+    if best_score >= MID_CONFIDENCE_THRESHOLD:
+        return True, None
+    vector_count = int(rag_scores.get("vector_count") or 0)
+    bm25_count = int(rag_scores.get("bm25_count") or 0)
+    if vector_count <= 0 and bm25_count <= 0:
+        return False, "empty"
+    return False, "low_score"
+
+
+def _ensure_rag_meta_defaults(message: Message | None) -> None:
+    if not message:
+        return
+    metadata = dict(message.message_metadata or {})
+    decision_meta = dict(metadata.get("decision_meta") or {})
+    rag_scores = _merge_rag_scores(decision_meta.get("rag_scores"))
+    updates = {"rag_scores": rag_scores}
+    if "rag_confident" not in decision_meta:
+        updates["rag_confident"] = False
+    if "rag_reason" not in decision_meta:
+        updates["rag_reason"] = "overridden_by_gate"
+    _update_message_decision_metadata(message, updates)
 
 
 def _record_message_decision_meta(
@@ -3632,8 +3676,21 @@ async def _handle_webhook_payload(
                     _record_decision_trace(conversation, entry)
             timing_context["rag_trace"] = []
         rag_scores = timing_context.get("rag_scores") if isinstance(timing_context, dict) else None
-        if saved_message and isinstance(rag_scores, dict):
-            _update_message_decision_metadata(saved_message, {"rag_scores": rag_scores})
+        rag_scores = _merge_rag_scores(rag_scores if isinstance(rag_scores, dict) else None)
+        if saved_message:
+            rag_confident, rag_reason = _derive_rag_status(
+                rag_scores=rag_scores,
+                rag_best_score=timing_context.get("rag_best_score") if isinstance(timing_context, dict) else None,
+                rag_attempted=bool(timing_context.get("rag_attempted")) if isinstance(timing_context, dict) else False,
+            )
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "rag_scores": rag_scores,
+                    "rag_confident": rag_confident,
+                    "rag_reason": rag_reason,
+                },
+            )
 
     if skip_persist:
         if not conversation_id:
@@ -3654,6 +3711,7 @@ async def _handle_webhook_payload(
                 outbox_created_at,
                 message_text=message_text,
             )
+        _ensure_rag_meta_defaults(saved_message)
         if media_info and saved_message:
             saved_media = saved_message.message_metadata.get("media") if isinstance(saved_message.message_metadata, dict) else None
             media_decision = _deserialize_media_decision(
@@ -3731,6 +3789,7 @@ async def _handle_webhook_payload(
             content=message_text,
             message_metadata=message_metadata,
         )
+        _ensure_rag_meta_defaults(saved_message)
 
         if enqueue_only:
             if (

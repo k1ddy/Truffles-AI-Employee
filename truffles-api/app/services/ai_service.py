@@ -1319,6 +1319,7 @@ def _record_rag_trace(
 ) -> None:
     if timing_context is None:
         return
+    timing_context["rag_attempted"] = True
     trace_payload = {
         "stage": "rag_retrieve",
         "phase": phase,
