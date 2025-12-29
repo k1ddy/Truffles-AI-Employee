@@ -550,7 +550,7 @@ def test_truth_gate_sets_decision_meta():
     client = SimpleNamespace(id="client-123", name="demo_salon", config={})
     settings = SimpleNamespace(
         webhook_secret=None,
-        branch_resolution_mode="hybrid",
+        branch_resolution_mode="disabled",
         remember_branch_preference=True,
     )
     conversation_id = uuid4()
@@ -648,7 +648,7 @@ def test_consult_reply_writes_decision_meta():
     client = SimpleNamespace(id="client-123", name="demo_salon", config={})
     settings = SimpleNamespace(
         webhook_secret=None,
-        branch_resolution_mode="hybrid",
+        branch_resolution_mode="disabled",
         remember_branch_preference=True,
     )
     conversation_id = uuid4()
