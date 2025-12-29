@@ -48,15 +48,15 @@
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-29)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
 - Env: `PUBLIC_BASE_URL=https://api.truffles.kz`, `MEDIA_SIGNING_SECRET=SET`, `MEDIA_URL_TTL_SECONDS=3600`, `MEDIA_CLEANUP_TTL_DAYS=7`, `CHATFLOW_MEDIA_TIMEOUT_SECONDS=90`.
-- `/admin/version`: version `main`, git_commit `8457ec9eb811769f2698a9789eee06eb1e33fd70`, build_time `2025-12-29T12:48:51Z`.
-- `/admin/health`: conversations bot_active 233, pending 1, manager_active 0; handovers pending 1, active 0 (checked_at `2025-12-29T11:06:16.747460+00:00`).
+- `/admin/version`: version `main`, git_commit `a8e46cfed6d9532a1fb2668133caa43ac9ee7e20`, build_time `2025-12-29T14:25:01Z`.
+- `/admin/health`: conversations bot_active 254, pending 4, manager_active 0; handovers pending 4, active 0 (checked_at `2025-12-29T14:32:29.419424+00:00`).
 - Live-check consult mode: care/color → consult replies with consult_intent meta; price → pricing path; booking → clarify; allergy → escalation; consult replies without prices/availability/masters.
 - Live-check context manager: refusal_flag.name set and booking skips name; 2x clarify → 3rd escalates; booking → consult switch updates current_goal + summary (consult reply, no prices/availability/masters).
-- Tests: `docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q` (81 passed).
+- Live-check PR-3 rewrite+hybrid: address slang → address (rewrite timeout, rag_scores logged); "манник" → service_semantic match; "скок стоит педик" → price; "какая погода" → OOD; "хочу записаться" → booking-clarify.
+- Tests: `docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q` (82 passed).
 - Tests: `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` (1 passed).
-- CI: `ruff check app tests` passed after webhook context manager fix (commit `c558b03`).
-- Deploy: prod on `8457ec9eb811769f2698a9789eee06eb1e33fd70`; PR-3 not deployed yet.
-- PR-3 (rewrite+hybrid retrieval) implemented and tests passed locally; prod deploy not done yet.
+- CI: `ruff check app tests` passed (commit `a8e46cf`).
+- Deploy: prod on `a8e46cfed6d9532a1fb2668133caa43ac9ee7e20`; PR-3 deployed (rewrite+hybrid + gpt-5 temperature fix).
 - DB (ops/diagnose): DB_USER `n8n`; conversations 15 total, 0 muted, 8 with topic; handovers 92 total, 0 pending, 0 active.
 
 ### MEDIA RUNBOOK (амнезия, 3–5 минут)
