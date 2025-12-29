@@ -676,11 +676,12 @@ def rewrite_for_service_match(text: str, client_slug: str) -> str | None:
     ]
 
     llm = get_llm_provider()
+    temperature = 1.0 if FAST_MODEL.strip().lower().startswith("gpt-5") else 0.0
     llm_start = time.monotonic()
     try:
         response = llm.generate(
             messages,
-            temperature=0.0,
+            temperature=temperature,
             max_tokens=SERVICE_REWRITE_MAX_TOKENS,
             model=FAST_MODEL,
             timeout_seconds=SERVICE_REWRITE_TIMEOUT_SECONDS,
@@ -768,11 +769,12 @@ def rewrite_query_for_retrieval(text: str, client_slug: str | None = None) -> di
     ]
 
     llm = get_llm_provider()
+    temperature = 1.0 if FAST_MODEL.strip().lower().startswith("gpt-5") else 0.0
     llm_start = time.monotonic()
     try:
         response = llm.generate(
             messages,
-            temperature=0.0,
+            temperature=temperature,
             max_tokens=RAG_REWRITE_MAX_TOKENS,
             model=FAST_MODEL,
             timeout_seconds=RAG_REWRITE_TIMEOUT_SECONDS,
