@@ -864,15 +864,18 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
 
         primary_intent = intents[0]
         secondary_intents = [intent for intent in intents[1:] if intent != primary_intent]
+        consult_intent = _should_force_consult_intent(text, intents)
+        consult_topic = _clean_consult_text(text, max_words=4) if consult_intent else ""
+        consult_question = _clean_consult_text(text, max_words=12) if consult_intent else ""
         return {
             "multi_intent": len(intents) > 1,
             "primary_intent": primary_intent,
             "secondary_intents": secondary_intents,
             "intents": intents,
             "service_query": "",
-            "consult_intent": False,
-            "consult_topic": "",
-            "consult_question": "",
+            "consult_intent": consult_intent,
+            "consult_topic": consult_topic,
+            "consult_question": consult_question,
         }
         return {
             "multi_intent": False,
