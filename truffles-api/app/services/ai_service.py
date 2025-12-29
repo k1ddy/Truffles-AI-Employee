@@ -725,6 +725,66 @@ def rewrite_for_service_match(text: str, client_slug: str) -> str | None:
 
 def detect_multi_intent(text: str) -> dict | None:
     def _fallback_payload() -> dict:
+        normalized = normalize_for_matching(text)
+        intents: list[str] = []
+
+        booking_keywords = [
+            "запис",
+            "запиш",
+            "запись",
+            "записат",
+            "перезапис",
+            "перенос",
+            "перенести",
+            "отмен",
+            "отмена",
+            "отменить",
+            "бронь",
+            "заброн",
+            "окошк",
+        ]
+        if any(keyword in normalized for keyword in booking_keywords):
+            intents.append("booking")
+        if re.search(r"\b(сегодня|завтра|послезавтра)\b", normalized) and re.search(r"\b\d{1,2}\b", normalized):
+            intents.append("booking")
+
+        hours_keywords = ["работаете", "график", "режим работы", "часы", "во сколько", "до скольки", "когда открыва"]
+        if any(keyword in normalized for keyword in hours_keywords):
+            intents.append("hours")
+
+        price_keywords = ["цена", "стоим", "стоимость", "прайс", "сколько стоит", "почем", "ценник", "скок"]
+        if any(keyword in normalized for keyword in price_keywords):
+            intents.append("pricing")
+
+        duration_keywords = [
+            "сколько длится",
+            "длится",
+            "длительность",
+            "по времени",
+            "сколько по времени",
+            "сколько времени",
+            "как долго",
+            "время процедуры",
+        ]
+        if any(keyword in normalized for keyword in duration_keywords):
+            intents.append("duration")
+
+        location_keywords = ["адрес", "где вы", "как добраться", "как проехать", "как доехать"]
+        if any(keyword in normalized for keyword in location_keywords):
+            intents.append("location")
+
+        if not intents:
+            intents = ["other"]
+
+        primary_intent = intents[0]
+        secondary_intents = [intent for intent in intents[1:] if intent != primary_intent]
+        return {
+            "multi_intent": len(intents) > 1,
+            "primary_intent": primary_intent,
+            "secondary_intents": secondary_intents,
+            "intents": intents,
+            "service_query": "",
+        }
         return {
             "multi_intent": False,
             "primary_intent": "other",
