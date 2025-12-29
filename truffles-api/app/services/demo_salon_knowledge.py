@@ -78,6 +78,23 @@ def _split_question_segments(text: str) -> list[str]:
     return [cleaned] if cleaned else []
 
 
+def _normalize_consult_label(value: str) -> str:
+    cleaned = str(value or "").replace("_", " ").strip()
+    return _normalize_text(cleaned)
+
+
+def _clean_consult_value(value: Any, max_words: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    if not cleaned:
+        return None
+    tokens = cleaned.split()
+    if len(tokens) > max_words:
+        cleaned = " ".join(tokens[:max_words])
+    return cleaned or None
+
+
 @lru_cache(maxsize=4)
 def _load_yaml(path: Path) -> dict:
     if not path.exists():
@@ -95,6 +112,15 @@ def load_intents_phrases() -> dict:
     data = _load_yaml(_INTENTS_PATH)
     intents = data.get("demo_salon_intents") if isinstance(data, dict) else None
     return intents if isinstance(intents, dict) else {}
+
+
+def _load_consult_playbooks() -> list[dict[str, Any]]:
+    truth = load_yaml_truth()
+    domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
+    playbooks = domain_pack.get("consult_playbooks") if isinstance(domain_pack, dict) else None
+    if not isinstance(playbooks, list):
+        return []
+    return [item for item in playbooks if isinstance(item, dict)]
 
 
 @lru_cache(maxsize=2)
@@ -354,6 +380,123 @@ def _contains_word(normalized: str, word: str) -> bool:
 
 def _contains_any_words(normalized: str, words: list[str]) -> bool:
     return any(_contains_word(normalized, word) for word in words)
+
+
+def _collect_consult_triggers(playbook: dict[str, Any]) -> list[str]:
+    raw = playbook.get("triggers")
+    items: list[str] = []
+    if isinstance(raw, list):
+        items.extend(raw)
+    elif isinstance(raw, dict):
+        for key in ("ru", "kk", "any", "all"):
+            values = raw.get(key)
+            if isinstance(values, list):
+                items.extend(values)
+    aliases = playbook.get("aliases")
+    if isinstance(aliases, list):
+        items.extend(aliases)
+    normalized = [_normalize_text(str(item)) for item in items if str(item).strip()]
+    return [item for item in normalized if item]
+
+
+def _consult_topic_matches(playbook: dict[str, Any], consult_topic: str) -> bool:
+    if not consult_topic:
+        return False
+    target = _normalize_consult_label(consult_topic)
+    if not target:
+        return False
+    for key in ("id", "topic"):
+        value = playbook.get(key)
+        if isinstance(value, str) and _normalize_consult_label(value) == target:
+            return True
+    aliases = playbook.get("aliases")
+    if isinstance(aliases, list):
+        for alias in aliases:
+            if isinstance(alias, str) and _normalize_consult_label(alias) == target:
+                return True
+    return False
+
+
+def _select_consult_playbook(
+    message: str,
+    consult_topic: str | None,
+    playbooks: list[dict[str, Any]],
+    *,
+    allow_fallback: bool,
+) -> dict[str, Any] | None:
+    normalized = _normalize_text(message)
+    if consult_topic:
+        for playbook in playbooks:
+            if _consult_topic_matches(playbook, consult_topic):
+                return playbook
+    if normalized:
+        for playbook in playbooks:
+            triggers = _collect_consult_triggers(playbook)
+            if triggers and _contains_any(normalized, triggers):
+                return playbook
+    if allow_fallback:
+        for playbook in playbooks:
+            if playbook.get("fallback") is True:
+                return playbook
+    return None
+
+
+def _ensure_question_mark(text: str) -> str:
+    cleaned = text.strip()
+    if not cleaned:
+        return ""
+    if cleaned.endswith("?"):
+        return cleaned
+    return f"{cleaned}?"
+
+
+def _format_consult_reply(playbook: dict[str, Any]) -> tuple[str, list[str], list[str]]:
+    lead = str(playbook.get("lead") or "").strip()
+    questions_raw = playbook.get("questions")
+    options_raw = playbook.get("options")
+
+    questions_items = questions_raw if isinstance(questions_raw, list) else []
+    options_items = options_raw if isinstance(options_raw, list) else []
+
+    questions = [
+        _ensure_question_mark(str(item))
+        for item in questions_items
+        if isinstance(item, str) and item.strip()
+    ]
+    options = [
+        str(item).strip()
+        for item in options_items
+        if isinstance(item, str) and item.strip()
+    ]
+
+    selected_questions = [q for q in questions if q][:2]
+    selected_options = [opt for opt in options if opt][:3]
+
+    lines: list[str] = []
+    if lead:
+        lines.append(lead)
+    if selected_questions:
+        lines.append(" ".join(selected_questions))
+    if selected_options:
+        lines.append("Можно рассмотреть варианты:")
+        lines.extend([f"- {option}" for option in selected_options])
+
+    reply = "\n".join(line for line in lines if line)
+    return reply, selected_questions, selected_options
+
+
+def _should_skip_consult(normalized: str, raw_text: str | None = None) -> bool:
+    if not normalized:
+        return True
+    if _has_price_signal(normalized, raw_text):
+        return True
+    if _has_duration_signal(normalized, raw_text):
+        return True
+    if _looks_like_hours_question(normalized):
+        return True
+    if _contains_any(normalized, ["адрес", "где вы", "как добрат", "как доехать", "как пройти", "остановк"]):
+        return True
+    return False
 
 
 def _looks_like_hours_question(normalized: str) -> bool:
@@ -1237,6 +1380,80 @@ def _format_promotions(truth: dict, intent: str | None = None) -> str:
     return "Скидки действуют только по официальным акциям."
 
 
+def build_consult_reply(
+    message: str,
+    *,
+    client_slug: str | None = "demo_salon",
+    intent_decomp: dict | None = None,
+) -> DemoSalonDecision | None:
+    normalized = _normalize_text(message)
+    if not normalized or _should_skip_consult(normalized, message):
+        return None
+
+    consult_intent = False
+    consult_topic = None
+    consult_question = None
+    if isinstance(intent_decomp, dict):
+        consult_intent = intent_decomp.get("consult_intent") is True
+        consult_topic = _clean_consult_value(intent_decomp.get("consult_topic"), 4)
+        consult_question = _clean_consult_value(intent_decomp.get("consult_question"), 12)
+
+    playbooks = _load_consult_playbooks()
+    if not playbooks:
+        return None
+
+    playbook = _select_consult_playbook(
+        message,
+        consult_topic if consult_intent else None,
+        playbooks,
+        allow_fallback=consult_intent,
+    )
+    if not playbook and not consult_intent:
+        playbook = _select_consult_playbook(
+            message,
+            None,
+            playbooks,
+            allow_fallback=False,
+        )
+    if not playbook:
+        return None
+
+    action_raw = playbook.get("action")
+    action = str(action_raw).strip().lower() if isinstance(action_raw, str) else "reply"
+    if action not in {"reply", "escalate"}:
+        action = "reply"
+
+    playbook_id = str(playbook.get("id") or playbook.get("topic") or "general").strip()
+    consult_question_final = consult_question or _clean_consult_value(message, 12) or ""
+
+    meta: dict[str, Any] = {
+        "consult_intent": True,
+        "consult_topic": playbook_id or "general",
+        "consult_question": consult_question_final,
+    }
+
+    if action == "escalate":
+        escalation_message = str(playbook.get("escalation_message") or "").strip()
+        return DemoSalonDecision(
+            action="escalate",
+            response=escalation_message,
+            intent="consult_escalate",
+            meta=meta,
+        )
+
+    reply, consult_questions, consult_options = _format_consult_reply(playbook)
+    if not reply:
+        return None
+    meta["consult_questions"] = consult_questions
+    meta["consult_options"] = consult_options
+    return DemoSalonDecision(
+        action="reply",
+        response=reply,
+        intent="consult_reply",
+        meta=meta,
+    )
+
+
 def format_reply_from_truth(intent: str, slots: dict | None = None) -> str | None:
     truth = load_yaml_truth()
     slots = slots or {}
@@ -1516,6 +1733,22 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
     if _contains_any(normalized, medical_keywords):
         return "policy_medical"
 
+    legal_keywords = [
+        "договор",
+        "оферт",
+        "юрид",
+        "юрист",
+        "закон",
+        "суд",
+        "иск",
+        "ответствен",
+        "компенсац",
+        "штраф",
+        "прав потреб",
+    ]
+    if _contains_any(normalized, legal_keywords):
+        return "policy_legal"
+
     hours_like = _looks_like_hours_question(normalized)
     complaint_keywords = [
         "не понрав",
@@ -1661,6 +1894,12 @@ def get_demo_salon_decision(
             ),
             intent="medical",
         )
+    if policy_intent == "policy_legal":
+        return DemoSalonDecision(
+            action="escalate",
+            response="По юридическим вопросам подключу администратора — передам ваш запрос.",
+            intent="legal",
+        )
     if policy_intent == "policy_complaint":
         return DemoSalonDecision(
             action="escalate",
@@ -1678,6 +1917,14 @@ def get_demo_salon_decision(
                 intent="same_day_booking",
                 collect=["услуга", "время"],
             )
+
+    consult_decision = build_consult_reply(
+        message,
+        client_slug=client_slug,
+        intent_decomp=intent_decomp,
+    )
+    if consult_decision:
+        return consult_decision
 
     if "скидки сумм" in normalized or "скидк" in normalized and "сумм" in normalized:
         reply = format_reply_from_truth("promotions_rules")

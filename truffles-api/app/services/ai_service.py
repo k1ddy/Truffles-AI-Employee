@@ -737,6 +737,19 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
             return ""
         return cleaned
 
+    def _clean_consult_text(value: str | None, max_words: int) -> str:
+        if not isinstance(value, str):
+            return ""
+        cleaned = re.sub(r"\s+", " ", value).strip()
+        if not cleaned:
+            return ""
+        tokens = cleaned.split()
+        if len(tokens) > max_words:
+            cleaned = " ".join(tokens[:max_words])
+        if len(cleaned) < 2:
+            return ""
+        return cleaned
+
     def _fallback_payload() -> dict:
         normalized = normalize_for_matching(text)
         intents: list[str] = []
@@ -797,6 +810,9 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
             "secondary_intents": secondary_intents,
             "intents": intents,
             "service_query": "",
+            "consult_intent": False,
+            "consult_topic": "",
+            "consult_question": "",
         }
         return {
             "multi_intent": False,
@@ -804,6 +820,9 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
             "secondary_intents": [],
             "intents": ["other"],
             "service_query": "",
+            "consult_intent": False,
+            "consult_topic": "",
+            "consult_question": "",
         }
 
     normalized = (text or "").strip()
@@ -818,7 +837,8 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
     system_prompt = (
         "Разложи сообщение клиента на интенты. Верни ТОЛЬКО JSON строго вида "
         '{"multi_intent":true/false,"primary_intent":"booking|pricing|duration|location|hours|other",'
-        '"secondary_intents":["..."],"intents":["..."],"service_query":"..."}.\n'
+        '"secondary_intents":["..."],"intents":["..."],"service_query":"...",'
+        '"consult_intent":true/false,"consult_topic":"...","consult_question":"..."}.\n'
         "Допустимые интенты: booking (запись/перенос/отмена/окошко), pricing (цены/стоимость), "
         "duration (длительность/время процедуры), location (адрес/как добраться), "
         "hours (график/время работы), other (другое).\n"
@@ -828,7 +848,11 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
         "secondary_intents — уникальные, без primary.\n"
         "service_query: 1-6 слов, ТОЛЬКО из текста клиента, коротко суть услуги. "
         "Если в сообщении есть услуга (особенно при pricing/duration/booking) — service_query обязателен, "
-        "даже если есть другие интенты. Если услуги нет — пустая строка. "
+        "даже если есть другие интенты. Если услуги нет — пустая строка.\n"
+        "consult_intent=true если клиент просит совет/рекомендацию/подбор/уход "
+        "в рамках салона и НЕ спрашивает цену/адрес/наличие/запись. "
+        "consult_topic — 1-4 слова, коротко тема запроса. "
+        "consult_question — короткая формулировка вопроса клиента (до 12 слов).\n"
         "Если не уверен в интенте — other."
     )
     messages = [
@@ -899,6 +923,9 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
     secondary_intents_raw = payload.get("secondary_intents", [])
     intents_raw = payload.get("intents", [])
     service_query_raw = payload.get("service_query")
+    consult_intent_raw = payload.get("consult_intent")
+    consult_topic_raw = payload.get("consult_topic")
+    consult_question_raw = payload.get("consult_question")
 
     cleaned_intents: list[str] = []
     if isinstance(intents_raw, list):
@@ -944,12 +971,29 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
         rewrite_query = rewrite_for_service_match(text, client_slug or "unknown")
         service_query = _clean_service_query(rewrite_query)
 
+    consult_intent = consult_intent_raw is True
+    consult_topic = _clean_consult_text(consult_topic_raw if isinstance(consult_topic_raw, str) else None, max_words=4)
+    consult_question = _clean_consult_text(
+        consult_question_raw if isinstance(consult_question_raw, str) else None, max_words=12
+    )
+    if consult_intent:
+        if not consult_question:
+            consult_question = _clean_consult_text(text, max_words=12)
+        if not consult_topic:
+            consult_topic = "general"
+    else:
+        consult_topic = ""
+        consult_question = ""
+
     return {
         "multi_intent": multi_intent,
         "primary_intent": primary_intent,
         "secondary_intents": cleaned_secondary,
         "intents": cleaned_intents,
         "service_query": service_query,
+        "consult_intent": consult_intent,
+        "consult_topic": consult_topic,
+        "consult_question": consult_question,
     }
 
 

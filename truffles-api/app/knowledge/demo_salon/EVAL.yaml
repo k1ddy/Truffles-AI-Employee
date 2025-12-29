@@ -1230,3 +1230,39 @@ eval_cases:
     - по салону
     - запись
     - цены
+- id: E096
+  user: Посоветуйте уход после окрашивания
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - окрашив
+    - тип волос
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E097
+  user: Какой цвет волос мне подойдёт?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - подбор цвета
+    - натуральный цвет
+    must_not:
+    - ₸
+    - адрес
+    - мастер
+    - запис
+    - свободн
+- id: E098
+  user: Нужен договор и юридическая ответственность
+  expected:
+    action: escalate
+    intent: legal
+    must_tell_user_any:
+    - администратор
+    - передам

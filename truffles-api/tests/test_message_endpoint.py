@@ -95,6 +95,9 @@ def _fake_intent_decomp():
             "secondary_intents": secondary,
             "intents": intents,
             "service_query": service_query,
+            "consult_intent": False,
+            "consult_topic": "",
+            "consult_question": "",
         }
 
     with patch("app.routers.webhook.detect_multi_intent", side_effect=_detect_stub):
@@ -636,6 +639,111 @@ def test_truth_gate_sets_decision_meta():
     assert truth_updates["llm_primary_used"] is False
     assert truth_updates["llm_used"] is False
     assert truth_updates["llm_timeout"] is False
+
+
+def test_consult_reply_writes_decision_meta():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="hybrid",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Посоветуйте уход после окрашивания",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-consult-1",
+                timestamp=1234567891,
+            ),
+        ),
+    )
+
+    intent_decomp = {
+        "multi_intent": False,
+        "primary_intent": "other",
+        "secondary_intents": [],
+        "intents": ["other"],
+        "service_query": "",
+        "consult_intent": True,
+        "consult_topic": "hair_aftercolor",
+        "consult_question": "уход после окрашивания",
+    }
+
+    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook.generate_bot_response"
+    ) as mock_llm:
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response is not None
+    assert "окрашив" in response.bot_response.casefold()
+    assert webhook_router.MSG_BOOKING_ASK_SERVICE not in response.bot_response
+
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("consult_intent") is True
+    assert meta.get("consult_topic") == "hair_aftercolor"
+    assert meta.get("consult_questions")
+
+    trace = conversation.context.get("decision_trace", [])
+    assert any(entry.get("stage") == "consult" for entry in trace if isinstance(entry, dict))
+    mock_llm.assert_not_called()
 
 
 def test_semantic_service_matcher_handles_low_confidence_match():

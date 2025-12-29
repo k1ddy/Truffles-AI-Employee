@@ -267,6 +267,22 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2025-12-29 — PR-1 Consult Mode (demo_salon)
+
+**Что сделали:**
+- Добавили consult_intent/consult_topic/consult_question в intent_decomp и запись decision_meta/trace для consult.
+- Добавили `domain_pack.consult_playbooks` и `build_consult_reply()`; подключили consult-роутинг до booking/truth.
+- Закончили LAW эскалацию через `policy_legal`, обновили `get_demo_salon_decision` для consult.
+- Обновили `EVAL.yaml` и добавили тест consult-роутинга в `tests/test_message_endpoint.py`.
+
+**Разбор (шаблон):**
+- Боль/симптом: нужен безопасный консультативный ответ без фактов/цен/наличия и без booking-триггеров.
+- Почему важно: риски обещаний/цен и лишние триггеры записи ломают доверие и SLA.
+- Диагноз: в маршрутизации не было consult-режима и playbook-ответов, LAW не эскалировался.
+- Решение: intent_decomp + consult_playbooks + consult gate до booking/truth + policy_legal; запись meta/trace.
+- Проверка: `docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q`; `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q`.
+- Осталось: деплой и live-check 5 кейсов consult/price/booking/escalation.
+
 ### 2025-12-26 — Outbox: policy trigger_type violation fix
 
 **Что сделали:**

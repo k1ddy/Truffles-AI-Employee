@@ -47,6 +47,7 @@ from app.services.conversation_service import (
 )
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
+    build_consult_reply,
     compose_multi_truth_reply,
     get_demo_salon_decision,
     get_demo_salon_price_item,
@@ -4523,8 +4524,26 @@ async def _handle_webhook_payload(
                 service_query = service_query.strip()
                 if service_query:
                     intent_decomp_service_query = service_query
+            consult_intent = intent_decomp_payload.get("consult_intent") is True
+            consult_topic = intent_decomp_payload.get("consult_topic")
+            if isinstance(consult_topic, str):
+                consult_topic = consult_topic.strip() or None
+            else:
+                consult_topic = None
+            consult_question = intent_decomp_payload.get("consult_question")
+            if isinstance(consult_question, str):
+                consult_question = consult_question.strip() or None
+            else:
+                consult_question = None
             service_query_source = "intent_decomp"
             service_query_score = 1.0 if intent_decomp_service_query else 0.0
+            consult_meta = {}
+            if consult_intent:
+                consult_meta["consult_intent"] = True
+            if consult_topic:
+                consult_meta["consult_topic"] = consult_topic
+            if consult_question:
+                consult_meta["consult_question"] = consult_question
             if saved_message:
                 _update_message_decision_metadata(
                     saved_message,
@@ -4534,6 +4553,7 @@ async def _handle_webhook_payload(
                         "service_query": intent_decomp_service_query,
                         "service_query_source": service_query_source,
                         "service_query_score": service_query_score,
+                        **consult_meta,
                     },
                 )
             _record_decision_trace(
@@ -4547,6 +4567,7 @@ async def _handle_webhook_payload(
                     "service_query": intent_decomp_service_query,
                     "service_query_source": service_query_source,
                     "service_query_score": service_query_score,
+                    **consult_meta,
                 },
             )
 
@@ -4794,6 +4815,101 @@ async def _handle_webhook_payload(
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
         result_message = "Out-of-domain early response sent" if sent else "Out-of-domain early response failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    consult_decision = None
+    if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
+        consult_blocked = bool(booking_wants_flow or booking_active or booking_signal)
+        if intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}:
+            consult_blocked = True
+        if not consult_blocked:
+            consult_decision = build_consult_reply(
+                message_text,
+                client_slug=payload.client_slug,
+                intent_decomp=intent_decomp_payload,
+            )
+
+    if consult_decision:
+        consult_meta = consult_decision.meta if isinstance(consult_decision.meta, dict) else {}
+        consult_trace = {
+            "stage": "consult",
+            "decision": consult_decision.action,
+            "intent": consult_decision.intent,
+            "state": conversation.state,
+        }
+        consult_trace.update(consult_meta)
+        _record_decision_trace(conversation, consult_trace)
+        _record_message_decision_meta(
+            saved_message,
+            action=consult_decision.action,
+            intent=consult_decision.intent,
+            source="consult",
+            fast_intent=False,
+        )
+        if saved_message and consult_meta:
+            _update_message_decision_metadata(saved_message, consult_meta)
+
+        if consult_decision.action == "escalate":
+            bot_response = consult_decision.response or MSG_ESCALATED
+            _reset_low_confidence_retry(conversation)
+
+            result_message = "Consult escalation"
+            _, reused, telegram_sent = _reuse_active_handover(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message=message_text,
+                source="consult",
+                intent=consult_decision.intent,
+            )
+            if reused:
+                result_message = f"Consult reuse, telegram={'sent' if telegram_sent else 'failed'}"
+            elif conversation.state == ConversationState.BOT_ACTIVE.value and routing["allow_handover_create"]:
+                result = escalate_to_pending(
+                    db=db,
+                    conversation=conversation,
+                    user_message=message_text,
+                    trigger_type="intent",
+                    trigger_value=consult_decision.intent or "consult",
+                )
+                if result.ok:
+                    handover = result.value
+                    telegram_sent = send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=message_text,
+                    )
+                    result_message = f"Consult escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                else:
+                    result_message = f"Consult escalation failed: {result.error}"
+            else:
+                result_message = "Consult escalation skipped (already pending)"
+
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = _send_response(bot_response)
+            if not sent:
+                result_message = f"{result_message}; response_send=failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        bot_response = consult_decision.response
+        _reset_low_confidence_retry(conversation)
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = _send_response(bot_response)
+        result_message = "Consult reply sent" if sent else "Consult reply send failed"
         db.commit()
         return WebhookResponse(
             success=True,
