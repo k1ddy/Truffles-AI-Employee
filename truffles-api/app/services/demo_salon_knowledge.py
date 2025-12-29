@@ -580,10 +580,15 @@ def _cosine_similarity(vector_a: list[float], vector_b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def semantic_question_type(text: str, *, include_kinds: set[str] | None = None) -> SemanticQuestionType | None:
+def semantic_question_type(
+    text: str,
+    *,
+    include_kinds: set[str] | None = None,
+    return_multi: bool = False,
+) -> SemanticQuestionType | list[SemanticQuestionType] | None:
     normalized = _normalize_text(text)
     if not normalized or len(normalized) < 3:
-        return None
+        return [] if return_multi else None
 
     if include_kinds is None:
         include_kinds = {"pricing", "duration"}
@@ -628,21 +633,36 @@ def semantic_question_type(text: str, *, include_kinds: set[str] | None = None) 
         scores[kind] = best
 
     if not scores:
-        return None
+        return [] if return_multi else None
 
-    def _pick_type(score_map: dict[str, float]) -> SemanticQuestionType | None:
+    def _pick_types(score_map: dict[str, float]) -> list[SemanticQuestionType]:
         if not score_map:
-            return None
+            return []
         sorted_scores = sorted(score_map.items(), key=lambda item: item[1], reverse=True)
         top_kind, top_score = sorted_scores[0]
         second_score = sorted_scores[1][1] if len(sorted_scores) > 1 else 0.0
-        if top_score >= _QUESTION_TYPE_THRESHOLD and (top_score - second_score) >= _QUESTION_TYPE_MARGIN:
-            return SemanticQuestionType(kind=top_kind, score=top_score, second_score=second_score)
-        return None
+        if top_score < _QUESTION_TYPE_THRESHOLD:
+            return []
+        if return_multi:
+            above_threshold = [item for item in sorted_scores if item[1] >= _QUESTION_TYPE_THRESHOLD]
+            if len(above_threshold) >= 2:
+                picked = above_threshold
+            elif len(sorted_scores) > 1 and (top_score - second_score) <= _QUESTION_TYPE_MARGIN:
+                picked = sorted_scores[:2]
+            else:
+                picked = sorted_scores[:1]
+        else:
+            if (top_score - second_score) >= _QUESTION_TYPE_MARGIN:
+                picked = sorted_scores[:1]
+            else:
+                return []
+        return [
+            SemanticQuestionType(kind=kind, score=score, second_score=second_score) for kind, score in picked
+        ]
 
-    picked = _pick_type(scores)
+    picked = _pick_types(scores)
     if picked:
-        return picked
+        return picked if return_multi else picked[0]
 
     if not use_fallback:
         fallback_vector = _local_text_embedding(text)
@@ -657,9 +677,12 @@ def semantic_question_type(text: str, *, include_kinds: set[str] | None = None) 
                 if score > best:
                     best = score
             fallback_scores[kind] = best
-        return _pick_type(fallback_scores)
+        picked_fallback = _pick_types(fallback_scores)
+        if return_multi:
+            return picked_fallback
+        return picked_fallback[0] if picked_fallback else None
 
-    return None
+    return [] if return_multi else None
 
 
 def _format_service_duration_reply(service: dict[str, Any] | None) -> str:
@@ -883,30 +906,50 @@ def compose_multi_truth_reply(message: str, client_slug: str | None) -> str | No
         normalized_segment = _normalize_text(segment)
         if not normalized_segment:
             continue
-        question_type = semantic_question_type(segment, include_kinds={"hours", "pricing", "duration"})
+        question_types = semantic_question_type(
+            segment,
+            include_kinds={"hours", "pricing", "duration"},
+            return_multi=True,
+        )
+        if question_types is None:
+            question_types = []
+        elif not isinstance(question_types, list):
+            question_types = [question_types]
+        kinds = {
+            question.kind
+            for question in question_types
+            if hasattr(question, "kind") and isinstance(getattr(question, "kind"), str)
+        }
         service_match = semantic_service_match(segment, client_slug)
-        reply = None
-
-        if question_type:
+        if kinds:
             info_detected = True
-            if question_type.kind == "hours":
-                reply = format_reply_from_truth("hours")
-            elif question_type.kind == "pricing":
-                if service_match and service_match.action == "match":
-                    reply = service_match.response
-            elif question_type.kind == "duration":
-                service = None
-                if service_match and service_match.canonical_name:
-                    service = _find_catalog_service_by_name(service_match.canonical_name)
-                reply = _format_service_duration_reply(service)
-        elif service_match and service_match.action == "match":
-            reply = _format_service_presence_reply(segment, service_match)
 
-        if reply:
-            cleaned = reply.strip()
-            if cleaned and cleaned not in seen:
-                replies.append(cleaned)
-                seen.add(cleaned)
+        def _add_reply(text: str | None) -> None:
+            if not text:
+                return
+            cleaned = text.strip()
+            if not cleaned or cleaned in seen:
+                return
+            replies.append(cleaned)
+            seen.add(cleaned)
+
+        if "hours" in kinds:
+            _add_reply(format_reply_from_truth("hours"))
+        if len(replies) >= 2:
+            break
+        if "pricing" in kinds and service_match and service_match.action == "match":
+            _add_reply(service_match.response)
+        if len(replies) >= 2:
+            break
+        if "duration" in kinds:
+            service = None
+            if service_match and service_match.canonical_name:
+                service = _find_catalog_service_by_name(service_match.canonical_name)
+            _add_reply(_format_service_duration_reply(service))
+        if len(replies) >= 2:
+            break
+        if service_match and service_match.action == "match" and not {"pricing", "duration"} & kinds:
+            _add_reply(_format_service_presence_reply(segment, service_match))
         if len(replies) >= 2:
             break
 
