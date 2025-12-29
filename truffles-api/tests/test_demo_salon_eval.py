@@ -1,16 +1,12 @@
-from difflib import SequenceMatcher
 from pathlib import Path
 from unittest.mock import patch
 
 import yaml
 
 from app.routers import webhook as webhook_router
-from app.services import demo_salon_knowledge
 from app.services.demo_salon_knowledge import get_demo_salon_decision
 
 EVAL_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_salon" / "EVAL.yaml"
-_TOKEN_MATCHES_BASE = demo_salon_knowledge._token_matches
-_FUZZY_TOKEN_MATCH_THRESHOLD = 0.86
 
 
 def _normalize(text: str) -> str:
@@ -32,62 +28,6 @@ def _fake_service_hint(text: str, client_slug: str | None) -> str | None:
     if "ресниц" in normalized:
         return "ресницы"
     return None
-
-
-def _local_service_search(text: str, client_slug: str, limit: int) -> list[dict]:
-    if not text or not client_slug:
-        return []
-    query_vec = demo_salon_knowledge._local_text_embedding(text)
-    if not query_vec:
-        return []
-    query_tokens = demo_salon_knowledge._tokenize(text)
-    candidates: list[dict] = []
-    for entry in demo_salon_knowledge._build_service_index():
-        name = entry.get("name")
-        if not name:
-            continue
-        best_score = 0.0
-        for alias_tokens in entry.get("aliases", []):
-            if not alias_tokens:
-                continue
-            alias_text = " ".join(alias_tokens)
-            alias_vec = demo_salon_knowledge._local_text_embedding(alias_text)
-            score = demo_salon_knowledge._cosine_similarity(query_vec, alias_vec)
-            if query_tokens:
-                for query_token in query_tokens:
-                    if len(query_token) < 4:
-                        continue
-                    for alias_token in alias_tokens:
-                        if len(alias_token) < 4:
-                            continue
-                        if query_token[:2] != alias_token[:2]:
-                            continue
-                        fuzzy_score = SequenceMatcher(None, query_token, alias_token).ratio()
-                        if fuzzy_score > score:
-                            score = fuzzy_score
-            if score > best_score:
-                best_score = score
-        if best_score > 0:
-            candidates.append({"score": best_score, "payload": {"canonical_name": name}})
-    candidates.sort(key=lambda item: item["score"], reverse=True)
-    return candidates[:limit]
-
-
-def _fuzzy_token_matches(token: str, message_tokens: list[str]) -> bool:
-    if _TOKEN_MATCHES_BASE(token, message_tokens):
-        return True
-    if not token:
-        return False
-    for msg in message_tokens:
-        if not msg:
-            continue
-        if len(token) < 4 or len(msg) < 4:
-            continue
-        if token[:2] != msg[:2]:
-            continue
-        if SequenceMatcher(None, token, msg).ratio() >= _FUZZY_TOKEN_MATCH_THRESHOLD:
-            return True
-    return False
 
 
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:
@@ -112,57 +52,50 @@ def test_demo_salon_eval_cases():
     data = yaml.safe_load(EVAL_PATH.read_text(encoding="utf-8"))
     cases = data.get("eval_cases", []) if isinstance(data, dict) else []
 
-    with patch(
-        "app.services.demo_salon_knowledge._search_services_index",
-        side_effect=_local_service_search,
-    ), patch(
-        "app.services.demo_salon_knowledge._token_matches",
-        side_effect=_fuzzy_token_matches,
-    ):
-        for case in cases:
-            case_id = case.get("id", "<unknown>")
-            user_text = case.get("user", "")
-            expected = case.get("expected", {})
+    for case in cases:
+        case_id = case.get("id", "<unknown>")
+        user_text = case.get("user", "")
+        expected = case.get("expected", {})
 
-            expected_action = expected.get("action")
-            if expected_action == "booking_flow":
-                messages = [user_text] if user_text else []
-                with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
-                    booking_signal = webhook_router._has_booking_signal(
-                        messages,
-                        client_slug="demo_salon",
-                        message_text=messages[-1] if messages else None,
-                    )
-                    assert booking_signal is True, f"{case_id}: booking signal not detected"
-                    booking_state = webhook_router._update_booking_from_messages(
-                        {},
-                        messages,
-                        client_slug="demo_salon",
-                    )
-                for slot in expected.get("booking_slots", []):
-                    assert booking_state.get(slot), f"{case_id}: booking slot missing '{slot}'"
-                continue
+        expected_action = expected.get("action")
+        if expected_action == "booking_flow":
+            messages = [user_text] if user_text else []
+            with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
+                booking_signal = webhook_router._has_booking_signal(
+                    messages,
+                    client_slug="demo_salon",
+                    message_text=messages[-1] if messages else None,
+                )
+                assert booking_signal is True, f"{case_id}: booking signal not detected"
+                booking_state = webhook_router._update_booking_from_messages(
+                    {},
+                    messages,
+                    client_slug="demo_salon",
+                )
+            for slot in expected.get("booking_slots", []):
+                assert booking_state.get(slot), f"{case_id}: booking slot missing '{slot}'"
+            continue
 
-            decision = get_demo_salon_decision(user_text)
-            assert decision is not None, f"{case_id}: no decision for '{user_text}'"
-            assert decision.action == expected_action, (
-                f"{case_id}: action mismatch: {decision.action} != {expected_action}"
-            )
+        decision = get_demo_salon_decision(user_text)
+        assert decision is not None, f"{case_id}: no decision for '{user_text}'"
+        assert decision.action == expected_action, (
+            f"{case_id}: action mismatch: {decision.action} != {expected_action}"
+        )
 
-            response = decision.response or ""
-            if expected.get("must_include"):
-                _assert_contains_all(response, expected["must_include"], case_id, "must_include")
-            if expected.get("must_include_any"):
-                _assert_contains_any(response, expected["must_include_any"], case_id, "must_include_any")
-            if expected.get("must_tell_user"):
-                _assert_contains_all(response, expected["must_tell_user"], case_id, "must_tell_user")
-            if expected.get("must_tell_user_any"):
-                _assert_contains_any(response, expected["must_tell_user_any"], case_id, "must_tell_user_any")
-            if expected.get("must_not"):
-                _assert_not_contains(response, expected["must_not"], case_id)
+        response = decision.response or ""
+        if expected.get("must_include"):
+            _assert_contains_all(response, expected["must_include"], case_id, "must_include")
+        if expected.get("must_include_any"):
+            _assert_contains_any(response, expected["must_include_any"], case_id, "must_include_any")
+        if expected.get("must_tell_user"):
+            _assert_contains_all(response, expected["must_tell_user"], case_id, "must_tell_user")
+        if expected.get("must_tell_user_any"):
+            _assert_contains_any(response, expected["must_tell_user_any"], case_id, "must_tell_user_any")
+        if expected.get("must_not"):
+            _assert_not_contains(response, expected["must_not"], case_id)
 
-            if expected.get("collect"):
+        if expected.get("collect"):
+            _assert_contains_all(response, expected["collect"], case_id, "collect")
+        if expected.get("must_do"):
+            if "ask_fields_missing" in expected["must_do"] and expected.get("collect"):
                 _assert_contains_all(response, expected["collect"], case_id, "collect")
-            if expected.get("must_do"):
-                if "ask_fields_missing" in expected["must_do"] and expected.get("collect"):
-                    _assert_contains_all(response, expected["collect"], case_id, "collect")
