@@ -4976,6 +4976,10 @@ async def _handle_webhook_payload(
             )
             context = _get_conversation_context(conversation)
             current_goal = new_goal
+    if booking_context is not None:
+        booking_context = _get_conversation_context(conversation)
+        booking = _get_booking_context(booking_context)
+        booking_active = bool(booking.get("active"))
     intent_decomp_has_booking = "booking" in intent_decomp_set
     intent_decomp_info = intent_decomp_set & BOOKING_INFO_QUESTION_TYPES
     if intent_decomp_has_booking:
@@ -5232,6 +5236,8 @@ async def _handle_webhook_payload(
         consult_blocked = bool(booking_wants_flow or booking_active or booking_signal)
         if intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}:
             consult_blocked = True
+        if consult_intent and not (intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}):
+            consult_blocked = False
         if not consult_blocked:
             consult_decision = build_consult_reply(
                 message_text,
