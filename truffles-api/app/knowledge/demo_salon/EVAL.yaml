@@ -1301,14 +1301,14 @@ eval_cases:
     must_include:
     - 5 000
 - id: E101
-  user: Цена на мужскую стрижку?
+  user: Сколько стоит мужская стрижка?
   expected:
     action: reply
     intent: price_query
     must_include:
     - 3 000
 - id: E102
-  user: Сколько стоит детская стрижка?
+  user: Сколько стоит детская стрижка до 10 лет?
   expected:
     action: reply
     intent: price_query
@@ -1336,7 +1336,7 @@ eval_cases:
     must_include:
     - 2 000
 - id: E106
-  user: Цена на окрашивание корней?
+  user: Сколько стоит окрашивание корней?
   expected:
     action: reply
     intent: price_query
@@ -1350,7 +1350,7 @@ eval_cases:
     must_include:
     - 12 000
 - id: E108
-  user: Цена на окрашивание в один тон средняя длина?
+  user: Сколько стоит окрашивание в один тон средняя длина?
   expected:
     action: reply
     intent: price_query
@@ -1371,7 +1371,7 @@ eval_cases:
     must_include:
     - 15 000
 - id: E111
-  user: Цена на балаяж?
+  user: Сколько стоит балаяж?
   expected:
     action: reply
     intent: price_query
@@ -1413,7 +1413,7 @@ eval_cases:
     must_include:
     - 15 000
 - id: E117
-  user: Цена на кератин?
+  user: Сколько стоит кератин?
   expected:
     action: reply
     intent: price_query
@@ -1441,7 +1441,7 @@ eval_cases:
     must_include:
     - 2 500
 - id: E121
-  user: Цена на маникюр аппаратный?
+  user: Сколько стоит маникюр аппаратный?
   expected:
     action: reply
     intent: price_query
@@ -1462,7 +1462,7 @@ eval_cases:
     must_include:
     - 7 000
 - id: E124
-  user: Цена на укрепление ногтей?
+  user: Сколько стоит укрепление ногтей?
   expected:
     action: reply
     intent: price_query
@@ -1483,7 +1483,7 @@ eval_cases:
     must_include:
     - 4 500
 - id: E127
-  user: Цена на педикюр аппаратный?
+  user: Сколько стоит педикюр аппаратный?
   expected:
     action: reply
     intent: price_query
@@ -1504,7 +1504,7 @@ eval_cases:
     must_include:
     - 12 000
 - id: E130
-  user: Цена на наращивание полигелем?
+  user: Сколько стоит наращивание полигелем?
   expected:
     action: reply
     intent: price_query
@@ -1532,7 +1532,7 @@ eval_cases:
     must_include:
     - 2 000
 - id: E134
-  user: Цена на окрашивание бровей?
+  user: Сколько стоит окрашивание бровей?
   expected:
     action: reply
     intent: price_query
@@ -1553,7 +1553,7 @@ eval_cases:
     must_include:
     - 5 000
 - id: E137
-  user: Цена на ламинирование ресниц?
+  user: Сколько стоит ламинирование ресниц?
   expected:
     action: reply
     intent: price_query
