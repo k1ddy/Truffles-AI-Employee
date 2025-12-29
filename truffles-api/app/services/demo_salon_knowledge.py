@@ -980,6 +980,7 @@ def compose_multi_truth_reply(
         return None
     replies: list[str] = []
     seen: set[str] = set()
+    truth = load_yaml_truth()
     intent_kinds, service_query = _extract_intent_decomp(intent_decomp)
     intent_kinds = {kind for kind in intent_kinds if kind in {"hours", "pricing", "duration"}}
     if not intent_kinds and len(segments) < 2:
@@ -1066,7 +1067,13 @@ def compose_multi_truth_reply(
             if service_match and service_match.action == "match":
                 _add_reply(service_match.response)
             else:
-                _add_reply(format_reply_from_truth("service_clarify"))
+                fallback_reply = None
+                if isinstance(fallback_service, dict):
+                    fallback_reply = _format_service_reply(fallback_service, truth)
+                if fallback_reply:
+                    _add_reply(fallback_reply)
+                else:
+                    _add_reply(format_reply_from_truth("service_clarify"))
         if len(replies) >= 2:
             break
         if "duration" in kinds:
