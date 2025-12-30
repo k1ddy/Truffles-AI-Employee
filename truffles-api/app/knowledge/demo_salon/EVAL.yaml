@@ -1469,12 +1469,14 @@ eval_cases:
     must_include:
     - 7 000
 - id: E124
-  user: Сколько стоит укрепление ногтей?
+  user: Почем укрепление ногтей?
   expected:
     action: reply
-    intent: price_query
+    intent: duration_or_price_clarify
     must_include:
-    - 2 000
+    - цена
+    - длительность
+    - услуга
 - id: E125
   user: Сколько стоит снятие гель-лака?
   expected:
