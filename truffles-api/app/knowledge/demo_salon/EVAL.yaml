@@ -1537,12 +1537,14 @@ eval_cases:
     must_include:
     - 1 000
 - id: E133
-  user: Сколько стоит коррекция бровей?
+  user: Почем коррекция бровей?
   expected:
     action: reply
-    intent: price_query
+    intent: duration_or_price_clarify
     must_include:
-    - 2 000
+    - цена
+    - длительность
+    - услуга
 - id: E134
   user: Сколько стоит окрашивание бровей?
   expected:
@@ -1558,12 +1560,14 @@ eval_cases:
     must_include:
     - окрашивание корней
 - id: E136
-  user: Сколько стоит ламинирование бровей?
+  user: Почем ламинирование бровей?
   expected:
     action: reply
-    intent: price_query
+    intent: duration_or_price_clarify
     must_include:
-    - 5 000
+    - цена
+    - длительность
+    - услуга
 - id: E137
   user: Сколько стоит ламинирование ресниц?
   expected:
@@ -1572,19 +1576,23 @@ eval_cases:
     must_include:
     - 6 000
 - id: E138
-  user: Сколько стоит наращивание ресниц классика?
+  user: Почем наращивание ресниц классика?
   expected:
     action: reply
-    intent: price_query
+    intent: duration_or_price_clarify
     must_include:
-    - 8 000
+    - цена
+    - длительность
+    - услуга
 - id: E139
-  user: Сколько стоит наращивание ресниц 3D?
+  user: Почем наращивание ресниц 3D?
   expected:
     action: reply
-    intent: price_query
+    intent: duration_or_price_clarify
     must_include:
-    - 12 000
+    - цена
+    - длительность
+    - услуга
 - id: E140
   user: Посоветуйте уход после окрашивания
   expected:
