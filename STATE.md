@@ -39,6 +39,7 @@
 - Price clarify: уточнение по цене/длительности теперь только при price-сигнале без найденного price_item.
 - Service matching: сервисные ответы не перехватывают price/duration запросы (отдаются в price/duration ветки).
 - Multi-truth: pricing/duration теперь добавляются по явным сигналам, чтобы не зависеть от semantic_question_type/эмбеддингов.
+- Multi-truth: hours добавляются по _looks_like_hours_question; price_item может переопределить широкий service_query при более точном совпадении.
 - EVAL: кейсы с явной услугой и запросом цены обновлены на `price_query` (тон./полировка/ботокс/укрепление/брови/ресницы).
 - OOD: оффтоп теперь определяется через `domain_pack.ood_anchors` (in/out) с токен-матчингом; in-domain анкоры отменяют OOD.
 - Service questions: сильные “делаете/оказываете/предоставляете” → сервисный вопрос даже без токена услуги; “есть” требует токена.
