@@ -16,7 +16,7 @@
 
 ### Надёжность доставки (outbox/retry/dedup)
 - Status: OK
-- Evidence: `truffles-api/app/services/outbox_service.py`, `truffles-api/app/routers/webhook.py` (dedup), `truffles-api/app/services/chatflow_service.py` (msg_id + retries), `ops/migrations/012_add_outbox_messages.sql`, `ops/migrations/010_add_message_dedup.sql`
+- Evidence: `truffles-api/app/services/outbox_service.py`, `truffles-api/app/routers/webhook.py`, `truffles-api/app/services/chatflow_service.py`, `ops/migrations/012_add_outbox_messages.sql`, `ops/migrations/010_add_message_dedup.sql`
 - Факт: ACK‑first → outbox; retries + backoff; inbound dedup (Redis + DB); outbound idempotency `msg_id`.
 - Boundary: гарантия “at‑least‑once”, не “exactly once”.
 - Fix plan: добавить outbox status history/processing_started_at (для SLA decomposition).
@@ -25,7 +25,7 @@
 ### SLA ответов
 - Status: PARTIAL
 - Evidence: `STATE.md` (SLA замеры), `/admin/metrics` (outbox_latency_p50/p90)
-- Факт: последние зафиксированные значения p50/p90 в `STATE.md`; в проде есть метрики `/admin/metrics`.
+- Факт: последние зафиксированные значения в `STATE.md`; в проде есть метрики `/admin/metrics`.
 - Boundary: зависит от LLM/ChatFlow/Qdrant; LLM timeouts возможны.
 - Fix plan: регулярно фиксировать p50/p90 из `/admin/metrics` как “официальные цифры”.
 - Go‑to‑market impact: обещаем диапазон, а не “мгновенно”.
@@ -51,7 +51,7 @@
 
 ### Telegram ↔ WhatsApp связка
 - Status: PARTIAL
-- Evidence: `truffles-api/app/services/manager_message_service.py` (`find_conversation_by_telegram`), `truffles-api/app/routers/telegram_webhook.py`
+- Evidence: `truffles-api/app/services/manager_message_service.py`, `truffles-api/app/routers/telegram_webhook.py`
 - Факт: маршрутизация идёт по `telegram_chat_id` + `message_thread_id` (topic).
 - Boundary: нет e2e теста на связку; возможны edge‑cases без topic_id.
 - Fix plan: добавить смоук‑тест на связку + health‑check.
@@ -59,10 +59,10 @@
 
 ### Запрет перенос/отмена
 - Status: PARTIAL
-- Evidence: `truffles-api/app/services/demo_salon_knowledge.py` (policy_reschedule/cancel), `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
+- Evidence: `truffles-api/app/services/demo_salon_knowledge.py`, `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
 - Факт: policy‑gate для reschedule/cancel реализован.
-- Boundary: это правило пока на уровне policy gate + demo‑pack.
-- Fix plan: закрепить в клиентских policy + авто‑тесты на каждом клиенте.
+- Boundary: правило закреплено на уровне demo‑pack.
+- Fix plan: закрепить в policy клиента + автотесты на каждом клиенте.
 
 ---
 
@@ -71,12 +71,12 @@
 ### Truth‑first / policy‑gate
 - Status: OK (demo_salon)
 - Evidence: `truffles-api/app/services/demo_salon_knowledge.py`, `truffles-api/app/routers/webhook.py`, `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
-- Факт: факты из Client Pack; risk‑темы эскалируются; low_confidence → clarify.
+- Факт: факты из Client Pack; риск‑темы эскалируются; low_confidence → clarify.
 - Boundary: truth‑first гарантируется только при заполненном Client Pack.
 
 ### OOD / smalltalk
 - Status: PARTIAL
-- Evidence: `truffles-api/app/services/intent_service.py` (domain router), `truffles-api/app/knowledge/demo_salon/INTENTS_PHRASES_DEMO_SALON.yaml`
+- Evidence: `truffles-api/app/services/intent_service.py`, `truffles-api/app/knowledge/demo_salon/INTENTS_PHRASES_DEMO_SALON.yaml`
 - Факт: OOD якоря есть, smalltalk ограничен.
 - Boundary: пороги требуют калибровки, возможны false‑positives.
 - Fix plan: калибровка anchors_out по backlog + тест‑батарее.
@@ -85,7 +85,7 @@
 - Status: PARTIAL
 - Evidence: `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`, `ops/sync_client.py`, `truffles-api/app/services/knowledge_service.py`
 - Факт: факты живут в Client Pack + Qdrant; sync через `ops/sync_client.py`.
-- Boundary: версионирования паков нет; “какие факты использованы” хранится только через rag_scores и decision_trace.
+- Boundary: версионирования паков нет; “какие факты использованы” хранится только через rag_scores/decision_trace.
 - Fix plan: добавить версию client_pack и лог использованных фактов.
 
 ---
@@ -94,16 +94,16 @@
 
 ### Изоляция tenant
 - Status: PARTIAL
-- Evidence: `truffles-api/app/services/knowledge_service.py` (filter by client_slug), `truffles-api/app/services/demo_salon_knowledge.py`, `truffles-api/app/routers/webhook.py` (client_slug routing), `SPECS/MULTI_TENANT.md`
-- Факт: фильтрация по client_slug/client_id в RAG и DB.
+- Evidence: `truffles-api/app/services/knowledge_service.py`, `truffles-api/app/routers/webhook.py`, `SPECS/MULTI_TENANT.md`
+- Факт: фильтрация по client_slug/client_id в RAG и routing.
 - Boundary: нет формального теста на cross‑tenant leakage.
 - Fix plan: добавить тест‑контракт “tenant isolation”.
 
 ### Секреты и токены
 - Status: PARTIAL
-- Evidence: `TECH.md` (env), `.github/workflows/ci.yml` (gitleaks), `SPECS/INFRASTRUCTURE.md`
+- Evidence: `TECH.md`, `.github/workflows/ci.yml` (gitleaks), `SPECS/INFRASTRUCTURE.md`
 - Факт: секреты ожидаются в `.env`/GitHub Secrets; gitleaks включён в CI.
-- Boundary: требуется регулярно проверять отсутствие секретов в git‑истории и логах.
+- Boundary: нужна регулярная проверка истории/логов.
 - Fix plan: добавить “secret audit” в операционный чеклист.
 
 ---
@@ -114,15 +114,15 @@
 - Status: PARTIAL
 - Evidence: `TECH.md`, `/home/zhan/restart_api.sh`, `.github/workflows/ci.yml`
 - Факт: GHCR build/push + restart через `IMAGE_NAME`/`PULL_IMAGE=1`.
-- Boundary: локальная сборка всё ещё возможна (fallback), это риск drift.
+- Boundary: локальная сборка всё ещё возможна (risk drift).
 - Fix plan: запретить локальный build на проде (policy).
 
 ### Мониторинг и алерты
 - Status: PARTIAL
 - Evidence: `truffles-api/app/services/alert_service.py`, `/admin/health`, `/admin/metrics`
-- Факт: есть Telegram alerts и админ‑эндпойнты.
+- Факт: Telegram alerts и админ‑эндпойнты есть.
 - Boundary: нет единой панели/алерт‑политики по SLA/LLM/ChatFlow.
-- Fix plan: выделить 1 “pilot dashboard” (metrics + health + outbox).
+- Fix plan: выделить один “pilot dashboard”.
 
 ### Бэкапы и аудит
 - Status: PARTIAL
@@ -134,31 +134,26 @@
 
 ## Phase‑0 Definition of Done (перед первым платным клиентом)
 - LAW‑темы всегда эскалируются (тесты + live‑check).
-- Truth‑first по топ‑вопросам (часов, адрес, услуги, цены, запись).
+- Truth‑first по топ‑вопросам (часы, адрес, услуги, цены, запись).
 - Outbox + retries работают; inbound dedup включён.
 - /admin/version соответствует последнему коммиту.
-- Battery v1 (250 кейсов) проходит в CI.
+- Core‑50 EVAL проходит в CI (extended — nightly).
 - 5‑минутный smoke‑run успешен (см. ниже).
 
 ---
 
 ## Smoke commands (5–10 команд)
 ```bash
-# 1) Версия и здоровье
 curl -fsS http://localhost:8000/admin/version
 curl -fsS http://localhost:8000/admin/health
 
-# 2) Метрики SLA/quality
 curl -fsS -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" "http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=YYYY-MM-DD"
 
-# 3) Outbox health
 docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "SELECT status, COUNT(*) FROM outbox_messages GROUP BY 1;"
 
-# 4) Decision trace/meta sample
 docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "SELECT id, context->'decision_trace' FROM conversations ORDER BY last_message_at DESC NULLS LAST LIMIT 1;"
 docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "SELECT content, metadata->'decision_meta' FROM messages ORDER BY created_at DESC LIMIT 3;"
 
-# 5) Tests (inside container)
 docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q
 docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q
 ```

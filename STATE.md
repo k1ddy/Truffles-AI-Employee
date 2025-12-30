@@ -25,6 +25,7 @@
 - Деплой API: CI build/push → на проде `IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash /home/zhan/restart_api.sh` (локальная сборка — fallback; см. `TECH.md`).
 - Инфра compose: `/home/zhan/infrastructure/docker-compose.yml` + `/home/zhan/infrastructure/docker-compose.truffles.yml`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 - Новые документы: `docs/TECH_STATUS.md` и `docs/SELLING_TRUTHS.md` (что можно обещать и чем доказывать).
+- Новые документы: `docs/TECH_STATUS.md` и `docs/SELLING_TRUTHS.md` (что можно обещать и чем доказывать).
 
 ### КЛЮЧЕВЫЕ МОЗГИ / РИСКИ / ПРОВЕРКИ (быстрый чек)
 - Мозги: `outbox → _handle_webhook_payload → pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → service matcher (услуги/цены) → LLM-first → truth gate fallback → low-confidence уточнение/эскалация`.
@@ -35,6 +36,7 @@
 - Проверки качества: `EVAL.yaml` + `pytest truffles-api/tests/test_<client>_eval.py` + sync KB (`ops/sync_client.py`).
 - Battery v0: добавлены 100 кейсов в `truffles-api/app/knowledge/demo_salon/EVAL.yaml` + 25 manual в `truffles-api/tests/test_cases.json` (без изменения логики).
 - Battery v1: добавлены +150 кейсов (E200–E349, всего 250) + 15 manual (TC069–TC083) без изменения логики.
+- EVAL CI: `test_demo_salon_eval.py` теперь в CI гоняет Core‑50 (env `CI=true`), полный набор — только вручную (`EVAL_TIER=all`).
 - Data fix: добавили `Стрижка машинкой` в `services_catalog.price_items`, чтобы прайс-ответы включали 2 000 ₸.
 - Data fix: добавили алиасы "чёлку/челку" в `services_catalog`, примеры "Цена на челку?"/"Сколько стоит?"/"Почем?"/"Подравнивание кончиков сколько стоит?" в `typical_questions.pricing`, и сервисы под прайс‑позиции (покрытие/укрепление/снятие/наращивание).
 - Multi-truth: pricing/duration теперь добавляются по явным сигналам, чтобы не зависеть от semantic_question_type/эмбеддингов.

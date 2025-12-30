@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -7,6 +8,59 @@ from app.routers import webhook as webhook_router
 from app.services.demo_salon_knowledge import get_demo_salon_decision
 
 EVAL_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_salon" / "EVAL.yaml"
+EVAL_TIER = os.environ.get("EVAL_TIER", "").strip().lower()
+CORE_EVAL_IDS = {
+    "E001",
+    "E002",
+    "E003",
+    "E003a",
+    "E003b",
+    "E003c",
+    "E003f",
+    "E003g",
+    "E003h",
+    "E003j",
+    "E003k",
+    "E004",
+    "E005",
+    "E006",
+    "E007",
+    "E008",
+    "E009",
+    "E010a",
+    "E010b",
+    "E010d",
+    "E010e",
+    "E010f",
+    "E011",
+    "E012",
+    "E013",
+    "E014",
+    "E014c",
+    "E015",
+    "E016",
+    "E017",
+    "E018",
+    "E019",
+    "E020",
+    "E021",
+    "E022",
+    "E023",
+    "E026",
+    "E028",
+    "E031",
+    "E032",
+    "E033",
+    "E034",
+    "E035",
+    "E037",
+    "E038",
+    "E039",
+    "E040",
+    "E047",
+    "E057",
+    "E060",
+}
 
 
 def _normalize(text: str) -> str:
@@ -48,9 +102,20 @@ def _assert_not_contains(response: str, items: list[str], case_id: str) -> None:
         assert _normalize(item) not in normalized, f"{case_id}: must_not contains '{item}'"
 
 
+def _filter_cases(cases: list[dict]) -> list[dict]:
+    if EVAL_TIER in {"all", "full"}:
+        return cases
+    if EVAL_TIER in {"core", "ci"} or (not EVAL_TIER and os.environ.get("CI")):
+        core_cases = [case for case in cases if case.get("id") in CORE_EVAL_IDS]
+        assert core_cases, "Core eval set is empty"
+        return core_cases
+    return cases
+
+
 def test_demo_salon_eval_cases():
     data = yaml.safe_load(EVAL_PATH.read_text(encoding="utf-8"))
     cases = data.get("eval_cases", []) if isinstance(data, dict) else []
+    cases = _filter_cases(cases)
 
     for case in cases:
         case_id = case.get("id", "<unknown>")

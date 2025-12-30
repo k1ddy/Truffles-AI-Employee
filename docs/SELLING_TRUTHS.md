@@ -5,12 +5,12 @@
 ---
 
 ## 1) “Бот не выдумывает факты”
-- Proof: truth‑first + policy‑gate в `truffles-api/app/services/demo_salon_knowledge.py`, `truffles-api/app/routers/webhook.py`; EVAL тесты `truffles-api/app/knowledge/demo_salon/EVAL.yaml`.
+- Proof: truth‑first + policy‑gate в `truffles-api/app/services/demo_salon_knowledge.py`, `truffles-api/app/routers/webhook.py`; тесты в `truffles-api/app/knowledge/demo_salon/EVAL.yaml`.
 - Boundary: если факт отсутствует в Client Pack → уточнение/эскалация.
 
 ## 2) “Оплата/медицина/жалобы — только админ”
-- Proof: policy‑gate (payment/medical/complaint) в `demo_salon_knowledge.py`, эскалация в webhook; EVAL кейсы в `EVAL.yaml`.
-- Boundary: это правило работает только при корректных policy‑настройках клиента.
+- Proof: policy‑gate (payment/medical/complaint) в `demo_salon_knowledge.py`, эскалация в webhook; EVAL кейсы.
+- Boundary: правило работает при корректных policy‑настройках клиента.
 
 ## 3) “Заявки уходят менеджеру в Telegram”
 - Proof: `handovers` + Telegram topics, `truffles-api/app/services/escalation_service.py`, `truffles-api/app/routers/telegram_webhook.py`.
