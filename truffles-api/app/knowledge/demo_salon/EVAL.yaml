@@ -1571,12 +1571,14 @@ eval_cases:
     - длительность
     - услуга
 - id: E137
-  user: Сколько стоит ламинирование ресниц?
+  user: Лами ресниц почем?
   expected:
     action: reply
-    intent: price_query
+    intent: duration_or_price_clarify
     must_include:
-    - 6 000
+    - цена
+    - длительность
+    - услуга
 - id: E138
   user: Почем наращивание ресниц классика?
   expected:
