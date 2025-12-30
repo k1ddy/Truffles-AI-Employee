@@ -1571,14 +1571,14 @@ eval_cases:
     - длительность
     - услуга
 - id: E137
-  user: Лами ресниц почем?
+  user: Сколько стоит лами ресниц?
   expected:
     action: reply
-    intent: duration_or_price_clarify
-    must_include:
-    - цена
-    - длительность
-    - услуга
+    intent: price_query
+    must_include_any:
+    - 6 000
+    - "6000"
+    - лами
 - id: E138
   user: Почем наращивание ресниц классика?
   expected:
