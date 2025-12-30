@@ -24,6 +24,7 @@
 - Outbound guard: при `TEST_MODE=1` отправка разрешена только для `OUTBOUND_ALLOWLIST_JIDS`, иначе SKIP + warn (возвращает `True` без ретраев).
 - Деплой API: CI build/push → на проде `IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash /home/zhan/restart_api.sh` (локальная сборка — fallback; см. `TECH.md`).
 - Инфра compose: `/home/zhan/infrastructure/docker-compose.yml` + `/home/zhan/infrastructure/docker-compose.truffles.yml`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
+- Новые документы: `docs/TECH_STATUS.md` и `docs/SELLING_TRUTHS.md` (что можно обещать и чем доказывать).
 
 ### КЛЮЧЕВЫЕ МОЗГИ / РИСКИ / ПРОВЕРКИ (быстрый чек)
 - Мозги: `outbox → _handle_webhook_payload → pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → service matcher (услуги/цены) → LLM-first → truth gate fallback → low-confidence уточнение/эскалация`.
@@ -35,7 +36,7 @@
 - Battery v0: добавлены 100 кейсов в `truffles-api/app/knowledge/demo_salon/EVAL.yaml` + 25 manual в `truffles-api/tests/test_cases.json` (без изменения логики).
 - Battery v1: добавлены +150 кейсов (E200–E349, всего 250) + 15 manual (TC069–TC083) без изменения логики.
 - Data fix: добавили `Стрижка машинкой` в `services_catalog.price_items`, чтобы прайс-ответы включали 2 000 ₸.
-- Data fix: добавили алиасы "чёлку/челку" в `services_catalog` и примеры "Цена на челку?"/"Сколько стоит?" в `typical_questions.pricing`.
+- Data fix: добавили алиасы "чёлку/челку" в `services_catalog`, примеры "Цена на челку?"/"Сколько стоит?"/"Почем?"/"Подравнивание кончиков сколько стоит?" в `typical_questions.pricing`, и сервисы под прайс‑позиции (покрытие/укрепление/снятие/наращивание).
 - Multi-truth: pricing/duration теперь добавляются по явным сигналам, чтобы не зависеть от semantic_question_type/эмбеддингов.
 - Multi-truth: hours добавляются по _looks_like_hours_question; price_item может переопределить широкий service_query при более точном совпадении.
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.

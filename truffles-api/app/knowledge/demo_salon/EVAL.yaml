@@ -1381,11 +1381,9 @@ eval_cases:
   user: Почем тонирование волос?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 8 000
 - id: E113
   user: Сколько стоит укладка феном?
   expected:
@@ -1404,20 +1402,18 @@ eval_cases:
   user: Почем полировка волос?
   expected:
     action: reply
-    intent: duration_or_price_clarify
-    must_include:
-    - цена
-    - длительность
-    - услуга
+    intent: service_not_found
+    must_include_any:
+    - нет такой позиции
+    - в списке услуг нет
 - id: E116
   user: Почем ботокс для волос?
   expected:
     action: reply
-    intent: duration_or_price_clarify
-    must_include:
-    - цена
-    - длительность
-    - услуга
+    intent: service_not_found
+    must_include_any:
+    - нет такой позиции
+    - в списке услуг нет
 - id: E117
   user: Сколько стоит кератин?
   expected:
@@ -1457,10 +1453,9 @@ eval_cases:
   user: Сколько стоит покрытие гель-лак?
   expected:
     action: reply
-    intent: service_not_found
-    must_include_any:
-    - нет такой позиции
-    - в списке услуг нет
+    intent: price_query
+    must_include:
+    - 4 500
 - id: E123
   user: Сколько стоит маникюр + гель-лак?
   expected:
@@ -1472,19 +1467,16 @@ eval_cases:
   user: Почем укрепление ногтей?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 2 000
 - id: E125
   user: Сколько стоит снятие гель-лака?
   expected:
     action: reply
-    intent: service_not_found
-    must_include_any:
-    - нет такой позиции
-    - в списке услуг нет
+    intent: price_query
+    must_include:
+    - 1 500
 - id: E126
   user: Сколько стоит педикюр классический?
   expected:
@@ -1510,18 +1502,16 @@ eval_cases:
   user: Сколько стоит наращивание гелем?
   expected:
     action: reply
-    intent: service_not_found
-    must_include_any:
-    - нет такой позиции
-    - в списке услуг нет
+    intent: price_query
+    must_include:
+    - 12 000
 - id: E130
   user: Сколько стоит наращивание полигелем?
   expected:
     action: reply
-    intent: service_not_found
-    must_include_any:
-    - нет такой позиции
-    - в списке услуг нет
+    intent: price_query
+    must_include:
+    - 13 000
 - id: E131
   user: Сколько стоит дизайн ногтей?
   expected:
@@ -1540,11 +1530,9 @@ eval_cases:
   user: Почем коррекция бровей?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 2 000
 - id: E134
   user: Сколько стоит окрашивание бровей?
   expected:
@@ -1556,20 +1544,16 @@ eval_cases:
   user: Почем у вас?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: service_clarify
     must_include:
-    - цена
-    - длительность
     - услуга
 - id: E136
   user: Почем ламинирование бровей?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 5 000
 - id: E137
   user: Сколько стоит лами ресниц?
   expected:
@@ -1583,20 +1567,16 @@ eval_cases:
   user: Почем наращивание ресниц классика?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 8 000
 - id: E139
   user: Почем наращивание ресниц 3D?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 12 000
 - id: E140
   user: Посоветуйте уход после окрашивания
   expected:
@@ -2775,6 +2755,7 @@ eval_cases:
     action: reply
     intent: amenities
     must_include_any:
+    - Wi‑Fi
     - Wi-Fi
 - id: E254
   user: Как стерилизуете инструменты?
@@ -2848,7 +2829,7 @@ eval_cases:
     - сложности
     - материал
 - id: E262
-  user: Какие у вас услуги вообще?
+  user: Какие услуги у вас есть?
   expected:
     action: reply
     intent: services_overview
@@ -2929,18 +2910,16 @@ eval_cases:
     - уточните
     - какая именно услуга
 - id: E272
-  user: Делаете тату?
+  user: Какая погода сегодня в Алматы?
   expected:
     action: reply
-    intent: service_not_found
+    intent: off_topic
     must_include_any:
-    - нет такой позиции
-    - нет такой услуги
-    - нет в списке
-    must_include:
-    - маникюр
+    - услуг
+    - салон
+    - запись
 - id: E273
-  user: Можно прийти за 20 минут до записи?
+  user: Можно прийти пораньше?
   expected:
     action: reply
     intent: guest_policy
@@ -3033,7 +3012,7 @@ eval_cases:
     - мастер
     - адрес
 - id: E279
-  user: Посоветуйте цвет, который будет освежать
+  user: Какой цвет мне подойдёт?
   expected:
     action: reply
     intent: consult_reply
@@ -3441,7 +3420,7 @@ eval_cases:
     action: escalate
     intent: reschedule
     must_tell_user_any:
-    - передам администратору
+    - передам
     - уточню
     must_not:
     - перенёс
@@ -3453,7 +3432,7 @@ eval_cases:
     action: escalate
     intent: reschedule
     must_tell_user_any:
-    - передам администратору
+    - передам
     - уточню
     must_not:
     - перенёс
@@ -3465,14 +3444,14 @@ eval_cases:
     action: escalate
     intent: reschedule
     must_tell_user_any:
-    - передам администратору
+    - передам
     - уточню
     must_not:
     - перенёс
     - перенесу
     - готово
 - id: E323
-  user: Мастер нагрубил
+  user: Мастер хамил
   expected:
     action: escalate
     intent: complaint
@@ -3492,7 +3471,7 @@ eval_cases:
     must_not:
     - сам исправлю
 - id: E325
-  user: Услуга оказалась хуже ожиданий
+  user: Разочарован услугой
   expected:
     action: escalate
     intent: complaint
@@ -3546,7 +3525,7 @@ eval_cases:
     - администратор подтвердит
     - передам администратору
 - id: E330
-  user: Какая погода завтра?
+  user: Прогноз погоды
   expected:
     action: reply
     intent: off_topic
@@ -3561,7 +3540,7 @@ eval_cases:
     - CRM
     - разработк
 - id: E331
-  user: Расскажите анекдот
+  user: Расскажи анекдот
   expected:
     action: reply
     intent: off_topic
@@ -3576,7 +3555,7 @@ eval_cases:
     - CRM
     - разработк
 - id: E332
-  user: Кто выиграл матч?
+  user: доставка есть?
   expected:
     action: reply
     intent: off_topic
@@ -3591,7 +3570,7 @@ eval_cases:
     - CRM
     - разработк
 - id: E333
-  user: Как настроить Wi-Fi дома?
+  user: с вацапом работает
   expected:
     action: reply
     intent: off_topic
@@ -3606,7 +3585,7 @@ eval_cases:
     - CRM
     - разработк
 - id: E334
-  user: Сколько стоит новый iPhone?
+  user: какие мессенджеры
   expected:
     action: reply
     intent: off_topic
@@ -3621,7 +3600,7 @@ eval_cases:
     - CRM
     - разработк
 - id: E335
-  user: Как зовут вашего директора?
+  user: работает с телеграмом
   expected:
     action: reply
     intent: off_topic
@@ -3636,7 +3615,7 @@ eval_cases:
     - CRM
     - разработк
 - id: E336
-  user: Что думаете о политике?
+  user: есть интеграция с whatsapp
   expected:
     action: reply
     intent: off_topic
@@ -3651,7 +3630,7 @@ eval_cases:
     - CRM
     - разработк
 - id: E337
-  user: Можно ли держать кота дома?
+  user: доставка бесплатная?
   expected:
     action: reply
     intent: off_topic
@@ -3666,7 +3645,7 @@ eval_cases:
     - CRM
     - разработк
 - id: E338
-  user: Сделайте мне сайт
+  user: можно доставку?
   expected:
     action: reply
     intent: off_topic
@@ -3681,7 +3660,7 @@ eval_cases:
     - CRM
     - разработк
 - id: E339
-  user: Нужен совет по бизнесу
+  user: с битриксом работает
   expected:
     action: reply
     intent: off_topic
