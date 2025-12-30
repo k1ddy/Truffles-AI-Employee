@@ -5826,6 +5826,55 @@ async def _handle_webhook_payload(
     if expected_reply_invalid_choice:
         semantic_match = semantic_service_match(message_text, payload.client_slug)
         if not semantic_match:
+            clarify_intent = current_goal or "info"
+            context = _get_conversation_context(conversation)
+            context_manager = _get_context_manager(context)
+            if _should_escalate_for_clarify(context_manager, clarify_intent):
+                clarify_count, _ = _get_clarify_attempt_state(context_manager, clarify_intent)
+                _record_context_manager_decision(
+                    conversation,
+                    saved_message,
+                    decision="clarify_limit",
+                    updates={
+                        "clarify_attempt": {"intent": clarify_intent, "count": clarify_count},
+                        "clarify_reason": "invalid_choice",
+                        "clarify_limit": True,
+                    },
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "expected_reply_type": expected_reply_type,
+                            "expected_reply_matched": False,
+                            "expected_reply_reason": "invalid_choice",
+                        },
+                    )
+                return _handle_clarify_limit_escalation(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message_text=message_text,
+                    saved_message=saved_message,
+                    source="question_contract",
+                    allow_handover=routing.get("allow_handover_create", False),
+                    send_response=_send_response,
+                )
+            _register_clarify_attempt(
+                conversation=conversation,
+                saved_message=saved_message,
+                intent=clarify_intent,
+                now=now,
+                reason="invalid_choice",
+            )
+            context = _get_conversation_context(conversation)
+            context = _set_expected_reply_context(
+                conversation=conversation,
+                saved_message=saved_message,
+                context=context,
+                expected_reply_type=EXPECTED_REPLY_SERVICE,
+                reason="invalid_choice",
+            )
             bot_response = MSG_EXPECTED_SERVICE_OFF_TOPIC
             _reset_low_confidence_retry(conversation)
             _record_decision_trace(
