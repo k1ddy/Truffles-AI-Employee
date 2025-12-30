@@ -1211,9 +1211,17 @@ def compose_multi_truth_reply(
     truth = load_yaml_truth()
     intent_kinds, service_query = _extract_intent_decomp(intent_decomp)
     intent_kinds = {kind for kind in intent_kinds if kind in {"hours", "pricing", "duration"}}
-    if not intent_kinds and len(segments) < 2:
-        return None
     normalized_message = _normalize_text(message)
+    if not intent_kinds and len(segments) < 2:
+        signal_count = 0
+        if _looks_like_hours_question(normalized_message):
+            signal_count += 1
+        if _has_price_signal(normalized_message, message):
+            signal_count += 1
+        if _has_duration_signal(normalized_message, message):
+            signal_count += 1
+        if signal_count < 2:
+            return None
     if intent_kinds:
         if "hours" in intent_kinds:
             hours_like = any(_looks_like_hours_question(_normalize_text(seg)) for seg in segments)

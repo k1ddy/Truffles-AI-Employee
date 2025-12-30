@@ -42,6 +42,7 @@
 - Data fix: добавили алиасы "чёлку/челку" в `services_catalog`, примеры "Цена на челку?"/"Сколько стоит?"/"Почем?"/"Подравнивание кончиков сколько стоит?" в `typical_questions.pricing`, и сервисы под прайс‑позиции (покрытие/укрепление/снятие/наращивание).
 - Multi-truth: pricing/duration теперь добавляются по явным сигналам, чтобы не зависеть от semantic_question_type/эмбеддингов.
 - Multi-truth: hours добавляются по _looks_like_hours_question; price_item может переопределить широкий service_query при более точном совпадении.
+- Multi-truth: single-сегмент (без пунктуации) с 2+ сигналами (hours/price/duration) даёт детерминированный ответ.
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
 - Детальный бриф салона заполнен эталоном (фейковые данные): `Business/Sales/Бриф_клиента.md`.
