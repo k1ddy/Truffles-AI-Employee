@@ -671,6 +671,126 @@
         "expected": "Эскалация, запрос имени/услуги/контактного номера",
         "automation": null,
         "status": null
+      },
+      {
+        "id": "TC069",
+        "name": "Consult: aftercolor care",
+        "input": "После окрашивания волосы сухие, что делать?",
+        "expected": "Консультативный ответ без цен/наличия",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC070",
+        "name": "Consult: nails care",
+        "input": "Ногти слоятся, нужен уход",
+        "expected": "Консультативный ответ без цен/наличия",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC071",
+        "name": "Consult: style reference",
+        "input": "Хочу как на фото, посоветуйте",
+        "expected": "Консультативный ответ + 1–2 вопроса",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC072",
+        "name": "Booking + info interrupt",
+        "input": "Запишите на маникюр, сколько длится?",
+        "expected": "Сначала длительность, затем продолжение записи",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC073",
+        "name": "Payment method",
+        "input": "Можно оплатить Kaspi?",
+        "expected": "Эскалация по оплате",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC074",
+        "name": "Medical allergy",
+        "input": "Аллергия на краску",
+        "expected": "Эскалация медицинская",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC075",
+        "name": "Complaint",
+        "input": "Не понравился результат",
+        "expected": "Эскалация жалоба",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC076",
+        "name": "Reschedule",
+        "input": "Перенести запись",
+        "expected": "Эскалация переноса",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC077",
+        "name": "Cancel",
+        "input": "Отменить запись",
+        "expected": "Эскалация отмены",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC078",
+        "name": "Multi-intent: hours + price",
+        "input": "Во сколько открыты и сколько стоит педикюр?",
+        "expected": "Ответ: часы + цена",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC079",
+        "name": "Address",
+        "input": "Где находитесь?",
+        "expected": "Адрес салона",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC080",
+        "name": "OOD weather",
+        "input": "Какая погода?",
+        "expected": "OOD ответ",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC081",
+        "name": "Service not found",
+        "input": "Делаете тату?",
+        "expected": "Нет такой услуги + предложения",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC082",
+        "name": "Same-day booking",
+        "input": "Есть окно сегодня?",
+        "expected": "Эскалация + запрос услуги/времени",
+        "automation": null,
+        "status": null
+      },
+      {
+        "id": "TC083",
+        "name": "Aftercare gel-lac",
+        "input": "Как ухаживать за гель-лаком?",
+        "expected": "Инструкции по уходу",
+        "automation": null,
+        "status": null
       }
     ]
   },
