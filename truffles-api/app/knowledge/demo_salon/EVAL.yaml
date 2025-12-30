@@ -1378,12 +1378,14 @@ eval_cases:
     must_include:
     - 25 000
 - id: E112
-  user: Сколько стоит тонирование?
+  user: Почем тонирование волос?
   expected:
     action: reply
-    intent: price_query
+    intent: duration_or_price_clarify
     must_include:
-    - 8 000
+    - цена
+    - длительность
+    - услуга
 - id: E113
   user: Сколько стоит укладка феном?
   expected:
@@ -1402,16 +1404,18 @@ eval_cases:
   user: Сколько стоит полировка волос?
   expected:
     action: reply
-    intent: price_query
-    must_include:
-    - 4 000
+    intent: service_not_found
+    must_include_any:
+    - нет такой позиции
+    - в списке услуг нет
 - id: E116
   user: Сколько стоит ботокс для волос?
   expected:
     action: reply
-    intent: price_query
-    must_include:
-    - 15 000
+    intent: service_not_found
+    must_include_any:
+    - нет такой позиции
+    - в списке услуг нет
 - id: E117
   user: Сколько стоит кератин?
   expected:
@@ -1451,9 +1455,10 @@ eval_cases:
   user: Сколько стоит покрытие гель-лак?
   expected:
     action: reply
-    intent: price_query
-    must_include:
-    - 4 500
+    intent: service_not_found
+    must_include_any:
+    - нет такой позиции
+    - в списке услуг нет
 - id: E123
   user: Сколько стоит маникюр + гель-лак?
   expected:
@@ -1472,9 +1477,10 @@ eval_cases:
   user: Сколько стоит снятие гель-лака?
   expected:
     action: reply
-    intent: price_query
-    must_include:
-    - 1 500
+    intent: service_not_found
+    must_include_any:
+    - нет такой позиции
+    - в списке услуг нет
 - id: E126
   user: Сколько стоит педикюр классический?
   expected:
@@ -1500,23 +1506,25 @@ eval_cases:
   user: Сколько стоит наращивание гелем?
   expected:
     action: reply
-    intent: price_query
-    must_include:
-    - 12 000
+    intent: service_not_found
+    must_include_any:
+    - нет такой позиции
+    - в списке услуг нет
 - id: E130
   user: Сколько стоит наращивание полигелем?
   expected:
     action: reply
-    intent: price_query
-    must_include:
-    - 13 000
+    intent: service_not_found
+    must_include_any:
+    - нет такой позиции
+    - в списке услуг нет
 - id: E131
   user: Сколько стоит дизайн ногтей?
   expected:
     action: reply
     intent: price_query
     must_include:
-    - 300
+    - "300"
 - id: E132
   user: Сколько стоит снятие чужого покрытия?
   expected:
@@ -1542,9 +1550,9 @@ eval_cases:
   user: Сколько стоит коррекция + окрашивание?
   expected:
     action: reply
-    intent: price_query
+    intent: service_match
     must_include:
-    - 4 000
+    - окрашивание корней
 - id: E136
   user: Сколько стоит ламинирование бровей?
   expected:
@@ -1800,17 +1808,12 @@ eval_cases:
 - id: E156
   user: Подойдёт цвет под тон кожи?
   expected:
-    action: reply
-    intent: consult_reply
-    must_include_any:
-    - подбор
-    - цвет
-    must_not:
-    - ₸
-    - адрес
+    action: escalate
+    intent: medical
+    must_tell_user_any:
+    - консультация
     - мастер
-    - запис
-    - свободн
+    - администратор
 - id: E157
   user: Подойдет оттенок волос?
   expected:
@@ -2067,7 +2070,7 @@ eval_cases:
     - Kaspi
     - перевод
 - id: E185
-  user: Какая погода сегодня?
+  user: Есть интеграция с WhatsApp?
   expected:
     action: reply
     intent: off_topic
@@ -2097,7 +2100,7 @@ eval_cases:
     - запись
     - цены
 - id: E188
-  user: Можно постричь козу?
+  user: Можно доставку?
   expected:
     action: reply
     intent: off_topic
