@@ -2679,6 +2679,115 @@ def test_expected_reply_type_off_topic_keeps_contract():
     assert meta.get("expected_reply_reason") == "off_topic"
 
 
+def test_expected_reply_type_invalid_choice_keeps_contract():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_SERVICE,
+            "intent_queue": ["location"],
+        },
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="проституция",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-expected-invalid-1",
+                timestamp=1234567896,
+            ),
+        ),
+    )
+
+    intent_decomp = {
+        "multi_intent": False,
+        "primary_intent": "other",
+        "secondary_intents": [],
+        "intents": ["other"],
+        "service_query": "",
+        "consult_intent": False,
+        "consult_topic": "",
+        "consult_question": "",
+    }
+
+    domain_result = (DomainIntent.UNKNOWN, 0.0, 0.0, {"out_hits": 0, "strict_in_hits": 0})
+
+    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.routers.webhook.semantic_service_match", return_value=None
+    ), patch(
+        "app.routers.webhook._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._extract_service_hint", return_value=None
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert webhook_router.MSG_EXPECTED_SERVICE_OFF_TOPIC in response.bot_response
+    assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
+    assert conversation.context.get("intent_queue") == ["location"]
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
+    assert meta.get("expected_reply_matched") is False
+    assert meta.get("expected_reply_reason") == "invalid_choice"
+
+
 def test_multi_truth_reply_handles_hours_and_service_without_booking():
     saved_message_first = Mock()
     saved_message_first.message_metadata = {}

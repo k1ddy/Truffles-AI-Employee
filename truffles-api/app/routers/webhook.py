@@ -5814,6 +5814,61 @@ async def _handle_webhook_payload(
             bot_response=bot_response,
         )
 
+    in_domain_signal = bool(int(early_domain_meta.get("strict_in_hits") or 0) > 0)
+    if early_domain_intent == DomainIntent.IN_DOMAIN:
+        in_domain_signal = True
+    expected_reply_invalid_choice = (
+        expected_reply_type == EXPECTED_REPLY_SERVICE
+        and expected_reply_matched is False
+        and message_text
+        and not in_domain_signal
+    )
+    if expected_reply_invalid_choice:
+        semantic_match = semantic_service_match(message_text, payload.client_slug)
+        if not semantic_match:
+            bot_response = MSG_EXPECTED_SERVICE_OFF_TOPIC
+            _reset_low_confidence_retry(conversation)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "question_contract",
+                    "decision": "invalid_choice",
+                    "state": conversation.state,
+                    "expected_reply_type": expected_reply_type,
+                    "expected_reply_reason": "invalid_choice",
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="reply",
+                intent="service_clarify",
+                source="question_contract",
+                fast_intent=False,
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "expected_reply_type": expected_reply_type,
+                        "expected_reply_matched": False,
+                        "expected_reply_reason": "invalid_choice",
+                    },
+                )
+            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+            sent = _send_response(bot_response)
+            result_message = (
+                "Expected reply invalid choice response sent"
+                if sent
+                else "Expected reply invalid choice response failed"
+            )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
     if early_out_of_domain:
         bot_response = OUT_OF_DOMAIN_RESPONSE
         _reset_low_confidence_retry(conversation)
