@@ -2248,3 +2248,241 @@ eval_cases:
     - без выходных
     - '9:00'
     - '21:00'
+- id: E200
+  user: После окрашивания волосы путаются, что посоветуете?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E201
+  user: Посоветуйте, какой оттенок волос выбрать
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E202
+  user: Волосы ломаются и сухие, как восстановить?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E203
+  user: Поврежденные волосы после укладки, что делать?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E204
+  user: Ногти слоятся, какой уход нужен?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E205
+  user: Сухая кутикула, подскажите уход
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E206
+  user: Как ухаживать за ресницами после процедуры?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E207
+  user: Уход за бровями дома — что важно?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E208
+  user: У меня чувствительное лицо, что посоветуете?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E209
+  user: Чувствительность к уходу, как быть?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E210
+  user: Хочу как на фото, посоветуйте
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E211
+  user: Есть референс, как повторить стиль?
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E212
+  user: Посоветуйте, что лучше для меня
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
+- id: E213
+  user: Нужен совет по уходу, не знаю с чего начать
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include_any:
+    - рекоменда
+    - уход
+    - вариант
+    must_not:
+    - ₸
+    - цена
+    - стоим
+    - налич
+    - свободн
+    - мастер
+    - адрес
