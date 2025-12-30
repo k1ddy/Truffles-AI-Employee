@@ -21,6 +21,28 @@ CHATFLOW_MEDIA_BASE_URL = os.environ.get("CHATFLOW_MEDIA_BASE_URL", "https://app
 MEDIA_SIGNING_SECRET = os.environ.get("MEDIA_SIGNING_SECRET")
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
 MEDIA_URL_TTL_SECONDS = int(os.environ.get("MEDIA_URL_TTL_SECONDS", "3600"))
+TEST_MODE = os.environ.get("TEST_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+OUTBOUND_ALLOWLIST_JIDS = {
+    jid.strip()
+    for jid in os.environ.get("OUTBOUND_ALLOWLIST_JIDS", "").split(",")
+    if jid.strip()
+}
+
+
+def _should_skip_outbound(remote_jid: str, *, action: str) -> bool:
+    if not TEST_MODE:
+        return False
+    jid = (remote_jid or "").strip()
+    if jid and jid in OUTBOUND_ALLOWLIST_JIDS:
+        return False
+    allowlist = ",".join(sorted(OUTBOUND_ALLOWLIST_JIDS)) or "<empty>"
+    logger.warning(
+        "Outbound guard: TEST_MODE enabled, SKIP %s to jid=%s (allowlist=%s)",
+        action,
+        jid or "<missing>",
+        allowlist,
+    )
+    return True
 
 
 def get_instance_id(db: Session, client_id: UUID) -> Optional[str]:
@@ -38,6 +60,9 @@ def send_whatsapp_message(
     idempotency_key: Optional[str] = None,
 ) -> bool:
     """Send message via ChatFlow API."""
+    if _should_skip_outbound(remote_jid, action="message"):
+        return True
+
     if not CHATFLOW_TOKEN:
         logger.error("ChatFlow token is missing (CHATFLOW_TOKEN env var not set)")
         alert_critical("WhatsApp send failed", {"jid": remote_jid, "error": "missing_chatflow_token"})
@@ -116,6 +141,9 @@ def send_whatsapp_media(
     timeout_seconds: float = 30.0,
 ) -> bool:
     """Send media via ChatFlow API (image/audio/document/video)."""
+    if _should_skip_outbound(remote_jid, action="media"):
+        return True
+
     if not CHATFLOW_TOKEN:
         logger.error("ChatFlow token is missing (CHATFLOW_TOKEN env var not set)")
         alert_critical("WhatsApp media send failed", {"jid": remote_jid, "error": "missing_chatflow_token"})
