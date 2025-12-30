@@ -342,12 +342,24 @@ def _match_service(normalized: str) -> dict[str, Any] | None:
 
 
 def _token_matches(token: str, message_tokens: list[str]) -> bool:
+    def _simplify(value: str) -> str:
+        if len(value) <= 4:
+            return value
+        trimmed = value.rstrip("ьъ")
+        if len(trimmed) <= 4:
+            return trimmed
+        if trimmed[-1] in "аеёиоуыэюя":
+            return trimmed[:-1]
+        return trimmed
+
     for msg in message_tokens:
         if msg == token:
             return True
         if len(token) >= 3 and msg.startswith(token):
             return True
         if len(msg) >= 3 and token.startswith(msg):
+            return True
+        if _simplify(msg) == _simplify(token):
             return True
     return False
 

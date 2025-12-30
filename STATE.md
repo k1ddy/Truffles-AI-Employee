@@ -35,6 +35,7 @@
 - Battery v0: добавлены 100 кейсов в `truffles-api/app/knowledge/demo_salon/EVAL.yaml` + 25 manual в `truffles-api/tests/test_cases.json` (без изменения логики).
 - Battery v1: добавлены +150 кейсов (E200–E349, всего 250) + 15 manual (TC069–TC083) без изменения логики.
 - Data fix: добавили `Стрижка машинкой` в `services_catalog.price_items`, чтобы прайс-ответы включали 2 000 ₸.
+- Price/service matching: токены теперь нормализуются по базовой форме (снятие конечной гласной/мягкого знака) для русских окончаний.
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
 - Детальный бриф салона заполнен эталоном (фейковые данные): `Business/Sales/Бриф_клиента.md`.
