@@ -3217,12 +3217,47 @@ def _format_multi_intent_followup(primary: str, secondary: list[str]) -> str | N
     return f"Ещё был вопрос по {label_text}. Уточните, пожалуйста."
 
 
-def _select_intent_from_queue(intent_queue: list[str], intents: list[str]) -> str | None:
+def _match_intent_choice_from_text(intent_queue: list[str], message_text: str) -> str | None:
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return None
+    tokens = [token for token in normalized.split() if len(token) >= 4]
+    if not tokens:
+        tokens = [normalized] if len(normalized) >= 4 else []
+    if not tokens:
+        return None
+    matches = []
+    for intent in intent_queue:
+        label = MULTI_INTENT_LABELS.get(intent)
+        if not label:
+            continue
+        label_normalized = normalize_for_matching(label)
+        if not label_normalized:
+            continue
+        for token in tokens:
+            if label_normalized.startswith(token) or token.startswith(label_normalized):
+                matches.append(intent)
+                break
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _select_intent_from_queue(
+    intent_queue: list[str],
+    intents: list[str],
+    *,
+    message_text: str | None = None,
+) -> str | None:
     if not intent_queue or not intents:
+        if message_text:
+            return _match_intent_choice_from_text(intent_queue, message_text)
         return None
     for intent in intents:
         if intent in intent_queue:
             return intent
+    if message_text:
+        return _match_intent_choice_from_text(intent_queue, message_text)
     return None
 
 
@@ -5388,16 +5423,25 @@ async def _handle_webhook_payload(
             )
 
     if intent_decomp_used and expected_reply_type == EXPECTED_REPLY_INTENT_CHOICE and intent_queue:
-        intent_queue_choice = _select_intent_from_queue(intent_queue, intent_decomp_intents)
+        intent_queue_choice = _select_intent_from_queue(
+            intent_queue,
+            intent_decomp_intents,
+            message_text=message_text,
+        )
         if intent_queue_choice:
             pending_intent_queue = [intent for intent in intent_queue if intent != intent_queue_choice]
             pending_expected_reply_type = (
                 EXPECTED_REPLY_INTENT_CHOICE if pending_intent_queue else None
             )
+            if intent_queue_choice == "duration":
+                pending_expected_reply_type = EXPECTED_REPLY_SERVICE
             intent_queue_event = {
                 "decision": "dequeue",
                 "chosen_intent": intent_queue_choice,
                 "remaining_queue": pending_intent_queue,
+                "expected_reply_matched": True,
+                "expected_reply_choice": intent_queue_choice,
+                "expected_reply_next": pending_expected_reply_type,
             }
             reordered_intents = [intent_queue_choice] + [
                 intent for intent in intent_decomp_intents if intent != intent_queue_choice
@@ -5422,6 +5466,7 @@ async def _handle_webhook_payload(
                 "expected_reply_type": expected_reply_type,
                 "intent_queue": intent_queue,
                 "intents": intent_decomp_intents,
+                "expected_reply_matched": False,
             }
 
     intent_decomp_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent} if intent_decomp_used else set()
@@ -5816,8 +5861,12 @@ async def _handle_webhook_payload(
             updates = {"intent_queue_choice": intent_queue_choice}
             if intent_queue_event.get("decision") == "dequeue":
                 updates["intent_queue_remaining"] = pending_intent_queue or []
+                updates["expected_reply_matched"] = True
+                updates["expected_reply_choice"] = intent_queue_choice
+                updates["expected_reply_next"] = pending_expected_reply_type
             else:
                 updates["intent_queue_missed"] = True
+                updates["expected_reply_matched"] = False
             _update_message_decision_metadata(saved_message, updates)
 
     if pending_intent_queue is not None:
