@@ -1553,12 +1553,14 @@ eval_cases:
     must_include:
     - 2 000
 - id: E135
-  user: Сколько стоит коррекция + окрашивание?
+  user: Почем у вас?
   expected:
     action: reply
-    intent: service_match
+    intent: duration_or_price_clarify
     must_include:
-    - окрашивание корней
+    - цена
+    - длительность
+    - услуга
 - id: E136
   user: Почем ламинирование бровей?
   expected:
