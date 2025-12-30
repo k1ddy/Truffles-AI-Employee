@@ -1410,13 +1410,14 @@ eval_cases:
     - длительность
     - услуга
 - id: E116
-  user: Сколько стоит ботокс для волос?
+  user: Почем ботокс для волос?
   expected:
     action: reply
-    intent: service_not_found
-    must_include_any:
-    - нет такой позиции
-    - в списке услуг нет
+    intent: duration_or_price_clarify
+    must_include:
+    - цена
+    - длительность
+    - услуга
 - id: E117
   user: Сколько стоит кератин?
   expected:
