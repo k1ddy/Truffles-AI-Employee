@@ -1706,6 +1706,13 @@ REENGAGE_CONFIRM_KEY = "reengage_confirmation"
 ASR_CONFIRM_KEY = "asr_confirm_pending"
 DECISION_TRACE_KEY = "decision_trace"
 CONTEXT_MANAGER_KEY = "context_manager"
+INTENT_QUEUE_KEY = "intent_queue"
+EXPECTED_REPLY_TYPE_KEY = "expected_reply_type"
+
+EXPECTED_REPLY_SERVICE = "service_choice"
+EXPECTED_REPLY_TIME = "time"
+EXPECTED_REPLY_NAME = "name"
+EXPECTED_REPLY_INTENT_CHOICE = "intent_choice"
 
 CLARIFY_MAX_ATTEMPTS = 2
 REFUSAL_TTL_MESSAGES = 10
@@ -2111,6 +2118,60 @@ def _set_conversation_context(conversation: Conversation, context: dict) -> None
     conversation.context = context
 
 
+def _get_intent_queue(context: dict) -> list[str]:
+    queue = context.get(INTENT_QUEUE_KEY) if isinstance(context, dict) else None
+    if not isinstance(queue, list):
+        return []
+    cleaned: list[str] = []
+    seen = set()
+    for item in queue:
+        if not isinstance(item, str):
+            continue
+        value = item.strip().casefold()
+        if not value or value in seen:
+            continue
+        cleaned.append(value)
+        seen.add(value)
+    return cleaned
+
+
+def _set_intent_queue(context: dict, queue: list[str] | None) -> dict:
+    context = dict(context)
+    cleaned: list[str] = []
+    seen = set()
+    for item in queue or []:
+        if not isinstance(item, str):
+            continue
+        value = item.strip().casefold()
+        if not value or value in seen:
+            continue
+        cleaned.append(value)
+        seen.add(value)
+    if cleaned:
+        context[INTENT_QUEUE_KEY] = cleaned
+    else:
+        context.pop(INTENT_QUEUE_KEY, None)
+    return context
+
+
+def _get_expected_reply_type(context: dict) -> str | None:
+    if not isinstance(context, dict):
+        return None
+    value = context.get(EXPECTED_REPLY_TYPE_KEY)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _set_expected_reply_type(context: dict, expected_reply_type: str | None) -> dict:
+    context = dict(context)
+    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
+        context[EXPECTED_REPLY_TYPE_KEY] = expected_reply_type.strip()
+    else:
+        context.pop(EXPECTED_REPLY_TYPE_KEY, None)
+    return context
+
+
 def _record_decision_trace(conversation: Conversation, trace: dict) -> None:
     context = _get_conversation_context(conversation)
     payload = dict(trace)
@@ -2127,6 +2188,36 @@ def _record_decision_trace(conversation: Conversation, trace: dict) -> None:
         trace_list = trace_list[-12:]
     context[DECISION_TRACE_KEY] = trace_list
     _set_conversation_context(conversation, context)
+
+
+def _set_expected_reply_context(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    context: dict,
+    expected_reply_type: str | None,
+    reason: str,
+) -> dict:
+    context = _set_expected_reply_type(context, expected_reply_type)
+    _set_conversation_context(conversation, context)
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "question_contract",
+            "decision": "set",
+            "expected_reply_type": expected_reply_type,
+            "reason": reason,
+        },
+    )
+    if saved_message:
+        _update_message_decision_metadata(
+            saved_message,
+            {
+                "expected_reply_type": expected_reply_type,
+                "expected_reply_reason": reason,
+            },
+        )
+    return context
 
 
 def _get_context_manager(context: dict) -> dict:
@@ -2839,6 +2930,37 @@ BOOKING_SLOT_VALIDATORS = {
 }
 
 
+def _expected_reply_for_booking_question(last_question: str | None) -> str | None:
+    if last_question == "service":
+        return EXPECTED_REPLY_SERVICE
+    if last_question == "datetime":
+        return EXPECTED_REPLY_TIME
+    if last_question == "name":
+        return EXPECTED_REPLY_NAME
+    return None
+
+
+def _match_expected_reply(
+    *,
+    expected_reply_type: str | None,
+    message_text: str,
+    client_slug: str | None,
+) -> tuple[bool, str | None]:
+    if not expected_reply_type or not message_text:
+        return False, None
+    if expected_reply_type == EXPECTED_REPLY_SERVICE:
+        value = _validate_service_slot(message_text, allow_freeform=True, client_slug=client_slug)
+    elif expected_reply_type == EXPECTED_REPLY_TIME:
+        value = _validate_datetime_slot(message_text, allow_freeform=True, client_slug=client_slug)
+    elif expected_reply_type == EXPECTED_REPLY_NAME:
+        value = _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug)
+    else:
+        return False, None
+    if not value:
+        return False, None
+    return True, value
+
+
 def _is_booking_related_message(message_text: str, client_slug: str | None) -> bool:
     if not message_text:
         return False
@@ -3092,6 +3214,29 @@ def _format_multi_intent_followup(primary: str, secondary: list[str]) -> str | N
     if primary == "booking":
         return f"По {label_text} отвечу после записи."
     return f"Ещё был вопрос по {label_text}. Уточните, пожалуйста."
+
+
+def _select_intent_from_queue(intent_queue: list[str], intents: list[str]) -> str | None:
+    if not intent_queue or not intents:
+        return None
+    for intent in intents:
+        if intent in intent_queue:
+            return intent
+    return None
+
+
+def _format_intent_queue_prompt(intent_queue: list[str]) -> str | None:
+    if not intent_queue:
+        return None
+    labels = []
+    for intent in intent_queue:
+        label = MULTI_INTENT_LABELS.get(intent)
+        if label:
+            labels.append(f"по {label}")
+    if not labels:
+        return "Уточните, какой вопрос разобрать дальше."
+    label_text = ", ".join(labels)
+    return f"Какой вопрос разобрать дальше: {label_text}?"
 
 
 def _build_booking_summary(booking: dict, *, refusal_flags: dict | None = None) -> str:
@@ -4125,6 +4270,42 @@ async def _handle_webhook_payload(
         context = _get_conversation_context(conversation)
     current_goal = context_manager.get("current_goal") if isinstance(context_manager, dict) else None
 
+    expected_reply_type = _get_expected_reply_type(context)
+    intent_queue = _get_intent_queue(context)
+    if expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME} and message_text:
+        matched, value = _match_expected_reply(
+            expected_reply_type=expected_reply_type,
+            message_text=message_text,
+            client_slug=payload.client_slug,
+        )
+        if matched and isinstance(value, str) and expected_reply_type == EXPECTED_REPLY_SERVICE:
+            context = _set_service_hint(context, value, now)
+        if matched:
+            next_expected = EXPECTED_REPLY_INTENT_CHOICE if intent_queue else None
+            context = _set_expected_reply_type(context, next_expected)
+            _set_conversation_context(conversation, context)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "question_contract",
+                "decision": "matched" if matched else "missed",
+                "expected_reply_type": expected_reply_type,
+                "value": value,
+            },
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "expected_reply_type": expected_reply_type,
+                    "expected_reply_matched": matched,
+                    "expected_reply_value": value,
+                },
+            )
+        context = _get_conversation_context(conversation)
+        expected_reply_type = _get_expected_reply_type(context)
+        intent_queue = _get_intent_queue(context)
+
     # 4.5 Branch routing (instance_id -> branch, or ask user)
     branch_mode = (
         settings.branch_resolution_mode if settings and settings.branch_resolution_mode else "hybrid"
@@ -5117,6 +5298,12 @@ async def _handle_webhook_payload(
     consult_intent = False
     consult_topic = None
     consult_question = None
+    intent_queue_choice = None
+    intent_queue_followup = None
+    intent_queue_intents: list[str] = []
+    pending_intent_queue: list[str] | None = None
+    pending_expected_reply_type: str | None = None
+    intent_queue_event: dict | None = None
     if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
         intent_decomp_payload = detect_multi_intent(message_text, client_slug=payload.client_slug)
         if isinstance(intent_decomp_payload, dict):
@@ -5196,6 +5383,43 @@ async def _handle_webhook_payload(
                     **consult_meta,
                 },
             )
+
+    if intent_decomp_used and expected_reply_type == EXPECTED_REPLY_INTENT_CHOICE and intent_queue:
+        intent_queue_choice = _select_intent_from_queue(intent_queue, intent_decomp_intents)
+        if intent_queue_choice:
+            pending_intent_queue = [intent for intent in intent_queue if intent != intent_queue_choice]
+            pending_expected_reply_type = (
+                EXPECTED_REPLY_INTENT_CHOICE if pending_intent_queue else None
+            )
+            intent_queue_event = {
+                "decision": "dequeue",
+                "chosen_intent": intent_queue_choice,
+                "remaining_queue": pending_intent_queue,
+            }
+            reordered_intents = [intent_queue_choice] + [
+                intent for intent in intent_decomp_intents if intent != intent_queue_choice
+            ]
+            intent_decomp_intents = reordered_intents
+            intent_decomp_primary = intent_queue_choice
+            intent_decomp_secondary = [
+                intent for intent in reordered_intents if intent != intent_decomp_primary
+            ]
+            intent_decomp_multi = len(reordered_intents) > 1
+            if isinstance(intent_decomp_payload, dict):
+                intent_decomp_payload = {
+                    **intent_decomp_payload,
+                    "primary_intent": intent_decomp_primary,
+                    "secondary_intents": intent_decomp_secondary,
+                    "intents": intent_decomp_intents,
+                    "multi_intent": intent_decomp_multi,
+                }
+        else:
+            intent_queue_event = {
+                "decision": "no_match",
+                "expected_reply_type": expected_reply_type,
+                "intent_queue": intent_queue,
+                "intents": intent_decomp_intents,
+            }
 
     intent_decomp_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent} if intent_decomp_used else set()
     if intent_decomp_used:
@@ -5521,6 +5745,68 @@ async def _handle_webhook_payload(
             bot_response=bot_response,
         )
 
+    if intent_queue_event:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "intent_queue",
+                **intent_queue_event,
+            },
+        )
+        if intent_queue_event.get("decision") == "no_match" and intent_queue:
+            intent_queue_intents = intent_queue
+            intent_queue_followup = _format_intent_queue_prompt(intent_queue)
+        if saved_message:
+            updates = {"intent_queue_choice": intent_queue_choice}
+            if intent_queue_event.get("decision") == "dequeue":
+                updates["intent_queue_remaining"] = pending_intent_queue or []
+            else:
+                updates["intent_queue_missed"] = True
+            _update_message_decision_metadata(saved_message, updates)
+
+    if pending_intent_queue is not None:
+        context = _get_conversation_context(conversation)
+        context = _set_intent_queue(context, pending_intent_queue)
+        context = _set_expected_reply_type(context, pending_expected_reply_type)
+        _set_conversation_context(conversation, context)
+        intent_queue_intents = pending_intent_queue
+        if pending_intent_queue:
+            intent_queue_followup = _format_intent_queue_prompt(pending_intent_queue)
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "intent_queue": pending_intent_queue,
+                    "expected_reply_type": pending_expected_reply_type,
+                },
+            )
+    elif intent_decomp_used and len(intent_decomp_intents) >= 3 and expected_reply_type != EXPECTED_REPLY_INTENT_CHOICE:
+        queue = [intent for intent in intent_decomp_intents if intent != intent_decomp_primary]
+        if queue:
+            context = _get_conversation_context(conversation)
+            context = _set_intent_queue(context, queue)
+            context = _set_expected_reply_type(context, EXPECTED_REPLY_INTENT_CHOICE)
+            _set_conversation_context(conversation, context)
+            intent_queue_intents = queue
+            intent_queue_followup = _format_intent_queue_prompt(queue)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "intent_queue",
+                    "decision": "set",
+                    "primary_intent": intent_decomp_primary,
+                    "intent_queue": queue,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "intent_queue": queue,
+                        "expected_reply_type": EXPECTED_REPLY_INTENT_CHOICE,
+                    },
+                )
+
     consult_decision = None
     if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
         consult_blocked = bool(booking_wants_flow or booking_active or booking_signal)
@@ -5639,6 +5925,7 @@ async def _handle_webhook_payload(
             )
 
         bot_response = consult_decision.response
+        bot_response = _combine_sidecar(bot_response, intent_queue_followup)
         _reset_low_confidence_retry(conversation)
         save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
         sent = _send_response(bot_response)
@@ -5654,7 +5941,23 @@ async def _handle_webhook_payload(
     multi_intent_primary = None
     multi_intent_secondary: list[str] = []
     multi_intent_followup = None
-    if (
+    if intent_queue_followup:
+        if isinstance(intent_decomp_primary, str):
+            multi_intent_primary = intent_decomp_primary
+        if intent_queue_intents:
+            multi_intent_secondary = list(intent_queue_intents)
+        multi_intent_followup = intent_queue_followup
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "multi_intent": True,
+                    "primary_intent": multi_intent_primary,
+                    "secondary_count": len(multi_intent_secondary),
+                    "intent_queue": intent_queue_intents,
+                },
+            )
+    elif (
         routing["allow_bot_reply"]
         and not bypass_domain_flows
         and message_text
@@ -5773,6 +6076,15 @@ async def _handle_webhook_payload(
                 booking_state, prompt = _next_booking_prompt(booking_state, refusal_flags=refusal_flags)
                 context = _set_booking_context(context, booking_state)
                 _set_conversation_context(conversation, context)
+                booking_expected = _expected_reply_for_booking_question(booking_state.get("last_question"))
+                if prompt and booking_expected:
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=booking_expected,
+                        reason="booking_prompt",
+                    )
 
                 if info_decision.intent in {"service_clarify", "duration_or_price_clarify"}:
                     clarify_intent = current_goal or "info"
@@ -5804,6 +6116,13 @@ async def _handle_webhook_payload(
                         saved_message=saved_message,
                         intent=clarify_intent,
                         now=now,
+                        reason="service_clarify",
+                    )
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=EXPECTED_REPLY_SERVICE,
                         reason="service_clarify",
                     )
                     prompt = None
@@ -6022,6 +6341,15 @@ async def _handle_webhook_payload(
             booking_state, prompt = _next_booking_prompt(booking_state, refusal_flags=refusal_flags)
             context = _set_booking_context(context, booking_state)
             _set_conversation_context(conversation, context)
+            booking_expected = _expected_reply_for_booking_question(booking_state.get("last_question"))
+            if prompt and booking_expected:
+                context = _set_expected_reply_context(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    context=context,
+                    expected_reply_type=booking_expected,
+                    reason="booking_prompt",
+                )
 
             if prompt:
                 context_manager = _get_context_manager(context)
@@ -6338,6 +6666,15 @@ async def _handle_webhook_payload(
                         intent_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent}
                         if "pricing" in intent_set or "duration" in intent_set:
                             clarify_reason = "missing_service_query"
+                if service_decision.action != "escalate":
+                    context = _get_conversation_context(conversation)
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=EXPECTED_REPLY_SERVICE,
+                        reason="service_clarify",
+                    )
             trace_payload = {
                 "stage": "service_matcher",
                 "decision": service_decision.intent,
@@ -6586,6 +6923,18 @@ async def _handle_webhook_payload(
                         now=now,
                         reason="service_clarify",
                     )
+            if decision.action != "escalate" and decision.intent in {
+                "service_clarify",
+                "duration_or_price_clarify",
+            }:
+                context = _get_conversation_context(conversation)
+                context = _set_expected_reply_context(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    context=context,
+                    expected_reply_type=EXPECTED_REPLY_SERVICE,
+                    reason=decision.intent,
+                )
             bot_response = decision.response
             _reset_low_confidence_retry(conversation)
 

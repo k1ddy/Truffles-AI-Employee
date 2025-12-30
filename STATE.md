@@ -56,6 +56,7 @@
 - Ambiguous price/duration → clarify (не отвечаем ценой при неуверенном типе).
 - Booking gate блокирует инфо‑вопросы (pricing/hours/duration) без явного booking; сплит сегментов по ,;?!.; service slot только через semantic matcher, datetime — токен; trace/meta `booking_blocked_reason`. (нужен деплой)
 - Context Manager: `current_goal` (info/consult/booking), `refusal_flags` (name/phone, TTL 10 сообщений), `clarify_attempts` (>=2 → эскалация), `compact_summary` (детерминированно; триггеры: intent_change/clarify_limit/12+ сообщений); всё пишется в decision_meta/trace.
+- Intent Queue + Question Contract: `conversation.context.intent_queue` и `conversation.context.expected_reply_type` в webhook, чтобы держать очередь интентов и ожидаемый тип ответа.
 - Consult playbooks: `domain_pack.consult_playbooks` расширен (hair_aftercolor/hair_damage/hair_color_choice/nails_care/brows_lashes_care/sensitive_skin/style_reference/general_consult) с questions/options/next_step.
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-29)
