@@ -1343,21 +1343,21 @@ eval_cases:
     must_include:
     - 8 000
 - id: E107
-  user: Сколько стоит окрашивание в один тон короткие?
+  user: Цена на окрашивание в один тон короткие?
   expected:
     action: reply
     intent: price_query
     must_include:
     - 12 000
 - id: E108
-  user: Сколько стоит окрашивание в один тон средняя длина?
+  user: Цена на окрашивание в один тон средняя длина?
   expected:
     action: reply
     intent: price_query
     must_include:
     - 15 000
 - id: E109
-  user: Сколько стоит окрашивание в один тон длинные?
+  user: Цена на окрашивание в один тон длинные?
   expected:
     action: reply
     intent: price_query
