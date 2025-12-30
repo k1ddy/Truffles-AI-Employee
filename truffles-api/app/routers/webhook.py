@@ -1585,6 +1585,7 @@ MSG_HANDOVER_DECLINED = (
     "Ок. Напишите, что именно интересует по салону: цена/запись/адрес/мастер/жалоба."
 )
 MSG_LOW_CONFIDENCE_RETRY = "Уточните, пожалуйста: интересуют услуги/цены или запись/адрес?"
+MSG_EXPECTED_SERVICE_OFF_TOPIC = "Я могу помочь по услугам салона. Какая услуга интересует?"
 MSG_PENDING_LOW_CONFIDENCE = (
     "Я уже передал менеджеру — он скоро подключится. "
     "Пока ждём, уточните: услуги/цены или запись/адрес."
@@ -4272,12 +4273,14 @@ async def _handle_webhook_payload(
 
     expected_reply_type = _get_expected_reply_type(context)
     intent_queue = _get_intent_queue(context)
+    expected_reply_matched: bool | None = None
     if expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME} and message_text:
         matched, value = _match_expected_reply(
             expected_reply_type=expected_reply_type,
             message_text=message_text,
             client_slug=payload.client_slug,
         )
+        expected_reply_matched = matched
         if matched and isinstance(value, str) and expected_reply_type == EXPECTED_REPLY_SERVICE:
             context = _set_service_hint(context, value, now)
         if matched:
@@ -5712,6 +5715,59 @@ async def _handle_webhook_payload(
                 message_text, client.config if client else None
             )
             early_out_of_domain = bool(int(early_domain_meta.get("out_hits") or 0) > 0)
+
+    expected_reply_off_topic = (
+        expected_reply_type == EXPECTED_REPLY_SERVICE
+        and expected_reply_matched is False
+        and message_text
+        and (early_out_of_domain or is_frustration_message(message_text))
+    )
+    if expected_reply_off_topic:
+        bot_response = MSG_EXPECTED_SERVICE_OFF_TOPIC
+        _reset_low_confidence_retry(conversation)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "out_of_domain",
+                "decision": "expected_reply_off_topic",
+                "state": conversation.state,
+                "domain_intent": early_domain_intent.value,
+                "out_hits": early_domain_meta.get("out_hits"),
+                "strict_in_hits": early_domain_meta.get("strict_in_hits"),
+                "expected_reply_type": expected_reply_type,
+                "expected_reply_reason": "off_topic",
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="out_of_domain",
+            intent="out_of_domain",
+            source="domain_router" if early_out_of_domain else "question_contract",
+            fast_intent=False,
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "expected_reply_type": expected_reply_type,
+                    "expected_reply_matched": False,
+                    "expected_reply_reason": "off_topic",
+                },
+            )
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = _send_response(bot_response)
+        result_message = (
+            "Expected reply off-topic response sent"
+            if sent
+            else "Expected reply off-topic response failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
 
     if early_out_of_domain:
         bot_response = OUT_OF_DOMAIN_RESPONSE
