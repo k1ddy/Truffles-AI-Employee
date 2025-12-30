@@ -1334,7 +1334,7 @@ eval_cases:
     action: reply
     intent: price_query
     must_include:
-    - 3 000
+    - 2 000
 - id: E106
   user: Сколько стоит окрашивание корней?
   expected:
@@ -1381,11 +1381,9 @@ eval_cases:
   user: Почем тонирование волос?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 8 000
 - id: E113
   user: Сколько стоит укладка феном?
   expected:
@@ -1404,20 +1402,16 @@ eval_cases:
   user: Почем полировка волос?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 4 000
 - id: E116
   user: Почем ботокс для волос?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 15 000
 - id: E117
   user: Сколько стоит кератин?
   expected:
@@ -1457,10 +1451,9 @@ eval_cases:
   user: Сколько стоит покрытие гель-лак?
   expected:
     action: reply
-    intent: service_not_found
-    must_include_any:
-    - нет такой позиции
-    - в списке услуг нет
+    intent: price_query
+    must_include:
+    - 4 500
 - id: E123
   user: Сколько стоит маникюр + гель-лак?
   expected:
@@ -1472,19 +1465,16 @@ eval_cases:
   user: Почем укрепление ногтей?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 2 000
 - id: E125
   user: Сколько стоит снятие гель-лака?
   expected:
     action: reply
-    intent: service_not_found
-    must_include_any:
-    - нет такой позиции
-    - в списке услуг нет
+    intent: price_query
+    must_include:
+    - 1 500
 - id: E126
   user: Сколько стоит педикюр классический?
   expected:
@@ -1510,18 +1500,16 @@ eval_cases:
   user: Сколько стоит наращивание гелем?
   expected:
     action: reply
-    intent: service_not_found
-    must_include_any:
-    - нет такой позиции
-    - в списке услуг нет
+    intent: price_query
+    must_include:
+    - 12 000
 - id: E130
   user: Сколько стоит наращивание полигелем?
   expected:
     action: reply
-    intent: service_not_found
-    must_include_any:
-    - нет такой позиции
-    - в списке услуг нет
+    intent: price_query
+    must_include:
+    - 13 000
 - id: E131
   user: Сколько стоит дизайн ногтей?
   expected:
@@ -1540,11 +1528,9 @@ eval_cases:
   user: Почем коррекция бровей?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 2 000
 - id: E134
   user: Сколько стоит окрашивание бровей?
   expected:
@@ -1565,11 +1551,9 @@ eval_cases:
   user: Почем ламинирование бровей?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 5 000
 - id: E137
   user: Сколько стоит лами ресниц?
   expected:
@@ -1583,20 +1567,16 @@ eval_cases:
   user: Почем наращивание ресниц классика?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 8 000
 - id: E139
   user: Почем наращивание ресниц 3D?
   expected:
     action: reply
-    intent: duration_or_price_clarify
+    intent: price_query
     must_include:
-    - цена
-    - длительность
-    - услуга
+    - 12 000
 - id: E140
   user: Посоветуйте уход после окрашивания
   expected:
@@ -2776,6 +2756,7 @@ eval_cases:
     intent: amenities
     must_include_any:
     - Wi-Fi
+    - Wi‑Fi
 - id: E254
   user: Как стерилизуете инструменты?
   expected:
@@ -3441,6 +3422,7 @@ eval_cases:
     action: escalate
     intent: reschedule
     must_tell_user_any:
+    - передам
     - передам администратору
     - уточню
     must_not:
@@ -3453,6 +3435,7 @@ eval_cases:
     action: escalate
     intent: reschedule
     must_tell_user_any:
+    - передам
     - передам администратору
     - уточню
     must_not:
@@ -3465,6 +3448,7 @@ eval_cases:
     action: escalate
     intent: reschedule
     must_tell_user_any:
+    - передам
     - передам администратору
     - уточню
     must_not:

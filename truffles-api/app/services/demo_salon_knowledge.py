@@ -319,9 +319,45 @@ def _message_has_service_token(normalized: str) -> bool:
 def _is_offtopic_message(normalized: str) -> bool:
     if not normalized:
         return False
-    if any(phrase and phrase in normalized for phrase in _offtopic_phrases()):
-        return True
-    return _contains_any(normalized, _OFFTOPIC_KEYWORDS)
+    truth = load_yaml_truth()
+    ood_pack = truth.get("domain_pack", {}).get("ood_anchors", {})
+    in_domain = ood_pack.get("in_domain", {})
+    out_of_domain = ood_pack.get("out_of_domain", {})
+    message_tokens = normalized.split()
+
+    def _anchor_matches(raw_anchor: str) -> bool:
+        anchor_tokens = _normalize_text(raw_anchor).split()
+        if not anchor_tokens:
+            return False
+        return all(_token_matches(token, message_tokens) for token in anchor_tokens)
+
+    def _has_in_domain_anchor() -> bool:
+        if not isinstance(in_domain, dict):
+            return False
+        for values in in_domain.values():
+            if not isinstance(values, list):
+                continue
+            for item in values:
+                if _anchor_matches(str(item)):
+                    return True
+        return False
+
+    phrase_match = any(phrase and phrase in normalized for phrase in _offtopic_phrases())
+    keyword_match = _contains_any(normalized, _OFFTOPIC_KEYWORDS)
+    anchor_match = False
+    if isinstance(out_of_domain, dict):
+        for values in out_of_domain.values():
+            if not isinstance(values, list):
+                continue
+            for item in values:
+                if _anchor_matches(str(item)):
+                    anchor_match = True
+                    break
+            if anchor_match:
+                break
+    if phrase_match or keyword_match or anchor_match:
+        return not _has_in_domain_anchor()
+    return False
 
 
 def _match_service(normalized: str) -> dict[str, Any] | None:
@@ -343,21 +379,26 @@ def _match_service(normalized: str) -> dict[str, Any] | None:
 
 def _token_matches(token: str, message_tokens: list[str]) -> bool:
     def _simplify(value: str) -> str:
-        if len(value) <= 4:
+        if len(value) <= 3:
             return value
         trimmed = value.rstrip("ьъ")
-        if len(trimmed) <= 4:
+        if len(trimmed) <= 3:
             return trimmed
-        if trimmed[-1] in "аеёиоуыэюя":
-            return trimmed[:-1]
+        while len(trimmed) > 3 and trimmed[-1] in "аеёиоуыэюя":
+            trimmed = trimmed[:-1]
         return trimmed
+
+    def _prefix_match(left: str, right: str) -> bool:
+        if len(left) < 4 or len(right) < 4:
+            return False
+        if left.startswith(right) or right.startswith(left):
+            return abs(len(left) - len(right)) <= 2
+        return False
 
     for msg in message_tokens:
         if msg == token:
             return True
-        if len(token) >= 3 and msg.startswith(token):
-            return True
-        if len(msg) >= 3 and token.startswith(msg):
+        if _prefix_match(token, msg):
             return True
         if _simplify(msg) == _simplify(token):
             return True
@@ -371,14 +412,17 @@ def _find_best_price_item(message: str) -> dict[str, Any] | None:
     message_tokens = normalized.split()
     best = None
     best_len = 0
+    best_token_len = 0
     for entry in _build_price_index():
         tokens = entry["tokens"]
         if not tokens:
             continue
         if all(_token_matches(token, message_tokens) for token in tokens):
-            if len(tokens) > best_len:
+            token_len = sum(len(token) for token in tokens)
+            if len(tokens) > best_len or (len(tokens) == best_len and token_len > best_token_len):
                 best = entry
                 best_len = len(tokens)
+                best_token_len = token_len
     return best
 
 
@@ -503,6 +547,8 @@ def _should_skip_consult(normalized: str, raw_text: str | None = None) -> bool:
     if _has_price_signal(normalized, raw_text):
         return True
     if _has_duration_signal(normalized, raw_text):
+        return True
+    if _is_offtopic_message(normalized):
         return True
     if _looks_like_hours_question(normalized):
         return True
@@ -1349,14 +1395,21 @@ def compose_multi_truth_reply(
 def _looks_like_service_question(normalized: str, raw_text: str | None = None) -> bool:
     if not normalized:
         return False
-    if not _message_has_service_token(normalized):
+    if _is_offtopic_message(normalized):
         return False
     if _has_price_signal(normalized, raw_text):
         return True
-    service_keywords = ["делаете", "есть ли", "есть", "оказываете", "предоставляете"]
+    strong_service_keywords = ["делаете", "оказываете", "предоставляете"]
+    service_keywords = strong_service_keywords + ["есть ли", "есть"]
     if _contains_any(normalized, service_keywords):
-        return True
-    return False
+        if _message_has_service_token(normalized):
+            return True
+        if _contains_any(normalized, strong_service_keywords):
+            return True
+        return False
+    if not _message_has_service_token(normalized):
+        return False
+    return True
 
 
 def _format_promotions(truth: dict, intent: str | None = None) -> str:
@@ -1775,12 +1828,16 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
         "жалоб",
         "претенз",
         "разочар",
+        "хуже",
+        "ожидан",
         "плохо",
         "недовол",
         "ужас",
         "кошмар",
         "хам",
         "грубо",
+        "грубил",
+        "нагруб",
         "брак",
         "треснул",
         "отпал",
@@ -1815,6 +1872,8 @@ def get_demo_salon_service_decision(
 ) -> DemoSalonDecision | None:
     normalized = _normalize_text(message)
     if not normalized:
+        return None
+    if _has_price_signal(normalized, message) or _has_duration_signal(normalized, message):
         return None
     segments = _split_question_segments(message)
     kinds_seen: set[str] = set()
@@ -2037,7 +2096,7 @@ def get_demo_salon_decision(
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="hours")
 
-    if "services_overview" in phrase_intents or _contains_any(
+    services_overview_like = "services_overview" in phrase_intents or _contains_any(
         normalized,
         [
             "чем занимает",
@@ -2048,7 +2107,12 @@ def get_demo_salon_decision(
             "какие процедуры",
             "что можно сделать",
         ],
-    ):
+    )
+    if not services_overview_like:
+        tokens = normalized.split()
+        if "какие" in tokens and any(token.startswith("услуг") for token in tokens):
+            services_overview_like = True
+    if services_overview_like:
         reply = format_reply_from_truth("services_overview")
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="services_overview")
@@ -2102,7 +2166,13 @@ def get_demo_salon_decision(
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
 
-    if _contains_any(normalized, ["пораньше", "раньше", "подождать"]):
+    guest_early_like = _contains_any(normalized, ["пораньше", "раньше", "подождать"])
+    if not guest_early_like:
+        if _contains_any(normalized, ["прийти", "приехать"]) and _contains_any(
+            normalized, ["минут", "мин"]
+        ) and _contains_any(normalized, ["до запис", "до прием", "до сеанс"]):
+            guest_early_like = True
+    if guest_early_like:
         reply = format_reply_from_truth("guest_early")
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
@@ -2157,7 +2227,7 @@ def get_demo_salon_decision(
         service_query = price_service_meta.get("service_query") if isinstance(price_service_meta, dict) else None
         if isinstance(service_query, str) and service_query.strip():
             price_item = _find_best_price_item(service_query)
-    if question_type is None and (price_item or price_signal):
+    if question_type is None and price_signal and not price_item:
         if _is_offtopic_message(normalized):
             reply = format_reply_from_truth("off_topic")
             if reply:
@@ -2211,7 +2281,10 @@ def get_demo_salon_decision(
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="brands")
 
-    if _contains_any(normalized, ["wifi", "вайфай", "вай фай", "wi fi"]):
+    if _contains_any(normalized, ["wifi", "вайфай", "вай фай", "wi fi"]) and not _contains_any(
+        normalized,
+        ["настро", "подключ", "дома"],
+    ):
         reply = format_reply_from_truth("amenities_wifi")
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="amenities")

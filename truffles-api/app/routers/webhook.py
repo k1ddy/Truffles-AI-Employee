@@ -4553,6 +4553,7 @@ async def _handle_webhook_payload(
     # 9.01 ASR low-confidence confirmation (bot-active only).
     context = _get_conversation_context(conversation)
     asr_confirmation = _get_asr_confirmation(context)
+    asr_confirmed = False
     if not routing.get("allow_bot_reply"):
         if asr_confirmation:
             context = _set_asr_confirmation(context, None)
@@ -4571,6 +4572,7 @@ async def _handle_webhook_payload(
                     _set_conversation_context(conversation, context)
                     if confirmed_text:
                         message_text = confirmed_text
+                        asr_confirmed = True
                         if not batch_messages_provided:
                             batch_messages = _coerce_batch_messages(message_text, None)
                     else:
@@ -6270,16 +6272,22 @@ async def _handle_webhook_payload(
                         bot_response=bot_response,
                     )
 
+        multi_truth_candidate = None
+        if message_text:
+            multi_truth_candidate = compose_multi_truth_reply(
+                message_text,
+                payload.client_slug,
+                intent_decomp=intent_decomp_payload if intent_decomp_used else None,
+            )
+        skip_service_matcher = bool(multi_truth_candidate)
         service_matcher = policy_handler.get("service_matcher")
-        service_decision = (
-            service_matcher(
+        service_decision = None
+        if not asr_confirmed and not skip_service_matcher and service_matcher:
+            service_decision = service_matcher(
                 message_text,
                 client_slug=payload.client_slug,
                 intent_decomp=intent_decomp_payload,
             )
-            if service_matcher
-            else None
-        )
         if service_decision:
             bot_response = service_decision.response
             bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
