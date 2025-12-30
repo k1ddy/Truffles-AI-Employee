@@ -1325,6 +1325,10 @@ def compose_multi_truth_reply(
             kinds.discard("pricing")
         if "duration" in kinds and not _has_duration_signal(normalized_segment, segment):
             kinds.discard("duration")
+        if _has_price_signal(normalized_segment, segment):
+            kinds.add("pricing")
+        if _has_duration_signal(normalized_segment, segment):
+            kinds.add("duration")
         service_match = semantic_service_match(segment, client_slug)
         fallback_service = _match_service(normalized_segment) if not service_match else None
         fallback_service_name = None
