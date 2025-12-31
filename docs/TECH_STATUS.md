@@ -151,10 +151,10 @@
 - 6) Decision meta/trace пишутся (S2) — OK/Fail
 
 ### Run Log (fill after checklist)
-- Date/Time:
-- Version (/admin/version):
-- Summary: OK/FAIL
-- Fails (if any):
+- Date/Time: 2025-12-31T10:54:34+05:00
+- Version (/admin/version): main / 247547586335b78e65d159a908b5b2893242c09b (build_time 2025-12-31T05:50:28Z)
+- Summary: FAIL
+- Fails (if any): C3 metrics not found for date/client (demo_salon, today)
 
 ### Smoke commands (copy/paste)
 ```bash
