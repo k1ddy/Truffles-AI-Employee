@@ -61,7 +61,7 @@
 - Booking + 2+ info (или total 3+) → defer booking, отвечаем на 1–2 info (service_query: price+duration; иначе location+hours), остаток в intent_queue, expected_reply_type=intent_choice.
 - expected_reply_type=service_choice сохраняется при OOD/токсичности и возвращает к вопросу об услуге.
 - expected_reply_type=service_choice при невалидном ответе без service/semantic/in-domain сигнала возвращает к вопросу об услуге (reason=invalid_choice).
-- intent_choice поддерживает prefix-match по меткам очереди (>=4 символов); выбор duration ставит expected_reply_type=service_choice.
+- intent_choice: prefix/substring match по меткам очереди (>=4 символов); info-выбор отвечает и обновляет очередь, booking запускает booking-prompt; decision_meta пишет expected_reply_choice/intent_queue_remaining/expected_reply_next.
 - Consult playbooks: `domain_pack.consult_playbooks` расширен (hair_aftercolor/hair_damage/hair_color_choice/nails_care/brows_lashes_care/sensitive_skin/style_reference/general_consult) с questions/options/next_step.
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-29)
