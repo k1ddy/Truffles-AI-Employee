@@ -2414,7 +2414,7 @@ def test_intent_queue_info_limit_skips_booking():
     payload = WebhookRequest(
         client_slug="demo_salon",
         body=WebhookBody(
-            message="Во сколько вы работаете, сколько стоит маникюр, где вы и хочу записаться?",
+            message="Сколько стоит маникюр, сколько длится, где вы и хочу записаться?",
             messageType="text",
             metadata=WebhookMetadata(
                 remoteJid="77000000000@s.whatsapp.net",
@@ -2426,31 +2426,45 @@ def test_intent_queue_info_limit_skips_booking():
 
     intent_decomp = {
         "multi_intent": True,
-        "primary_intent": "hours",
-        "secondary_intents": ["pricing", "location", "booking"],
-        "intents": ["hours", "pricing", "location", "booking"],
+        "primary_intent": "pricing",
+        "secondary_intents": ["duration", "booking"],
+        "intents": ["pricing", "duration", "booking"],
         "service_query": "маникюр",
         "consult_intent": False,
         "consult_topic": "",
         "consult_question": "",
     }
 
-    pricing_decision = DemoSalonDecision(
-        action="reply",
-        response="PRICE",
-        intent="price_query",
-        meta={"service_query": "маникюр"},
-    )
-    policy_handler = {"policy_type": "demo_salon"}
+    def _truth_gate(_message: str, *, client_slug: str | None = None, intent_decomp: dict | None = None):
+        return DemoSalonDecision(
+            action="reply",
+            response="LOCATION",
+            intent="location",
+        )
+
+    def _info_decision(question: str, *_args, **_kwargs):
+        if "длится" in question:
+            return DemoSalonDecision(
+                action="reply",
+                response="DURATION",
+                intent="duration_query",
+                meta={"service_query": "маникюр"},
+            )
+        return DemoSalonDecision(
+            action="reply",
+            response="PRICE",
+            intent="price_query",
+            meta={"service_query": "маникюр"},
+        )
+
+    policy_handler = {"policy_type": "demo_salon", "truth_gate": _truth_gate}
 
     with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
         "app.routers.webhook._get_policy_handler", return_value=policy_handler
     ), patch(
         "app.routers.webhook.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook.format_reply_from_truth", return_value="HOURS"
-    ), patch(
-        "app.routers.webhook.get_demo_salon_decision", return_value=pricing_decision
+        "app.routers.webhook.get_demo_salon_decision", side_effect=_info_decision
     ), patch(
         "app.routers.webhook._find_message_by_message_id", return_value=saved_message
     ), patch(
@@ -2470,16 +2484,16 @@ def test_intent_queue_info_limit_skips_booking():
         )
 
     assert response.success is True
-    assert "HOURS" in response.bot_response
     assert "PRICE" in response.bot_response
+    assert "DURATION" in response.bot_response
     assert "Что разобрать дальше" in response.bot_response
     assert webhook_router.MSG_BOOKING_ASK_SERVICE not in response.bot_response
-    assert conversation.context.get("intent_queue") == ["location", "booking"]
+    assert conversation.context.get("intent_queue") == ["booking", "location"]
     assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_INTENT_CHOICE
     meta = saved_message.message_metadata.get("decision_meta", {})
-    assert meta.get("intent_queue") == ["location", "booking"]
+    assert meta.get("intent_queue") == ["booking", "location"]
     assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_INTENT_CHOICE
-    assert meta.get("info_intents_answered") == ["hours", "pricing"]
+    assert meta.get("info_intents_answered") == ["pricing", "duration"]
 
 
 def test_intent_queue_prefix_choice_sets_service_contract():

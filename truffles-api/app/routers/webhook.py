@@ -2054,7 +2054,8 @@ def _extract_datetime(text: str) -> str | None:
 
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration"}
 INFO_INTENTS = {"pricing", "hours", "duration", "location"}
-INFO_INTENT_PRIORITY = ("hours", "pricing", "duration")
+INFO_INTENT_PRIORITY_SERVICE = ("pricing", "duration", "location", "hours")
+INFO_INTENT_PRIORITY_GENERIC = ("location", "hours", "pricing", "duration")
 SERVICE_CARRYOVER_KEY = "service_carryover"
 SERVICE_CARRYOVER_TTL_MESSAGES = 4
 SERVICE_CARRYOVER_INTENTS = {"pricing", "duration"}
@@ -3285,6 +3286,8 @@ def _build_info_intent_reply(
 ) -> tuple[str | None, dict | None]:
     if intent == "hours":
         return format_reply_from_truth("hours"), None
+    if intent == "location":
+        return format_reply_from_truth("location"), None
     if intent == "pricing":
         question = f"Сколько стоит {service_query}?" if service_query else "Сколько стоит?"
     elif intent == "duration":
@@ -3297,6 +3300,36 @@ def _build_info_intent_reply(
         return decision.response, meta
     fallback = format_reply_from_truth("duration_or_price_clarify")
     return fallback, None
+
+
+def _extract_truth_gate_info_intents(
+    message_text: str,
+    *,
+    policy_handler: dict | None,
+    policy_type: str | None,
+    client_slug: str | None,
+    intent_decomp: dict | None,
+) -> list[str]:
+    if not message_text or not policy_handler:
+        return []
+    truth_gate = policy_handler.get("truth_gate")
+    if not truth_gate:
+        return []
+    if policy_type == "demo_salon":
+        decision = truth_gate(message_text, client_slug=client_slug, intent_decomp=intent_decomp)
+    else:
+        decision = truth_gate(message_text)
+    if not decision or getattr(decision, "action", None) != "reply":
+        return []
+    intent = getattr(decision, "intent", None)
+    if not isinstance(intent, str):
+        return []
+    intent_key = intent.strip().casefold()
+    if intent_key == "hours":
+        return ["hours"]
+    if intent_key == "location" or intent_key.startswith("location_"):
+        return ["location"]
+    return []
 
 
 def _build_booking_summary(booking: dict, *, refusal_flags: dict | None = None) -> str:
@@ -5999,7 +6032,6 @@ async def _handle_webhook_payload(
 
     if (
         intent_decomp_used
-        and len(intent_decomp_intents) >= 4
         and expected_reply_type is None
         and not intent_queue_event
         and pending_intent_queue is None
@@ -6009,16 +6041,60 @@ async def _handle_webhook_payload(
         and message_text
         and policy_type == "demo_salon"
     ):
-        info_intents = [intent for intent in INFO_INTENT_PRIORITY if intent in intent_decomp_set][:2]
-        if info_intents:
+        combined_intents: list[str] = []
+        seen_intents: set[str] = set()
+        for intent_name in intent_decomp_intents:
+            normalized = intent_name.strip().casefold()
+            if not normalized or normalized in seen_intents:
+                continue
+            combined_intents.append(normalized)
+            seen_intents.add(normalized)
+
+        truth_gate_intents: list[str] = []
+        if "booking" in intent_decomp_set:
+            truth_gate_intents = _extract_truth_gate_info_intents(
+                message_text,
+                policy_handler=policy_handler,
+                policy_type=policy_type,
+                client_slug=payload.client_slug,
+                intent_decomp=intent_decomp_payload,
+            )
+        for intent_name in truth_gate_intents:
+            if intent_name not in seen_intents:
+                combined_intents.append(intent_name)
+                seen_intents.add(intent_name)
+
+        combined_set = set(combined_intents)
+        info_intents = [intent for intent in combined_intents if intent in INFO_INTENTS]
+        info_intent_set = set(info_intents)
+        should_defer_booking = (
+            "booking" in combined_set
+            and info_intent_set
+            and (len(info_intent_set) >= 2 or len(combined_set) >= 3)
+        )
+        if should_defer_booking:
+            priority = (
+                INFO_INTENT_PRIORITY_SERVICE
+                if intent_decomp_service_query
+                else INFO_INTENT_PRIORITY_GENERIC
+            )
+            answer_intents: list[str] = []
+            for intent_name in priority:
+                if intent_name in info_intent_set and intent_name not in answer_intents:
+                    answer_intents.append(intent_name)
+                if len(answer_intents) >= 2:
+                    break
+            if not answer_intents:
+                answer_intents = info_intents[:2]
+
             replies: list[str] = []
             seen_replies: set[str] = set()
             answered_intents: list[str] = []
             info_meta: dict = {}
             service_meta: dict | None = None
-            for intent in info_intents:
+            for intent_name in answer_intents:
                 reply, meta = _build_info_intent_reply(
-                    intent,
+                    intent_name,
                     service_query=intent_decomp_service_query,
                     client_slug=payload.client_slug,
                 )
@@ -6027,14 +6103,14 @@ async def _handle_webhook_payload(
                     if reply and reply not in seen_replies:
                         replies.append(reply)
                         seen_replies.add(reply)
-                        answered_intents.append(intent)
+                        answered_intents.append(intent_name)
                 if isinstance(meta, dict) and meta:
                     info_meta.update(meta)
                     service_meta = dict(info_meta)
             if replies:
                 answered_set = set(answered_intents)
                 remaining_queue = [
-                    intent for intent in intent_decomp_intents if intent not in answered_set
+                    intent for intent in combined_intents if intent not in answered_set
                 ]
                 context = _get_conversation_context(conversation)
                 expected_next = EXPECTED_REPLY_INTENT_CHOICE if remaining_queue else None
@@ -6048,8 +6124,9 @@ async def _handle_webhook_payload(
                 _reset_low_confidence_retry(conversation)
                 trace_payload = {
                     "stage": "intent_queue",
-                    "decision": "info_limit",
+                    "decision": "defer_booking",
                     "state": conversation.state,
+                    "combined_intents": combined_intents,
                     "info_intents": answered_intents,
                     "intent_queue": remaining_queue,
                     "expected_reply_type": expected_next,
@@ -6065,8 +6142,10 @@ async def _handle_webhook_payload(
                 )
                 if saved_message:
                     updates = {
+                        "combined_intents": combined_intents,
                         "info_intents_answered": answered_intents,
-                        "intent_queue_reason": "info_limit",
+                        "intent_queue_reason": "defer_booking",
+                        "booking_deferred": True,
                     }
                     if remaining_queue:
                         updates["intent_queue"] = remaining_queue

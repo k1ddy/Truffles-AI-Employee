@@ -3891,9 +3891,17 @@ eval_cases:
     intent: multi_truth
     must_include:
     - педикюр
-    - ₸
+    - минут
     must_include_any:
     - Работаем
     - ежедневно
     - '9:00'
     - '21:00'
+- id: E358
+  user: Сколько стоит маникюр, сколько длится, где находитесь и можно записаться?
+  expected:
+    action: reply
+    intent: location
+    must_include_any:
+    - Адрес
+    - Алматы
