@@ -27,6 +27,7 @@
 - Новые документы: `docs/TECH_STATUS.md` и `docs/SELLING_TRUTHS.md` (что можно обещать и чем доказывать).
 - Новые документы: `docs/TECH_STATUS.md` и `docs/SELLING_TRUTHS.md` (что можно обещать и чем доказывать).
 - Session Canon updated in `docs/SESSION_START_PROMPT.txt`.
+- Pilot readiness checklist added.
 
 ### КЛЮЧЕВЫЕ МОЗГИ / РИСКИ / ПРОВЕРКИ (быстрый чек)
 - Мозги: `outbox → _handle_webhook_payload → pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → service matcher (услуги/цены) → LLM-first → truth gate fallback → low-confidence уточнение/эскалация`.

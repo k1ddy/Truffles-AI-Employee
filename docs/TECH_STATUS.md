@@ -142,18 +142,27 @@
 
 ---
 
-## Smoke commands (5–10 команд)
+## Pilot Readiness Checklist (5–10 min)
+- 1) Версия и билд актуальны (C1) — OK/Fail
+- 2) Health без критичных ошибок (C2) — OK/Fail
+- 3) Метрики доступны (C3) — OK/Fail
+- 4) Outbox processing отвечает (C4) — OK/Fail
+- 5) Outbox backlog в норме (S1) — OK/Fail
+- 6) Decision meta/trace пишутся (S2) — OK/Fail
+
+### Smoke commands (5–10)
 ```bash
+# C1
 curl -fsS http://localhost:8000/admin/version
+# C2
 curl -fsS http://localhost:8000/admin/health
-
+# C3
 curl -fsS -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" "http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=YYYY-MM-DD"
+# C4
+curl -fsS -X POST -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" http://localhost:8000/admin/outbox/process
 
-docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "SELECT status, COUNT(*) FROM outbox_messages GROUP BY 1;"
-
-docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "SELECT id, context->'decision_trace' FROM conversations ORDER BY last_message_at DESC NULLS LAST LIMIT 1;"
-docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "SELECT content, metadata->'decision_meta' FROM messages ORDER BY created_at DESC LIMIT 3;"
-
-docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q
-docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q
+# S1
+docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "SELECT status, COUNT(*) FROM outbox_messages GROUP BY 1 ORDER BY 2 DESC;"
+# S2
+docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "SELECT m.content, m.metadata->'decision_meta' AS decision_meta, c.context->'decision_trace' AS decision_trace FROM messages m JOIN conversations c ON c.id = m.conversation_id ORDER BY m.created_at DESC LIMIT 1;"
 ```
