@@ -21,6 +21,18 @@
 
 ---
 
+## OWNERS (кто обновляет)
+
+| Артефакт | Ответственный |
+|----------|----------------|
+| `STATE.md` | Brain (последний шаг каждой сессии) |
+| `SPECS/*` | Top Architect |
+| `docs/TECH_STATUS.md` | QA/OPS (после прогонов) |
+| `docs/SELLING_TRUTHS.md` | Top Architect / Brain |
+| `STRUCTURE.md` | Brain |
+
+---
+
 ## БЫСТРЫЙ ВХОД (если нужно быстро вкатиться)
 
 | Файл | Зачем читать |
