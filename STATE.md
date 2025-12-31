@@ -32,6 +32,7 @@
 - Док‑синхронизация: убраны дубли в `STATE.md`/`STRUCTURE.md`, `SPECS/CONSULTANT.md` обновлён под `webhook.py`, уточнён источник истины в `docs/SESSION_START_PROMPT.txt`.
 - Док‑синхронизация: `SPECS/MULTI_TENANT.md` и `SPECS/ARCHITECTURE.md` приведены к текущей реализации (branch routing частично, pipeline/вход /webhook/{client_slug}, ChatFlow без retries).
 - Док‑синхронизация: `SPECS/ESCALATION.md` приведён к факту (roles/agent_identities/learned_responses — схема есть, wiring pending; branch config перенесён в реализованное).
+- Док‑синхронизация: `AGENTS.md` и `docs/SESSION_START_PROMPT.txt` обновлены под роли Top Architect / Brain / Hands.
 
 ### SYSTEM MAP (1‑page)
 - Ingress: ChatFlow → `POST /webhook/{client_slug}` → outbox PENDING → worker/cron → `_handle_webhook_payload`.
