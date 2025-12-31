@@ -16,12 +16,12 @@
 |--------|--------|
 | Состояния диалога | ✅ РЕАЛИЗОВАНО |
 | Цепочка эскалации (multi-level) | 📋 ПЛАН |
-| Роли и идентичности | 📋 ПЛАН |
+| Роли и идентичности | ⚠️ ЧАСТИЧНО (схема/модели есть, wiring pending) |
 | Менеджер отвечает через Telegram | ✅ РЕАЛИЗОВАНО |
-| Очередь обучения + модерация | 📋 ПЛАН |
+| Очередь обучения + модерация | ⚠️ ЧАСТИЧНО (схема есть, флоу/moderation pending) |
 | Telegram per branch (форум) | 📋 ПЛАН |
 | Метрики | ⚠️ ЧАСТИЧНО |
-| База данных | ✅ РЕАЛИЗОВАНО (handovers) |
+| База данных | ✅ РЕАЛИЗОВАНО (handovers + agents/agent_identities/learned_responses) |
 | Конфигурация | ⚠️ ЧАСТИЧНО |
 
 ---
@@ -262,7 +262,7 @@
 | `manager` | Менеджер | Отвечать, видеть диалоги | В очередь на модерацию |
 | `support` | Поддержка | Только отвечать | В очередь на модерацию |
 
-**Текущая реализация:** Роли в БД отсутствуют. Используется `client_settings.owner_telegram_id` как временный костыль.
+**Текущая реализация:** Таблицы ролей/идентичностей существуют, но wiring не подключён. Используется `client_settings.owner_telegram_id` как временный костыль.
 
 ---
 
@@ -295,7 +295,7 @@ Admin ответил → pending → approve owner (или auto-approve, есл�
 Manager/Support ответил → pending → approve owner
 ```
 
-**Конфиг:** `auto_approve_roles` (по умолчанию только owner). Если добавлять admin — ограничить филиалом.
+**Конфиг:** `auto_approve_roles` (по умолчанию `owner,admin`). При включении `admin` — ограничить филиалом.
 
 **Текущая реализация:** ⚠️ Частично. Ответ менеджера сохраняется в `handover.manager_response`. Если отвечает owner (по `client_settings.owner_telegram_id`) — ответ может авто-добавляться в KB (Qdrant).
 
@@ -623,7 +623,7 @@ skipped_by              JSONB  -- список кто пропустил
 
 id                  UUID PRIMARY KEY
 client_id           UUID
-branch_id           UUID  -- TODO: добавить, чтобы маршрутизировать на филиал
+branch_id           UUID  -- есть; используется в webhook для выбора филиала (не везде wired)
 user_id             UUID (FK → users)
 channel             TEXT  -- whatsapp, telegram
 
@@ -692,7 +692,7 @@ enable_reminders            BOOLEAN DEFAULT TRUE
 enable_owner_escalation     BOOLEAN DEFAULT TRUE
 ```
 
-### agents (план)
+### agents (существует, wiring pending)
 ```sql
 -- Пользователи со стороны бизнеса (owner/admin/manager/support)
 
@@ -705,7 +705,7 @@ is_active   BOOLEAN DEFAULT TRUE
 created_at  TIMESTAMP
 ```
 
-### agent_identities (план)
+### agent_identities (существует, wiring pending)
 ```sql
 -- Идентичности в разных каналах
 
@@ -847,6 +847,11 @@ MSG_MUTED_LONG = "Понял! Если ответа от менеджеров д
 | `enable_reminders` | true | client_settings |
 | `enable_owner_escalation` | true | client_settings |
 | `owner_telegram_id` | — | client_settings (LEGACY: заменяется agents/agent_identities) |
+| `branch_resolution_mode` | `hybrid` | client_settings |
+| `remember_branch_preference` | true | client_settings |
+| `auto_approve_roles` | `owner,admin` | client_settings |
+| `manager_scope` | `branch` | client_settings |
+| `require_branch_for_pricing` | true | client_settings |
 
 ### План (не реализовано):
 
@@ -860,11 +865,6 @@ MSG_MUTED_LONG = "Понял! Если ответа от менеджеров д
 | `quiet_hours_end` | 08:00 | Конец тихих часов |
 | `owner_auto_approve` | true | Автомодерация для owner |
 | `max_escalations_per_hour` | 50 | Лимит защиты от спама |
-| `branch_resolution_mode` | `hybrid` | `by_instance` / `ask_user` / `hybrid` |
-| `remember_branch_preference` | true | Сохранять выбранный филиал |
-| `auto_approve_roles` | `owner,admin` | Роли с auto-approve (строка/список) |
-| `manager_scope` | `branch` | `branch` / `global` |
-| `require_branch_for_pricing` | true | Без филиала не озвучивать цены/скидки |
 
 ---
 

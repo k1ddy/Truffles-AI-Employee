@@ -30,6 +30,7 @@
 - Pilot readiness run PASS (2025-12-31) зафиксирован в `docs/TECH_STATUS.md`.
 - Док‑синхронизация: убраны дубли в `STATE.md`/`STRUCTURE.md`, `SPECS/CONSULTANT.md` обновлён под `webhook.py`, уточнён источник истины в `docs/SESSION_START_PROMPT.txt`.
 - Док‑синхронизация: `SPECS/MULTI_TENANT.md` и `SPECS/ARCHITECTURE.md` приведены к текущей реализации (branch routing частично, pipeline/вход /webhook/{client_slug}, ChatFlow без retries).
+- Док‑синхронизация: `SPECS/ESCALATION.md` приведён к факту (roles/agent_identities/learned_responses — схема есть, wiring pending; branch config перенесён в реализованное).
 
 ### КЛЮЧЕВЫЕ МОЗГИ / РИСКИ / ПРОВЕРКИ (быстрый чек)
 - Мозги: `outbox → _handle_webhook_payload → pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → service matcher (услуги/цены) → LLM-first → truth gate fallback → low-confidence уточнение/эскалация`.
