@@ -150,19 +150,32 @@
 - 5) Outbox backlog в норме (S1) — OK/Fail
 - 6) Decision meta/trace пишутся (S2) — OK/Fail
 
-### Smoke commands (5–10)
-```bash
-# C1
-curl -fsS http://localhost:8000/admin/version
-# C2
-curl -fsS http://localhost:8000/admin/health
-# C3
-curl -fsS -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" "http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=YYYY-MM-DD"
-# C4
-curl -fsS -X POST -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" http://localhost:8000/admin/outbox/process
+### Run Log (fill after checklist)
+- Date/Time:
+- Version (/admin/version):
+- Summary: OK/FAIL
+- Fails (if any):
 
-# S1
-docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "SELECT status, COUNT(*) FROM outbox_messages GROUP BY 1 ORDER BY 2 DESC;"
-# S2
-docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "SELECT m.content, m.metadata->'decision_meta' AS decision_meta, c.context->'decision_trace' AS decision_trace FROM messages m JOIN conversations c ON c.id = m.conversation_id ORDER BY m.created_at DESC LIMIT 1;"
+### Smoke commands (copy/paste)
+```bash
+# 1) Версия/живость
+curl -s http://localhost:8000/admin/version
+curl -s http://localhost:8000/admin/health
+
+# 2) Метрики за сегодня
+curl -s -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" \
+  "http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=$(date +%F)"
+
+# 3) Outbox (последние 10)
+docker exec -i truffles_postgres_1 psql -U $DB_USER -d chatbot -c \
+"SELECT status, created_at, updated_at FROM outbox_messages ORDER BY created_at DESC LIMIT 10;"
+
+# 4) Decision meta присутствует
+docker exec -i truffles_postgres_1 psql -U $DB_USER -d chatbot -c \
+"SELECT metadata->'decision_meta' FROM messages ORDER BY created_at DESC LIMIT 5;"
 ```
+
+### Live smoke (ручной)
+- “Сколько стоит маникюр, сколько длится, где находитесь и можно записаться?”
+- “по адресу”
+- “по записи”
