@@ -6073,9 +6073,12 @@ async def _handle_webhook_payload(
             and (len(info_intent_set) >= 2 or len(combined_set) >= 3)
         )
         if should_defer_booking:
+            info_service_query = intent_decomp_service_query
+            if not info_service_query and {"pricing", "duration"} & info_intent_set:
+                info_service_query = _extract_service_hint(message_text, payload.client_slug)
             priority = (
                 INFO_INTENT_PRIORITY_SERVICE
-                if intent_decomp_service_query
+                if info_service_query
                 else INFO_INTENT_PRIORITY_GENERIC
             )
             answer_intents: list[str] = []
@@ -6095,7 +6098,7 @@ async def _handle_webhook_payload(
             for intent_name in answer_intents:
                 reply, meta = _build_info_intent_reply(
                     intent_name,
-                    service_query=intent_decomp_service_query,
+                    service_query=info_service_query,
                     client_slug=payload.client_slug,
                 )
                 if isinstance(reply, str):
