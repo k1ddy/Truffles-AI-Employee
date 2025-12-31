@@ -9,7 +9,7 @@
 ⚠️ Требует проверки: факты ниже нужно подтверждать через API/DB/логи, не полагаться на записи.
 
 ### БАЗОВЫЕ ФАКТЫ (читать первым делом)
-- Verified 2025-12-31 (Evidence: `curl -s http://localhost:8000/admin/version` → `{"version":"main","git_commit":"67bd61d6606e6fbdc2ad2d83936dc932a41a77c8","build_time":"2025-12-31T07:04:22Z"}`).
+- Verified 2025-12-31 (Evidence: `/admin/version` + `/admin/metrics` updated; see entries below).
 - Рабочая среда — прод: `/home/zhan/truffles-main` (любые действия считаются продовыми).
 - Тесты запускать внутри контейнера `truffles-api`: `docker exec -i truffles-api pytest ...` (на хосте python может отсутствовать).
 - Источник истины по деплою/коммиту: `GET /admin/version` (git_commit).
