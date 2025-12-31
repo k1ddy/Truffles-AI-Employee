@@ -6314,6 +6314,10 @@ async def _handle_webhook_payload(
         and routing["allow_booking_flow"]
         and not bypass_domain_flows
     ):
+        context = _get_conversation_context(conversation)
+        context = _set_intent_queue(context, None)
+        _set_conversation_context(conversation, context)
+        booking_context = context
         booking_signal = True
         booking_wants_flow = True
         booking_block_meta = None
