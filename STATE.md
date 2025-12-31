@@ -9,6 +9,7 @@
 ⚠️ Требует проверки: факты ниже нужно подтверждать через API/DB/логи, не полагаться на записи.
 
 ### БАЗОВЫЕ ФАКТЫ (читать первым делом)
+- Verified 2025-12-31 (Evidence: `curl -s http://localhost:8000/admin/version` → `{"version":"main","git_commit":"67bd61d6606e6fbdc2ad2d83936dc932a41a77c8","build_time":"2025-12-31T07:04:22Z"}`).
 - Рабочая среда — прод: `/home/zhan/truffles-main` (любые действия считаются продовыми).
 - Тесты запускать внутри контейнера `truffles-api`: `docker exec -i truffles-api pytest ...` (на хосте python может отсутствовать).
 - Источник истины по деплою/коммиту: `GET /admin/version` (git_commit).
@@ -68,11 +69,12 @@
 - intent_choice: prefix/substring match по меткам очереди (>=4 символов); info-выбор отвечает и обновляет очередь, booking запускает booking-prompt; decision_meta пишет expected_reply_choice/intent_queue_remaining/expected_reply_next.
 - Consult playbooks: `domain_pack.consult_playbooks` расширен (hair_aftercolor/hair_damage/hair_color_choice/nails_care/brows_lashes_care/sensitive_skin/style_reference/general_consult) с questions/options/next_step.
 
-### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-29)
+### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-31; Evidence: `curl -s http://localhost:8000/admin/health` → `checked_at=2025-12-31T07:10:03.359001+00:00`)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
 - Env: `PUBLIC_BASE_URL=https://api.truffles.kz`, `MEDIA_SIGNING_SECRET=SET`, `MEDIA_URL_TTL_SECONDS=3600`, `MEDIA_CLEANUP_TTL_DAYS=7`, `CHATFLOW_MEDIA_TIMEOUT_SECONDS=90`.
-- `/admin/version`: version `main`, git_commit `6a4b7ef0c05f903355413516d20bbd656ddd4f22`, build_time `2025-12-29T18:37:02Z`.
-- `/admin/health`: conversations bot_active 254, pending 4, manager_active 0; handovers pending 4, active 0 (checked_at `2025-12-29T14:32:29.419424+00:00`).
+- `/admin/version` (2025-12-31): version `main`, git_commit `67bd61d6606e6fbdc2ad2d83936dc932a41a77c8`, build_time `2025-12-31T07:04:22Z`. Evidence: `curl -s http://localhost:8000/admin/version` → `{"version":"main","git_commit":"67bd61d6606e6fbdc2ad2d83936dc932a41a77c8","build_time":"2025-12-31T07:04:22Z"}`.
+- `/admin/health` (2025-12-31): conversations bot_active 279, pending 1, manager_active 0; handovers pending 1, active 0 (checked_at `2025-12-31T07:10:03.359001+00:00`). Evidence: `curl -s http://localhost:8000/admin/health` → `{"conversations":{"bot_active":279,"pending":1,"manager_active":0},"handovers":{"pending":1,"active":0},"checked_at":"2025-12-31T07:10:03.359001+00:00"}`.
+- `/admin/metrics` (2025-12-31): demo_salon metric_date 2025-12-31 → Invalid admin token. Evidence: `curl -s -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" "http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=2025-12-31"` → `{"detail":"Invalid admin token"}`.
 - Live-check consult mode: care/color → consult replies with consult_intent meta; price → pricing path; booking → clarify; allergy → escalation; consult replies without prices/availability/masters.
 - Live-check context manager: refusal_flag.name set and booking skips name; 2x clarify → 3rd escalates; booking → consult switch updates current_goal + summary (consult reply, no prices/availability/masters).
 - Live-check PR-3 rewrite+hybrid: address slang → address (rewrite timeout, rag_scores logged); "манник" → service_semantic match; "скок стоит педик" → price; "какая погода" → OOD; "хочу записаться" → booking-clarify.
@@ -81,8 +83,10 @@
 - Tests: `docker exec -i truffles-api pytest /app/tests/test_message_endpoint.py -q` (85 passed).
 - Tests: `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` (1 passed).
 - CI: `lint-test/build-push/deploy` passed (commit `6a4b7ef`).
-- Deploy: prod on `6a4b7ef0c05f903355413516d20bbd656ddd4f22`; PR-5 deployed (consult precedence/info interrupt/service carryover).
-- DB (ops/diagnose): DB_USER `n8n`; conversations 15 total, 0 muted, 8 with topic; handovers 92 total, 0 pending, 0 active.
+- Deploy: prod on `67bd61d6606e6fbdc2ad2d83936dc932a41a77c8`. Evidence: `curl -s http://localhost:8000/admin/version` → `{"version":"main","git_commit":"67bd61d6606e6fbdc2ad2d83936dc932a41a77c8","build_time":"2025-12-31T07:04:22Z"}`.
+- DB messages (2025-12-31): total_msgs 2838, with_decision_meta 344. Evidence: `docker exec -i truffles_postgres_1 psql -U $DB_USER -d chatbot -c "SELECT count(*) AS total_msgs, count(*) FILTER (WHERE metadata ? 'decision_meta') AS with_decision_meta FROM messages;"` with `DB_USER=n8n` → `total_msgs=2838, with_decision_meta=344`.
+- DB conversations (2025-12-31): conv_with_branch 14, total_conversations 280. Evidence: `docker exec -i truffles_postgres_1 psql -U $DB_USER -d chatbot -c "SELECT count(*) FILTER (WHERE branch_id IS NOT NULL) AS conv_with_branch, count(*) AS total_conversations FROM conversations;"` with `DB_USER=n8n` → `conv_with_branch=14, total_conversations=280`.
+- DB outbox (2025-12-31): FAILED 12, SENT 767. Evidence: `docker exec -i truffles_postgres_1 psql -U $DB_USER -d chatbot -c "SELECT status, count(*) FROM outbox_messages GROUP BY status;"` with `DB_USER=n8n` → `FAILED=12, SENT=767`.
 
 ### MEDIA RUNBOOK (амнезия, 3–5 минут)
 - Точка входа: `truffles-api/app/routers/webhook.py` → `_handle_webhook_payload()` + outbox coalesce.
