@@ -6121,6 +6121,77 @@ async def _handle_webhook_payload(
             )
 
     if (
+        intent_queue_choice == "booking"
+        and expected_reply_type == EXPECTED_REPLY_INTENT_CHOICE
+        and routing["allow_booking_flow"]
+        and not bypass_domain_flows
+    ):
+        context = _get_conversation_context(conversation)
+        context = _set_intent_queue(context, None)
+        context_manager = _get_context_manager(context)
+        booking_state = _get_booking_context(context)
+        booking_state = dict(booking_state)
+        if not booking_state.get("active"):
+            booking_state["active"] = True
+            booking_state["started_at"] = now.isoformat()
+        booking_state = _update_booking_from_messages(
+            booking_state,
+            booking_messages,
+            client_slug=payload.client_slug,
+        )
+        if not booking_state.get("service"):
+            service_hint = _get_recent_service_hint(context, now)
+            if service_hint:
+                booking_state["service"] = service_hint
+                context = _clear_service_hint(context)
+        if not booking_state.get("service"):
+            carryover = _get_service_carryover(context_manager, message_count=message_count)
+            if carryover:
+                booking_state["service"] = carryover.get("service_query")
+        refusal_flags = context_manager.get("refusal_flags") if isinstance(context_manager, dict) else None
+        booking_state, prompt = _next_booking_prompt(booking_state, refusal_flags=refusal_flags)
+        context = _set_booking_context(context, booking_state)
+        _set_conversation_context(conversation, context)
+        booking_expected = _expected_reply_for_booking_question(booking_state.get("last_question"))
+        if prompt and booking_expected:
+            context = _set_expected_reply_context(
+                conversation=conversation,
+                saved_message=saved_message,
+                context=context,
+                expected_reply_type=booking_expected,
+                reason="booking_prompt",
+            )
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "booking",
+                "decision": "prompt",
+                "state": conversation.state,
+                "missing_slot": booking_state.get("last_question"),
+                "source": "intent_queue",
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="booking_prompt",
+            intent="booking",
+            source="intent_queue",
+            fast_intent=False,
+        )
+        bot_response = prompt or MSG_BOOKING_ASK_DATETIME
+        _reset_low_confidence_retry(conversation)
+        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+        sent = _send_response(bot_response)
+        result_message = "Intent queue booking prompt sent" if sent else "Intent queue booking prompt failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    if (
         intent_decomp_used
         and expected_reply_type is None
         and not intent_queue_event
@@ -6307,21 +6378,6 @@ async def _handle_webhook_payload(
                         "expected_reply_type": EXPECTED_REPLY_INTENT_CHOICE,
                     },
                 )
-
-    if (
-        intent_queue_choice == "booking"
-        and expected_reply_type == EXPECTED_REPLY_INTENT_CHOICE
-        and routing["allow_booking_flow"]
-        and not bypass_domain_flows
-    ):
-        context = _get_conversation_context(conversation)
-        context = _set_intent_queue(context, None)
-        _set_conversation_context(conversation, context)
-        booking_context = context
-        booking_signal = True
-        booking_wants_flow = True
-        booking_block_meta = None
-        booking_blocked = False
 
     consult_decision = None
     if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:

@@ -2747,6 +2747,16 @@ def test_intent_queue_choice_booking_starts_prompt_and_clears_queue():
         context={
             "expected_reply_type": webhook_router.EXPECTED_REPLY_INTENT_CHOICE,
             "intent_queue": ["booking", "location"],
+            "context_manager": {
+                "message_count": 0,
+                "service_carryover": {
+                    "service_query": "маникюр",
+                    "service_query_source": "semantic_match",
+                    "service_query_score": 0.72,
+                    "message_count": 0,
+                    "ttl": 4,
+                },
+            },
         },
     )
     user = SimpleNamespace(id="user-123", context={})
@@ -2813,21 +2823,17 @@ def test_intent_queue_choice_booking_starts_prompt_and_clears_queue():
         )
 
     assert response.success is True
-    assert any(
-        prompt in response.bot_response
-        for prompt in (
-            webhook_router.MSG_BOOKING_ASK_SERVICE,
-            webhook_router.MSG_BOOKING_ASK_DATETIME,
-            webhook_router.MSG_BOOKING_ASK_NAME,
-        )
-    )
+    assert response.bot_response == webhook_router.MSG_BOOKING_ASK_DATETIME
     assert conversation.context.get("intent_queue") is None
-    assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
+    assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
     meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("action") == "booking_prompt"
+    assert meta.get("intent") == "booking"
     assert meta.get("expected_reply_matched") is True
     assert meta.get("expected_reply_choice") == "booking"
     assert meta.get("intent_queue_remaining") == []
     assert meta.get("expected_reply_next") == "booking"
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
 
 
 def test_expected_reply_type_clears_on_match():
