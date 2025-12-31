@@ -977,6 +977,134 @@ def test_booking_info_interrupt_appends_prompt():
     mock_llm.assert_not_called()
 
 
+def test_booking_time_service_question_keeps_time_contract():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    context_manager = {
+        "clarify_attempts": {
+            "booking": {"count": 1, "last_at": "2025-12-01T10:00:00+00:00"},
+        },
+    }
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={
+            "booking": {"active": True, "service": "педикюр"},
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "context_manager": context_manager,
+        },
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Маникюр делаете?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-booking-time-service-1",
+                timestamp=1234567894,
+            ),
+        ),
+    )
+
+    intent_decomp = {
+        "multi_intent": False,
+        "primary_intent": "other",
+        "secondary_intents": [],
+        "intents": ["other"],
+        "service_query": "",
+        "consult_intent": False,
+        "consult_topic": "",
+        "consult_question": "",
+    }
+
+    def _truth_gate(_message: str, *, client_slug: str | None = None, intent_decomp: dict | None = None):
+        return DemoSalonDecision(
+            action="reply",
+            response="Да, делаем маникюр.",
+            intent="service_match",
+            meta={
+                "service_query": "маникюр",
+                "service_query_source": "semantic_match",
+                "service_query_score": 0.9,
+            },
+        )
+
+    policy_handler = {"policy_type": "demo_salon", "truth_gate": _truth_gate}
+
+    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._get_policy_handler", return_value=policy_handler
+    ), patch(
+        "app.routers.webhook.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook.generate_bot_response"
+    ) as mock_llm:
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert "делаем маникюр" in response.bot_response
+    assert webhook_router.MSG_BOOKING_ASK_DATETIME in response.bot_response
+    assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
+    booking_state = conversation.context.get("booking", {})
+    assert booking_state.get("service") == "маникюр"
+    clarify_state = conversation.context.get("context_manager", {}).get("clarify_attempts", {})
+    assert clarify_state.get("booking", {}).get("count") == 1
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("booking_info_interrupt") is True
+    trace = conversation.context.get("decision_trace", [])
+    assert any(entry.get("stage") == "booking_interrupt" for entry in trace if isinstance(entry, dict))
+    mock_llm.assert_not_called()
+
+
 def test_service_carryover_applies_for_pricing():
     saved_message = Mock()
     saved_message.message_metadata = {}

@@ -2056,6 +2056,15 @@ BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration"}
 INFO_INTENTS = {"pricing", "hours", "duration", "location"}
 INFO_INTENT_PRIORITY_SERVICE = ("pricing", "duration", "location", "hours")
 INFO_INTENT_PRIORITY_GENERIC = ("location", "hours", "pricing", "duration")
+BOOKING_TIME_SERVICE_INTENTS = {
+    "service_match",
+    "service_not_found",
+    "price_query",
+    "price_manicure",
+    "service_duration",
+    "service_clarify",
+    "duration_or_price_clarify",
+}
 SERVICE_CARRYOVER_KEY = "service_carryover"
 SERVICE_CARRYOVER_TTL_MESSAGES = 4
 SERVICE_CARRYOVER_INTENTS = {"pricing", "duration"}
@@ -3305,6 +3314,15 @@ def _build_info_intent_reply(
         return decision.response, meta
     fallback = format_reply_from_truth("duration_or_price_clarify")
     return fallback, None
+
+
+def _is_booking_time_service_decision(decision: DemoSalonDecision | None) -> bool:
+    if not decision or getattr(decision, "action", None) != "reply":
+        return False
+    intent = getattr(decision, "intent", None)
+    if not isinstance(intent, str):
+        return False
+    return intent.strip().casefold() in BOOKING_TIME_SERVICE_INTENTS
 
 
 def _extract_truth_gate_info_intents(
@@ -6571,60 +6589,96 @@ async def _handle_webhook_payload(
         else:
             multi_intent_other_followup = multi_intent_followup
 
+    booking_time_service_candidate = (
+        expected_reply_type == EXPECTED_REPLY_TIME
+        and expected_reply_matched is False
+        and message_text
+    )
     if (
         routing["allow_booking_flow"]
         and not bypass_domain_flows
         and booking_wants_flow
         and not consult_intent
-        and intent_decomp_used
+        and (intent_decomp_used or booking_time_service_candidate)
     ):
-        booking_info_intents = sorted(intent_decomp_set & INFO_INTENTS)
-        if booking_info_intents and policy_handler and routing["allow_truth_gate_reply"]:
+        booking_info_intents = (
+            sorted(intent_decomp_set & INFO_INTENTS) if intent_decomp_used else []
+        )
+        if (booking_info_intents or booking_time_service_candidate) and policy_handler and routing["allow_truth_gate_reply"]:
             info_decision = None
             info_source = None
-            if "hours" in booking_info_intents and {"pricing", "duration"} & set(booking_info_intents):
-                multi_result = compose_multi_truth_reply(
-                    message_text,
-                    payload.client_slug,
-                    intent_decomp=intent_decomp_payload,
-                    return_meta=True,
-                )
-                if multi_result:
-                    multi_reply, multi_meta = multi_result
-                    info_decision = DemoSalonDecision(
-                        action="reply",
-                        response=multi_reply,
-                        intent="multi_truth",
-                        meta=multi_meta if isinstance(multi_meta, dict) else None,
-                    )
-                    info_source = "multi_truth"
-            if not info_decision:
-                service_matcher = policy_handler.get("service_matcher")
-                if service_matcher:
-                    info_decision = service_matcher(
+            if booking_info_intents:
+                if "hours" in booking_info_intents and {"pricing", "duration"} & set(booking_info_intents):
+                    multi_result = compose_multi_truth_reply(
                         message_text,
-                        client_slug=payload.client_slug,
+                        payload.client_slug,
                         intent_decomp=intent_decomp_payload,
+                        return_meta=True,
                     )
-                    if info_decision:
-                        info_source = "service_matcher"
-            if not info_decision:
-                truth_gate = policy_handler.get("truth_gate")
-                if truth_gate:
-                    if policy_type == "demo_salon":
-                        info_decision = truth_gate(
+                    if multi_result:
+                        multi_reply, multi_meta = multi_result
+                        info_decision = DemoSalonDecision(
+                            action="reply",
+                            response=multi_reply,
+                            intent="multi_truth",
+                            meta=multi_meta if isinstance(multi_meta, dict) else None,
+                        )
+                        info_source = "multi_truth"
+                if not info_decision:
+                    service_matcher = policy_handler.get("service_matcher")
+                    if service_matcher:
+                        info_decision = service_matcher(
                             message_text,
                             client_slug=payload.client_slug,
                             intent_decomp=intent_decomp_payload,
                         )
-                    else:
-                        info_decision = truth_gate(message_text)
-                    if info_decision:
-                        info_source = "truth_gate"
+                        if info_decision:
+                            info_source = "service_matcher"
+                if not info_decision:
+                    truth_gate = policy_handler.get("truth_gate")
+                    if truth_gate:
+                        if policy_type == "demo_salon":
+                            info_decision = truth_gate(
+                                message_text,
+                                client_slug=payload.client_slug,
+                                intent_decomp=intent_decomp_payload,
+                            )
+                        else:
+                            info_decision = truth_gate(message_text)
+                        if info_decision:
+                            info_source = "truth_gate"
+            if not info_decision and booking_time_service_candidate:
+                service_matcher = policy_handler.get("service_matcher")
+                if service_matcher:
+                    candidate = service_matcher(
+                        message_text,
+                        client_slug=payload.client_slug,
+                        intent_decomp=intent_decomp_payload,
+                    )
+                    if _is_booking_time_service_decision(candidate):
+                        info_decision = candidate
+                        info_source = "service_matcher"
+                if not info_decision:
+                    truth_gate = policy_handler.get("truth_gate")
+                    if truth_gate:
+                        if policy_type == "demo_salon":
+                            candidate = truth_gate(
+                                message_text,
+                                client_slug=payload.client_slug,
+                                intent_decomp=intent_decomp_payload,
+                            )
+                        else:
+                            candidate = truth_gate(message_text)
+                        if _is_booking_time_service_decision(candidate):
+                            info_decision = candidate
+                            info_source = "truth_gate"
 
             if info_decision and info_decision.action == "reply":
                 info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}
                 info_meta = dict(info_meta)
+                booking_time_service_interrupt = bool(
+                    booking_time_service_candidate and _is_booking_time_service_decision(info_decision)
+                )
 
                 context = booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
                 booking_state = booking if isinstance(booking, dict) else _get_booking_context(context)
@@ -6638,6 +6692,10 @@ async def _handle_webhook_payload(
                     booking_messages,
                     client_slug=payload.client_slug,
                 )
+                if booking_time_service_interrupt:
+                    service_query = info_meta.get("service_query")
+                    if isinstance(service_query, str) and service_query.strip():
+                        booking_state["service"] = service_query.strip()
                 if not booking_state.get("service"):
                     service_hint = _get_recent_service_hint(context, now)
                     if service_hint:
@@ -6658,7 +6716,10 @@ async def _handle_webhook_payload(
                         reason="booking_prompt",
                     )
 
-                if info_decision.intent in {"service_clarify", "duration_or_price_clarify"}:
+                if (
+                    info_decision.intent in {"service_clarify", "duration_or_price_clarify"}
+                    and not booking_time_service_interrupt
+                ):
                     clarify_intent = current_goal or "info"
                     context_manager = _get_context_manager(context)
                     if _should_escalate_for_clarify(context_manager, clarify_intent):
@@ -6699,7 +6760,7 @@ async def _handle_webhook_payload(
                     )
                     prompt = None
 
-                if prompt:
+                if prompt and not booking_time_service_interrupt:
                     context_manager = _get_context_manager(context)
                     if _should_escalate_for_clarify(context_manager, "booking"):
                         clarify_count, _ = _get_clarify_attempt_state(context_manager, "booking")
