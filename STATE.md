@@ -33,6 +33,17 @@
 - Док‑синхронизация: `SPECS/MULTI_TENANT.md` и `SPECS/ARCHITECTURE.md` приведены к текущей реализации (branch routing частично, pipeline/вход /webhook/{client_slug}, ChatFlow без retries).
 - Док‑синхронизация: `SPECS/ESCALATION.md` приведён к факту (roles/agent_identities/learned_responses — схема есть, wiring pending; branch config перенесён в реализованное).
 
+### SYSTEM MAP (1‑page)
+- Ingress: ChatFlow → `POST /webhook/{client_slug}` → outbox PENDING → worker/cron → `_handle_webhook_payload`.
+- Hard gates: pending/manager_active/opt‑out → LAW escalation (payment/medical/complaint/discount/reschedule).
+- OOD: early strong‑anchor OOD (soft return to salon topic).
+- Booking: booking guard/flow; defer when booking + 2+ info; `expected_reply_type=time`; service‑Q allowed without clarify growth; clarify_limit → escalate.
+- Info/Consult: deterministic info (service matcher + multi‑truth hours/price/duration), consult playbooks; then LLM‑first (RAG only) → truth fallback → low‑confidence clarify/escalate.
+- Contracts: intent_queue + expected_reply_type (intent_choice/service_choice/time); invalid choice → return to question without reset.
+- Data: `SALON_TRUTH.yaml` domain_pack/client_pack; Qdrant RAG + services_index; `knowledge_backlog` for misses.
+- Observability: decision_meta on messages; decision_trace in conversations.context; `/admin/metrics`.
+- Deploy/Test: GHCR + `/admin/version`; Core‑50 in CI, full eval manual; outbound allowlist when `TEST_MODE=1`.
+
 ### КЛЮЧЕВЫЕ МОЗГИ / РИСКИ / ПРОВЕРКИ (быстрый чек)
 - Мозги: `outbox → _handle_webhook_payload → pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → service matcher (услуги/цены) → LLM-first → truth gate fallback → low-confidence уточнение/эскалация`.
 - Риски: payment/reschedule/medical/complaint — только эскалация; не озвучивать способы оплаты; branch‑gate для цен.
