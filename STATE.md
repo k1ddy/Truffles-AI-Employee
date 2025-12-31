@@ -29,6 +29,7 @@
 - Pilot readiness checklist added.
 - Pilot readiness run PASS (2025-12-31) зафиксирован в `docs/TECH_STATUS.md`.
 - Док‑синхронизация: убраны дубли в `STATE.md`/`STRUCTURE.md`, `SPECS/CONSULTANT.md` обновлён под `webhook.py`, уточнён источник истины в `docs/SESSION_START_PROMPT.txt`.
+- Док‑синхронизация: `SPECS/MULTI_TENANT.md` и `SPECS/ARCHITECTURE.md` приведены к текущей реализации (branch routing частично, pipeline/вход /webhook/{client_slug}, ChatFlow без retries).
 
 ### КЛЮЧЕВЫЕ МОЗГИ / РИСКИ / ПРОВЕРКИ (быстрый чек)
 - Мозги: `outbox → _handle_webhook_payload → pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → service matcher (услуги/цены) → LLM-first → truth gate fallback → low-confidence уточнение/эскалация`.
@@ -109,7 +110,7 @@
 - [x] Мультитенант (truffles, demo_salon)
 
 ### Что не работает / в процессе
-- [ ] **⚠️ Новая архитектура эскалации/обучения** — роли/идентичности + очередь обучения + Telegram per branch описаны в спеках, **код не внедрён**
+- [ ] **⚠️ Новая архитектура эскалации/обучения** — схема БД/модели/миграции внедрены, но wiring потоков (модерация, очередь, Telegram per branch) ещё не подключён
 - [ ] **⚠️ Эскалация всё ещё частая на реальные вопросы** — KB неполная, score часто < 0.5 → создаётся заявка; мелкие сообщения ("спасибо", "ок?") больше не должны создавать заявки (whitelist + guardrails)
 - [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant работает (логи 2025-12-25: "Owner response detected" / "Added to knowledge"), но нет модерации/метрик
 - [ ] **⚠️ Ответы медленные (outbox)** — обновлено: `OUTBOX_COALESCE_SECONDS=1`, `OUTBOX_WINDOW_MERGE_SECONDS=2.5`, `OUTBOX_WORKER_INTERVAL_SECONDS=1`; safe intents (SAFE5) total_s 2.72–2.86s; LLM ветка (CMPX6-3/6-5/7-4/7-5/8-1) total_s 8.35–9.52s (avg 8.99, p90 9.48) → SLA <10s для LLM достигнут
@@ -119,7 +120,7 @@
 - [ ] **⚠️ OOD anchors (data-driven)** — demo_salon: anchors_in/out расширены (животные/погода/политика/кулинария/код/советы/анекдоты + style/booking/адрес/часы), offtopic_examples дополнил; SQL зафиксирован в `ops/update_instance_demo.sql`, нужен деплой, если API ещё на старом образе
 - [ ] **⚠️ Закрепы заявок в Telegram** — фикс в коде: `unpin` теперь использует `handover.telegram_message_id` (fallback на callback message_id); нужен деплой/проверка
 - [ ] **⚠️ Дубли заявок на одного клиента** — владельцу неудобно; нужен guard: при open handover не создавать новый, а писать в текущий топик
-- [ ] **Branch подключен частично** — webhook ставит `conversation.branch_id`, но Telegram per branch + RAG фильтры ещё не wired → `SPECS/MULTI_TENANT.md`
+- [ ] **Branch подключен частично** — выбор branch и запись `conversation.branch_id` есть в `webhook.py`, но Telegram per branch и RAG фильтры всё ещё по client → `SPECS/MULTI_TENANT.md`
 - [ ] **⚠️ by_instance зависит от instanceId** — demo_salon исправлен (query‑param даёт instanceId), остальным клиентам нужно прокинуть
 - [ ] **⚠️ demo_salon truth-gate даёт цену на "как у/в стиле"** — нет правила style_reference, фото не поддерживаются; нужен отдельный ответ/эскалация
 - [ ] **⚠️ Медиа (аудио/фото/документы)** — guardrails + Telegram forward + локальное хранение + транскрипция коротких PTT добавлены в код (нужен деплой); длинные аудио/видео и OCR/vision отсутствуют
@@ -204,9 +205,9 @@
 19. [ ] Telegram кнопки модерации [В базу] [Отклонить] для не-owner
 
 **АРХИТЕКТУРА ЭСКАЛАЦИИ/ОБУЧЕНИЯ [P0] — НОВОЕ РЕШЕНИЕ**
-20. [ ] Роли + идентичности (agents/agent_identities) в БД
-21. [ ] Очередь обучения (learned_responses: pending/approved/rejected) + auto-approve owner
-22. [ ] Telegram per branch (branches.telegram_chat_id) + routing по branch_id
+20. [ ] Роли + идентичности (agents/agent_identities) — схема БД/модели есть, wiring pending
+21. [ ] Очередь обучения (learned_responses: pending/approved/rejected) — схема БД есть, модерация/флоу pending
+22. [ ] Telegram per branch (branches.telegram_chat_id) — pending (branch routing в webhook уже есть)
 
 **⚠️ ПРОБЛЕМА:** Эскалация срабатывает слишком часто — даже на "ты еще здесь?"
 - **Причина:** KB неполная → RAG score часто < 0.5 на реальные вопросы

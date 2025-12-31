@@ -12,12 +12,12 @@
 |-----------|--------|
 | Таблица companies | ✅ СУЩЕСТВУЕТ (не используется) |
 | Таблица clients | ✅ РАБОТАЕТ |
-| Таблица branches | ⚠️ СУЩЕСТВУЕТ, НЕ ПОДКЛЮЧЕНА |
+| Таблица branches | ⚠️ СУЩЕСТВУЕТ, ПОДКЛЮЧЕНА ЧАСТИЧНО (branch selection в webhook) |
 | Таблица client_settings | ✅ РАБОТАЕТ |
 | Промпты из БД | ✅ РАБОТАЕТ |
 | RAG фильтрация по client_slug | ✅ РАБОТАЕТ |
 | Telegram группы на заказчика | ✅ РАБОТАЕТ |
-| Роутинг через branch_id | ❌ НЕ РЕАЛИЗОВАНО (план) |
+| Роутинг через branch_id | ⚠️ ЧАСТИЧНО: branch_id выбирается/сохраняется, Telegram/RAG ещё по client |
 | Онбординг скрипт | ⚠️ ЧАСТИЧНО (SQL вручную) |
 | Счётчик сообщений | 📋 ПЛАН |
 | Dashboard для заказчика | 📋 ПЛАН |
@@ -75,10 +75,10 @@ Company
 
 | Что | Сейчас | Конечное |
 |-----|--------|----------|
-| Роутинг | client_id | branch_id |
+| Роутинг | branch_id (выбор в webhook), Telegram/RAG ещё по client | branch_id везде |
 | Telegram credentials | client_settings | Branch |
 | Knowledge | client_slug | Branch.knowledge_tag |
-| Conversation привязан к | client_id | branch_id |
+| Conversation привязан к | branch_id (сохраняется, не используется повсеместно) | branch_id |
 | Каналы (WhatsApp/Instagram) | 1 на client | через Channel (backlog) |
 
 ---
@@ -92,7 +92,7 @@ Company (companies) — существует, не используется
           │
           ├── ClientSettings (client_settings) — telegram, mute, reminders
           ├── Prompt (prompts)
-          ├── Branch (branches) — СУЩЕСТВУЕТ, НЕ ПОДКЛЮЧЕН
+          ├── Branch (branches) — СУЩЕСТВУЕТ, ПОДКЛЮЧЕН ЧАСТИЧНО (выбор филиала в webhook)
           │
           └── User (users)
                 │
@@ -128,9 +128,9 @@ Python API:
 | Данные | Где хранится | Как разделяется |
 |--------|--------------|-----------------|
 | Промпт | prompts | WHERE client_id |
-| База знаний | Qdrant | filter: metadata.client_slug + knowledge_tag (branch) |
+| База знаний | Qdrant | filter: metadata.client_slug (knowledge_tag не используется) |
 | Настройки эскалации | client_settings | WHERE client_id |
-| Telegram группа | branches.telegram_chat_id | Отдельная группа на филиал |
+| Telegram группа | client_settings.telegram_chat_id | Одна группа на клиента (branch не используется) |
 | Пользователи | users | WHERE client_id |
 | Диалоги | conversations | WHERE client_id |
 | Сообщения | messages | через conversation → client_id |
@@ -431,7 +431,7 @@ https://api.truffles.kz/webhook/salon_elita?webhook_secret=...
                            client_slug
 ```
 
-API извлекает slug → ищет в БД → получает client_id.
+API извлекает slug → ищет клиента по `Client.name` (slug должен совпадать с name) → получает client_id.
 
 **Реализация (preferred):** ChatFlow → Python API (`/webhook/{client_slug}`).
 **Legacy:** webhook wrapper → Python API (`/webhook`).
@@ -549,9 +549,8 @@ except Exception as e:
  - `manager_scope`: `branch` (по умолчанию) или `global`
 
 **Что нужно сделать (в плане):**
-- [ ] Conversation.branch_id для маршрутизации
-- [ ] Роутинг по instance_id → branch (by_instance/hybrid)
-- [ ] Ветка “спросить филиал” (ask_user/hybrid)
+- [x] Conversation.branch_id сохраняется (webhook)
+- [x] Роутинг по instance_id → branch (by_instance/ask_user/hybrid) реализован в webhook
 - [ ] Эскалация из Branch.telegram_chat_id
 - [ ] RAG фильтр по Branch.knowledge_tag
 - [ ] Сохранение выбранного филиала у пользователя (optional)

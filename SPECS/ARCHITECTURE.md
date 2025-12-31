@@ -116,7 +116,7 @@ WhatsApp клиент
     ↓
 ChatFlow (app.chatflow.kz)
     ↓
-POST /webhook (webhook_secret)
+POST /webhook/{client_slug} (direct ChatFlow; /webhook — legacy wrapper; webhook_secret проверяется если задан)
     ↓
 enqueue outbox_messages (PENDING)
     ↓
@@ -124,9 +124,9 @@ outbox worker (тик 2s) или POST /admin/outbox/process (cron)
     ↓
 _handle_webhook_payload(skip_persist=True)
     ↓
-policy/truth gate → intent → RAG/LLM
+pending/opt-out/policy escalation → early OOD (strong anchors) → booking guard/flow + service matcher → LLM-first (RAG/LLM) → truth gate fallback → intent classification/low-confidence handling
     ↓
-chatflow_service → WhatsApp (retries/backoff + msg_id idempotency)
+chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
 ```
 
 ### Медиа‑контур (фото/аудио/документы)
@@ -577,7 +577,7 @@ pytest tests/ -v
 ### Смоук на проде
 ```
 1. GET /health → 200
-2. POST /webhook с тестовым payload → не 500
+2. POST /webhook/{client_slug} с тестовым payload → не 500
 3. Telegram webhook доступен
 ```
 
