@@ -51,6 +51,7 @@
 | `ARCHITECTURE.md` | Техническая архитектура, стек, потоки | Новые компоненты |
 | `INFRASTRUCTURE.md` | Инфраструктура, безопасность, CI/CD, тесты | DevOps, качество |
 | `MULTI_TENANT.md` | Мультитенантность, онбординг | Новый заказчик |
+| `SYSTEM_REFERENCE.md` | Системные референсы (интеграции/точки правды) | При аудите/интеграциях |
 | `WEEK2_CODER_TASKS.md` | Задачи Недели 2 для кодера | Архив |
 | `WEEK3_CODER_TASKS.md` | Задачи Недели 3 для кодера | Кодер: текущая неделя |
 
@@ -79,8 +80,6 @@
 | `IMPERIUM_DECISIONS.yaml` | CEO-level решения (policy) |
 | `IMPERIUM_GAPS.yaml` | Критические пробелы и MVP фиксы |
 | `SESSION_START_PROMPT.txt` | Стартовый промпт для новых сессий |
-| `TECH_STATUS.md` | Тех‑статус (OK/PARTIAL/BROKEN + evidence) |
-| `SELLING_TRUTHS.md` | Честные продающие утверждения (claim/proof/boundary) |
 | `TECH_STATUS.md` | Тех‑статус (OK/PARTIAL/BROKEN + evidence) |
 | `SELLING_TRUTHS.md` | Честные продающие утверждения (claim/proof/boundary) |
 

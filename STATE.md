@@ -25,9 +25,10 @@
 - Деплой API: CI build/push → на проде `IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash /home/zhan/restart_api.sh` (локальная сборка — fallback; см. `TECH.md`).
 - Инфра compose: `/home/zhan/infrastructure/docker-compose.yml` + `/home/zhan/infrastructure/docker-compose.truffles.yml`; `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 - Новые документы: `docs/TECH_STATUS.md` и `docs/SELLING_TRUTHS.md` (что можно обещать и чем доказывать).
-- Новые документы: `docs/TECH_STATUS.md` и `docs/SELLING_TRUTHS.md` (что можно обещать и чем доказывать).
 - Session Canon updated in `docs/SESSION_START_PROMPT.txt`.
 - Pilot readiness checklist added.
+- Pilot readiness run PASS (2025-12-31) зафиксирован в `docs/TECH_STATUS.md`.
+- Док‑синхронизация: убраны дубли в `STATE.md`/`STRUCTURE.md`, `SPECS/CONSULTANT.md` обновлён под `webhook.py`, уточнён источник истины в `docs/SESSION_START_PROMPT.txt`.
 
 ### КЛЮЧЕВЫЕ МОЗГИ / РИСКИ / ПРОВЕРКИ (быстрый чек)
 - Мозги: `outbox → _handle_webhook_payload → pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → service matcher (услуги/цены) → LLM-first → truth gate fallback → low-confidence уточнение/эскалация`.

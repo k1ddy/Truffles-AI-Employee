@@ -92,7 +92,7 @@
 
 **Реализация:**
 ```python
-# truffles-api/app/routers/message.py
+# truffles-api/app/routers/webhook.py (основной путь; message.py — legacy)
 
 if is_rejection(intent):
     if conversation.no_count == 0:
@@ -294,7 +294,7 @@ if intent == Intent.PRICE_OBJECTION:
 **Реализация:** Архитектура API — один запрос = один ответ.
 
 ```python
-# message.py
+# webhook.py (outbox → один ответ)
 bot_response = generate_bot_response(db, conversation, request.content)
 send_bot_response(db, request.client_id, request.remote_jid, bot_response)
 # Один вызов send — одно сообщение
@@ -315,7 +315,7 @@ send_bot_response(db, request.client_id, request.remote_jid, bot_response)
 **Что нужно реализовать:**
 
 ```python
-# В message.py или отдельном сервисе
+# В webhook.py или отдельном сервисе
 
 import asyncio
 
@@ -601,7 +601,7 @@ WhatsApp (ChatFlow)
 
 | Файл | Назначение |
 |------|------------|
-| `routers/message.py` | Входная точка, основная логика |
+| `routers/webhook.py` | Входная точка, основная логика (message.py — legacy) |
 | `services/intent_service.py` | Классификация intent |
 | `services/ai_service.py` | Генерация ответа, RAG |
 | `services/knowledge_service.py` | Поиск в Qdrant |
