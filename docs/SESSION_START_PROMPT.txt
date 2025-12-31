@@ -22,6 +22,15 @@ Roles & ownership (who updates what):
 Process (always):
 Architect -> Brain -> Hands. One writer at a time unless using worktrees.
 
+Multi-terminal protocol (mandatory):
+- Terminal 1: Architect (sets course; no code changes unless explicitly asked).
+- Terminal 2: Brain (defines tasks, accepts results, sole authority to commit/push).
+- Terminal 3..N: Hands (DEV/QA/OPS/DOCS), execute tasks only.
+- Single-writer rule: only one terminal edits code at a time. For parallel work, use separate worktrees and non-overlapping files.
+- Handoff format (must use):
+  GOAL / FILES / TESTS / LIVE-CHECK / EVIDENCE / COMMIT / RISKS
+- Zhanbol interaction: he provides priorities and approvals; we reply concisely and ask only when blocked.
+
 Minimum start (avoid dumb mistakes):
 0) Confirm environment access: `hostname`, `whoami`, `docker ps`, `ls -la ~/.ssh`
    - If `docker ps` shows Truffles containers or `pwd` is `/home/zhan/truffles-main`, you are on the prod host: run commands locally, do NOT SSH, and do NOT claim “no access” unless preflight fails.
