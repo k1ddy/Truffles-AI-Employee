@@ -62,6 +62,7 @@
 - Ambiguous price/duration → clarify (не отвечаем ценой при неуверенном типе).
 - Booking gate блокирует инфо‑вопросы (pricing/hours/duration) без явного booking; сплит сегментов по ,;?!.; service slot только через semantic matcher, datetime — токен; trace/meta `booking_blocked_reason`. (нужен деплой)
 - Booking: при expected_reply_type=time service‑вопросы (presence/price/duration) отвечаются по факту без роста clarify; service_query сохраняется в booking_context, дальше prompt времени.
+- Live-check 2025-12-31: booking‑prompt + “маникюр делаете?” → price reply + повтор времени, clarify_attempt не растёт (commit 854b4f9).
 - Context Manager: `current_goal` (info/consult/booking), `refusal_flags` (name/phone, TTL 10 сообщений), `clarify_attempts` (>=2 → эскалация), `compact_summary` (детерминированно; триггеры: intent_change/clarify_limit/12+ сообщений); всё пишется в decision_meta/trace.
 - Intent Queue + Question Contract: `conversation.context.intent_queue` и `conversation.context.expected_reply_type` в webhook, чтобы держать очередь интентов и ожидаемый тип ответа.
 - Booking + 2+ info (или total 3+) → defer booking, отвечаем на 1–2 info (service_query: price+duration; иначе location+hours), остаток в intent_queue, expected_reply_type=intent_choice.
