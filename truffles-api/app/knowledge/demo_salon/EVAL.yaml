@@ -3872,3 +3872,28 @@ eval_cases:
     - по салону
     - запись
     - цены
+- id: E356
+  user: Во сколько вы работаете, сколько стоит маникюр, сколько длится и какие услуги есть?
+  expected:
+    action: reply
+    intent: multi_truth
+    must_include:
+    - ₸
+    must_include_any:
+    - Работаем
+    - ежедневно
+    - '9:00'
+    - '21:00'
+- id: E357
+  user: График работы, сколько длится педикюр, сколько стоит педикюр и какие бренды используете?
+  expected:
+    action: reply
+    intent: multi_truth
+    must_include:
+    - педикюр
+    - ₸
+    must_include_any:
+    - Работаем
+    - ежедневно
+    - '9:00'
+    - '21:00'

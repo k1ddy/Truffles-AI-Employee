@@ -52,6 +52,7 @@ from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
     build_consult_reply,
     compose_multi_truth_reply,
+    format_reply_from_truth,
     get_demo_salon_decision,
     get_demo_salon_price_item,
     get_demo_salon_price_reply,
@@ -2053,6 +2054,7 @@ def _extract_datetime(text: str) -> str | None:
 
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration"}
 INFO_INTENTS = {"pricing", "hours", "duration", "location"}
+INFO_INTENT_PRIORITY = ("hours", "pricing", "duration")
 SERVICE_CARRYOVER_KEY = "service_carryover"
 SERVICE_CARRYOVER_TTL_MESSAGES = 4
 SERVICE_CARRYOVER_INTENTS = {"pricing", "duration"}
@@ -3270,9 +3272,31 @@ def _format_intent_queue_prompt(intent_queue: list[str]) -> str | None:
         if label:
             labels.append(f"по {label}")
     if not labels:
-        return "Уточните, какой вопрос разобрать дальше."
+        return "Что разобрать дальше?"
     label_text = ", ".join(labels)
-    return f"Какой вопрос разобрать дальше: {label_text}?"
+    return f"Что разобрать дальше: [{label_text}]?"
+
+
+def _build_info_intent_reply(
+    intent: str,
+    *,
+    service_query: str | None,
+    client_slug: str | None,
+) -> tuple[str | None, dict | None]:
+    if intent == "hours":
+        return format_reply_from_truth("hours"), None
+    if intent == "pricing":
+        question = f"Сколько стоит {service_query}?" if service_query else "Сколько стоит?"
+    elif intent == "duration":
+        question = f"Сколько длится {service_query}?" if service_query else "Сколько длится?"
+    else:
+        return None, None
+    decision = get_demo_salon_decision(question, client_slug=client_slug)
+    if decision and decision.action == "reply" and decision.response:
+        meta = decision.meta if isinstance(decision.meta, dict) else None
+        return decision.response, meta
+    fallback = format_reply_from_truth("duration_or_price_clarify")
+    return fallback, None
 
 
 def _build_booking_summary(booking: dict, *, refusal_flags: dict | None = None) -> str:
@@ -5972,6 +5996,102 @@ async def _handle_webhook_payload(
                 updates["intent_queue_missed"] = True
                 updates["expected_reply_matched"] = False
             _update_message_decision_metadata(saved_message, updates)
+
+    if (
+        intent_decomp_used
+        and len(intent_decomp_intents) >= 4
+        and expected_reply_type is None
+        and not intent_queue_event
+        and pending_intent_queue is None
+        and routing["allow_bot_reply"]
+        and routing["allow_truth_gate_reply"]
+        and not bypass_domain_flows
+        and message_text
+        and policy_type == "demo_salon"
+    ):
+        info_intents = [intent for intent in INFO_INTENT_PRIORITY if intent in intent_decomp_set][:2]
+        if info_intents:
+            replies: list[str] = []
+            seen_replies: set[str] = set()
+            answered_intents: list[str] = []
+            info_meta: dict = {}
+            service_meta: dict | None = None
+            for intent in info_intents:
+                reply, meta = _build_info_intent_reply(
+                    intent,
+                    service_query=intent_decomp_service_query,
+                    client_slug=payload.client_slug,
+                )
+                if isinstance(reply, str):
+                    reply = reply.strip()
+                    if reply and reply not in seen_replies:
+                        replies.append(reply)
+                        seen_replies.add(reply)
+                        answered_intents.append(intent)
+                if isinstance(meta, dict) and meta:
+                    info_meta.update(meta)
+                    service_meta = dict(info_meta)
+            if replies:
+                answered_set = set(answered_intents)
+                remaining_queue = [
+                    intent for intent in intent_decomp_intents if intent not in answered_set
+                ]
+                context = _get_conversation_context(conversation)
+                expected_next = EXPECTED_REPLY_INTENT_CHOICE if remaining_queue else None
+                context = _set_intent_queue(context, remaining_queue or None)
+                context = _set_expected_reply_type(context, expected_next)
+                _set_conversation_context(conversation, context)
+                followup = _format_intent_queue_prompt(remaining_queue)
+                bot_response = "\n\n".join(replies)
+                if followup:
+                    bot_response = f"{bot_response}\n\n{followup}"
+                _reset_low_confidence_retry(conversation)
+                trace_payload = {
+                    "stage": "intent_queue",
+                    "decision": "info_limit",
+                    "state": conversation.state,
+                    "info_intents": answered_intents,
+                    "intent_queue": remaining_queue,
+                    "expected_reply_type": expected_next,
+                }
+                trace_payload.update(info_meta)
+                _record_decision_trace(conversation, trace_payload)
+                _record_message_decision_meta(
+                    saved_message,
+                    action="reply",
+                    intent="multi_intent_info",
+                    source="intent_queue",
+                    fast_intent=False,
+                )
+                if saved_message:
+                    updates = {
+                        "info_intents_answered": answered_intents,
+                        "intent_queue_reason": "info_limit",
+                    }
+                    if remaining_queue:
+                        updates["intent_queue"] = remaining_queue
+                        updates["expected_reply_type"] = expected_next
+                    if info_meta:
+                        updates.update(info_meta)
+                    _update_message_decision_metadata(saved_message, updates)
+                if service_meta:
+                    _maybe_store_service_carryover(
+                        conversation=conversation,
+                        service_meta=service_meta,
+                        intent="multi_intent_info",
+                        message_count=message_count,
+                        reason="intent_queue",
+                    )
+                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
+                sent = _send_response(bot_response)
+                result_message = "Intent queue info reply sent" if sent else "Intent queue info reply failed"
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
 
     if pending_intent_queue is not None:
         context = _get_conversation_context(conversation)

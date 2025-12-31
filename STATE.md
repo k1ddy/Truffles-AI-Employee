@@ -58,6 +58,7 @@
 - Booking gate блокирует инфо‑вопросы (pricing/hours/duration) без явного booking; сплит сегментов по ,;?!.; service slot только через semantic matcher, datetime — токен; trace/meta `booking_blocked_reason`. (нужен деплой)
 - Context Manager: `current_goal` (info/consult/booking), `refusal_flags` (name/phone, TTL 10 сообщений), `clarify_attempts` (>=2 → эскалация), `compact_summary` (детерминированно; триггеры: intent_change/clarify_limit/12+ сообщений); всё пишется в decision_meta/trace.
 - Intent Queue + Question Contract: `conversation.context.intent_queue` и `conversation.context.expected_reply_type` в webhook, чтобы держать очередь интентов и ожидаемый тип ответа.
+- Multi-intent 4+ → отвечаем на 1–2 info-интента (hours + price/duration), остаток в intent_queue, expected_reply_type=intent_choice.
 - expected_reply_type=service_choice сохраняется при OOD/токсичности и возвращает к вопросу об услуге.
 - expected_reply_type=service_choice при невалидном ответе без service/semantic/in-domain сигнала возвращает к вопросу об услуге (reason=invalid_choice).
 - intent_choice поддерживает prefix-match по меткам очереди (>=4 символов); выбор duration ставит expected_reply_type=service_choice.
