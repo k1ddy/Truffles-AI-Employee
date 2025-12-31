@@ -69,12 +69,12 @@
 - intent_choice: prefix/substring match по меткам очереди (>=4 символов); info-выбор отвечает и обновляет очередь, booking запускает booking-prompt; decision_meta пишет expected_reply_choice/intent_queue_remaining/expected_reply_next.
 - Consult playbooks: `domain_pack.consult_playbooks` расширен (hair_aftercolor/hair_damage/hair_color_choice/nails_care/brows_lashes_care/sensitive_skin/style_reference/general_consult) с questions/options/next_step.
 
-### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-31; Evidence: `curl -s http://localhost:8000/admin/health` → `checked_at=2025-12-31T07:10:03.359001+00:00`)
+### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-31; Evidence: `curl -s http://localhost:8000/admin/health` → `checked_at=2025-12-31T07:12:59.570689+00:00`)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
 - Env: `PUBLIC_BASE_URL=https://api.truffles.kz`, `MEDIA_SIGNING_SECRET=SET`, `MEDIA_URL_TTL_SECONDS=3600`, `MEDIA_CLEANUP_TTL_DAYS=7`, `CHATFLOW_MEDIA_TIMEOUT_SECONDS=90`.
 - `/admin/version` (2025-12-31): version `main`, git_commit `67bd61d6606e6fbdc2ad2d83936dc932a41a77c8`, build_time `2025-12-31T07:04:22Z`. Evidence: `curl -s http://localhost:8000/admin/version` → `{"version":"main","git_commit":"67bd61d6606e6fbdc2ad2d83936dc932a41a77c8","build_time":"2025-12-31T07:04:22Z"}`.
-- `/admin/health` (2025-12-31): conversations bot_active 279, pending 1, manager_active 0; handovers pending 1, active 0 (checked_at `2025-12-31T07:10:03.359001+00:00`). Evidence: `curl -s http://localhost:8000/admin/health` → `{"conversations":{"bot_active":279,"pending":1,"manager_active":0},"handovers":{"pending":1,"active":0},"checked_at":"2025-12-31T07:10:03.359001+00:00"}`.
-- `/admin/metrics` (2025-12-31): demo_salon metric_date 2025-12-31 → Invalid admin token. Evidence: `curl -s -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" "http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=2025-12-31"` → `{"detail":"Invalid admin token"}`.
+- `/admin/health` (2025-12-31): conversations bot_active 280, pending 0, manager_active 0; handovers pending 0, active 0 (checked_at `2025-12-31T07:12:59.570689+00:00`). Evidence: `curl -s http://localhost:8000/admin/health` → `{"conversations":{"bot_active":280,"pending":0,"manager_active":0},"handovers":{"pending":0,"active":0},"checked_at":"2025-12-31T07:12:59.570689+00:00"}`.
+- `/admin/metrics` (2025-12-31): demo_salon OK; p50 7.06s, p90 13.36s, clarify_rate 0.2632, clarify_success_rate 0.8, escalation_rate 0.0526. Evidence: `TOKEN=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "$ALERTS_ADMIN_TOKEN"')` + `curl -s -H "X-Admin-Token: $TOKEN" "http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=2025-12-31"`.
 - Live-check consult mode: care/color → consult replies with consult_intent meta; price → pricing path; booking → clarify; allergy → escalation; consult replies without prices/availability/masters.
 - Live-check context manager: refusal_flag.name set and booking skips name; 2x clarify → 3rd escalates; booking → consult switch updates current_goal + summary (consult reply, no prices/availability/masters).
 - Live-check PR-3 rewrite+hybrid: address slang → address (rewrite timeout, rag_scores logged); "манник" → service_semantic match; "скок стоит педик" → price; "какая погода" → OOD; "хочу записаться" → booking-clarify.
@@ -1627,4 +1627,4 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 
 ---
 
-*Последнее обновление: 2025-12-26*
+*Последнее обновление: 2025-12-31 (Evidence: /admin/version + /admin/health проверки выше)*
