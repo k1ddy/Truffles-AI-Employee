@@ -2984,7 +2984,12 @@ def _match_expected_reply(
     return True, value
 
 
-def _is_booking_related_message(message_text: str, client_slug: str | None) -> bool:
+def _is_booking_related_message(
+    message_text: str,
+    client_slug: str | None,
+    *,
+    allow_name: bool = True,
+) -> bool:
     if not message_text:
         return False
     if _is_booking_request(message_text):
@@ -2994,7 +2999,7 @@ def _is_booking_related_message(message_text: str, client_slug: str | None) -> b
         return True
     if _extract_service_hint(message_text, client_slug) or _extract_datetime(message_text):
         return True
-    if _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug):
+    if allow_name and _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug):
         return True
     return False
 
@@ -3003,7 +3008,7 @@ def _select_last_non_booking_message(messages: list[str], *, client_slug: str | 
     for message in reversed(messages or []):
         if not message:
             continue
-        if _is_booking_related_message(message, client_slug):
+        if _is_booking_related_message(message, client_slug, allow_name=False):
             continue
         return message
     return None
