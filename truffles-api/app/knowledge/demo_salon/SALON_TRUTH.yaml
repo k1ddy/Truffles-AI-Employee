@@ -1,6 +1,7 @@
 salon: &salon
   name: Мира
   city: Алматы
+  timezone: Asia/Almaty
   instagram: https://instagram.com/mira_beauty_kz
   profile:
     audience: Женщины 20-45, офисные сотрудники, приходят перед мероприятиями.

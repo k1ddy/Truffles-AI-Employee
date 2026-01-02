@@ -98,6 +98,34 @@
 
 ---
 
+## ФАЗА 4: ПРОДУКТ И КАНАЛЫ (после пилотов)
+
+### 4.1 CRM и запись
+- [ ] Интеграция с CRM (AmoCRM, Bitrix)
+- [ ] Инструменты записи (create/update lead/appointment) с идемпотентностью
+- [ ] Статусы записи + история действий
+
+### 4.2 Каналы
+- [ ] Instagram Direct
+- [ ] Web‑панель для менеджеров (вместо Telegram)
+- [ ] Мульти‑номер/филиалы в UI
+
+### 4.3 LLM и качество
+- [ ] Multi‑LLM routing (fast/slow/quality tiers)
+- [ ] Hybrid retrieval RU/KZ (BM25 + vector + rerank)
+- [ ] Query‑rewrite для шумных сообщений/ASR
+
+### 4.4 Голос и ASR
+- [ ] Качественный ASR контур (RU/KZ, подтверждение, фоллбек)
+- [ ] Звонки (voice pipeline) + summary
+
+### 4.5 Observability
+- [ ] Grafana/Prometheus/Loki или эквивалентный стек
+- [ ] Дашборды SLA/LLM/эскалации
+- [ ] Алерты по деградации качества
+
+---
+
 ## ТЕКУЩИЙ СТАТУС
 
 | Компонент | Статус | Приоритет |

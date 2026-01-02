@@ -1,11 +1,18 @@
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import yaml
+from zoneinfo import ZoneInfo
 
 from app.routers import webhook as webhook_router
-from app.services.demo_salon_knowledge import get_demo_salon_decision
+from app.services.demo_salon_knowledge import (
+    build_quiet_hours_notice,
+    get_demo_salon_decision,
+    get_salon_timezone,
+)
+from app.services.state_machine import ConversationState
 
 EVAL_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_salon" / "EVAL.yaml"
 EVAL_TIER = os.environ.get("EVAL_TIER", "").strip().lower()
@@ -65,6 +72,22 @@ CORE_EVAL_IDS = {
 
 def _normalize(text: str) -> str:
     return (text or "").casefold()
+
+
+def _build_local_datetime(value: str, tz_name: str | None) -> datetime:
+    parts = [part for part in (value or "").split(":") if part.strip()]
+    if len(parts) < 2:
+        raise ValueError(f"Invalid local_time '{value}'")
+    hour = int(parts[0])
+    minute = int(parts[1])
+    second = int(parts[2]) if len(parts) > 2 else 0
+    tz = timezone.utc
+    if tz_name:
+        try:
+            tz = ZoneInfo(tz_name)
+        except Exception:
+            tz = timezone.utc
+    return datetime(2025, 1, 1, hour, minute, second, tzinfo=tz)
 
 
 def _fake_service_hint(text: str, client_slug: str | None) -> str | None:
@@ -148,6 +171,21 @@ def test_demo_salon_eval_cases():
         )
 
         response = decision.response or ""
+        if decision.action == "reply":
+            intent = decision.intent or ""
+            cta_intents = set(webhook_router.BOOKING_CTA_SERVICE_INTENTS) | {"hours", "location", "multi_truth"}
+            if intent in cta_intents:
+                response = webhook_router._maybe_append_booking_cta(
+                    response,
+                    conversation_state=ConversationState.BOT_ACTIVE.value,
+                    allow_booking_flow=True,
+                ) or response
+        local_time = case.get("local_time")
+        if local_time:
+            tz_name = get_salon_timezone()
+            now_local = _build_local_datetime(str(local_time), tz_name)
+            notice = build_quiet_hours_notice(now_local=now_local)
+            response = webhook_router._apply_quiet_hours_notice(response, notice)
         if expected.get("must_include"):
             _assert_contains_all(response, expected["must_include"], case_id, "must_include")
         if expected.get("must_include_any"):

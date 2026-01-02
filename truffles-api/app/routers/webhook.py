@@ -50,6 +50,7 @@ from app.services.conversation_service import (
 )
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
+    build_quiet_hours_notice,
     build_consult_reply,
     compose_multi_truth_reply,
     format_reply_from_truth,
@@ -3228,6 +3229,18 @@ def _maybe_append_booking_cta(
     return f"{bot_response}\n\n{MSG_BOOKING_CTA}"
 
 
+def _apply_quiet_hours_notice(text: str, notice: str | None) -> str:
+    if not text or not notice:
+        return text
+    normalized_text = _normalize_text(text)
+    normalized_notice = _normalize_text(notice)
+    if normalized_notice and normalized_notice in normalized_text:
+        return text
+    if "салон закрыт" in normalized_text:
+        return text
+    return f"{notice}\n\n{text}"
+
+
 MULTI_INTENT_LABELS = {
     "booking": "записи",
     "pricing": "цене",
@@ -5723,6 +5736,27 @@ async def _handle_webhook_payload(
     multi_intent_followup = None
     multi_intent_booking_followup = None
     multi_intent_other_followup = None
+
+    quiet_hours_notice: str | None = None
+    if conversation.state == ConversationState.BOT_ACTIVE.value and policy_type == "demo_salon":
+        quiet_hours_notice = build_quiet_hours_notice(now_utc=now)
+
+    def _finalize_bot_response(text: str, *, allow_quiet_hours: bool = True) -> str:
+        if not text:
+            return text
+        if not allow_quiet_hours:
+            return text
+        if not quiet_hours_notice:
+            return text
+        if conversation.state != ConversationState.BOT_ACTIVE.value:
+            return text
+        return _apply_quiet_hours_notice(text, quiet_hours_notice)
+
+    def _send_and_save(text: str, *, allow_quiet_hours: bool = True) -> tuple[str, bool]:
+        final_text = _finalize_bot_response(text, allow_quiet_hours=allow_quiet_hours)
+        save_message(db, conversation.id, client.id, role="assistant", content=final_text)
+        sent = _send_response(final_text)
+        return final_text, sent
 
     if (
         conversation.state == ConversationState.BOT_ACTIVE.value

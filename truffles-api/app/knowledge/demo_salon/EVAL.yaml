@@ -148,7 +148,7 @@ eval_cases:
     must_include:
     - Хотите записаться
 - id: E003m
-  user: Педикюр делаете?
+  user: Делаете педикюр?
   expected:
     action: reply
     intent: service_match
@@ -359,6 +359,29 @@ eval_cases:
     - без выходных
     - '9:00'
     - '21:00'
+- id: E014e
+  user: Сколько стоит маникюр?
+  local_time: "23:30"
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - 2 500
+    - 3 500
+    - 7 000
+    must_include:
+    - Сейчас салон закрыт
+- id: E014f
+  user: Где вы находитесь?
+  local_time: "10:30"
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+    must_not:
+    - салон закрыт
 - id: E015
   user: До скольки вы работаете?
   expected:

@@ -4,6 +4,7 @@ import hashlib
 import math
 import os
 import re
+from datetime import datetime, time, timezone
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any
 
 import httpx
 import yaml
+from zoneinfo import ZoneInfo
 
 from app.logging_config import get_logger
 from app.services.knowledge_service import get_embedding
@@ -106,6 +108,92 @@ def _load_yaml(path: Path) -> dict:
 
 def load_yaml_truth() -> dict:
     return _load_yaml(_TRUTH_PATH)
+
+
+_TIME_PATTERN = re.compile(r"^(\d{1,2})[:.](\d{2})$")
+
+
+def get_salon_timezone(truth: dict | None = None) -> str | None:
+    truth = truth if isinstance(truth, dict) else load_yaml_truth()
+    salon = truth.get("salon") if isinstance(truth, dict) else None
+    if not isinstance(salon, dict):
+        return None
+    timezone_name = salon.get("timezone")
+    if isinstance(timezone_name, str) and timezone_name.strip():
+        return timezone_name.strip()
+    return None
+
+
+def _parse_hours_time(value: str | None) -> time | None:
+    if not isinstance(value, str):
+        return None
+    match = _TIME_PATTERN.match(value.strip())
+    if not match:
+        return None
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    if hour > 23 or minute > 59:
+        return None
+    return time(hour=hour, minute=minute)
+
+
+def _resolve_local_now(
+    *,
+    timezone_name: str | None,
+    now_utc: datetime | None = None,
+    now_local: datetime | None = None,
+) -> datetime:
+    tz = timezone.utc
+    if isinstance(timezone_name, str) and timezone_name.strip():
+        try:
+            tz = ZoneInfo(timezone_name.strip())
+        except Exception:
+            tz = timezone.utc
+    if now_local is not None:
+        return now_local.replace(tzinfo=tz) if now_local.tzinfo is None else now_local
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    return now_utc.astimezone(tz)
+
+
+def build_quiet_hours_notice(
+    *,
+    now_utc: datetime | None = None,
+    now_local: datetime | None = None,
+) -> str | None:
+    truth = load_yaml_truth()
+    salon = truth.get("salon") if isinstance(truth, dict) else None
+    if not isinstance(salon, dict):
+        return None
+    hours = salon.get("hours") if isinstance(salon, dict) else None
+    if not isinstance(hours, dict):
+        return None
+    open_time = _parse_hours_time(hours.get("open"))
+    close_time = _parse_hours_time(hours.get("close"))
+    if not open_time or not close_time:
+        return None
+    now_local = _resolve_local_now(
+        timezone_name=get_salon_timezone(truth),
+        now_utc=now_utc,
+        now_local=now_local,
+    )
+    current_time = now_local.time()
+    if open_time <= close_time:
+        is_quiet = current_time < open_time or current_time >= close_time
+    else:
+        is_quiet = close_time <= current_time < open_time
+    if not is_quiet:
+        return None
+    days = hours.get("days") or ""
+    open_label = hours.get("open") or ""
+    close_label = hours.get("close") or ""
+    days_text = f"{days}, " if days else ""
+    return (
+        f"Сейчас салон закрыт. Работаем {days_text}с {open_label} до {close_label}. "
+        "Оставьте вопрос — отвечу в рабочее время."
+    )
 
 
 def load_intents_phrases() -> dict:
