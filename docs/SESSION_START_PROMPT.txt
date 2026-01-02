@@ -57,6 +57,15 @@ Question gate (mandatory):
 - If not found: ask Zhanbol with evidence of what was checked, or mark GAP.
 - No task is issued until questions are resolved or GAP is accepted.
 
+Snapshot pack (before Architect/Brain start):
+- /admin/version
+- /admin/health
+- /admin/metrics (today, demo_salon)
+- python3 ops/diagnose.py
+- DB counts: conversations / handovers / outbox_messages / messages with decision_meta
+- Latest CI run: commit + status
+- Compare with STATE.md and list mismatches
+
 Minimum start (avoid dumb mistakes):
 0) Confirm environment access: `hostname`, `whoami`, `docker ps`, `ls -la ~/.ssh`
    - If `docker ps` shows Truffles containers or `pwd` is `/home/zhan/truffles-main`, you are on the prod host: run commands locally, do NOT SSH, and do NOT claim “no access” unless preflight fails.
