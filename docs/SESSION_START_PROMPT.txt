@@ -51,6 +51,12 @@ Role start cards (copy/paste at session start):
 - Hands-QA/OPS: "Run tests/live-checks/SQL only. Return commands+results. No code changes."
 - Hands-DOCS: "Audit docs vs code. Provide mismatches and exact text to change. No code changes."
 
+Question gate (mandatory):
+- Architect/Brain must ask questions if data is missing for a decision.
+- Before asking: search repo/docs/code; if answer exists, do not ask.
+- If not found: ask Zhanbol with evidence of what was checked, or mark GAP.
+- No task is issued until questions are resolved or GAP is accepted.
+
 Minimum start (avoid dumb mistakes):
 0) Confirm environment access: `hostname`, `whoami`, `docker ps`, `ls -la ~/.ssh`
    - If `docker ps` shows Truffles containers or `pwd` is `/home/zhan/truffles-main`, you are on the prod host: run commands locally, do NOT SSH, and do NOT claim “no access” unless preflight fails.
