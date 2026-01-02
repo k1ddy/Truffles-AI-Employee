@@ -129,6 +129,18 @@ pending/opt-out/policy escalation → early OOD (strong anchors) → booking gua
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
 ```
 
+### Agentic orchestration = роли пайплайна (без отдельных агентов)
+Термин “agentic” — это **логические роли стадий** в одном потоке `_handle_webhook_payload`, а не отдельные рантайм‑агенты.
+
+**Соответствие ролей фактическому порядку:**
+- **Router** → вход + outbox + порядок стадий из цепочки выше.
+- **Safety Guard** → pending/opt‑out/policy escalation (LAW‑гейты).
+- **OOD Guard** → early OOD (strong anchors).
+- **Booking Guard** → booking guard/flow + expected_reply_type контракт.
+- **Info/RAG Specialist** → service matcher → LLM‑first (RAG/LLM) → truth gate fallback.
+- **Host Persona** → формулировка ответа (шаблоны/LLM), CTA/quiet hours.
+- **Observability** → decision_trace/meta на каждом сообщении.
+
 ### Медиа‑контур (фото/аудио/документы)
 **Цель:** безопасность ресурсов + сохранение контекста + управляемая стоимость.
 
