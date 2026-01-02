@@ -70,6 +70,7 @@ Brain Operating Contract (Zhanbol interface):
 - Report results compactly (facts -> doc -> gap) with file:line evidence; no long dumps.
 - Include a short rationale ("why") for decisions (1-2 lines) with evidence.
 - Update STATE.md last, only after decision and verification are recorded.
+- Pre-commit gate: no commit/STATE if live-check (from task/stop-line) не сделан; ответы всегда указывают Tests: PASS/NO, Live-check: PASS/NO + conv_id/trace/meta; если live-check невозможен — STOP и репорт, без коммита.
 
 Question gate (mandatory):
 - Architect/Brain must ask questions if data is missing for a decision.
