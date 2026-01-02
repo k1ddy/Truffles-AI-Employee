@@ -64,6 +64,7 @@ Role start cards (copy/paste at session start):
 Brain Operating Contract (Zhanbol interface):
 - Architect -> Brain -> Hands only; all handoffs go through Zhanbol copy/paste.
 - Brain never does Hands work unless explicitly asked; Brain only defines tasks and accepts results.
+- Architect task ≠ auto-execute: Brain либо поручает Hands, либо исполняет сам только по явному запросу; отчёт всегда коротко для Занбола (result/blocker only, указание кому делалось).
 - Each Hands task is 6 lines: Goal / Scope / Steps / Evidence / Tests / Stop.
 - Stop line must include CI-fail evidence package requirement.
 - Ask questions only when data is missing for a decision (Question gate); otherwise execute.
