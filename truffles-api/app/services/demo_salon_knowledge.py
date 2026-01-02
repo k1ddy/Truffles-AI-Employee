@@ -120,7 +120,12 @@ def get_salon_timezone(truth: dict | None = None) -> str | None:
         return None
     timezone_name = salon.get("timezone")
     if isinstance(timezone_name, str) and timezone_name.strip():
-        return timezone_name.strip()
+        timezone_name = timezone_name.strip()
+        try:
+            ZoneInfo(timezone_name)
+        except Exception:
+            return None
+        return timezone_name
     return None
 
 
@@ -174,8 +179,11 @@ def build_quiet_hours_notice(
     close_time = _parse_hours_time(hours.get("close"))
     if not open_time or not close_time:
         return None
+    timezone_name = get_salon_timezone(truth)
+    if not timezone_name:
+        return None
     now_local = _resolve_local_now(
-        timezone_name=get_salon_timezone(truth),
+        timezone_name=timezone_name,
         now_utc=now_utc,
         now_local=now_local,
     )
