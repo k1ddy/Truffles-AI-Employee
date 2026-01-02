@@ -30,6 +30,26 @@ Multi-terminal protocol (mandatory):
 - Handoff format (must use):
   GOAL / FILES / TESTS / LIVE-CHECK / EVIDENCE / COMMIT / RISKS
 - Zhanbol interaction: he provides priorities and approvals; we reply concisely and ask only when blocked.
+- All cross-terminal handoffs go through Zhanbol (copy/paste). No direct "air transfer".
+
+Decision rights (strict):
+- Architect chooses priority and DoD.
+- Brain defines tasks and is the only role that can approve commit/push.
+- Hands execute only; no course changes, no commit decisions.
+
+Acceptance gate (non-negotiable):
+- tests + live-check + trace/meta evidence or NO merge.
+- Any unexpected file in diff -> STOP and ask Brain.
+
+One-issue flow:
+- 1 problem -> 1 fix -> 1 verification -> 1 STATE.md update.
+
+Role start cards (copy/paste at session start):
+- Top Architect: "Read AGENTS.md + STATE.md. Set 5 invariants, 3 priorities, 1 DoD. Choose ONE problem and pass to Brain."
+- Brain: "Define 1 task in 6 lines. Approve commit/push only with tests+live+trace/meta. Update STATE.md last."
+- Hands-DEV: "Edit only files in task. Stop on unexpected diff. Provide GOAL/FILES/TESTS/LIVE/EVIDENCE/COMMIT/RISKS."
+- Hands-QA/OPS: "Run tests/live-checks/SQL only. Return commands+results. No code changes."
+- Hands-DOCS: "Audit docs vs code. Provide mismatches and exact text to change. No code changes."
 
 Minimum start (avoid dumb mistakes):
 0) Confirm environment access: `hostname`, `whoami`, `docker ps`, `ls -la ~/.ssh`
