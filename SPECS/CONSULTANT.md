@@ -71,6 +71,15 @@
 - `frustration + question` → эскалация.
 - `booking + price` → слот-флоу; цену даём только если нет блоков (филиал/правила).
 
+**Booking interrupt (expected_reply_type активен):**
+- Если идёт сбор слота записи и приходит in-domain вопрос (цены/длительность/адрес/часы) → ответить по фактам **и в том же сообщении** вернуть booking‑prompt (продолжить запись).
+- Decision trace/meta: `stage=booking_interrupt`, `booking_info_interrupt=true`, `booking_info_intents` сохраняются.
+- Если сообщение не относится к записи и нет booking‑сигнала → поставить booking на паузу до явного запроса записи.
+
+**CTA после инфо‑ответа (standalone, вне booking):**
+- После ответа на цены/длительность/часы/адрес — добавить мягкий CTA: “Хотите записаться?”.
+- Исключения: LAW/opt‑out/OOD, `pending/manager_active`, и когда booking‑prompt уже добавлен (booking‑interrupt).
+
 ## LLM-first с жёсткими правилами [P0]
 
 - LLM — основной ответчик после жёстких гейтов (pending/opt-out/safety/complaint/medical/payment).

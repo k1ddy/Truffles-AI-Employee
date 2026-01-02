@@ -1701,6 +1701,7 @@ MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удо
 MSG_BOOKING_ASK_NAME = "Как вас зовут?"
 MSG_BOOKING_CANCELLED = "Хорошо, если передумаете — пишите."
 MSG_BOOKING_REENGAGE = "Хотите продолжить запись? Если да — напишите услугу."
+MSG_BOOKING_CTA = "Хотите записаться?"
 
 SERVICE_HINT_KEY = "last_service_hint"
 SERVICE_HINT_AT_KEY = "last_service_hint_at"
@@ -2062,6 +2063,11 @@ BOOKING_TIME_SERVICE_INTENTS = {
     "price_query",
     "price_manicure",
     "service_duration",
+    "service_clarify",
+    "duration_or_price_clarify",
+}
+BOOKING_CTA_SERVICE_INTENTS = BOOKING_TIME_SERVICE_INTENTS - {
+    "service_not_found",
     "service_clarify",
     "duration_or_price_clarify",
 }
@@ -3201,6 +3207,25 @@ def _combine_sidecar(primary: str, sidecar: str | None) -> str:
     if not sidecar:
         return primary
     return f"{sidecar}\n\n{primary}"
+
+
+def _maybe_append_booking_cta(
+    bot_response: str | None,
+    *,
+    conversation_state: str,
+    allow_booking_flow: bool,
+    has_followup: bool = False,
+) -> str | None:
+    if not bot_response:
+        return bot_response
+    if conversation_state != ConversationState.BOT_ACTIVE.value:
+        return bot_response
+    if not allow_booking_flow or has_followup:
+        return bot_response
+    normalized = _normalize_text(bot_response)
+    if not normalized or "запис" in normalized:
+        return bot_response
+    return f"{bot_response}\n\n{MSG_BOOKING_CTA}"
 
 
 MULTI_INTENT_LABELS = {
@@ -6097,6 +6122,12 @@ async def _handle_webhook_payload(
             bot_response = info_reply
             if followup:
                 bot_response = f"{bot_response}\n\n{followup}"
+            bot_response = _maybe_append_booking_cta(
+                bot_response,
+                conversation_state=conversation.state,
+                allow_booking_flow=routing["allow_booking_flow"],
+                has_followup=bool(followup),
+            )
             _reset_low_confidence_retry(conversation)
             trace_payload = {
                 "stage": "intent_queue",
@@ -7190,6 +7221,11 @@ async def _handle_webhook_payload(
                 if multi_result:
                     multi_reply, multi_meta = multi_result
                     bot_response = multi_reply
+                    bot_response = _maybe_append_booking_cta(
+                        bot_response,
+                        conversation_state=conversation.state,
+                        allow_booking_flow=routing["allow_booking_flow"],
+                    )
                     _reset_low_confidence_retry(conversation)
 
                     result_message = "Multi-truth reply sent"
@@ -7244,6 +7280,16 @@ async def _handle_webhook_payload(
         if service_decision:
             bot_response = service_decision.response
             bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+            if (
+                service_decision.action == "reply"
+                and service_decision.intent in BOOKING_CTA_SERVICE_INTENTS
+            ):
+                bot_response = _maybe_append_booking_cta(
+                    bot_response,
+                    conversation_state=conversation.state,
+                    allow_booking_flow=routing["allow_booking_flow"],
+                    has_followup=bool(multi_intent_other_followup),
+                )
             _reset_low_confidence_retry(conversation)
 
             result_message = "Service matcher reply sent"

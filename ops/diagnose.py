@@ -13,26 +13,62 @@ import subprocess
 def run_command(command):
     return subprocess.run(command, capture_output=True, text=True)
 
+API_CONTAINER_HINT = "truffles-api"
+
+def resolve_container_name():
+    result = run_command(
+        [
+            "docker",
+            "ps",
+            "-a",
+            "--filter",
+            f"name={API_CONTAINER_HINT}",
+            "--format",
+            "{{.Names}}",
+        ]
+    )
+    if result.returncode != 0:
+        return None, result.stderr.strip()
+    names = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not names:
+        return None, ""
+    if API_CONTAINER_HINT in names:
+        return API_CONTAINER_HINT, ""
+    return names[0], ""
+
 print("=" * 60)
 print("ДИАГНОСТИКА TRUFFLES")
 print("=" * 60)
 
 print("\n🔎 PRE-FLIGHT:")
 print("-" * 40)
-status_result = run_command(
-    ["docker", "inspect", "--format", "{{.State.Status}}", "truffles-api"]
-)
-status = status_result.stdout.strip() if status_result.returncode == 0 else ""
-if status:
-    print(f"truffles-api status: {status}")
+container_name, docker_error = resolve_container_name()
+status = ""
+if docker_error:
+    print(f"docker error: {docker_error}")
+    print("Skipping docker checks (no access).")
 else:
-    print("truffles-api status: NOT FOUND (container missing?)")
+    if container_name:
+        print(f"truffles-api container: {container_name}")
+        status_result = run_command(
+            ["docker", "inspect", "--format", "{{.State.Status}}", container_name]
+        )
+        status = status_result.stdout.strip() if status_result.returncode == 0 else ""
+        if status:
+            print(f"truffles-api status: {status}")
+        else:
+            print("truffles-api status: UNKNOWN")
+    else:
+        print("truffles-api container: NOT FOUND (container missing?)")
 
-image_result = run_command(
-    ["docker", "inspect", "--format", "{{.Config.Image}}", "truffles-api"]
-)
-if image_result.returncode == 0 and image_result.stdout.strip():
-    print(f"truffles-api image: {image_result.stdout.strip()}")
+if container_name:
+    image_result = run_command(
+        ["docker", "inspect", "--format", "{{.Config.Image}}", container_name]
+    )
+    if image_result.returncode == 0 and image_result.stdout.strip():
+        print(f"truffles-api image: {image_result.stdout.strip()}")
+    else:
+        print("truffles-api image: UNKNOWN")
 else:
     print("truffles-api image: UNKNOWN")
 
@@ -56,7 +92,7 @@ if status == "running":
                 f'else echo "{name}=MISSING"; fi'
             )
         result = run_command(
-            ["docker", "exec", "-i", "truffles-api", "/bin/sh", "-lc", cmd]
+            ["docker", "exec", "-i", container_name, "/bin/sh", "-lc", cmd]
         )
         if result.returncode == 0:
             print(result.stdout.strip())

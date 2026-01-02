@@ -165,6 +165,10 @@
 - "Да" → снять мьют и продолжить; "Нет" → оставить мьют.
 - В `pending/manager_active` opt-out = отмена заявки, не мьют.
 
+**Booking interrupt (expected_reply_type активен):**
+- In-domain вопрос во время сбора слота → дать факт‑ответ и в том же сообщении вернуть booking‑prompt (без эскалации).
+- Если сообщение не относится к записи и нет booking‑сигнала → booking ставится на паузу до явного запроса записи.
+
 ### Матрица state × intent → action
 
 | State | human_request / frustration | rejection / opt_out | booking (slots) | question (in-domain) | greeting / thanks | out_of_domain / other |

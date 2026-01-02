@@ -78,6 +78,7 @@
 - Context Manager: `current_goal` (info/consult/booking), `refusal_flags` (name/phone, TTL 10 сообщений), `clarify_attempts` (>=2 → эскалация), `compact_summary` (детерминированно; триггеры: intent_change/clarify_limit/12+ сообщений); всё пишется в decision_meta/trace.
 - Intent Queue + Question Contract: `conversation.context.intent_queue` и `conversation.context.expected_reply_type` в webhook, чтобы держать очередь интентов и ожидаемый тип ответа.
 - Booking + 2+ info (или total 3+) → defer booking, отвечаем на 1–2 info (service_query: price+duration; иначе location+hours), остаток в intent_queue, expected_reply_type=intent_choice.
+- Standalone info-ответы (price/duration/hours/location) получают CTA "Хотите записаться?" только в bot_active без followup/booking-prompt; skip non-bot-active + если ответ уже про запись; EVAL E003l/E003m/E014d, negative E039b; тест `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` PASS.
 - expected_reply_type=service_choice сохраняется при OOD/токсичности и возвращает к вопросу об услуге.
 - expected_reply_type=service_choice при невалидном ответе без service/semantic/in-domain сигнала возвращает к вопросу об услуге (reason=invalid_choice).
 - intent_choice: prefix/substring match по меткам очереди (>=4 символов); info-выбор отвечает и обновляет очередь, booking запускает booking-prompt; decision_meta пишет expected_reply_choice/intent_queue_remaining/expected_reply_next.
