@@ -2999,6 +2999,16 @@ def _is_booking_related_message(message_text: str, client_slug: str | None) -> b
     return False
 
 
+def _select_last_non_booking_message(messages: list[str], *, client_slug: str | None) -> str | None:
+    for message in reversed(messages or []):
+        if not message:
+            continue
+        if _is_booking_related_message(message, client_slug):
+            continue
+        return message
+    return None
+
+
 def _apply_booking_slot(
     booking: dict,
     slot_key: str,
@@ -4035,6 +4045,10 @@ async def _handle_webhook_payload(
 
     batch_messages_provided = batch_messages is not None
     batch_messages = _coerce_batch_messages(message_text, batch_messages)
+    batch_non_booking_message = _select_last_non_booking_message(
+        batch_messages,
+        client_slug=payload.client_slug,
+    )
 
     timing_context: dict = {"client_slug": payload.client_slug, "remote_jid": remote_jid}
     if outbox_ids:
@@ -4452,10 +4466,11 @@ async def _handle_webhook_payload(
     expected_reply_type = _get_expected_reply_type(context)
     intent_queue = _get_intent_queue(context)
     expected_reply_matched: bool | None = None
-    if expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME} and message_text:
+    expected_reply_text = batch_non_booking_message or message_text
+    if expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME} and expected_reply_text:
         matched, value = _match_expected_reply(
             expected_reply_type=expected_reply_type,
-            message_text=message_text,
+            message_text=expected_reply_text,
             client_slug=payload.client_slug,
         )
         expected_reply_matched = matched
@@ -6628,6 +6643,7 @@ async def _handle_webhook_payload(
         else:
             multi_intent_other_followup = multi_intent_followup
 
+    booking_interrupt_text = batch_non_booking_message or message_text
     booking_time_service_candidate = (
         expected_reply_type == EXPECTED_REPLY_TIME
         and expected_reply_matched is False
@@ -6638,18 +6654,22 @@ async def _handle_webhook_payload(
         and not bypass_domain_flows
         and booking_wants_flow
         and not consult_intent
-        and (intent_decomp_used or booking_time_service_candidate)
+        and (intent_decomp_used or booking_time_service_candidate or batch_non_booking_message)
     ):
         booking_info_intents = (
             sorted(intent_decomp_set & INFO_INTENTS) if intent_decomp_used else []
         )
-        if (booking_info_intents or booking_time_service_candidate) and policy_handler and routing["allow_truth_gate_reply"]:
+        if (
+            (booking_info_intents or booking_time_service_candidate or batch_non_booking_message)
+            and policy_handler
+            and routing["allow_truth_gate_reply"]
+        ):
             info_decision = None
             info_source = None
             if booking_info_intents:
                 if "hours" in booking_info_intents and {"pricing", "duration"} & set(booking_info_intents):
                     multi_result = compose_multi_truth_reply(
-                        message_text,
+                        booking_interrupt_text,
                         payload.client_slug,
                         intent_decomp=intent_decomp_payload,
                         return_meta=True,
@@ -6667,7 +6687,7 @@ async def _handle_webhook_payload(
                     service_matcher = policy_handler.get("service_matcher")
                     if service_matcher:
                         info_decision = service_matcher(
-                            message_text,
+                            booking_interrupt_text,
                             client_slug=payload.client_slug,
                             intent_decomp=intent_decomp_payload,
                         )
@@ -6678,19 +6698,42 @@ async def _handle_webhook_payload(
                     if truth_gate:
                         if policy_type == "demo_salon":
                             info_decision = truth_gate(
-                                message_text,
+                                booking_interrupt_text,
                                 client_slug=payload.client_slug,
                                 intent_decomp=intent_decomp_payload,
                             )
                         else:
-                            info_decision = truth_gate(message_text)
+                            info_decision = truth_gate(booking_interrupt_text)
+                        if info_decision:
+                            info_source = "truth_gate"
+            if not info_decision and batch_non_booking_message and not booking_info_intents:
+                service_matcher = policy_handler.get("service_matcher")
+                if service_matcher:
+                    info_decision = service_matcher(
+                        booking_interrupt_text,
+                        client_slug=payload.client_slug,
+                        intent_decomp=intent_decomp_payload,
+                    )
+                    if info_decision:
+                        info_source = "service_matcher"
+                if not info_decision:
+                    truth_gate = policy_handler.get("truth_gate")
+                    if truth_gate:
+                        if policy_type == "demo_salon":
+                            info_decision = truth_gate(
+                                booking_interrupt_text,
+                                client_slug=payload.client_slug,
+                                intent_decomp=intent_decomp_payload,
+                            )
+                        else:
+                            info_decision = truth_gate(booking_interrupt_text)
                         if info_decision:
                             info_source = "truth_gate"
             if not info_decision and booking_time_service_candidate:
                 service_matcher = policy_handler.get("service_matcher")
                 if service_matcher:
                     candidate = service_matcher(
-                        message_text,
+                        booking_interrupt_text,
                         client_slug=payload.client_slug,
                         intent_decomp=intent_decomp_payload,
                     )
@@ -6702,12 +6745,12 @@ async def _handle_webhook_payload(
                     if truth_gate:
                         if policy_type == "demo_salon":
                             candidate = truth_gate(
-                                message_text,
+                                booking_interrupt_text,
                                 client_slug=payload.client_slug,
                                 intent_decomp=intent_decomp_payload,
                             )
                         else:
-                            candidate = truth_gate(message_text)
+                            candidate = truth_gate(booking_interrupt_text)
                         if _is_booking_time_service_decision(candidate):
                             info_decision = candidate
                             info_source = "truth_gate"
