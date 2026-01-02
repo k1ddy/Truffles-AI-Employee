@@ -1910,22 +1910,10 @@ def get_demo_salon_service_decision(
     if not normalized:
         return None
     segments = _split_question_segments(message)
-    kinds_seen: set[str] = set()
-    for segment in segments:
-        question_types = semantic_question_type(
-            segment,
-            include_kinds={"hours", "pricing", "duration"},
-            return_multi=True,
-        )
-        if isinstance(question_types, list):
-            for question in question_types:
-                if hasattr(question, "kind") and isinstance(getattr(question, "kind"), str):
-                    kinds_seen.add(question.kind)
-        elif question_types and hasattr(question_types, "kind"):
-            kind = getattr(question_types, "kind")
-            if isinstance(kind, str):
-                kinds_seen.add(kind)
-    if "hours" in kinds_seen and {"pricing", "duration"} & kinds_seen:
+    has_hours_signal = any(_looks_like_hours_question(_normalize_text(segment)) for segment in segments)
+    has_price_signal = any(_has_price_signal(_normalize_text(segment), segment) for segment in segments)
+    has_duration_signal = any(_has_duration_signal(_normalize_text(segment), segment) for segment in segments)
+    if has_hours_signal and (has_price_signal or has_duration_signal):
         return None
     if not _looks_like_service_question(normalized, message):
         return None
