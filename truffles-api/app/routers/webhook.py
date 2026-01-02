@@ -2989,6 +2989,7 @@ def _is_booking_related_message(
     client_slug: str | None,
     *,
     allow_name: bool = True,
+    allow_service: bool = True,
 ) -> bool:
     if not message_text:
         return False
@@ -2997,7 +2998,9 @@ def _is_booking_related_message(
     refusal_flags = detect_refusal_flags(message_text)
     if refusal_flags.get("name") or refusal_flags.get("phone"):
         return True
-    if _extract_service_hint(message_text, client_slug) or _extract_datetime(message_text):
+    if allow_service and _extract_service_hint(message_text, client_slug):
+        return True
+    if _extract_datetime(message_text):
         return True
     if allow_name and _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug):
         return True
@@ -3008,7 +3011,7 @@ def _select_last_non_booking_message(messages: list[str], *, client_slug: str | 
     for message in reversed(messages or []):
         if not message:
             continue
-        if _is_booking_related_message(message, client_slug, allow_name=False):
+        if _is_booking_related_message(message, client_slug, allow_name=False, allow_service=False):
             continue
         return message
     return None
