@@ -3993,3 +3993,13 @@ eval_cases:
     - по салону
     - запись
     - цены
+- id: E361
+  messages:
+  - маникюр
+  - сколько стоит?
+  expected:
+    action: reply
+    intent: pricing
+    must_include:
+    - маникюр
+    - ₸

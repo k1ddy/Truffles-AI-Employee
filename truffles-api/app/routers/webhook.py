@@ -4484,6 +4484,17 @@ async def _handle_webhook_payload(
         expected_reply_matched = matched
         if matched and isinstance(value, str) and expected_reply_type == EXPECTED_REPLY_SERVICE:
             context = _set_service_hint(context, value, now)
+            _maybe_store_service_carryover(
+                conversation=conversation,
+                service_meta={
+                    "service_query": value,
+                    "service_query_source": "expected_reply",
+                    "service_query_score": 1.0,
+                },
+                intent=None,
+                message_count=message_count,
+                reason="expected_reply",
+            )
         if matched:
             next_expected = EXPECTED_REPLY_INTENT_CHOICE if intent_queue else None
             context = _set_expected_reply_type(context, next_expected)

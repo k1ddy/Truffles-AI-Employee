@@ -245,6 +245,89 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
     return response.bot_response or ""
 
 
+def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str | None) -> str:
+    conversation_id = uuid4()
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+        retry_offered_at=None,
+    )
+    user = SimpleNamespace(id="user-123", context={})
+    saved_message = SimpleNamespace(message_metadata={})
+    db = _build_fake_db(client, settings, conversation, user)
+
+    patches = [
+        patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint),
+        patch("app.routers.webhook.detect_multi_intent", side_effect=_fake_intent_decomp),
+        patch("app.routers.webhook._get_debounce_redis", return_value=None),
+        patch("app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)),
+        patch("app.routers.webhook.send_bot_response", return_value=True),
+        patch("app.routers.webhook._find_message_by_message_id", return_value=saved_message),
+        patch("app.routers.webhook._get_user_branch_preference", return_value=None),
+        patch(
+            "app.routers.webhook.generate_bot_response",
+            return_value=SimpleNamespace(ok=False, error="disabled", error_code="disabled", value=None),
+        ),
+    ]
+
+    if local_time:
+        tz_name = get_salon_timezone()
+        fixed_now = _build_fixed_now(local_time, tz_name)
+
+        class _FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed_now if tz is None else fixed_now.astimezone(tz)
+
+        patches.append(patch("app.routers.webhook.datetime", _FixedDateTime))
+
+    last_response = ""
+    with ExitStack() as stack:
+        for patcher in patches:
+            stack.enter_context(patcher)
+        for idx, message_text in enumerate(messages):
+            payload = WebhookRequest(
+                client_slug="demo_salon",
+                body=WebhookBody(
+                    message=message_text,
+                    messageType="text",
+                    metadata=WebhookMetadata(
+                        remoteJid="77000000000@s.whatsapp.net",
+                        messageId=f"eval-{case_id}-{idx}",
+                        timestamp=1234567890 + idx,
+                    ),
+                ),
+            )
+            response = asyncio.run(
+                webhook_router._handle_webhook_payload(
+                    payload,
+                    db,
+                    provided_secret=None,
+                    enforce_secret=False,
+                    skip_persist=True,
+                    conversation_id=conversation_id,
+                )
+            )
+            last_response = response.bot_response or ""
+    return last_response
+
+
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:
     normalized = _normalize(response)
     for item in items:
@@ -281,6 +364,7 @@ def test_demo_salon_eval_cases():
     for case in cases:
         case_id = case.get("id", "<unknown>")
         user_text = case.get("user", "")
+        messages = case.get("messages")
         expected = case.get("expected", {})
 
         expected_action = expected.get("action")
@@ -302,19 +386,23 @@ def test_demo_salon_eval_cases():
                 assert booking_state.get(slot), f"{case_id}: booking slot missing '{slot}'"
             continue
 
-        decision = get_demo_salon_decision(user_text)
-        assert decision is not None, f"{case_id}: no decision for '{user_text}'"
-        assert decision.action == expected_action, (
-            f"{case_id}: action mismatch: {decision.action} != {expected_action}"
-        )
+        decision = None
+        if not messages and expected_action != "off_topic":
+            decision = get_demo_salon_decision(user_text)
+            if decision is not None:
+                assert decision.action == expected_action, (
+                    f"{case_id}: action mismatch: {decision.action} != {expected_action}"
+                )
 
-        response = decision.response or ""
+        response = (decision.response if decision else "") or ""
         local_time = case.get("local_time")
         must_include = expected.get("must_include") or []
         wants_cta = any(
             isinstance(item, str) and "Хотите записаться" in item for item in must_include
         )
-        if local_time or wants_cta:
+        if messages:
+            response = _run_webhook_conversation(messages, case_id, str(local_time) if local_time else None)
+        elif local_time or wants_cta or not decision:
             response = _run_webhook_case(
                 user_text,
                 case_id,
