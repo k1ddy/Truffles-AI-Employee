@@ -1,17 +1,19 @@
+import asyncio
 import os
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
-
-import yaml
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+import yaml
+
+from app.models import Client, ClientSettings, Conversation, User
 from app.routers import webhook as webhook_router
-from app.services.demo_salon_knowledge import (
-    build_quiet_hours_notice,
-    get_demo_salon_decision,
-    get_salon_timezone,
-)
+from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
+from app.services.demo_salon_knowledge import get_demo_salon_decision, get_salon_timezone
 from app.services.state_machine import ConversationState
 
 EVAL_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_salon" / "EVAL.yaml"
@@ -74,7 +76,7 @@ def _normalize(text: str) -> str:
     return (text or "").casefold()
 
 
-def _build_local_datetime(value: str, tz_name: str | None) -> datetime:
+def _build_fixed_now(value: str, tz_name: str | None) -> datetime:
     parts = [part for part in (value or "").split(":") if part.strip()]
     if len(parts) < 2:
         raise ValueError(f"Invalid local_time '{value}'")
@@ -87,7 +89,8 @@ def _build_local_datetime(value: str, tz_name: str | None) -> datetime:
             tz = ZoneInfo(tz_name)
         except Exception:
             tz = timezone.utc
-    return datetime(2025, 1, 1, hour, minute, second, tzinfo=tz)
+    local_dt = datetime(2025, 1, 1, hour, minute, second, tzinfo=tz)
+    return local_dt.astimezone(timezone.utc)
 
 
 def _fake_service_hint(text: str, client_slug: str | None) -> str | None:
@@ -105,6 +108,141 @@ def _fake_service_hint(text: str, client_slug: str | None) -> str | None:
     if "ресниц" in normalized:
         return "ресницы"
     return None
+
+
+def _fake_intent_decomp(text: str, **_kwargs) -> dict:
+    normalized = (text or "").casefold()
+    intents: list[str] = []
+    if any(keyword in normalized for keyword in ["цена", "стоим", "стоимость", "прайс", "сколько стоит", "почем"]):
+        intents.append("pricing")
+    if any(keyword in normalized for keyword in ["во сколько", "до скольки", "работаете", "график", "часы"]):
+        intents.append("hours")
+    if any(keyword in normalized for keyword in ["где", "адрес", "находитесь"]):
+        intents.append("location")
+    if not intents:
+        intents = ["other"]
+    primary = intents[0]
+    secondary = [intent for intent in intents[1:] if intent != primary]
+    service_query = _fake_service_hint(normalized, None) or ""
+    return {
+        "multi_intent": len(intents) > 1,
+        "primary_intent": primary,
+        "secondary_intents": secondary,
+        "intents": intents,
+        "service_query": service_query,
+        "consult_intent": False,
+        "consult_topic": "",
+        "consult_question": "",
+    }
+
+
+def _build_query(result):
+    query = Mock()
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.first.return_value = result
+    return query
+
+
+def _build_fake_db(client, settings, conversation, user):
+    def _query(model):
+        if model is Client:
+            return _build_query(client)
+        if model is ClientSettings:
+            return _build_query(settings)
+        if model is Conversation:
+            return _build_query(conversation)
+        if model is User:
+            return _build_query(user)
+        return _build_query(None)
+
+    db = Mock()
+    db.query.side_effect = _query
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+    db.refresh = Mock()
+    return db
+
+
+def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> str:
+    conversation_id = uuid4()
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+        retry_offered_at=None,
+    )
+    user = SimpleNamespace(id="user-123", context={})
+    saved_message = SimpleNamespace(message_metadata={})
+    db = _build_fake_db(client, settings, conversation, user)
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message=user_text,
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId=f"eval-{case_id}",
+                timestamp=1234567890,
+            ),
+        ),
+    )
+
+    patches = [
+        patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint),
+        patch("app.routers.webhook.detect_multi_intent", side_effect=_fake_intent_decomp),
+        patch("app.routers.webhook._get_debounce_redis", return_value=None),
+        patch("app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)),
+        patch("app.routers.webhook.send_bot_response", return_value=True),
+        patch("app.routers.webhook._find_message_by_message_id", return_value=saved_message),
+        patch("app.routers.webhook._get_user_branch_preference", return_value=None),
+        patch(
+            "app.routers.webhook.generate_bot_response",
+            return_value=SimpleNamespace(ok=False, error="disabled", error_code="disabled", value=None),
+        ),
+    ]
+
+    if local_time:
+        tz_name = get_salon_timezone()
+        fixed_now = _build_fixed_now(local_time, tz_name)
+
+        class _FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed_now if tz is None else fixed_now.astimezone(tz)
+
+        patches.append(patch("app.routers.webhook.datetime", _FixedDateTime))
+
+    with ExitStack() as stack:
+        for patcher in patches:
+            stack.enter_context(patcher)
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+    return response.bot_response or ""
 
 
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:
@@ -171,21 +309,17 @@ def test_demo_salon_eval_cases():
         )
 
         response = decision.response or ""
-        if decision.action == "reply":
-            intent = decision.intent or ""
-            cta_intents = set(webhook_router.BOOKING_CTA_SERVICE_INTENTS) | {"hours", "location", "multi_truth"}
-            if intent in cta_intents:
-                response = webhook_router._maybe_append_booking_cta(
-                    response,
-                    conversation_state=ConversationState.BOT_ACTIVE.value,
-                    allow_booking_flow=True,
-                ) or response
         local_time = case.get("local_time")
-        if local_time:
-            tz_name = get_salon_timezone()
-            now_local = _build_local_datetime(str(local_time), tz_name)
-            notice = build_quiet_hours_notice(now_local=now_local)
-            response = webhook_router._apply_quiet_hours_notice(response, notice)
+        must_include = expected.get("must_include") or []
+        wants_cta = any(
+            isinstance(item, str) and "Хотите записаться" in item for item in must_include
+        )
+        if local_time or wants_cta:
+            response = _run_webhook_case(
+                user_text,
+                case_id,
+                str(local_time) if local_time else None,
+            )
         if expected.get("must_include"):
             _assert_contains_all(response, expected["must_include"], case_id, "must_include")
         if expected.get("must_include_any"):

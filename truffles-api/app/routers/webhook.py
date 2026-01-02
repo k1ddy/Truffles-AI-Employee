@@ -50,8 +50,8 @@ from app.services.conversation_service import (
 )
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
-    build_quiet_hours_notice,
     build_consult_reply,
+    build_quiet_hours_notice,
     compose_multi_truth_reply,
     format_reply_from_truth,
     get_demo_salon_decision,
@@ -2627,6 +2627,7 @@ def _handle_clarify_limit_escalation(
     source: str,
     allow_handover: bool,
     send_response,
+    finalize_response=None,
 ) -> WebhookResponse:
     bot_response = MSG_ESCALATED
     _reset_low_confidence_retry(conversation)
@@ -2683,6 +2684,8 @@ def _handle_clarify_limit_escalation(
     )
     if saved_message:
         _update_message_decision_metadata(saved_message, {"clarify_limit": True})
+    if finalize_response:
+        bot_response = finalize_response(bot_response)
     save_message(db, conversation.id, conversation.client_id, role="assistant", content=bot_response)
     sent = send_response(bot_response)
     if not sent:
@@ -4381,6 +4384,28 @@ async def _handle_webhook_payload(
 
     # 4. Update last_message_at (keep previous for session timeout check)
     now = datetime.now(timezone.utc)
+    policy_handler = _get_policy_handler(client)
+    policy_type = policy_handler.get("policy_type") if policy_handler else None
+    quiet_hours_notice: str | None = None
+    if conversation.state == ConversationState.BOT_ACTIVE.value and policy_type == "demo_salon":
+        quiet_hours_notice = build_quiet_hours_notice(now_utc=now)
+
+    def _finalize_bot_response(text: str, *, allow_quiet_hours: bool = True) -> str:
+        if not text:
+            return text
+        if not allow_quiet_hours:
+            return text
+        if not quiet_hours_notice:
+            return text
+        if conversation.state != ConversationState.BOT_ACTIVE.value:
+            return text
+        return _apply_quiet_hours_notice(text, quiet_hours_notice)
+
+    def _send_and_save(text: str, *, allow_quiet_hours: bool = True) -> tuple[str, bool]:
+        final_text = _finalize_bot_response(text, allow_quiet_hours=allow_quiet_hours)
+        save_message(db, conversation.id, client.id, role="assistant", content=final_text)
+        sent = _send_response(final_text)
+        return final_text, sent
     previous_last_message_at = conversation.last_message_at
     conversation.last_message_at = now
     context = _get_conversation_context(conversation)
@@ -4535,10 +4560,7 @@ async def _handle_webhook_payload(
                                 or matched_branch.slug
                                 or "филиал"
                             )
-                            save_message(
-                                db, conversation.id, client.id, role="assistant", content=bot_response
-                            )
-                            sent = _send_response(bot_response)
+                            bot_response, sent = _send_and_save(bot_response)
                             result_message = (
                                 "Branch selected (prompted)" if sent else "Branch selection response failed"
                             )
@@ -4555,8 +4577,7 @@ async def _handle_webhook_payload(
                             context, _build_branch_selection(branches, now)
                         )
                         _set_conversation_context(conversation, context)
-                        save_message(db, conversation.id, client.id, role="assistant", content=prompt)
-                        sent = _send_response(prompt)
+                        prompt, sent = _send_and_save(prompt)
                         result_message = (
                             "Branch selection requested (retry)"
                             if sent
@@ -4573,8 +4594,7 @@ async def _handle_webhook_payload(
                     prompt = _build_branch_prompt(branches)
                     context = _set_branch_selection(context, _build_branch_selection(branches, now))
                     _set_conversation_context(conversation, context)
-                    save_message(db, conversation.id, client.id, role="assistant", content=prompt)
-                    sent = _send_response(prompt)
+                    prompt, sent = _send_and_save(prompt)
                     result_message = (
                         "Branch selection requested" if sent else "Branch selection prompt failed"
                     )
@@ -4784,8 +4804,7 @@ async def _handle_webhook_payload(
                         },
                     )
                     bot_response = MSG_REENGAGE_DECLINED
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
+                    bot_response, sent = _send_and_save(bot_response)
                     result_message = "Re-engage declined" if sent else "Re-engage decline send failed"
                     db.commit()
                     return WebhookResponse(
@@ -4808,8 +4827,7 @@ async def _handle_webhook_payload(
                         },
                     )
                     bot_response = MSG_REENGAGE_CONFIRM
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
+                    bot_response, sent = _send_and_save(bot_response)
                     result_message = "Re-engage confirmation requested" if sent else "Re-engage confirmation failed"
                     db.commit()
                     return WebhookResponse(
@@ -4839,8 +4857,7 @@ async def _handle_webhook_payload(
             },
         )
         bot_response = MSG_REENGAGE_CONFIRM
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response)
         result_message = "Re-engage confirmation requested" if sent else "Re-engage confirmation failed"
         db.commit()
         return WebhookResponse(
@@ -4912,8 +4929,7 @@ async def _handle_webhook_payload(
                             batch_messages = _coerce_batch_messages(message_text, None)
                     else:
                         bot_response = MSG_ASR_CONFIRM_DECLINED
-                        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                        sent = _send_response(bot_response)
+                        bot_response, sent = _send_and_save(bot_response)
                         result_message = (
                             "ASR confirm missing transcript" if sent else "ASR confirm response failed"
                         )
@@ -4928,8 +4944,7 @@ async def _handle_webhook_payload(
                     context = _set_asr_confirmation(context, None)
                     _set_conversation_context(conversation, context)
                     bot_response = MSG_ASR_CONFIRM_DECLINED
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
+                    bot_response, sent = _send_and_save(bot_response)
                     result_message = "ASR confirm declined" if sent else "ASR confirm decline failed"
                     db.commit()
                     return WebhookResponse(
@@ -4957,8 +4972,7 @@ async def _handle_webhook_payload(
                     saved_message,
                     {"asr_confirm_requested": True, "asr_low_confidence": True},
                 )
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = "ASR confirmation requested" if sent else "ASR confirmation send failed"
             db.commit()
             return WebhookResponse(
@@ -4989,8 +5003,7 @@ async def _handle_webhook_payload(
                 source="pending",
                 fast_intent=False,
             )
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = "Pending opt-out handled" if sent else "Pending opt-out send failed"
             db.commit()
             return WebhookResponse(
@@ -5016,8 +5029,7 @@ async def _handle_webhook_payload(
             source="pending",
             fast_intent=False,
         )
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response)
         result_message = "Pending wait response sent" if sent else "Pending wait response failed"
         db.commit()
         return WebhookResponse(
@@ -5030,8 +5042,7 @@ async def _handle_webhook_payload(
     if has_media:
         if not media_info:
             bot_response = MSG_MEDIA_UNSUPPORTED
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = "Media unsupported response sent" if sent else "Media response failed"
             db.commit()
             return WebhookResponse(
@@ -5053,8 +5064,7 @@ async def _handle_webhook_payload(
 
         if media_decision and not media_decision.allowed:
             bot_response = media_decision.response or MSG_MEDIA_UNSUPPORTED
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = "Media rejected response sent" if sent else "Media response failed"
             db.commit()
             return WebhookResponse(
@@ -5142,8 +5152,7 @@ async def _handle_webhook_payload(
                         media_response = MSG_MEDIA_STYLE_REFERENCE
                     else:
                         bot_response = MSG_AI_ERROR
-                        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                        sent = _send_response(bot_response)
+                        bot_response, sent = _send_and_save(bot_response)
                         result_message = (
                             "Style reference escalation failed" if sent else "Media escalation response failed"
                         )
@@ -5208,8 +5217,7 @@ async def _handle_webhook_payload(
 
         if media_response is not None and conversation.state != ConversationState.MANAGER_ACTIVE.value:
             bot_response = media_response
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = "Media response sent" if sent else "Media response failed"
             db.commit()
             return WebhookResponse(
@@ -5385,8 +5393,7 @@ async def _handle_webhook_payload(
                             bot_response = MSG_AI_ERROR
                             result_message = f"Handover confirm escalation failed: {esc_result.error}"
 
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
+                    bot_response, sent = _send_and_save(bot_response)
                     if not sent:
                         result_message = f"{result_message}; response_send=failed"
                     db.commit()
@@ -5403,8 +5410,7 @@ async def _handle_webhook_payload(
                     _reset_low_confidence_retry(conversation)
 
                     bot_response = MSG_HANDOVER_DECLINED
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
+                    bot_response, sent = _send_and_save(bot_response)
                     result_message = "Handover declined, asked for salon details" if sent else "Handover decline send failed"
                     db.commit()
                     return WebhookResponse(
@@ -5729,34 +5735,11 @@ async def _handle_webhook_payload(
         booking_wants_flow = False
     booking_blocked = bool(booking_block_meta)
 
-    policy_handler = _get_policy_handler(client)
-    policy_type = policy_handler.get("policy_type") if policy_handler else None
     multi_intent_primary = None
     multi_intent_secondary: list[str] = []
     multi_intent_followup = None
     multi_intent_booking_followup = None
     multi_intent_other_followup = None
-
-    quiet_hours_notice: str | None = None
-    if conversation.state == ConversationState.BOT_ACTIVE.value and policy_type == "demo_salon":
-        quiet_hours_notice = build_quiet_hours_notice(now_utc=now)
-
-    def _finalize_bot_response(text: str, *, allow_quiet_hours: bool = True) -> str:
-        if not text:
-            return text
-        if not allow_quiet_hours:
-            return text
-        if not quiet_hours_notice:
-            return text
-        if conversation.state != ConversationState.BOT_ACTIVE.value:
-            return text
-        return _apply_quiet_hours_notice(text, quiet_hours_notice)
-
-    def _send_and_save(text: str, *, allow_quiet_hours: bool = True) -> tuple[str, bool]:
-        final_text = _finalize_bot_response(text, allow_quiet_hours=allow_quiet_hours)
-        save_message(db, conversation.id, client.id, role="assistant", content=final_text)
-        sent = _send_response(final_text)
-        return final_text, sent
 
     if (
         conversation.state == ConversationState.BOT_ACTIVE.value
@@ -5790,8 +5773,7 @@ async def _handle_webhook_payload(
             source="opt_out",
             fast_intent=False,
         )
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
         result_message = f"Muted (opt-out #{conversation.no_count})" if sent else "Opt-out response failed"
         db.commit()
         return WebhookResponse(
@@ -5864,8 +5846,7 @@ async def _handle_webhook_payload(
                 source="policy_gate",
                 fast_intent=False,
             )
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
             if not sent:
                 result_message = f"{result_message}; response_send=failed"
             _log_timing(
@@ -5946,8 +5927,7 @@ async def _handle_webhook_payload(
                     "expected_reply_reason": "off_topic",
                 },
             )
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
         result_message = (
             "Expected reply off-topic response sent"
             if sent
@@ -6006,6 +5986,7 @@ async def _handle_webhook_payload(
                     source="question_contract",
                     allow_handover=routing.get("allow_handover_create", False),
                     send_response=_send_response,
+                    finalize_response=_finalize_bot_response,
                 )
             _register_clarify_attempt(
                 conversation=conversation,
@@ -6050,8 +6031,7 @@ async def _handle_webhook_payload(
                         "expected_reply_reason": "invalid_choice",
                     },
                 )
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = (
                 "Expected reply invalid choice response sent"
                 if sent
@@ -6086,8 +6066,7 @@ async def _handle_webhook_payload(
             source="domain_router",
             fast_intent=False,
         )
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
         result_message = "Out-of-domain early response sent" if sent else "Out-of-domain early response failed"
         db.commit()
         return WebhookResponse(
@@ -6190,8 +6169,7 @@ async def _handle_webhook_payload(
                 message_count=message_count,
                 reason="intent_queue_choice",
             )
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = (
                 "Intent queue info reply sent" if sent else "Intent queue info reply failed"
             )
@@ -6263,8 +6241,7 @@ async def _handle_webhook_payload(
         )
         bot_response = prompt or MSG_BOOKING_ASK_DATETIME
         _reset_low_confidence_retry(conversation)
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response)
         result_message = "Intent queue booking prompt sent" if sent else "Intent queue booking prompt failed"
         db.commit()
         return WebhookResponse(
@@ -6408,8 +6385,7 @@ async def _handle_webhook_payload(
                         message_count=message_count,
                         reason="intent_queue",
                     )
-                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                sent = _send_response(bot_response)
+                bot_response, sent = _send_and_save(bot_response)
                 result_message = "Intent queue info reply sent" if sent else "Intent queue info reply failed"
                 db.commit()
                 return WebhookResponse(
@@ -6567,8 +6543,7 @@ async def _handle_webhook_payload(
             else:
                 result_message = "Consult escalation skipped (already pending)"
 
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             if not sent:
                 result_message = f"{result_message}; response_send=failed"
             db.commit()
@@ -6582,8 +6557,7 @@ async def _handle_webhook_payload(
         bot_response = consult_decision.response
         bot_response = _combine_sidecar(bot_response, intent_queue_followup)
         _reset_low_confidence_retry(conversation)
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response)
         result_message = "Consult reply sent" if sent else "Consult reply send failed"
         db.commit()
         return WebhookResponse(
@@ -6808,6 +6782,7 @@ async def _handle_webhook_payload(
                             source=info_source or "booking_interrupt",
                             allow_handover=routing.get("allow_handover_create", False),
                             send_response=_send_response,
+                            finalize_response=_finalize_bot_response,
                         )
                     _register_clarify_attempt(
                         conversation=conversation,
@@ -6848,6 +6823,7 @@ async def _handle_webhook_payload(
                             source="booking",
                             allow_handover=routing.get("allow_handover_create", False),
                             send_response=_send_response,
+                            finalize_response=_finalize_bot_response,
                         )
                     _register_clarify_attempt(
                         conversation=conversation,
@@ -6923,8 +6899,7 @@ async def _handle_webhook_payload(
                 bot_response = _combine_sidecar(prompt or "", info_decision.response or "")
                 bot_response = bot_response.strip()
                 _reset_low_confidence_retry(conversation)
-                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                sent = _send_response(bot_response)
+                bot_response, sent = _send_and_save(bot_response)
                 result_message = "Booking info interrupt sent" if sent else "Booking info interrupt failed"
                 db.commit()
                 return WebhookResponse(
@@ -6975,8 +6950,7 @@ async def _handle_webhook_payload(
                 fast_intent=False,
             )
             bot_response = _combine_sidecar(MSG_BOOKING_CANCELLED, multi_intent_booking_followup)
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = "Booking cancelled" if sent else "Booking cancel response failed"
             _log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
             booking_logged = True
@@ -7008,8 +6982,7 @@ async def _handle_webhook_payload(
                 fast_intent=False,
             )
             bot_response = _combine_sidecar(MSG_BOOKING_REENGAGE, multi_intent_booking_followup)
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = "Booking paused" if sent else "Booking pause response failed"
             _log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
             booking_logged = True
@@ -7072,6 +7045,7 @@ async def _handle_webhook_payload(
                         source="booking",
                         allow_handover=routing.get("allow_handover_create", False),
                         send_response=_send_response,
+                        finalize_response=_finalize_bot_response,
                     )
                 _register_clarify_attempt(
                     conversation=conversation,
@@ -7098,8 +7072,7 @@ async def _handle_webhook_payload(
                 )
                 bot_response = _combine_sidecar(prompt, policy_price_sidecar)
                 bot_response = _combine_sidecar(bot_response, multi_intent_booking_followup)
-                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                sent = _send_response(bot_response)
+                bot_response, sent = _send_and_save(bot_response)
                 result_message = "Booking slot requested" if sent else "Booking slot response failed"
                 _log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
                 booking_logged = True
@@ -7172,8 +7145,7 @@ async def _handle_webhook_payload(
                 source="booking",
                 fast_intent=False,
             )
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             if not sent:
                 result_message = f"{result_message}; response_send=failed"
             _log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
@@ -7225,8 +7197,7 @@ async def _handle_webhook_payload(
             source="fast_intent",
             fast_intent=True,
         )
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response)
         if not sent:
             result_message = f"{result_message}; response_send=failed"
         db.commit()
@@ -7289,8 +7260,7 @@ async def _handle_webhook_payload(
                         message_count=message_count,
                         reason="multi_truth",
                     )
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
+                    bot_response, sent = _send_and_save(bot_response)
                     if not sent:
                         result_message = f"{result_message}; response_send=failed"
                     db.commit()
@@ -7353,6 +7323,7 @@ async def _handle_webhook_payload(
                         source="service_matcher",
                         allow_handover=routing.get("allow_handover_create", False),
                         send_response=_send_response,
+                        finalize_response=_finalize_bot_response,
                     )
                 _register_clarify_attempt(
                     conversation=conversation,
@@ -7414,8 +7385,7 @@ async def _handle_webhook_payload(
                 message_count=message_count,
                 reason="service_matcher",
             )
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             if not sent:
                 result_message = f"{result_message}; response_send=failed"
             db.commit()
@@ -7512,8 +7482,7 @@ async def _handle_webhook_payload(
                                 "llm_cache_hit": llm_cache_hit,
                             },
                         )
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
+                    bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
                     if not sent:
                         result_message = f"{result_message}; response_send=failed"
                     db.commit()
@@ -7538,8 +7507,7 @@ async def _handle_webhook_payload(
                     timing_context,
                 )
                 _record_decision_trace(conversation, trace)
-                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                sent = _send_response(bot_response)
+                bot_response, sent = _send_and_save(bot_response)
                 result_message = "Message sent" if sent else "Failed to send"
                 if saved_message:
                     llm_used = bool(timing_context.get("llm_used")) if timing_context else False
@@ -7738,8 +7706,7 @@ async def _handle_webhook_payload(
                 message_count=message_count,
                 reason="truth_gate",
             )
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             if not sent:
                 result_message = f"{result_message}; response_send=failed"
             _log_timing(
@@ -7871,8 +7838,7 @@ async def _handle_webhook_payload(
                 "state": conversation.state,
             },
         )
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response)
         result_message = "Greeting response sent" if sent else "Greeting response failed"
         db.commit()
         return WebhookResponse(
@@ -7889,8 +7855,7 @@ async def _handle_webhook_payload(
                 "state": conversation.state,
             },
         )
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response)
         result_message = "Pending status response sent" if sent else "Pending status response failed"
         db.commit()
         return WebhookResponse(
@@ -7908,8 +7873,7 @@ async def _handle_webhook_payload(
                 "state": conversation.state,
             },
         )
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response)
         result_message = "Bot status response sent" if sent else "Bot status response failed"
         db.commit()
         return WebhookResponse(
@@ -7926,8 +7890,7 @@ async def _handle_webhook_payload(
                 "state": conversation.state,
             },
         )
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response)
         result_message = "Style reference prompt sent" if sent else "Style reference prompt failed"
         db.commit()
         return WebhookResponse(
@@ -7954,8 +7917,7 @@ async def _handle_webhook_payload(
             user_text=message_text,
             miss_type="out_of_domain",
         )
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
         result_message = "Out-of-domain response sent" if sent else "Out-of-domain response failed"
         db.commit()
         return WebhookResponse(
@@ -7979,8 +7941,7 @@ async def _handle_webhook_payload(
 
         if reused:
             bot_response = MSG_ESCALATED
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = (
                 f"Escalation reused ({intent.value}), telegram={'sent' if telegram_sent else 'failed'}"
             )
@@ -8015,8 +7976,7 @@ async def _handle_webhook_payload(
                         "telegram_sent": telegram_sent,
                     },
                 )
-                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                sent = _send_response(bot_response)
+                bot_response, sent = _send_and_save(bot_response)
                 result_message = f"Escalated ({intent.value}), telegram={'sent' if telegram_sent else 'failed'}"
             else:
                 logger.error(f"Escalation failed: {result.error}")
@@ -8044,8 +8004,7 @@ async def _handle_webhook_payload(
                 _record_rag_meta()
                 if gen_result.ok and gen_result.value[0]:
                     bot_response = gen_result.value[0]
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
+                    bot_response, sent = _send_and_save(bot_response)
                 result_message = f"Escalation failed ({result.error_code}), responded normally"
 
     elif decision.action == "pending_escalation":
@@ -8059,8 +8018,7 @@ async def _handle_webhook_payload(
                 "intent": intent.value,
             },
         )
-        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-        sent = _send_response(bot_response)
+        bot_response, sent = _send_and_save(bot_response)
         result_message = "Escalation skipped (pending), status response sent" if sent else "Pending status response failed"
 
     elif decision.action == "rejection":
@@ -8078,8 +8036,7 @@ async def _handle_webhook_payload(
                     "state": conversation.state,
                 },
             )
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = "Request cancelled, bot reactivated"
         else:
             mute_first, mute_second = get_mute_settings(db, client.id)
@@ -8105,8 +8062,7 @@ async def _handle_webhook_payload(
                     "no_count": conversation.no_count,
                 },
             )
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = f"Muted (rejection #{conversation.no_count})"
 
     elif decision.action == "ai_response":
@@ -8138,8 +8094,7 @@ async def _handle_webhook_payload(
                     "error": gen_result.error,
                 },
             )
-            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-            sent = _send_response(bot_response)
+            bot_response, sent = _send_and_save(bot_response)
             result_message = f"AI error: {gen_result.error}"
         else:
             response_text, confidence = gen_result.value
@@ -8217,8 +8172,7 @@ async def _handle_webhook_payload(
                                     "llm_cache_hit": llm_cache_hit,
                                 },
                             )
-                        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                        sent = _send_response(bot_response)
+                        bot_response, sent = _send_and_save(bot_response)
                         result_message = (
                             "Service semantic matcher reply sent" if sent else "Service semantic matcher send failed"
                         )
@@ -8240,8 +8194,7 @@ async def _handle_webhook_payload(
                                 "state": conversation.state,
                             },
                         )
-                        save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                        sent = _send_response(bot_response)
+                        bot_response, sent = _send_and_save(bot_response)
                         result_message = "Low confidence while pending, responded without re-escalation"
                     else:
                         # Low RAG confidence — ask clarifying question before escalation (up to a limit).
@@ -8274,6 +8227,7 @@ async def _handle_webhook_payload(
                                     source="ai_response",
                                     allow_handover=routing.get("allow_handover_create", False),
                                     send_response=_send_response,
+                                    finalize_response=_finalize_bot_response,
                                 )
                             _register_clarify_attempt(
                                 conversation=conversation,
@@ -8295,8 +8249,7 @@ async def _handle_webhook_payload(
                                     "retry_count": retry_count + 1,
                                 },
                             )
-                            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                            sent = _send_response(bot_response)
+                            bot_response, sent = _send_and_save(bot_response)
                             result_message = "Low confidence: asked clarification before escalation"
                         else:
                             confirmation = {
@@ -8319,8 +8272,7 @@ async def _handle_webhook_payload(
                                     "retry_count": retry_count,
                                 },
                             )
-                            save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                            sent = _send_response(bot_response)
+                            bot_response, sent = _send_and_save(bot_response)
                             result_message = (
                                 "Low confidence: asked for handover confirmation"
                                 if sent
@@ -8353,8 +8305,7 @@ async def _handle_webhook_payload(
                     timing_context,
                 )
                 _record_decision_trace(conversation, trace)
-                save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                sent = _send_response(bot_response)
+                bot_response, sent = _send_and_save(bot_response)
                 result_message = "Message sent" if sent else "Failed to send"
             else:
                 _record_knowledge_backlog(
@@ -8384,8 +8335,7 @@ async def _handle_webhook_payload(
                             "retry_count": retry_count + 1,
                         },
                     )
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
+                    bot_response, sent = _send_and_save(bot_response)
                     result_message = "No response: asked clarification"
                 else:
                     confirmation = {
@@ -8408,8 +8358,7 @@ async def _handle_webhook_payload(
                             "retry_count": retry_count,
                         },
                     )
-                    save_message(db, conversation.id, client.id, role="assistant", content=bot_response)
-                    sent = _send_response(bot_response)
+                    bot_response, sent = _send_and_save(bot_response)
                     result_message = (
                         "No response: asked for handover confirmation"
                         if sent

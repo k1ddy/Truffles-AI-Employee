@@ -4,15 +4,15 @@ import hashlib
 import math
 import os
 import re
-from datetime import datetime, time, timezone
 from dataclasses import dataclass
+from datetime import datetime, time, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 import yaml
-from zoneinfo import ZoneInfo
 
 from app.logging_config import get_logger
 from app.services.knowledge_service import get_embedding

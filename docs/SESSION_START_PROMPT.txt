@@ -29,6 +29,7 @@ Multi-terminal protocol (mandatory):
 - Single-writer rule: only one terminal edits code at a time. For parallel work, use separate worktrees and non-overlapping files.
 - Handoff format (must use):
   GOAL / FILES / TESTS / LIVE-CHECK / EVIDENCE / COMMIT / RISKS
+- One task per handoff message; do not bundle multiple tasks.
 - Zhanbol interaction: he provides priorities and approvals; we reply concisely and ask only when blocked.
 - All cross-terminal handoffs go through Zhanbol (copy/paste). No direct "air transfer".
 
@@ -41,6 +42,15 @@ Acceptance gate (non-negotiable):
 - tests + live-check + trace/meta evidence or NO merge.
 - Any unexpected file in diff -> STOP and ask Brain.
 
+Stop-the-line (strict):
+- Any warning in tests/logs/CI (e.g., missing keys) -> STOP and report; no silent waivers.
+- CI fail > local pass; rerun only after CI build + restart.
+- On any CI fail: immediately return run URL + failed job + failed step + 5–15 error lines + exact command + matrix (OS/runtime) before any other action.
+- No "test painting": tests must reflect production path (no manual CTA/quiet-hours appends).
+- Existing EVAL cases change only as bugfix with evidence; new cases are allowed.
+- DoD checks must not use `docker cp` or `docker run -v`; use `docker exec` after rebuild/restart.
+- Hands never update `STATE.md` (Brain updates last).
+
 One-issue flow:
 - 1 problem -> 1 fix -> 1 verification -> 1 STATE.md update.
 
@@ -48,8 +58,18 @@ Role start cards (copy/paste at session start):
 - Top Architect: "Read AGENTS.md + STATE.md. Set 5 invariants, 3 priorities, 1 DoD. Choose ONE problem and pass to Brain."
 - Brain: "Define 1 task in 6 lines. Approve commit/push only with tests+live+trace/meta. Update STATE.md last."
 - Hands-DEV: "Edit only files in task. Stop on unexpected diff. Provide GOAL/FILES/TESTS/LIVE/EVIDENCE/COMMIT/RISKS."
-- Hands-QA/OPS: "Run tests/live-checks/SQL only. Return commands+results. No code changes."
+- Hands-QA/OPS: "Run tests/live-checks/SQL only. Return commands+results. No code changes. If CI fail: include run URL + failed job + step + error snippet."
 - Hands-DOCS: "Audit docs vs code. Provide mismatches and exact text to change. No code changes."
+
+Brain Operating Contract (Zhanbol interface):
+- Architect -> Brain -> Hands only; all handoffs go through Zhanbol copy/paste.
+- Brain never does Hands work unless explicitly asked; Brain only defines tasks and accepts results.
+- Each Hands task is 6 lines: Goal / Scope / Steps / Evidence / Tests / Stop.
+- Stop line must include CI-fail evidence package requirement.
+- Ask questions only when data is missing for a decision (Question gate); otherwise execute.
+- Report results compactly (facts -> doc -> gap) with file:line evidence; no long dumps.
+- Include a short rationale ("why") for decisions (1-2 lines) with evidence.
+- Update STATE.md last, only after decision and verification are recorded.
 
 Question gate (mandatory):
 - Architect/Brain must ask questions if data is missing for a decision.

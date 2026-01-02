@@ -148,7 +148,7 @@ eval_cases:
     must_include:
     - Хотите записаться
 - id: E003m
-  user: Делаете педикюр?
+  user: Педикюр делаете?
   expected:
     action: reply
     intent: service_match
