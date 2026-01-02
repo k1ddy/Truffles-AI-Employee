@@ -130,6 +130,7 @@
 - [x] Бот отвечает на сообщения WhatsApp
 - [x] RAG поиск по базе знаний (Qdrant)
 - [x] Классификация интентов
+- [x] Booking interrupt при склейке: info‑ответ + возврат к booking‑prompt (live‑check PASS 2026‑01‑02)
 - [x] Эскалация в Telegram (кнопки Беру/Решено)
 - [x] Ответ менеджера → клиенту
 - [x] Напоминания (15 мин, 1 час) — cron
@@ -141,7 +142,6 @@
 - [ ] **⚠️ Active Learning частично** — owner-ответ → auto-upsert в Qdrant работает (логи 2025-12-25: "Owner response detected" / "Added to knowledge"), но нет модерации/метрик
 - [ ] **⚠️ Ответы медленные (outbox)** — обновлено: `OUTBOX_COALESCE_SECONDS=1`, `OUTBOX_WINDOW_MERGE_SECONDS=2.5`, `OUTBOX_WORKER_INTERVAL_SECONDS=1`; safe intents (SAFE5) total_s 2.72–2.86s; LLM ветка (CMPX6-3/6-5/7-4/7-5/8-1) total_s 8.35–9.52s (avg 8.99, p90 9.48) → SLA <10s для LLM достигнут
 - [ ] **⚠️ Model routing + LLM timeout** — `FAST_MODEL=gpt-5-mini`, `SLOW_MODEL=gpt-5-mini`, `INTENT_TIMEOUT_SECONDS=1.5`, `LLM_TIMEOUT_SECONDS=4`, `FAST_MODEL_MAX_CHARS=160`, `LLM_MAX_TOKENS=600`, `LLM_HISTORY_MESSAGES=6`, `LLM_KNOWLEDGE_CHARS=1500`, `LLM_CACHE_TTL_SECONDS=86400`; llm_ms ~4.3s (timeout=true) → SLA по времени достигнут, но таймауты всё ещё происходят
-- [ ] **⚠️ Склейка сообщений ломает multi‑intent** — coalesce ещё склеивает разнородные фразы; добавлен pause booking при нерелевантных сообщениях и pending‑silence (код обновлён, нужен деплой/проверка)
 - [ ] **⚠️ Out‑of‑domain gate до booking/truth** — ранний OOD‑ответ без LLM (код обновлён, нужен деплой/проверка)
 - [ ] **⚠️ OOD anchors (data-driven)** — demo_salon: anchors_in/out расширены (животные/погода/политика/кулинария/код/советы/анекдоты + style/booking/адрес/часы), offtopic_examples дополнил; SQL зафиксирован в `ops/update_instance_demo.sql`, нужен деплой, если API ещё на старом образе
 - [ ] **⚠️ Закрепы заявок в Telegram** — фикс в коде: `unpin` теперь использует `handover.telegram_message_id` (fallback на callback message_id); нужен деплой/проверка
@@ -1479,7 +1479,7 @@ LIMIT 1;
 | P0 | Вкатить latest CI image на прод (pull GHCR) | В `/admin/version` новый коммит; поведение соответствует изменениям |
 | P0 | Прокинуть `instanceId` в inbound payload (ChatFlow) для всех клиентов | `payload.body.metadata.instanceId` есть; `conversation.branch_id` ставится (demo_salon + truffles ok) |
 | P0 | Снизить задержку ответов (outbox): сейчас avg 17s, p90 25s | Avg/p90 < 10s |
-| P0 | Починить multi‑intent при склейке (цена → запись) | Сообщения “цена+запись” ведут к сбору записи, не теряют контекст |
+| P0 | DONE 2026‑01‑02: multi‑intent при склейке (booking+info) | Live‑check PASS + trace booking_interrupt |
 | P1 | Убрать дубли заявок на одного клиента | При open handover новые не создаются, идёт ответ в существующий топик |
 | P1 | Пины в Telegram снимаются после "Решено" | После resolve закреп исчезает всегда |
 | P1 | Проработать UX Telegram для владельца/менеджеров | Спека: как работать с заявками без хаоса |
@@ -1648,4 +1648,17 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 
 ---
 
-*Последнее обновление: 2025-12-31 (Evidence: /admin/version + /admin/health проверки выше)*
+### 2026-01-02 — Fix: booking+info под coalesce (multi-intent)
+
+**Что сделали:**
+- Batch non‑booking selection игнорирует semantic service hints → "парковка есть?" не фильтруется как booking.
+- Live‑check: info‑ответ + booking‑prompt в одном ответе; expected_reply_type=time; trace booking_interrupt + truth_gate.
+- CI/деплой/pytest PASS; allowlist снят после успеха.
+
+**Evidence:**
+- Code: `truffles-api/app/routers/webhook.py` (allow_service flag + selection).
+- CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20658445278 (commit 7b971713b4863094ce39910f03c5e60e97688b16).
+- Prod: `/admin/version` commit 7b971713b4863094ce39910f03c5e60e97688b16.
+- Live‑check: conversation `99306198-1ecf-44d6-9066-72bb4e76e915`, decision_meta.booking_info_interrupt=true.
+
+*Последнее обновление: 2026-01-02 (Evidence: CI 20658445278 + /admin/version + live-check)*
