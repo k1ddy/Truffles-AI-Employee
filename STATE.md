@@ -62,6 +62,7 @@
 - Multi-truth: hours добавляются по _looks_like_hours_question; price_item может переопределить широкий service_query при более точном совпадении.
 - Multi-truth: single-сегмент (без пунктуации) с 2+ сигналами (hours/price/duration) даёт детерминированный ответ.
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
+- Early OOD guard: блок только при `out_hits>0`, `strict_in_hits==0`, без `booking_signal`; booking/intents проходят к booking/truth. Evidence: `truffles-api/app/routers/webhook.py:5888-5916`; EVAL `E359` ("хочу записаться" → booking_intake) и `E360` ("какая погода" → off_topic) в `truffles-api/app/knowledge/demo_salon/EVAL.yaml:3974-3995`; тест `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` PASS (2026-01-02, 108.6s).
 - Проверка 2026-01-02: open handovers duplicates 0 (handovers.status IN pending/active) по conversation_id и по conversations.user_id (join); SQL `SELECT conversation_id, count(*) ... HAVING count(*) > 1` → 0; `SELECT c.user_id, count(*) ... HAVING count(*) > 1` → 0.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
 - Детальный бриф салона заполнен эталоном (фейковые данные): `Business/Sales/Бриф_клиента.md`.

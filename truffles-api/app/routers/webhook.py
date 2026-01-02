@@ -5910,7 +5910,9 @@ async def _handle_webhook_payload(
             early_domain_intent, _, _, early_domain_meta = classify_domain_with_scores(
                 message_text, client.config if client else None
             )
-            early_out_of_domain = bool(int(early_domain_meta.get("out_hits") or 0) > 0)
+            out_hits = int(early_domain_meta.get("out_hits") or 0)
+            strict_in_hits = int(early_domain_meta.get("strict_in_hits") or 0)
+            early_out_of_domain = bool(out_hits > 0 and strict_in_hits == 0 and not booking_signal)
 
     expected_reply_off_topic = (
         expected_reply_type == EXPECTED_REPLY_SERVICE

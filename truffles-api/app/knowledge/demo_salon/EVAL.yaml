@@ -3974,3 +3974,22 @@ eval_cases:
     must_include_any:
     - Адрес
     - Алматы
+- id: E359
+  user: хочу записаться
+  expected:
+    action: reply
+    intent: booking_intake
+    must_include_any:
+    - Могу передать
+    - услуга
+    - точную дату
+- id: E360
+  user: какая погода
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - вопросами о наших услугах
+    - по салону
+    - запись
+    - цены
