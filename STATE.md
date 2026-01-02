@@ -62,6 +62,7 @@
 - Multi-truth: hours добавляются по _looks_like_hours_question; price_item может переопределить широкий service_query при более точном совпадении.
 - Multi-truth: single-сегмент (без пунктуации) с 2+ сигналами (hours/price/duration) даёт детерминированный ответ.
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
+- Проверка 2026-01-02: open handovers duplicates 0 (handovers.status IN pending/active) по conversation_id и по conversations.user_id (join); SQL `SELECT conversation_id, count(*) ... HAVING count(*) > 1` → 0; `SELECT c.user_id, count(*) ... HAVING count(*) > 1` → 0.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
 - Детальный бриф салона заполнен эталоном (фейковые данные): `Business/Sales/Бриф_клиента.md`.
 - Demo salon knowledge pack обновлён под эталон (truth/intents/eval + обзор услуг).
@@ -1481,7 +1482,7 @@ LIMIT 1;
 | P0 | Прокинуть `instanceId` в inbound payload (ChatFlow) для всех клиентов | `payload.body.metadata.instanceId` есть; `conversation.branch_id` ставится (demo_salon + truffles ok) |
 | P0 | Снизить задержку ответов (outbox): сейчас avg 17s, p90 25s | Avg/p90 < 10s |
 | P0 | DONE 2026‑01‑02: multi‑intent при склейке (booking+info) | Live‑check PASS + trace booking_interrupt |
-| P1 | Убрать дубли заявок на одного клиента | При open handover новые не создаются, идёт ответ в существующий топик |
+| P1 | Убрать дубли заявок на одного клиента | Проверка 2026-01-02: open handovers duplicates 0 (conversation_id + join user_id); DoD: при open handover новые не создаются, идёт ответ в существующий топик |
 | P1 | Пины в Telegram снимаются после "Решено" | После resolve закреп исчезает всегда |
 | P1 | Проработать UX Telegram для владельца/менеджеров | Спека: как работать с заявками без хаоса |
 | P1 | Добавить базовые фразы в knowledge base | "ты еще здесь?" → бот отвечает сам |
