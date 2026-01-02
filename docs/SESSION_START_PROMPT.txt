@@ -74,6 +74,7 @@ Brain Operating Contract (Zhanbol interface):
 Question gate (mandatory):
 - Architect/Brain must ask questions if data is missing for a decision.
 - Before asking: search repo/docs/code; if answer exists, do not ask.
+- STATE.md не является доказательством; любой пункт подтверждать логами/БД/trace до фикса.
 - If not found: ask Zhanbol with evidence of what was checked, or mark GAP.
 - No task is issued until questions are resolved or GAP is accepted.
 
