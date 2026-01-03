@@ -50,8 +50,8 @@ from app.services.conversation_service import (
 )
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
-    build_info_combined_reply,
     build_consult_reply,
+    build_info_combined_reply,
     build_quiet_hours_notice,
     compose_multi_truth_reply,
     format_reply_from_truth,
