@@ -33,6 +33,18 @@
 
 ---
 
+## ВЕТКИ / TOUCH-LIST
+
+- Правила: не редактировать параллельно один и тот же файл в разных ветках/терминалах; merge только после CI green.
+| Branch | Scope | Touch-list (основные файлы/папки) |
+|--------|-------|-----------------------------------|
+| `dev` | webhook + services | `truffles-api/app/routers/webhook.py`, `truffles-api/app/services/*` |
+| `data` | eval + facts | `truffles-api/app/knowledge/demo_salon/EVAL.yaml`, `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml` |
+| `docs` | specs + состояния | `SPECS/*`, `STATE.md`, `STRUCTURE.md`, `AGENTS.md` |
+| `ops` | CI + deploy | `.github/workflows/*`, `TECH.md`, `/home/zhan/restart_api.sh`, infra compose (не в этом репо) |
+
+---
+
 ## БЫСТРЫЙ ВХОД (если нужно быстро вкатиться)
 
 | Файл | Зачем читать |

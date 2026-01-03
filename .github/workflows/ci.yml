@@ -14,7 +14,7 @@ permissions:
   packages: write
 
 jobs:
-  lint-test:
+  lint:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -38,8 +38,53 @@ jobs:
       - name: Lint (ruff)
         run: ruff check app tests
 
-      - name: Tests
-        run: pytest tests -q
+  core-eval:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: truffles-api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: truffles-api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov ruff
+
+      - name: Tests (core)
+        run: pytest -q tests/test_demo_salon_eval.py
+
+  long-eval:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: truffles-api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: truffles-api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov ruff
+
+      - name: Tests (long)
+        run: pytest -q tests/test_demo_salon_eval.py -o EVAL_TIER=long
 
   secret-scan:
     runs-on: ubuntu-latest
@@ -55,7 +100,7 @@ jobs:
 
   build-push:
     if: github.ref == 'refs/heads/main'
-    needs: [lint-test, secret-scan]
+    needs: [lint, core-eval, long-eval, secret-scan]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +132,9 @@ jobs:
             APP_VERSION=main
             GIT_COMMIT=${{ github.sha }}
             BUILD_TIME=${{ steps.meta.outputs.build_time }}
-          cache-from: type=gha
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE_NAME }}:main
+            type=gha
           cache-to: type=gha,mode=max
 
   deploy:
