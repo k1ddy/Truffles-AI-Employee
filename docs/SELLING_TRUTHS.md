@@ -9,8 +9,8 @@
 - Boundary: если факт отсутствует в Client Pack → уточнение/эскалация.
 
 ## 2) “Оплата/медицина/жалобы/перенос — только менеджер”
-- Proof: policy‑gate (payment/medical/complaint/reschedule) в `demo_salon_knowledge.py`, эскалация в webhook; EVAL кейсы.
-- Boundary: правило работает при корректных policy‑настройках клиента.
+- Proof: policy‑gate (payment actions/medical/complaint/reschedule) в `demo_salon_knowledge.py`, эскалация в webhook; EVAL кейсы.
+- Boundary: способы оплаты можно перечислять **только** если это разрешено policy‑gate в client_pack.
 
 ## 3) “Заявки уходят менеджеру в Telegram”
 - Proof: `handovers` + Telegram topics, `truffles-api/app/services/escalation_service.py`, `truffles-api/app/routers/telegram_webhook.py`.
@@ -27,3 +27,11 @@
 ## 6) “Обновления знаний без разработчика”
 - Proof: Client Pack (`SALON_TRUTH.yaml`) + `ops/sync_client.py` для синка в Qdrant.
 - Boundary: требуется ручная проверка/валидация перед публикацией.
+
+## 7) “Данные клиента не уходят другим салонам без согласия”
+- Proof: tenant isolation в RAG (`client_slug`), конфиг `clients.config.data_sharing` в `SPECS/MULTI_TENANT.md`.
+- Boundary: при opt-in разрешены только обезличенные агрегаты (без PII и текстов сообщений).
+
+## 8) “Мы не дообучаем LLM на данных клиента”
+- Proof: LLM использует RAG + Client Pack; изменения — через факты и policy, не через fine-tuning.
+- Boundary: качество зависит от полноты Client Pack.

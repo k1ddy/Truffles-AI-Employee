@@ -150,10 +150,78 @@ Python API:
 
 - **Domain Pack** — общие категории услуг, RU/KZ синонимы, типовые вопросы, OOD‑якоря. **Без фактов.**
 - **Client Pack** — факты конкретного салона: услуги, цены, адрес, часы, правила, акции и т.д.
-- **demo_salon** — dummy Client Pack, используется только для демо/тестов.
+- **demo_salon** — dummy Client Pack с вымышленными данными, используется только для демо/тестов.
 
 **Где лежит:** `truffles-api/app/knowledge/<client_slug>/SALON_TRUTH.yaml`  
 **Формат:** `domain_pack` + `client_pack`, при этом старые ключи остаются для обратной совместимости.
+
+### Policy‑gates и booking‑mode (client_pack)
+
+**Скидки** — конфигурируются в client_pack и работают только при явных правилах.
+
+```yaml
+client_pack:
+  discounts:
+    enabled: true
+    rules:
+      - id: birthday
+        label: "День рождения"
+        when: "+/- 3 дня"
+        value_text: "Скидка 10% на услуги"
+        confirmation_required: true
+```
+
+**Запись (CRM/календарь):**
+```yaml
+client_pack:
+  booking:
+    booking_mode: collect_preferences   # collect_preferences | confirm_slots
+    availability_provider: none         # none | google_calendar | bitrix | amocrm | manual
+```
+
+Если `availability_provider` = `none/manual` (включая Excel/TXT), бот **не обещает слоты**, только собирает предпочтения.
+
+**Оплата (только info):**
+```yaml
+client_pack:
+  payment:
+    allow_payment_info: true
+    methods:
+      - "Kaspi QR"
+      - "Карта"
+      - "Наличные"
+    notes: "Оплату принимает администратор"
+```
+
+**Прайс‑медиа (опционально):**
+```yaml
+client_pack:
+  pricing_media:
+    mode: text_only        # text_only | image_only | text_plus_image
+    image_url: "https://example.com/price.jpg"
+    caption: "Актуальный прайс"
+```
+
+**Важно:** без `pricing_media.image_url` всегда fallback на текст.
+
+### Data usage и NDA (per client)
+
+**По умолчанию:** данные используются только внутри салона (tenant-only).
+**Опционально (opt-in):** разрешены только обезличенные агрегаты для улучшения domain_pack.
+
+```yaml
+clients.config:
+  data_sharing: off        # off | aggregate
+```
+
+**Запрещено при любом режиме:**
+- исходные тексты сообщений
+- персональные данные и контакты
+- медиа/файлы
+
+**Разрешено при `aggregate`:**
+- обезличенные паттерны (синонимы, частые формулировки без PII)
+- статистика intents/clarify/OOD без текста
 
 ---
 

@@ -179,6 +179,7 @@ Truffles = Умный автоответчик + Kaspi Pay проверка + Д
 - Серверы: PS.kz, Kazteleport (КЗ ЦОД)
 - Изоляция: каждый клиент = отдельный стек
 - Опция Enterprise: On-Premise на серверах заказчика
+- Data sharing: только opt-in; по умолчанию tenant-only, без PII
 
 ---
 

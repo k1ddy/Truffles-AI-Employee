@@ -124,7 +124,7 @@ outbox worker (тик 2s) или POST /admin/outbox/process (cron)
     ↓
 _handle_webhook_payload(skip_persist=True)
     ↓
-pending/opt-out/policy escalation → early OOD (strong anchors) → booking guard/flow + service matcher → LLM-first (RAG/LLM) → truth gate fallback → intent classification/low-confidence handling
+behavioral shield (rate-limit/toxic) → pending/opt-out/Hard‑LAW escalation → policy‑gates (скидки/оплата info) → early OOD (strong anchors) → booking guard/flow + service matcher → LLM-first (RAG/LLM) → truth gate fallback → intent classification/low-confidence handling
     ↓
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
 ```
@@ -134,12 +134,32 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 
 **Соответствие ролей фактическому порядку:**
 - **Router** → вход + outbox + порядок стадий из цепочки выше.
-- **Safety Guard** → pending/opt‑out/policy escalation (LAW‑гейты).
+- **Safety Guard** → pending/opt‑out/Hard‑LAW escalation + policy‑gates (скидки/оплата info).
 - **OOD Guard** → early OOD (strong anchors).
 - **Booking Guard** → booking guard/flow + expected_reply_type контракт.
 - **Info/RAG Specialist** → service matcher → LLM‑first (RAG/LLM) → truth gate fallback.
 - **Host Persona** → формулировка ответа (шаблоны/LLM), CTA/quiet hours.
 - **Observability** → decision_trace/meta на каждом сообщении.
+
+### Policy‑gates (конфиг per client)
+- Hard‑LAW всегда эскалирует (оплата: подтверждение/проверка/возвраты, медицинка, жалобы, переносы).
+- Policy‑gates (скидки/оплата info) исполняются детерминированно по `client_pack.discounts` и `client_pack.payment`.
+- Если правило отсутствует/не совпало — эскалация (без попытки торга).
+
+### Booking mode (с/без CRM)
+- `booking_mode`: `collect_preferences` (без провайдера) или `confirm_slots` (live‑провайдер).
+- `availability_provider`: `none` | `google_calendar` | `bitrix` | `amocrm` | `manual`.
+- Если провайдер не задан/недоступен — только сбор предпочтений, **без обещаний слотов**.
+
+### Behavioral Shield (P1, план)
+- Цель: отсечь спам/машинную скорость и токсичные сообщения до LLM.
+- Каналы: для WhatsApp нет IP, поэтому ключ — `remote_jid`.
+- Статус: медиа rate‑limit реализован; text rate‑limit и silent‑ban — план.
+
+### Pricing media (P1, план)
+- `client_pack.pricing_media.mode`: `text_only` | `image_only` | `text_plus_image`.
+- Если задан `image_url` и mode позволяет — бот отправляет прайс‑картинку через ChatFlow media API.
+- Фолбэк: при ошибке медиа → текстовый прайс.
 
 ### Медиа‑контур (фото/аудио/документы)
 **Цель:** безопасность ресурсов + сохранение контекста + управляемая стоимость.
@@ -520,6 +540,7 @@ metadata = {
 | Тестовая БД | SQLite in-memory |
 | Моки | `unittest.mock.patch` |
 | Сервисы в CI | Нет (unit tests + mocks), CI: ruff + pytest |
+| Long-form EVAL | 10-15 сообщений в одном диалоге, проверка `current_goal`/`expected_reply_type`/trace; обязателен перед релизом |
 
 **Запуск:**
 ```bash

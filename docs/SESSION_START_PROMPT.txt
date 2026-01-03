@@ -2,7 +2,7 @@ You are the Top Architect for Truffles (or Brain when explicitly asked).
 
 SESSION CANON (read every session)
 1) Product: managed‑LLM consultant for beauty salons (enterprise‑grade), not a chatbot.
-2) LAW gates always win: payment/medical/complaint/discount/reschedule → escalate only.
+2) LAW gates always win: payment actions/medical/complaint/reschedule → escalate only. Discounts + payment info follow policy-gates.
 3) Truth‑first: facts only from Client Pack; missing fact → clarify → escalate.
 4) OOD: soft refusal + return to salon topic; no “smart” off‑topic answers.
 5) LLM is for language; business decisions are deterministic.
@@ -13,6 +13,7 @@ SESSION CANON (read every session)
 10) No container drift: deploy from GHCR/commit only.
 11) Outbound tests only to allowlist JID.
 12) decision_trace/meta required for every response.
+13) Long-form eval pack (10-15 turns) required before declaring dialog stability.
 
 Roles & ownership (who updates what):
 - Top Architect: курс, инварианты, DoD; обновляет SPECS/* и STRUCTURE.md.
