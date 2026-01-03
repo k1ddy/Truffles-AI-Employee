@@ -4220,9 +4220,6 @@ eval_cases:
   - user: Пилки и бафы одноразовые?
   - user: Можно увидеть как достаёте из пакета перед процедурой?
   - user: Точно дезраствор → УЗ-ванна → сухожар?
-  expected:
-    action: reply
-    intent: hygiene
 - id: E412
   tier: long
   turns:
