@@ -1908,6 +1908,17 @@ def is_handover_status_question(text: str) -> bool:
     return any(k in normalized for k in keywords)
 
 
+SHIELD_CONTEXT_KEY = "shield"
+SHIELD_RECENT_KEY = "recent_messages"
+SHIELD_SPAM_WINDOW_SECONDS = 5.0
+SHIELD_SPAM_MAX_MESSAGES = 3
+SHIELD_MAX_MESSAGE_LENGTH = 1000
+SHIELD_TOXIC_PATTERNS = [
+    re.compile(r"\b(хуй|пизд|пидор|еба|сука|нахуй|убью|иди\s+на\s+хуй|бля[тд])", re.IGNORECASE),
+]
+SHIELD_MEANINGFUL_PATTERN = re.compile(r"[A-Za-zА-Яа-я0-9]{2,}")
+
+
 BOOKING_REQUEST_KEYWORDS = [
     "запис",
     "запись",
@@ -2250,6 +2261,31 @@ def _get_context_manager(context: dict) -> dict:
 def _set_context_manager(context: dict, manager: dict) -> dict:
     context = dict(context)
     context[CONTEXT_MANAGER_KEY] = manager
+    return context
+
+
+def _get_shield_context(context: dict) -> dict:
+    shield = context.get(SHIELD_CONTEXT_KEY) if isinstance(context, dict) else None
+    if not isinstance(shield, dict):
+        return {SHIELD_RECENT_KEY: []}
+    recent = shield.get(SHIELD_RECENT_KEY)
+    cleaned: list[float] = []
+    if isinstance(recent, list):
+        for value in recent:
+            try:
+                cleaned.append(float(value))
+            except (TypeError, ValueError):
+                continue
+    cleaned.sort()
+    return {SHIELD_RECENT_KEY: cleaned}
+
+
+def _set_shield_context(context: dict, shield: dict) -> dict:
+    context = dict(context)
+    if shield.get(SHIELD_RECENT_KEY):
+        context[SHIELD_CONTEXT_KEY] = shield
+    else:
+        context.pop(SHIELD_CONTEXT_KEY, None)
     return context
 
 
@@ -4641,6 +4677,105 @@ async def _handle_webhook_payload(
                         conversation_id=conversation.id,
                         bot_response=prompt,
                     )
+
+    # 4.9 Behavioral shield (pre-LAW/policy).
+    context = _get_conversation_context(conversation)
+    shield_context = _get_shield_context(context)
+    now_ts = now.timestamp()
+    recent = [
+        ts for ts in shield_context.get(SHIELD_RECENT_KEY, []) if (now_ts - ts) <= SHIELD_SPAM_WINDOW_SECONDS
+    ]
+    recent.append(now_ts)
+    shield_context[SHIELD_RECENT_KEY] = recent[-(SHIELD_SPAM_MAX_MESSAGES + 2) :]
+    context = _set_shield_context(context, shield_context)
+    _set_conversation_context(conversation, context)
+
+    is_spam_burst = len(recent) > SHIELD_SPAM_MAX_MESSAGES and (recent[-1] - recent[0]) <= SHIELD_SPAM_WINDOW_SECONDS
+    too_long = len(message_text) > SHIELD_MAX_MESSAGE_LENGTH
+    if is_spam_burst or too_long:
+        reason = "spam" if is_spam_burst else "too_long"
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "shield",
+                "decision": "drop",
+                "reason": reason,
+                "message_length": len(message_text),
+                "recent_messages": len(recent),
+            },
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "action": "shield_drop",
+                    "intent": "shield",
+                    "source": "shield",
+                    "shield_reason": reason,
+                },
+            )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message="Shield drop",
+            conversation_id=conversation.id,
+            bot_response=None,
+        )
+
+    is_toxic = any(pattern.search(message_text) for pattern in SHIELD_TOXIC_PATTERNS)
+    is_nonsense = not SHIELD_MEANINGFUL_PATTERN.search(message_text or "")
+    if (is_toxic or is_nonsense) and conversation.state == ConversationState.BOT_ACTIVE.value:
+        reason = "toxic" if is_toxic else "nonsense"
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "shield",
+                "decision": "escalate",
+                "reason": reason,
+            },
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "action": "escalate",
+                    "intent": "shield",
+                    "source": "shield",
+                    "shield_reason": reason,
+                },
+            )
+        bot_response = MSG_ESCALATED
+        result_message = "Shield escalation"
+        if not skip_persist and conversation.state == ConversationState.BOT_ACTIVE.value:
+            esc_result = escalate_to_pending(
+                db=db,
+                conversation=conversation,
+                user_message=message_text,
+                trigger_type="shield",
+                trigger_value=reason,
+            )
+            if esc_result.ok:
+                handover = esc_result.value
+                telegram_sent = send_telegram_notification(
+                    db=db,
+                    handover=handover,
+                    conversation=conversation,
+                    user=user,
+                    message=message_text,
+                )
+                result_message = f"Shield escalation, telegram={'sent' if telegram_sent else 'failed'}"
+            else:
+                result_message = f"Shield escalation failed: {esc_result.error}"
+        bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
+        if not sent:
+            result_message = f"{result_message}; response_send=failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
 
     # 5. Check session timeout - reset mute if no messages for 24h+
     bot_response = None

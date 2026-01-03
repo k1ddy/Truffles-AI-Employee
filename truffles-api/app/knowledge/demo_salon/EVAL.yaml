@@ -4016,6 +4016,37 @@ eval_cases:
       decision: used
       service_query: маникюр
       service_query_source: context
+- id: E362
+  messages:
+  - привет
+  - привет
+  - привет
+  - привет
+  expected:
+    trace_contains:
+    - stage: shield
+      decision: drop
+      reason: spam
+- id: E363
+  user: ты пидор
+  expected:
+    action: reply
+    must_include_any:
+    - Передал менеджеру
+    - менеджеру
+    trace_contains:
+    - stage: shield
+      decision: escalate
+      reason: toxic
+- id: E364
+  user: хочу записаться на завтра
+  expected:
+    action: reply
+    intent: booking_intake
+    must_include_any:
+    - Могу передать
+    - услуга
+    - дату
 - id: E401
   tier: long
   turns:
