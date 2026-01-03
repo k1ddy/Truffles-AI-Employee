@@ -204,6 +204,87 @@ def build_quiet_hours_notice(
     )
 
 
+def build_info_combined_reply(
+    *,
+    include_parking: bool = False,
+    include_guest: bool = False,
+) -> tuple[str | None, dict[str, Any]]:
+    truth = load_yaml_truth()
+    salon = truth.get("salon") if isinstance(truth, dict) else None
+    if not isinstance(salon, dict):
+        return None, {}
+
+    address = salon.get("address") if isinstance(salon, dict) else None
+    hours = salon.get("hours") if isinstance(salon, dict) else None
+    parking = salon.get("parking") if isinstance(salon, dict) else None
+    guest_policy = truth.get("guest_policy") if isinstance(truth, dict) else None
+
+    parts: list[str] = []
+    sections: list[str] = []
+
+    if isinstance(address, dict):
+        full = address.get("full")
+        entrance = address.get("entrance")
+        address_parts = []
+        if full:
+            address_parts.append(f"Адрес: {full}.")
+        if entrance:
+            address_parts.append(str(entrance).strip())
+        address_text = " ".join(address_parts).strip()
+        if address_text:
+            parts.append(address_text)
+            sections.append("address")
+
+    if isinstance(hours, dict):
+        days = hours.get("days")
+        open_label = hours.get("open")
+        close_label = hours.get("close")
+        hours_parts = ["Работаем"]
+        if days:
+            hours_parts.append(str(days).strip())
+        if open_label or close_label:
+            window = ""
+            if open_label and close_label:
+                window = f"с {open_label} до {close_label}"
+            elif open_label:
+                window = f"с {open_label}"
+            elif close_label:
+                window = f"до {close_label}"
+            if window:
+                hours_parts.append(window)
+        hours_text = " ".join(hours_parts).strip()
+        if hours_text:
+            parts.append(hours_text if hours_text.endswith(".") else f"{hours_text}.")
+            sections.append("hours")
+
+    if include_parking and isinstance(parking, dict):
+        details = parking.get("details")
+        parking_text = details or "Есть парковка рядом с салоном."
+        if parking_text:
+            parts.append(f"Парковка: {parking_text if parking_text.endswith('.') else f'{parking_text}.'}")
+            sections.append("parking")
+
+    if include_guest and isinstance(guest_policy, dict):
+        guest_parts = [
+            guest_policy.get("allowed_guests"),
+            guest_policy.get("guest_limit"),
+            guest_policy.get("early_arrival"),
+            guest_policy.get("children_rules"),
+            guest_policy.get("alcohol_policy"),
+            guest_policy.get("food_drink_policy"),
+        ]
+        guest_text = " ".join([str(item).strip() for item in guest_parts if isinstance(item, str) and item.strip()])
+        if guest_text:
+            parts.append(guest_text if guest_text.endswith(".") else f"{guest_text}.")
+            sections.append("guest_policy")
+
+    if not parts:
+        return None, {}
+    reply = " ".join(parts)
+    meta = {"info_combined": True, "info_sections": sections}
+    return reply, meta
+
+
 def load_intents_phrases() -> dict:
     data = _load_yaml(_INTENTS_PATH)
     intents = data.get("demo_salon_intents") if isinstance(data, dict) else None
@@ -625,6 +706,23 @@ def _looks_like_hours_question(normalized: str) -> bool:
         if _contains_any(normalized, ["сегодня", "сейчас", "открыт", "будни", "выходн"]):
             return True
     return False
+
+
+def _has_parking_signal(normalized: str) -> bool:
+    if not normalized:
+        return False
+    return "парков" in normalized
+
+
+def _has_guest_waiting_signal(normalized: str) -> bool:
+    if not normalized:
+        return False
+    if _contains_any(
+        normalized,
+        ["гост", "ребен", "ребён", "дет", "коляс", "ожидан", "пораньше", "раньше", "подождать", "заранее"],
+    ):
+        return True
+    return _contains_any_words(normalized, ["муж", "супруг", "подруг", "сопровожд"])
 
 
 def _has_price_signal(normalized: str, raw_text: str | None = None) -> bool:
@@ -1579,12 +1677,28 @@ def format_reply_from_truth(intent: str, slots: dict | None = None) -> str | Non
     truth = load_yaml_truth()
     slots = slots or {}
 
-    if intent == "location":
+    if intent in {"location", "hours", "parking"}:
+        include_parking = intent == "parking"
+        reply, _meta = build_info_combined_reply(include_parking=include_parking)
+        if reply:
+            return reply
+        # Fallback to legacy shape if combined reply is not available.
         address = truth.get("salon", {}).get("address", {})
-        return (
-            f"Адрес: {address.get('full')}. "
-            f"{address.get('entrance') or ''}".strip()
-        )
+        hours = truth.get("salon", {}).get("hours", {})
+        if intent == "location":
+            return (
+                f"Адрес: {address.get('full')}. "
+                f"{address.get('entrance') or ''}".strip()
+            )
+        if intent == "hours":
+            days = hours.get("days")
+            open_time = hours.get("open")
+            close_time = hours.get("close")
+            return f"Работаем {days}, с {open_time} до {close_time}."
+        if intent == "parking":
+            parking = truth.get("salon", {}).get("parking", {})
+            details = parking.get("details") or ""
+            return details or "Есть парковка рядом с салоном."
     if intent == "location_directions":
         address = truth.get("salon", {}).get("address", {})
         landmarks = address.get("landmarks") or []
@@ -1596,16 +1710,6 @@ def format_reply_from_truth(intent: str, slots: dict | None = None) -> str | Non
         if signage:
             return f"Да, есть {signage}."
         return "Да, вывеска есть."
-    if intent == "parking":
-        parking = truth.get("salon", {}).get("parking", {})
-        details = parking.get("details") or ""
-        return details or "Есть парковка рядом с салоном."
-    if intent == "hours":
-        hours = truth.get("salon", {}).get("hours", {})
-        days = hours.get("days")
-        open_time = hours.get("open")
-        close_time = hours.get("close")
-        return f"Работаем {days}, с {open_time} до {close_time}."
     if intent == "services_overview":
         summary = truth.get("salon", {}).get("services_summary")
         if summary:
@@ -1965,6 +2069,11 @@ def get_demo_salon_decision(
         return None
 
     phrase_intents = phrase_match_intent(message)
+    parking_signal = _has_parking_signal(normalized)
+    guest_signal = _has_guest_waiting_signal(normalized)
+    location_signal = _contains_any(normalized, ["адрес", "где вы", "где наход"])
+    price_signal = _has_price_signal(normalized, message)
+    price_item = _find_best_price_item(message)
     if "отмен" in normalized and "за сколько" in normalized:
         reply = format_reply_from_truth("cancel_policy")
         if reply:
@@ -2060,10 +2169,24 @@ def get_demo_salon_decision(
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="objection_price")
 
-    if "адрес" in normalized or "где вы" in normalized or "где наход" in normalized:
-        reply = format_reply_from_truth("location")
+    if location_signal and not guest_signal and (not price_signal or (price_signal and not price_item)):
+        reply, meta = build_info_combined_reply(
+            include_parking=parking_signal,
+            include_guest=guest_signal,
+        )
+        intent_name = "location"
+        if price_signal:
+            clarify = format_reply_from_truth("duration_or_price_clarify")
+            if clarify:
+                reply = f"{reply} {clarify}".strip() if reply else clarify
+            intent_name = "duration_or_price_clarify"
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="location")
+            return DemoSalonDecision(
+                action="reply",
+                response=reply,
+                intent=intent_name,
+                meta=meta,
+            )
 
     if "остановк" in normalized or "как пройти" in normalized or "как добрат" in normalized or "как доехать" in normalized:
         reply = format_reply_from_truth("location_directions")
@@ -2075,10 +2198,18 @@ def get_demo_salon_decision(
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="location_signage")
 
-    if "парков" in normalized:
-        reply = format_reply_from_truth("parking")
+    if parking_signal:
+        reply, meta = build_info_combined_reply(
+            include_parking=True,
+            include_guest=guest_signal,
+        )
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="parking")
+            return DemoSalonDecision(
+                action="reply",
+                response=reply,
+                intent="parking",
+                meta=meta,
+            )
 
     if "последняя запись" in normalized or "до какого времени можно запис" in normalized:
         reply = format_reply_from_truth("last_appointment")
@@ -2122,9 +2253,17 @@ def get_demo_salon_decision(
         ["ашык", "ашық", "бугин", "бүгін"],
     )
     if hours_like and not _contains_any(normalized, ["косметик", "материал", "бренд", "марки"]):
-        reply = format_reply_from_truth("hours")
+        reply, meta = build_info_combined_reply(
+            include_parking=parking_signal,
+            include_guest=guest_signal,
+        )
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="hours")
+            return DemoSalonDecision(
+                action="reply",
+                response=reply,
+                intent="hours",
+                meta=meta,
+            )
 
     if "services_overview" in phrase_intents or _contains_any(
         normalized,
@@ -2179,20 +2318,21 @@ def get_demo_salon_decision(
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="service_clarify")
 
-    if _contains_any(normalized, ["ребен", "ребён"]) or _contains_any_words(
-        normalized, ["муж", "мужем", "мужу", "мужа"]
-    ):
-        reply = format_reply_from_truth("guest_child")
+    if guest_signal:
+        reply, meta = build_info_combined_reply(
+            include_parking=parking_signal,
+            include_guest=True,
+        )
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
+            return DemoSalonDecision(
+                action="reply",
+                response=reply,
+                intent="guest_policy",
+                meta=meta,
+            )
 
     if _contains_any(normalized, ["собак", "животн"]):
         reply = format_reply_from_truth("guest_animals")
-        if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
-
-    if _contains_any(normalized, ["пораньше", "раньше", "подождать"]):
-        reply = format_reply_from_truth("guest_early")
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
 
@@ -2234,8 +2374,6 @@ def get_demo_salon_decision(
             meta={"question_type": "duration", **service_query_meta},
         )
 
-    price_signal = _has_price_signal(normalized, message)
-    price_item = _find_best_price_item(message)
     if not price_item and isinstance(intent_decomp, dict):
         price_service_meta = _resolve_service_query_meta(
             message,
@@ -2247,16 +2385,26 @@ def get_demo_salon_decision(
         if isinstance(service_query, str) and service_query.strip():
             price_item = _find_best_price_item(service_query)
     if question_type is None and price_signal and not price_item:
+        info_reply: str | None = None
+        info_meta: dict[str, Any] = {}
+        if location_signal or parking_signal or guest_signal:
+            info_reply, info_meta = build_info_combined_reply(
+                include_parking=parking_signal,
+                include_guest=guest_signal,
+            )
         if _is_offtopic_message(normalized):
             reply = format_reply_from_truth("off_topic")
             if reply:
                 return DemoSalonDecision(action="reply", response=reply, intent="off_topic")
-        reply = format_reply_from_truth("duration_or_price_clarify")
-        if reply:
+        clarify_reply = format_reply_from_truth("duration_or_price_clarify")
+        reply_parts = [part for part in [info_reply, clarify_reply] if part]
+        reply_text = " ".join(reply_parts) if reply_parts else clarify_reply
+        if reply_text:
             return DemoSalonDecision(
                 action="reply",
-                response=reply,
+                response=reply_text,
                 intent="duration_or_price_clarify",
+                meta=info_meta or None,
             )
 
     question_meta_for_price = question_meta if question_type and question_type.kind == "pricing" else None

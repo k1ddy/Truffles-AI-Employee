@@ -4481,3 +4481,83 @@ eval_cases:
     must_include:
     - перенос
     - администратор
+- id: E422
+  user: Подскажите адрес и до скольки сегодня работаете? Вы открыты сейчас?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - '21:00'
+    must_include_any:
+    - ежедневно
+    - '9:00'
+- id: E423
+  user: Какой у вас адрес и есть ли парковка рядом?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - парковка
+    - Бесплатная
+    - '9:00'
+- id: E424
+  user: Вы сейчас открыты? Где вы находитесь?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    must_include_any:
+    - '9:00'
+    - '21:00'
+- id: E425
+  user: Пишу ночью, подскажите адрес и график работы
+  local_time: "23:30"
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Сейчас салон закрыт
+    - '9:00'
+- id: E426
+  user: Скиньте адрес и сколько стоит у вас вообще?
+  expected:
+    action: reply
+    intent: duration_or_price_clarify
+    must_include:
+    - Абая 150
+    - услуга
+    must_include_any:
+    - 9:00
+    - ежедневно
+    must_not:
+    - ₸
+    - тенге
+- id: E427
+  user: Можно прийти с ребёнком? Адрес подскажите, есть ли место подождать?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - Абая 150
+    - зона ожидания
+    - ребён
+    must_include_any:
+    - ежедневно
+    - '9:00'
+- id: E428
+  user: Где вы на Абая, есть парковка и можно приехать заранее посидеть?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - парковка
+    - Бесплатная
+    - подождать
+    must_include_any:
+    - '9:00'
+    - '21:00'

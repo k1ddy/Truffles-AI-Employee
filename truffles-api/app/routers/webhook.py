@@ -50,6 +50,7 @@ from app.services.conversation_service import (
 )
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
+    build_info_combined_reply,
     build_consult_reply,
     build_quiet_hours_notice,
     compose_multi_truth_reply,
@@ -3409,23 +3410,60 @@ def _build_info_intent_reply(
     *,
     service_query: str | None,
     client_slug: str | None,
+    message_text: str | None = None,
 ) -> tuple[str | None, dict | None]:
+    normalized = normalize_for_matching(message_text) if message_text else ""
+    parking_signal = "парков" in normalized if normalized else False
+    guest_signal = False
+    if normalized:
+        guest_signal = any(
+            token in normalized
+            for token in ["гост", "ребен", "ребён", "дет", "коляс", "ожидан", "пораньше", "раньше", "подожд", "заранее"]
+        )
+    location_signal = False
+    if normalized:
+        location_signal = any(token in normalized for token in ["адрес", "где вы", "где наход", "где вы находитесь"])
+    include_info_bundle = intent in {"location", "hours"} or location_signal or parking_signal or guest_signal
+
     if intent == "hours":
-        return format_reply_from_truth("hours"), None
+        reply, meta = build_info_combined_reply(
+            include_parking=parking_signal,
+            include_guest=guest_signal,
+        )
+        return reply, meta or None
     if intent == "location":
-        return format_reply_from_truth("location"), None
+        reply, meta = build_info_combined_reply(
+            include_parking=parking_signal,
+            include_guest=guest_signal,
+        )
+        return reply, meta or None
     if intent == "pricing":
         question = f"Сколько стоит {service_query}?" if service_query else "Сколько стоит?"
     elif intent == "duration":
         question = f"Сколько длится {service_query}?" if service_query else "Сколько длится?"
     else:
         return None, None
+    info_prefix: str | None = None
+    info_meta: dict | None = None
+    if include_info_bundle:
+        info_prefix, info_meta = build_info_combined_reply(
+            include_parking=parking_signal,
+            include_guest=guest_signal,
+        )
     decision = get_demo_salon_decision(question, client_slug=client_slug)
     if decision and decision.action == "reply" and decision.response:
-        meta = decision.meta if isinstance(decision.meta, dict) else None
-        return decision.response, meta
+        meta = decision.meta if isinstance(decision.meta, dict) else {}
+        if info_meta:
+            meta = {**info_meta, **meta}
+        reply_text = decision.response
+        if info_prefix:
+            reply_text = f"{info_prefix} {reply_text}".strip()
+        return reply_text, meta or None
     fallback = format_reply_from_truth("duration_or_price_clarify")
-    return fallback, None
+    if info_prefix:
+        fallback = f"{info_prefix} {fallback}".strip() if fallback else info_prefix
+    meta = info_meta or None
+    return fallback, meta
 
 
 def _is_booking_time_service_decision(decision: DemoSalonDecision | None) -> bool:
@@ -6335,6 +6373,7 @@ async def _handle_webhook_payload(
             intent_queue_choice,
             service_query=info_service_query,
             client_slug=payload.client_slug,
+            message_text=message_text,
         )
         info_reply = info_reply.strip() if isinstance(info_reply, str) else None
         if info_reply:
@@ -6538,6 +6577,7 @@ async def _handle_webhook_payload(
                     intent_name,
                     service_query=info_service_query,
                     client_slug=payload.client_slug,
+                    message_text=message_text,
                 )
                 if isinstance(reply, str):
                     reply = reply.strip()
