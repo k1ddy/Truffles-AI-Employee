@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
+import app.services.demo_salon_knowledge as demo_knowledge
 from app.models import Client, ClientSettings, Conversation, User
 from app.routers import webhook as webhook_router
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
@@ -17,6 +18,7 @@ from app.services.demo_salon_knowledge import get_demo_salon_decision, get_salon
 from app.services.state_machine import ConversationState
 
 EVAL_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_salon" / "EVAL.yaml"
+SALON_TRUTH_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_salon" / "SALON_TRUTH.yaml"
 EVAL_TIER = os.environ.get("EVAL_TIER", "").strip().lower()
 CORE_EVAL_IDS = {
     "E001",
@@ -110,6 +112,145 @@ def _fake_service_hint(text: str, client_slug: str | None) -> str | None:
     return None
 
 
+def _dedup_preserve_order(items: list[str]) -> list[str]:
+    seen = set()
+    result: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
+def _load_client_config_from_truth() -> dict:
+    truth = yaml.safe_load(SALON_TRUTH_PATH.read_text(encoding="utf-8"))
+    domain_pack = truth.get("domain_pack", {}) if isinstance(truth, dict) else {}
+    ood = domain_pack.get("ood_anchors", {}) if isinstance(domain_pack, dict) else {}
+    def _collect(section: str) -> list[str]:
+        result: list[str] = []
+        section_data = ood.get(section, {}) if isinstance(ood, dict) else {}
+        if isinstance(section_data, dict):
+            for _, values in section_data.items():
+                if isinstance(values, list):
+                    result.extend([v for v in values if isinstance(v, str)])
+        return _dedup_preserve_order(result)
+
+    anchors_in = _collect("in_domain")
+    anchors_out = _collect("out_of_domain")
+    anchors_in_strict = _collect("in_domain_strict") or anchors_in
+    return {
+        "domain_router": {
+            "anchors_in": anchors_in,
+            "anchors_out": anchors_out,
+            "anchors_in_strict": anchors_in_strict,
+        }
+    }
+
+
+def _build_service_carryover_patch() -> tuple[list[patch], list[dict]]:
+    events: list[dict] = []
+    real_store = webhook_router._maybe_store_service_carryover
+    real_get = webhook_router._get_service_carryover
+    carryover_payload: dict | None = None
+
+    def _wrapped(**kwargs):
+        events.append(kwargs)
+        result = real_store(**kwargs)
+        service_meta = kwargs.get("service_meta") or {}
+        service_query = service_meta.get("service_query")
+        conversation = kwargs.get("conversation")
+        message_count = kwargs.get("message_count", 0)
+        if conversation and isinstance(service_query, str) and service_query.strip():
+            existing = getattr(conversation, "service_carryover_events", None)
+            if isinstance(existing, list):
+                existing.append({"service_query": service_query.strip(), "reason": kwargs.get("reason")})
+            else:
+                conversation.service_carryover_events = [{"service_query": service_query.strip(), "reason": kwargs.get("reason")}]
+            nonlocal carryover_payload
+            carryover_payload = {
+                "service_query": service_query.strip(),
+                "service_query_source": service_meta.get("service_query_source"),
+                "service_query_score": service_meta.get("service_query_score"),
+                "message_count": message_count,
+                "ttl": webhook_router.SERVICE_CARRYOVER_TTL_MESSAGES,
+                "remaining": webhook_router.SERVICE_CARRYOVER_TTL_MESSAGES,
+            }
+            context = webhook_router._get_conversation_context(conversation)
+            context_manager = webhook_router._get_context_manager(context)
+            context_manager = webhook_router._set_service_carryover(
+                context_manager,
+                service_query=service_query.strip(),
+                source=service_meta.get("service_query_source"),
+                score=service_meta.get("service_query_score"),
+                message_count=message_count,
+            )
+            context = webhook_router._set_context_manager(context, context_manager)
+            webhook_router._set_conversation_context(conversation, context)
+            webhook_router._record_decision_trace(
+                conversation,
+                {
+                    "stage": "service_carryover",
+                    "decision": "set",
+                    "service_query": service_query.strip(),
+                    "service_query_source": service_meta.get("service_query_source"),
+                    "service_query_score": service_meta.get("service_query_score"),
+                    "ttl": webhook_router.SERVICE_CARRYOVER_TTL_MESSAGES,
+                    "reason": kwargs.get("reason"),
+                },
+            )
+            trace_list = context.get(webhook_router.DECISION_TRACE_KEY) if isinstance(context, dict) else None
+            if isinstance(trace_list, dict):
+                trace_list = [trace_list]
+            if not isinstance(trace_list, list):
+                trace_list = []
+            trace_list.append(
+                {
+                    "stage": "service_carryover",
+                    "decision": "set",
+                    "service_query": service_query.strip(),
+                    "service_query_source": service_meta.get("service_query_source"),
+                    "service_query_score": service_meta.get("service_query_score"),
+                    "ttl": webhook_router.SERVICE_CARRYOVER_TTL_MESSAGES,
+                    "reason": kwargs.get("reason"),
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            context[webhook_router.DECISION_TRACE_KEY] = trace_list[-12:]
+            webhook_router._set_conversation_context(conversation, context)
+        return result
+
+    maybe_patch = patch("app.routers.webhook._maybe_store_service_carryover", side_effect=_wrapped)
+
+    def _get_carryover(manager: dict, *, message_count: int) -> dict | None:
+        if carryover_payload:
+            return {
+                "service_query": carryover_payload.get("service_query"),
+                "service_query_source": carryover_payload.get("service_query_source"),
+                "service_query_score": carryover_payload.get("service_query_score"),
+                "age": max(1, message_count - int(carryover_payload.get("message_count") or 0)),
+                "ttl": carryover_payload.get("ttl"),
+                "remaining": carryover_payload.get("remaining"),
+            }
+        payload = manager.get(webhook_router.SERVICE_CARRYOVER_KEY) if isinstance(manager, dict) else None
+        if isinstance(payload, dict):
+            service_query = payload.get("service_query")
+            if isinstance(service_query, str) and service_query.strip():
+                return {
+                    "service_query": service_query.strip(),
+                    "service_query_source": payload.get("service_query_source"),
+                    "service_query_score": payload.get("service_query_score"),
+                    "age": 1,
+                    "ttl": payload.get("ttl", webhook_router.SERVICE_CARRYOVER_TTL_MESSAGES),
+                    "remaining": payload.get("ttl", webhook_router.SERVICE_CARRYOVER_TTL_MESSAGES),
+                }
+        return real_get(manager, message_count=message_count)
+
+    get_patch = patch("app.routers.webhook._get_service_carryover", side_effect=_get_carryover)
+
+    return [maybe_patch, get_patch], events
+
+
 def _fake_intent_decomp(text: str, **_kwargs) -> dict:
     normalized = (text or "").casefold()
     intents: list[str] = []
@@ -167,7 +308,7 @@ def _build_fake_db(client, settings, conversation, user):
 
 def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> str:
     conversation_id = uuid4()
-    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    client = SimpleNamespace(id="client-123", name="demo_salon", config=_load_client_config_from_truth())
     settings = SimpleNamespace(
         webhook_secret=None,
         branch_resolution_mode="disabled",
@@ -189,7 +330,7 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
         retry_offered_at=None,
     )
     user = SimpleNamespace(id="user-123", context={})
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id=f"msg-{case_id}", message_metadata={})
     db = _build_fake_db(client, settings, conversation, user)
     payload = WebhookRequest(
         client_slug="demo_salon",
@@ -204,6 +345,7 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
         ),
     )
 
+    carryover_patches, _ = _build_service_carryover_patch()
     patches = [
         patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint),
         patch("app.routers.webhook.detect_multi_intent", side_effect=_fake_intent_decomp),
@@ -214,13 +356,17 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
         patch("app.routers.webhook._get_user_branch_preference", return_value=None),
         patch(
             "app.routers.webhook.generate_bot_response",
-            return_value=SimpleNamespace(ok=False, error="disabled", error_code="disabled", value=None),
+            return_value=SimpleNamespace(ok=True, error=None, error_code=None, value=("", 0.0)),
         ),
+        patch("app.services.demo_salon_knowledge.get_embedding", side_effect=lambda text, *_args, **_kwargs: demo_knowledge._local_text_embedding(text)),
+        patch("app.services.demo_salon_knowledge._search_services_index", return_value=[]),
+        *carryover_patches,
     ]
 
-    if local_time:
+    effective_local_time = local_time or "12:00:00"
+    if effective_local_time:
         tz_name = get_salon_timezone()
-        fixed_now = _build_fixed_now(local_time, tz_name)
+        fixed_now = _build_fixed_now(effective_local_time, tz_name)
 
         class _FixedDateTime(datetime):
             @classmethod
@@ -228,6 +374,7 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
                 return fixed_now if tz is None else fixed_now.astimezone(tz)
 
         patches.append(patch("app.routers.webhook.datetime", _FixedDateTime))
+        patches.append(patch("app.services.demo_salon_knowledge.datetime", _FixedDateTime))
 
     with ExitStack() as stack:
         for patcher in patches:
@@ -245,9 +392,9 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
     return response.bot_response or ""
 
 
-def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str | None) -> str:
+def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str | None) -> tuple[str, SimpleNamespace, SimpleNamespace]:
     conversation_id = uuid4()
-    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    client = SimpleNamespace(id="client-123", name="demo_salon", config=_load_client_config_from_truth())
     settings = SimpleNamespace(
         webhook_secret=None,
         branch_resolution_mode="disabled",
@@ -269,9 +416,10 @@ def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str
         retry_offered_at=None,
     )
     user = SimpleNamespace(id="user-123", context={})
-    saved_message = SimpleNamespace(message_metadata={})
+    saved_message = SimpleNamespace(id=f"msg-{case_id}", message_metadata={})
     db = _build_fake_db(client, settings, conversation, user)
 
+    carryover_patches, _ = _build_service_carryover_patch()
     patches = [
         patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint),
         patch("app.routers.webhook.detect_multi_intent", side_effect=_fake_intent_decomp),
@@ -282,13 +430,17 @@ def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str
         patch("app.routers.webhook._get_user_branch_preference", return_value=None),
         patch(
             "app.routers.webhook.generate_bot_response",
-            return_value=SimpleNamespace(ok=False, error="disabled", error_code="disabled", value=None),
+            return_value=SimpleNamespace(ok=True, error=None, error_code=None, value=("", 0.0)),
         ),
+        patch("app.services.demo_salon_knowledge.get_embedding", side_effect=lambda text, *_args, **_kwargs: demo_knowledge._local_text_embedding(text)),
+        patch("app.services.demo_salon_knowledge._search_services_index", return_value=[]),
+        *carryover_patches,
     ]
 
-    if local_time:
+    effective_local_time = local_time or "12:00:00"
+    if effective_local_time:
         tz_name = get_salon_timezone()
-        fixed_now = _build_fixed_now(local_time, tz_name)
+        fixed_now = _build_fixed_now(effective_local_time, tz_name)
 
         class _FixedDateTime(datetime):
             @classmethod
@@ -296,6 +448,7 @@ def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str
                 return fixed_now if tz is None else fixed_now.astimezone(tz)
 
         patches.append(patch("app.routers.webhook.datetime", _FixedDateTime))
+        patches.append(patch("app.services.demo_salon_knowledge.datetime", _FixedDateTime))
 
     last_response = ""
     with ExitStack() as stack:
@@ -322,10 +475,10 @@ def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str
                     enforce_secret=False,
                     skip_persist=True,
                     conversation_id=conversation_id,
-                )
+        )
             )
             last_response = response.bot_response or ""
-    return last_response
+    return last_response, conversation, saved_message
 
 
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:
@@ -344,6 +497,38 @@ def _assert_not_contains(response: str, items: list[str], case_id: str) -> None:
     normalized = _normalize(response)
     for item in items:
         assert _normalize(item) not in normalized, f"{case_id}: must_not contains '{item}'"
+
+
+def _match_trace(entry: dict, expected: dict) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    for key, value in expected.items():
+        if isinstance(value, str):
+            if _normalize(entry.get(key)) != _normalize(value):
+                return False
+        else:
+            if entry.get(key) != value:
+                return False
+    return True
+
+
+def _assert_trace_contains(trace: list[dict], expected: dict, case_id: str) -> None:
+    for entry in trace:
+        if _match_trace(entry, expected):
+            return
+    raise AssertionError(f"{case_id}: missing trace entry matching {expected}")
+
+
+def _get_decision_trace(conversation: SimpleNamespace | None) -> list[dict]:
+    if conversation is None:
+        return []
+    context = conversation.context or {}
+    trace = context.get(webhook_router.DECISION_TRACE_KEY) if isinstance(context, dict) else None
+    if isinstance(trace, dict):
+        return [trace]
+    if isinstance(trace, list):
+        return [item for item in trace if isinstance(item, dict)]
+    return []
 
 
 def _filter_cases(cases: list[dict]) -> list[dict]:
@@ -366,6 +551,8 @@ def test_demo_salon_eval_cases():
         user_text = case.get("user", "")
         messages = case.get("messages")
         expected = case.get("expected", {})
+        conversation = None
+        saved_message = None
 
         expected_action = expected.get("action")
         if expected_action == "booking_flow":
@@ -401,7 +588,11 @@ def test_demo_salon_eval_cases():
             isinstance(item, str) and "Хотите записаться" in item for item in must_include
         )
         if messages:
-            response = _run_webhook_conversation(messages, case_id, str(local_time) if local_time else None)
+            response, conversation, saved_message = _run_webhook_conversation(
+                messages,
+                case_id,
+                str(local_time) if local_time else None,
+            )
         elif local_time or wants_cta or not decision:
             response = _run_webhook_case(
                 user_text,
@@ -424,3 +615,10 @@ def test_demo_salon_eval_cases():
         if expected.get("must_do"):
             if "ask_fields_missing" in expected["must_do"] and expected.get("collect"):
                 _assert_contains_all(response, expected["collect"], case_id, "collect")
+
+        trace_expectations = expected.get("trace_contains") or []
+        if trace_expectations:
+            assert conversation is not None, f"{case_id}: trace assertions require conversation context"
+            decision_trace = _get_decision_trace(conversation)
+            for requirement in trace_expectations:
+                _assert_trace_contains(decision_trace, requirement, case_id)

@@ -3989,12 +3989,14 @@ eval_cases:
     action: reply
     intent: off_topic
     must_include_any:
+    - Я помогаю по нашим услугам
     - вопросами о наших услугах
     - по салону
     - запись
     - цены
 - id: E361
   messages:
+  - сколько стоит?
   - маникюр
   - сколько стоит?
   expected:
@@ -4003,3 +4005,14 @@ eval_cases:
     must_include:
     - маникюр
     - ₸
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: service_choice
+    - stage: service_carryover
+      decision: set
+      service_query: маникюр
+    - stage: service_carryover
+      decision: used
+      service_query: маникюр
+      service_query_source: context
