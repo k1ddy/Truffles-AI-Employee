@@ -1919,6 +1919,18 @@ SHIELD_TOXIC_PATTERNS = [
     re.compile(r"\b(хуй|пизд|пидор|еба|сука|нахуй|убью|иди\s+на\s+хуй|бля[тд])", re.IGNORECASE),
 ]
 SHIELD_MEANINGFUL_PATTERN = re.compile(r"[A-Za-zА-Яа-я0-9]{2,}")
+HYGIENE_KEYWORDS = [
+    "стерилиз",
+    "дезраств",
+    "дезинф",
+    "ультразвук",
+    "уз-ванн",
+    "сухожар",
+    "крафт",
+    "однораз",
+    "инструмент",
+    "обрабатыва",
+]
 
 
 BOOKING_REQUEST_KEYWORDS = [
@@ -3473,8 +3485,11 @@ def _build_booking_summary(booking: dict, *, refusal_flags: dict | None = None) 
 def _demo_salon_escalation_gate(messages: list[str]):
     for message in messages:
         decision = get_demo_salon_decision(message)
-        if decision and decision.action == "escalate":
-            return decision
+        if not decision or decision.action != "escalate":
+            continue
+        if decision.intent in {"medical"} and _is_hygiene_context_text(message):
+            continue
+        return decision
     return None
 
 
@@ -3520,6 +3535,13 @@ def _get_policy_handler(client: Client | None) -> dict | None:
     if not policy_type:
         return None
     return _POLICY_HANDLERS.get(policy_type)
+
+
+def _is_hygiene_context_text(text: str) -> bool:
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return False
+    return any(keyword in normalized for keyword in HYGIENE_KEYWORDS)
 
 
 def find_active_conversation_by_channel_ref(db: Session, client_id, remote_jid: str) -> Conversation | None:
