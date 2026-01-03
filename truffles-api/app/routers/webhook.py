@@ -1910,9 +1910,11 @@ def is_handover_status_question(text: str) -> bool:
 
 SHIELD_CONTEXT_KEY = "shield"
 SHIELD_RECENT_KEY = "recent_messages"
+SHIELD_LAST_TEXT_KEY = "last_text"
 SHIELD_SPAM_WINDOW_SECONDS = 5.0
 SHIELD_SPAM_MAX_MESSAGES = 3
 SHIELD_MAX_MESSAGE_LENGTH = 1000
+SHIELD_SHORT_MESSAGE_LEN = 12
 SHIELD_TOXIC_PATTERNS = [
     re.compile(r"\b(хуй|пизд|пидор|еба|сука|нахуй|убью|иди\s+на\s+хуй|бля[тд])", re.IGNORECASE),
 ]
@@ -2267,7 +2269,7 @@ def _set_context_manager(context: dict, manager: dict) -> dict:
 def _get_shield_context(context: dict) -> dict:
     shield = context.get(SHIELD_CONTEXT_KEY) if isinstance(context, dict) else None
     if not isinstance(shield, dict):
-        return {SHIELD_RECENT_KEY: []}
+        return {SHIELD_RECENT_KEY: [], SHIELD_LAST_TEXT_KEY: None}
     recent = shield.get(SHIELD_RECENT_KEY)
     cleaned: list[float] = []
     if isinstance(recent, list):
@@ -2277,12 +2279,15 @@ def _get_shield_context(context: dict) -> dict:
             except (TypeError, ValueError):
                 continue
     cleaned.sort()
-    return {SHIELD_RECENT_KEY: cleaned}
+    last_text = shield.get(SHIELD_LAST_TEXT_KEY) if isinstance(shield, dict) else None
+    return {SHIELD_RECENT_KEY: cleaned, SHIELD_LAST_TEXT_KEY: last_text}
 
 
 def _set_shield_context(context: dict, shield: dict) -> dict:
     context = dict(context)
-    if shield.get(SHIELD_RECENT_KEY):
+    recent = shield.get(SHIELD_RECENT_KEY)
+    last_text = shield.get(SHIELD_LAST_TEXT_KEY)
+    if recent or last_text:
         context[SHIELD_CONTEXT_KEY] = shield
     else:
         context.pop(SHIELD_CONTEXT_KEY, None)
@@ -4681,16 +4686,31 @@ async def _handle_webhook_payload(
     # 4.9 Behavioral shield (pre-LAW/policy).
     context = _get_conversation_context(conversation)
     shield_context = _get_shield_context(context)
-    now_ts = now.timestamp()
+    previous_text = shield_context.get(SHIELD_LAST_TEXT_KEY)
+    normalized_text = normalize_for_matching(message_text)
+    msg_ts = None
+    if metadata and getattr(metadata, "timestamp", None) is not None:
+        try:
+            msg_ts = float(metadata.timestamp)
+        except (TypeError, ValueError):
+            msg_ts = None
+    now_ts = msg_ts if msg_ts is not None else now.timestamp()
     recent = [
         ts for ts in shield_context.get(SHIELD_RECENT_KEY, []) if (now_ts - ts) <= SHIELD_SPAM_WINDOW_SECONDS
     ]
     recent.append(now_ts)
     shield_context[SHIELD_RECENT_KEY] = recent[-(SHIELD_SPAM_MAX_MESSAGES + 2) :]
+    shield_context[SHIELD_LAST_TEXT_KEY] = normalized_text
     context = _set_shield_context(context, shield_context)
     _set_conversation_context(conversation, context)
 
-    is_spam_burst = len(recent) > SHIELD_SPAM_MAX_MESSAGES and (recent[-1] - recent[0]) <= SHIELD_SPAM_WINDOW_SECONDS
+    is_short = len(message_text.strip()) <= SHIELD_SHORT_MESSAGE_LEN
+    is_repeat = bool(normalized_text and previous_text and normalized_text == previous_text)
+    is_spam_burst = (
+        len(recent) > SHIELD_SPAM_MAX_MESSAGES
+        and (recent[-1] - recent[0]) <= SHIELD_SPAM_WINDOW_SECONDS
+        and (is_short or is_repeat)
+    )
     too_long = len(message_text) > SHIELD_MAX_MESSAGE_LENGTH
     if is_spam_burst or too_long:
         reason = "spam" if is_spam_burst else "too_long"
@@ -4702,6 +4722,8 @@ async def _handle_webhook_payload(
                 "reason": reason,
                 "message_length": len(message_text),
                 "recent_messages": len(recent),
+                "is_repeat": is_repeat,
+                "is_short": is_short,
             },
         )
         if saved_message:

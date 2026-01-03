@@ -4028,7 +4028,8 @@ eval_cases:
       decision: drop
       reason: spam
 - id: E363
-  user: ты пидор
+  turns:
+  - user: ты пидор
   expected:
     action: reply
     must_include_any:
