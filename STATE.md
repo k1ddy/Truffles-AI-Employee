@@ -350,6 +350,24 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2026-01-03 — Канон: class‑router + info‑bundle инварианты
+
+**Что сделали:**
+- Зафиксировали intent lattice (class‑router), info‑bundle и class‑carryover в `SPECS/ARCHITECTURE.md`.
+- Обновили `SPECS/CONSULTANT.md`: info‑bundle инвариант, class‑carryover, LLM как языковой слой; shield = реализовано.
+- Добавили DoD‑инварианты в `STRATEGY/REQUIREMENTS.md` (устойчивость к перефразам + info‑bundle).
+- Обновили `SPECS/MULTI_TENANT.md`: anchors как boost, info‑bundle зависит от client_pack, OOD только при out‑signals без in‑signals.
+- Обновили `SPECS/ESCALATION.md`: info‑комбо не эскалируются без Hard‑LAW/policy.
+- Дописали канон в `docs/SESSION_START_PROMPT.txt` (class‑routing).
+
+**Разбор (шаблон):**
+- Боль/симптом: перестановка слов ломает ответы; ветка прыгает между info/booking/OOD, “детские” запросы дают урезанный ответ.
+- Почему важно: UX и доверие к “супер‑хосту” ломаются.
+- Диагноз: канон не фиксировал class‑routing и info‑bundle как инварианты; anchors воспринимались как основной сигнал.
+- Решение: зафиксировали intent lattice, info‑bundle и class‑carryover в SPECS/STRATEGY/SESSION.
+- Проверка: docs‑sync (tests не требуются для docs).
+- Осталось: реализация class‑router/info‑bundle в коде + CI core/long + live‑check 10–15 turns.
+
 ### 2025-12-29 — PR-1 Consult Mode (demo_salon)
 
 **Что сделали:**

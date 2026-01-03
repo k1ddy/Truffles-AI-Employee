@@ -124,7 +124,9 @@ outbox worker (тик 2s) или POST /admin/outbox/process (cron)
     ↓
 _handle_webhook_payload(skip_persist=True)
     ↓
-behavioral shield (rate-limit/toxic) → pending/opt-out/Hard‑LAW escalation → policy‑gates (скидки/оплата info) → early OOD (strong anchors) → booking guard/flow + service matcher → LLM-first (RAG/LLM) → truth gate fallback → intent classification/low-confidence handling
+behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → policy‑gates (скидки/оплата info)
+→ intent lattice (class router: semantic + anchors‑boost) → early OOD (только при out‑signals без in‑signals)
+→ info bundle / consult / booking flow / service matcher → LLM формулировка (RAG) → truth gate fallback → low‑confidence handling
     ↓
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
 ```
@@ -135,11 +137,27 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 **Соответствие ролей фактическому порядку:**
 - **Router** → вход + outbox + порядок стадий из цепочки выше.
 - **Safety Guard** → pending/opt‑out/Hard‑LAW escalation + policy‑gates (скидки/оплата info).
-- **OOD Guard** → early OOD (strong anchors).
+- **OOD Guard** → early OOD (только если нет in‑signals).
 - **Booking Guard** → booking guard/flow + expected_reply_type контракт.
-- **Info/RAG Specialist** → service matcher → LLM‑first (RAG/LLM) → truth gate fallback.
+- **Info/RAG Specialist** → info bundle / consult / service matcher → LLM‑формулировка (RAG) → truth gate fallback.
 - **Host Persona** → формулировка ответа (шаблоны/LLM), CTA/quiet hours.
 - **Observability** → decision_trace/meta на каждом сообщении.
+
+### Intent Lattice (class router) — канон
+- Цель: устойчивый выбор **класса ответа**, не зависящий от порядка слов.
+- Классы (по приоритету): Hard‑LAW → policy → opt‑out → human/frustration → booking → info‑bundle → consult → greeting → OOD.
+- Входы: семантический классификатор + domain_pack anchors **как boost**, не как единственный сигнал.
+- OOD допустим **только** если есть out‑signals и **нет** in‑signals (strict‑in).
+- Если несколько классов в одном сообщении — отвечаем по сильному + сохраняем очередь (intent_queue).
+
+### Info‑bundle (композиция фактов)
+- Любые сочетания “где/когда/парковка/гости/ранний приход/сегодня” → единый факт‑ответ: адрес + часы + нужные секции.
+- Если запрошена цена без услуги → уточнение услуги (без цен), но адрес+часы остаются.
+- Источник: только client_pack (truth‑first), без фантазий.
+
+### Context carryover (класс‑уровень)
+- После info‑bundle хранить класс и ключевые факты в контексте, чтобы перестановка вопросов не сбрасывала ветку.
+- Carryover не подменяет Hard‑LAW/policy‑gates и не меняет факты.
 
 ### Policy‑gates (конфиг per client)
 - Hard‑LAW всегда эскалирует (оплата: подтверждение/проверка/возвраты, медицинка, жалобы, переносы).
@@ -151,10 +169,10 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - `availability_provider`: `none` | `google_calendar` | `bitrix` | `amocrm` | `manual`.
 - Если провайдер не задан/недоступен — только сбор предпочтений, **без обещаний слотов**.
 
-### Behavioral Shield (P1, план)
+### Behavioral Shield (реализовано)
 - Цель: отсечь спам/машинную скорость и токсичные сообщения до LLM.
 - Каналы: для WhatsApp нет IP, поэтому ключ — `remote_jid`.
-- Статус: медиа rate‑limit реализован; text rate‑limit и silent‑ban — план.
+- Реализация: burst/drop (повторы/короткие bursts) + too‑long → silent drop; toxic/nonsense → эскалация.
 
 ### Pricing media (P1, план)
 - `client_pack.pricing_media.mode`: `text_only` | `image_only` | `text_plus_image`.

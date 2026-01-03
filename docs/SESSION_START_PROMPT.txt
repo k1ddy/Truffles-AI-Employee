@@ -6,6 +6,7 @@ SESSION CANON (read every session)
 3) Truth‑first: facts only from Client Pack; missing fact → clarify → escalate.
 4) OOD: soft refusal + return to salon topic; no “smart” off‑topic answers.
 5) LLM is for language; business decisions are deterministic.
+5a) Intent lattice: class-based routing + info-bundle; anchors are boost only, order of words must not change class.
 6) Consult mode: advice within salon scope, no prices/availability/masters, 1–2 questions, 2–3 options.
 7) Context Manager: current_goal + refusal_flags + clarify_limit + compact_summary.
 8) Core‑50 EVAL blocks CI; Extended‑250 runs nightly/manual only.
