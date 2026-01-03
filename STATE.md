@@ -109,6 +109,10 @@
 - expected_reply_type=service_choice при невалидном ответе без service/semantic/in-domain сигнала возвращает к вопросу об услуге (reason=invalid_choice).
 - intent_choice: prefix/substring match по меткам очереди (>=4 символов); info-выбор отвечает и обновляет очередь, booking запускает booking-prompt; decision_meta пишет expected_reply_choice/intent_queue_remaining/expected_reply_next.
 - Consult playbooks: `domain_pack.consult_playbooks` расширен (hair_aftercolor/hair_damage/hair_color_choice/nails_care/brows_lashes_care/sensitive_skin/style_reference/general_consult) с questions/options/next_step.
+- CI (main@8a6164f) green: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20678138128 (head_sha 8a6164fac4607260f09c63e60a7fee3d96a2961c, conclusion=success).
+- Прод: `/admin/version` → `{"version":"main","git_commit":"8a6164fac4607260f09c63e60a7fee3d96a2961c","build_time":"2026-01-03T13:49:12Z"}` (команда `curl -s http://localhost:8000/admin/version`).
+- Info-combo bundle: location/hours (и pricing/duration при сигнале адрес/парковка/гость) объединяют адрес+часы, опционально парковку/гостей, пишут info_sections meta. Evidence: `truffles-api/app/services/demo_salon_knowledge.py:207-285`, `truffles-api/app/routers/webhook.py:3408-3465`.
+- Core EVAL расширен инфо-комбо кейсами (адрес/часы/парковка/guest/quiet/clarify) E422–E428. Evidence: `truffles-api/app/knowledge/demo_salon/EVAL.yaml:4484-4558`.
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-31; Evidence: `curl -s http://localhost:8000/admin/health` → `checked_at=2025-12-31T07:12:59.570689+00:00`)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
