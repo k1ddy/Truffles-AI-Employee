@@ -72,6 +72,14 @@ CORE_EVAL_IDS = {
     "E057",
     "E060",
 }
+TURNS_EXAMPLE_CASE = {
+    "id": "EX_TURNS_001",
+    "tier": "long",
+    "turns": [
+        {"user": "What are your hours?", "expected": {"must_include_any": ["hours", "open"]}},
+        {"user": "Thanks", "expected": {"must_not": ["price"]}},
+    ],
+}
 
 
 def _normalize(text: str) -> str:
@@ -392,7 +400,11 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
     return response.bot_response or ""
 
 
-def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str | None) -> tuple[str, SimpleNamespace, SimpleNamespace]:
+def _run_webhook_conversation_turns(
+    messages: list[str],
+    case_id: str,
+    local_time: str | None,
+) -> tuple[list[str], SimpleNamespace, SimpleNamespace]:
     conversation_id = uuid4()
     client = SimpleNamespace(id="client-123", name="demo_salon", config=_load_client_config_from_truth())
     settings = SimpleNamespace(
@@ -450,7 +462,7 @@ def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str
         patches.append(patch("app.routers.webhook.datetime", _FixedDateTime))
         patches.append(patch("app.services.demo_salon_knowledge.datetime", _FixedDateTime))
 
-    last_response = ""
+    responses: list[str] = []
     with ExitStack() as stack:
         for patcher in patches:
             stack.enter_context(patcher)
@@ -475,9 +487,19 @@ def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str
                     enforce_secret=False,
                     skip_persist=True,
                     conversation_id=conversation_id,
-        )
+                )
             )
-            last_response = response.bot_response or ""
+            responses.append(response.bot_response or "")
+    return responses, conversation, saved_message
+
+
+def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str | None) -> tuple[str, SimpleNamespace, SimpleNamespace]:
+    responses, conversation, saved_message = _run_webhook_conversation_turns(
+        messages,
+        case_id,
+        local_time,
+    )
+    last_response = responses[-1] if responses else ""
     return last_response, conversation, saved_message
 
 
@@ -531,9 +553,68 @@ def _get_decision_trace(conversation: SimpleNamespace | None) -> list[dict]:
     return []
 
 
+def _coerce_expected(expected: object, case_id: str) -> dict:
+    if expected is None:
+        return {}
+    if not isinstance(expected, dict):
+        raise AssertionError(f"{case_id}: expected must be a mapping")
+    return expected
+
+
+def _normalize_turns(turns: object, case_id: str) -> list[dict]:
+    if not turns:
+        return []
+    if not isinstance(turns, list):
+        raise AssertionError(f"{case_id}: turns must be a list")
+    normalized: list[dict] = []
+    for idx, turn in enumerate(turns, start=1):
+        if isinstance(turn, str):
+            user_text = turn
+            expected = None
+        elif isinstance(turn, dict):
+            user_text = turn.get("user") or turn.get("message") or turn.get("text")
+            expected = turn.get("expected")
+        else:
+            raise AssertionError(f"{case_id}: turn {idx} must be a string or mapping")
+        if not isinstance(user_text, str) or not user_text.strip():
+            raise AssertionError(f"{case_id}: turn {idx} missing user text")
+        if expected is not None and not isinstance(expected, dict):
+            raise AssertionError(f"{case_id}: turn {idx} expected must be a mapping")
+        normalized.append({"user": user_text, "expected": expected})
+    return normalized
+
+
+def _assert_expected_response(response: str, expected: dict, case_id: str) -> None:
+    if expected.get("must_include"):
+        _assert_contains_all(response, expected["must_include"], case_id, "must_include")
+    if expected.get("must_include_any"):
+        _assert_contains_any(response, expected["must_include_any"], case_id, "must_include_any")
+    if expected.get("must_tell_user"):
+        _assert_contains_all(response, expected["must_tell_user"], case_id, "must_tell_user")
+    if expected.get("must_tell_user_any"):
+        _assert_contains_any(response, expected["must_tell_user_any"], case_id, "must_tell_user_any")
+    if expected.get("must_not"):
+        _assert_not_contains(response, expected["must_not"], case_id)
+    if expected.get("collect"):
+        _assert_contains_all(response, expected["collect"], case_id, "collect")
+    if expected.get("must_do"):
+        if "ask_fields_missing" in expected["must_do"] and expected.get("collect"):
+            _assert_contains_all(response, expected["collect"], case_id, "collect")
+
+
+def _collect_trace_expectations(expected: dict, trace_expectations: list[dict]) -> None:
+    items = expected.get("trace_contains") or []
+    if isinstance(items, list):
+        trace_expectations.extend(items)
+
+
 def _filter_cases(cases: list[dict]) -> list[dict]:
     if EVAL_TIER in {"all", "full"}:
         return cases
+    if EVAL_TIER == "long":
+        long_cases = [case for case in cases if str(case.get("tier", "")).strip().lower() == "long"]
+        assert long_cases, "Long eval set is empty"
+        return long_cases
     if EVAL_TIER in {"core", "ci"} or (not EVAL_TIER and os.environ.get("CI")):
         core_cases = [case for case in cases if case.get("id") in CORE_EVAL_IDS]
         assert core_cases, "Core eval set is empty"
@@ -549,27 +630,34 @@ def test_demo_salon_eval_cases():
     for case in cases:
         case_id = case.get("id", "<unknown>")
         user_text = case.get("user", "")
+        case_expected = _coerce_expected(case.get("expected"), case_id)
+        turns = _normalize_turns(case.get("turns"), case_id)
         messages = case.get("messages")
-        expected = case.get("expected", {})
         conversation = None
         saved_message = None
+        trace_expectations: list[dict] = []
 
-        expected_action = expected.get("action")
+        if turns and messages:
+            raise AssertionError(f"{case_id}: use turns or messages, not both")
+        if turns:
+            messages = [turn["user"] for turn in turns]
+
+        expected_action = case_expected.get("action")
         if expected_action == "booking_flow":
-            messages = [user_text] if user_text else []
+            booking_messages = messages if messages else ([user_text] if user_text else [])
             with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
                 booking_signal = webhook_router._has_booking_signal(
-                    messages,
+                    booking_messages,
                     client_slug="demo_salon",
-                    message_text=messages[-1] if messages else None,
+                    message_text=booking_messages[-1] if booking_messages else None,
                 )
                 assert booking_signal is True, f"{case_id}: booking signal not detected"
                 booking_state = webhook_router._update_booking_from_messages(
                     {},
-                    messages,
+                    booking_messages,
                     client_slug="demo_salon",
                 )
-            for slot in expected.get("booking_slots", []):
+            for slot in case_expected.get("booking_slots", []):
                 assert booking_state.get(slot), f"{case_id}: booking slot missing '{slot}'"
             continue
 
@@ -583,40 +671,46 @@ def test_demo_salon_eval_cases():
 
         response = (decision.response if decision else "") or ""
         local_time = case.get("local_time")
-        must_include = expected.get("must_include") or []
+        must_include = case_expected.get("must_include") or []
         wants_cta = any(
             isinstance(item, str) and "Хотите записаться" in item for item in must_include
         )
-        if messages:
-            response, conversation, saved_message = _run_webhook_conversation(
+        if turns:
+            responses, conversation, saved_message = _run_webhook_conversation_turns(
                 messages,
                 case_id,
                 str(local_time) if local_time else None,
             )
-        elif local_time or wants_cta or not decision:
-            response = _run_webhook_case(
-                user_text,
-                case_id,
-                str(local_time) if local_time else None,
-            )
-        if expected.get("must_include"):
-            _assert_contains_all(response, expected["must_include"], case_id, "must_include")
-        if expected.get("must_include_any"):
-            _assert_contains_any(response, expected["must_include_any"], case_id, "must_include_any")
-        if expected.get("must_tell_user"):
-            _assert_contains_all(response, expected["must_tell_user"], case_id, "must_tell_user")
-        if expected.get("must_tell_user_any"):
-            _assert_contains_any(response, expected["must_tell_user_any"], case_id, "must_tell_user_any")
-        if expected.get("must_not"):
-            _assert_not_contains(response, expected["must_not"], case_id)
+            for idx, turn in enumerate(turns, start=1):
+                step_expected = turn.get("expected") or {}
+                if step_expected:
+                    _assert_expected_response(
+                        responses[idx - 1] if responses else "",
+                        step_expected,
+                        f"{case_id}/turn{idx}",
+                    )
+                    _collect_trace_expectations(step_expected, trace_expectations)
+            if case_expected:
+                response = responses[-1] if responses else ""
+                _assert_expected_response(response, case_expected, case_id)
+                _collect_trace_expectations(case_expected, trace_expectations)
+        else:
+            if messages:
+                response, conversation, saved_message = _run_webhook_conversation(
+                    messages,
+                    case_id,
+                    str(local_time) if local_time else None,
+                )
+            elif local_time or wants_cta or not decision:
+                response = _run_webhook_case(
+                    user_text,
+                    case_id,
+                    str(local_time) if local_time else None,
+                )
+            if case_expected:
+                _assert_expected_response(response, case_expected, case_id)
+                _collect_trace_expectations(case_expected, trace_expectations)
 
-        if expected.get("collect"):
-            _assert_contains_all(response, expected["collect"], case_id, "collect")
-        if expected.get("must_do"):
-            if "ask_fields_missing" in expected["must_do"] and expected.get("collect"):
-                _assert_contains_all(response, expected["collect"], case_id, "collect")
-
-        trace_expectations = expected.get("trace_contains") or []
         if trace_expectations:
             assert conversation is not None, f"{case_id}: trace assertions require conversation context"
             decision_trace = _get_decision_trace(conversation)
