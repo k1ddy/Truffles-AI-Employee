@@ -118,6 +118,8 @@
 - CI (main@e36337e) green с build/push/deploy: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20687244044.
 - Прод: `/admin/version` → `{"version":"main","git_commit":"e36337e63780619e598176f3370680b86573f8bb","build_time":"2026-01-04T03:55:04Z"}` (команда `curl -s https://api.truffles.kz/admin/version`).
 - Live-check (prod, test number 77015705555@s.whatsapp.net): "Где вы находитесь и до скольки работаете?" → info_bundle reply (адрес+часы); conversation_id=624c6087-cbd6-4197-8131-4091cec563d0; decision_meta action=reply intent=info_bundle source=class_router; trace stages info_class + class_carryover set (SQL queries in session).
+- Doc sync PR #7: "Canonize info_bundle carryover invariants" merged (commit `eb3477ce1bbc118a38561b76a726ca4b3c0b4e16`): https://github.com/k1ddy/Truffles-AI-Employee/pull/7.
+- P0 fix info_bundle hours follow-up (PR #8): CI core/long PASS https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20688985111; prod `/admin/version` → `{"version":"main","git_commit":"6a90da1d4c465592c17b2b8cd14dd6805322ea9a","build_time":"2026-01-04T06:40:40Z"}`; live-check R3 (gap ~1.7s) conv_id `c0ab977f-0434-496a-ae66-05fface8fb7b`, user msg `aefc48a9-4b06-4ae3-9854-c3f5bac203ed`: decision_meta question_type=hours, service_query=null, class_router carryover_class=info_bundle, carryover_info_sections=["address","hours"]; trace info_class question_type=hours; reply address+hours (assistant msg `24bf46a8-1992-488e-a31d-431a58fd4dc7`).
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-31; Evidence: `curl -s http://localhost:8000/admin/health` → `checked_at=2025-12-31T07:12:59.570689+00:00`)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
@@ -1708,4 +1710,4 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - Prod: `/admin/version` commit 7b971713b4863094ce39910f03c5e60e97688b16.
 - Live‑check: conversation `99306198-1ecf-44d6-9066-72bb4e76e915`, decision_meta.booking_info_interrupt=true.
 
-*Последнее обновление: 2026-01-04 (Evidence: CI 20687244044 + /admin/version + live-check)*
+*Последнее обновление: 2026-01-04 (Evidence: CI 20688985111 + /admin/version + live-check R3)*
