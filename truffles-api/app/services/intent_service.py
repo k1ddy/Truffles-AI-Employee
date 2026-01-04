@@ -30,8 +30,8 @@ RAG_HYBRID_VECTOR_WEIGHT = float(os.environ.get("RAG_HYBRID_VECTOR_WEIGHT", "0.6
 RAG_HYBRID_BM25_WEIGHT = float(os.environ.get("RAG_HYBRID_BM25_WEIGHT", "0.4"))
 
 ROUTER_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "intent_classifier.md"
-ROUTER_TIMEOUT_SECONDS = float(os.environ.get("ROUTER_TIMEOUT_SECONDS", str(INTENT_TIMEOUT_SECONDS)))
-ROUTER_MAX_TOKENS = int(os.environ.get("ROUTER_MAX_TOKENS", "220"))
+ROUTER_TIMEOUT_SECONDS = float(os.environ.get("ROUTER_TIMEOUT_SECONDS", "3.0"))
+ROUTER_MAX_TOKENS = int(os.environ.get("ROUTER_MAX_TOKENS", "140"))
 ROUTER_ALLOWED_CLASSES = {
     "booking",
     "info_bundle",
@@ -155,6 +155,15 @@ def _clean_router_service_query(value: Any) -> str:
     if len(tokens) > 6:
         cleaned = " ".join(tokens[:6])
     return cleaned
+
+
+def _router_retry_max_tokens(max_tokens: int) -> int:
+    if max_tokens <= 1:
+        return 1
+    fallback = max(20, int(max_tokens * 0.6))
+    if fallback >= max_tokens:
+        fallback = max(1, max_tokens - 1)
+    return fallback
 
 
 def _build_router_carryover(carryover: dict | None) -> dict:
@@ -394,63 +403,83 @@ def route_llm_router(
         {"role": "system", "content": prompt},
         {"role": "user", "content": json.dumps(router_input, ensure_ascii=False)},
     ]
-    temperature = 1.0 if FAST_MODEL.strip().lower().startswith("gpt-5") else 0.0
-    llm_start = time.monotonic()
-    try:
-        response = llm.generate(
-            messages,
-            temperature=temperature,
-            max_tokens=ROUTER_MAX_TOKENS,
-            model=FAST_MODEL,
-            timeout_seconds=ROUTER_TIMEOUT_SECONDS,
-        )
-    except httpx.TimeoutException as exc:
+    temperature = 0.0
+    router_retry = False
+    total_elapsed_ms = 0.0
+
+    def _call_router_llm(max_tokens: int) -> tuple[Any | None, float, str | None]:
+        llm_start = time.monotonic()
+        try:
+            response = llm.generate(
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                model=FAST_MODEL,
+                timeout_seconds=ROUTER_TIMEOUT_SECONDS,
+            )
+        except httpx.TimeoutException as exc:
+            elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
+            logger.info(
+                "Timing",
+                extra={
+                    "context": {
+                        "stage": "router_llm_ms",
+                        "elapsed_ms": elapsed_ms,
+                        "model_name": FAST_MODEL,
+                        "model_tier": "fast",
+                        "timeout": True,
+                        "timeout_seconds": ROUTER_TIMEOUT_SECONDS,
+                        "max_tokens": max_tokens,
+                    }
+                },
+            )
+            logger.warning(f"Router LLM timeout after {ROUTER_TIMEOUT_SECONDS}s: {exc}")
+            return None, elapsed_ms, "timeout"
+        except Exception as exc:
+            elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
+            logger.info(
+                "Timing",
+                extra={
+                    "context": {
+                        "stage": "router_llm_ms",
+                        "elapsed_ms": elapsed_ms,
+                        "model_name": FAST_MODEL,
+                        "model_tier": "fast",
+                        "timeout": False,
+                        "error": str(exc),
+                        "max_tokens": max_tokens,
+                    }
+                },
+            )
+            logger.warning(f"Router LLM failed: {exc}")
+            return None, elapsed_ms, "error"
+
+        elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
         logger.info(
             "Timing",
             extra={
                 "context": {
                     "stage": "router_llm_ms",
-                    "elapsed_ms": round((time.monotonic() - llm_start) * 1000, 2),
-                    "model_name": FAST_MODEL,
-                    "model_tier": "fast",
-                    "timeout": True,
-                    "timeout_seconds": ROUTER_TIMEOUT_SECONDS,
-                }
-            },
-        )
-        logger.warning(f"Router LLM timeout after {ROUTER_TIMEOUT_SECONDS}s: {exc}")
-        result["error"] = "timeout"
-        return result
-    except Exception as exc:
-        logger.info(
-            "Timing",
-            extra={
-                "context": {
-                    "stage": "router_llm_ms",
-                    "elapsed_ms": round((time.monotonic() - llm_start) * 1000, 2),
+                    "elapsed_ms": elapsed_ms,
                     "model_name": FAST_MODEL,
                     "model_tier": "fast",
                     "timeout": False,
-                    "error": str(exc),
+                    "max_tokens": max_tokens,
                 }
             },
         )
-        logger.warning(f"Router LLM failed: {exc}")
-        result["error"] = "error"
-        return result
+        return response, elapsed_ms, None
 
-    logger.info(
-        "Timing",
-        extra={
-            "context": {
-                "stage": "router_llm_ms",
-                "elapsed_ms": round((time.monotonic() - llm_start) * 1000, 2),
-                "model_name": FAST_MODEL,
-                "model_tier": "fast",
-                "timeout": False,
-            }
-        },
-    )
+    response, elapsed_ms, error = _call_router_llm(ROUTER_MAX_TOKENS)
+    total_elapsed_ms += elapsed_ms
+    if error == "timeout":
+        router_retry = True
+        retry_tokens = _router_retry_max_tokens(ROUTER_MAX_TOKENS)
+        response, elapsed_ms, error = _call_router_llm(retry_tokens)
+        total_elapsed_ms += elapsed_ms
+    if error is not None:
+        result["error"] = error
+        return result
 
     content = (response.content or "").strip()
     result["raw"] = content
@@ -508,6 +537,9 @@ def route_llm_router(
         "confidence": confidence,
         "reason": reason,
         "carryover": carryover_payload,
+        "router_llm_ms": round(total_elapsed_ms, 2),
+        "router_error": "none",
+        "router_retry": router_retry,
     }
     return result
 
