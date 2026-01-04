@@ -67,16 +67,16 @@ from app.services.demo_salon_knowledge import (
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
-    DomainIntent,
-    Intent,
-    ROUTER_CONFIDENCE_THRESHOLD,
     classify_domain_with_scores,
     classify_intent,
+    DomainIntent,
+    Intent,
     is_frustration_message,
     is_human_request_message,
     is_opt_out_message,
     is_rejection,
     route_llm_router,
+    ROUTER_CONFIDENCE_THRESHOLD,
     should_escalate,
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
