@@ -881,6 +881,7 @@ client_pack:
   salon: *salon
   services_catalog: *services_catalog
   promotions: *promotions
+  discounts: *promotions
   booking: *booking
   guest_policy: *guest_policy
   service_duration_estimates: *service_duration_estimates
