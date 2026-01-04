@@ -4701,3 +4701,986 @@ eval_cases:
     must_include_any:
     - 10–15
     - раньше
+- id: E435
+  tier: core
+  turns:
+  - Здравствуйте
+  - Это салон Мира?
+  - Маникюр делаете?
+  - Вы в Алматы?
+  - Где именно вы находитесь?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E436
+  tier: long
+  turns:
+  - Добрый день
+  - Какие услуги по волосам есть?
+  - Окрашивание делаете?
+  - По времени окрашивание долго?
+  - Какими брендами красите?
+  - Есть ли парковка?
+  - Можно прийти с подругой и подождать?
+  - Какая у вас скидка на первый визит?
+  - Во сколько открываетесь?
+  - И точный адрес напишите, пожалуйста
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E437
+  user: Подскажите адрес салона.
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E438
+  user: Где вы находитесь в Алматы?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E439
+  user: Скиньте локацию, куда ехать?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E440
+  user: Как до вас добраться, адрес какой?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E441
+  user: Улица и дом салона?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E442
+  user: Вы на Абая где-то? Напишите адрес.
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E443
+  user: Уточните адрес, пожалуйста.
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E444
+  user: На каком перекрёстке вы?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E445
+  user: Вход со стороны Розыбакиева? Напишите адрес.
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E446
+  user: Где вы физически находитесь?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E447
+  tier: core
+  turns:
+  - Привет
+  - Маникюр сколько стоит?
+  - Педикюр делаете?
+  - Парковка бесплатная?
+  - До скольки сегодня работаете?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E448
+  tier: long
+  turns:
+  - Здравствуйте
+  - Какие услуги по бровям есть?
+  - Коррекцию бровей делаете?
+  - Сколько стоит коррекция?
+  - Какими брендами по бровям работаете?
+  - Стерилизация инструментов есть?
+  - Можно прийти с ребёнком?
+  - Парковка у вас есть?
+  - Вы в будни работаете?
+  - До скольки сегодня открыты?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E449
+  user: Во сколько открываетесь?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E450
+  user: До скольки работаете?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E451
+  user: График работы какой?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E452
+  user: Сегодня вы открыты?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E453
+  user: Работаете без выходных?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E454
+  user: Во сколько закрываетесь?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E455
+  user: Режим работы салона?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E456
+  user: По времени до скольки принимаетесь?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E457
+  user: С какого времени можно прийти утром?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E458
+  user: Когда заканчиваете работу?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E459
+  tier: core
+  turns:
+  - Добрый день
+  - У вас есть окрашивание волос?
+  - Балаяж делаете?
+  - Тонирование тоже есть?
+  - Сколько стоит балаяж?
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - 25 000
+    - от 25 000
+- id: E460
+  tier: long
+  turns:
+  - Здравствуйте
+  - Вы в Алматы?
+  - Какие услуги по ногтям есть?
+  - Маникюр делаете?
+  - Гель-лак у вас есть?
+  - Сколько длится маникюр с покрытием?
+  - Парковка рядом?
+  - Можно прийти с подругой?
+  - Во сколько работаете?
+  - Сколько стоит маникюр + гель-лак?
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - 7 000
+    - 7000
+- id: E461
+  user: Сколько стоит мужская стрижка?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 3 000
+- id: E462
+  user: Цена на стрижку машинкой?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 000
+- id: E463
+  user: Подравнивание кончиков сколько стоит?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 500
+- id: E464
+  user: Сколько стоит чёлка?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 1 000
+- id: E465
+  user: Окрашивание корней цена?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 8 000
+- id: E466
+  user: Сколько стоит маникюр классический?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 500
+- id: E467
+  user: Маникюр аппаратный почём?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 3 500
+- id: E468
+  user: Сколько стоит педикюр классический?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 4 500
+- id: E469
+  user: Педикюр + гель-лак сколько?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 9 000
+- id: E470
+  user: Наращивание ресниц 2D сколько стоит?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 10 000
+- id: E471
+  tier: core
+  turns:
+  - Привет
+  - Маникюр делаете?
+  - А педикюр?
+  - Стерилизация есть?
+  - Сколько по времени длится педикюр?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - педикюр
+    must_include_any:
+    - минут
+    - час
+- id: E472
+  tier: long
+  turns:
+  - Здравствуйте
+  - Какие услуги по волосам есть?
+  - Окрашивание делаете?
+  - Какими брендами красите?
+  - Сколько стоит окрашивание корней?
+  - Парковка рядом есть?
+  - Можно прийти с мужем и подождать?
+  - График работы какой?
+  - Адрес напишите
+  - Сколько по времени занимает окрашивание?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - окрашив
+    must_include_any:
+    - час
+    - минут
+- id: E473
+  user: Сколько длится маникюр?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - маникюр
+    must_include_any:
+    - минут
+    - час
+- id: E474
+  user: По времени маникюр с гель-лаком сколько?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - маникюр
+    must_include_any:
+    - минут
+    - час
+- id: E475
+  user: Сколько по времени педикюр?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - педикюр
+    must_include_any:
+    - минут
+    - час
+- id: E476
+  user: Длительность мужской стрижки?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - стрижка
+    must_include_any:
+    - минут
+    - час
+- id: E477
+  user: Сколько минут длится женская стрижка?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - стрижка
+    must_include_any:
+    - минут
+    - час
+- id: E478
+  user: Окрашивание волос сколько часов?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - окрашив
+    must_include_any:
+    - час
+    - минут
+- id: E479
+  user: Чистка лица по времени?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - чистк
+    must_include_any:
+    - минут
+    - час
+- id: E480
+  user: Пилинг сколько длится?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - пилинг
+    must_include_any:
+    - минут
+    - час
+- id: E481
+  user: Сколько времени занимает ламинирование бровей?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - бров
+    must_include_any:
+    - минут
+    - час
+- id: E482
+  user: Наращивание ресниц по времени сколько?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - ресниц
+    must_include_any:
+    - минут
+    - час
+- id: E483
+  tier: core
+  turns:
+  - Здравствуйте
+  - Уход за лицом делаете?
+  - А чистку?
+  - Парковка есть?
+  - Ламинирование ресниц делаете?
+  expected:
+    action: reply
+    intent: service_match
+    must_include_any:
+    - ламинирование
+    - ресниц
+- id: E484
+  tier: long
+  turns:
+  - Добрый день
+  - Какие услуги по волосам есть?
+  - Стрижку делаете?
+  - Мужскую?
+  - Сколько стоит мужская стрижка?
+  - Какими брендами красите?
+  - Можно прийти с ребёнком?
+  - Есть ли парковка?
+  - По времени стрижка сколько?
+  - Пилинг лица делаете?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - пилинг
+- id: E485
+  user: Маникюр делаете?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - маникюр
+- id: E486
+  user: Педикюр у вас есть?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - педикюр
+- id: E487
+  user: Окрашивание волос делаете?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - окрашив
+- id: E488
+  user: Мелирование делаете?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - мелирован
+- id: E489
+  user: Балаяж у вас есть?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - балаяж
+- id: E490
+  user: Брови и ресницы делаете?
+  expected:
+    action: reply
+    intent: service_match
+    must_include_any:
+    - бров
+    - ресниц
+- id: E491
+  user: Чистку лица делаете?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - чистк
+- id: E492
+  user: Пилинг лица делаете?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - пилинг
+- id: E493
+  user: Наращивание ресниц делаете?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - ресниц
+- id: E494
+  user: Подравнивание кончиков делаете?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - подравнивание
+- id: E495
+  tier: core
+  turns:
+  - Здравствуйте
+  - Маникюр делаете?
+  - Сколько стоит маникюр аппаратный?
+  - Работаете без выходных?
+  - Есть скидка на первое посещение?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - не суммируется
+    - не комбинируем
+- id: E496
+  tier: long
+  turns:
+  - Привет
+  - Какие услуги по волосам есть?
+  - Окрашивание делаете?
+  - Сколько стоит окрашивание корней?
+  - По времени сколько занимает?
+  - Парковка бесплатная?
+  - Можно прийти пораньше?
+  - График работы какой?
+  - Именинникам есть скидка?
+  - За сколько дней до/после действует?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 15%
+    must_include_any:
+    - 7 дней
+    - до/после
+- id: E497
+  user: Какая скидка на первое посещение?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - не суммируется
+    - не комбинируем
+- id: E498
+  user: Новым клиентам есть скидка?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - не суммируется
+    - не комбинируем
+- id: E499
+  user: Именинникам скидка есть?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 15%
+    must_include_any:
+    - 7 дней
+    - до/после
+- id: E500
+  user: Скидка в день рождения?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 15%
+    must_include_any:
+    - 7 дней
+    - до/после
+- id: E501
+  user: Студентам есть скидка?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - будням
+    - 11:00
+    - 16:00
+- id: E502
+  user: Пенсионерам скидка?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - будням
+    - 11:00
+    - 16:00
+- id: E503
+  user: Скидки суммируются?
+  expected:
+    action: reply
+    intent: promotions
+    must_include_any:
+    - не суммируются
+    - не комбинируем
+- id: E504
+  user: Есть акции или промокоды?
+  expected:
+    action: reply
+    intent: promotions
+    must_include_any:
+    - 10%
+    - 15%
+    - не комбинируем
+- id: E505
+  user: Какие сейчас акции?
+  expected:
+    action: reply
+    intent: promotions
+    must_include_any:
+    - 10%
+    - 15%
+- id: E506
+  user: Скидка по будням есть?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - будням
+    - 11:00
+    - 16:00
+- id: E507
+  tier: core
+  turns:
+  - Здравствуйте
+  - Маникюр делаете?
+  - Как долго длится маникюр?
+  - Где вы находитесь?
+  - Парковка рядом есть?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+- id: E508
+  tier: long
+  turns:
+  - Добрый день
+  - У вас есть педикюр?
+  - Сколько стоит педикюр классический?
+  - Можно прийти с ребёнком?
+  - Есть ли стерилизация?
+  - Какими брендами по ногтям работаете?
+  - График работы какой?
+  - Адрес напишите
+  - Парковка у вас бесплатная?
+  - Сколько обычно мест?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+    - 5–6
+- id: E509
+  user: Есть парковка у салона?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+    - 5–6
+- id: E510
+  user: Парковка бесплатная?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+    - 5–6
+- id: E511
+  user: Во дворе есть места для машины?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+    - 5–6
+- id: E512
+  user: Где можно оставить авто?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+    - 5–6
+- id: E513
+  user: Сколько мест на парковке?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - 5–6
+    - 5-6
+- id: E514
+  user: Парковка рядом с входом?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+- id: E515
+  user: Есть ли у вас парковочные места?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+- id: E516
+  user: Можно припарковаться во дворе?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+- id: E517
+  user: Парковка платная или бесплатная?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+- id: E518
+  user: У вас парковка на сколько машин?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - 5–6
+    - 5-6
+- id: E519
+  tier: core
+  turns:
+  - Здравствуйте
+  - Маникюр делаете?
+  - Парковка есть?
+  - Адрес скажите
+  - Можно прийти с мужем и подождать?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
+- id: E520
+  tier: long
+  turns:
+  - Привет
+  - Какие услуги по бровям есть?
+  - Ламинирование делаете?
+  - Сколько стоит ламинирование бровей?
+  - По времени сколько?
+  - Какими брендами пользуетесь?
+  - График работы какой?
+  - Парковка рядом?
+  - Можно прийти пораньше минут на 10–15?
+  - Если приду с ребёнком, где ему подождать?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
+    must_include_any:
+    - 10–15
+    - 2–3
+- id: E521
+  user: Можно прийти с ребёнком?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - можно
+    - зона ожидания
+- id: E522
+  user: Можно прийти с мужем и подождать?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
+- id: E523
+  user: Есть зона ожидания?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
+- id: E524
+  user: Можно прийти пораньше на 10–15 минут?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - 10–15
+    - зона ожидания
+- id: E525
+  user: Сколько мест в зоне ожидания?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - 2–3
+    - 2-3
+- id: E526
+  user: Можно с собакой?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - нельзя
+    - животных
+    - гигиен
+- id: E527
+  user: Можно привести двух сопровождающих?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - 2–3
+    - одного
+    - зона ожидания
+- id: E528
+  user: Если приду заранее, где подождать?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
+- id: E529
+  user: Есть ли ограничения по гостям?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - одного
+    - 2–3
+    - зона ожидания
+- id: E530
+  user: Можно ли с ребёнком и где ему подождать?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
