@@ -127,6 +127,14 @@
 - Live-check (prod): paraphrase “На каком перекрёстке вы?” → info_bundle; conv_id `a271e3d0-053d-4d83-9852-f3ea3167efe9`, user msg `cca7722f-8e03-45e4-9119-8deafaed2478` class_router.in_signals `info_anchor_location`; reply `c54d7be2-81db-4d52-b607-b53d857da061` (address+hours).
 - Live-check (prod): chaotic follow-up “Когда заканчиваете работу?” после price+parking → info_bundle; conv_id `4f9026c2-9c94-4b38-8248-b5aacf635cdf`, user msg `0e679f43-08dd-40e4-932f-7c0022811788` class_router.in_signals `info_anchor_hours`, `info_anchor_pricing`; reply `6489ceb6-27cc-474d-bd73-8609b081e749` (hours+address+pricing).
 - Live-check (prod): booking+info interrupt “Где вы находитесь и до скольки работаете?” после “Хочу записаться” → info reply + intent choice; conv_id `cd10fbb4-a5b9-4d98-87fb-b7dbb16a6766`, user msg `4cd2d8a9-2ae6-4652-9264-e08a6985247c` decision_meta intent=multi_intent_info booking_deferred=true info_sections=["address","hours"]; reply `425f22fe-6234-4e09-80fb-c4de27c65b90`.
+- Канон LLM-router: источник класса = LLM-router (doc commit `49c81ba`).
+- LLM-router внедрён как источник класса с fallback на детерминизм + запись router output в trace/meta; prompt fallback встроен для контейнера. Evidence: `truffles-api/app/routers/webhook.py:2839`, `truffles-api/app/routers/webhook.py:6597`, `truffles-api/app/services/intent_service.py:32`, `truffles-api/app/services/intent_service.py:323`, `prompts/intent_classifier.md`.
+- Router eval: инварианты класса (перефраз/перестановка/хаотичный follow-up) E531–E537 добавлены. Evidence: `truffles-api/app/knowledge/demo_salon/EVAL.yaml:5687`.
+- CI (main@223fe9f) build/push/deploy green: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20690022936.
+- Прод: `/admin/version` → `{"version":"main","git_commit":"223fe9f12bec2f030fc40d878f644868d2fdd631","build_time":"2026-01-04T08:16:45Z"}`.
+- Live-check (prod): info_bundle paraphrase “Подскажите, где находитесь и до скольки работаете?” → info_bundle reply; conv_id `f86b64bc-46ba-41e5-bcba-d94562f0376b`, user msg `msg-218c5af6630b46fa89771a48554abece` decision_meta action=reply intent=info_bundle source=class_router (router error=timeout fallback); trace info_class info_sections=["address","hours"]; reply `4069a1a6-2b94-4fb4-a737-120dbdfdd29f` (address+hours + CTA).
+- Live-check (prod): booking+info в одном сообщении “Хочу записаться на маникюр, где вы находитесь и до скольки работаете?” → info reply + intent choice; conv_id `5792475d-5cbf-43a1-88c9-7d1d680d5102`, user msg `msg-8d7e152b294c4b0f8c37d8c9db99d22c` decision_meta booking_deferred=true info_sections=["address","hours"]; trace intent_queue defer_booking; reply `724c6afc-895e-4a9d-9530-489c263996da` (address+hours + intent choice).
+- Live-check (prod): consult + перебивка “Посоветуйте уход для сухих волос” → consult reply, затем “Кстати, где вы находитесь?” → info_bundle reply; conv_id `acc4589c-f0d1-4eb1-83a7-3973a75319b6`, user msg `msg-0e4e1baeb03743ffbcd592a6895c115b` decision_meta consult_reply (source=consult), user msg `msg-16564c13b8844e3fbe3dba6f94c0478f` decision_meta info_bundle source=class_router (router error=timeout fallback); reply `0de2e7a4-4e28-46bd-8bac-a267311b58a8` (consult) + `e0f4f3df-b021-4dd6-9abb-8f47bce98d01` (address+hours).
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-31; Evidence: `curl -s http://localhost:8000/admin/health` → `checked_at=2025-12-31T07:12:59.570689+00:00`)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
@@ -1717,4 +1725,4 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - Prod: `/admin/version` commit 7b971713b4863094ce39910f03c5e60e97688b16.
 - Live‑check: conversation `99306198-1ecf-44d6-9066-72bb4e76e915`, decision_meta.booking_info_interrupt=true.
 
-*Последнее обновление: 2026-01-04 (Evidence: CI 20689515956 + /admin/version + live-check SC1/SC2/SC3)*
+*Последнее обновление: 2026-01-04 (Evidence: CI 20690022936 + /admin/version + live-check S1/S2/S3)*
