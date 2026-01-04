@@ -407,16 +407,22 @@ def route_llm_router(
     router_retry = False
     total_elapsed_ms = 0.0
 
-    def _call_router_llm(max_tokens: int) -> tuple[Any | None, float, str | None]:
+    def _call_router_llm(
+        max_tokens: int,
+        *,
+        temperature_override: float | None,
+    ) -> tuple[Any | None, float, str | None]:
         llm_start = time.monotonic()
         try:
-            response = llm.generate(
-                messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                model=FAST_MODEL,
-                timeout_seconds=ROUTER_TIMEOUT_SECONDS,
-            )
+            kwargs = {
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "model": FAST_MODEL,
+                "timeout_seconds": ROUTER_TIMEOUT_SECONDS,
+            }
+            if temperature_override is not None:
+                kwargs["temperature"] = temperature_override
+            response = llm.generate(**kwargs)
         except httpx.TimeoutException as exc:
             elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
             logger.info(
@@ -430,6 +436,7 @@ def route_llm_router(
                         "timeout": True,
                         "timeout_seconds": ROUTER_TIMEOUT_SECONDS,
                         "max_tokens": max_tokens,
+                        "temperature": temperature_override,
                     }
                 },
             )
@@ -437,6 +444,10 @@ def route_llm_router(
             return None, elapsed_ms, "timeout"
         except Exception as exc:
             elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
+            error_text = str(exc)
+            error_code = "error"
+            if "temperature" in error_text and "unsupported" in error_text:
+                error_code = "unsupported_temperature"
             logger.info(
                 "Timing",
                 extra={
@@ -446,13 +457,14 @@ def route_llm_router(
                         "model_name": FAST_MODEL,
                         "model_tier": "fast",
                         "timeout": False,
-                        "error": str(exc),
+                        "error": error_text,
                         "max_tokens": max_tokens,
+                        "temperature": temperature_override,
                     }
                 },
             )
             logger.warning(f"Router LLM failed: {exc}")
-            return None, elapsed_ms, "error"
+            return None, elapsed_ms, error_code
 
         elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
         logger.info(
@@ -465,17 +477,30 @@ def route_llm_router(
                     "model_tier": "fast",
                     "timeout": False,
                     "max_tokens": max_tokens,
+                    "temperature": temperature_override,
                 }
             },
         )
         return response, elapsed_ms, None
 
-    response, elapsed_ms, error = _call_router_llm(ROUTER_MAX_TOKENS)
+    temperature_override: float | None = temperature
+    response, elapsed_ms, error = _call_router_llm(
+        ROUTER_MAX_TOKENS, temperature_override=temperature_override
+    )
     total_elapsed_ms += elapsed_ms
+    if error == "unsupported_temperature":
+        router_retry = True
+        temperature_override = None
+        response, elapsed_ms, error = _call_router_llm(
+            ROUTER_MAX_TOKENS, temperature_override=temperature_override
+        )
+        total_elapsed_ms += elapsed_ms
     if error == "timeout":
         router_retry = True
         retry_tokens = _router_retry_max_tokens(ROUTER_MAX_TOKENS)
-        response, elapsed_ms, error = _call_router_llm(retry_tokens)
+        response, elapsed_ms, error = _call_router_llm(
+            retry_tokens, temperature_override=temperature_override
+        )
         total_elapsed_ms += elapsed_ms
     if error is not None:
         result["error"] = error
