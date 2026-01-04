@@ -7863,6 +7863,17 @@ async def _handle_webhook_payload(
                         bot_response=bot_response,
                     )
 
+        info_class_intents, _ = _detect_info_class_intents(
+            message_text,
+            intent_decomp_set=intent_decomp_set,
+        )
+        class_router_result = _build_class_router_result(
+            info_intents=info_class_intents,
+            booking_signal=booking_signal,
+            class_carryover=class_carryover,
+            domain_intent=DomainIntent.UNKNOWN,
+            domain_meta=None,
+        )
         info_class = "info" in (class_router_result.get("classes") or [])
         info_class_intents_for_reply: set[str] = set(class_router_result.get("intents") or [])
         for item in class_router_result.get("carryover_intents") or []:
