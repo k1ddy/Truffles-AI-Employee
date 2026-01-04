@@ -159,6 +159,11 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - После info‑bundle хранить класс и ключевые факты в контексте, чтобы перестановка вопросов не сбрасывала ветку.
 - Carryover не подменяет Hard‑LAW/policy‑gates и не меняет факты.
 
+### Base‑80 батарея (acceptance)
+- 80% входящих классов (по объёму) покрыты перефраз‑battery и 5–6‑ходовыми комбинациями.
+- 10–20 перефраз на класс, проверка только инвариантов (facts/must_not), без точных строк.
+- Статус “устойчивый хост” невозможен без 100% pass Base‑80.
+
 ### Policy‑gates (конфиг per client)
 - Hard‑LAW всегда эскалирует (оплата: подтверждение/проверка/возвраты, медицинка, жалобы, переносы).
 - Policy‑gates (скидки/оплата info) исполняются детерминированно по `client_pack.discounts` и `client_pack.payment`.

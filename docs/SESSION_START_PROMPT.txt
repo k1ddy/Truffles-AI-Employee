@@ -15,6 +15,7 @@ SESSION CANON (read every session)
 11) Outbound tests only to allowlist JID.
 12) decision_trace/meta required for every response.
 13) Long-form eval pack (10-15 turns) required before declaring dialog stability.
+14) Base-80 battery (5–6 turns + 10–20 paraphrases per class) is required for “stable host”.
 
 Roles & ownership (who updates what):
 - Top Architect: курс, инварианты, DoD; обновляет SPECS/* и STRUCTURE.md.
