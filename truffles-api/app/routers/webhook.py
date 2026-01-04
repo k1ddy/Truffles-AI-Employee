@@ -4005,6 +4005,7 @@ def _build_info_intent_reply(
     service_query: str | None,
     client_slug: str | None,
     message_text: str | None = None,
+    include_info_bundle: bool = True,
 ) -> tuple[str | None, dict | None]:
     normalized = normalize_for_matching(message_text) if message_text else ""
     parking_signal = "парков" in normalized if normalized else False
@@ -4017,7 +4018,9 @@ def _build_info_intent_reply(
     location_signal = False
     if normalized:
         location_signal = any(token in normalized for token in ["адрес", "где вы", "где наход", "где вы находитесь"])
-    include_info_bundle = intent in {"location", "hours"} or location_signal or parking_signal or guest_signal
+    include_info_bundle = include_info_bundle and (
+        intent in {"location", "hours"} or location_signal or parking_signal or guest_signal
+    )
 
     if intent == "hours":
         reply, meta = build_info_combined_reply(
@@ -8505,14 +8508,55 @@ async def _handle_webhook_payload(
             if not answer_intents:
                 answer_intents = list(sorted(info_class_intents_for_reply))[:2]
 
+            info_signals = (
+                info_class_meta.get("info_signals")
+                if isinstance(info_class_meta, dict)
+                else None
+            )
+            include_parking = (
+                bool(info_signals.get("parking")) if isinstance(info_signals, dict) else False
+            )
+            include_guest = (
+                bool(info_signals.get("guest")) if isinstance(info_signals, dict) else False
+            )
+            include_base_bundle = False
+            if isinstance(info_signals, dict):
+                include_base_bundle = any(
+                    bool(info_signals.get(key))
+                    for key in ("parking", "guest", "location", "hours")
+                )
+            if not include_base_bundle:
+                include_base_bundle = bool(
+                    {"hours", "location"} & info_class_intents_for_reply
+                )
+            base_bundle_reply: str | None = None
+            base_bundle_meta: dict[str, Any] = {}
+            if include_base_bundle:
+                base_bundle_reply, base_bundle_meta = build_info_combined_reply(
+                    include_parking=include_parking,
+                    include_guest=include_guest,
+                )
+
             replies: list[str] = []
             info_meta_combined: dict[str, Any] = {}
-            for intent_name in answer_intents:
+            if isinstance(base_bundle_meta, dict) and base_bundle_meta:
+                info_meta_combined.update(base_bundle_meta)
+            if isinstance(base_bundle_reply, str):
+                base_bundle_reply = base_bundle_reply.strip()
+                if base_bundle_reply:
+                    replies.append(base_bundle_reply)
+            extra_intents = [
+                intent_name
+                for intent_name in answer_intents
+                if intent_name not in {"hours", "location"}
+            ]
+            for intent_name in extra_intents:
                 reply, meta = _build_info_intent_reply(
                     intent_name,
                     service_query=info_service_query,
                     client_slug=payload.client_slug,
                     message_text=message_text,
+                    include_info_bundle=False,
                 )
                 if isinstance(reply, str):
                     reply = reply.strip()
