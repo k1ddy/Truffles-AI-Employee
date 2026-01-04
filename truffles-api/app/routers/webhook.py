@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
@@ -2098,6 +2099,9 @@ BOOKING_CTA_SERVICE_INTENTS = BOOKING_TIME_SERVICE_INTENTS - {
     "service_clarify",
     "duration_or_price_clarify",
 }
+CLASS_CARRYOVER_KEY = "class_carryover"
+CLASS_CARRYOVER_TTL_MESSAGES = 4
+CLASS_CARRYOVER_CLASSES = {"info"}
 SERVICE_CARRYOVER_KEY = "service_carryover"
 SERVICE_CARRYOVER_TTL_MESSAGES = 4
 SERVICE_CARRYOVER_INTENTS = {"pricing", "duration"}
@@ -2318,6 +2322,154 @@ def _increment_context_message_count(manager: dict) -> int:
     return count
 
 
+def _prune_class_carryover(manager: dict, *, message_count: int) -> tuple[dict, dict | None]:
+    payload = manager.get(CLASS_CARRYOVER_KEY)
+    if not isinstance(payload, dict):
+        return manager, None
+    class_name = payload.get("class")
+    if not isinstance(class_name, str) or not class_name.strip():
+        manager = dict(manager)
+        manager.pop(CLASS_CARRYOVER_KEY, None)
+        return manager, {"reason": "invalid"}
+    try:
+        last_count = int(payload.get("message_count"))
+    except (TypeError, ValueError):
+        manager = dict(manager)
+        manager.pop(CLASS_CARRYOVER_KEY, None)
+        return manager, {"reason": "invalid"}
+    ttl = payload.get("ttl", CLASS_CARRYOVER_TTL_MESSAGES)
+    try:
+        ttl = int(ttl)
+    except (TypeError, ValueError):
+        ttl = CLASS_CARRYOVER_TTL_MESSAGES
+    if ttl <= 0:
+        ttl = CLASS_CARRYOVER_TTL_MESSAGES
+    age = message_count - last_count
+    if age > ttl:
+        manager = dict(manager)
+        manager.pop(CLASS_CARRYOVER_KEY, None)
+        return manager, {"reason": "expired", "age": age, "ttl": ttl, "class": class_name}
+    return manager, None
+
+
+def _get_class_carryover(manager: dict, *, message_count: int) -> dict | None:
+    payload = manager.get(CLASS_CARRYOVER_KEY)
+    if not isinstance(payload, dict):
+        return None
+    class_name = payload.get("class")
+    if not isinstance(class_name, str) or not class_name.strip():
+        return None
+    try:
+        last_count = int(payload.get("message_count"))
+    except (TypeError, ValueError):
+        return None
+    ttl = payload.get("ttl", CLASS_CARRYOVER_TTL_MESSAGES)
+    try:
+        ttl = int(ttl)
+    except (TypeError, ValueError):
+        return None
+    if ttl <= 0:
+        return None
+    age = message_count - last_count
+    if age <= 0 or age > ttl:
+        return None
+    remaining = max(ttl - age + 1, 0)
+    intents = payload.get("intents")
+    if isinstance(intents, list):
+        intents = [intent for intent in intents if isinstance(intent, str) and intent.strip()]
+    else:
+        intents = []
+    info_sections = payload.get("info_sections")
+    if not isinstance(info_sections, list):
+        info_sections = []
+    return {
+        "class": class_name.strip(),
+        "intents": intents,
+        "info_sections": info_sections,
+        "age": age,
+        "ttl": ttl,
+        "remaining": remaining,
+    }
+
+
+def _set_class_carryover(
+    manager: dict,
+    *,
+    class_name: str,
+    intents: list[str],
+    info_sections: list[str] | None,
+    message_count: int,
+) -> dict:
+    manager = dict(manager)
+    cleaned_intents = []
+    seen = set()
+    for intent in intents:
+        if not isinstance(intent, str):
+            continue
+        value = intent.strip().casefold()
+        if not value or value in seen:
+            continue
+        cleaned_intents.append(value)
+        seen.add(value)
+    cleaned_sections = []
+    if isinstance(info_sections, list):
+        for section in info_sections:
+            if not isinstance(section, str):
+                continue
+            value = section.strip()
+            if not value:
+                continue
+            cleaned_sections.append(value)
+    manager[CLASS_CARRYOVER_KEY] = {
+        "class": class_name.strip(),
+        "intents": cleaned_intents,
+        "info_sections": cleaned_sections,
+        "message_count": message_count,
+        "ttl": CLASS_CARRYOVER_TTL_MESSAGES,
+    }
+    return manager
+
+
+def _maybe_store_class_carryover(
+    *,
+    conversation: Conversation,
+    class_name: str,
+    intents: list[str] | None,
+    info_meta: dict | None,
+    message_count: int,
+    reason: str,
+) -> None:
+    if class_name.strip().casefold() not in CLASS_CARRYOVER_CLASSES:
+        return
+    intent_list = intents or []
+    info_sections = []
+    if isinstance(info_meta, dict):
+        info_sections = info_meta.get("info_sections") if isinstance(info_meta.get("info_sections"), list) else []
+    context = _get_conversation_context(conversation)
+    context_manager = _get_context_manager(context)
+    context_manager = _set_class_carryover(
+        context_manager,
+        class_name=class_name.strip(),
+        intents=intent_list,
+        info_sections=info_sections,
+        message_count=message_count,
+    )
+    context = _set_context_manager(context, context_manager)
+    _set_conversation_context(conversation, context)
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "class_carryover",
+            "decision": "set",
+            "class": class_name.strip(),
+            "intents": intent_list,
+            "info_sections": info_sections,
+            "ttl": CLASS_CARRYOVER_TTL_MESSAGES,
+            "reason": reason,
+        },
+    )
+
+
 def _prune_service_carryover(manager: dict, *, message_count: int) -> tuple[dict, dict | None]:
     payload = manager.get(SERVICE_CARRYOVER_KEY)
     if not isinstance(payload, dict):
@@ -2442,6 +2594,109 @@ def _maybe_store_service_carryover(
             "reason": reason,
         },
     )
+
+
+def _detect_info_class_intents(message_text: str | None, *, intent_decomp_set: set[str]) -> tuple[set[str], dict[str, Any]]:
+    intents = {intent for intent in intent_decomp_set if intent in INFO_INTENTS}
+    meta: dict[str, Any] = {}
+    normalized = normalize_for_matching(message_text) if message_text else ""
+    if not normalized:
+        return intents, meta
+
+    parking_signal = "парков" in normalized
+    guest_signal = any(token in normalized for token in ["гост", "ребен", "ребён", "дет", "коляс", "ожидан", "подожд", "пораньше", "раньше"])
+    location_signal = parking_signal or guest_signal or any(
+        token in normalized
+        for token in ["адрес", "где вы", "где находитесь", "куда ехать", "локац", "как доехать"]
+    )
+    hours_signal = any(
+        token in normalized
+        for token in ["работае", "до скольк", "во скольк", "график", "открыт", "сейчас открыты", "когда откры"]
+    )
+
+    if location_signal:
+        intents.add("location")
+    if hours_signal:
+        intents.add("hours")
+    question_type = None
+    try:
+        question_type = semantic_question_type(message_text)
+    except Exception:
+        question_type = None
+    if question_type and question_type.kind in INFO_INTENTS:
+        intents.add(question_type.kind)
+        meta["question_type"] = question_type.kind
+        meta["question_type_score"] = question_type.score
+    meta["info_signals"] = {
+        "parking": parking_signal,
+        "guest": guest_signal,
+        "location": location_signal,
+        "hours": hours_signal,
+    }
+    return intents, meta
+
+
+def _build_class_router_result(
+    *,
+    info_intents: set[str],
+    booking_signal: bool,
+    class_carryover: dict | None,
+    domain_intent: DomainIntent,
+    domain_meta: dict | None,
+) -> dict[str, Any]:
+    anchors_out_hits = int(domain_meta.get("out_hits") or 0) if isinstance(domain_meta, dict) else 0
+    anchors_in_hits = int(domain_meta.get("strict_in_hits") or 0) if isinstance(domain_meta, dict) else 0
+    in_signals: list[str] = []
+    out_signals: list[str] = []
+    classes: list[str] = []
+
+    if info_intents:
+        in_signals.append("info_intents")
+        classes.append("info")
+    if booking_signal:
+        in_signals.append("booking_signal")
+        classes.append("booking")
+    if anchors_in_hits > 0:
+        in_signals.append("anchor_in")
+    if anchors_out_hits > 0:
+        out_signals.append("anchor_out")
+
+    carryover_class = None
+    carryover_info_sections: list[str] = []
+    carryover_intents: list[str] = []
+    if isinstance(class_carryover, dict):
+        carryover_class = class_carryover.get("class")
+        if isinstance(carryover_class, str) and carryover_class.strip():
+            in_signals.append("carryover")
+            classes.append(carryover_class.strip())
+        raw_sections = class_carryover.get("info_sections")
+        if isinstance(raw_sections, list):
+            carryover_info_sections = [item for item in raw_sections if isinstance(item, str)]
+        raw_intents = class_carryover.get("intents")
+        if isinstance(raw_intents, list):
+            carryover_intents = [item for item in raw_intents if isinstance(item, str)]
+
+    if domain_intent == DomainIntent.OUT_OF_DOMAIN and not out_signals:
+        out_signals.append("domain_out")
+
+    out_of_domain_signal = bool(out_signals and not in_signals)
+    classes = list(dict.fromkeys(classes))
+    in_signals = list(dict.fromkeys(in_signals))
+    out_signals = list(dict.fromkeys(out_signals))
+    carryover_intents = list(dict.fromkeys(carryover_intents))
+    carryover_info_sections = list(dict.fromkeys(carryover_info_sections))
+    return {
+        "classes": classes,
+        "intents": sorted(info_intents),
+        "in_signals": in_signals,
+        "out_signals": out_signals,
+        "anchors_in_hits": anchors_in_hits,
+        "anchors_out_hits": anchors_out_hits,
+        "out_of_domain_signal": out_of_domain_signal,
+        "carryover_class": carryover_class,
+        "carryover_info_sections": carryover_info_sections,
+        "carryover_intents": carryover_intents,
+    }
 
 
 def _is_refusal_flag_active(refusal_flags: dict | None, field: str) -> bool:
@@ -4540,6 +4795,10 @@ async def _handle_webhook_payload(
         now=now,
         client_slug=payload.client_slug,
     )
+    context_manager, class_carryover_event = _prune_class_carryover(
+        context_manager,
+        message_count=message_count,
+    )
     context_manager, carryover_event = _prune_service_carryover(
         context_manager,
         message_count=message_count,
@@ -4552,6 +4811,15 @@ async def _handle_webhook_payload(
             saved_message,
             decision="refusal_flags",
             updates={"refusal_flags": refusal_flags, "refusal_events": refusal_events},
+        )
+    if class_carryover_event:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "class_carryover",
+                "decision": "expired",
+                **class_carryover_event,
+            },
         )
     if carryover_event:
         _record_decision_trace(
@@ -4571,6 +4839,7 @@ async def _handle_webhook_payload(
         )
         context = _get_conversation_context(conversation)
     current_goal = context_manager.get("current_goal") if isinstance(context_manager, dict) else None
+    class_carryover = _get_class_carryover(context_manager, message_count=message_count)
 
     expected_reply_type = _get_expected_reply_type(context)
     intent_queue = _get_intent_queue(context)
@@ -6128,6 +6397,10 @@ async def _handle_webhook_payload(
         and not bypass_domain_flows
         and message_text
     ):
+        early_info_intents, early_info_meta = _detect_info_class_intents(
+            message_text,
+            intent_decomp_set=set(),
+        )
         if not (
             is_greeting_message(message_text)
             or is_thanks_message(message_text)
@@ -6142,7 +6415,8 @@ async def _handle_webhook_payload(
             )
             out_hits = int(early_domain_meta.get("out_hits") or 0)
             strict_in_hits = int(early_domain_meta.get("strict_in_hits") or 0)
-            early_out_of_domain = bool(out_hits > 0 and strict_in_hits == 0 and not booking_signal)
+            early_in_signals = bool(strict_in_hits > 0 or booking_signal or early_info_intents)
+            early_out_of_domain = bool(out_hits > 0 and not early_in_signals)
 
     expected_reply_off_topic = (
         expected_reply_type == EXPECTED_REPLY_SERVICE
@@ -6162,6 +6436,7 @@ async def _handle_webhook_payload(
                 "domain_intent": early_domain_intent.value,
                 "out_hits": early_domain_meta.get("out_hits"),
                 "strict_in_hits": early_domain_meta.get("strict_in_hits"),
+                "info_intents": sorted(early_info_intents),
                 "expected_reply_type": expected_reply_type,
                 "expected_reply_reason": "off_topic",
             },
@@ -6418,6 +6693,14 @@ async def _handle_webhook_payload(
             )
             if saved_message and isinstance(info_meta, dict) and info_meta:
                 _update_message_decision_metadata(saved_message, info_meta)
+            _maybe_store_class_carryover(
+                conversation=conversation,
+                class_name="info",
+                intents=[intent_queue_choice],
+                info_meta=info_meta,
+                message_count=message_count,
+                reason="intent_queue",
+            )
             _maybe_store_service_carryover(
                 conversation=conversation,
                 service_meta=info_meta if isinstance(info_meta, dict) else None,
@@ -6634,6 +6917,14 @@ async def _handle_webhook_payload(
                     if info_meta:
                         updates.update(info_meta)
                     _update_message_decision_metadata(saved_message, updates)
+                _maybe_store_class_carryover(
+                    conversation=conversation,
+                    class_name="info",
+                    intents=answered_intents,
+                    info_meta=info_meta,
+                    message_count=message_count,
+                    reason="intent_queue",
+                )
                 if service_meta:
                     _maybe_store_service_carryover(
                         conversation=conversation,
@@ -7180,6 +7471,14 @@ async def _handle_webhook_payload(
                     message_count=message_count,
                     reason="booking_interrupt",
                 )
+                _maybe_store_class_carryover(
+                    conversation=conversation,
+                    class_name="info",
+                    intents=booking_info_intents,
+                    info_meta=info_meta,
+                    message_count=message_count,
+                    reason="booking_interrupt",
+                )
 
                 bot_response = _combine_sidecar(prompt or "", info_decision.response or "")
                 bot_response = bot_response.strip()
@@ -7538,6 +7837,14 @@ async def _handle_webhook_payload(
                     )
                     if saved_message and isinstance(multi_meta, dict):
                         _update_message_decision_metadata(saved_message, multi_meta)
+                    _maybe_store_class_carryover(
+                        conversation=conversation,
+                        class_name="info",
+                        intents=["multi_truth"],
+                        info_meta=multi_meta if isinstance(multi_meta, dict) else None,
+                        message_count=message_count,
+                        reason="multi_truth",
+                    )
                     _maybe_store_service_carryover(
                         conversation=conversation,
                         service_meta=multi_meta if isinstance(multi_meta, dict) else None,
@@ -7555,6 +7862,116 @@ async def _handle_webhook_payload(
                         conversation_id=conversation.id,
                         bot_response=bot_response,
                     )
+
+        info_class_intents, _ = _detect_info_class_intents(
+            message_text,
+            intent_decomp_set=intent_decomp_set,
+        )
+        class_router_result = _build_class_router_result(
+            info_intents=info_class_intents,
+            booking_signal=booking_signal,
+            class_carryover=class_carryover,
+            domain_intent=DomainIntent.UNKNOWN,
+            domain_meta=None,
+        )
+        info_class = "info" in (class_router_result.get("classes") or [])
+        info_class_intents_for_reply: set[str] = set(class_router_result.get("intents") or [])
+        for item in class_router_result.get("carryover_intents") or []:
+            if isinstance(item, str) and item.strip():
+                info_class_intents_for_reply.add(item.strip().casefold())
+        if info_class and info_class_intents_for_reply:
+            info_service_query = intent_decomp_service_query
+            if not info_service_query and {"pricing", "duration"} & info_class_intents_for_reply:
+                info_service_query = _extract_service_hint(message_text, payload.client_slug)
+            if not info_service_query and {"pricing", "duration"} & info_class_intents_for_reply:
+                service_carryover_meta = _get_service_carryover(context_manager, message_count=message_count)
+                if service_carryover_meta:
+                    info_service_query = service_carryover_meta.get("service_query")
+
+            priority = (
+                INFO_INTENT_PRIORITY_SERVICE
+                if info_service_query
+                else INFO_INTENT_PRIORITY_GENERIC
+            )
+            answer_intents: list[str] = []
+            for intent_name in priority:
+                if intent_name in info_class_intents_for_reply and intent_name not in answer_intents:
+                    answer_intents.append(intent_name)
+                if len(answer_intents) >= 2:
+                    break
+            if not answer_intents:
+                answer_intents = list(sorted(info_class_intents_for_reply))[:2]
+
+            replies: list[str] = []
+            info_meta_combined: dict[str, Any] = {}
+            for intent_name in answer_intents:
+                reply, meta = _build_info_intent_reply(
+                    intent_name,
+                    service_query=info_service_query,
+                    client_slug=payload.client_slug,
+                    message_text=message_text,
+                )
+                if isinstance(reply, str):
+                    reply = reply.strip()
+                    if reply:
+                        replies.append(reply)
+                if isinstance(meta, dict) and meta:
+                    info_meta_combined.update(meta)
+            if replies:
+                bot_response = "\n\n".join(replies)
+                bot_response = _maybe_append_booking_cta(
+                    bot_response,
+                    conversation_state=conversation.state,
+                    allow_booking_flow=routing["allow_booking_flow"],
+                    has_followup=False,
+                )
+                bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+                _reset_low_confidence_retry(conversation)
+                trace_payload = {
+                    "stage": "info_class",
+                    "decision": "reply",
+                    "state": conversation.state,
+                    "intents": answer_intents,
+                    "class_router": class_router_result,
+                }
+                trace_payload.update(info_meta_combined)
+                _record_decision_trace(conversation, trace_payload)
+                _record_message_decision_meta(
+                    saved_message,
+                    action="reply",
+                    intent="info_bundle",
+                    source="class_router",
+                    fast_intent=False,
+                )
+                if saved_message:
+                    meta_updates = {"class_router": class_router_result}
+                    if info_meta_combined:
+                        meta_updates.update(info_meta_combined)
+                    _update_message_decision_metadata(saved_message, meta_updates)
+                _maybe_store_class_carryover(
+                    conversation=conversation,
+                    class_name="info",
+                    intents=answer_intents,
+                    info_meta=info_meta_combined,
+                    message_count=message_count,
+                    reason="class_router",
+                )
+                _maybe_store_service_carryover(
+                    conversation=conversation,
+                    service_meta=info_meta_combined,
+                    intent="info_bundle",
+                    message_count=message_count,
+                    reason="class_router",
+                )
+                bot_response, sent = _send_and_save(bot_response)
+                result_message = "Info class reply sent" if sent else "Info class reply failed"
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
 
         service_matcher = policy_handler.get("service_matcher")
         service_decision = (
@@ -8066,7 +8483,18 @@ async def _handle_webhook_payload(
 
     domain_out_hits = int(domain_meta.get("out_hits") or 0)
     domain_strict_in_hits = int(domain_meta.get("strict_in_hits") or 0)
-    out_of_domain_signal = domain_out_hits > 0
+    info_class_intents, info_class_meta = _detect_info_class_intents(
+        message_text,
+        intent_decomp_set=intent_decomp_set,
+    )
+    class_router_result = _build_class_router_result(
+        info_intents=info_class_intents,
+        booking_signal=booking_signal,
+        class_carryover=class_carryover,
+        domain_intent=domain_intent,
+        domain_meta=domain_meta,
+    )
+    out_of_domain_signal = class_router_result["out_of_domain_signal"]
     _log_timing(
         "intent_ms",
         (time.monotonic() - intent_t0) * 1000,
@@ -8076,10 +8504,36 @@ async def _handle_webhook_payload(
             "out_of_domain_signal": out_of_domain_signal,
             "out_hits": domain_out_hits,
             "strict_in_hits": domain_strict_in_hits,
+            "class_router": class_router_result,
         },
     )
 
     rag_confident = False
+
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "class_router",
+            "classes": class_router_result.get("classes"),
+            "intents": class_router_result.get("intents"),
+            "carryover_intents": class_router_result.get("carryover_intents"),
+            "in_signals": class_router_result.get("in_signals"),
+            "out_signals": class_router_result.get("out_signals"),
+            "anchors_in_hits": class_router_result.get("anchors_in_hits"),
+            "anchors_out_hits": class_router_result.get("anchors_out_hits"),
+            "out_of_domain_signal": out_of_domain_signal,
+            "carryover_class": class_router_result.get("carryover_class"),
+            "carryover_info_sections": class_router_result.get("carryover_info_sections"),
+        },
+    )
+    if saved_message:
+        _update_message_decision_metadata(
+            saved_message,
+            {
+                "class_router": class_router_result,
+                "carryover_class": class_router_result.get("carryover_class"),
+            },
+        )
 
     _record_decision_trace(
         conversation,
@@ -8092,6 +8546,7 @@ async def _handle_webhook_payload(
             "rag_confident": rag_confident,
             "out_hits": domain_out_hits,
             "strict_in_hits": domain_strict_in_hits,
+            "info_intents": sorted(info_class_intents),
         },
     )
 
