@@ -120,6 +120,13 @@
 - Live-check (prod, test number 77015705555@s.whatsapp.net): "Где вы находитесь и до скольки работаете?" → info_bundle reply (адрес+часы); conversation_id=624c6087-cbd6-4197-8131-4091cec563d0; decision_meta action=reply intent=info_bundle source=class_router; trace stages info_class + class_carryover set (SQL queries in session).
 - Doc sync PR #7: "Canonize info_bundle carryover invariants" merged (commit `eb3477ce1bbc118a38561b76a726ca4b3c0b4e16`): https://github.com/k1ddy/Truffles-AI-Employee/pull/7.
 - P0 fix info_bundle hours follow-up (PR #8): CI core/long PASS https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20688985111; prod `/admin/version` → `{"version":"main","git_commit":"6a90da1d4c465592c17b2b8cd14dd6805322ea9a","build_time":"2026-01-04T06:40:40Z"}`; live-check R3 (gap ~1.7s) conv_id `c0ab977f-0434-496a-ae66-05fface8fb7b`, user msg `aefc48a9-4b06-4ae3-9854-c3f5bac203ed`: decision_meta question_type=hours, service_query=null, class_router carryover_class=info_bundle, carryover_info_sections=["address","hours"]; trace info_class question_type=hours; reply address+hours (assistant msg `24bf46a8-1992-488e-a31d-431a58fd4dc7`).
+- Base-80 battery (8 классов, core 5–6 turns + long 10 turns + 10 перефразов на класс) добавлена E435–E530. Evidence: `truffles-api/app/knowledge/demo_salon/EVAL.yaml:4704-5680`.
+- Class stability: anchor boost для pricing/duration/hours/location + class_router.in_signals пишет `info_anchor_*`. Evidence: `truffles-api/app/routers/webhook.py:2608-2801`.
+- CI (main@2d8bf94) build/push/deploy green: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20689515956.
+- Прод: `/admin/version` → `{"version":"main","git_commit":"2d8bf940313178fdf43ad0270325f9008842a9e6","build_time":"2026-01-04T07:28:48Z"}`.
+- Live-check (prod): paraphrase “На каком перекрёстке вы?” → info_bundle; conv_id `a271e3d0-053d-4d83-9852-f3ea3167efe9`, user msg `cca7722f-8e03-45e4-9119-8deafaed2478` class_router.in_signals `info_anchor_location`; reply `c54d7be2-81db-4d52-b607-b53d857da061` (address+hours).
+- Live-check (prod): chaotic follow-up “Когда заканчиваете работу?” после price+parking → info_bundle; conv_id `4f9026c2-9c94-4b38-8248-b5aacf635cdf`, user msg `0e679f43-08dd-40e4-932f-7c0022811788` class_router.in_signals `info_anchor_hours`, `info_anchor_pricing`; reply `6489ceb6-27cc-474d-bd73-8609b081e749` (hours+address+pricing).
+- Live-check (prod): booking+info interrupt “Где вы находитесь и до скольки работаете?” после “Хочу записаться” → info reply + intent choice; conv_id `cd10fbb4-a5b9-4d98-87fb-b7dbb16a6766`, user msg `4cd2d8a9-2ae6-4652-9264-e08a6985247c` decision_meta intent=multi_intent_info booking_deferred=true info_sections=["address","hours"]; reply `425f22fe-6234-4e09-80fb-c4de27c65b90`.
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-31; Evidence: `curl -s http://localhost:8000/admin/health` → `checked_at=2025-12-31T07:12:59.570689+00:00`)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
@@ -1710,4 +1717,4 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - Prod: `/admin/version` commit 7b971713b4863094ce39910f03c5e60e97688b16.
 - Live‑check: conversation `99306198-1ecf-44d6-9066-72bb4e76e915`, decision_meta.booking_info_interrupt=true.
 
-*Последнее обновление: 2026-01-04 (Evidence: CI 20688985111 + /admin/version + live-check R3)*
+*Последнее обновление: 2026-01-04 (Evidence: CI 20689515956 + /admin/version + live-check SC1/SC2/SC3)*
