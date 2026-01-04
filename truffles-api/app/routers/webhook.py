@@ -2112,6 +2112,13 @@ SERVICE_CARRYOVER_SKIP_INTENTS = {
 }
 
 
+def _normalize_class_name(class_name: str) -> str:
+    normalized = class_name.strip()
+    if normalized.casefold() in {"info", "info_bundle"}:
+        return "info_bundle"
+    return normalized
+
+
 def _evaluate_booking_signal(
     messages: list[str],
     *,
@@ -2401,6 +2408,7 @@ def _set_class_carryover(
     message_count: int,
 ) -> dict:
     manager = dict(manager)
+    normalized_class = _normalize_class_name(class_name)
     cleaned_intents = []
     seen = set()
     for intent in intents:
@@ -2421,7 +2429,7 @@ def _set_class_carryover(
                 continue
             cleaned_sections.append(value)
     manager[CLASS_CARRYOVER_KEY] = {
-        "class": class_name.strip(),
+        "class": normalized_class,
         "intents": cleaned_intents,
         "info_sections": cleaned_sections,
         "message_count": message_count,
@@ -2439,7 +2447,8 @@ def _maybe_store_class_carryover(
     message_count: int,
     reason: str,
 ) -> None:
-    if class_name.strip().casefold() not in CLASS_CARRYOVER_CLASSES:
+    normalized_class = _normalize_class_name(class_name)
+    if normalized_class not in CLASS_CARRYOVER_CLASSES:
         return
     intent_list = intents or []
     info_sections = []
@@ -2449,7 +2458,7 @@ def _maybe_store_class_carryover(
     context_manager = _get_context_manager(context)
     context_manager = _set_class_carryover(
         context_manager,
-        class_name=class_name.strip(),
+        class_name=normalized_class,
         intents=intent_list,
         info_sections=info_sections,
         message_count=message_count,
@@ -2461,7 +2470,7 @@ def _maybe_store_class_carryover(
         {
             "stage": "class_carryover",
             "decision": "set",
-            "class": class_name.strip(),
+            "class": normalized_class,
             "intents": intent_list,
             "info_sections": info_sections,
             "ttl": CLASS_CARRYOVER_TTL_MESSAGES,
@@ -2692,10 +2701,7 @@ def _build_class_router_result(
     if isinstance(class_carryover, dict):
         carryover_class = class_carryover.get("class")
         if isinstance(carryover_class, str) and carryover_class.strip():
-            normalized = carryover_class.strip()
-            if normalized.casefold() == "info":
-                normalized = "info_bundle"
-            carryover_class = normalized
+            carryover_class = _normalize_class_name(carryover_class)
             in_signals.append("carryover")
             classes.append(carryover_class)
         raw_sections = class_carryover.get("info_sections")
@@ -6186,45 +6192,54 @@ async def _handle_webhook_payload(
         and not intent_decomp_service_query
         and intent_decomp_set & SERVICE_CARRYOVER_INTENTS
     ):
-        context = _get_conversation_context(conversation)
-        context_manager = _get_context_manager(context)
-        carryover = _get_service_carryover(context_manager, message_count=message_count)
-        if carryover and isinstance(intent_decomp_payload, dict):
-            intent_decomp_payload = dict(intent_decomp_payload)
-            intent_decomp_payload["service_query"] = carryover["service_query"]
-            intent_decomp_payload["service_query_source"] = "context"
-            carryover_score = carryover.get("service_query_score")
-            if isinstance(carryover_score, (int, float)):
-                intent_decomp_payload["service_query_score"] = carryover_score
-            intent_decomp_service_query = carryover["service_query"]
-            service_query_score = (
-                float(carryover_score)
-                if isinstance(carryover_score, (int, float))
-                else 1.0
-            )
-            if saved_message:
-                _update_message_decision_metadata(
-                    saved_message,
+        skip_service_carryover = False
+        if isinstance(class_carryover, dict) and _looks_like_hours_followup(message_text):
+            raw_sections = class_carryover.get("info_sections")
+            if isinstance(raw_sections, list):
+                for section in raw_sections:
+                    if isinstance(section, str) and section.strip().casefold() == "hours":
+                        skip_service_carryover = True
+                        break
+        if not skip_service_carryover:
+            context = _get_conversation_context(conversation)
+            context_manager = _get_context_manager(context)
+            carryover = _get_service_carryover(context_manager, message_count=message_count)
+            if carryover and isinstance(intent_decomp_payload, dict):
+                intent_decomp_payload = dict(intent_decomp_payload)
+                intent_decomp_payload["service_query"] = carryover["service_query"]
+                intent_decomp_payload["service_query_source"] = "context"
+                carryover_score = carryover.get("service_query_score")
+                if isinstance(carryover_score, (int, float)):
+                    intent_decomp_payload["service_query_score"] = carryover_score
+                intent_decomp_service_query = carryover["service_query"]
+                service_query_score = (
+                    float(carryover_score)
+                    if isinstance(carryover_score, (int, float))
+                    else 1.0
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "service_query": carryover["service_query"],
+                            "service_query_source": "context",
+                            "service_query_score": service_query_score,
+                            "service_query_ttl": carryover.get("ttl"),
+                            "service_query_ttl_remaining": carryover.get("remaining"),
+                        },
+                    )
+                _record_decision_trace(
+                    conversation,
                     {
+                        "stage": "service_carryover",
+                        "decision": "used",
                         "service_query": carryover["service_query"],
                         "service_query_source": "context",
                         "service_query_score": service_query_score,
-                        "service_query_ttl": carryover.get("ttl"),
-                        "service_query_ttl_remaining": carryover.get("remaining"),
+                        "ttl": carryover.get("ttl"),
+                        "ttl_remaining": carryover.get("remaining"),
                     },
                 )
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "service_carryover",
-                    "decision": "used",
-                    "service_query": carryover["service_query"],
-                    "service_query_source": "context",
-                    "service_query_score": service_query_score,
-                    "ttl": carryover.get("ttl"),
-                    "ttl_remaining": carryover.get("remaining"),
-                },
-            )
     intent_decomp_has_booking = "booking" in intent_decomp_set
     intent_decomp_info = intent_decomp_set & BOOKING_INFO_QUESTION_TYPES
     if intent_decomp_has_booking:
@@ -7970,6 +7985,8 @@ async def _handle_webhook_payload(
                         replies.append(reply)
                 if isinstance(meta, dict) and meta:
                     info_meta_combined.update(meta)
+            if force_hours_followup:
+                info_meta_combined["question_type"] = "hours"
             if replies:
                 bot_response = "\n\n".join(replies)
                 bot_response = _maybe_append_booking_cta(
