@@ -4561,6 +4561,20 @@ eval_cases:
     must_include_any:
     - '9:00'
     - '21:00'
+- id: E428a
+  turns:
+  - Где вы находитесь и до скольки работаете?
+  - И по времени?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Адрес:
+    - Работаем
+    must_not:
+    - Какая услуга
+    - зависит от услуги
+    - Сколько длится
 - id: E429
   tier: long
   turns:
