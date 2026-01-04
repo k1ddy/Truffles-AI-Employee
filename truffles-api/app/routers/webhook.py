@@ -2605,12 +2605,95 @@ def _maybe_store_service_carryover(
     )
 
 
+INFO_ANCHOR_GROUPS: dict[str, list[tuple[str, ...]]] = {
+    "pricing": [
+        ("цен",),
+        ("стоим",),
+        ("скольк", "стоит"),
+        ("поч",),
+    ],
+    "duration": [
+        ("длит",),
+        ("длител",),
+        ("скольк", "врем"),
+        ("врем", "заним"),
+        ("минут",),
+        ("час",),
+    ],
+    "hours": [
+        ("график",),
+        ("режим", "работ"),
+        ("работ", "скольк"),
+        ("работ", "когда"),
+        ("работ", "до"),
+        ("откры",),
+        ("закры",),
+    ],
+    "location": [
+        ("адрес",),
+        ("где", "наход"),
+        ("где", "вы"),
+        ("локац",),
+        ("перекр",),
+        ("угол",),
+        ("ориентир",),
+        ("как", "доех"),
+        ("как", "добрат"),
+        ("как", "найт"),
+        ("куда", "ехать"),
+        ("улиц",),
+    ],
+}
+
+QUESTION_WORD_PREFIXES = ("скольк", "где", "когда", "како")
+
+
+def _tokenize_for_matching(normalized: str) -> list[str]:
+    return re.findall(r"\w+", normalized)
+
+
+def _has_token_prefix(tokens: list[str], prefix: str) -> bool:
+    return any(token.startswith(prefix) for token in tokens)
+
+
+def _anchor_group_hit(tokens: list[str], group: tuple[str, ...]) -> bool:
+    return all(_has_token_prefix(tokens, prefix) for prefix in group)
+
+
+def _count_anchor_hits(tokens: list[str], groups: list[tuple[str, ...]]) -> int:
+    hits = 0
+    for group in groups:
+        if _anchor_group_hit(tokens, group):
+            hits += 1
+    return hits
+
+
+def _detect_info_anchor_hits(tokens: list[str]) -> dict[str, int]:
+    hits: dict[str, int] = {}
+    for intent in INFO_INTENTS:
+        groups = INFO_ANCHOR_GROUPS.get(intent)
+        if not groups:
+            continue
+        count = _count_anchor_hits(tokens, groups)
+        if count:
+            hits[intent] = count
+    return hits
+
+
 def _detect_info_class_intents(message_text: str | None, *, intent_decomp_set: set[str]) -> tuple[set[str], dict[str, Any]]:
     intents = {intent for intent in intent_decomp_set if intent in INFO_INTENTS}
     meta: dict[str, Any] = {}
     normalized = normalize_for_matching(message_text) if message_text else ""
     if not normalized:
         return intents, meta
+
+    tokens = _tokenize_for_matching(normalized)
+    anchor_hits = _detect_info_anchor_hits(tokens)
+    anchor_intents = {intent for intent, count in anchor_hits.items() if count > 0}
+    question_like = "?" in (message_text or "")
+    if not question_like and tokens:
+        question_like = any(_has_token_prefix(tokens, prefix) for prefix in QUESTION_WORD_PREFIXES)
+    short_query = 0 < len(tokens) <= 4
 
     parking_signal = "парков" in normalized
     guest_signal = any(token in normalized for token in ["гост", "ребен", "ребён", "дет", "коляс", "ожидан", "подожд", "пораньше", "раньше"])
@@ -2623,19 +2706,30 @@ def _detect_info_class_intents(message_text: str | None, *, intent_decomp_set: s
         for token in ["работае", "до скольк", "во скольк", "график", "открыт", "сейчас открыты", "когда откры"]
     )
 
+    if "location" in anchor_intents and (question_like or short_query or intent_decomp_set):
+        location_signal = True
+    if "hours" in anchor_intents and (question_like or short_query or intent_decomp_set):
+        hours_signal = True
+
     if location_signal:
         intents.add("location")
     if hours_signal:
         intents.add("hours")
     question_type = None
     try:
-        question_type = semantic_question_type(message_text)
+        question_type = semantic_question_type(message_text, include_kinds=INFO_INTENTS)
     except Exception:
         question_type = None
     if question_type and question_type.kind in INFO_INTENTS:
         intents.add(question_type.kind)
         meta["question_type"] = question_type.kind
         meta["question_type_score"] = question_type.score
+    anchor_boost = question_like or short_query or bool(intent_decomp_set) or bool(question_type)
+    if anchor_intents and anchor_boost:
+        intents.update(anchor_intents)
+        meta["anchor_intents"] = sorted(anchor_intents)
+        meta["anchor_hits"] = anchor_hits
+        meta["anchor_boost"] = anchor_boost
     meta["info_signals"] = {
         "parking": parking_signal,
         "guest": guest_signal,
@@ -2673,6 +2767,7 @@ def _looks_like_hours_followup(message_text: str | None) -> bool:
 def _build_class_router_result(
     *,
     info_intents: set[str],
+    info_meta: dict[str, Any] | None,
     booking_signal: bool,
     class_carryover: dict | None,
     domain_intent: DomainIntent,
@@ -2687,6 +2782,12 @@ def _build_class_router_result(
     if info_intents:
         in_signals.append("info_intents")
         classes.append("info_bundle")
+    if isinstance(info_meta, dict):
+        raw_anchor_intents = info_meta.get("anchor_intents")
+        if isinstance(raw_anchor_intents, list):
+            for item in raw_anchor_intents:
+                if isinstance(item, str) and item.strip():
+                    in_signals.append(f"info_anchor_{item.strip().casefold()}")
     if booking_signal:
         in_signals.append("booking_signal")
         classes.append("booking")
@@ -7907,12 +8008,13 @@ async def _handle_webhook_payload(
                         bot_response=bot_response,
                     )
 
-        info_class_intents, _ = _detect_info_class_intents(
+        info_class_intents, info_class_meta = _detect_info_class_intents(
             message_text,
             intent_decomp_set=intent_decomp_set,
         )
         class_router_result = _build_class_router_result(
             info_intents=info_class_intents,
+            info_meta=info_class_meta,
             booking_signal=booking_signal,
             class_carryover=class_carryover,
             domain_intent=DomainIntent.UNKNOWN,
@@ -8559,6 +8661,7 @@ async def _handle_webhook_payload(
     )
     class_router_result = _build_class_router_result(
         info_intents=info_class_intents,
+        info_meta=info_class_meta,
         booking_signal=booking_signal,
         class_carryover=class_carryover,
         domain_intent=domain_intent,
