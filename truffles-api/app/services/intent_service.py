@@ -32,6 +32,10 @@ RAG_HYBRID_BM25_WEIGHT = float(os.environ.get("RAG_HYBRID_BM25_WEIGHT", "0.4"))
 ROUTER_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "intent_classifier.md"
 ROUTER_TIMEOUT_SECONDS = float(os.environ.get("ROUTER_TIMEOUT_SECONDS", "3.0"))
 ROUTER_MAX_TOKENS = int(os.environ.get("ROUTER_MAX_TOKENS", "140"))
+_DEFAULT_ROUTER_MODEL = (
+    "gpt-4o-mini" if FAST_MODEL.strip().lower().startswith("gpt-5") else FAST_MODEL
+)
+ROUTER_MODEL = os.environ.get("ROUTER_MODEL", _DEFAULT_ROUTER_MODEL).strip()
 ROUTER_ALLOWED_CLASSES = {
     "booking",
     "info_bundle",
@@ -403,7 +407,7 @@ def route_llm_router(
         {"role": "system", "content": prompt},
         {"role": "user", "content": json.dumps(router_input, ensure_ascii=False)},
     ]
-    model_name = FAST_MODEL.strip().lower()
+    model_name = ROUTER_MODEL.strip().lower()
     temperature = 0.0
     temperature_override: float | None = temperature
     if model_name.startswith("gpt-5"):
@@ -421,7 +425,7 @@ def route_llm_router(
             kwargs = {
                 "messages": messages,
                 "max_tokens": max_tokens,
-                "model": FAST_MODEL,
+                "model": ROUTER_MODEL,
                 "timeout_seconds": ROUTER_TIMEOUT_SECONDS,
             }
             if temperature_override is not None:
@@ -435,7 +439,7 @@ def route_llm_router(
                     "context": {
                         "stage": "router_llm_ms",
                         "elapsed_ms": elapsed_ms,
-                        "model_name": FAST_MODEL,
+                        "model_name": ROUTER_MODEL,
                         "model_tier": "fast",
                         "timeout": True,
                         "timeout_seconds": ROUTER_TIMEOUT_SECONDS,
@@ -458,7 +462,7 @@ def route_llm_router(
                     "context": {
                         "stage": "router_llm_ms",
                         "elapsed_ms": elapsed_ms,
-                        "model_name": FAST_MODEL,
+                        "model_name": ROUTER_MODEL,
                         "model_tier": "fast",
                         "timeout": False,
                         "error": error_text,
@@ -477,7 +481,7 @@ def route_llm_router(
                 "context": {
                     "stage": "router_llm_ms",
                     "elapsed_ms": elapsed_ms,
-                    "model_name": FAST_MODEL,
+                    "model_name": ROUTER_MODEL,
                     "model_tier": "fast",
                     "timeout": False,
                     "max_tokens": max_tokens,
