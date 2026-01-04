@@ -2636,6 +2636,31 @@ def _detect_info_class_intents(message_text: str | None, *, intent_decomp_set: s
     return intents, meta
 
 
+def _looks_like_hours_followup(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    if _contains_any(normalized, ["по времени", "по часам", "по час"]):
+        return True
+    return _contains_any(
+        normalized,
+        [
+            "график",
+            "до скольк",
+            "во скольк",
+            "время работы",
+            "часы",
+            "часов",
+            "работае",
+            "открыт",
+            "когда откры",
+            "открывает",
+        ],
+    )
+
+
 def _build_class_router_result(
     *,
     info_intents: set[str],
@@ -7884,13 +7909,6 @@ async def _handle_webhook_payload(
             if isinstance(item, str) and item.strip():
                 info_class_intents_for_reply.add(item.strip().casefold())
         if info_class and info_class_intents_for_reply:
-            info_service_query = intent_decomp_service_query
-            if not info_service_query and {"pricing", "duration"} & info_class_intents_for_reply:
-                info_service_query = _extract_service_hint(message_text, payload.client_slug)
-            if not info_service_query and {"pricing", "duration"} & info_class_intents_for_reply:
-                service_carryover_meta = _get_service_carryover(context_manager, message_count=message_count)
-                if service_carryover_meta:
-                    info_service_query = service_carryover_meta.get("service_query")
             carryover_sections = class_router_result.get("carryover_info_sections")
             carryover_has_hours = False
             if isinstance(carryover_sections, list):
@@ -7898,7 +7916,28 @@ async def _handle_webhook_payload(
                     if isinstance(section, str) and section.strip().casefold() == "hours":
                         carryover_has_hours = True
                         break
-            if carryover_has_hours and not info_service_query:
+            explicit_service = bool(intent_decomp_service_query)
+            force_hours_followup = (
+                carryover_has_hours
+                and _looks_like_hours_followup(message_text)
+                and not explicit_service
+            )
+            info_service_query = intent_decomp_service_query
+            if (
+                not force_hours_followup
+                and not info_service_query
+                and {"pricing", "duration"} & info_class_intents_for_reply
+            ):
+                info_service_query = _extract_service_hint(message_text, payload.client_slug)
+            if (
+                not force_hours_followup
+                and not info_service_query
+                and {"pricing", "duration"} & info_class_intents_for_reply
+            ):
+                service_carryover_meta = _get_service_carryover(context_manager, message_count=message_count)
+                if service_carryover_meta:
+                    info_service_query = service_carryover_meta.get("service_query")
+            if force_hours_followup:
                 info_class_intents_for_reply.discard("duration")
                 info_class_intents_for_reply.add("hours")
 
