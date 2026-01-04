@@ -403,7 +403,11 @@ def route_llm_router(
         {"role": "system", "content": prompt},
         {"role": "user", "content": json.dumps(router_input, ensure_ascii=False)},
     ]
+    model_name = FAST_MODEL.strip().lower()
     temperature = 0.0
+    temperature_override: float | None = temperature
+    if model_name.startswith("gpt-5"):
+        temperature_override = 1.0
     router_retry = False
     total_elapsed_ms = 0.0
 
@@ -483,14 +487,13 @@ def route_llm_router(
         )
         return response, elapsed_ms, None
 
-    temperature_override: float | None = temperature
     response, elapsed_ms, error = _call_router_llm(
         ROUTER_MAX_TOKENS, temperature_override=temperature_override
     )
     total_elapsed_ms += elapsed_ms
     if error == "unsupported_temperature":
         router_retry = True
-        temperature_override = None
+        temperature_override = 1.0
         response, elapsed_ms, error = _call_router_llm(
             ROUTER_MAX_TOKENS, temperature_override=temperature_override
         )
