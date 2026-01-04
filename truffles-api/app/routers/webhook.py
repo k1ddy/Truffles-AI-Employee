@@ -2101,7 +2101,7 @@ BOOKING_CTA_SERVICE_INTENTS = BOOKING_TIME_SERVICE_INTENTS - {
 }
 CLASS_CARRYOVER_KEY = "class_carryover"
 CLASS_CARRYOVER_TTL_MESSAGES = 4
-CLASS_CARRYOVER_CLASSES = {"info"}
+CLASS_CARRYOVER_CLASSES = {"info_bundle"}
 SERVICE_CARRYOVER_KEY = "service_carryover"
 SERVICE_CARRYOVER_TTL_MESSAGES = 4
 SERVICE_CARRYOVER_INTENTS = {"pricing", "duration"}
@@ -2652,7 +2652,7 @@ def _build_class_router_result(
 
     if info_intents:
         in_signals.append("info_intents")
-        classes.append("info")
+        classes.append("info_bundle")
     if booking_signal:
         in_signals.append("booking_signal")
         classes.append("booking")
@@ -2667,8 +2667,12 @@ def _build_class_router_result(
     if isinstance(class_carryover, dict):
         carryover_class = class_carryover.get("class")
         if isinstance(carryover_class, str) and carryover_class.strip():
+            normalized = carryover_class.strip()
+            if normalized.casefold() == "info":
+                normalized = "info_bundle"
+            carryover_class = normalized
             in_signals.append("carryover")
-            classes.append(carryover_class.strip())
+            classes.append(carryover_class)
         raw_sections = class_carryover.get("info_sections")
         if isinstance(raw_sections, list):
             carryover_info_sections = [item for item in raw_sections if isinstance(item, str)]
@@ -6695,7 +6699,7 @@ async def _handle_webhook_payload(
                 _update_message_decision_metadata(saved_message, info_meta)
             _maybe_store_class_carryover(
                 conversation=conversation,
-                class_name="info",
+                class_name="info_bundle",
                 intents=[intent_queue_choice],
                 info_meta=info_meta,
                 message_count=message_count,
@@ -6919,7 +6923,7 @@ async def _handle_webhook_payload(
                     _update_message_decision_metadata(saved_message, updates)
                 _maybe_store_class_carryover(
                     conversation=conversation,
-                    class_name="info",
+                    class_name="info_bundle",
                     intents=answered_intents,
                     info_meta=info_meta,
                     message_count=message_count,
@@ -7473,7 +7477,7 @@ async def _handle_webhook_payload(
                 )
                 _maybe_store_class_carryover(
                     conversation=conversation,
-                    class_name="info",
+                    class_name="info_bundle",
                     intents=booking_info_intents,
                     info_meta=info_meta,
                     message_count=message_count,
@@ -7839,7 +7843,7 @@ async def _handle_webhook_payload(
                         _update_message_decision_metadata(saved_message, multi_meta)
                     _maybe_store_class_carryover(
                         conversation=conversation,
-                        class_name="info",
+                        class_name="info_bundle",
                         intents=["multi_truth"],
                         info_meta=multi_meta if isinstance(multi_meta, dict) else None,
                         message_count=message_count,
@@ -7874,7 +7878,7 @@ async def _handle_webhook_payload(
             domain_intent=DomainIntent.UNKNOWN,
             domain_meta=None,
         )
-        info_class = "info" in (class_router_result.get("classes") or [])
+        info_class = "info_bundle" in (class_router_result.get("classes") or [])
         info_class_intents_for_reply: set[str] = set(class_router_result.get("intents") or [])
         for item in class_router_result.get("carryover_intents") or []:
             if isinstance(item, str) and item.strip():
@@ -7887,6 +7891,16 @@ async def _handle_webhook_payload(
                 service_carryover_meta = _get_service_carryover(context_manager, message_count=message_count)
                 if service_carryover_meta:
                     info_service_query = service_carryover_meta.get("service_query")
+            carryover_sections = class_router_result.get("carryover_info_sections")
+            carryover_has_hours = False
+            if isinstance(carryover_sections, list):
+                for section in carryover_sections:
+                    if isinstance(section, str) and section.strip().casefold() == "hours":
+                        carryover_has_hours = True
+                        break
+            if carryover_has_hours and not info_service_query:
+                info_class_intents_for_reply.discard("duration")
+                info_class_intents_for_reply.add("hours")
 
             priority = (
                 INFO_INTENT_PRIORITY_SERVICE
@@ -7950,7 +7964,7 @@ async def _handle_webhook_payload(
                     _update_message_decision_metadata(saved_message, meta_updates)
                 _maybe_store_class_carryover(
                     conversation=conversation,
-                    class_name="info",
+                    class_name="info_bundle",
                     intents=answer_intents,
                     info_meta=info_meta_combined,
                     message_count=message_count,
