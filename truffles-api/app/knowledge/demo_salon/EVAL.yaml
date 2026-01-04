@@ -172,7 +172,7 @@ eval_cases:
   user: Есть скидка на первый визит?
   expected:
     action: reply
-    intent: promotions
+    intent: discounts
     must_include:
     - 10%
     must_include_any:
@@ -183,7 +183,7 @@ eval_cases:
   user: Именинникам есть скидка?
   expected:
     action: reply
-    intent: promotions
+    intent: discounts
     must_include:
     - 15%
     must_include_any:
@@ -5910,3 +5910,34 @@ eval_cases:
     - перчатки
     - не снимайте покрытие
     - увлажняйте кутикулу
+- id: E544
+  user: Есть скидки или акции?
+  expected:
+    action: reply
+    intent: discounts
+    must_include_any:
+    - Официальные акции
+    - Скидки действуют
+    must_not:
+    - ₸
+    - сколько стоит
+    trace_contains:
+    - stage: policy_gate
+      policy_gate: discounts
+- id: E545
+  user: Есть скидки, хочу записаться и адрес, пожалуйста.
+  expected:
+    action: reply
+    intent: discounts
+    must_include_any:
+    - Официальные акции
+    - Скидки действуют
+    must_include:
+    - по записи
+    - по адресу
+    must_not:
+    - ₸
+    - сколько стоит
+    trace_contains:
+    - stage: policy_gate
+      policy_gate: discounts
