@@ -67,6 +67,7 @@ from app.services.demo_salon_knowledge import (
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
+    ROUTER_CONFIDENCE_THRESHOLD,
     DomainIntent,
     Intent,
     classify_domain_with_scores,
@@ -2906,6 +2907,14 @@ def _ensure_router_output_meta(router_output: dict, *, error: str | None) -> dic
     return router_output
 
 
+def _normalize_router_fallback_reason(*, error: str | None) -> str:
+    if error == "timeout":
+        return "timeout"
+    if error:
+        return "error"
+    return "low_confidence"
+
+
 def _build_class_router_result(
     *,
     info_intents: set[str],
@@ -3026,6 +3035,10 @@ def _resolve_class_router_result(
         else:
             result["intents"] = sorted(info_router_intents)
 
+    router_fallback_reason = None
+    if not router_used and isinstance(router_fallback, str) and router_fallback != "skipped":
+        router_fallback_reason = router_fallback
+
     result["router"] = {
         "used": bool(router_used),
         "confidence": router_confidence,
@@ -3035,6 +3048,7 @@ def _resolve_class_router_result(
         "output": router_output,
         "sla": router_sla,
     }
+    result["router_fallback_reason"] = router_fallback_reason
     return result
 
 
@@ -6765,14 +6779,14 @@ async def _handle_webhook_payload(
                 confidence = router_output.get("confidence")
                 if isinstance(confidence, (int, float)):
                     router_state["confidence"] = float(confidence)
-                router_class = router_output.get("class")
-                router_state["used"] = bool(
-                    router_state["confidence"] >= MID_CONFIDENCE_THRESHOLD
-                    and isinstance(router_class, str)
-                    and router_class.strip()
-                )
+            router_class = router_output.get("class")
+            router_state["used"] = bool(
+                router_state["confidence"] >= ROUTER_CONFIDENCE_THRESHOLD
+                and isinstance(router_class, str)
+                and router_class.strip()
+            )
             if not router_state["used"]:
-                router_state["fallback_reason"] = "low_confidence"
+                router_state["fallback_reason"] = _normalize_router_fallback_reason(error=None)
             else:
                 router_state["fallback_reason"] = None
         else:
@@ -6781,7 +6795,9 @@ async def _handle_webhook_payload(
                 if isinstance(router_result, dict)
                 else "router_failed"
             )
-            router_state["fallback_reason"] = router_state["error"]
+            router_state["fallback_reason"] = _normalize_router_fallback_reason(
+                error=router_state["error"]
+            )
             router_output = router_result.get("payload") if isinstance(router_result, dict) else None
             if isinstance(router_output, dict):
                 router_state["output"] = _ensure_router_output_meta(
@@ -9175,6 +9191,7 @@ async def _handle_webhook_payload(
             "out_of_domain_signal": out_of_domain_signal,
             "carryover_class": class_router_result.get("carryover_class"),
             "carryover_info_sections": class_router_result.get("carryover_info_sections"),
+            "router_fallback_reason": class_router_result.get("router_fallback_reason"),
             "router": class_router_result.get("router"),
         },
     )
@@ -9184,6 +9201,7 @@ async def _handle_webhook_payload(
             {
                 "class_router": class_router_result,
                 "carryover_class": class_router_result.get("carryover_class"),
+                "router_fallback_reason": class_router_result.get("router_fallback_reason"),
             },
         )
 
