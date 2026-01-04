@@ -113,6 +113,11 @@
 - Прод: `/admin/version` → `{"version":"main","git_commit":"8a6164fac4607260f09c63e60a7fee3d96a2961c","build_time":"2026-01-03T13:49:12Z"}` (команда `curl -s http://localhost:8000/admin/version`).
 - Info-combo bundle: location/hours (и pricing/duration при сигнале адрес/парковка/гость) объединяют адрес+часы, опционально парковку/гостей, пишут info_sections meta. Evidence: `truffles-api/app/services/demo_salon_knowledge.py:207-285`, `truffles-api/app/routers/webhook.py:3408-3465`.
 - Core EVAL расширен инфо-комбо кейсами (адрес/часы/парковка/guest/quiet/clarify) E422–E428. Evidence: `truffles-api/app/knowledge/demo_salon/EVAL.yaml:4484-4558`.
+- Class-router info-bundle: при info-интентах отвечает bundle по приоритету + пишет class_carryover (TTL 4), decision_meta `intent=info_bundle`/`class_router`/`info_sections`. Evidence: `truffles-api/app/routers/webhook.py:2102-2365`, `truffles-api/app/routers/webhook.py:7866-7967`.
+- Long EVAL info-bundle paraphrases E429–E434 добавлены. Evidence: `truffles-api/app/knowledge/demo_salon/EVAL.yaml:4564-4688`.
+- CI (main@e36337e) green с build/push/deploy: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20687244044.
+- Прод: `/admin/version` → `{"version":"main","git_commit":"e36337e63780619e598176f3370680b86573f8bb","build_time":"2026-01-04T03:55:04Z"}` (команда `curl -s https://api.truffles.kz/admin/version`).
+- Live-check (prod, test number 77015705555@s.whatsapp.net): "Где вы находитесь и до скольки работаете?" → info_bundle reply (адрес+часы); conversation_id=624c6087-cbd6-4197-8131-4091cec563d0; decision_meta action=reply intent=info_bundle source=class_router; trace stages info_class + class_carryover set (SQL queries in session).
 
 ### ПОСЛЕДНЯЯ ПРОВЕРКА (prod, 2025-12-31; Evidence: `curl -s http://localhost:8000/admin/health` → `checked_at=2025-12-31T07:12:59.570689+00:00`)
 - Preflight: truffles-api running, image `ghcr.io/k1ddy/truffles-ai-employee:main`.
@@ -1703,4 +1708,4 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - Prod: `/admin/version` commit 7b971713b4863094ce39910f03c5e60e97688b16.
 - Live‑check: conversation `99306198-1ecf-44d6-9066-72bb4e76e915`, decision_meta.booking_info_interrupt=true.
 
-*Последнее обновление: 2026-01-02 (Evidence: CI 20658445278 + /admin/version + live-check)*
+*Последнее обновление: 2026-01-04 (Evidence: CI 20687244044 + /admin/version + live-check)*
