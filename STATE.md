@@ -1733,4 +1733,23 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - Prod: `/admin/version` commit 7b971713b4863094ce39910f03c5e60e97688b16.
 - Live‑check: conversation `99306198-1ecf-44d6-9066-72bb4e76e915`, decision_meta.booking_info_interrupt=true.
 
-*Последнее обновление: 2026-01-04 (Evidence: CI 20693678478 + /admin/version + live-check info_bundle dedupe)*
+---
+
+### 2026-01-04 — P1-A/P1-B/P1-C: router SLA + chaos long eval + deploy + live-check
+
+**Что сделали:**
+- P1-A: router SLA + fallback reasons (PR #24).
+- P1-B: добавлены long chaos кейсы E546–E551 (PR #25).
+- P1-C: merge → CI build/push/deploy → live-check 3 сценария.
+
+**Evidence:**
+- PR #24: https://github.com/k1ddy/Truffles-AI-Employee/pull/24
+- PR #25: https://github.com/k1ddy/Truffles-AI-Employee/pull/25
+- CI main: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20694618301 (build-push+deploy)
+- Prod `/admin/version`: `{"version":"main","git_commit":"9c58a3b86835d84fa4fb949331c3949187fd998c","build_time":"2026-01-04T14:49:30Z"}`
+- Live-check (decision_trace.class_router: router_error=none, router_fallback_reason=null, fallback_rate_flag=false):
+  - chaos → conversation `3c41f05b-7229-44cd-b0d3-32221644aefe` (msg `live7-chaos-1767539630470-1`)
+  - discount+booking → conversation `04957432-fde4-46eb-abb6-4bea70d1a388` (msg `live7-discount_booking-1767539630962-1`)
+  - consult+перебивка → conversation `d7107767-58a7-4e4f-96ed-6f457313c8e2` (msg `live7-consult_interrupt-1767539631375-1`)
+
+*Последнее обновление: 2026-01-04 (Evidence: CI 20694618301 + /admin/version + live-check router SLA)*
