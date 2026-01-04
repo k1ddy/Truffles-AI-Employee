@@ -61,6 +61,7 @@ from app.services.demo_salon_knowledge import (
     get_demo_salon_price_item,
     get_demo_salon_price_reply,
     get_demo_salon_service_decision,
+    load_yaml_truth,
     semantic_question_type,
     semantic_service_match,
 )
@@ -2798,6 +2799,87 @@ def _looks_like_hours_followup(message_text: str | None) -> bool:
             "открывает",
         ],
     )
+
+
+def _looks_like_promotions_request(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    normalized = _normalize_text(message_text)
+    if not normalized:
+        return False
+    keywords = LLM_GUARD_TOPICS.get("discount") or []
+    return _contains_any(normalized, keywords)
+
+
+def _load_discount_policy_payload(*, policy_type: str | None) -> dict | None:
+    if policy_type != "demo_salon":
+        return None
+    truth = load_yaml_truth()
+    if not isinstance(truth, dict):
+        return None
+    client_pack = truth.get("client_pack")
+    if not isinstance(client_pack, dict):
+        return None
+    discounts = client_pack.get("discounts")
+    if not isinstance(discounts, dict):
+        return None
+    if discounts.get("enabled") is False:
+        return None
+    return discounts
+
+
+def _has_discount_policy_rules(*, policy_type: str | None) -> bool:
+    discounts = _load_discount_policy_payload(policy_type=policy_type)
+    if not discounts:
+        return False
+    rules = discounts.get("rules")
+    if isinstance(rules, list) and rules:
+        return True
+    items = discounts.get("items")
+    if isinstance(items, list) and items:
+        return True
+    stacking = discounts.get("stacking") or discounts.get("stacking_notes")
+    if isinstance(stacking, str) and stacking.strip():
+        return True
+    fallback_text = discounts.get("value_text") or discounts.get("text") or discounts.get("notes")
+    if isinstance(fallback_text, str) and fallback_text.strip():
+        return True
+    return False
+
+
+def _format_discounts_policy_reply(*, policy_type: str | None) -> str | None:
+    discounts = _load_discount_policy_payload(policy_type=policy_type)
+    if not discounts:
+        return None
+    rules = discounts.get("rules")
+    if isinstance(rules, list) and rules:
+        parts = [str(rule).strip() for rule in rules if str(rule).strip()]
+        if parts:
+            return " ".join(parts)
+    fallback_text = discounts.get("value_text") or discounts.get("text") or discounts.get("notes")
+    if isinstance(fallback_text, str) and fallback_text.strip():
+        return fallback_text.strip()
+    items = discounts.get("items")
+    if not isinstance(items, list):
+        items = []
+    parts: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        percent = item.get("discount_percent") or item.get("discount")
+        if name and percent:
+            parts.append(f"{name}: {percent}%")
+    if parts:
+        stacking = discounts.get("stacking") or discounts.get("stacking_notes")
+        stacking_text = ""
+        if isinstance(stacking, str) and stacking.strip():
+            stacking_text = f" {stacking}."
+        return "Официальные акции: " + "; ".join(parts) + "." + stacking_text
+    stacking = discounts.get("stacking") or discounts.get("stacking_notes")
+    if isinstance(stacking, str) and stacking.strip():
+        return stacking.strip()
+    return None
 
 
 def _build_router_meta_output(*, error: str, retry: bool = False, elapsed_ms: float = 0.0) -> dict:
@@ -6937,6 +7019,162 @@ async def _handle_webhook_payload(
         )
         bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
         result_message = "Out-of-domain early response sent" if sent else "Out-of-domain early response failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    promotions_router_class = None
+    router_used = bool(router_state.get("used")) if isinstance(router_state, dict) else False
+    router_output = router_state.get("output") if isinstance(router_state, dict) else None
+    if isinstance(router_output, dict):
+        raw_class = router_output.get("class")
+        if isinstance(raw_class, str):
+            promotions_router_class = _normalize_class_name(raw_class)
+    discount_signal = _looks_like_promotions_request(message_text)
+    promotions_trigger = False
+    if router_used and promotions_router_class in {"promotions", "discounts"}:
+        promotions_trigger = True
+    if discount_signal:
+        promotions_trigger = True
+
+    if (
+        promotions_trigger
+        and routing["allow_bot_reply"]
+        and not bypass_domain_flows
+        and policy_handler
+        and message_text
+    ):
+        info_class_intents, info_class_meta = _detect_info_class_intents(
+            message_text,
+            intent_decomp_set=intent_decomp_set,
+        )
+        class_router_result = _resolve_class_router_result(
+            info_intents=info_class_intents,
+            info_meta=info_class_meta,
+            booking_signal=booking_signal,
+            class_carryover=class_carryover,
+            domain_intent=DomainIntent.UNKNOWN,
+            domain_meta=None,
+            router_state=router_state,
+        )
+        if discount_signal:
+            class_router_result = dict(class_router_result)
+            classes = list(class_router_result.get("classes") or [])
+            if "promotions" not in classes and "discounts" not in classes:
+                classes.insert(0, "promotions")
+            class_router_result["classes"] = classes
+            in_signals = list(class_router_result.get("in_signals") or [])
+            if "promotions_signal" not in in_signals:
+                in_signals.append("promotions_signal")
+            class_router_result["in_signals"] = in_signals
+
+        discounts_available = _has_discount_policy_rules(policy_type=policy_type)
+        discounts_reply = _format_discounts_policy_reply(policy_type=policy_type) if discounts_available else None
+        if discounts_reply:
+            decision = DemoSalonDecision(
+                action="reply",
+                response=discounts_reply,
+                intent="discounts",
+            )
+        else:
+            decision = DemoSalonDecision(
+                action="escalate",
+                response=MSG_ESCALATED,
+                intent="discounts",
+            )
+
+        bot_response = decision.response or MSG_ESCALATED
+        followup_intents: list[str] = []
+        if booking_signal or "booking" in intent_decomp_set:
+            followup_intents.append("booking")
+        for intent_name in ("location", "hours"):
+            if intent_name in info_class_intents and intent_name not in followup_intents:
+                followup_intents.append(intent_name)
+        followup_prompt = None
+        queue_set = False
+        if followup_intents:
+            if expected_reply_type is None and pending_intent_queue is None and not intent_queue_event:
+                context = _get_conversation_context(conversation)
+                context = _set_intent_queue(context, followup_intents)
+                context = _set_expected_reply_type(context, EXPECTED_REPLY_INTENT_CHOICE)
+                _set_conversation_context(conversation, context)
+                followup_prompt = _format_intent_queue_prompt(followup_intents)
+                queue_set = True
+            else:
+                followup_prompt = _format_multi_intent_followup("discounts", followup_intents)
+        if followup_prompt:
+            bot_response = _combine_sidecar(bot_response, followup_prompt)
+
+        _reset_low_confidence_retry(conversation)
+
+        result_message = "Policy discounts reply sent"
+        if decision.action == "escalate":
+            _, reused, telegram_sent = _reuse_active_handover(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message=message_text,
+                source="policy_gate",
+                intent=decision.intent,
+            )
+            if reused:
+                result_message = f"Policy discounts reuse, telegram={'sent' if telegram_sent else 'failed'}"
+            elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get("allow_handover_create", False):
+                result = escalate_to_pending(
+                    db=db,
+                    conversation=conversation,
+                    user_message=message_text,
+                    trigger_type="intent",
+                    trigger_value=decision.intent or "discounts",
+                )
+                if result.ok:
+                    handover = result.value
+                    telegram_sent = send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=message_text,
+                    )
+                    result_message = f"Policy discounts escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                else:
+                    result_message = f"Policy discounts escalation failed: {result.error}"
+            else:
+                result_message = "Policy discounts escalation skipped (already pending)"
+
+        trace_payload = {
+            "stage": "policy_gate",
+            "decision": decision.action,
+            "intent": decision.intent,
+            "state": conversation.state,
+            "policy_type": policy_type,
+            "policy_gate": "discounts",
+            "class_router": class_router_result,
+        }
+        if followup_intents:
+            trace_payload["followup_intents"] = followup_intents
+        _record_decision_trace(conversation, trace_payload)
+        _record_message_decision_meta(
+            saved_message,
+            action=decision.action,
+            intent=decision.intent,
+            source="policy_gate",
+            fast_intent=False,
+        )
+        if saved_message:
+            meta_updates = {"class_router": class_router_result, "policy_gate": "discounts"}
+            if queue_set:
+                meta_updates["intent_queue"] = followup_intents
+                meta_updates["expected_reply_type"] = EXPECTED_REPLY_INTENT_CHOICE
+            _update_message_decision_metadata(saved_message, meta_updates)
+
+        bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
+        if not sent:
+            result_message = f"{result_message}; response_send=failed"
         db.commit()
         return WebhookResponse(
             success=True,
