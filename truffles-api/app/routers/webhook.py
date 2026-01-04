@@ -4,6 +4,7 @@ import hashlib
 import mimetypes
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -95,6 +96,40 @@ except Exception:  # pragma: no cover
 
 _debounce_redis_client = None
 _debounce_redis_url = None
+_router_sla_lock = threading.Lock()
+_router_sla_counts = {"attempts": 0, "fallbacks": 0, "timeouts": 0}
+_router_fallback_flag_threshold = 0.05
+
+
+def _update_router_sla(*, attempted: bool, fallback: bool, timeout: bool) -> dict:
+    if not attempted:
+        return {
+            "attempts": 0,
+            "fallbacks": 0,
+            "timeouts": 0,
+            "fallback_rate": 0.0,
+            "timeout_rate": 0.0,
+            "fallback_rate_flag": False,
+        }
+    with _router_sla_lock:
+        _router_sla_counts["attempts"] += 1
+        if fallback:
+            _router_sla_counts["fallbacks"] += 1
+        if timeout:
+            _router_sla_counts["timeouts"] += 1
+        attempts = _router_sla_counts["attempts"]
+        fallbacks = _router_sla_counts["fallbacks"]
+        timeouts = _router_sla_counts["timeouts"]
+    fallback_rate = fallbacks / max(attempts, 1)
+    timeout_rate = timeouts / max(attempts, 1)
+    return {
+        "attempts": attempts,
+        "fallbacks": fallbacks,
+        "timeouts": timeouts,
+        "fallback_rate": round(fallback_rate, 4),
+        "timeout_rate": round(timeout_rate, 4),
+        "fallback_rate_flag": fallback_rate > _router_fallback_flag_threshold,
+    }
 
 
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
@@ -2765,6 +2800,30 @@ def _looks_like_hours_followup(message_text: str | None) -> bool:
     )
 
 
+def _build_router_meta_output(*, error: str, retry: bool = False, elapsed_ms: float = 0.0) -> dict:
+    return {
+        "class": None,
+        "intents": [],
+        "slots": {},
+        "confidence": 0.0,
+        "reason": "",
+        "carryover": {},
+        "router_llm_ms": round(elapsed_ms, 2),
+        "router_error": error,
+        "router_retry": bool(retry),
+    }
+
+
+def _ensure_router_output_meta(router_output: dict, *, error: str | None) -> dict:
+    if not isinstance(router_output.get("router_llm_ms"), (int, float)):
+        router_output["router_llm_ms"] = 0.0
+    if not isinstance(router_output.get("router_error"), str) or not router_output.get("router_error"):
+        router_output["router_error"] = error or "none"
+    if not isinstance(router_output.get("router_retry"), bool):
+        router_output["router_retry"] = False
+    return router_output
+
+
 def _build_class_router_result(
     *,
     info_intents: set[str],
@@ -2860,6 +2919,7 @@ def _resolve_class_router_result(
     router_error = router_state.get("error") if isinstance(router_state, dict) else None
     router_fallback = router_state.get("fallback_reason") if isinstance(router_state, dict) else None
     router_confidence = router_state.get("confidence") if isinstance(router_state, dict) else None
+    router_sla = router_state.get("sla") if isinstance(router_state, dict) else None
 
     router_class = None
     router_reason = None
@@ -2891,6 +2951,7 @@ def _resolve_class_router_result(
         "fallback_reason": router_fallback if not router_used else None,
         "error": router_error,
         "output": router_output,
+        "sla": router_sla,
     }
     return result
 
@@ -6594,15 +6655,19 @@ async def _handle_webhook_payload(
             {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow, "gate": "escalation"},
         )
 
-    router_state: dict[str, Any] | None = None
+    router_state: dict[str, Any] | None = {
+        "used": False,
+        "confidence": 0.0,
+        "output": _build_router_meta_output(error="skipped"),
+        "error": "skipped",
+        "fallback_reason": "skipped",
+        "attempted": False,
+        "sla": None,
+    }
     if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
-        router_state = {
-            "used": False,
-            "confidence": 0.0,
-            "output": None,
-            "error": None,
-            "fallback_reason": "skipped",
-        }
+        router_state["attempted"] = True
+        router_state["error"] = None
+        router_state["fallback_reason"] = "skipped"
         router_result = route_llm_router(
             message_text,
             carryover=class_carryover,
@@ -6611,7 +6676,7 @@ async def _handle_webhook_payload(
         if isinstance(router_result, dict) and router_result.get("ok") is True:
             router_output = router_result.get("payload")
             if isinstance(router_output, dict):
-                router_state["output"] = router_output
+                router_state["output"] = _ensure_router_output_meta(router_output, error=None)
                 confidence = router_output.get("confidence")
                 if isinstance(confidence, (int, float)):
                     router_state["confidence"] = float(confidence)
@@ -6632,6 +6697,36 @@ async def _handle_webhook_payload(
                 else "router_failed"
             )
             router_state["fallback_reason"] = router_state["error"]
+            router_output = router_result.get("payload") if isinstance(router_result, dict) else None
+            if isinstance(router_output, dict):
+                router_state["output"] = _ensure_router_output_meta(
+                    router_output, error=router_state["error"]
+                )
+            else:
+                router_state["output"] = _build_router_meta_output(error=router_state["error"])
+
+    if isinstance(router_state, dict):
+        router_output = router_state.get("output")
+        if isinstance(router_output, dict):
+            router_output = _ensure_router_output_meta(
+                router_output, error=router_state.get("error")
+            )
+            router_state["output"] = router_output
+            router_error_value = router_output.get("router_error")
+        else:
+            router_state["output"] = _build_router_meta_output(
+                error=str(router_state.get("error") or "router_failed")
+            )
+            router_error_value = router_state["output"].get("router_error")
+        router_timeout = isinstance(router_error_value, str) and router_error_value == "timeout"
+        router_fallback = router_state.get("fallback_reason") not in (None, "skipped")
+        router_state["timeout"] = router_timeout
+        router_state["fallback"] = router_fallback
+        router_state["sla"] = _update_router_sla(
+            attempted=bool(router_state.get("attempted")),
+            fallback=bool(router_fallback),
+            timeout=bool(router_timeout),
+        )
 
     early_domain_intent = DomainIntent.UNKNOWN
     early_domain_meta: dict = {}
