@@ -386,18 +386,49 @@ def route_llm_router(
     expected_reply_type: str | None = None,
 ) -> dict:
     result: dict[str, Any] = {"ok": False, "payload": None, "error": None, "raw": None}
+    carryover_input = _build_router_carryover(carryover)
     normalized = (message or "").strip()
+    router_retry = False
+    total_elapsed_ms = 0.0
+
+    def _build_payload(
+        *,
+        router_class: str | None = None,
+        intents: list[str] | None = None,
+        slots: dict | None = None,
+        confidence: float = 0.0,
+        reason: str = "",
+        carryover_payload: dict | None = None,
+        router_llm_ms: float | None = None,
+        router_error: str = "none",
+        router_retry_flag: bool | None = None,
+    ) -> dict:
+        payload = {
+            "class": router_class,
+            "intents": list(intents or []),
+            "slots": dict(slots or {}),
+            "confidence": float(confidence or 0.0),
+            "reason": str(reason or ""),
+            "carryover": dict(carryover_payload or carryover_input),
+            "router_llm_ms": round(router_llm_ms or 0.0, 2),
+            "router_error": router_error,
+            "router_retry": bool(router_retry_flag if router_retry_flag is not None else router_retry),
+        }
+        return payload
+
     if not normalized:
         result["error"] = "empty_message"
+        result["payload"] = _build_payload(router_error="empty_message")
         return result
     prompt = _load_router_prompt()
     if not prompt:
         result["error"] = "prompt_missing"
+        result["payload"] = _build_payload(router_error="prompt_missing")
         return result
 
     router_input = {
         "message": message,
-        "carryover": _build_router_carryover(carryover),
+        "carryover": carryover_input,
     }
     if isinstance(expected_reply_type, str) and expected_reply_type.strip():
         router_input["expected_reply_type"] = expected_reply_type.strip()
@@ -412,9 +443,6 @@ def route_llm_router(
     temperature_override: float | None = temperature
     if model_name.startswith("gpt-5"):
         temperature_override = 1.0
-    router_retry = False
-    total_elapsed_ms = 0.0
-
     def _call_router_llm(
         max_tokens: int,
         *,
@@ -511,12 +539,22 @@ def route_llm_router(
         total_elapsed_ms += elapsed_ms
     if error is not None:
         result["error"] = error
+        result["payload"] = _build_payload(
+            router_error=error,
+            router_llm_ms=total_elapsed_ms,
+            router_retry_flag=router_retry,
+        )
         return result
 
     content = (response.content or "").strip()
     result["raw"] = content
     if not content:
         result["error"] = "empty_response"
+        result["payload"] = _build_payload(
+            router_error="empty_response",
+            router_llm_ms=total_elapsed_ms,
+            router_retry_flag=router_retry,
+        )
         return result
 
     payload = None
@@ -531,11 +569,21 @@ def route_llm_router(
                 payload = None
     if not isinstance(payload, dict):
         result["error"] = "invalid_json"
+        result["payload"] = _build_payload(
+            router_error="invalid_json",
+            router_llm_ms=total_elapsed_ms,
+            router_retry_flag=router_retry,
+        )
         return result
 
     router_class = _clean_router_class(payload.get("class"))
     if not router_class:
         result["error"] = "invalid_class"
+        result["payload"] = _build_payload(
+            router_error="invalid_class",
+            router_llm_ms=total_elapsed_ms,
+            router_retry_flag=router_retry,
+        )
         return result
 
     intents = _clean_router_intents(payload.get("intents"))
@@ -562,17 +610,17 @@ def route_llm_router(
         carryover_payload = router_input["carryover"]
 
     result["ok"] = True
-    result["payload"] = {
-        "class": router_class,
-        "intents": intents,
-        "slots": slots,
-        "confidence": confidence,
-        "reason": reason,
-        "carryover": carryover_payload,
-        "router_llm_ms": round(total_elapsed_ms, 2),
-        "router_error": "none",
-        "router_retry": router_retry,
-    }
+    result["payload"] = _build_payload(
+        router_class=router_class,
+        intents=intents,
+        slots=slots,
+        confidence=confidence,
+        reason=reason,
+        carryover_payload=carryover_payload,
+        router_llm_ms=total_elapsed_ms,
+        router_error="none",
+        router_retry_flag=router_retry,
+    )
     return result
 
 
