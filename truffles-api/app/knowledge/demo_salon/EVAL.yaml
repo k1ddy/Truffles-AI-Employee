@@ -5684,3 +5684,88 @@ eval_cases:
     intent: guest_policy
     must_include:
     - зона ожидания
+- id: E531
+  user: Во сколько закрываетесь и где вы находитесь?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - '21:00'
+    must_include_any:
+    - '9:00'
+    - ежедневно
+- id: E532
+  user: Адрес скажите, график работы какой?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    must_include_any:
+    - '9:00'
+    - '21:00'
+- id: E533
+  user: Где салон и есть ли рядом парковка, до скольки работаете?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - парковка
+    - Бесплатная
+    must_include_any:
+    - '9:00'
+    - '21:00'
+- id: E534
+  user: Как к вам доехать и когда открываетесь?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    must_include_any:
+    - '9:00'
+    - ежедневно
+- id: E535
+  turns:
+  - Сколько стоит маникюр с покрытием?
+  - А где вы и до скольки сегодня?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    must_not:
+    - Какая услуга
+    - Сколько длится
+- id: E536
+  turns:
+  - Хочу записаться на маникюр
+  - Напомните адрес и часы работы
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    must_include_any:
+    - '9:00'
+    - '21:00'
+- id: E537
+  turns:
+  - Где вы находитесь?
+  - До скольки сегодня работаете?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    must_not:
+    - Какая услуга
+    - зависит от услуги
