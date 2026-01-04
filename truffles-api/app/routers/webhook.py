@@ -73,6 +73,7 @@ from app.services.intent_service import (
     is_human_request_message,
     is_opt_out_message,
     is_rejection,
+    route_llm_router,
     should_escalate,
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
@@ -2833,6 +2834,65 @@ def _build_class_router_result(
         "carryover_info_sections": carryover_info_sections,
         "carryover_intents": carryover_intents,
     }
+
+
+def _resolve_class_router_result(
+    *,
+    info_intents: set[str],
+    info_meta: dict[str, Any] | None,
+    booking_signal: bool,
+    class_carryover: dict | None,
+    domain_intent: DomainIntent,
+    domain_meta: dict | None,
+    router_state: dict | None,
+) -> dict[str, Any]:
+    result = _build_class_router_result(
+        info_intents=info_intents,
+        info_meta=info_meta,
+        booking_signal=booking_signal,
+        class_carryover=class_carryover,
+        domain_intent=domain_intent,
+        domain_meta=domain_meta,
+    )
+
+    router_output = router_state.get("output") if isinstance(router_state, dict) else None
+    router_used = router_state.get("used") if isinstance(router_state, dict) else False
+    router_error = router_state.get("error") if isinstance(router_state, dict) else None
+    router_fallback = router_state.get("fallback_reason") if isinstance(router_state, dict) else None
+    router_confidence = router_state.get("confidence") if isinstance(router_state, dict) else None
+
+    router_class = None
+    router_reason = None
+    router_intents: list[str] = []
+    if isinstance(router_output, dict):
+        raw_class = router_output.get("class")
+        if isinstance(raw_class, str):
+            router_class = _normalize_class_name(raw_class)
+        raw_reason = router_output.get("reason")
+        if isinstance(raw_reason, str):
+            router_reason = raw_reason
+        raw_intents = router_output.get("intents")
+        if isinstance(raw_intents, list):
+            router_intents = [item for item in raw_intents if isinstance(item, str)]
+
+    if router_used and router_class:
+        result["classes"] = [router_class]
+        info_router_intents = [intent for intent in router_intents if intent in INFO_INTENTS]
+        if router_class == "info_bundle":
+            if info_router_intents:
+                result["intents"] = sorted(info_router_intents)
+        else:
+            result["intents"] = sorted(info_router_intents)
+
+    result["router"] = {
+        "used": bool(router_used),
+        "confidence": router_confidence,
+        "reason": router_reason,
+        "fallback_reason": router_fallback if not router_used else None,
+        "error": router_error,
+        "output": router_output,
+    }
+    return result
 
 
 def _is_refusal_flag_active(refusal_flags: dict | None, field: str) -> bool:
@@ -6534,6 +6594,45 @@ async def _handle_webhook_payload(
             {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow, "gate": "escalation"},
         )
 
+    router_state: dict[str, Any] | None = None
+    if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
+        router_state = {
+            "used": False,
+            "confidence": 0.0,
+            "output": None,
+            "error": None,
+            "fallback_reason": "skipped",
+        }
+        router_result = route_llm_router(
+            message_text,
+            carryover=class_carryover,
+            expected_reply_type=expected_reply_type,
+        )
+        if isinstance(router_result, dict) and router_result.get("ok") is True:
+            router_output = router_result.get("payload")
+            if isinstance(router_output, dict):
+                router_state["output"] = router_output
+                confidence = router_output.get("confidence")
+                if isinstance(confidence, (int, float)):
+                    router_state["confidence"] = float(confidence)
+                router_class = router_output.get("class")
+                router_state["used"] = bool(
+                    router_state["confidence"] >= MID_CONFIDENCE_THRESHOLD
+                    and isinstance(router_class, str)
+                    and router_class.strip()
+                )
+            if not router_state["used"]:
+                router_state["fallback_reason"] = "low_confidence"
+            else:
+                router_state["fallback_reason"] = None
+        else:
+            router_state["error"] = (
+                router_result.get("error")
+                if isinstance(router_result, dict)
+                else "router_failed"
+            )
+            router_state["fallback_reason"] = router_state["error"]
+
     early_domain_intent = DomainIntent.UNKNOWN
     early_domain_meta: dict = {}
     early_out_of_domain = False
@@ -8012,13 +8111,14 @@ async def _handle_webhook_payload(
             message_text,
             intent_decomp_set=intent_decomp_set,
         )
-        class_router_result = _build_class_router_result(
+        class_router_result = _resolve_class_router_result(
             info_intents=info_class_intents,
             info_meta=info_class_meta,
             booking_signal=booking_signal,
             class_carryover=class_carryover,
             domain_intent=DomainIntent.UNKNOWN,
             domain_meta=None,
+            router_state=router_state,
         )
         info_class = "info_bundle" in (class_router_result.get("classes") or [])
         info_class_intents_for_reply: set[str] = set(class_router_result.get("intents") or [])
@@ -8659,13 +8759,14 @@ async def _handle_webhook_payload(
         message_text,
         intent_decomp_set=intent_decomp_set,
     )
-    class_router_result = _build_class_router_result(
+    class_router_result = _resolve_class_router_result(
         info_intents=info_class_intents,
         info_meta=info_class_meta,
         booking_signal=booking_signal,
         class_carryover=class_carryover,
         domain_intent=domain_intent,
         domain_meta=domain_meta,
+        router_state=router_state,
     )
     out_of_domain_signal = class_router_result["out_of_domain_signal"]
     _log_timing(
@@ -8697,6 +8798,7 @@ async def _handle_webhook_payload(
             "out_of_domain_signal": out_of_domain_signal,
             "carryover_class": class_router_result.get("carryover_class"),
             "carryover_info_sections": class_router_result.get("carryover_info_sections"),
+            "router": class_router_result.get("router"),
         },
     )
     if saved_message:

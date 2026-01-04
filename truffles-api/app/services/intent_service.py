@@ -1,8 +1,10 @@
+import json
 import math
 import os
 import re
 import time
 from enum import Enum
+from pathlib import Path
 from typing import Any, Iterable, Tuple
 
 import httpx
@@ -27,11 +29,110 @@ RAG_BM25_TIMEOUT_SECONDS = float(os.environ.get("RAG_BM25_TIMEOUT_SECONDS", "0.8
 RAG_HYBRID_VECTOR_WEIGHT = float(os.environ.get("RAG_HYBRID_VECTOR_WEIGHT", "0.6"))
 RAG_HYBRID_BM25_WEIGHT = float(os.environ.get("RAG_HYBRID_BM25_WEIGHT", "0.4"))
 
+ROUTER_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "intent_classifier.md"
+ROUTER_TIMEOUT_SECONDS = float(os.environ.get("ROUTER_TIMEOUT_SECONDS", str(INTENT_TIMEOUT_SECONDS)))
+ROUTER_MAX_TOKENS = int(os.environ.get("ROUTER_MAX_TOKENS", "220"))
+ROUTER_ALLOWED_CLASSES = {
+    "booking",
+    "info_bundle",
+    "consult",
+    "greeting",
+    "out_of_domain",
+    "other",
+}
+ROUTER_ALLOWED_INTENTS = {
+    "booking",
+    "pricing",
+    "duration",
+    "location",
+    "hours",
+    "consult",
+    "greeting",
+    "out_of_domain",
+    "other",
+}
+
+_ROUTER_PROMPT_CACHE: str | None = None
+
 
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
     if value is None:
         return default
     return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _load_router_prompt() -> str:
+    global _ROUTER_PROMPT_CACHE
+    if _ROUTER_PROMPT_CACHE is not None:
+        return _ROUTER_PROMPT_CACHE
+    try:
+        _ROUTER_PROMPT_CACHE = ROUTER_PROMPT_PATH.read_text(encoding="utf-8").strip()
+    except Exception as exc:
+        logger.warning(f"Router prompt load failed: {exc}")
+        _ROUTER_PROMPT_CACHE = ""
+    return _ROUTER_PROMPT_CACHE
+
+
+def _clean_router_class(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().casefold()
+    if not cleaned:
+        return None
+    if cleaned in {"info", "info_bundle"}:
+        return "info_bundle"
+    if cleaned in ROUTER_ALLOWED_CLASSES:
+        return cleaned
+    return None
+
+
+def _clean_router_intents(values: Any) -> list[str]:
+    cleaned: list[str] = []
+    if not isinstance(values, list):
+        return cleaned
+    seen = set()
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        value = item.strip().casefold()
+        if not value or value not in ROUTER_ALLOWED_INTENTS or value in seen:
+            continue
+        cleaned.append(value)
+        seen.add(value)
+    return cleaned
+
+
+def _clean_router_service_query(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    if len(cleaned) < 2:
+        return ""
+    tokens = cleaned.split()
+    if len(tokens) > 6:
+        cleaned = " ".join(tokens[:6])
+    return cleaned
+
+
+def _build_router_carryover(carryover: dict | None) -> dict:
+    if not isinstance(carryover, dict):
+        return {}
+    payload: dict[str, Any] = {}
+    carryover_class = carryover.get("class")
+    if isinstance(carryover_class, str) and carryover_class.strip():
+        payload["class"] = carryover_class.strip()
+    intents = carryover.get("intents")
+    if isinstance(intents, list):
+        payload["intents"] = [item for item in intents if isinstance(item, str) and item.strip()]
+    info_sections = carryover.get("info_sections")
+    if isinstance(info_sections, list):
+        payload["info_sections"] = [
+            item for item in info_sections if isinstance(item, str) and item.strip()
+        ]
+    ttl_remaining = carryover.get("remaining")
+    if isinstance(ttl_remaining, int):
+        payload["ttl_remaining"] = ttl_remaining
+    return payload
 
 
 class Intent(str, Enum):
@@ -220,6 +321,152 @@ def classify_intent(message: str) -> Intent:
     except Exception as e:
         logger.error(f"Intent classification error: {e}")
         return Intent.OTHER
+
+
+def route_llm_router(
+    message: str,
+    *,
+    carryover: dict | None = None,
+    expected_reply_type: str | None = None,
+) -> dict:
+    result: dict[str, Any] = {"ok": False, "payload": None, "error": None, "raw": None}
+    normalized = (message or "").strip()
+    if not normalized:
+        result["error"] = "empty_message"
+        return result
+    prompt = _load_router_prompt()
+    if not prompt:
+        result["error"] = "prompt_missing"
+        return result
+
+    router_input = {
+        "message": message,
+        "carryover": _build_router_carryover(carryover),
+    }
+    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
+        router_input["expected_reply_type"] = expected_reply_type.strip()
+
+    llm = get_llm_provider()
+    messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": json.dumps(router_input, ensure_ascii=False)},
+    ]
+    temperature = 1.0 if FAST_MODEL.strip().lower().startswith("gpt-5") else 0.0
+    llm_start = time.monotonic()
+    try:
+        response = llm.generate(
+            messages,
+            temperature=temperature,
+            max_tokens=ROUTER_MAX_TOKENS,
+            model=FAST_MODEL,
+            timeout_seconds=ROUTER_TIMEOUT_SECONDS,
+        )
+    except httpx.TimeoutException as exc:
+        logger.info(
+            "Timing",
+            extra={
+                "context": {
+                    "stage": "router_llm_ms",
+                    "elapsed_ms": round((time.monotonic() - llm_start) * 1000, 2),
+                    "model_name": FAST_MODEL,
+                    "model_tier": "fast",
+                    "timeout": True,
+                    "timeout_seconds": ROUTER_TIMEOUT_SECONDS,
+                }
+            },
+        )
+        logger.warning(f"Router LLM timeout after {ROUTER_TIMEOUT_SECONDS}s: {exc}")
+        result["error"] = "timeout"
+        return result
+    except Exception as exc:
+        logger.info(
+            "Timing",
+            extra={
+                "context": {
+                    "stage": "router_llm_ms",
+                    "elapsed_ms": round((time.monotonic() - llm_start) * 1000, 2),
+                    "model_name": FAST_MODEL,
+                    "model_tier": "fast",
+                    "timeout": False,
+                    "error": str(exc),
+                }
+            },
+        )
+        logger.warning(f"Router LLM failed: {exc}")
+        result["error"] = "error"
+        return result
+
+    logger.info(
+        "Timing",
+        extra={
+            "context": {
+                "stage": "router_llm_ms",
+                "elapsed_ms": round((time.monotonic() - llm_start) * 1000, 2),
+                "model_name": FAST_MODEL,
+                "model_tier": "fast",
+                "timeout": False,
+            }
+        },
+    )
+
+    content = (response.content or "").strip()
+    result["raw"] = content
+    if not content:
+        result["error"] = "empty_response"
+        return result
+
+    payload = None
+    try:
+        payload = json.loads(content)
+    except Exception:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                payload = json.loads(match.group(0))
+            except Exception:
+                payload = None
+    if not isinstance(payload, dict):
+        result["error"] = "invalid_json"
+        return result
+
+    router_class = _clean_router_class(payload.get("class"))
+    if not router_class:
+        result["error"] = "invalid_class"
+        return result
+
+    intents = _clean_router_intents(payload.get("intents"))
+    confidence = payload.get("confidence")
+    try:
+        confidence = float(confidence)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    confidence = max(0.0, min(confidence, 1.0))
+    reason = payload.get("reason")
+    if not isinstance(reason, str):
+        reason = ""
+
+    slots = payload.get("slots")
+    if not isinstance(slots, dict):
+        slots = {}
+    slots = dict(slots)
+    slots["service_query"] = _clean_router_service_query(slots.get("service_query"))
+
+    carryover_payload = payload.get("carryover")
+    if not isinstance(carryover_payload, dict):
+        carryover_payload = {}
+    if not carryover_payload and router_input.get("carryover"):
+        carryover_payload = router_input["carryover"]
+
+    result["ok"] = True
+    result["payload"] = {
+        "class": router_class,
+        "intents": intents,
+        "slots": slots,
+        "confidence": confidence,
+        "reason": reason,
+        "carryover": carryover_payload,
+    }
+    return result
 
 
 def should_escalate(intent: Intent) -> bool:
