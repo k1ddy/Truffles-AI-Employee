@@ -125,7 +125,7 @@ outbox worker (тик 2s) или POST /admin/outbox/process (cron)
 _handle_webhook_payload(skip_persist=True)
     ↓
 behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → policy‑gates (скидки/оплата info)
-→ intent lattice (class router: semantic + anchors‑boost) → early OOD (только при out‑signals без in‑signals)
+→ LLM semantic router (class router) → early OOD (только при out‑signals без in‑signals)
 → info bundle / consult / booking flow / service matcher → LLM формулировка (RAG) → truth gate fallback → low‑confidence handling
     ↓
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
@@ -143,11 +143,13 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - **Host Persona** → формулировка ответа (шаблоны/LLM), CTA/quiet hours.
 - **Observability** → decision_trace/meta на каждом сообщении.
 
-### Intent Lattice (class router) — канон
+### LLM Semantic Router (class router) — канон
 - Цель: устойчивый выбор **класса ответа**, не зависящий от порядка слов.
 - Классы (по приоритету): Hard‑LAW → policy → opt‑out → human/frustration → booking → info‑bundle → consult → greeting → OOD.
-- Входы: семантический классификатор + domain_pack anchors **как boost**, не как единственный сигнал.
+- Источник истины класса: **LLM‑router** (structured JSON: class/intents/slots/confidence/reason).
+- Anchors/лексика/эвристики — **только fallback/boost**, не основной источник класса.
 - OOD допустим **только** если есть out‑signals и **нет** in‑signals (strict‑in).
+- Если confidence ниже порога или LLM недоступен → fallback на детерминированный router и фиксируем это в trace.
 - Если несколько классов в одном сообщении — отвечаем по сильному + сохраняем очередь (intent_queue).
 - `info_bundle` — **отдельный класс**, выводится class‑router и не “схлопывается” в `info`.
 
