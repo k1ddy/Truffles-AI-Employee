@@ -6188,3 +6188,22 @@ eval_cases:
       expected_reply_type: time
       answer_interpreter_used: true
       answer_slot: datetime
+- id: E559
+  tier: long
+  messages:
+  - хочу записаться на маникюр
+  - в субботу вечером
+  expected:
+    action: reply
+    must_include:
+    - как вас зовут
+    must_not:
+    - ₸
+    - тг
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: time
+      answer_interpreter_used: true
+      answer_slot: datetime
+      expected_reply_shortcircuit: true
