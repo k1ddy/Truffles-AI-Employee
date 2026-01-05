@@ -1866,6 +1866,8 @@ def _detect_promotion_intent(normalized: str) -> str | None:
         return "promotion_first_visit"
     if "именин" in normalized or "день рождения" in normalized:
         return "promotion_birthday"
+    if "до после" in normalized and _contains_any_words(normalized, ["дней", "дня", "день"]):
+        return "promotion_birthday"
     if "студент" in normalized or "пенсион" in normalized:
         return "promotion_student"
     return None
