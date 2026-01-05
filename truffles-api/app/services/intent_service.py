@@ -32,7 +32,7 @@ RAG_HYBRID_BM25_WEIGHT = float(os.environ.get("RAG_HYBRID_BM25_WEIGHT", "0.4"))
 ROUTER_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "intent_classifier.md"
 ROUTER_TIMEOUT_SECONDS = float(os.environ.get("ROUTER_TIMEOUT_SECONDS", "3.0"))
 ROUTER_MAX_TOKENS = int(os.environ.get("ROUTER_MAX_TOKENS", "140"))
-ROUTER_CONFIDENCE_THRESHOLD = float(os.environ.get("ROUTER_CONFIDENCE_THRESHOLD", "0.35"))
+ROUTER_CONFIDENCE_THRESHOLD = float(os.environ.get("ROUTER_CONFIDENCE_THRESHOLD", "0.30"))
 _DEFAULT_ROUTER_MODEL = (
     "gpt-4o-mini" if FAST_MODEL.strip().lower().startswith("gpt-5") else FAST_MODEL
 )
