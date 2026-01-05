@@ -6068,3 +6068,123 @@ eval_cases:
     must_include_any:
     - администратор
     - разбер
+- id: E552
+  tier: long
+  messages:
+  - сколько стоит?
+  - маникюрчик
+  - сколько стоит?
+  expected:
+    action: reply
+    intent: pricing
+    must_include:
+    - маникюр
+    must_include_any:
+    - ₸
+    - тг
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: service_choice
+      answer_interpreter_used: true
+      answer_slot: service
+- id: E553
+  tier: long
+  messages:
+  - хочу записаться
+  - ногти
+  expected:
+    action: reply
+    must_include:
+    - дату
+    - время
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: service_choice
+      answer_interpreter_used: true
+      answer_slot: service
+- id: E554
+  tier: long
+  messages:
+  - сколько стоит?
+  - сделать ногти
+  - сколько стоит?
+  expected:
+    action: reply
+    intent: pricing
+    must_include:
+    - маникюр
+    must_include_any:
+    - ₸
+    - тг
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: service_choice
+      answer_interpreter_used: true
+      answer_slot: service
+- id: E555
+  tier: long
+  messages:
+  - хочу записаться на ногти
+  - в субботу вечером
+  expected:
+    action: reply
+    must_include:
+    - как вас зовут
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: time
+      answer_interpreter_used: true
+      answer_slot: datetime
+- id: E556
+  tier: long
+  messages:
+  - хочу записаться на маникюр
+  - после обеда
+  expected:
+    action: reply
+    must_include:
+    - как вас зовут
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: time
+      answer_interpreter_used: true
+      answer_slot: datetime
+- id: E557
+  tier: long
+  messages:
+  - хочу записаться на маникюр в субботу вечером
+  - Алия
+  expected:
+    action: reply
+    must_include_any:
+    - передал менеджеру
+    - менеджеру
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: name
+      answer_interpreter_used: true
+      answer_slot: name
+- id: E558
+  tier: long
+  messages:
+  - хочу записаться на маникюр
+  - в субботу вечером и сколько стоит маникюр
+  expected:
+    action: reply
+    must_include:
+    - как вас зовут
+    must_include_any:
+    - ₸
+    - тг
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: time
+      answer_interpreter_used: true
+      answer_slot: datetime
