@@ -958,8 +958,14 @@ def semantic_question_type(
     if include_kinds is None:
         include_kinds = {"pricing", "duration"}
 
-    if "duration" in include_kinds:
-        if _has_duration_signal(normalized, text) and _message_has_service_token(normalized):
+    if "duration" in include_kinds and _message_has_service_token(normalized):
+        duration_hint = _has_duration_signal(normalized, text)
+        if not duration_hint and "сколько" in normalized:
+            duration_hint = _contains_any_words(
+                normalized,
+                ["час", "часа", "часов", "минута", "минуты", "минут"],
+            )
+        if duration_hint:
             return SemanticQuestionType(kind="duration", score=1.0, second_score=0.0)
 
     query_vector = None
