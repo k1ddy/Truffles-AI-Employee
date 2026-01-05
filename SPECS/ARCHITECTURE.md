@@ -125,7 +125,7 @@ outbox worker (тик 2s) или POST /admin/outbox/process (cron)
 _handle_webhook_payload(skip_persist=True)
     ↓
 behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → policy‑gates (скидки/оплата info)
-→ LLM semantic router (class router) → early OOD (только при out‑signals без in‑signals)
+→ LLM semantic router (class router) → answer‑interpreter (expected_reply_type) → early OOD (только при out‑signals без in‑signals)
 → info bundle / consult / booking flow / service matcher → LLM формулировка (RAG) → truth gate fallback → low‑confidence handling
     ↓
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
@@ -153,6 +153,12 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Если несколько классов в одном сообщении — отвечаем по сильному + сохраняем очередь (intent_queue).
 - `info_bundle` — **отдельный класс**, выводится class‑router и не “схлопывается” в `info`.
 
+### Answer‑Interpreter (expected_reply_type) — канон
+- Включается **только** если ожидается ответ на вопрос (`expected_reply_type` активен).
+- Делает **семантический** разбор ответа (slot/value/confidence), а не классификацию запроса.
+- Низкая уверенность/ошибка → fallback на детерминированный парсер + короткий уточняющий вопрос.
+- Не может менять класс ответа и не влияет на Hard‑LAW/policy‑gates.
+
 ### Info‑bundle (композиция фактов)
 - Любые сочетания “где/когда/парковка/гости/ранний приход/сегодня” → единый факт‑ответ: адрес + часы + нужные секции.
 - Если запрошена цена без услуги → уточнение услуги (без цен), но адрес+часы остаются.
@@ -163,6 +169,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - После info‑bundle хранить класс и ключевые факты в контексте, чтобы перестановка вопросов не сбрасывала ветку.
 - Carryover не подменяет Hard‑LAW/policy‑gates и не меняет факты.
 - Храним `class=info_bundle` + `info_sections`; service‑carryover не может переопределить hours‑follow‑up.
+- Goal‑keeper: `current_goal` сохраняется при перебивках; ответ на перебивку возвращает к цели.
 
 ### Base‑80 батарея (acceptance)
 - 80% входящих классов (по объёму) покрыты перефраз‑battery и 5–6‑ходовыми комбинациями.
@@ -554,7 +561,12 @@ metadata = {
 | Формат | JSON |
 | Уровень | INFO (DEBUG не показывается) |
 | Где смотреть | `docker logs truffles-api` |
-| Correlation ID | НЕТ |
+| Correlation ID | `conversation_id` + `message_id` в decision_meta/trace |
+
+## 12.1 Router SLA + Debug Visibility (P0)
+- В decision_trace/meta всегда пишем: `router_llm_ms`, `router_error`, `router_retry`, `router_fallback_reason`.
+- SLO: `router_fallback_rate < 10%`, `timeout_rate < 2%`.
+- Нужен минимальный trace‑viewer: фильтры по router_error/fallback/LAW/clarify, топ‑кейсы из knowledge_backlog.
 
 ---
 
