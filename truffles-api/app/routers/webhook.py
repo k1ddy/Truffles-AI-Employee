@@ -28,6 +28,7 @@ from app.services.ai_service import (
     ACKNOWLEDGEMENT_RESPONSE,
     BOT_STATUS_RESPONSE,
     GREETING_RESPONSE,
+    HIGH_CONFIDENCE_THRESHOLD,
     MID_CONFIDENCE_THRESHOLD,
     OUT_OF_DOMAIN_RESPONSE,
     THANKS_RESPONSE,
@@ -72,6 +73,7 @@ from app.services.intent_service import (
     Intent,
     classify_domain_with_scores,
     classify_intent,
+    interpret_expected_reply,
     is_frustration_message,
     is_human_request_message,
     is_opt_out_message,
@@ -3646,6 +3648,30 @@ def _match_expected_reply(
     return True, value
 
 
+def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None, value: str) -> dict:
+    if not expected_reply_type or not value:
+        return context
+    if expected_reply_type == EXPECTED_REPLY_SERVICE:
+        slot_key = "service"
+    elif expected_reply_type == EXPECTED_REPLY_TIME:
+        slot_key = "datetime"
+    elif expected_reply_type == EXPECTED_REPLY_NAME:
+        slot_key = "name"
+    else:
+        return context
+    booking_state = _get_booking_context(context)
+    if not isinstance(booking_state, dict) or not booking_state:
+        return context
+    if booking_state.get(slot_key):
+        return context
+    last_question = booking_state.get("last_question")
+    if not booking_state.get("active") and last_question != slot_key:
+        return context
+    booking_state = dict(booking_state)
+    booking_state[slot_key] = value
+    return _set_booking_context(context, booking_state)
+
+
 def _is_booking_related_message(
     message_text: str,
     client_slug: str | None,
@@ -5202,11 +5228,73 @@ async def _handle_webhook_payload(
     expected_reply_matched: bool | None = None
     expected_reply_text = batch_non_booking_message or message_text
     if expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME} and expected_reply_text:
-        matched, value = _match_expected_reply(
+        answer_confidence = 0.0
+        answer_slot = ""
+        answer_value = ""
+        answer_error = "invalid_result"
+        prompt_hint = None
+        booking_context = _get_booking_context(context)
+        last_question = booking_context.get("last_question")
+        if expected_reply_type == EXPECTED_REPLY_SERVICE:
+            prompt_hint = (
+                MSG_BOOKING_ASK_SERVICE
+                if last_question == "service"
+                else MSG_EXPECTED_SERVICE_OFF_TOPIC
+            )
+        elif expected_reply_type == EXPECTED_REPLY_TIME:
+            prompt_hint = MSG_BOOKING_ASK_DATETIME
+        elif expected_reply_type == EXPECTED_REPLY_NAME:
+            prompt_hint = MSG_BOOKING_ASK_NAME
+
+        question_context = {
+            "prompt_hint": prompt_hint,
+            "booking": booking_context,
+            "current_goal": current_goal,
+            "service_carryover": _get_service_carryover(
+                context_manager, message_count=message_count
+            ),
+        }
+        answer_result = interpret_expected_reply(
+            expected_reply_text,
             expected_reply_type=expected_reply_type,
-            message_text=expected_reply_text,
-            client_slug=payload.client_slug,
+            carryover=class_carryover,
+            question_context=question_context,
         )
+        answer_payload = answer_result.get("payload") if isinstance(answer_result, dict) else None
+        if isinstance(answer_result, dict):
+            answer_error = answer_result.get("error") or "none"
+        if isinstance(answer_payload, dict):
+            answer_slot = answer_payload.get("slot") or ""
+            answer_value = answer_payload.get("value") or ""
+            try:
+                answer_confidence = float(answer_payload.get("confidence") or 0.0)
+            except (TypeError, ValueError):
+                answer_confidence = 0.0
+            answer_confidence = max(0.0, min(answer_confidence, 1.0))
+        answer_meta = {
+            "answer_interpreter_used": True,
+            "answer_confidence": answer_confidence,
+            "answer_slot": answer_slot,
+            "answer_value": answer_value,
+            "answer_error": answer_error,
+        }
+
+        answer_used = (
+            isinstance(answer_result, dict)
+            and answer_result.get("ok") is True
+            and isinstance(answer_value, str)
+            and answer_value.strip()
+            and answer_confidence >= HIGH_CONFIDENCE_THRESHOLD
+        )
+        if answer_used:
+            matched = True
+            value = answer_value
+        else:
+            matched, value = _match_expected_reply(
+                expected_reply_type=expected_reply_type,
+                message_text=expected_reply_text,
+                client_slug=payload.client_slug,
+            )
         expected_reply_matched = matched
         if matched and isinstance(value, str) and expected_reply_type == EXPECTED_REPLY_SERVICE:
             context = _set_service_hint(context, value, now)
@@ -5223,28 +5311,33 @@ async def _handle_webhook_payload(
                 reason="expected_reply",
             )
             context = _get_conversation_context(conversation)
+        if matched and isinstance(value, str):
+            context = _apply_expected_reply_slot(
+                context,
+                expected_reply_type=expected_reply_type,
+                value=value,
+            )
+            _set_conversation_context(conversation, context)
         if matched:
             next_expected = EXPECTED_REPLY_INTENT_CHOICE if intent_queue else None
             context = _set_expected_reply_type(context, next_expected)
             _set_conversation_context(conversation, context)
-        _record_decision_trace(
-            conversation,
-            {
-                "stage": "question_contract",
-                "decision": "matched" if matched else "missed",
-                "expected_reply_type": expected_reply_type,
-                "value": value,
-            },
-        )
+        trace_payload = {
+            "stage": "question_contract",
+            "decision": "matched" if matched else "missed",
+            "expected_reply_type": expected_reply_type,
+            "value": value,
+        }
+        trace_payload.update(answer_meta)
+        _record_decision_trace(conversation, trace_payload)
         if saved_message:
-            _update_message_decision_metadata(
-                saved_message,
-                {
-                    "expected_reply_type": expected_reply_type,
-                    "expected_reply_matched": matched,
-                    "expected_reply_value": value,
-                },
-            )
+            updates = {
+                "expected_reply_type": expected_reply_type,
+                "expected_reply_matched": matched,
+                "expected_reply_value": value,
+            }
+            updates.update(answer_meta)
+            _update_message_decision_metadata(saved_message, updates)
         context = _get_conversation_context(conversation)
         expected_reply_type = _get_expected_reply_type(context)
         intent_queue = _get_intent_queue(context)

@@ -37,6 +37,26 @@ _DEFAULT_ROUTER_MODEL = (
     "gpt-4o-mini" if FAST_MODEL.strip().lower().startswith("gpt-5") else FAST_MODEL
 )
 ROUTER_MODEL = os.environ.get("ROUTER_MODEL", _DEFAULT_ROUTER_MODEL).strip()
+ANSWER_INTERPRETER_TIMEOUT_SECONDS = float(
+    os.environ.get("ANSWER_INTERPRETER_TIMEOUT_SECONDS", "2.5")
+)
+ANSWER_INTERPRETER_MAX_TOKENS = int(os.environ.get("ANSWER_INTERPRETER_MAX_TOKENS", "120"))
+ANSWER_INTERPRETER_MODEL = os.environ.get("ANSWER_INTERPRETER_MODEL", ROUTER_MODEL).strip()
+ANSWER_INTERPRETER_SLOTS = {"service", "datetime", "name"}
+ANSWER_INTERPRETER_SLOT_ALIASES = {
+    "service": "service",
+    "service_choice": "service",
+    "service_query": "service",
+    "time": "datetime",
+    "datetime": "datetime",
+    "date": "datetime",
+    "name": "name",
+}
+ANSWER_INTERPRETER_SLOT_BY_REPLY_TYPE = {
+    "service_choice": "service",
+    "time": "datetime",
+    "name": "name",
+}
 ROUTER_ALLOWED_CLASSES = {
     "booking",
     "info_bundle",
@@ -60,14 +80,26 @@ ROUTER_PROMPT_FALLBACK = """# LLM Router Prompt (Salon)
 
 Ты LLM‑router для салона красоты. Вход всегда JSON.
 
-Вход:
+Вход (JSON):
 ```json
-{"message":"...","carryover":{"class":"...","intents":["..."],"info_sections":["..."],"ttl_remaining":0},"expected_reply_type":"..."}
+{"task":"router","message":"...","carryover":{"class":"...","intents":["..."],"info_sections":["..."],"ttl_remaining":0},"expected_reply_type":"..."}
 ```
 
-Верни ТОЛЬКО JSON строго такого вида:
+или
+```json
+{"task":"answer_interpreter","message":"...","expected_reply_type":"service_choice|time|name","carryover":{"class":"...","intents":["..."],"info_sections":["..."],"ttl_remaining":0},"question_context":{"prompt_hint":"..."}}
+```
+
+Верни ТОЛЬКО JSON. Режимы:
+
+1) task="router" (или task отсутствует) → строго такого вида:
 ```json
 {"class":"...","intents":["..."],"slots":{"service_query":""},"confidence":0.0,"reason":"...","carryover":{}}
+```
+
+2) task="answer_interpreter" → строго такого вида:
+```json
+{"slot":"service|datetime|name","value":"...","confidence":0.0,"reason":"..."}
 ```
 
 ## КЛАССЫ (выбери один)
@@ -95,6 +127,11 @@ ROUTER_PROMPT_FALLBACK = """# LLM Router Prompt (Salon)
 
 ## REASON
 - Короткая причина (1–6 слов).
+
+## ANSWER INTERPRETER (task="answer_interpreter")
+- slot: service|datetime|name. expected_reply_type: service_choice→service, time→datetime, name→name.
+- value: краткий ответ из сообщения клиента (для service 1–6 слов). Если ответа нет — пустая строка.
+- confidence: 0.0–1.0. Если сомневаешься — 0.0.
 """
 
 _ROUTER_PROMPT_CACHE: str | None = None
@@ -159,6 +196,28 @@ def _clean_router_service_query(value: Any) -> str:
     tokens = cleaned.split()
     if len(tokens) > 6:
         cleaned = " ".join(tokens[:6])
+    return cleaned
+
+
+def _clean_answer_slot(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().casefold()
+    if not cleaned:
+        return None
+    return ANSWER_INTERPRETER_SLOT_ALIASES.get(cleaned)
+
+
+def _clean_answer_value(value: Any, *, slot: str) -> str:
+    if not isinstance(value, str):
+        return ""
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    if not cleaned:
+        return ""
+    if slot == "service":
+        return _clean_router_service_query(cleaned)
+    if len(cleaned) > 80:
+        cleaned = cleaned[:80].strip()
     return cleaned
 
 
@@ -428,6 +487,7 @@ def route_llm_router(
         return result
 
     router_input = {
+        "task": "router",
         "message": message,
         "carryover": carryover_input,
     }
@@ -622,6 +682,171 @@ def route_llm_router(
         router_error="none",
         router_retry_flag=router_retry,
     )
+    return result
+
+
+def interpret_expected_reply(
+    message: str,
+    *,
+    expected_reply_type: str | None,
+    carryover: dict | None = None,
+    question_context: dict | None = None,
+) -> dict:
+    result: dict[str, Any] = {"ok": False, "payload": None, "error": None, "raw": None}
+    expected_slot = ANSWER_INTERPRETER_SLOT_BY_REPLY_TYPE.get(
+        expected_reply_type or ""
+    )
+    payload = {
+        "slot": expected_slot or "",
+        "value": "",
+        "confidence": 0.0,
+        "reason": "",
+    }
+    result["payload"] = payload
+
+    normalized = (message or "").strip()
+    if not normalized:
+        result["error"] = "empty_message"
+        return result
+    if not expected_slot:
+        result["error"] = "unsupported_expected_reply_type"
+        return result
+    prompt = _load_router_prompt()
+    if not prompt:
+        result["error"] = "prompt_missing"
+        return result
+
+    carryover_input = _build_router_carryover(carryover)
+    interpreter_input = {
+        "task": "answer_interpreter",
+        "message": message,
+        "expected_reply_type": expected_reply_type,
+        "carryover": carryover_input,
+        "question_context": question_context if isinstance(question_context, dict) else {},
+    }
+    llm = get_llm_provider()
+    messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": json.dumps(interpreter_input, ensure_ascii=False)},
+    ]
+    model_name = ANSWER_INTERPRETER_MODEL.strip()
+    temperature = 1.0 if model_name.lower().startswith("gpt-5") else 0.0
+    llm_start = time.monotonic()
+    try:
+        response = llm.generate(
+            messages,
+            temperature=temperature,
+            max_tokens=ANSWER_INTERPRETER_MAX_TOKENS,
+            model=ANSWER_INTERPRETER_MODEL,
+            timeout_seconds=ANSWER_INTERPRETER_TIMEOUT_SECONDS,
+        )
+    except httpx.TimeoutException as exc:
+        elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
+        logger.info(
+            "Timing",
+            extra={
+                "context": {
+                    "stage": "answer_interpreter_llm_ms",
+                    "elapsed_ms": elapsed_ms,
+                    "model_name": ANSWER_INTERPRETER_MODEL,
+                    "model_tier": "fast",
+                    "timeout": True,
+                    "timeout_seconds": ANSWER_INTERPRETER_TIMEOUT_SECONDS,
+                    "max_tokens": ANSWER_INTERPRETER_MAX_TOKENS,
+                    "temperature": temperature,
+                }
+            },
+        )
+        logger.warning(
+            f"Answer interpreter timeout after {ANSWER_INTERPRETER_TIMEOUT_SECONDS}s: {exc}"
+        )
+        result["error"] = "timeout"
+        return result
+    except Exception as exc:
+        elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
+        logger.info(
+            "Timing",
+            extra={
+                "context": {
+                    "stage": "answer_interpreter_llm_ms",
+                    "elapsed_ms": elapsed_ms,
+                    "model_name": ANSWER_INTERPRETER_MODEL,
+                    "model_tier": "fast",
+                    "timeout": False,
+                    "error": str(exc),
+                    "max_tokens": ANSWER_INTERPRETER_MAX_TOKENS,
+                    "temperature": temperature,
+                }
+            },
+        )
+        logger.warning(f"Answer interpreter failed: {exc}")
+        result["error"] = "error"
+        return result
+
+    elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
+    logger.info(
+        "Timing",
+        extra={
+            "context": {
+                "stage": "answer_interpreter_llm_ms",
+                "elapsed_ms": elapsed_ms,
+                "model_name": ANSWER_INTERPRETER_MODEL,
+                "model_tier": "fast",
+                "timeout": False,
+                "max_tokens": ANSWER_INTERPRETER_MAX_TOKENS,
+                "temperature": temperature,
+            }
+        },
+    )
+
+    content = (response.content or "").strip()
+    result["raw"] = content
+    if not content:
+        result["error"] = "empty_response"
+        return result
+
+    parsed = None
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                parsed = json.loads(match.group(0))
+            except Exception:
+                parsed = None
+    if not isinstance(parsed, dict):
+        result["error"] = "invalid_json"
+        return result
+
+    slot = _clean_answer_slot(parsed.get("slot")) or expected_slot
+    error = None
+    if slot != expected_slot:
+        error = "slot_mismatch"
+        slot = expected_slot
+    value = _clean_answer_value(parsed.get("value"), slot=slot)
+    if not value:
+        error = error or "empty_value"
+    confidence = parsed.get("confidence")
+    try:
+        confidence = float(confidence)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    confidence = max(0.0, min(confidence, 1.0))
+    if error:
+        confidence = 0.0
+    reason = parsed.get("reason")
+    if not isinstance(reason, str):
+        reason = ""
+
+    result["payload"] = {
+        "slot": slot,
+        "value": value,
+        "confidence": confidence,
+        "reason": reason,
+    }
+    result["error"] = error
+    result["ok"] = error is None
     return result
 
 
