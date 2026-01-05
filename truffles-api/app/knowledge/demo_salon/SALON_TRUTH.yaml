@@ -117,6 +117,7 @@ services_catalog: &services_catalog
       aliases:
         - уход за лицом
         - чистка лица
+        - чистку лица
         - пилинг
         - массаж лица
       price_items:
