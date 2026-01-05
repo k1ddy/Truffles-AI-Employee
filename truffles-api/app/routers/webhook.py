@@ -4306,6 +4306,13 @@ def _build_info_intent_reply(
             include_guest=guest_signal,
         )
         return reply, meta or None
+    if (
+        intent in {"pricing", "duration"}
+        and not service_query
+        and message_text
+        and client_slug == "demo_salon"
+    ):
+        service_query = get_demo_salon_service_hint(message_text)
     if intent == "pricing":
         question = f"Сколько стоит {service_query}?" if service_query else "Сколько стоит?"
     elif intent == "duration":
