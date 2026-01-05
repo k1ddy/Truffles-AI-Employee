@@ -1593,9 +1593,11 @@ def _format_promotions(truth: dict, intent: str | None = None) -> str:
     if intent == "promotion_first_visit":
         for promo in items:
             if "перв" in str(promo.get("name", "")).casefold():
+                stacking = promotions.get("stacking")
+                stacking_text = f" {stacking}." if stacking else " Скидки не суммируются."
                 return (
                     f"На первое посещение действует скидка {promo.get('discount_percent')}% "
-                    "на услуги. Скидки не суммируются."
+                    f"на услуги.{stacking_text}"
                 )
     if intent == "promotion_birthday":
         for promo in items:
