@@ -2123,6 +2123,7 @@ def _extract_datetime(text: str) -> str | None:
 
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration"}
 INFO_INTENTS = {"pricing", "hours", "duration", "location"}
+CONSULT_INTERRUPT_INTENTS = {"booking", "pricing", "duration", "location", "hours"}
 INFO_INTENT_PRIORITY_SERVICE = ("pricing", "duration", "location", "hours")
 INFO_INTENT_PRIORITY_GENERIC = ("location", "hours", "pricing", "duration")
 BOOKING_TIME_SERVICE_INTENTS = {
@@ -2144,6 +2145,8 @@ CLASS_CARRYOVER_TTL_MESSAGES = 4
 CLASS_CARRYOVER_CLASSES = {"info_bundle"}
 SERVICE_CARRYOVER_KEY = "service_carryover"
 SERVICE_CARRYOVER_TTL_MESSAGES = 4
+CONSULT_CONTEXT_KEY = "consult_context"
+CONSULT_CONTEXT_TTL_MESSAGES = 6
 SERVICE_CARRYOVER_INTENTS = {"pricing", "duration"}
 SERVICE_CARRYOVER_SKIP_INTENTS = {
     "service_clarify",
@@ -2643,6 +2646,152 @@ def _maybe_store_service_carryover(
             "reason": reason,
         },
     )
+
+
+def _prune_consult_context(manager: dict, *, message_count: int) -> tuple[dict, dict | None]:
+    payload = manager.get(CONSULT_CONTEXT_KEY)
+    if not isinstance(payload, dict):
+        return manager, None
+    try:
+        last_count = int(payload.get("message_count"))
+    except (TypeError, ValueError):
+        manager = dict(manager)
+        manager.pop(CONSULT_CONTEXT_KEY, None)
+        return manager, {"reason": "invalid"}
+    ttl = payload.get("ttl", CONSULT_CONTEXT_TTL_MESSAGES)
+    try:
+        ttl = int(ttl)
+    except (TypeError, ValueError):
+        ttl = CONSULT_CONTEXT_TTL_MESSAGES
+    if ttl <= 0:
+        ttl = CONSULT_CONTEXT_TTL_MESSAGES
+    age = message_count - last_count
+    if age > ttl:
+        manager = dict(manager)
+        manager.pop(CONSULT_CONTEXT_KEY, None)
+        return manager, {"reason": "expired", "age": age, "ttl": ttl}
+    return manager, None
+
+
+def _get_consult_context(manager: dict, *, message_count: int) -> dict | None:
+    payload = manager.get(CONSULT_CONTEXT_KEY)
+    if not isinstance(payload, dict):
+        return None
+    try:
+        last_count = int(payload.get("message_count"))
+    except (TypeError, ValueError):
+        return None
+    ttl = payload.get("ttl", CONSULT_CONTEXT_TTL_MESSAGES)
+    try:
+        ttl = int(ttl)
+    except (TypeError, ValueError):
+        return None
+    if ttl <= 0:
+        return None
+    age = message_count - last_count
+    if age <= 0 or age > ttl:
+        return None
+    remaining = max(ttl - age + 1, 0)
+    questions_raw = payload.get("questions")
+    questions: list[str] = []
+    if isinstance(questions_raw, list):
+        for item in questions_raw:
+            if not isinstance(item, str):
+                continue
+            value = item.strip()
+            if value:
+                questions.append(value)
+    topic = payload.get("topic")
+    topic_value = topic.strip() if isinstance(topic, str) and topic.strip() else None
+    question = payload.get("question")
+    question_value = question.strip() if isinstance(question, str) and question.strip() else None
+    return {
+        "questions": questions,
+        "topic": topic_value,
+        "question": question_value,
+        "age": age,
+        "ttl": ttl,
+        "remaining": remaining,
+    }
+
+
+def _set_consult_context(
+    manager: dict,
+    *,
+    consult_meta: dict,
+    message_count: int,
+) -> dict:
+    manager = dict(manager)
+    questions_raw = consult_meta.get("consult_questions") if isinstance(consult_meta, dict) else None
+    questions: list[str] = []
+    if isinstance(questions_raw, list):
+        for item in questions_raw:
+            if not isinstance(item, str):
+                continue
+            value = item.strip()
+            if value:
+                questions.append(_ensure_question_mark(value))
+    topic = consult_meta.get("consult_topic") if isinstance(consult_meta, dict) else None
+    topic_value = topic.strip() if isinstance(topic, str) and topic.strip() else None
+    question = consult_meta.get("consult_question") if isinstance(consult_meta, dict) else None
+    question_value = question.strip() if isinstance(question, str) and question.strip() else None
+    manager[CONSULT_CONTEXT_KEY] = {
+        "questions": questions,
+        "topic": topic_value,
+        "question": question_value,
+        "message_count": message_count,
+        "ttl": CONSULT_CONTEXT_TTL_MESSAGES,
+    }
+    return manager
+
+
+def _build_consult_return_prompt(consult_context: dict | None) -> str | None:
+    if not isinstance(consult_context, dict):
+        return None
+    questions = consult_context.get("questions")
+    if isinstance(questions, list):
+        cleaned = [item.strip() for item in questions if isinstance(item, str) and item.strip()]
+        if cleaned:
+            return f"Если вернуться к вашему вопросу: {' '.join(cleaned)}"
+    question = consult_context.get("question")
+    if isinstance(question, str) and question.strip():
+        return f"Если вернуться к вашему вопросу: {_ensure_question_mark(question)}"
+    return "Если хотите, продолжим консультацию."
+
+
+def _apply_consult_return(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    bot_response: str | None,
+    consult_return_prompt: str | None,
+    consult_context: dict | None,
+    reason: str,
+) -> str | None:
+    if not bot_response or not consult_return_prompt:
+        return bot_response
+    trace_payload = {
+        "stage": "consult_return",
+        "decision": "attached",
+        "current_goal": "consult",
+        "reason": reason,
+    }
+    if isinstance(consult_context, dict):
+        consult_topic = consult_context.get("topic")
+        consult_question = consult_context.get("question")
+        if consult_topic:
+            trace_payload["consult_topic"] = consult_topic
+        if consult_question:
+            trace_payload["consult_question"] = consult_question
+    _record_decision_trace(conversation, trace_payload)
+    if saved_message:
+        updates = {"consult_return": True, "current_goal": "consult"}
+        if isinstance(consult_context, dict):
+            consult_topic = consult_context.get("topic")
+            if consult_topic:
+                updates["consult_topic"] = consult_topic
+        _update_message_decision_metadata(saved_message, updates)
+    return _append_followup(bot_response, consult_return_prompt)
 
 
 INFO_ANCHOR_GROUPS: dict[str, list[tuple[str, ...]]] = {
@@ -3919,6 +4068,21 @@ def _combine_sidecar(primary: str, sidecar: str | None) -> str:
     return f"{sidecar}\n\n{primary}"
 
 
+def _ensure_question_mark(text: str) -> str:
+    cleaned = text.strip()
+    if not cleaned:
+        return ""
+    if cleaned.endswith("?"):
+        return cleaned
+    return f"{cleaned}?"
+
+
+def _append_followup(primary: str, followup: str | None) -> str:
+    if not followup:
+        return primary
+    return f"{primary}\n\n{followup}"
+
+
 def _maybe_append_booking_cta(
     bot_response: str | None,
     *,
@@ -5185,6 +5349,10 @@ async def _handle_webhook_payload(
         context_manager,
         message_count=message_count,
     )
+    context_manager, consult_context_event = _prune_consult_context(
+        context_manager,
+        message_count=message_count,
+    )
     context = _set_context_manager(context, context_manager)
     _set_conversation_context(conversation, context)
     if refusal_events:
@@ -5212,6 +5380,15 @@ async def _handle_webhook_payload(
                 **carryover_event,
             },
         )
+    if consult_context_event:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "consult_context",
+                "decision": "expired",
+                **consult_context_event,
+            },
+        )
     if message_count == SUMMARY_MESSAGE_THRESHOLD:
         _update_compact_summary(
             conversation=conversation,
@@ -5221,6 +5398,10 @@ async def _handle_webhook_payload(
         )
         context = _get_conversation_context(conversation)
     current_goal = context_manager.get("current_goal") if isinstance(context_manager, dict) else None
+    consult_context = _get_consult_context(context_manager, message_count=message_count)
+    consult_return_prompt = None
+    consult_return_reason = None
+    consult_return_pending = False
     class_carryover = _get_class_carryover(context_manager, message_count=message_count)
 
     expected_reply_type = _get_expected_reply_type(context)
@@ -6583,28 +6764,43 @@ async def _handle_webhook_payload(
             }
 
     intent_decomp_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent} if intent_decomp_used else set()
+    consult_interrupt_intents = (
+        intent_decomp_set & CONSULT_INTERRUPT_INTENTS if intent_decomp_used else set()
+    )
+    if (
+        current_goal == "consult"
+        and consult_context
+        and not consult_intent
+        and (consult_interrupt_intents or booking_signal)
+    ):
+        consult_return_pending = True
+        consult_return_reason = (
+            "intent_interrupt" if consult_interrupt_intents else "booking_signal"
+        )
+        consult_return_prompt = _build_consult_return_prompt(consult_context)
     if intent_decomp_used:
         new_goal = _resolve_current_goal(intent_decomp_set, consult_intent)
-        if new_goal and new_goal != current_goal:
-            context = _get_conversation_context(conversation)
-            context_manager = _get_context_manager(context)
-            context_manager["current_goal"] = new_goal
-            context = _set_context_manager(context, context_manager)
-            _set_conversation_context(conversation, context)
-            _record_context_manager_decision(
-                conversation,
-                saved_message,
-                decision="current_goal",
-                updates={"current_goal": new_goal},
-            )
-            _update_compact_summary(
-                conversation=conversation,
-                saved_message=saved_message,
-                reason="intent_change",
-                now=now,
-            )
-            context = _get_conversation_context(conversation)
-            current_goal = new_goal
+        if not (current_goal == "consult" and consult_return_pending):
+            if new_goal and new_goal != current_goal:
+                context = _get_conversation_context(conversation)
+                context_manager = _get_context_manager(context)
+                context_manager["current_goal"] = new_goal
+                context = _set_context_manager(context, context_manager)
+                _set_conversation_context(conversation, context)
+                _record_context_manager_decision(
+                    conversation,
+                    saved_message,
+                    decision="current_goal",
+                    updates={"current_goal": new_goal},
+                )
+                _update_compact_summary(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    reason="intent_change",
+                    now=now,
+                )
+                context = _get_conversation_context(conversation)
+                current_goal = new_goal
     if booking_context is not None:
         booking_context = _get_conversation_context(conversation)
         booking = _get_booking_context(booking_context)
@@ -7374,6 +7570,15 @@ async def _handle_webhook_payload(
                 allow_booking_flow=routing["allow_booking_flow"],
                 has_followup=bool(followup),
             )
+            if consult_return_pending:
+                bot_response = _apply_consult_return(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    bot_response=bot_response,
+                    consult_return_prompt=consult_return_prompt,
+                    consult_context=consult_context,
+                    reason=consult_return_reason or "intent_queue_info",
+                )
             _reset_low_confidence_retry(conversation)
             trace_payload = {
                 "stage": "intent_queue",
@@ -7481,6 +7686,15 @@ async def _handle_webhook_payload(
             fast_intent=False,
         )
         bot_response = prompt or MSG_BOOKING_ASK_DATETIME
+        if consult_return_pending:
+            bot_response = _apply_consult_return(
+                conversation=conversation,
+                saved_message=saved_message,
+                bot_response=bot_response,
+                consult_return_prompt=consult_return_prompt,
+                consult_context=consult_context,
+                reason=consult_return_reason or "intent_queue_booking",
+            )
         _reset_low_confidence_retry(conversation)
         bot_response, sent = _send_and_save(bot_response)
         result_message = "Intent queue booking prompt sent" if sent else "Intent queue booking prompt failed"
@@ -7635,6 +7849,15 @@ async def _handle_webhook_payload(
                         message_count=message_count,
                         reason="intent_queue",
                     )
+                if consult_return_pending:
+                    bot_response = _apply_consult_return(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        bot_response=bot_response,
+                        consult_return_prompt=consult_return_prompt,
+                        consult_context=consult_context,
+                        reason=consult_return_reason or "intent_queue_defer",
+                    )
                 bot_response, sent = _send_and_save(bot_response)
                 result_message = "Intent queue info reply sent" if sent else "Intent queue info reply failed"
                 db.commit()
@@ -7737,6 +7960,29 @@ async def _handle_webhook_payload(
                         now=now,
                         reason="consult",
                     )
+        if consult_decision.action == "reply":
+            context = _get_conversation_context(conversation)
+            context_manager = _get_context_manager(context)
+            context_manager["current_goal"] = "consult"
+            context_manager = _set_consult_context(
+                context_manager,
+                consult_meta=consult_meta,
+                message_count=message_count,
+            )
+            context = _set_context_manager(context, context_manager)
+            _set_conversation_context(conversation, context)
+            consult_trace = {
+                "stage": "consult_context",
+                "decision": "set",
+                "current_goal": "consult",
+                "ttl": CONSULT_CONTEXT_TTL_MESSAGES,
+            }
+            consult_topic = consult_meta.get("consult_topic")
+            if consult_topic:
+                consult_trace["consult_topic"] = consult_topic
+            _record_decision_trace(conversation, consult_trace)
+            if saved_message:
+                _update_message_decision_metadata(saved_message, {"current_goal": "consult"})
         consult_trace = {
             "stage": "consult",
             "decision": consult_decision.action,
@@ -8184,6 +8430,15 @@ async def _handle_webhook_payload(
 
                 bot_response = _combine_sidecar(prompt or "", info_decision.response or "")
                 bot_response = bot_response.strip()
+                if consult_return_pending:
+                    bot_response = _apply_consult_return(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        bot_response=bot_response,
+                        consult_return_prompt=consult_return_prompt,
+                        consult_context=consult_context,
+                        reason=consult_return_reason or "booking_interrupt",
+                    )
                 _reset_low_confidence_retry(conversation)
                 bot_response, sent = _send_and_save(bot_response)
                 result_message = "Booking info interrupt sent" if sent else "Booking info interrupt failed"
@@ -8358,6 +8613,15 @@ async def _handle_webhook_payload(
                 )
                 bot_response = _combine_sidecar(prompt, policy_price_sidecar)
                 bot_response = _combine_sidecar(bot_response, multi_intent_booking_followup)
+                if consult_return_pending:
+                    bot_response = _apply_consult_return(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        bot_response=bot_response,
+                        consult_return_prompt=consult_return_prompt,
+                        consult_context=consult_context,
+                        reason=consult_return_reason or "booking_prompt",
+                    )
                 bot_response, sent = _send_and_save(bot_response)
                 result_message = "Booking slot requested" if sent else "Booking slot response failed"
                 _log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
@@ -8734,6 +8998,15 @@ async def _handle_webhook_payload(
                     message_count=message_count,
                     reason="class_router",
                 )
+                if consult_return_pending:
+                    bot_response = _apply_consult_return(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        bot_response=bot_response,
+                        consult_return_prompt=consult_return_prompt,
+                        consult_context=consult_context,
+                        reason=consult_return_reason or "info_class",
+                    )
                 bot_response, sent = _send_and_save(bot_response)
                 result_message = "Info class reply sent" if sent else "Info class reply failed"
                 db.commit()
@@ -8766,6 +9039,15 @@ async def _handle_webhook_payload(
                     conversation_state=conversation.state,
                     allow_booking_flow=routing["allow_booking_flow"],
                     has_followup=bool(multi_intent_other_followup),
+                )
+            if consult_return_pending:
+                bot_response = _apply_consult_return(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    bot_response=bot_response,
+                    consult_return_prompt=consult_return_prompt,
+                    consult_context=consult_context,
+                    reason=consult_return_reason or "service_matcher",
                 )
             _reset_low_confidence_retry(conversation)
 
@@ -9090,6 +9372,15 @@ async def _handle_webhook_payload(
                     reason=decision.intent,
                 )
             bot_response = decision.response
+            if consult_return_pending:
+                bot_response = _apply_consult_return(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    bot_response=bot_response,
+                    consult_return_prompt=consult_return_prompt,
+                    consult_context=consult_context,
+                    reason=consult_return_reason or "truth_gate",
+                )
             _reset_low_confidence_retry(conversation)
 
             result_message = "Truth gate fallback reply sent"
