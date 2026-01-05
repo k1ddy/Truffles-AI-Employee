@@ -3895,6 +3895,27 @@ def _select_last_non_booking_message(messages: list[str], *, client_slug: str | 
     return None
 
 
+def _select_expected_reply_message(
+    messages: list[str],
+    *,
+    expected_reply_type: str | None,
+    client_slug: str | None,
+) -> str | None:
+    if not messages or not expected_reply_type:
+        return None
+    for message in reversed(messages or []):
+        if not message:
+            continue
+        matched, _ = _match_expected_reply(
+            expected_reply_type=expected_reply_type,
+            message_text=message,
+            client_slug=client_slug,
+        )
+        if matched:
+            return message
+    return None
+
+
 def _apply_booking_slot(
     booking: dict,
     slot_key: str,
@@ -5449,7 +5470,14 @@ async def _handle_webhook_payload(
     intent_queue = _get_intent_queue(context)
     expected_reply_matched: bool | None = None
     expected_reply_shortcircuit = False
-    expected_reply_text = batch_non_booking_message or message_text
+    expected_reply_text = (
+        _select_expected_reply_message(
+            batch_messages,
+            expected_reply_type=expected_reply_type,
+            client_slug=payload.client_slug,
+        )
+        or message_text
+    )
     if expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME} and expected_reply_text:
         answer_confidence = 0.0
         answer_slot = ""
@@ -5547,6 +5575,19 @@ async def _handle_webhook_payload(
             next_expected = EXPECTED_REPLY_INTENT_CHOICE if intent_queue else None
             context = _set_expected_reply_type(context, next_expected)
             _set_conversation_context(conversation, context)
+        if expected_reply_shortcircuit:
+            context_manager = _get_context_manager(context)
+            if context_manager.get("current_goal") != "booking":
+                context_manager["current_goal"] = "booking"
+                context = _set_context_manager(context, context_manager)
+                _set_conversation_context(conversation, context)
+                _record_context_manager_decision(
+                    conversation,
+                    saved_message,
+                    decision="current_goal",
+                    updates={"current_goal": "booking"},
+                )
+            current_goal = "booking"
         trace_payload = {
             "stage": "question_contract",
             "decision": "matched" if matched else "missed",
@@ -6821,7 +6862,9 @@ async def _handle_webhook_payload(
         consult_return_prompt = _build_consult_return_prompt(consult_context)
     if intent_decomp_used:
         new_goal = _resolve_current_goal(intent_decomp_set, consult_intent)
-        if not (current_goal == "consult" and consult_return_pending):
+        if not expected_reply_shortcircuit and not (
+            current_goal == "consult" and consult_return_pending
+        ):
             if new_goal and new_goal != current_goal:
                 context = _get_conversation_context(conversation)
                 context_manager = _get_context_manager(context)
@@ -8201,16 +8244,28 @@ async def _handle_webhook_payload(
         and not bypass_domain_flows
         and booking_wants_flow
         and not consult_intent
-        and (intent_decomp_used or booking_time_service_candidate or batch_non_booking_message)
+        and (
+            intent_decomp_used
+            or booking_time_service_candidate
+            or batch_non_booking_message
+            or expected_reply_shortcircuit
+        )
     ):
         booking_info_intents = (
             sorted(intent_decomp_set & INFO_INTENTS) if intent_decomp_used else []
         )
-        if (
-            (booking_info_intents or booking_time_service_candidate or batch_non_booking_message)
-            and policy_handler
-            and routing["allow_truth_gate_reply"]
-        ):
+        if expected_reply_shortcircuit and booking_interrupt_text:
+            anchor_intents, _ = _detect_info_class_intents(
+                booking_interrupt_text,
+                intent_decomp_set=set(),
+            )
+            booking_info_intents = sorted(anchor_intents)
+        allow_booking_interrupt_info = bool(
+            booking_info_intents
+            or booking_time_service_candidate
+            or (batch_non_booking_message and not expected_reply_shortcircuit)
+        )
+        if allow_booking_interrupt_info and policy_handler and routing["allow_truth_gate_reply"]:
             info_decision = None
             info_source = None
             if booking_info_intents:
