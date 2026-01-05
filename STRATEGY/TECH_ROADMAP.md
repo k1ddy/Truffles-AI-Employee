@@ -1,174 +1,63 @@
 # ТЕХНИЧЕСКИЙ ROADMAP
 
-**Цель:** Система которая работает надёжно, масштабируется, и не требует переделки.
+**Цель:** управляемый LLM‑консультант для салонов с детерминированным ядром и “живым” ответом.
 
 ---
 
-## ПРИНЦИПЫ
+## КАНОН (не меняется)
 
-1. **Делать правильно сразу** — не "потом переделаем"
-2. **Знать когда сломалось** — мониторинг и алерты
-3. **Система сама восстанавливается** — автоперезапуск, retry, fallback
-4. **Тесты до продакшена** — не ловить баги у клиента
-
----
-
-## ФАЗА 1: НАДЁЖНОСТЬ (до первого клиента)
-
-### 1.1 Переключение на Python
-- [ ] Все сообщения → Python API
-- [ ] Telegram webhook → Python API
-
-### 1.2 Автовосстановление
-- [ ] Docker restart policy: `always`
-- [ ] Healthcheck endpoints: `/health` для каждого сервиса
-- [ ] Docker healthcheck с автоперезапуском
-- [ ] Supervisor или systemd для критичных процессов
-
-### 1.3 Мониторинг и алерты
-- [ ] Telegram бот для алертов (отдельный от основного)
-- [ ] Алерты: сервис упал, БД недоступна, Qdrant недоступен
-- [ ] Алерты: handover висит > 2 часов без ответа
-- [ ] Алерты: ошибки в логах (5xx, exceptions)
-- [ ] Дашборд: количество сообщений, эскалаций, ошибок
-
-### 1.4 Логирование
-- [ ] Структурированные логи (JSON)
-- [ ] Централизованное хранение (файл → потом ELK/Loki)
-- [ ] Уровни: ERROR, WARN, INFO, DEBUG
-- [ ] Request ID для трейсинга
-
-### 1.5 Тестирование
-- [ ] Unit тесты для критичных функций
-- [ ] Integration тесты: message → response flow
-- [ ] Тест качества ответов: 10 типовых вопросов → проверка ответов
-- [ ] CI pipeline: тесты перед деплоем
+1. **LAW‑гейты и truth‑first всегда.**
+2. **Deterministic Core** для фактов (часы, адрес, услуги, цены, правила).
+3. **LLM — для подачи и консультации**, не для бизнес‑решений.
+4. **CORE‑eval в CI блокирует релиз**, long‑eval — отдельный tier.
 
 ---
 
-## ФАЗА 2: МАСШТАБИРУЕМОСТЬ (10-100 клиентов)
+## ПРИОРИТЕТЫ
 
-### 2.1 Убрать legacy workflow engine полностью
-- [ ] WhatsApp webhook напрямую в Python
-- [ ] Дедупликация в Python (Redis)
+### P0 — Детерминизм и релизная стабильность
+- Base‑80 CORE: часы/адрес/услуги/цены/скидки/парковка/guest_policy без OpenAI.
+- Taxonomy → Alias Expansion: ServiceSample расширяет aliases **только** для услуг салона.
+- CI deploy без конфликтов; `/admin/version` всегда = HEAD.
+- Core/long в CI раздельно; локальные тесты не являются gate.
 
-### 2.2 Message Queue
-- [ ] Redis Queue или RabbitMQ
-- [ ] Асинхронная обработка сообщений
-- [ ] Retry при ошибках
-- [ ] Dead letter queue для failed messages
+### P1 — “Разумный хост”
+- Goal‑stack и consult‑return при перебивках.
+- Answer‑Interpreter: устойчивое понимание ответов клиента на вопрос бота.
+- Router SLA <10% fallback с прозрачным `fallback_reason`.
+- Long‑хаос 12–15 ходов в `EVAL_TIER=long`.
 
-### 2.3 Database
-- [ ] Connection pooling (pgbouncer)
-- [ ] Read replicas для аналитики
-- [ ] Бэкапы автоматические
-- [ ] Миграции через Alembic
+### P2 — Active Learning
+- Очередь `learned_responses` + модерация.
+- Калибровка по живым диалогам, tenant‑only, opt‑in.
+- Метрики “где ломается” и регрессии.
 
-### 2.4 Кэширование
-- [ ] Redis cache для промптов
-- [ ] Cache для client_settings
-- [ ] Cache invalidation при изменениях
-
----
-
-## ФАЗА 3: ENTERPRISE (100-10000 клиентов)
-
-### 3.1 Kubernetes
-- [ ] Helm charts для деплоя
-- [ ] Horizontal Pod Autoscaler
-- [ ] Pod Disruption Budget
-- [ ] Rolling updates
-
-### 3.2 Multi-region
-- [ ] PostgreSQL с репликацией
-- [ ] Qdrant cluster
-- [ ] CDN для статики
-
-### 3.3 Observability
-- [ ] Prometheus + Grafana
-- [ ] Distributed tracing (Jaeger)
-- [ ] Error tracking (Sentry)
-- [ ] SLO/SLA мониторинг
-
-### 3.4 Security
-- [ ] Secrets management (Vault)
-- [ ] Network policies
-- [ ] Rate limiting
-- [ ] Audit logs
+### P3 — Enterprise слой
+- Единый мониторинг качества (SLA/ошибки/регрессии).
+- CRM/Calendar интеграции (Bitrix/Amo/Google Calendar).
+- Версионирование client_pack и аудит фактов.
 
 ---
 
-## ФАЗА 4: ПРОДУКТ И КАНАЛЫ (после пилотов)
+## ТЕКУЩИЙ СТАТУС (СВОДНО)
 
-### 4.1 CRM и запись
-- [ ] Интеграция с CRM (AmoCRM, Bitrix)
-- [ ] Инструменты записи (create/update lead/appointment) с идемпотентностью
-- [ ] Статусы записи + история действий
-
-### 4.2 Каналы
-- [ ] Instagram Direct
-- [ ] Web‑панель для менеджеров (вместо Telegram)
-- [ ] Мульти‑номер/филиалы в UI
-
-### 4.3 LLM и качество
-- [ ] Multi‑LLM routing (fast/slow/quality tiers)
-- [ ] Hybrid retrieval RU/KZ (BM25 + vector + rerank)
-- [ ] Query‑rewrite для шумных сообщений/ASR
-
-### 4.4 Голос и ASR
-- [ ] Качественный ASR контур (RU/KZ, подтверждение, фоллбек)
-- [ ] Звонки (voice pipeline) + summary
-
-### 4.5 Observability
-- [ ] Grafana/Prometheus/Loki или эквивалентный стек
-- [ ] Дашборды SLA/LLM/эскалации
-- [ ] Алерты по деградации качества
-
----
-
-## ТЕКУЩИЙ СТАТУС
-
-| Компонент | Статус | Приоритет |
-|-----------|--------|-----------|
-| Python API | 80% (частично подключен) | P0 |
-| Telegram webhook | ✅ Python API | P0 |
-| Healthchecks | ❌ Нет | P0 |
-| Алерты | ❌ Нет | P0 |
-| Автоперезапуск | ❌ Нет | P0 |
-| Логирование | Базовое (print) | P1 |
-| Тесты | Написаны, не в CI | P1 |
-| Message Queue | ❌ Нет | P2 |
-| Kubernetes | ❌ Нет | P3 |
+| Блок | Статус |
+|------|--------|
+| Base‑80 CORE | In Progress (E4xx фикс‑луп) |
+| CI split core/long | ✅ Done |
+| LLM Router + Answer‑Interpreter | ⚠️ Partial (SLA tuning) |
+| Goal‑stack/consult‑return | ✅ Done |
+| Active learning queue | 📋 Plan |
+| Monitoring | ⚠️ Partial |
 
 ---
 
 ## БЛИЖАЙШИЕ ЗАДАЧИ (P0)
 
-1. ~~**Переключить всех на Python**~~ ✅ Сделано 2025-12-10
-2. ~~**Telegram webhook → Python**~~ ✅ Сделано 2025-12-10
-3. **Docker healthchecks** — автоперезапуск при падении
-4. **Алерт-бот** — уведомления в Telegram при ошибках
-5. **E2E тест** — один полный flow: сообщение → ответ → эскалация → resolve
+1. Закрыть Base‑80 CORE без OpenAI.
+2. Авто‑обогащение aliases из ServiceSample для услуг салона.
+3. Проверить стабильность CI‑deploy (без конфликтов контейнера).
 
 ---
 
-## ФУНКЦИОНАЛ (следующие фичи)
-
-| Приоритет | Фича | Описание |
-|-----------|------|----------|
-| 🟡 Medium | История переписки | Менеджер видит последние сообщения в заявке |
-| 🟡 Medium | Автоприветствие менеджера | Первое сообщение менеджера отправляется автоматически |
-| 🟢 Low | "Менеджер занимается" | Если клиент пишет пока pending — сообщить что менеджер уже подключён |
-
----
-
-## АНАЛИТИКА (данные уже собираются)
-
-- `handovers.resolved_by_name` — кто решил
-- `handovers.resolved_at` — когда решил
-- `handovers.first_response_at` — время первого ответа
-- `handovers.assigned_to_name` — кто взял
-
----
-
-*Обновлено: 2025-12-10*
+*Обновлено: 2026-01-05*
