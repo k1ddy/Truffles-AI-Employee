@@ -61,6 +61,7 @@ from app.services.demo_salon_knowledge import (
     get_demo_salon_decision,
     get_demo_salon_price_item,
     get_demo_salon_price_reply,
+    get_demo_salon_service_hint,
     get_demo_salon_service_decision,
     load_yaml_truth,
     semantic_question_type,
@@ -2104,6 +2105,10 @@ def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
         return None
     match = semantic_service_match(text, client_slug)
     if not match or match.action != "match":
+        if client_slug == "demo_salon":
+            fallback = get_demo_salon_service_hint(text)
+            if fallback:
+                return fallback
         return None
     canonical_name = match.canonical_name
     if isinstance(canonical_name, str) and canonical_name.strip():

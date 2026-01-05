@@ -2597,6 +2597,23 @@ def get_demo_salon_price_item(message: str) -> str | None:
     return str(item).strip() or None
 
 
+def get_demo_salon_service_hint(message: str) -> str | None:
+    normalized = _normalize_text(message)
+    if not normalized:
+        return None
+    service = _match_service(normalized)
+    if isinstance(service, dict):
+        name = service.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    price_item = _find_best_price_item(message)
+    if isinstance(price_item, dict):
+        name = price_item.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return None
+
+
 def get_truth_reply(message: str) -> str | None:
     decision = get_demo_salon_decision(message)
     if decision and decision.action == "reply":
