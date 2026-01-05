@@ -194,7 +194,7 @@ services_catalog: &services_catalog
         - Снятие ресниц
       duration_text: "Обычно 40–120 минут, зависит от процедуры."
 promotions: &promotions
-  stacking: Скидки не суммируются
+  stacking: Акции, сертификаты и промокоды не комбинируем
   stacking_notes: Акции, сертификаты и промокоды не комбинируем — за визит действует одно предложение.
   items:
   - name: Первое посещение
