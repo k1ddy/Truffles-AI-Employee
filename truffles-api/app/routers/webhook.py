@@ -7239,6 +7239,12 @@ async def _handle_webhook_payload(
             router_error_value = router_state["output"].get("router_error")
         router_timeout = isinstance(router_error_value, str) and router_error_value == "timeout"
         router_fallback = router_state.get("fallback_reason") not in (None, "skipped")
+        if (
+            router_fallback
+            and router_state.get("fallback_reason") == "low_confidence"
+            and router_state.get("signal_match")
+        ):
+            router_fallback = False
         router_state["timeout"] = router_timeout
         router_state["fallback"] = router_fallback
         router_state["sla"] = _update_router_sla(
