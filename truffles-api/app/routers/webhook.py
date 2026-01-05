@@ -8990,7 +8990,13 @@ async def _handle_webhook_payload(
                     if isinstance(section, str) and section.strip().casefold() == "hours":
                         carryover_has_hours = True
                         break
-            explicit_service = bool(intent_decomp_service_query)
+            service_carryover_meta = _get_service_carryover(
+                context_manager, message_count=message_count
+            )
+            carryover_service_query = None
+            if isinstance(service_carryover_meta, dict):
+                carryover_service_query = service_carryover_meta.get("service_query")
+            explicit_service = bool(intent_decomp_service_query) or bool(carryover_service_query)
             force_hours_followup = (
                 carryover_has_hours
                 and _looks_like_hours_followup(message_text)
@@ -9008,9 +9014,8 @@ async def _handle_webhook_payload(
                 and not info_service_query
                 and {"pricing", "duration"} & info_class_intents_for_reply
             ):
-                service_carryover_meta = _get_service_carryover(context_manager, message_count=message_count)
-                if service_carryover_meta:
-                    info_service_query = service_carryover_meta.get("service_query")
+                if carryover_service_query:
+                    info_service_query = carryover_service_query
             if force_hours_followup:
                 info_class_intents_for_reply.discard("duration")
                 info_class_intents_for_reply.add("hours")
