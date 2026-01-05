@@ -686,8 +686,6 @@ def _looks_like_hours_question(normalized: str) -> bool:
             "до скольки",
             "открыты",
             "открыто",
-            "часы",
-            "часов",
             "время работы",
             "во сколько",
             "открывает",
@@ -700,6 +698,8 @@ def _looks_like_hours_question(normalized: str) -> bool:
         ],
     ):
         return True
+    if _contains_any_words(normalized, ["часы", "часов"]):
+        return not _message_has_service_token(normalized)
     if "работаете" in normalized:
         return True
     if "работает" in normalized and _contains_any(normalized, ["вы", "салон"]):
