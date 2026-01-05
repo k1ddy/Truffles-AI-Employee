@@ -2970,7 +2970,11 @@ def _looks_like_promotions_request(message_text: str | None) -> bool:
     if not normalized:
         return False
     keywords = LLM_GUARD_TOPICS.get("discount") or []
-    return _contains_any(normalized, keywords)
+    if _contains_any(normalized, keywords):
+        return True
+    if "до после" in normalized and _contains_any(normalized, ["дней", "дня", "день"]):
+        return True
+    return False
 
 
 def _load_discount_policy_payload(*, policy_type: str | None) -> dict | None:
