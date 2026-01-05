@@ -6411,3 +6411,22 @@ eval_cases:
     - stage: consult_return
       decision: attached
       current_goal: consult
+- id: E570
+  tier: long
+  messages:
+  - хочу записаться на маникюр
+  - спасибо, в субботу вечером
+  expected:
+    action: reply
+    must_include:
+    - как вас зовут
+    must_not:
+    - ₸
+    - тг
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: time
+      answer_interpreter_used: true
+      answer_slot: datetime
+      expected_reply_shortcircuit: true
