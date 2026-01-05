@@ -165,6 +165,17 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Источник: только client_pack (truth‑first), без фантазий.
 - Follow‑up “по времени/по часам”: если carryover содержит `hours` и нет явной услуги — **не** используем service‑matcher/carryover, ответ остаётся в `hours`.
 
+### Pack Compiler и онбординг (offline‑pipeline)
+- Источники: CRM/Calendar/Excel/Sheets/сайт → единый формат.
+- Нормализация: услуги/категории/правила → client_pack факты.
+- Taxonomy → Alias Expansion: ServiceSample расширяет алиасы **только** для услуг клиента (распознавание ≠ правда).
+- Branch overrides: адрес/часы/канал/политики на уровне филиала.
+- Валидация: обязательные поля (адрес/часы/услуги/правила); если нет — GAP‑лист.
+- Версионирование: `client_pack.version`, `domain_pack.version`, `compiled_at`, `hash`.
+- Output: compiled client_pack → Qdrant sync + Base‑80 EVAL генерация.
+
+**Runtime использует только compiled client_pack**; domain taxonomy не даёт право на ответ, если факта нет.
+
 ### Context carryover (класс‑уровень)
 - После info‑bundle хранить класс и ключевые факты в контексте, чтобы перестановка вопросов не сбрасывала ветку.
 - Carryover не подменяет Hard‑LAW/policy‑gates и не меняет факты.
