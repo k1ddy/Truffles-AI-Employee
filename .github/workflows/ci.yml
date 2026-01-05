@@ -152,4 +152,5 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            docker rm -f truffles-api >/dev/null 2>&1 || true
             IMAGE_NAME=${{ env.IMAGE_NAME }}:main PULL_IMAGE=1 bash ~/restart_api.sh
