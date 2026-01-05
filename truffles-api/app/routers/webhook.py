@@ -5226,6 +5226,7 @@ async def _handle_webhook_payload(
     expected_reply_type = _get_expected_reply_type(context)
     intent_queue = _get_intent_queue(context)
     expected_reply_matched: bool | None = None
+    expected_reply_shortcircuit = False
     expected_reply_text = batch_non_booking_message or message_text
     if expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME} and expected_reply_text:
         answer_confidence = 0.0
@@ -5296,6 +5297,8 @@ async def _handle_webhook_payload(
                 client_slug=payload.client_slug,
             )
         expected_reply_matched = matched
+        if matched:
+            expected_reply_shortcircuit = True
         if matched and isinstance(value, str) and expected_reply_type == EXPECTED_REPLY_SERVICE:
             context = _set_service_hint(context, value, now)
             _set_conversation_context(conversation, context)
@@ -5328,6 +5331,8 @@ async def _handle_webhook_payload(
             "expected_reply_type": expected_reply_type,
             "value": value,
         }
+        if expected_reply_shortcircuit:
+            trace_payload["expected_reply_shortcircuit"] = True
         trace_payload.update(answer_meta)
         _record_decision_trace(conversation, trace_payload)
         if saved_message:
@@ -5336,6 +5341,8 @@ async def _handle_webhook_payload(
                 "expected_reply_matched": matched,
                 "expected_reply_value": value,
             }
+            if expected_reply_shortcircuit:
+                updates["expected_reply_shortcircuit"] = True
             updates.update(answer_meta)
             _update_message_decision_metadata(saved_message, updates)
         context = _get_conversation_context(conversation)
@@ -5717,6 +5724,9 @@ async def _handle_webhook_payload(
         client_slug=payload.client_slug,
         message_text=message_text,
     )
+    if expected_reply_shortcircuit:
+        booking_signal = True
+        booking_block_meta = None
     context = _get_conversation_context(conversation)
     booking_state = _get_booking_context(context)
     booking_active = bool(booking_state.get("active"))
@@ -6656,7 +6666,10 @@ async def _handle_webhook_payload(
                 )
     intent_decomp_has_booking = "booking" in intent_decomp_set
     intent_decomp_info = intent_decomp_set & BOOKING_INFO_QUESTION_TYPES
-    if intent_decomp_has_booking:
+    if expected_reply_shortcircuit:
+        booking_signal = True
+        booking_block_meta = None
+    elif intent_decomp_has_booking:
         booking_signal = True
         if booking_block_meta and booking_block_meta.get("booking_blocked_reason") == "info_question":
             booking_block_meta = None
