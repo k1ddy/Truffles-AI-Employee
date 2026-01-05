@@ -958,6 +958,10 @@ def semantic_question_type(
     if include_kinds is None:
         include_kinds = {"pricing", "duration"}
 
+    if "duration" in include_kinds:
+        if _has_duration_signal(normalized, text) and _message_has_service_token(normalized):
+            return SemanticQuestionType(kind="duration", score=1.0, second_score=0.0)
+
     query_vector = None
     use_fallback = False
     error_detail = None
