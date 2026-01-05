@@ -1757,3 +1757,20 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
   - consult+перебивка → conversation `d7107767-58a7-4e4f-96ed-6f457313c8e2` (msg `live7-consult_interrupt-1767539631375-1`)
 
 *Последнее обновление: 2026-01-04 (Evidence: CI 20694618301 + /admin/version + live-check router SLA)*
+
+---
+
+### 2026-01-05 — Consult keeper + consult eval expansion + live-check
+
+**Что сделали:**
+- Consult keeper: при перебивках (info/booking) attach consult_return и удерживаем `current_goal=consult`.
+- EVAL: добавлены комбинированные ответы E560–E563 и long стабильность consult E564–E569.
+- Merge 3 PR → CI core/long PASS → deploy HEAD.
+
+**Evidence:**
+- Code: `truffles-api/app/routers/webhook.py:2762`, `truffles-api/app/routers/webhook.py:6766`, `truffles-api/app/routers/webhook.py:7963`.
+- EVAL cases: `truffles-api/app/knowledge/demo_salon/EVAL.yaml:6210`, `truffles-api/app/knowledge/demo_salon/EVAL.yaml:6390`.
+- PRs: https://github.com/k1ddy/Truffles-AI-Employee/pull/30, https://github.com/k1ddy/Truffles-AI-Employee/pull/31, https://github.com/k1ddy/Truffles-AI-Employee/pull/32.
+- CI core/long: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20711370449, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20711403858, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20711520186.
+- Prod `/admin/version`: `{"version":"main","git_commit":"80e864edce7237cc4b72080ad2bd7b3087c02e13","build_time":"2026-01-05T09:51:39Z"}`.
+- Live-check consult+перебивка+возврат: conv_id `a271e3d0-053d-4d83-9852-f3ea3167efe9`; last messages: "Посоветуйте уход после окрашивания" → consult reply; "Где вы находитесь?" → address+hours + "Если вернуться..."; decision_meta (msg `267c740e-733b-48f5-aae4-eb3d1221bcdf`) consult_return=true current_goal=consult consult_topic=hair_aftercolor; decision_trace stage=consult_return recorded_at `2026-01-05T10:00:46.100141+00:00`.
