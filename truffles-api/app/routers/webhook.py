@@ -63,6 +63,8 @@ from app.services.demo_salon_knowledge import (
     get_demo_salon_price_reply,
     get_demo_salon_service_decision,
     get_demo_salon_service_hint,
+    _has_duration_signal,
+    _has_price_signal,
     load_yaml_truth,
     semantic_question_type,
     semantic_service_match,
@@ -8994,7 +8996,34 @@ async def _handle_webhook_payload(
         for item in class_router_result.get("carryover_intents") or []:
             if isinstance(item, str) and item.strip():
                 info_class_intents_for_reply.add(item.strip().casefold())
-        if info_class and info_class_intents_for_reply:
+        skip_info_class_for_service = False
+        if (
+            info_class
+            and message_text
+            and payload.client_slug == "demo_salon"
+            and not info_class_intents
+        ):
+            normalized = normalize_for_matching(message_text)
+            service_hint = get_demo_salon_service_hint(message_text)
+            if service_hint:
+                presence_keywords = [
+                    "делаете",
+                    "делает",
+                    "делают",
+                    "есть",
+                    "есть ли",
+                    "оказываете",
+                    "предоставляете",
+                ]
+                presence_hint = _contains_any(normalized, presence_keywords) or (
+                    "?" in message_text and len(normalized.split()) <= 4
+                )
+                if presence_hint and not (
+                    _has_price_signal(normalized, message_text)
+                    or _has_duration_signal(normalized, message_text)
+                ):
+                    skip_info_class_for_service = True
+        if info_class and info_class_intents_for_reply and not skip_info_class_for_service:
             carryover_sections = class_router_result.get("carryover_info_sections")
             carryover_has_hours = False
             if isinstance(carryover_sections, list):
