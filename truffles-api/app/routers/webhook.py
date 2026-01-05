@@ -7157,7 +7157,14 @@ async def _handle_webhook_payload(
         "attempted": False,
         "sla": None,
     }
-    if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
+    router_should_attempt = bool(
+        routing["allow_bot_reply"]
+        and not bypass_domain_flows
+        and message_text
+        and not booking_wants_flow
+        and not expected_reply_shortcircuit
+    )
+    if router_should_attempt:
         router_state["attempted"] = True
         router_state["error"] = None
         router_state["fallback_reason"] = "skipped"
