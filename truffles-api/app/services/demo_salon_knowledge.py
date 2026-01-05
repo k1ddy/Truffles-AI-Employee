@@ -2358,7 +2358,7 @@ def get_demo_salon_decision(
                 intent="service_duration",
                 meta={**question_meta, **service_query_meta} if question_meta else service_query_meta,
             )
-    elif _has_duration_signal(normalized, message):
+    if _has_duration_signal(normalized, message):
         service_query_meta = _resolve_service_query_meta(
             message,
             client_slug,
