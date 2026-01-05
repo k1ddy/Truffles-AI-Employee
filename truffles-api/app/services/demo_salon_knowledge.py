@@ -2385,6 +2385,39 @@ def get_demo_salon_decision(
         if isinstance(service_query, str) and service_query.strip():
             price_item = _find_best_price_item(service_query)
     if question_type is None and price_signal and not price_item:
+        if not location_signal and not parking_signal and not guest_signal:
+            service_query_meta = _resolve_service_query_meta(
+                message,
+                client_slug,
+                intent_decomp,
+                require_query=True,
+            )
+            service_query_value = service_query_meta.get("service_query")
+            if service_query_value:
+                service = _resolve_service_from_query(service_query_value)
+                if service:
+                    truth = load_yaml_truth()
+                    service_reply = _format_service_reply(service, truth)
+                    if service_reply:
+                        return DemoSalonDecision(
+                            action="reply",
+                            response=service_reply,
+                            intent="price_query",
+                            meta=service_query_meta,
+                        )
+                price_item = _find_best_price_item(service_query_value)
+                if price_item:
+                    reply = format_reply_from_truth(
+                        "price_query",
+                        {"price_item": price_item["item"]},
+                    )
+                    if reply:
+                        return DemoSalonDecision(
+                            action="reply",
+                            response=reply,
+                            intent="price_query",
+                            meta=service_query_meta,
+                        )
         info_reply: str | None = None
         info_meta: dict[str, Any] = {}
         if location_signal or parking_signal or guest_signal:
