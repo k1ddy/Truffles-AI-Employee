@@ -1057,14 +1057,30 @@ def semantic_question_type(
     return [] if return_multi else None
 
 
-def _format_service_duration_reply(service: dict[str, Any] | None) -> str:
+def _format_service_duration_reply(service: dict[str, Any] | None, *, message: str | None = None) -> str:
     truth = load_yaml_truth()
     catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
     if service:
         duration_text = service.get("duration_text") if isinstance(service, dict) else None
         if isinstance(duration_text, str) and duration_text.strip():
             duration_text = duration_text.strip()
-            name = service.get("name") or "Услуга"
+            name_override = None
+            if message:
+                price_items = service.get("price_items")
+                if isinstance(price_items, list) and price_items:
+                    price_item = _find_best_price_item(message)
+                    if isinstance(price_item, dict):
+                        candidate = price_item.get("name")
+                        if isinstance(candidate, str) and candidate.strip():
+                            candidate = candidate.strip()
+                            normalized_items = {
+                                _normalize_text(str(item))
+                                for item in price_items
+                                if isinstance(item, str) and item.strip()
+                            }
+                            if _normalize_text(candidate) in normalized_items:
+                                name_override = candidate
+            name = name_override or service.get("name") or "Услуга"
             suffix = "" if duration_text.endswith((".", "!", "?")) else "."
             return f"{name} — {duration_text}{suffix}"
 
@@ -1530,9 +1546,9 @@ def compose_multi_truth_reply(
             break
         if "duration" in kinds:
             if not service_query:
-                _add_reply(_format_service_duration_reply(None))
+                _add_reply(_format_service_duration_reply(None, message=segment))
             else:
-                _add_reply(_format_service_duration_reply(service_from_query))
+                _add_reply(_format_service_duration_reply(service_from_query, message=segment))
         if len(replies) >= 2:
             break
         if (
@@ -2361,7 +2377,7 @@ def get_demo_salon_decision(
                 require_query=True,
             )
             service = _resolve_service_from_query(service_query_meta.get("service_query"))
-            reply = _format_service_duration_reply(service)
+            reply = _format_service_duration_reply(service, message=message)
             return DemoSalonDecision(
                 action="reply",
                 response=reply,
@@ -2376,7 +2392,7 @@ def get_demo_salon_decision(
             require_query=True,
         )
         service = _resolve_service_from_query(service_query_meta.get("service_query"))
-        reply = _format_service_duration_reply(service)
+        reply = _format_service_duration_reply(service, message=message)
         return DemoSalonDecision(
             action="reply",
             response=reply,
