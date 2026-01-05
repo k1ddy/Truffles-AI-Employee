@@ -58,6 +58,7 @@ from app.services.demo_salon_knowledge import (
     build_quiet_hours_notice,
     compose_multi_truth_reply,
     format_reply_from_truth,
+    _detect_promotion_intent,
     get_demo_salon_decision,
     get_demo_salon_price_item,
     get_demo_salon_price_reply,
@@ -7534,20 +7535,40 @@ async def _handle_webhook_payload(
                 in_signals.append("promotions_signal")
             class_router_result["in_signals"] = in_signals
 
-        discounts_available = _has_discount_policy_rules(policy_type=policy_type)
-        discounts_reply = _format_discounts_policy_reply(policy_type=policy_type) if discounts_available else None
-        if discounts_reply:
+        promotion_intent = None
+        if policy_type == "demo_salon":
+            promotion_intent = _detect_promotion_intent(_normalize_text(message_text))
+        promo_reply = None
+        if promotion_intent == "promotion_birthday":
+            promo_reply = format_reply_from_truth(
+                "promotions",
+                {"promotion_intent": promotion_intent},
+            )
+        if promo_reply:
             decision = DemoSalonDecision(
                 action="reply",
-                response=discounts_reply,
-                intent="discounts",
+                response=promo_reply,
+                intent="promotions",
             )
         else:
-            decision = DemoSalonDecision(
-                action="escalate",
-                response=MSG_ESCALATED,
-                intent="discounts",
+            discounts_available = _has_discount_policy_rules(policy_type=policy_type)
+            discounts_reply = (
+                _format_discounts_policy_reply(policy_type=policy_type)
+                if discounts_available
+                else None
             )
+            if discounts_reply:
+                decision = DemoSalonDecision(
+                    action="reply",
+                    response=discounts_reply,
+                    intent="discounts",
+                )
+            else:
+                decision = DemoSalonDecision(
+                    action="escalate",
+                    response=MSG_ESCALATED,
+                    intent="discounts",
+                )
 
         bot_response = decision.response or MSG_ESCALATED
         followup_intents: list[str] = []
