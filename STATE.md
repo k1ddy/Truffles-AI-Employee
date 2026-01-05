@@ -1774,3 +1774,18 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - CI core/long: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20711370449, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20711403858, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20711520186.
 - Prod `/admin/version`: `{"version":"main","git_commit":"80e864edce7237cc4b72080ad2bd7b3087c02e13","build_time":"2026-01-05T09:51:39Z"}`.
 - Live-check consult+перебивка+возврат: conv_id `a271e3d0-053d-4d83-9852-f3ea3167efe9`; last messages: "Посоветуйте уход после окрашивания" → consult reply; "Где вы находитесь?" → address+hours + "Если вернуться..."; decision_meta (msg `267c740e-733b-48f5-aae4-eb3d1221bcdf`) consult_return=true current_goal=consult consult_topic=hair_aftercolor; decision_trace stage=consult_return recorded_at `2026-01-05T10:00:46.100141+00:00`.
+
+---
+
+### 2026-01-05 — Router SLA guard + expected reply shortcircuit
+
+**Что сделали:**
+- Router SLA: low_confidence не считается fallback при signal_match.
+- Expected reply (time): shortcircuit в booking, без ухода в pricing.
+
+**Evidence:**
+- PR #38: https://github.com/k1ddy/Truffles-AI-Employee/pull/38
+- CI main (build/push/deploy): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20713718956
+- Prod `/admin/version`: `{"version":"main","git_commit":"f78bcad487281e150588133bcfdd5dea2d8c3d76","build_time":"2026-01-05T11:17:49Z"}`
+- Live-check router SLA: conv_id `ec380df5-e32d-4deb-b2d6-f52889edca24`, user msg `d9d57d09-f906-457b-ae58-4a52ba890f43` decision_meta class_router.router.sla fallback_rate=0.0 fallback_rate_flag=false (signal_match=true, fallback_reason=low_confidence).
+- Expected reply shortcircuit: conv_id `d1a3116d-5334-4a70-a6a5-3088301f34d1`, user msg `24768482-e2bf-48a3-bb7e-65ba1d878cde` decision_meta expected_reply_shortcircuit=true answer_slot=datetime answer_value="в субботу вечером", no pricing (assistant asked name).
