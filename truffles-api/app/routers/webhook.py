@@ -9043,8 +9043,16 @@ async def _handle_webhook_payload(
                         alias_name = alias_match.get("name")
                         if isinstance(alias_name, str) and alias_name.strip():
                             alias_service_query = alias_name.strip()
+            intent_decomp_source = None
+            if isinstance(intent_decomp_payload, dict):
+                source = intent_decomp_payload.get("service_query_source")
+                if isinstance(source, str):
+                    intent_decomp_source = source
+            intent_decomp_explicit_query = (
+                intent_decomp_service_query if intent_decomp_source != "context" else None
+            )
             explicit_service_signal = bool(
-                intent_decomp_service_query or router_service_query or alias_service_query
+                intent_decomp_explicit_query or router_service_query or alias_service_query
             )
             guest_policy_lock = guest_policy_class
             info_bundle_lock = info_class and not explicit_service_signal
@@ -9080,12 +9088,12 @@ async def _handle_webhook_payload(
             )
             info_service_query = None
             if not info_semantic_lock:
-                if intent_decomp_service_query:
-                    info_service_query = intent_decomp_service_query
-                elif alias_service_query:
+                if alias_service_query:
                     info_service_query = alias_service_query
                 elif router_service_query:
                     info_service_query = router_service_query
+                elif intent_decomp_explicit_query:
+                    info_service_query = intent_decomp_explicit_query
             if (
                 not force_hours_followup
                 and not info_service_query
