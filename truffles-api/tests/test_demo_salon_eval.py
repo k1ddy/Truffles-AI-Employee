@@ -1,7 +1,7 @@
 import asyncio
 import os
 from contextlib import ExitStack
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -11,7 +11,8 @@ from zoneinfo import ZoneInfo
 import yaml
 
 import app.services.demo_salon_knowledge as demo_knowledge
-from app.models import Client, ClientSettings, Conversation, User
+import app.services.reminder_service as reminder_service
+from app.models import Client, ClientSettings, Conversation, Handover, User
 from app.routers import webhook as webhook_router
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
 from app.services.demo_salon_knowledge import get_demo_salon_decision, get_salon_timezone
@@ -430,11 +431,18 @@ def _build_query(result):
     query = Mock()
     query.filter.return_value = query
     query.order_by.return_value = query
-    query.first.return_value = result
+    if isinstance(result, list):
+        query.first.return_value = result[0] if result else None
+        query.all.return_value = result
+    else:
+        query.first.return_value = result
+        query.all.return_value = [] if result is None else [result]
     return query
 
 
-def _build_fake_db(client, settings, conversation, user):
+def _build_fake_db(client, settings, conversation, user, handovers=None):
+    handovers = handovers or []
+
     def _query(model):
         if model is Client:
             return _build_query(client)
@@ -442,17 +450,58 @@ def _build_fake_db(client, settings, conversation, user):
             return _build_query(settings)
         if model is Conversation:
             return _build_query(conversation)
+        if model is Handover:
+            return _build_query(handovers)
         if model is User:
             return _build_query(user)
         return _build_query(None)
 
     db = Mock()
     db.query.side_effect = _query
-    db.add = Mock()
+
+    def _add(item):
+        if isinstance(item, Handover):
+            item.conversation = conversation
+            handovers.append(item)
+
+    db.add = Mock(side_effect=_add)
     db.flush = Mock()
     db.commit = Mock()
     db.refresh = Mock()
     return db
+
+
+def _trigger_pending_sla(
+    db: Mock,
+    conversation: SimpleNamespace,
+    handovers: list[Handover],
+    fixed_now: datetime,
+) -> None:
+    if not handovers or conversation.state != ConversationState.PENDING.value:
+        return
+
+    backdated = fixed_now - timedelta(minutes=20)
+    for handover in handovers:
+        handover.conversation = conversation
+        handover.created_at = backdated
+        handover.status = "pending"
+    conversation.escalated_at = backdated
+
+    class _FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now if tz is None else fixed_now.astimezone(tz)
+
+    patches = [
+        patch("app.services.reminder_service.datetime", _FixedDateTime),
+        patch("app.services.reminder_service.send_bot_response", return_value=True),
+        patch("app.services.reminder_service.save_message", return_value=None),
+        patch("app.services.reminder_service.get_pending_reminders", return_value=[]),
+    ]
+    with ExitStack() as stack:
+        for patcher in patches:
+            stack.enter_context(patcher)
+        reminder_service.process_reminders(db)
 
 
 def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> str:
@@ -462,6 +511,14 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
         webhook_secret=None,
         branch_resolution_mode="disabled",
         remember_branch_preference=True,
+        enable_reminders=True,
+        reminder_timeout_1=30,
+        reminder_timeout_2=60,
+        telegram_chat_id=None,
+        telegram_bot_token=None,
+        owner_telegram_id=None,
+        enable_owner_escalation=True,
+        auto_close_timeout=0,
     )
     conversation = SimpleNamespace(
         id=conversation_id,
@@ -478,7 +535,7 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
         context={},
         retry_offered_at=None,
     )
-    user = SimpleNamespace(id="user-123", context={})
+    user = SimpleNamespace(id="user-123", context={}, remote_jid="77000000000@s.whatsapp.net")
     saved_message = SimpleNamespace(id=f"msg-{case_id}", message_metadata={})
     db = _build_fake_db(client, settings, conversation, user)
     payload = WebhookRequest(
@@ -545,6 +602,7 @@ def _run_webhook_conversation_turns(
     messages: list[str],
     case_id: str,
     local_time: str | None,
+    pending_sla_expected: bool = False,
 ) -> tuple[list[str], SimpleNamespace, SimpleNamespace]:
     conversation_id = uuid4()
     client = SimpleNamespace(id="client-123", name="demo_salon", config=_load_client_config_from_truth())
@@ -552,6 +610,14 @@ def _run_webhook_conversation_turns(
         webhook_secret=None,
         branch_resolution_mode="disabled",
         remember_branch_preference=True,
+        enable_reminders=True,
+        reminder_timeout_1=30,
+        reminder_timeout_2=60,
+        telegram_chat_id=None,
+        telegram_bot_token=None,
+        owner_telegram_id=None,
+        enable_owner_escalation=True,
+        auto_close_timeout=0,
     )
     conversation = SimpleNamespace(
         id=conversation_id,
@@ -568,9 +634,10 @@ def _run_webhook_conversation_turns(
         context={},
         retry_offered_at=None,
     )
-    user = SimpleNamespace(id="user-123", context={})
+    user = SimpleNamespace(id="user-123", context={}, remote_jid="77000000000@s.whatsapp.net")
     saved_message = SimpleNamespace(id=f"msg-{case_id}", message_metadata={})
-    db = _build_fake_db(client, settings, conversation, user)
+    handovers: list[Handover] = []
+    db = _build_fake_db(client, settings, conversation, user, handovers)
 
     carryover_patches, _ = _build_service_carryover_patch()
     patches = [
@@ -591,6 +658,7 @@ def _run_webhook_conversation_turns(
     ]
 
     effective_local_time = local_time or "12:00:00"
+    fixed_now = datetime.now(timezone.utc)
     if effective_local_time:
         tz_name = get_salon_timezone()
         fixed_now = _build_fixed_now(effective_local_time, tz_name)
@@ -631,6 +699,8 @@ def _run_webhook_conversation_turns(
                 )
             )
             responses.append(response.bot_response or "")
+            if pending_sla_expected and idx == 0:
+                _trigger_pending_sla(db, conversation, handovers, fixed_now)
     return responses, conversation, saved_message
 
 
@@ -772,6 +842,9 @@ def test_demo_salon_eval_cases():
         case_id = case.get("id", "<unknown>")
         user_text = case.get("user", "")
         case_expected = _coerce_expected(case.get("expected"), case_id)
+        pending_sla_expected = bool(
+            case.get("pending_sla_expected") or case_expected.get("pending_sla_expected")
+        )
         turns = _normalize_turns(case.get("turns"), case_id)
         messages = case.get("messages")
         conversation = None
@@ -821,6 +894,7 @@ def test_demo_salon_eval_cases():
                 messages,
                 case_id,
                 str(local_time) if local_time else None,
+                pending_sla_expected=pending_sla_expected,
             )
             for idx, turn in enumerate(turns, start=1):
                 step_expected = turn.get("expected") or {}
