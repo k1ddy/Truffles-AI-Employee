@@ -1091,6 +1091,20 @@ def _update_message_decision_metadata(message: Message, updates: dict) -> None:
     message.message_metadata = metadata
 
 
+def _router_observability_meta(*, eligible: bool, reason: str) -> dict:
+    return {
+        "router_eligible": bool(eligible),
+        "router_skipped_reason": reason,
+    }
+
+
+def _set_router_observability(message: Message | None, *, eligible: bool, reason: str) -> dict:
+    updates = _router_observability_meta(eligible=eligible, reason=reason)
+    if message:
+        _update_message_decision_metadata(message, updates)
+    return updates
+
+
 _DEFAULT_RAG_SCORES = {"bm25_max": 0.0, "vector_max": 0.0, "hybrid_max": 0.0}
 
 
@@ -1131,6 +1145,10 @@ def _ensure_rag_meta_defaults(message: Message | None) -> None:
         updates["rag_confident"] = False
     if "rag_reason" not in decision_meta:
         updates["rag_reason"] = "overridden_by_gate"
+    if "router_eligible" not in decision_meta:
+        updates["router_eligible"] = True
+    if "router_skipped_reason" not in decision_meta:
+        updates["router_skipped_reason"] = "none"
     _update_message_decision_metadata(message, updates)
 
 
@@ -1774,6 +1792,16 @@ LLM_GUARD_TOPICS = {
     ],
 }
 
+HARD_LAW_INTENTS = {
+    "cancel_request",
+    "complaint",
+    "legal",
+    "medical",
+    "payment",
+    "refund",
+    "reschedule",
+}
+
 COMPLAINT_EXPLICIT_KEYWORDS = [
     "жалоб",
     "претенз",
@@ -2106,6 +2134,12 @@ def _normalize_text(text: str) -> str:
     normalized = re.sub(r"[^\w\s]", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized
+
+
+def _is_hard_law_intent(intent: str | None) -> bool:
+    if not isinstance(intent, str):
+        return False
+    return intent.strip().casefold() in HARD_LAW_INTENTS
 
 
 def _looks_like_policy_topic(message_text: str | None) -> bool:
@@ -6088,6 +6122,13 @@ async def _handle_webhook_payload(
         }
         if expected_reply_shortcircuit:
             trace_payload["expected_reply_shortcircuit"] = True
+            trace_payload.update(
+                _set_router_observability(
+                    saved_message,
+                    eligible=False,
+                    reason="expected_reply_shortcircuit",
+                )
+            )
         trace_payload.update(answer_meta)
         _record_decision_trace(conversation, trace_payload)
         if saved_message:
@@ -6254,18 +6295,22 @@ async def _handle_webhook_payload(
     too_long = len(message_text) > SHIELD_MAX_MESSAGE_LENGTH
     if is_spam_burst or too_long:
         reason = "spam" if is_spam_burst else "too_long"
-        _record_decision_trace(
-            conversation,
-            {
-                "stage": "shield",
-                "decision": "drop",
-                "reason": reason,
-                "message_length": len(message_text),
-                "recent_messages": len(recent),
-                "is_repeat": is_repeat,
-                "is_short": is_short,
-            },
+        router_shield_meta = _set_router_observability(
+            saved_message,
+            eligible=False,
+            reason="shield_drop",
         )
+        trace_payload = {
+            "stage": "shield",
+            "decision": "drop",
+            "reason": reason,
+            "message_length": len(message_text),
+            "recent_messages": len(recent),
+            "is_repeat": is_repeat,
+            "is_short": is_short,
+        }
+        trace_payload.update(router_shield_meta)
+        _record_decision_trace(conversation, trace_payload)
         if saved_message:
             _update_message_decision_metadata(
                 saved_message,
@@ -6454,14 +6499,18 @@ async def _handle_webhook_payload(
 
     # 8. Manager active → bot must stay silent (only forwarding above)
     if conversation.state == ConversationState.MANAGER_ACTIVE.value:
-        _record_decision_trace(
-            conversation,
-            {
-                "stage": "routing",
-                "decision": "manager_active_silent",
-                "state": conversation.state,
-            },
+        router_pending_meta = _set_router_observability(
+            saved_message,
+            eligible=False,
+            reason="pending",
         )
+        trace_payload = {
+            "stage": "routing",
+            "decision": "manager_active_silent",
+            "state": conversation.state,
+        }
+        trace_payload.update(router_pending_meta)
+        _record_decision_trace(conversation, trace_payload)
         db.commit()
         return WebhookResponse(
             success=True,
@@ -6719,19 +6768,23 @@ async def _handle_webhook_payload(
             )
 
     if conversation.state == ConversationState.PENDING.value:
+        router_pending_meta = _set_router_observability(
+            saved_message,
+            eligible=False,
+            reason="pending",
+        )
         if is_opt_out_message(message_text):
             handover = get_active_handover(db, conversation.id)
             if handover:
                 manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
             bot_response = MSG_MUTED_TEMP
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "rejection",
-                    "decision": "cancel_handover",
-                    "state": conversation.state,
-                },
-            )
+            trace_payload = {
+                "stage": "rejection",
+                "decision": "cancel_handover",
+                "state": conversation.state,
+            }
+            trace_payload.update(router_pending_meta)
+            _record_decision_trace(conversation, trace_payload)
             _record_message_decision_meta(
                 saved_message,
                 action="rejection",
@@ -6755,14 +6808,13 @@ async def _handle_webhook_payload(
                 manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
             conversation.bot_status = "muted"
             conversation.bot_muted_until = None
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "pending_sla",
-                    "decision": "pending_close",
-                    "state": conversation.state,
-                },
-            )
+            trace_payload = {
+                "stage": "pending_sla",
+                "decision": "pending_close",
+                "state": conversation.state,
+            }
+            trace_payload.update(router_pending_meta)
+            _record_decision_trace(conversation, trace_payload)
             if saved_message:
                 _update_message_decision_metadata(
                     saved_message,
@@ -6783,14 +6835,13 @@ async def _handle_webhook_payload(
             if handover:
                 manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
             conversation.bot_status = "active"
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "pending_sla",
-                    "decision": "pending_ack",
-                    "state": conversation.state,
-                },
-            )
+            trace_payload = {
+                "stage": "pending_sla",
+                "decision": "pending_ack",
+                "state": conversation.state,
+            }
+            trace_payload.update(router_pending_meta)
+            _record_decision_trace(conversation, trace_payload)
             if saved_message:
                 _update_message_decision_metadata(
                     saved_message,
@@ -6811,14 +6862,13 @@ async def _handle_webhook_payload(
 
         if is_handover_status_question(message_text):
             bot_response = MSG_PENDING_STATUS
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "pending_status",
-                    "decision": "status_reply",
-                    "state": conversation.state,
-                },
-            )
+            trace_payload = {
+                "stage": "pending_status",
+                "decision": "status_reply",
+                "state": conversation.state,
+            }
+            trace_payload.update(router_pending_meta)
+            _record_decision_trace(conversation, trace_payload)
             if saved_message:
                 _update_message_decision_metadata(
                     saved_message,
@@ -6850,14 +6900,13 @@ async def _handle_webhook_payload(
             pending_sla[PENDING_SLA_PING_SENT_KEY] = now.isoformat()
             context = _set_pending_sla(context, pending_sla)
             _set_conversation_context(conversation, context)
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "pending_sla",
-                    "decision": "ping",
-                    "state": conversation.state,
-                },
-            )
+            trace_payload = {
+                "stage": "pending_sla",
+                "decision": "ping",
+                "state": conversation.state,
+            }
+            trace_payload.update(router_pending_meta)
+            _record_decision_trace(conversation, trace_payload)
             if saved_message:
                 _update_message_decision_metadata(
                     saved_message,
@@ -6878,14 +6927,13 @@ async def _handle_webhook_payload(
             )
 
         bot_response = MSG_PENDING_WAIT
-        _record_decision_trace(
-            conversation,
-            {
-                "stage": "routing",
-                "decision": "pending_wait",
-                "state": conversation.state,
-            },
-        )
+        trace_payload = {
+            "stage": "routing",
+            "decision": "pending_wait",
+            "state": conversation.state,
+        }
+        trace_payload.update(router_pending_meta)
+        _record_decision_trace(conversation, trace_payload)
         _record_message_decision_meta(
             saved_message,
             action="pending_wait",
@@ -6906,6 +6954,19 @@ async def _handle_webhook_payload(
     if has_media:
         if not media_info:
             bot_response = MSG_MEDIA_UNSUPPORTED
+            if is_media_without_text:
+                router_media_meta = _set_router_observability(
+                    saved_message,
+                    eligible=False,
+                    reason="media_only",
+                )
+                trace_payload = {
+                    "stage": "media",
+                    "decision": "unsupported",
+                    "state": conversation.state,
+                }
+                trace_payload.update(router_media_meta)
+                _record_decision_trace(conversation, trace_payload)
             bot_response, sent = _send_and_save(bot_response)
             result_message = "Media unsupported response sent" if sent else "Media response failed"
             db.commit()
@@ -6928,6 +6989,19 @@ async def _handle_webhook_payload(
 
         if media_decision and not media_decision.allowed:
             bot_response = media_decision.response or MSG_MEDIA_UNSUPPORTED
+            if is_media_without_text:
+                router_media_meta = _set_router_observability(
+                    saved_message,
+                    eligible=False,
+                    reason="media_only",
+                )
+                trace_payload = {
+                    "stage": "media",
+                    "decision": "rejected",
+                    "state": conversation.state,
+                }
+                trace_payload.update(router_media_meta)
+                _record_decision_trace(conversation, trace_payload)
             bot_response, sent = _send_and_save(bot_response)
             result_message = "Media rejected response sent" if sent else "Media response failed"
             db.commit()
@@ -7081,6 +7155,19 @@ async def _handle_webhook_payload(
 
         if media_response is not None and conversation.state != ConversationState.MANAGER_ACTIVE.value:
             bot_response = media_response
+            if is_media_without_text:
+                router_media_meta = _set_router_observability(
+                    saved_message,
+                    eligible=False,
+                    reason="media_only",
+                )
+                trace_payload = {
+                    "stage": "media",
+                    "decision": "media_only",
+                    "state": conversation.state,
+                }
+                trace_payload.update(router_media_meta)
+                _record_decision_trace(conversation, trace_payload)
             bot_response, sent = _send_and_save(bot_response)
             result_message = "Media response sent" if sent else "Media response failed"
             db.commit()
@@ -7807,17 +7894,24 @@ async def _handle_webhook_payload(
                 else:
                     result_message = "Policy escalation skipped (already pending)"
 
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "policy_gate",
-                    "decision": decision.action,
-                    "intent": decision.intent,
-                    "state": conversation.state,
-                    "booking_wants_flow": booking_wants_flow,
-                    "policy_type": policy_type,
-                },
+            router_skip_reason = (
+                "law_gate" if _is_hard_law_intent(decision.intent) else "policy_gate"
             )
+            router_gate_meta = _set_router_observability(
+                saved_message,
+                eligible=False,
+                reason=router_skip_reason,
+            )
+            trace_payload = {
+                "stage": "policy_gate",
+                "decision": decision.action,
+                "intent": decision.intent,
+                "state": conversation.state,
+                "booking_wants_flow": booking_wants_flow,
+                "policy_type": policy_type,
+            }
+            trace_payload.update(router_gate_meta)
+            _record_decision_trace(conversation, trace_payload)
             _record_message_decision_meta(
                 saved_message,
                 action=decision.action,
@@ -8297,6 +8391,11 @@ async def _handle_webhook_payload(
             else:
                 result_message = "Policy discounts escalation skipped (already pending)"
 
+        router_gate_meta = _set_router_observability(
+            saved_message,
+            eligible=False,
+            reason="policy_gate",
+        )
         trace_payload = {
             "stage": "policy_gate",
             "decision": decision.action,
@@ -8306,6 +8405,7 @@ async def _handle_webhook_payload(
             "policy_gate": "discounts",
             "class_router": class_router_result,
         }
+        trace_payload.update(router_gate_meta)
         if followup_intents:
             trace_payload["followup_intents"] = followup_intents
         _record_decision_trace(conversation, trace_payload)
@@ -10497,24 +10597,28 @@ async def _handle_webhook_payload(
 
     rag_confident = False
 
-    _record_decision_trace(
-        conversation,
-        {
-            "stage": "class_router",
-            "classes": class_router_result.get("classes"),
-            "intents": class_router_result.get("intents"),
-            "carryover_intents": class_router_result.get("carryover_intents"),
-            "in_signals": class_router_result.get("in_signals"),
-            "out_signals": class_router_result.get("out_signals"),
-            "anchors_in_hits": class_router_result.get("anchors_in_hits"),
-            "anchors_out_hits": class_router_result.get("anchors_out_hits"),
-            "out_of_domain_signal": out_of_domain_signal,
-            "carryover_class": class_router_result.get("carryover_class"),
-            "carryover_info_sections": class_router_result.get("carryover_info_sections"),
-            "router_fallback_reason": class_router_result.get("router_fallback_reason"),
-            "router": class_router_result.get("router"),
-        },
+    router_meta = _set_router_observability(
+        saved_message,
+        eligible=not expected_reply_shortcircuit,
+        reason="expected_reply_shortcircuit" if expected_reply_shortcircuit else "none",
     )
+    trace_payload = {
+        "stage": "class_router",
+        "classes": class_router_result.get("classes"),
+        "intents": class_router_result.get("intents"),
+        "carryover_intents": class_router_result.get("carryover_intents"),
+        "in_signals": class_router_result.get("in_signals"),
+        "out_signals": class_router_result.get("out_signals"),
+        "anchors_in_hits": class_router_result.get("anchors_in_hits"),
+        "anchors_out_hits": class_router_result.get("anchors_out_hits"),
+        "out_of_domain_signal": out_of_domain_signal,
+        "carryover_class": class_router_result.get("carryover_class"),
+        "carryover_info_sections": class_router_result.get("carryover_info_sections"),
+        "router_fallback_reason": class_router_result.get("router_fallback_reason"),
+        "router": class_router_result.get("router"),
+    }
+    trace_payload.update(router_meta)
+    _record_decision_trace(conversation, trace_payload)
     if saved_message:
         _update_message_decision_metadata(
             saved_message,
