@@ -3081,17 +3081,21 @@ def _ensure_router_output_meta(router_output: dict, *, error: str | None) -> dic
 ROUTER_FALLBACK_REASON_MAP = {
     "timeout": "timeout",
     "invalid_json": "invalid_json",
-    "invalid_class": "invalid_class",
-    "empty_response": "empty_response",
-    "empty_message": "empty_message",
-    "prompt_missing": "prompt_missing",
 }
-ROUTER_FALLBACK_ERROR_VALUES = {"router_failed", "error", "unsupported_temperature"}
+ROUTER_FALLBACK_ERROR_VALUES = {
+    "router_failed",
+    "error",
+    "unsupported_temperature",
+    "invalid_class",
+    "empty_response",
+    "empty_message",
+    "prompt_missing",
+}
 
 
-def _normalize_router_fallback_reason(*, error: str | None) -> str:
+def _normalize_router_fallback_reason(*, error: str | None) -> str | None:
     if not error:
-        return "low_confidence"
+        return None
     normalized = error.strip().casefold()
     mapped = ROUTER_FALLBACK_REASON_MAP.get(normalized)
     if mapped:
@@ -3221,6 +3225,10 @@ def _resolve_class_router_result(
     router_signal_class = router_state.get("signal_class") if isinstance(router_state, dict) else None
     router_signal_match = router_state.get("signal_match") if isinstance(router_state, dict) else None
     router_used_reason = router_state.get("used_reason") if isinstance(router_state, dict) else None
+    router_low_confidence = (
+        bool(router_state.get("low_confidence")) if isinstance(router_state, dict) else False
+    )
+    router_safe_class = router_state.get("safe_class") if isinstance(router_state, dict) else None
 
     router_class = None
     router_reason = None
@@ -3235,6 +3243,10 @@ def _resolve_class_router_result(
         raw_intents = router_output.get("intents")
         if isinstance(raw_intents, list):
             router_intents = [item for item in raw_intents if isinstance(item, str)]
+
+    if router_low_confidence and isinstance(router_safe_class, str) and router_safe_class.strip():
+        router_class = _normalize_class_name(router_safe_class)
+        router_intents = []
 
     if router_used and router_class:
         result["classes"] = [router_class]
@@ -3261,6 +3273,7 @@ def _resolve_class_router_result(
         "signal_match": router_signal_match,
         "used_reason": router_used_reason,
         "sla": router_sla,
+        "router_low_confidence": bool(router_low_confidence),
     }
     result["router_fallback_reason"] = router_fallback_reason
     return result
@@ -7184,6 +7197,8 @@ async def _handle_webhook_payload(
         "output": _build_router_meta_output(error="skipped"),
         "error": "skipped",
         "fallback_reason": "skipped",
+        "low_confidence": False,
+        "safe_class": None,
         "confidence_threshold": ROUTER_CONFIDENCE_THRESHOLD,
         "signal_class": router_signal_class,
         "signal_match": False,
@@ -7229,18 +7244,27 @@ async def _handle_webhook_payload(
                     ROUTER_SIGNAL_CONFIDENCE_FLOOR,
                 )
             router_state["confidence_threshold"] = confidence_threshold
-            router_state["used"] = bool(
-                router_state["confidence"] >= confidence_threshold and normalized_class
+            low_confidence = bool(
+                normalized_class and router_state["confidence"] < confidence_threshold
             )
-            if router_state["used"]:
-                router_state["used_reason"] = (
-                    "confidence"
-                    if router_state["confidence"] >= ROUTER_CONFIDENCE_THRESHOLD
-                    else "signal_match"
-                )
+            if normalized_class:
+                router_state["used"] = True
+                if low_confidence:
+                    router_state["low_confidence"] = True
+                    router_state["safe_class"] = "info_bundle"
+                    router_state["used_reason"] = "low_confidence_default"
+                else:
+                    router_state["used_reason"] = (
+                        "confidence"
+                        if router_state["confidence"] >= ROUTER_CONFIDENCE_THRESHOLD
+                        else "signal_match"
+                    )
                 router_state["fallback_reason"] = None
             else:
-                router_state["fallback_reason"] = _normalize_router_fallback_reason(error=None)
+                router_state["used"] = False
+                router_state["fallback_reason"] = _normalize_router_fallback_reason(
+                    error="invalid_class"
+                )
         else:
             router_state["error"] = (
                 router_result.get("error")
@@ -7273,12 +7297,6 @@ async def _handle_webhook_payload(
             router_error_value = router_state["output"].get("router_error")
         router_timeout = isinstance(router_error_value, str) and router_error_value == "timeout"
         router_fallback = router_state.get("fallback_reason") not in (None, "skipped")
-        if (
-            router_fallback
-            and router_state.get("fallback_reason") == "low_confidence"
-            and router_state.get("signal_match")
-        ):
-            router_fallback = False
         router_state["timeout"] = router_timeout
         router_state["fallback"] = router_fallback
         router_state["sla"] = _update_router_sla(
