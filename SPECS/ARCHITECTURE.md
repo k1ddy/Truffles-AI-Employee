@@ -182,6 +182,27 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Храним `class=info_bundle` + `info_sections`; service‑carryover не может переопределить hours‑follow‑up.
 - Goal‑keeper: `current_goal` сохраняется при перебивках; ответ на перебивку возвращает к цели.
 
+### Session Memory v1 (conversation.context.session_memory)
+**Назначение:** удерживать краткую память о вопросах/целях без точных цитат.
+
+**Структура:**
+- `last_question_type` — последний тип вопроса (hours/pricing/duration/booking/consult/info_bundle/other).
+- `pending_slots` — какие слоты ещё нужны (service/datetime/branch/etc).
+- `active_goal` — текущая цель (info_bundle/consult/booking/other).
+- `constraints` — активные ограничения (branch_id, service_query, policy locks и т.п.).
+- `unanswered_questions` — список вопросов, на которые ещё не ответили.
+- `ttl` — истечение памяти (now + 24h по умолчанию).
+
+**Точки обновления:**
+- после `question_contract` → фиксируем `last_question_type`, пополняем `pending_slots`, обновляем `unanswered_questions`.
+- после `intent_router` → обновляем `active_goal` и `constraints`.
+- после `info/consult/booking` → чистим закрытые `pending_slots`, обновляем `active_goal`, синхронизируем `constraints`.
+
+**Reset rules:**
+- gap > 24h между сообщениями → полный reset памяти.
+- явный текст пользователя “новый запрос” → reset.
+- любые эскалации (pending/manager_active) → reset.
+
 ### Base‑80 батарея (acceptance)
 - 80% входящих классов (по объёму) покрыты перефраз‑battery и 5–6‑ходовыми комбинациями.
 - 10–20 перефраз на класс, проверка только инвариантов (facts/must_not), без точных строк.
@@ -592,6 +613,30 @@ metadata = {
 | Моки | `unittest.mock.patch` |
 | Сервисы в CI | Нет (unit tests + mocks), CI: ruff + pytest |
 | Long-form EVAL | 10-15 сообщений в одном диалоге, проверка `current_goal`/`expected_reply_type`/trace; обязателен перед релизом |
+
+### 13.1 Trace-first CI gate (канон)
+- CI проверяет **trace/meta**, а не точные слова ответа.
+- Гейт‑поля: `class_router`, `info_sections`, `policy_gate`, `expected_reply_type`.
+- Любое отсутствие/несовпадение меты = FAIL.
+
+### 13.2 ASR-noise eval battery
+- Набор: транскрипты с опечатками, шумом, склейкой фраз (ASR-noise).
+- Уровни шума:
+  - **L1 (легкий):** опечатки/омофоны/пунктуация, смысл читается.
+  - **L2 (средний):** пропуски служебных слов, перестановки, смешение intents.
+  - **L3 (тяжелый):** сильный шум, обрывы фраз, code-switch, неполные услуги.
+- Pass-критерии:
+  - **L1:** тот же класс и корректные факты; без эскалации по ошибке.
+  - **L2:** класс сохраняется **или** корректное уточнение; policy-gates соблюдены.
+  - **L3:** безопасный ответ (уточнение/эскалация по правилам), без выдумок.
+- Правила интерпретации:
+  - сравниваем только trace/meta (не текст).
+  - допускаются перефразы и разные формулировки CTA.
+  - провал = неверный класс, пропуск policy-gate, пустые/отсутствующие ключи.
+
+### 13.3 Nightly/manual — human-quality
+- Ночной/ручной прогон: эмпатия, тон, продажа (human-quality).
+- Это **не** CI-гейт; проверка по диалогам/транскриптам.
 
 **Запуск:**
 ```bash

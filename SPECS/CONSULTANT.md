@@ -634,6 +634,11 @@ def detect_stuck(db, conversation_id) -> bool:
 - Задержка ответа + typing indicator (Rule 8).
 - RU/KZ паритет: язык пользователя → ответы на том же языке (truth + intents + prompt).
 
+## Качество и тестирование (trace-first)
+- **CI = trace/meta gate:** проверяем `class_router`, `info_sections`, `policy_gate`, `expected_reply_type`; текст ответа не сравниваем.
+- **ASR-noise eval:** набор шумных транскриптов (L1/L2/L3); интерпретация по trace/meta, pass = корректный класс/уточнение/эскалация без выдумок.
+- **Nightly/manual:** human-quality (эмпатия/тон/продажа) по реальным диалогам, отдельно от CI.
+
 ---
 
 # ЧАСТЬ 7: ТЕХНИЧЕСКАЯ АРХИТЕКТУРА [РЕАЛИЗОВАНО]
