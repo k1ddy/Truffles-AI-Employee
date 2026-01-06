@@ -271,6 +271,14 @@ Topic в Telegram: если у клиента нет topic_id — создать
 Кнопки [Беру] [Решено]
 ```
 
+### Pending‑SLA (ожидание менеджера)
+- Через 15 минут в `pending` без ответа менеджера → SLA‑ping клиенту (подтверждение актуальности).
+- Ответ клиента:
+  - `pending_ack` → handover → resolved, `state=bot_active`.
+  - `pending_close` → handover → resolved, `state=bot_active`, бот замьючен.
+- Классификация `pending_ack/pending_close`: LLM‑router first, при ошибке/низкой уверенности — детерминированный fallback.
+- Auto‑close: 4 часа ожидания без подтверждения → системное закрытие.
+
 ### Менеджер → Клиент
 ```
 Менеджер пишет в Telegram топик
