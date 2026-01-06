@@ -52,13 +52,13 @@ from app.services.conversation_service import (
     get_or_create_user,
 )
 from app.services.demo_salon_knowledge import (
-    DemoSalonDecision,
     _match_service,
     _normalize_text as _normalize_service_text,
     build_consult_reply,
     build_info_combined_reply,
     build_quiet_hours_notice,
     compose_multi_truth_reply,
+    DemoSalonDecision,
     format_reply_from_truth,
     get_demo_salon_decision,
     get_demo_salon_price_item,
