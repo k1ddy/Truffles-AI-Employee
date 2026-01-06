@@ -2108,6 +2108,17 @@ def _normalize_text(text: str) -> str:
     return normalized
 
 
+def _looks_like_policy_topic(message_text: str | None) -> bool:
+    normalized = _normalize_text(message_text)
+    if not normalized:
+        return False
+    for topic in ("payment", "medical", "complaint", "discount"):
+        keywords = LLM_GUARD_TOPICS.get(topic) or []
+        if any(keyword in normalized for keyword in keywords):
+            return True
+    return False
+
+
 def _detect_llm_guard_topics(response_text: str) -> list[str]:
     normalized = _normalize_text(response_text)
     if not normalized:
@@ -2238,6 +2249,18 @@ SERVICE_CARRYOVER_SKIP_INTENTS = {
     "duration_or_price_clarify",
     "service_not_found",
 }
+SESSION_MEMORY_KEY = "session_memory"
+SESSION_MEMORY_TTL_HOURS = 24
+SESSION_MEMORY_SHORT_TOKENS = 4
+SESSION_MEMORY_RESET_PHRASES = (
+    "новый вопрос",
+    "другая тема",
+    "начнем сначала",
+    "начнём сначала",
+    "начнем заново",
+    "начнём заново",
+    "давай сначала",
+)
 
 
 def _normalize_class_name(class_name: str) -> str:
@@ -2382,6 +2405,7 @@ def _set_expected_reply_context(
     context: dict,
     expected_reply_type: str | None,
     reason: str,
+    now: datetime,
 ) -> dict:
     context = _set_expected_reply_type(context, expected_reply_type)
     _set_conversation_context(conversation, context)
@@ -2392,8 +2416,8 @@ def _set_expected_reply_context(
             "decision": "set",
             "expected_reply_type": expected_reply_type,
             "reason": reason,
-        },
-    )
+            },
+        )
     if saved_message:
         _update_message_decision_metadata(
             saved_message,
@@ -2401,6 +2425,28 @@ def _set_expected_reply_context(
                 "expected_reply_type": expected_reply_type,
                 "expected_reply_reason": reason,
             },
+        )
+    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
+        context_manager = _get_context_manager(context)
+        active_goal = None
+        if isinstance(context_manager, dict):
+            active_goal = context_manager.get("current_goal")
+            if isinstance(active_goal, str):
+                active_goal = active_goal.strip() or None
+            else:
+                active_goal = None
+        context, memory = _update_session_memory_on_question(
+            context,
+            expected_reply_type=expected_reply_type.strip(),
+            active_goal=active_goal,
+            now=now,
+        )
+        _set_conversation_context(conversation, context)
+        _record_session_memory_update(
+            conversation,
+            saved_message,
+            memory=memory,
+            reason="question_set",
         )
     return context
 
@@ -2416,6 +2462,184 @@ def _set_context_manager(context: dict, manager: dict) -> dict:
     context = dict(context)
     context[CONTEXT_MANAGER_KEY] = manager
     return context
+
+
+def _get_session_memory(context: dict) -> dict:
+    payload = context.get(SESSION_MEMORY_KEY) if isinstance(context, dict) else None
+    if isinstance(payload, dict):
+        return dict(payload)
+    return {}
+
+
+def _set_session_memory(context: dict, memory: dict | None) -> dict:
+    context = dict(context)
+    if memory:
+        context[SESSION_MEMORY_KEY] = memory
+    else:
+        context.pop(SESSION_MEMORY_KEY, None)
+    return context
+
+
+def _parse_session_memory_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _is_session_memory_expired(memory: dict, now: datetime) -> bool:
+    ttl_hours = memory.get("ttl_hours", SESSION_MEMORY_TTL_HOURS)
+    try:
+        ttl_hours = int(ttl_hours)
+    except (TypeError, ValueError):
+        ttl_hours = SESSION_MEMORY_TTL_HOURS
+    last_updated_at = _parse_session_memory_time(memory.get("last_updated_at"))
+    if not last_updated_at:
+        return True
+    return (now - last_updated_at) > timedelta(hours=max(1, ttl_hours))
+
+
+def _should_reset_session_memory(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    return any(phrase in normalized for phrase in SESSION_MEMORY_RESET_PHRASES)
+
+
+def _session_memory_snapshot(memory: dict) -> dict:
+    pending_slots = memory.get("pending_slots")
+    if isinstance(pending_slots, dict):
+        pending_keys = sorted(
+            key for key in pending_slots.keys() if isinstance(key, str) and key.strip()
+        )
+    else:
+        pending_keys = []
+    unanswered = memory.get("unanswered_questions")
+    if isinstance(unanswered, list):
+        unanswered_count = len([item for item in unanswered if isinstance(item, str) and item.strip()])
+    else:
+        unanswered_count = 0
+    return {
+        "last_question_type": memory.get("last_question_type"),
+        "active_goal": memory.get("active_goal"),
+        "pending_slots": pending_keys,
+        "unanswered_questions_count": unanswered_count,
+    }
+
+
+def _record_session_memory_update(
+    conversation: Conversation,
+    saved_message: Message | None,
+    *,
+    memory: dict,
+    reason: str,
+) -> None:
+    snapshot = _session_memory_snapshot(memory)
+    trace = {"stage": "session_memory", "decision": "update", "reason": reason}
+    trace.update(snapshot)
+    _record_decision_trace(conversation, trace)
+    if saved_message:
+        _update_message_decision_metadata(saved_message, {"session_memory_update": snapshot})
+
+
+def _reset_session_memory(
+    *,
+    context: dict,
+    context_manager: dict,
+    reason: str,
+    now: datetime,
+) -> tuple[dict, dict, dict]:
+    manager = dict(context_manager)
+    manager.pop(CLASS_CARRYOVER_KEY, None)
+    manager.pop(SERVICE_CARRYOVER_KEY, None)
+    manager.pop(CONSULT_CONTEXT_KEY, None)
+    context = _set_context_manager(context, manager)
+    context = _set_expected_reply_type(context, None)
+    context = _set_intent_queue(context, [])
+    context = _set_session_memory(context, None)
+    memory_payload = {"last_updated_at": now.isoformat(), "ttl_hours": SESSION_MEMORY_TTL_HOURS}
+    return context, manager, {"reason": reason, **_session_memory_snapshot(memory_payload)}
+
+
+def _update_session_memory_on_question(
+    context: dict,
+    *,
+    expected_reply_type: str,
+    active_goal: str | None,
+    now: datetime,
+) -> tuple[dict, dict]:
+    memory = _get_session_memory(context)
+    unanswered = memory.get("unanswered_questions")
+    unanswered_list = (
+        [item for item in unanswered if isinstance(item, str) and item.strip()]
+        if isinstance(unanswered, list)
+        else []
+    )
+    if expected_reply_type not in unanswered_list:
+        unanswered_list.append(expected_reply_type)
+    memory["last_question_type"] = expected_reply_type
+    if active_goal:
+        memory["active_goal"] = active_goal
+    memory["unanswered_questions"] = unanswered_list
+    memory["last_updated_at"] = now.isoformat()
+    memory["ttl_hours"] = SESSION_MEMORY_TTL_HOURS
+    context = _set_session_memory(context, memory)
+    return context, memory
+
+
+def _update_session_memory_on_answer(
+    context: dict,
+    *,
+    expected_reply_type: str,
+    value: str,
+    now: datetime,
+) -> tuple[dict, dict]:
+    memory = _get_session_memory(context)
+    pending_slots = memory.get("pending_slots")
+    pending_map = dict(pending_slots) if isinstance(pending_slots, dict) else {}
+    unanswered = memory.get("unanswered_questions")
+    unanswered_list = (
+        [item for item in unanswered if isinstance(item, str) and item.strip()]
+        if isinstance(unanswered, list)
+        else []
+    )
+    if expected_reply_type in unanswered_list:
+        unanswered_list = [item for item in unanswered_list if item != expected_reply_type]
+    slot_map = {
+        EXPECTED_REPLY_SERVICE: "service",
+        EXPECTED_REPLY_TIME: "datetime",
+        EXPECTED_REPLY_NAME: "name",
+    }
+    slot_key = slot_map.get(expected_reply_type)
+    if slot_key and isinstance(value, str) and value.strip():
+        pending_map[slot_key] = value.strip()
+    memory["pending_slots"] = pending_map
+    memory["unanswered_questions"] = unanswered_list
+    memory["last_updated_at"] = now.isoformat()
+    memory["ttl_hours"] = SESSION_MEMORY_TTL_HOURS
+    context = _set_session_memory(context, memory)
+    return context, memory
+
+
+def _update_session_memory_goal(
+    context: dict,
+    *,
+    active_goal: str,
+    now: datetime,
+) -> tuple[dict, dict]:
+    memory = _get_session_memory(context)
+    memory["active_goal"] = active_goal
+    memory["last_updated_at"] = now.isoformat()
+    memory["ttl_hours"] = SESSION_MEMORY_TTL_HOURS
+    context = _set_session_memory(context, memory)
+    return context, memory
 
 
 def _get_shield_context(context: dict) -> dict:
@@ -2926,6 +3150,16 @@ def _tokenize_for_matching(normalized: str) -> list[str]:
     return re.findall(r"\w+", normalized)
 
 
+def _is_short_reply(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    tokens = _tokenize_for_matching(normalized)
+    return 0 < len(tokens) <= SESSION_MEMORY_SHORT_TOKENS
+
+
 def _has_token_prefix(tokens: list[str], prefix: str) -> bool:
     return any(token.startswith(prefix) for token in tokens)
 
@@ -3025,6 +3259,19 @@ def _detect_info_class_intents(message_text: str | None, *, intent_decomp_set: s
         "hours": hours_signal,
     }
     return intents, meta
+
+
+def _looks_like_info_query(message_text: str | None) -> bool:
+    intents, meta = _detect_info_class_intents(message_text, intent_decomp_set=set())
+    if intents:
+        return True
+    info_signals = meta.get("info_signals") if isinstance(meta, dict) else None
+    if isinstance(info_signals, dict):
+        return any(
+            info_signals.get(signal)
+            for signal in ("parking", "guest", "location", "hours")
+        )
+    return False
 
 
 def _looks_like_hours_followup(message_text: str | None) -> bool:
@@ -5562,6 +5809,34 @@ async def _handle_webhook_payload(
     conversation.last_message_at = now
     context = _get_conversation_context(conversation)
     context_manager = _get_context_manager(context)
+    session_memory = _get_session_memory(context)
+    session_memory_reset_reason = None
+    if session_memory and _is_session_memory_expired(session_memory, now):
+        session_memory_reset_reason = "expired"
+    elif _should_reset_session_memory(message_text):
+        session_memory_reset_reason = "explicit_reset"
+    if session_memory_reset_reason:
+        context, context_manager, reset_snapshot = _reset_session_memory(
+            context=context,
+            context_manager=context_manager,
+            reason=session_memory_reset_reason,
+            now=now,
+        )
+        _set_conversation_context(conversation, context)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "session_memory",
+                "decision": "reset",
+                "reason": session_memory_reset_reason,
+                **reset_snapshot,
+            },
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message, {"session_memory_reset": session_memory_reset_reason}
+            )
+        session_memory = {}
     message_count = _increment_context_message_count(context_manager)
     context_manager, refusal_flags, refusal_events = _update_refusal_flags(
         context_manager,
@@ -5634,6 +5909,32 @@ async def _handle_webhook_payload(
 
     expected_reply_type = _get_expected_reply_type(context)
     intent_queue = _get_intent_queue(context)
+    session_memory = _get_session_memory(context)
+    memory_expected_reply_type = None
+    if not expected_reply_type and session_memory and not _is_session_memory_expired(session_memory, now):
+        last_question_type = session_memory.get("last_question_type")
+        if isinstance(last_question_type, str):
+            last_question_type = last_question_type.strip()
+        if (
+            last_question_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+            and _is_short_reply(message_text)
+            and not _looks_like_info_query(message_text)
+            and not _looks_like_policy_topic(message_text)
+        ):
+            expected_reply_type = last_question_type
+            memory_expected_reply_type = last_question_type
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "session_memory",
+                    "decision": "expected_reply_fallback",
+                    "expected_reply_type": last_question_type,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message, {"session_memory_expected_reply": last_question_type}
+                )
     expected_reply_matched: bool | None = None
     expected_reply_shortcircuit = False
     expected_reply_text = (
@@ -5741,6 +6042,21 @@ async def _handle_webhook_payload(
             next_expected = EXPECTED_REPLY_INTENT_CHOICE if intent_queue else None
             context = _set_expected_reply_type(context, next_expected)
             _set_conversation_context(conversation, context)
+        if matched and isinstance(value, str) and isinstance(expected_reply_type, str):
+            context = _get_conversation_context(conversation)
+            context, memory = _update_session_memory_on_answer(
+                context,
+                expected_reply_type=expected_reply_type,
+                value=value,
+                now=now,
+            )
+            _set_conversation_context(conversation, context)
+            _record_session_memory_update(
+                conversation,
+                saved_message,
+                memory=memory,
+                reason="answer_matched",
+            )
         if expected_reply_shortcircuit:
             context_manager = _get_context_manager(context)
             if context_manager.get("current_goal") != "booking":
@@ -5752,6 +6068,16 @@ async def _handle_webhook_payload(
                     saved_message,
                     decision="current_goal",
                     updates={"current_goal": "booking"},
+                )
+                context, memory = _update_session_memory_goal(
+                    context, active_goal="booking", now=now
+                )
+                _set_conversation_context(conversation, context)
+                _record_session_memory_update(
+                    conversation,
+                    saved_message,
+                    memory=memory,
+                    reason="active_goal",
                 )
             current_goal = "booking"
         trace_payload = {
@@ -7215,6 +7541,16 @@ async def _handle_webhook_payload(
                     decision="current_goal",
                     updates={"current_goal": new_goal},
                 )
+                context, memory = _update_session_memory_goal(
+                    context, active_goal=new_goal, now=now
+                )
+                _set_conversation_context(conversation, context)
+                _record_session_memory_update(
+                    conversation,
+                    saved_message,
+                    memory=memory,
+                    reason="active_goal",
+                )
                 _update_compact_summary(
                     conversation=conversation,
                     saved_message=saved_message,
@@ -7771,6 +8107,7 @@ async def _handle_webhook_payload(
                 context=context,
                 expected_reply_type=EXPECTED_REPLY_SERVICE,
                 reason="invalid_choice",
+                now=now,
             )
             bot_response = MSG_EXPECTED_SERVICE_OFF_TOPIC
             _reset_low_confidence_retry(conversation)
@@ -8164,6 +8501,7 @@ async def _handle_webhook_payload(
                 context=context,
                 expected_reply_type=booking_expected,
                 reason="booking_prompt",
+                now=now,
             )
         _record_decision_trace(
             conversation,
@@ -8468,6 +8806,16 @@ async def _handle_webhook_payload(
             )
             context = _set_context_manager(context, context_manager)
             _set_conversation_context(conversation, context)
+            context, memory = _update_session_memory_goal(
+                context, active_goal="consult", now=now
+            )
+            _set_conversation_context(conversation, context)
+            _record_session_memory_update(
+                conversation,
+                saved_message,
+                memory=memory,
+                reason="active_goal",
+            )
             consult_trace = {
                 "stage": "consult_context",
                 "decision": "set",
@@ -8786,6 +9134,7 @@ async def _handle_webhook_payload(
                         context=context,
                         expected_reply_type=booking_expected,
                         reason="booking_prompt",
+                        now=now,
                     )
 
                 if (
@@ -8830,6 +9179,7 @@ async def _handle_webhook_payload(
                         context=context,
                         expected_reply_type=EXPECTED_REPLY_SERVICE,
                         reason="service_clarify",
+                        now=now,
                     )
                     prompt = None
 
@@ -9070,6 +9420,7 @@ async def _handle_webhook_payload(
                     context=context,
                     expected_reply_type=booking_expected,
                     reason="booking_prompt",
+                    now=now,
                 )
 
             if prompt:
@@ -9687,6 +10038,7 @@ async def _handle_webhook_payload(
                         context=context,
                         expected_reply_type=EXPECTED_REPLY_SERVICE,
                         reason="service_clarify",
+                        now=now,
                     )
             trace_payload = {
                 "stage": "service_matcher",
@@ -9944,6 +10296,7 @@ async def _handle_webhook_payload(
                     context=context,
                     expected_reply_type=EXPECTED_REPLY_SERVICE,
                     reason=decision.intent,
+                    now=now,
                 )
             bot_response = decision.response
             if consult_return_pending:
