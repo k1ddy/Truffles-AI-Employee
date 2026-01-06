@@ -118,6 +118,14 @@
 
 **Реализация:** `truffles-api/app/services/state_service.py` (`escalate_to_pending`) + `truffles-api/app/services/escalation_service.py` (`send_telegram_notification`)
 
+### Pending‑SLA lifecycle (ожидание менеджера)
+- **SLA ping** клиенту через **15 минут** в `pending` без ответа менеджера: просим подтвердить актуальность.
+- Ответ клиента:
+  - `pending_ack` → закрываем handover, `state=bot_active`, короткое подтверждение.
+  - `pending_close` → закрываем handover, `state=bot_active`, бот замьючен, короткое подтверждение.
+- Классификация `pending_ack/pending_close`: **LLM‑router first**, при ошибке/низкой уверенности — **детерминированный fallback** (фразы подтверждения/закрытия).
+- **Auto‑close:** через **4 часа** ожидания без подтверждения — системное закрытие (handover → resolved, state → bot_active).
+
 ### Когда `manager_active`:
 - **БОТ ПОЛНОСТЬЮ МОЛЧИТ**
 - Все сообщения клиента форвардятся менеджеру в Telegram
