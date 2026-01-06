@@ -8996,6 +8996,12 @@ async def _handle_webhook_payload(
                 intent_decomp_set=set(),
             )
             booking_info_intents = sorted(anchor_intents)
+        if (
+            not booking_info_intents
+            and booking_time_service_candidate
+            and info_class_intents
+        ):
+            booking_info_intents = sorted(info_class_intents)
         allow_booking_interrupt_info = bool(
             booking_info_intents
             or booking_time_service_candidate
@@ -9099,6 +9105,11 @@ async def _handle_webhook_payload(
                 booking_time_service_interrupt = bool(
                     booking_time_service_candidate and _is_booking_time_service_decision(info_decision)
                 )
+                booking_interrupt_info = bool(
+                    info_decision
+                    and info_decision.action == "reply"
+                    and not booking_time_service_interrupt
+                )
 
                 context = booking_context if isinstance(booking_context, dict) else _get_conversation_context(conversation)
                 booking_state = booking if isinstance(booking, dict) else _get_booking_context(context)
@@ -9141,49 +9152,52 @@ async def _handle_webhook_payload(
                     info_decision.intent in {"service_clarify", "duration_or_price_clarify"}
                     and not booking_time_service_interrupt
                 ):
-                    clarify_intent = current_goal or "info"
-                    context_manager = _get_context_manager(context)
-                    if _should_escalate_for_clarify(context_manager, clarify_intent):
-                        clarify_count, _ = _get_clarify_attempt_state(context_manager, clarify_intent)
-                        _record_context_manager_decision(
-                            conversation,
-                            saved_message,
-                            decision="clarify_limit",
-                            updates={
-                                "clarify_attempt": {"intent": clarify_intent, "count": clarify_count},
-                                "clarify_reason": "service_clarify",
-                                "clarify_limit": True,
-                            },
-                        )
-                        return _handle_clarify_limit_escalation(
-                            db=db,
+                    if booking_interrupt_info:
+                        prompt = None
+                    else:
+                        clarify_intent = current_goal or "info"
+                        context_manager = _get_context_manager(context)
+                        if _should_escalate_for_clarify(context_manager, clarify_intent):
+                            clarify_count, _ = _get_clarify_attempt_state(context_manager, clarify_intent)
+                            _record_context_manager_decision(
+                                conversation,
+                                saved_message,
+                                decision="clarify_limit",
+                                updates={
+                                    "clarify_attempt": {"intent": clarify_intent, "count": clarify_count},
+                                    "clarify_reason": "service_clarify",
+                                    "clarify_limit": True,
+                                },
+                            )
+                            return _handle_clarify_limit_escalation(
+                                db=db,
+                                conversation=conversation,
+                                user=user,
+                                message_text=message_text,
+                                saved_message=saved_message,
+                                source=info_source or "booking_interrupt",
+                                allow_handover=routing.get("allow_handover_create", False),
+                                send_response=_send_response,
+                                finalize_response=_finalize_bot_response,
+                            )
+                        _register_clarify_attempt(
                             conversation=conversation,
-                            user=user,
-                            message_text=message_text,
                             saved_message=saved_message,
-                            source=info_source or "booking_interrupt",
-                            allow_handover=routing.get("allow_handover_create", False),
-                            send_response=_send_response,
-                            finalize_response=_finalize_bot_response,
+                            intent=clarify_intent,
+                            now=now,
+                            reason="service_clarify",
                         )
-                    _register_clarify_attempt(
-                        conversation=conversation,
-                        saved_message=saved_message,
-                        intent=clarify_intent,
-                        now=now,
-                        reason="service_clarify",
-                    )
-                    context = _set_expected_reply_context(
-                        conversation=conversation,
-                        saved_message=saved_message,
-                        context=context,
-                        expected_reply_type=EXPECTED_REPLY_SERVICE,
-                        reason="service_clarify",
-                        now=now,
-                    )
-                    prompt = None
+                        context = _set_expected_reply_context(
+                            conversation=conversation,
+                            saved_message=saved_message,
+                            context=context,
+                            expected_reply_type=EXPECTED_REPLY_SERVICE,
+                            reason="service_clarify",
+                            now=now,
+                        )
+                        prompt = None
 
-                if prompt and not booking_time_service_interrupt:
+                if prompt and not booking_time_service_interrupt and not booking_interrupt_info:
                     context_manager = _get_context_manager(context)
                     if _should_escalate_for_clarify(context_manager, "booking"):
                         clarify_count, _ = _get_clarify_attempt_state(context_manager, "booking")
@@ -9223,6 +9237,8 @@ async def _handle_webhook_payload(
                     "info_intents": booking_info_intents,
                     "booking_prompt": prompt,
                 }
+                if booking_interrupt_info:
+                    trace_payload["booking_interrupt_info"] = True
                 _record_decision_trace(conversation, trace_payload)
 
                 if info_source == "service_matcher":
@@ -9269,6 +9285,7 @@ async def _handle_webhook_payload(
                             **info_meta,
                             "booking_info_interrupt": True,
                             "booking_info_intents": booking_info_intents,
+                            "booking_interrupt_info": bool(booking_interrupt_info),
                         },
                     )
                 _maybe_store_service_carryover(
