@@ -1564,7 +1564,14 @@ def _looks_like_service_question(normalized: str, raw_text: str | None = None) -
         return False
     if _has_price_signal(normalized, raw_text):
         return True
-    service_keywords = ["делаете", "есть ли", "есть", "оказываете", "предоставляете"]
+    service_keywords = [
+        "делаете",
+        "есть ли",
+        "есть",
+        "оказываете",
+        "предоставляете",
+        "можно сделать",
+    ]
     if _contains_any(normalized, service_keywords):
         return True
     return False
