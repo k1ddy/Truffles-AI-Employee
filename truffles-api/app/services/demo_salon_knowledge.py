@@ -2073,6 +2073,7 @@ def get_demo_salon_decision(
     guest_signal = _has_guest_waiting_signal(normalized)
     location_signal = _contains_any(normalized, ["адрес", "где вы", "где наход"])
     price_signal = _has_price_signal(normalized, message)
+    duration_signal = _has_duration_signal(normalized, message)
     price_item = _find_best_price_item(message)
     if "отмен" in normalized and "за сколько" in normalized:
         reply = format_reply_from_truth("cancel_policy")
@@ -2338,27 +2339,17 @@ def get_demo_salon_decision(
 
     question_type = semantic_question_type(message)
     question_meta: dict[str, Any] | None = None
+    duration_meta: dict[str, Any] | None = None
     if question_type:
         question_meta = {
             "question_type": question_type.kind,
             "question_type_score": question_type.score,
         }
         if question_type.kind == "duration":
-            service_query_meta = _resolve_service_query_meta(
-                message,
-                client_slug,
-                intent_decomp,
-                require_query=True,
-            )
-            service = _resolve_service_from_query(service_query_meta.get("service_query"))
-            reply = _format_service_duration_reply(service)
-            return DemoSalonDecision(
-                action="reply",
-                response=reply,
-                intent="service_duration",
-                meta={**question_meta, **service_query_meta} if question_meta else service_query_meta,
-            )
-    elif _has_duration_signal(normalized, message):
+            duration_meta = question_meta
+    if duration_signal and not price_signal and duration_meta is None:
+        duration_meta = {"question_type": "duration"}
+    if duration_meta:
         service_query_meta = _resolve_service_query_meta(
             message,
             client_slug,
@@ -2371,7 +2362,7 @@ def get_demo_salon_decision(
             action="reply",
             response=reply,
             intent="service_duration",
-            meta={"question_type": "duration", **service_query_meta},
+            meta={**duration_meta, **service_query_meta} if duration_meta else service_query_meta,
         )
 
     if not price_item and isinstance(intent_decomp, dict):
