@@ -7819,3 +7819,69 @@ eval_cases:
     must_include_any:
     - маникюр
     - парикмахер
+- id: E732
+  tier: long
+  pending_sla_expected: true
+  turns:
+  - user: Позовите администратора, пожалуйста.
+  - user: ага
+    expected:
+      trace_contains:
+      - stage: pending_sla
+        decision: pending_ack
+        state: bot_active
+- id: E733
+  tier: long
+  pending_sla_expected: true
+  turns:
+  - user: Можно связаться с администратором?
+  - user: давай быстрее
+    expected:
+      trace_contains:
+      - stage: pending_sla
+        decision: pending_ack
+        state: bot_active
+- id: E734
+  tier: long
+  pending_sla_expected: true
+  turns:
+  - user: Нужен менеджер, подключите, пожалуйста.
+  - user: ок, актуально
+    expected:
+      trace_contains:
+      - stage: pending_sla
+        decision: pending_ack
+        state: bot_active
+- id: E735
+  tier: long
+  pending_sla_expected: true
+  turns:
+  - user: Позовите администратора.
+  - user: закрыто
+    expected:
+      trace_contains:
+      - stage: pending_sla
+        decision: pending_close
+        state: bot_active
+- id: E736
+  tier: long
+  pending_sla_expected: true
+  turns:
+  - user: Подключите администратора, пожалуйста.
+  - user: решено по телефону
+    expected:
+      trace_contains:
+      - stage: pending_sla
+        decision: pending_close
+        state: bot_active
+- id: E737
+  tier: long
+  pending_sla_expected: true
+  turns:
+  - user: Хочу поговорить с администратором.
+  - user: не надо
+    expected:
+      trace_contains:
+      - stage: pending_sla
+        decision: pending_close
+        state: bot_active
