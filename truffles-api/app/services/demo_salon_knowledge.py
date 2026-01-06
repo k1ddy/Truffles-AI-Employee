@@ -1374,10 +1374,17 @@ def _resolve_service_query_meta(
         if isinstance(price_item, dict):
             fallback_name = _clean_service_query(price_item.get("name"))
             if fallback_name:
+                normalized_message = _normalize_text(message)
+                normalized_candidate = _normalize_text(fallback_name)
+                candidate_in_message = bool(
+                    normalized_message
+                    and normalized_candidate
+                    and normalized_candidate in normalized_message
+                )
                 current_query = meta.get("service_query")
                 current_tokens = _normalize_text(current_query).split() if current_query else []
                 candidate_tokens = _normalize_text(fallback_name).split()
-                if not current_query or len(candidate_tokens) > len(current_tokens):
+                if candidate_in_message or not current_query or len(candidate_tokens) > len(current_tokens):
                     meta["service_query"] = fallback_name
                     meta["service_query_source"] = "semantic_match"
                     meta["service_query_score"] = 1.0
