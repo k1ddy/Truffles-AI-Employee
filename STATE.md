@@ -1811,3 +1811,21 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
   - hours → conv_id `54796bbb-29db-4efe-8ba6-44403653e58e`, msg `live-alias2-hours-1767675856-4`; decision_meta info_sections=["address","hours"]; last msgs: "до скольки вы открыты?" → "Работаем ... с 9:00 до 21:00."
   - parking → conv_id `7a67ed30-ff2c-46f1-894d-fdf7a2c41d2f`, msg `live-alias2-parking-1767675856-5`; decision_meta info_sections=["address","hours","parking"]; last msgs: "можно припарковаться у вас?" → "Парковка: Бесплатная парковка во дворе..."
 - Doc sync: `docs/SELLING_TRUTHS.md:41` (Source Pack), commit f155bf1761ee14c5af5b3f044caae90fbf822c92.
+
+---
+
+### 2026-01-06 — Info_bundle/guest_policy lock + explicit service override
+
+**Что сделали:**
+- PR #52/#53: guest_policy и info_bundle блокируют semantic_match без явного service-сигнала; явная услуга в тексте побеждает carryover.
+- Deploy HEAD; `/admin/version` соответствует main.
+- Live-check 3 кейса (guest_policy/address+hours/pricing+address) — PASS.
+
+**Evidence:**
+- PRs: https://github.com/k1ddy/Truffles-AI-Employee/pull/52, https://github.com/k1ddy/Truffles-AI-Employee/pull/53
+- CI main: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20741714343
+- Prod `/admin/version`: `{"version":"main","git_commit":"58053a50bb4a84d441d6410fab02a353327a42dc","build_time":"2026-01-06T07:46:31Z"}`
+- Live-check (conv_id `fc2ff625-f678-4544-a477-1fc2c9b93b63`):
+  - guest_policy → msg `2d482756-b6de-4839-9d12-a04b6d2847a9` decision_meta info_semantic_match_skip_reason=guest_policy_lock, service_query=null; reply msg `c5fff20b-0c29-4e87-9b80-7001d3150b9d` (guest_policy + address/hours, без прайса/длительности).
+  - address+hours → msg `2c4323eb-216a-43f6-91e6-630951151f85` decision_meta info_semantic_match_skip_reason=info_bundle_lock; reply msg `756c409d-5aa9-45bf-b139-681b06b61aa1` (address+hours, без прайса/длительности).
+  - pricing+address → msg `c517a1ea-2794-42d5-a785-db13a98d05a7` decision_meta question_type=pricing service_query="Маникюр"; reply msg `0244ce5e-c86e-402a-b561-b609853f799e` (address+маникюр прайс).
