@@ -6,13 +6,25 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.models import ClientSettings, Conversation, Handover, Message
+from app.models import ClientSettings, Conversation, Handover, Message, User
 from app.schemas.reminder import ReminderItem
 from app.services.alert_service import alert_warning
+from app.services.chatflow_service import send_bot_response
+from app.services.message_service import save_message
+from app.services.state_service import manager_resolve
 from app.services.state_machine import ConversationState
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("reminder_service")
+
+PENDING_SLA_PING_MINUTES = int(os.environ.get("PENDING_SLA_PING_MINUTES", "15"))
+PENDING_AUTO_CLOSE_HOURS = int(os.environ.get("PENDING_AUTO_CLOSE_HOURS", "4"))
+PENDING_SLA_CONTEXT_KEY = "pending_sla"
+PENDING_SLA_PING_SENT_KEY = "ping_sent_at"
+PENDING_SLA_AUTO_CLOSE_KEY = "auto_closed_at"
+
+MSG_PENDING_SLA_PING = "Напоминаю: менеджер ещё не подключился. Я на связи — напишите, что нужно уточнить."
+MSG_PENDING_AUTO_CLOSE = "Закрываю ожидание. Если всё ещё актуально — напишите, я помогу."
 
 
 def _get_no_response_threshold_minutes() -> int:
@@ -35,6 +47,120 @@ def _get_last_message(db: Session, conversation_id, role: str) -> Message | None
         .order_by(Message.created_at.desc())
         .first()
     )
+
+
+def _get_pending_sla_context(conversation: Conversation) -> tuple[dict, dict]:
+    context = conversation.context if isinstance(conversation.context, dict) else {}
+    payload = context.get(PENDING_SLA_CONTEXT_KEY)
+    pending_sla = payload if isinstance(payload, dict) else {}
+    return context, pending_sla
+
+
+def _append_decision_trace(context: dict, payload: dict) -> dict:
+    trace = context.get("decision_trace")
+    trace_list = trace if isinstance(trace, list) else []
+    trace_list.append(payload)
+    context["decision_trace"] = trace_list
+    return context
+
+
+def _send_pending_user_message(
+    db: Session,
+    conversation: Conversation,
+    *,
+    text: str,
+    decision_meta: dict,
+) -> bool:
+    user = db.query(User).filter(User.id == conversation.user_id).first()
+    remote_jid = user.remote_jid if user else None
+    if not remote_jid:
+        return False
+    ok = send_bot_response(db, conversation.client_id, remote_jid, text)
+    save_message(
+        db,
+        conversation_id=conversation.id,
+        client_id=conversation.client_id,
+        role="assistant",
+        content=text,
+        message_metadata={"decision_meta": decision_meta},
+    )
+    conversation.last_message_at = datetime.now(timezone.utc)
+    return ok
+
+
+def process_pending_sla(db: Session) -> dict:
+    now = datetime.now(timezone.utc)
+    results = {"pinged": 0, "auto_closed": 0, "items": []}
+
+    open_handovers = db.query(Handover).filter(Handover.status.in_(["pending", "active"])).all()
+
+    for handover in open_handovers:
+        conversation = handover.conversation
+        if not conversation or conversation.state != ConversationState.PENDING.value:
+            continue
+
+        escalated_at = conversation.escalated_at or handover.created_at
+        if escalated_at and escalated_at.tzinfo is None:
+            escalated_at = escalated_at.replace(tzinfo=timezone.utc)
+        if not escalated_at:
+            continue
+
+        context, pending_sla = _get_pending_sla_context(conversation)
+        auto_closed_at = pending_sla.get(PENDING_SLA_AUTO_CLOSE_KEY)
+        ping_sent_at = pending_sla.get(PENDING_SLA_PING_SENT_KEY)
+
+        auto_close_due = now - escalated_at >= timedelta(hours=PENDING_AUTO_CLOSE_HOURS)
+        ping_due = now - escalated_at >= timedelta(minutes=PENDING_SLA_PING_MINUTES)
+
+        if auto_close_due and not auto_closed_at:
+            _send_pending_user_message(
+                db,
+                conversation,
+                text=MSG_PENDING_AUTO_CLOSE,
+                decision_meta={"pending_action": "auto_close"},
+            )
+            pending_sla[PENDING_SLA_AUTO_CLOSE_KEY] = now.isoformat()
+            manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
+            conversation.bot_status = "muted"
+            conversation.bot_muted_until = None
+            results["auto_closed"] += 1
+            results["items"].append(
+                {
+                    "handover_id": str(handover.id),
+                    "conversation_id": str(conversation.id),
+                    "action": "auto_close",
+                }
+            )
+            continue
+
+        if ping_due and not ping_sent_at:
+            _send_pending_user_message(
+                db,
+                conversation,
+                text=MSG_PENDING_SLA_PING,
+                decision_meta={"pending_sla_ping": True, "pending_action": "pending_sla_ping"},
+            )
+            pending_sla[PENDING_SLA_PING_SENT_KEY] = now.isoformat()
+            context = _append_decision_trace(
+                context,
+                {
+                    "stage": "pending_sla",
+                    "decision": "ping",
+                    "recorded_at": now.isoformat(),
+                },
+            )
+            context[PENDING_SLA_CONTEXT_KEY] = pending_sla
+            conversation.context = context
+            results["pinged"] += 1
+            results["items"].append(
+                {
+                    "handover_id": str(handover.id),
+                    "conversation_id": str(conversation.id),
+                    "action": "ping",
+                }
+            )
+
+    return results
 
 
 def auto_close_stale_handovers(db: Session) -> dict:
@@ -307,6 +433,7 @@ def process_reminders(db: Session) -> dict:
                 }
             )
 
+    results["pending_sla"] = process_pending_sla(db)
     results["auto_close"] = auto_close_stale_handovers(db)
     results["no_response_alerts"] = check_no_response_alerts(db)
     return results
