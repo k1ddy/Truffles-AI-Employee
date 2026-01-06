@@ -2887,7 +2887,21 @@ def _detect_info_class_intents(message_text: str | None, *, intent_decomp_set: s
     short_query = 0 < len(tokens) <= 4
 
     parking_signal = "парков" in normalized
-    guest_signal = any(token in normalized for token in ["гост", "ребен", "ребён", "дет", "коляс", "ожидан", "подожд", "пораньше", "раньше"])
+    guest_signal = any(
+        token in normalized
+        for token in [
+            "гост",
+            "ребен",
+            "ребён",
+            "дет",
+            "коляс",
+            "ожидан",
+            "подожд",
+            "пораньше",
+            "раньше",
+            "подруг",
+        ]
+    )
     location_signal = parking_signal or guest_signal or any(
         token in normalized
         for token in ["адрес", "где вы", "где находитесь", "куда ехать", "локац", "как доехать"]
@@ -4279,7 +4293,19 @@ def _build_info_intent_reply(
     if normalized:
         guest_signal = any(
             token in normalized
-            for token in ["гост", "ребен", "ребён", "дет", "коляс", "ожидан", "пораньше", "раньше", "подожд", "заранее"]
+            for token in [
+                "гост",
+                "ребен",
+                "ребён",
+                "дет",
+                "коляс",
+                "ожидан",
+                "пораньше",
+                "раньше",
+                "подожд",
+                "заранее",
+                "подруг",
+            ]
         )
     location_signal = False
     if normalized:
@@ -8977,6 +9003,7 @@ async def _handle_webhook_payload(
             router_state=router_state,
         )
         info_class = "info_bundle" in (class_router_result.get("classes") or [])
+        guest_policy_class = "guest_policy" in (class_router_result.get("classes") or [])
         info_class_intents_for_reply: set[str] = set(class_router_result.get("intents") or [])
         for item in class_router_result.get("carryover_intents") or []:
             if isinstance(item, str) and item.strip():
@@ -8990,6 +9017,41 @@ async def _handle_webhook_payload(
                         carryover_has_hours = True
                         break
             explicit_service = bool(intent_decomp_service_query)
+            router_service_query = None
+            router_state = class_router_result.get("router") if isinstance(class_router_result, dict) else None
+            router_output = router_state.get("output") if isinstance(router_state, dict) else None
+            if isinstance(router_output, dict):
+                slots = router_output.get("slots")
+                if isinstance(slots, dict):
+                    candidate = slots.get("service_query")
+                    if isinstance(candidate, str) and candidate.strip():
+                        router_service_query = candidate.strip()
+            expected_reply_service = expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME}
+            explicit_pricing_duration = False
+            if intent_decomp_set & {"pricing", "duration"}:
+                explicit_pricing_duration = True
+            elif isinstance(info_class_meta, dict):
+                anchor_intents = info_class_meta.get("anchor_intents")
+                if isinstance(anchor_intents, list):
+                    explicit_pricing_duration = any(
+                        isinstance(item, str) and item.strip().casefold() in {"pricing", "duration"}
+                        for item in anchor_intents
+                    )
+            info_semantic_lock = (
+                (info_class or guest_policy_class)
+                and not explicit_service
+                and not router_service_query
+                and not expected_reply_service
+                and not explicit_pricing_duration
+            )
+            info_semantic_meta: dict[str, Any] = {}
+            if info_semantic_lock:
+                info_class_intents_for_reply.discard("pricing")
+                info_class_intents_for_reply.discard("duration")
+                info_semantic_meta = {
+                    "info_semantic_match_skipped": True,
+                    "info_semantic_match_skip_reason": "class_router_lock",
+                }
             force_hours_followup = (
                 carryover_has_hours
                 and _looks_like_hours_followup(message_text)
@@ -9000,6 +9062,7 @@ async def _handle_webhook_payload(
                 not force_hours_followup
                 and not info_service_query
                 and {"pricing", "duration"} & info_class_intents_for_reply
+                and not info_semantic_lock
             ):
                 info_service_query = _extract_service_hint(message_text, payload.client_slug)
             if (
@@ -9061,6 +9124,8 @@ async def _handle_webhook_payload(
             info_meta_combined: dict[str, Any] = {}
             if isinstance(base_bundle_meta, dict) and base_bundle_meta:
                 info_meta_combined.update(base_bundle_meta)
+            if info_semantic_meta:
+                info_meta_combined.update(info_semantic_meta)
             if isinstance(base_bundle_reply, str):
                 base_bundle_reply = base_bundle_reply.strip()
                 if base_bundle_reply:
