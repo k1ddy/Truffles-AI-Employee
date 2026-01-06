@@ -36,6 +36,7 @@
 - Док‑синхронизация: `SPECS/ESCALATION.md` приведён к факту (roles/agent_identities/learned_responses — схема есть, wiring pending; branch config перенесён в реализованное).
 - Док‑синхронизация: `AGENTS.md` и `docs/SESSION_START_PROMPT.txt` обновлены под роли Top Architect / Brain / Hands.
 - Док‑канон обновлён: Hard‑LAW vs policy‑gates (скидки/оплата info), data_sharing opt‑in, long‑form eval и time‑awareness, behavioral shield и pricing‑media, policy‑гейты вынесены в client_pack; evidence: STRATEGY/REQUIREMENTS.md:41-69; STRATEGY/VISION.md:179-183; SPECS/CONSULTANT.md:9-112,150-191,240-252; SPECS/ESCALATION.md:151-188; SPECS/ARCHITECTURE.md:127-163; SPECS/MULTI_TENANT.md:151-225; SPECS/ACTIVE_LEARNING.md:23-41; docs/SESSION_START_PROMPT.txt:1-17; docs/SELLING_TRUTHS.md:11-36.
+- Doc-sync: trace-first тестирование (CI gate + ASR-noise + nightly/manual) + Session Memory v1; ASR corpus v1=10. Evidence: `SPECS/ARCHITECTURE.md:185-204`, `SPECS/ARCHITECTURE.md:617-639`, `SPECS/CONSULTANT.md:637-640`, `/tmp/asr_corpus.jsonl`.
 
 ### SYSTEM MAP (1‑page)
 - Ingress: ChatFlow → `POST /webhook/{client_slug}` → outbox PENDING → worker/cron → `_handle_webhook_payload`.
