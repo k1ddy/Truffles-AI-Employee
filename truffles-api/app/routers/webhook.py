@@ -54,7 +54,7 @@ from app.services.conversation_service import (
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
     _match_service,
-    _normalize_text,
+    _normalize_text as _normalize_service_text,
     build_consult_reply,
     build_info_combined_reply,
     build_quiet_hours_notice,
@@ -9034,7 +9034,7 @@ async def _handle_webhook_payload(
                         router_service_query = candidate.strip()
             alias_service_query = None
             if message_text and payload.client_slug:
-                normalized_for_alias = _normalize_text(message_text)
+                normalized_for_alias = _normalize_service_text(message_text)
                 if normalized_for_alias:
                     alias_match = _match_service(normalized_for_alias)
                     if isinstance(alias_match, dict):
