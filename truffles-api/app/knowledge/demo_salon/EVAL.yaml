@@ -6430,3 +6430,1180 @@ eval_cases:
       answer_interpreter_used: true
       answer_slot: datetime
       expected_reply_shortcircuit: true
+
+- id: E571
+  user: Напишите точный адрес, пожалуйста.
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E572
+  user: Где салон находится?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E573
+  user: Адрес и ориентир какой?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E574
+  user: Во сколько открываетесь утром?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E575
+  user: До какого времени работаете вечером?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E576
+  user: График работы салона напомните?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - '9:00'
+    - '21:00'
+    - ежедневно
+    - без выходных
+- id: E577
+  user: Сколько стоит балаяж?
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - 25 000
+    - от 25 000
+- id: E578
+  user: Цена на балаяж?
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - 25 000
+    - от 25 000
+- id: E579
+  user: балаяж почем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - 25 000
+    - от 25 000
+- id: E580
+  user: Сколько стоит маникюр с гель-лаком?
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - 7 000
+    - 7000
+- id: E581
+  user: Цена на маникюр с гель-лаком?
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - 7 000
+    - 7000
+- id: E582
+  user: маникюр с гель-лаком почем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include_any:
+    - 7 000
+    - 7000
+- id: E583
+  user: Сколько стоит мужская стрижка?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 3 000
+- id: E584
+  user: Цена на мужская стрижка?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 3 000
+- id: E585
+  user: мужская стрижка почем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 3 000
+- id: E586
+  user: Сколько стоит стрижка машинкой?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 000
+- id: E587
+  user: Цена на стрижка машинкой?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 000
+- id: E588
+  user: стрижка машинкой почем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 000
+- id: E589
+  user: Сколько стоит подравнивание кончиков?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 500
+- id: E590
+  user: Цена на подравнивание кончиков?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 500
+- id: E591
+  user: подравнивание кончиков почем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 500
+- id: E592
+  user: Сколько стоит окрашивание корней?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 8 000
+- id: E593
+  user: Цена на окрашивание корней?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 8 000
+- id: E594
+  user: окрашивание корней почем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 8 000
+- id: E595
+  user: Сколько стоит классический маникюр?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 500
+- id: E596
+  user: Цена на классический маникюр?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 500
+- id: E597
+  user: классический маникюр почем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 2 500
+- id: E598
+  user: Сколько стоит аппаратный маникюр?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 3 500
+- id: E599
+  user: Цена на аппаратный маникюр?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 3 500
+- id: E600
+  user: аппаратный маникюр почем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 3 500
+- id: E601
+  user: Сколько стоит классический педикюр?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 4 500
+- id: E602
+  user: Цена на классический педикюр?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 4 500
+- id: E603
+  user: классический педикюр почем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 4 500
+- id: E604
+  user: Сколько стоит педикюр с гель-лаком?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 9 000
+- id: E605
+  user: Цена на педикюр с гель-лаком?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 9 000
+- id: E606
+  user: педикюр с гель-лаком почем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 9 000
+- id: E607
+  user: Сколько стоит наращивание ресниц 2D?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 10 000
+- id: E608
+  user: Цена на наращивание ресниц 2D?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 10 000
+- id: E609
+  user: наращивание ресниц 2D почем?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 10 000
+- id: E610
+  user: Сколько стоит чёлка?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 1 000
+- id: E611
+  user: Чёлка цена?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 1 000
+- id: E612
+  user: Сколько стоит челка?
+  expected:
+    action: reply
+    intent: price_query
+    must_include:
+    - 1 000
+- id: E613
+  user: Сколько длится педикюр?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - педикюр
+    must_include_any:
+    - минут
+    - час
+- id: E614
+  user: Сколько по времени педикюр?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - педикюр
+    must_include_any:
+    - минут
+    - час
+- id: E615
+  user: педикюр сколько занимает?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - педикюр
+    must_include_any:
+    - минут
+    - час
+- id: E616
+  user: Сколько длится окрашивание волос?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - окрашив
+    must_include_any:
+    - минут
+    - час
+- id: E617
+  user: Сколько по времени окрашивание волос?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - окрашив
+    must_include_any:
+    - минут
+    - час
+- id: E618
+  user: окрашивание волос сколько занимает?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - окрашив
+    must_include_any:
+    - минут
+    - час
+- id: E619
+  user: Сколько длится маникюр?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - маникюр
+    must_include_any:
+    - минут
+    - час
+- id: E620
+  user: Сколько по времени маникюр?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - маникюр
+    must_include_any:
+    - минут
+    - час
+- id: E621
+  user: маникюр сколько занимает?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - маникюр
+    must_include_any:
+    - минут
+    - час
+- id: E622
+  user: Сколько длится маникюр с гель-лаком?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - маникюр
+    must_include_any:
+    - минут
+    - час
+- id: E623
+  user: Сколько по времени маникюр с гель-лаком?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - маникюр
+    must_include_any:
+    - минут
+    - час
+- id: E624
+  user: маникюр с гель-лаком сколько занимает?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - маникюр
+    must_include_any:
+    - минут
+    - час
+- id: E625
+  user: Сколько длится мужская стрижка?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - стрижка
+    must_include_any:
+    - минут
+    - час
+- id: E626
+  user: Сколько по времени мужская стрижка?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - стрижка
+    must_include_any:
+    - минут
+    - час
+- id: E627
+  user: мужская стрижка сколько занимает?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - стрижка
+    must_include_any:
+    - минут
+    - час
+- id: E628
+  user: Сколько длится женская стрижка?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - стрижка
+    must_include_any:
+    - минут
+    - час
+- id: E629
+  user: Сколько по времени женская стрижка?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - стрижка
+    must_include_any:
+    - минут
+    - час
+- id: E630
+  user: женская стрижка сколько занимает?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - стрижка
+    must_include_any:
+    - минут
+    - час
+- id: E631
+  user: Сколько длится чистка лица?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - чистк
+    must_include_any:
+    - минут
+    - час
+- id: E632
+  user: Сколько по времени чистка лица?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - чистк
+    must_include_any:
+    - минут
+    - час
+- id: E633
+  user: чистка лица сколько занимает?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - чистк
+    must_include_any:
+    - минут
+    - час
+- id: E634
+  user: Сколько длится пилинг?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - пилинг
+    must_include_any:
+    - минут
+    - час
+- id: E635
+  user: Сколько по времени пилинг?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - пилинг
+    must_include_any:
+    - минут
+    - час
+- id: E636
+  user: пилинг сколько занимает?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - пилинг
+    must_include_any:
+    - минут
+    - час
+- id: E637
+  user: Сколько длится ламинирование бровей?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - бров
+    must_include_any:
+    - минут
+    - час
+- id: E638
+  user: Сколько по времени ламинирование бровей?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - бров
+    must_include_any:
+    - минут
+    - час
+- id: E639
+  user: ламинирование бровей сколько занимает?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - бров
+    must_include_any:
+    - минут
+    - час
+- id: E640
+  user: Сколько длится наращивание ресниц?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - ресниц
+    must_include_any:
+    - минут
+    - час
+- id: E641
+  user: Сколько по времени наращивание ресниц?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - ресниц
+    must_include_any:
+    - минут
+    - час
+- id: E642
+  user: наращивание ресниц сколько занимает?
+  expected:
+    action: reply
+    intent: service_duration
+    must_include:
+    - ресниц
+    must_include_any:
+    - минут
+    - час
+- id: E643
+  user: Делаете ламинирование ресниц?
+  expected:
+    action: reply
+    intent: service_match
+    must_include_any:
+    - ламинирование
+    - ресниц
+- id: E644
+  user: Есть ламинирование ресниц?
+  expected:
+    action: reply
+    intent: service_match
+    must_include_any:
+    - ламинирование
+    - ресниц
+- id: E645
+  user: Можно сделать ламинирование ресниц?
+  expected:
+    action: reply
+    intent: service_match
+    must_include_any:
+    - ламинирование
+    - ресниц
+- id: E646
+  user: Делаете пилинг лица?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - пилинг
+- id: E647
+  user: Есть пилинг лица?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - пилинг
+- id: E648
+  user: Можно сделать пилинг лица?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - пилинг
+- id: E649
+  user: Делаете маникюр?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - маникюр
+- id: E650
+  user: Есть маникюр?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - маникюр
+- id: E651
+  user: Можно сделать маникюр?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - маникюр
+- id: E652
+  user: Делаете педикюр?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - педикюр
+- id: E653
+  user: Есть педикюр?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - педикюр
+- id: E654
+  user: Можно сделать педикюр?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - педикюр
+- id: E655
+  user: Делаете окрашивание волос?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - окрашив
+- id: E656
+  user: Есть окрашивание волос?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - окрашив
+- id: E657
+  user: Можно сделать окрашивание волос?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - окрашив
+- id: E658
+  user: Делаете мелирование?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - мелирован
+- id: E659
+  user: Есть мелирование?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - мелирован
+- id: E660
+  user: Можно сделать мелирование?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - мелирован
+- id: E661
+  user: Делаете балаяж?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - балаяж
+- id: E662
+  user: Есть балаяж?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - балаяж
+- id: E663
+  user: Можно сделать балаяж?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - балаяж
+- id: E664
+  user: Делаете чистка лица?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - чистк
+- id: E665
+  user: Есть чистка лица?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - чистк
+- id: E666
+  user: Можно сделать чистка лица?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - чистк
+- id: E667
+  user: Делаете пилинг?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - пилинг
+- id: E668
+  user: Есть пилинг?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - пилинг
+- id: E669
+  user: Можно сделать пилинг?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - пилинг
+- id: E670
+  user: Делаете наращивание ресниц?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - ресниц
+- id: E671
+  user: Есть наращивание ресниц?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - ресниц
+- id: E672
+  user: Можно сделать наращивание ресниц?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - ресниц
+- id: E673
+  user: Делаете подравнивание кончиков?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - подравнивание
+- id: E674
+  user: Есть подравнивание кончиков?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - подравнивание
+- id: E675
+  user: Можно сделать подравнивание кончиков?
+  expected:
+    action: reply
+    intent: service_match
+    must_include:
+    - подравнивание
+- id: E676
+  user: Брови и ресницы делаете?
+  expected:
+    action: reply
+    intent: service_match
+    must_include_any:
+    - бров
+    - ресниц
+- id: E677
+  user: Есть услуги по бровям и ресницам?
+  expected:
+    action: reply
+    intent: service_match
+    must_include_any:
+    - бров
+    - ресниц
+- id: E678
+  user: Можно сделать брови и ресницы?
+  expected:
+    action: reply
+    intent: service_match
+    must_include_any:
+    - бров
+    - ресниц
+- id: E679
+  user: Скидка на первый визит есть?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - не суммируется
+    - не комбинируем
+- id: E680
+  user: Для новых клиентов скидка какая?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - не суммируется
+    - не комбинируем
+- id: E681
+  user: Первое посещение со скидкой?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - не суммируется
+    - не комбинируем
+- id: E682
+  user: Скидка именинникам действует?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 15%
+    must_include_any:
+    - 7 дней
+    - до/после
+- id: E683
+  user: В день рождения сколько процентов скидка?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 15%
+    must_include_any:
+    - 7 дней
+    - до/после
+- id: E684
+  user: За сколько дней до/после действует скидка именинникам?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 15%
+    must_include_any:
+    - 7 дней
+    - до/после
+- id: E685
+  user: Скидка студентам по будням есть?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - будням
+    - '11:00'
+    - '16:00'
+- id: E686
+  user: Пенсионерам скидка в какие часы?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - будням
+    - '11:00'
+    - '16:00'
+- id: E687
+  user: Студентам/пенсионерам скидка действует днем?
+  expected:
+    action: reply
+    intent: promotions
+    must_include:
+    - 10%
+    must_include_any:
+    - будням
+    - '11:00'
+    - '16:00'
+- id: E688
+  user: Скидки можно складывать?
+  expected:
+    action: reply
+    intent: promotions
+    must_include_any:
+    - не суммируются
+    - не комбинируем
+- id: E689
+  user: Акции суммируются между собой?
+  expected:
+    action: reply
+    intent: promotions
+    must_include_any:
+    - не суммируются
+    - не комбинируем
+- id: E690
+  user: Комбинируются ли скидки и промокоды?
+  expected:
+    action: reply
+    intent: promotions
+    must_include_any:
+    - не суммируются
+    - не комбинируем
+- id: E691
+  user: Какие акции сейчас действуют?
+  expected:
+    action: reply
+    intent: promotions
+    must_include_any:
+    - 10%
+    - 15%
+    - не комбинируем
+- id: E692
+  user: Промокоды есть какие-нибудь?
+  expected:
+    action: reply
+    intent: promotions
+    must_include_any:
+    - 10%
+    - 15%
+    - не комбинируем
+- id: E693
+  user: Есть действующие скидки?
+  expected:
+    action: reply
+    intent: promotions
+    must_include_any:
+    - 10%
+    - 15%
+    - не комбинируем
+- id: E694
+  user: Где парковаться у салона?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+    - 5–6
+    - 5-6
+- id: E695
+  user: Есть бесплатная парковка во дворе?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+    - 5–6
+    - 5-6
+- id: E696
+  user: Сколько парковочных мест у вас?
+  expected:
+    action: reply
+    intent: parking
+    must_include:
+    - парковка
+    must_include_any:
+    - бесплатн
+    - во дворе
+    - 5–6
+    - 5-6
+- id: E697
+  user: Есть место ожидания для гостей?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
+- id: E698
+  user: Можно подождать в зоне ожидания?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
+- id: E699
+  user: Где можно подождать сопровождающим?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
+- id: E700
+  user: Можно прийти за 10–15 минут раньше?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - 10–15
+    - 10-15
+    - зона ожидания
+- id: E701
+  user: Если приду на 10 минут раньше, где подождать?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - 10–15
+    - 10-15
+    - зона ожидания
+- id: E702
+  user: Можно приехать заранее минут на 15?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - 10–15
+    - 10-15
+    - зона ожидания
+- id: E703
+  user: Сколько мест в зоне ожидания?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - 2–3
+    - 2-3
+- id: E704
+  user: Сколько человек может ждать в зоне ожидания?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - 2–3
+    - 2-3
+- id: E705
+  user: Зона ожидания на сколько мест?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - 2–3
+    - 2-3
+- id: E706
+  user: Можно прийти с собакой?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - нельзя
+    - животных
+    - гигиен
+- id: E707
+  user: Пускаете с животными?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - нельзя
+    - животных
+    - гигиен
+- id: E708
+  user: Можно с питомцем?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - нельзя
+    - животных
+    - гигиен
+- id: E709
+  user: Сколько гостей можно с собой привести?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - одного
+    - 2–3
+    - зона ожидания
+- id: E710
+  user: Можно прийти с двумя сопровождающими?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - одного
+    - 2–3
+    - зона ожидания
+- id: E711
+  user: Есть ли ограничение по сопровождающим?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include_any:
+    - одного
+    - 2–3
+    - зона ожидания
