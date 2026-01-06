@@ -3274,6 +3274,21 @@ def _looks_like_info_query(message_text: str | None) -> bool:
     return False
 
 
+def _looks_like_time_only_request(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    if _is_booking_request(message_text):
+        return False
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    if any(keyword in normalized for keyword in SERVICE_KEYWORDS):
+        return False
+    if TIME_PATTERN.search(message_text):
+        return True
+    return bool(DATE_PATTERN.search(normalized))
+
+
 def _looks_like_hours_followup(message_text: str | None) -> bool:
     if not message_text:
         return False
@@ -10876,6 +10891,38 @@ async def _handle_webhook_payload(
                     llm_primary_failed = True
                     llm_primary_reason = "low_confidence"
                 else:
+                    if _looks_like_time_only_request(message_text):
+                        bot_response = MSG_EXPECTED_SERVICE_OFF_TOPIC
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "time_only_guard",
+                                "decision": "service_clarify",
+                                "state": conversation.state,
+                            },
+                        )
+                        _record_message_decision_meta(
+                            saved_message,
+                            action="reply",
+                            intent="service_clarify",
+                            source="time_only_guard",
+                            fast_intent=False,
+                        )
+                        if saved_message:
+                            _update_message_decision_metadata(
+                                saved_message, {"time_only_guard": True}
+                            )
+                        bot_response, sent = _send_and_save(bot_response)
+                        result_message = (
+                            "Time-only guard reply sent" if sent else "Time-only guard send failed"
+                        )
+                        db.commit()
+                        return WebhookResponse(
+                            success=True,
+                            message=result_message,
+                            conversation_id=conversation.id,
+                            bot_response=bot_response,
+                        )
                     if not out_of_domain_signal:
                         semantic_result = semantic_service_match(message_text, payload.client_slug)
                         if not semantic_result:
