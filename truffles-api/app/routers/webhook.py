@@ -2973,6 +2973,46 @@ def _looks_like_hours_followup(message_text: str | None) -> bool:
     )
 
 
+def _looks_like_carryover_followup(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    tokens = _tokenize_for_matching(normalized)
+    if not tokens:
+        return False
+    followup_phrases = [
+        "по времени",
+        "по цене",
+        "по стоимости",
+        "по длитель",
+        "по адресу",
+        "по месту",
+        "по час",
+        "по график",
+    ]
+    if _contains_any(normalized, followup_phrases):
+        return True
+    if tokens[0] in {"и", "а", "еще", "ещё"} and _contains_any(
+        normalized,
+        [
+            "сколько",
+            "когда",
+            "где",
+            "до скольк",
+            "во скольк",
+            "цена",
+            "стоим",
+            "длител",
+            "время",
+            "час",
+        ],
+    ):
+        return True
+    return False
+
+
 def _looks_like_promotions_request(message_text: str | None) -> bool:
     if not message_text:
         return False
@@ -6893,6 +6933,50 @@ async def _handle_webhook_payload(
             }
 
     intent_decomp_set = {intent.strip().casefold() for intent in intent_decomp_intents if intent} if intent_decomp_used else set()
+    info_class_intents: set[str] = set()
+    info_class_meta: dict[str, Any] = {}
+    if message_text:
+        info_class_intents, info_class_meta = _detect_info_class_intents(
+            message_text,
+            intent_decomp_set=intent_decomp_set,
+        )
+    info_signals = (
+        info_class_meta.get("info_signals")
+        if isinstance(info_class_meta, dict)
+        else None
+    )
+    basic_info_message = bool(
+        {"location", "hours"} & info_class_intents
+        or (
+            isinstance(info_signals, dict)
+            and (info_signals.get("parking") or info_signals.get("guest"))
+        )
+    )
+    carryover_followup = _looks_like_carryover_followup(message_text)
+    allow_service_carryover = bool(carryover_followup and not basic_info_message)
+    if not allow_service_carryover:
+        existing_service_carryover = _get_service_carryover(
+            context_manager, message_count=message_count
+        )
+        if basic_info_message or class_carryover or existing_service_carryover:
+            carryover_reason = "basic_info_lock" if basic_info_message else "no_followup"
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "carryover_ignored": True,
+                        "carryover_ignored_reason": carryover_reason,
+                    },
+                )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "carryover_guard",
+                    "decision": "ignored",
+                    "reason": carryover_reason,
+                },
+            )
+        class_carryover = None
     consult_interrupt_intents = (
         intent_decomp_set & CONSULT_INTERRUPT_INTENTS if intent_decomp_used else set()
     )
@@ -6942,6 +7026,7 @@ async def _handle_webhook_payload(
         and not consult_intent
         and not intent_decomp_service_query
         and intent_decomp_set & SERVICE_CARRYOVER_INTENTS
+        and allow_service_carryover
     ):
         skip_service_carryover = False
         if isinstance(class_carryover, dict) and _looks_like_hours_followup(message_text):
@@ -7543,10 +7628,6 @@ async def _handle_webhook_payload(
         and policy_handler
         and message_text
     ):
-        info_class_intents, info_class_meta = _detect_info_class_intents(
-            message_text,
-            intent_decomp_set=intent_decomp_set,
-        )
         class_router_result = _resolve_class_router_result(
             info_intents=info_class_intents,
             info_meta=info_class_meta,
@@ -7711,7 +7792,11 @@ async def _handle_webhook_payload(
         info_service_query = intent_decomp_service_query
         if not info_service_query and intent_queue_choice in {"pricing", "duration"}:
             info_service_query = _extract_service_hint(message_text, payload.client_slug)
-        if not info_service_query and intent_queue_choice in {"pricing", "duration"}:
+        if (
+            not info_service_query
+            and intent_queue_choice in {"pricing", "duration"}
+            and allow_service_carryover
+        ):
             carryover = _get_service_carryover(context_manager, message_count=message_count)
             if carryover:
                 info_service_query = carryover.get("service_query")
@@ -7825,7 +7910,7 @@ async def _handle_webhook_payload(
             if service_hint:
                 booking_state["service"] = service_hint
                 context = _clear_service_hint(context)
-        if not booking_state.get("service"):
+        if not booking_state.get("service") and allow_service_carryover:
             carryover = _get_service_carryover(context_manager, message_count=message_count)
             if carryover:
                 booking_state["service"] = carryover.get("service_query")
@@ -9015,10 +9100,6 @@ async def _handle_webhook_payload(
                         bot_response=bot_response,
                     )
 
-        info_class_intents, info_class_meta = _detect_info_class_intents(
-            message_text,
-            intent_decomp_set=intent_decomp_set,
-        )
         class_router_result = _resolve_class_router_result(
             info_intents=info_class_intents,
             info_meta=info_class_meta,
@@ -9124,6 +9205,7 @@ async def _handle_webhook_payload(
                 and not info_service_query
                 and {"pricing", "duration"} & info_class_intents_for_reply
                 and not info_semantic_lock
+                and allow_service_carryover
             ):
                 service_carryover_meta = _get_service_carryover(context_manager, message_count=message_count)
                 if service_carryover_meta:
@@ -9799,10 +9881,6 @@ async def _handle_webhook_payload(
 
     domain_out_hits = int(domain_meta.get("out_hits") or 0)
     domain_strict_in_hits = int(domain_meta.get("strict_in_hits") or 0)
-    info_class_intents, info_class_meta = _detect_info_class_intents(
-        message_text,
-        intent_decomp_set=intent_decomp_set,
-    )
     class_router_result = _resolve_class_router_result(
         info_intents=info_class_intents,
         info_meta=info_class_meta,
