@@ -1789,3 +1789,25 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - Prod `/admin/version`: `{"version":"main","git_commit":"f78bcad487281e150588133bcfdd5dea2d8c3d76","build_time":"2026-01-05T11:17:49Z"}`
 - Live-check router SLA: conv_id `ec380df5-e32d-4deb-b2d6-f52889edca24`, user msg `d9d57d09-f906-457b-ae58-4a52ba890f43` decision_meta class_router.router.sla fallback_rate=0.0 fallback_rate_flag=false (signal_match=true, fallback_reason=low_confidence).
 - Expected reply shortcircuit: conv_id `d1a3116d-5334-4a70-a6a5-3088301f34d1`, user msg `24768482-e2bf-48a3-bb7e-65ba1d878cde` decision_meta expected_reply_shortcircuit=true answer_slot=datetime answer_value="в субботу вечером", no pricing (assistant asked name).
+
+---
+
+### 2026-01-06 — Base-80 CORE aliases gate + deploy + live-check
+
+**Что сделали:**
+- PR #42: добавили Base-80 alias IDs (E571–E711) в CORE_EVAL_IDS → CI core/long + build/push/deploy PASS.
+- Deploy HEAD; `/admin/version` соответствует main.
+- Live-check 5 alias кейсов (service_match/price/duration/hours/parking) — PASS.
+- Doc sync: Source Pack добавлен в `docs/SELLING_TRUTHS.md` (commit f155bf1).
+
+**Evidence:**
+- PR #42: https://github.com/k1ddy/Truffles-AI-Employee/pull/42
+- CI main: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20738453824
+- Prod `/admin/version`: `{"version":"main","git_commit":"8fc94307da217a4235d0197c562f08e866bb9b65","build_time":"2026-01-06T04:53:46Z"}`
+- Live-check (alias cases):
+  - service_match → conv_id `82b5e451-cc29-48fe-9bf3-2003bf4334ae`, msg `live-alias2-service-1767675856-1`; decision_meta intent=service_match service_query="Брови и ресницы"; last msgs: "лами ресницы делаете?" → "Ламинирование ресниц — 6 000 ₸..."
+  - pricing → conv_id `58f78885-3361-4e66-b430-03251d534755`, msg `live-alias2-price-1767675856-2`; decision_meta intent=info_bundle intents=["pricing"] service_query="Стрижка машинкой"; last msgs: "сколько стоит стрижка машинкой?" → "Стрижка машинкой — 2 000 ₸..."
+  - duration → conv_id `fda91938-a44f-464d-bc13-3a0103561034`, msg `live-alias2-duration-1767675856-3`; decision_meta question_type=duration service_query="Маникюр + гель-лак"; last msgs: "сколько длится маникюр с гель-лаком?" → "Обычно 45–90 минут..."
+  - hours → conv_id `54796bbb-29db-4efe-8ba6-44403653e58e`, msg `live-alias2-hours-1767675856-4`; decision_meta info_sections=["address","hours"]; last msgs: "до скольки вы открыты?" → "Работаем ... с 9:00 до 21:00."
+  - parking → conv_id `7a67ed30-ff2c-46f1-894d-fdf7a2c41d2f`, msg `live-alias2-parking-1767675856-5`; decision_meta info_sections=["address","hours","parking"]; last msgs: "можно припарковаться у вас?" → "Парковка: Бесплатная парковка во дворе..."
+- Doc sync: `docs/SELLING_TRUTHS.md:41` (Source Pack), commit f155bf1761ee14c5af5b3f044caae90fbf822c92.
