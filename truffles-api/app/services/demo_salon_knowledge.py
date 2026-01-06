@@ -2351,7 +2351,7 @@ def get_demo_salon_decision(
                 meta=meta,
             )
 
-    if _contains_any(normalized, ["собак", "животн"]):
+    if _contains_any(normalized, ["собак", "животн", "питом"]):
         reply = format_reply_from_truth("guest_animals")
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
