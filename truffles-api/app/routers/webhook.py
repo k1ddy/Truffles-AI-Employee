@@ -1745,6 +1745,27 @@ LLM_GUARD_TOPICS = {
     ],
 }
 
+COMPLAINT_EXPLICIT_KEYWORDS = [
+    "жалоб",
+    "претенз",
+    "плохо сдел",
+    "испорт",
+    "верни",
+    "вернем",
+    "вернём",
+    "недоволен",
+    "недовольн",
+    "хамств",
+]
+
+COMPLAINT_CONSULT_OVERRIDE_KEYWORDS = [
+    "боюс",
+    "страшн",
+    "пережива",
+    "опасаюс",
+    "сомнева",
+]
+
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
 MSG_BOOKING_ASK_NAME = "Как вас зовут?"
@@ -7193,6 +7214,37 @@ async def _handle_webhook_payload(
         policy_t0 = time.monotonic()
         escalation_gate = policy_handler.get("escalation_gate")
         decision = escalation_gate(booking_messages) if escalation_gate else None
+        if decision and decision.intent == "complaint":
+            normalized_text = _normalize_text(message_text)
+            complaint_signal = bool(
+                normalized_text and _contains_any(normalized_text, COMPLAINT_EXPLICIT_KEYWORDS)
+            )
+            consult_override = bool(
+                (consult_intent or current_goal == "consult")
+                and normalized_text
+                and _contains_any(normalized_text, COMPLAINT_CONSULT_OVERRIDE_KEYWORDS)
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "complaint_signal": complaint_signal,
+                        "consult_override": consult_override,
+                    },
+                )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "complaint_guard",
+                    "decision": "suppressed"
+                    if (consult_override or not complaint_signal)
+                    else "accepted",
+                    "complaint_signal": complaint_signal,
+                    "consult_override": consult_override,
+                },
+            )
+            if consult_override or not complaint_signal:
+                decision = None
         if decision:
             bot_response = decision.response
             bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
