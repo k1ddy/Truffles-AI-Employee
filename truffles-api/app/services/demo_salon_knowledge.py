@@ -1047,14 +1047,19 @@ def semantic_question_type(
     return [] if return_multi else None
 
 
-def _format_service_duration_reply(service: dict[str, Any] | None) -> str:
+def _format_service_duration_reply(
+    service: dict[str, Any] | None,
+    *,
+    service_label: str | None = None,
+) -> str:
     truth = load_yaml_truth()
     catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
     if service:
         duration_text = service.get("duration_text") if isinstance(service, dict) else None
         if isinstance(duration_text, str) and duration_text.strip():
             duration_text = duration_text.strip()
-            name = service.get("name") or "Услуга"
+            label = service_label.strip() if isinstance(service_label, str) and service_label.strip() else None
+            name = label or service.get("name") or "Услуга"
             suffix = "" if duration_text.endswith((".", "!", "?")) else "."
             return f"{name} — {duration_text}{suffix}"
 
@@ -1522,7 +1527,7 @@ def compose_multi_truth_reply(
             if not service_query:
                 _add_reply(_format_service_duration_reply(None))
             else:
-                _add_reply(_format_service_duration_reply(service_from_query))
+                _add_reply(_format_service_duration_reply(service_from_query, service_label=service_query))
         if len(replies) >= 2:
             break
         if (
@@ -2357,7 +2362,10 @@ def get_demo_salon_decision(
             require_query=True,
         )
         service = _resolve_service_from_query(service_query_meta.get("service_query"))
-        reply = _format_service_duration_reply(service)
+        reply = _format_service_duration_reply(
+            service,
+            service_label=service_query_meta.get("service_query"),
+        )
         return DemoSalonDecision(
             action="reply",
             response=reply,
