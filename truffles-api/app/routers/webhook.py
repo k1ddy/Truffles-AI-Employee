@@ -1643,6 +1643,9 @@ MSG_PENDING_LOW_CONFIDENCE = (
 MSG_PENDING_ESCALATION = "Я уже передал менеджеру — он скоро подключится."
 MSG_PENDING_STATUS = "Да, я передал. Сейчас менеджер ещё не взял заявку. Как только возьмёт — ответит здесь. Пока ждём, могу помочь: уточните, что нужно?"
 MSG_PENDING_WAIT = "Администратор подключится."
+MSG_PENDING_SLA_PING = "Напоминаю: менеджер ещё не подключился. Я на связи — напишите, что нужно уточнить."
+MSG_PENDING_AUTO_CLOSE = "Закрываю ожидание. Если всё ещё актуально — напишите, я помогу."
+MSG_PENDING_ACK = "Хорошо. Напишите, что именно нужно: цена/запись/адрес/мастер."
 MSG_AI_ERROR = "Извините, произошла ошибка. Попробуйте позже."
 MSG_MEDIA_UNSUPPORTED = (
     "Сейчас принимаем только фото, аудио и документы. Видео не поддерживаются. Опишите вопрос текстом."
@@ -1665,6 +1668,32 @@ MSG_STYLE_REFERENCE_NEED_MEDIA = (
     "Можем ориентироваться на фото/референс. Пришлите фото и кратко опишите запрос — "
     "я передам администратору для подтверждения."
 )
+
+PENDING_SLA_PING_MINUTES = 15
+PENDING_AUTO_CLOSE_HOURS = 4
+PENDING_SLA_CONTEXT_KEY = "pending_sla"
+PENDING_SLA_PING_SENT_KEY = "ping_sent_at"
+PENDING_SLA_AUTO_CLOSE_KEY = "auto_closed_at"
+
+PENDING_ACK_PHRASES = {
+    "ага",
+    "актуально",
+    "да",
+    "давай",
+    "жду",
+    "можно",
+    "ок",
+    "ответьте",
+}
+PENDING_CLOSE_PHRASES = {
+    "закрыто",
+    "решено",
+    "не надо",
+    "уже сделал",
+    "по телефону",
+    "спасибо все",
+    "спасибо всё",
+}
 
 LLM_GUARD_TOPICS = {
     "payment": [
@@ -2108,6 +2137,35 @@ def _coerce_batch_messages(message_text: str, batch_messages: list[str] | None) 
 
 def _contains_any(normalized: str, keywords: list[str]) -> bool:
     return any(keyword in normalized for keyword in keywords)
+
+
+def _normalize_pending_text(text: str) -> str:
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return ""
+    return normalized.replace("ё", "е")
+
+
+def _is_pending_ack(text: str) -> bool:
+    normalized = _normalize_pending_text(text)
+    return normalized in PENDING_ACK_PHRASES
+
+
+def _is_pending_close(text: str) -> bool:
+    normalized = _normalize_pending_text(text)
+    return normalized in PENDING_CLOSE_PHRASES
+
+
+def _get_pending_sla(context: dict) -> dict:
+    payload = context.get(PENDING_SLA_CONTEXT_KEY) if isinstance(context, dict) else None
+    return payload if isinstance(payload, dict) else {}
+
+
+def _set_pending_sla(context: dict, payload: dict) -> dict:
+    if not isinstance(context, dict):
+        context = {}
+    context[PENDING_SLA_CONTEXT_KEY] = payload
+    return context
 
 
 def _is_booking_request(text: str) -> bool:
@@ -6357,6 +6415,134 @@ async def _handle_webhook_payload(
             )
             bot_response, sent = _send_and_save(bot_response)
             result_message = "Pending opt-out handled" if sent else "Pending opt-out send failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        if _is_pending_close(message_text):
+            handover = get_active_handover(db, conversation.id)
+            if handover:
+                manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
+            conversation.bot_status = "muted"
+            conversation.bot_muted_until = None
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "pending_sla",
+                    "decision": "pending_close",
+                    "state": conversation.state,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_action": "pending_close",
+                    },
+                )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message="Pending closed by user",
+                conversation_id=conversation.id,
+                bot_response=None,
+            )
+
+        if _is_pending_ack(message_text):
+            handover = get_active_handover(db, conversation.id)
+            if handover:
+                manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
+            conversation.bot_status = "active"
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "pending_sla",
+                    "decision": "pending_ack",
+                    "state": conversation.state,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_action": "pending_ack",
+                    },
+                )
+            bot_response = MSG_PENDING_ACK
+            bot_response, sent = _send_and_save(bot_response)
+            result_message = "Pending ack response sent" if sent else "Pending ack send failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        if is_handover_status_question(message_text):
+            bot_response = MSG_PENDING_STATUS
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "pending_status",
+                    "decision": "status_reply",
+                    "state": conversation.state,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_action": "pending_status",
+                    },
+                )
+            bot_response, sent = _send_and_save(bot_response)
+            result_message = "Pending status response sent" if sent else "Pending status response failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        pending_sla = _get_pending_sla(context)
+        ping_sent_at = pending_sla.get(PENDING_SLA_PING_SENT_KEY)
+        escalated_at = conversation.escalated_at
+        if escalated_at and escalated_at.tzinfo is None:
+            escalated_at = escalated_at.replace(tzinfo=timezone.utc)
+        ping_due = bool(
+            escalated_at
+            and not ping_sent_at
+            and now - escalated_at >= timedelta(minutes=PENDING_SLA_PING_MINUTES)
+        )
+        if ping_due:
+            pending_sla[PENDING_SLA_PING_SENT_KEY] = now.isoformat()
+            context = _set_pending_sla(context, pending_sla)
+            _set_conversation_context(conversation, context)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "pending_sla",
+                    "decision": "ping",
+                    "state": conversation.state,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_sla_ping": True,
+                        "pending_action": "pending_sla_ping",
+                    },
+                )
+            bot_response = MSG_PENDING_SLA_PING
+            bot_response, sent = _send_and_save(bot_response)
+            result_message = "Pending SLA ping sent" if sent else "Pending SLA ping send failed"
             db.commit()
             return WebhookResponse(
                 success=True,
