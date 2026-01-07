@@ -57,7 +57,6 @@ from app.services.demo_salon_knowledge import (
     _has_duration_signal,
     _has_price_signal,
     _match_service,
-    _normalize_text as _normalize_service_text,
     build_consult_reply,
     build_info_combined_reply,
     build_quiet_hours_notice,
@@ -71,6 +70,9 @@ from app.services.demo_salon_knowledge import (
     load_yaml_truth,
     semantic_question_type,
     semantic_service_match,
+)
+from app.services.demo_salon_knowledge import (
+    _normalize_text as _normalize_service_text,
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
