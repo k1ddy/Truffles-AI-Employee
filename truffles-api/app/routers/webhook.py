@@ -10165,6 +10165,7 @@ async def _handle_webhook_payload(
                         or _has_duration_signal(normalized, message_text)
                     ):
                         skip_info_class_for_service = True
+        intent_decomp_explicit_query = None
         if info_class and info_class_intents_for_reply and not skip_info_class_for_service:
             carryover_sections = class_router_result.get("carryover_info_sections")
             carryover_has_hours = False
