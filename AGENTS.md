@@ -110,6 +110,7 @@ Solo founder. Технически не глубокий, но умный и б�
 - Запрещены проверки DoD через `docker cp` или `docker run -v`; тесты принимаются только после CI build + restart + `docker exec`.
 - Hands не обновляют `STATE.md` (делает Brain последним шагом).
 - Локальный `pytest` без явного разрешения запрещён; единственный gate — CI, core и long гоняются раздельными джобами. Нарушение → stop-line и фиксация в STATE.
+- Live-check: если у роли нет WA‑клиента/allowlist → статус BLOCKED (сразу сообщить). Не просить Жанбола отправлять сообщения. Live-check делают только Hands/OPS с тестовым JID и снимают conv_id + trace/meta.
 
 **One‑issue flow:**
 - 1 проблема → 1 правка → 1 проверка → 1 запись в STATE.md.

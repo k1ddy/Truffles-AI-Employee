@@ -53,6 +53,9 @@ from app.services.conversation_service import (
 )
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
+    _detect_promotion_intent,
+    _has_duration_signal,
+    _has_price_signal,
     _match_service,
     build_consult_reply,
     build_info_combined_reply,
@@ -63,6 +66,7 @@ from app.services.demo_salon_knowledge import (
     get_demo_salon_price_item,
     get_demo_salon_price_reply,
     get_demo_salon_service_decision,
+    get_demo_salon_service_hint,
     load_yaml_truth,
     semantic_question_type,
     semantic_service_match,
@@ -108,6 +112,9 @@ _router_sla_counts = {"attempts": 0, "fallbacks": 0, "timeouts": 0}
 _router_fallback_flag_threshold = 0.1
 ROUTER_SIGNAL_CONFIDENCE_BONUS = 0.1
 ROUTER_SIGNAL_CONFIDENCE_FLOOR = 0.2
+CONTROLLER_CONFIDENCE_THRESHOLD = float(
+    os.getenv("CONTROLLER_CONFIDENCE_THRESHOLD", "0.3") or 0.3
+)
 
 
 def _update_router_sla(*, attempted: bool, fallback: bool, timeout: bool) -> dict:
@@ -2234,6 +2241,10 @@ def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
         return None
     match = semantic_service_match(text, client_slug)
     if not match or match.action != "match":
+        if client_slug == "demo_salon":
+            fallback = get_demo_salon_service_hint(text)
+            if fallback:
+                return fallback
         return None
     canonical_name = match.canonical_name
     if isinstance(canonical_name, str) and canonical_name.strip():
@@ -3265,6 +3276,7 @@ INFO_ANCHOR_GROUPS: dict[str, list[tuple[str, ...]]] = {
     "hours": [
         ("график",),
         ("режим", "работ"),
+        ("каког", "врем"),
         ("работ", "скольк"),
         ("работ", "когда"),
         ("работ", "до"),
@@ -3505,7 +3517,11 @@ def _looks_like_promotions_request(message_text: str | None) -> bool:
     if not normalized:
         return False
     keywords = LLM_GUARD_TOPICS.get("discount") or []
-    return _contains_any(normalized, keywords)
+    if _contains_any(normalized, keywords):
+        return True
+    if "до после" in normalized and _contains_any(normalized, ["дней", "дня", "день"]):
+        return True
+    return False
 
 
 def _load_discount_policy_payload(*, policy_type: str | None) -> dict | None:
@@ -3773,13 +3789,19 @@ def _resolve_class_router_result(
         if isinstance(raw_goal, str):
             controller_goal = raw_goal.strip()
 
+    controller_confidence_value = controller_confidence
+    controller_low_confidence = bool(
+        isinstance(controller_confidence_value, (int, float))
+        and controller_confidence_value < CONTROLLER_CONFIDENCE_THRESHOLD
+    )
+
     controller_fallback_reason = None
     controller_error_normalized = controller_error if isinstance(controller_error, str) else None
     controller_error_normalized = controller_error_normalized.strip() if controller_error_normalized else None
     if controller_error_normalized:
         controller_fallback_reason = _normalize_controller_fallback_reason(error=controller_error_normalized)
 
-    if controller_used and controller_class:
+    if controller_used and controller_class and not controller_low_confidence:
         result["classes"] = [controller_class]
         info_controller_intents = [intent for intent in controller_intents if intent in INFO_INTENTS]
         if controller_class == "info_bundle":
@@ -3788,8 +3810,16 @@ def _resolve_class_router_result(
         else:
             result["intents"] = sorted(info_controller_intents)
         controller_fallback_reason = None
+    elif controller_used and controller_class and controller_low_confidence:
+        # Low confidence: keep deterministic class_router result, but mark fallback_reason for observability.
+        controller_used_reason = "low_confidence"
+        controller_fallback_reason = "low_confidence"
+        controller_used = True
     elif not controller_used and isinstance(controller_fallback, str) and controller_fallback != "skipped":
         controller_fallback_reason = controller_fallback_reason or controller_fallback
+
+    if controller_fallback_reason and not controller_low_confidence:
+        controller_low_confidence = True
 
     result["controller"] = {
         "used": bool(controller_used),
@@ -3803,6 +3833,7 @@ def _resolve_class_router_result(
         "used_reason": controller_used_reason,
         "sla": controller_sla,
         "goal": controller_goal,
+        "low_confidence": controller_low_confidence,
     }
     result["controller_fallback_reason"] = controller_fallback_reason
     # Backward-compat for downstream callers still keyed on router
@@ -4897,6 +4928,13 @@ def _build_info_intent_reply(
             include_guest=guest_signal,
         )
         return reply, meta or None
+    if (
+        intent in {"pricing", "duration"}
+        and not service_query
+        and message_text
+        and client_slug == "demo_salon"
+    ):
+        service_query = get_demo_salon_service_hint(message_text)
     if intent == "pricing":
         question = f"Сколько стоит {service_query}?" if service_query else "Сколько стоит?"
     elif intent == "duration":
@@ -8207,6 +8245,7 @@ async def _handle_webhook_payload(
             controller_state["fallback_reason"] = _normalize_controller_fallback_reason(
                 error=controller_state["error"]
             )
+            controller_state["confidence"] = 0.0
             controller_output = controller_result.get("payload") if isinstance(controller_result, dict) else None
             if isinstance(controller_output, dict):
                 controller_state["output"] = _ensure_controller_output_meta(
@@ -8498,20 +8537,40 @@ async def _handle_webhook_payload(
                 in_signals.append("promotions_signal")
             class_router_result["in_signals"] = in_signals
 
-        discounts_available = _has_discount_policy_rules(policy_type=policy_type)
-        discounts_reply = _format_discounts_policy_reply(policy_type=policy_type) if discounts_available else None
-        if discounts_reply:
+        promotion_intent = None
+        if policy_type == "demo_salon":
+            promotion_intent = _detect_promotion_intent(_normalize_text(message_text))
+        promo_reply = None
+        if promotion_intent == "promotion_birthday":
+            promo_reply = format_reply_from_truth(
+                "promotions",
+                {"promotion_intent": promotion_intent},
+            )
+        if promo_reply:
             decision = DemoSalonDecision(
                 action="reply",
-                response=discounts_reply,
-                intent="discounts",
+                response=promo_reply,
+                intent="promotions",
             )
         else:
-            decision = DemoSalonDecision(
-                action="escalate",
-                response=MSG_ESCALATED,
-                intent="discounts",
+            discounts_available = _has_discount_policy_rules(policy_type=policy_type)
+            discounts_reply = (
+                _format_discounts_policy_reply(policy_type=policy_type)
+                if discounts_available
+                else None
             )
+            if discounts_reply:
+                decision = DemoSalonDecision(
+                    action="reply",
+                    response=discounts_reply,
+                    intent="discounts",
+                )
+            else:
+                decision = DemoSalonDecision(
+                    action="escalate",
+                    response=MSG_ESCALATED,
+                    intent="discounts",
+                )
 
         bot_response = decision.response or MSG_ESCALATED
         followup_intents: list[str] = []
@@ -9807,13 +9866,13 @@ async def _handle_webhook_payload(
                             finalize_response=_finalize_bot_response,
                         )
                     elif clarify_guard_reason is None:
-                        _register_clarify_attempt(
-                            conversation=conversation,
-                            saved_message=saved_message,
-                            intent="booking",
-                            now=now,
-                            reason="booking_prompt",
-                        )
+                            _register_clarify_attempt(
+                                conversation=conversation,
+                                saved_message=saved_message,
+                                intent="booking",
+                                now=now,
+                                reason="booking_prompt",
+                            )
                 _record_decision_trace(
                     conversation,
                     {
@@ -10064,7 +10123,52 @@ async def _handle_webhook_payload(
         for item in class_router_result.get("carryover_intents") or []:
             if isinstance(item, str) and item.strip():
                 info_class_intents_for_reply.add(item.strip().casefold())
-        if info_class and info_class_intents_for_reply:
+        skip_info_class_for_service = False
+        if (
+            info_class
+            and message_text
+            and payload.client_slug == "demo_salon"
+            and not info_class_intents
+        ):
+            normalized = normalize_for_matching(message_text)
+            service_hint = get_demo_salon_service_hint(message_text)
+            if service_hint:
+                if _contains_any(
+                    normalized,
+                    [
+                        "парков",
+                        "гост",
+                        "ребен",
+                        "ребён",
+                        "дет",
+                        "коляс",
+                        "ожидан",
+                        "подруг",
+                    ],
+                ):
+                    service_hint = None
+                else:
+                    presence_keywords = [
+                        "делаете",
+                        "делает",
+                        "делают",
+                        "есть",
+                        "есть ли",
+                        "оказываете",
+                        "предоставляете",
+                    ]
+                    presence_hint = _contains_any(normalized, presence_keywords) or (
+                        "?" in message_text and len(normalized.split()) <= 4
+                    )
+                    if presence_hint and not (
+                        _has_price_signal(normalized, message_text)
+                        or _has_duration_signal(normalized, message_text)
+                    ):
+                        skip_info_class_for_service = True
+        router_service_query = None
+        alias_service_query = None
+        intent_decomp_explicit_query = None
+        if info_class and info_class_intents_for_reply and not skip_info_class_for_service:
             carryover_sections = class_router_result.get("carryover_info_sections")
             carryover_has_hours = False
             if isinstance(carryover_sections, list):
@@ -10072,7 +10176,6 @@ async def _handle_webhook_payload(
                     if isinstance(section, str) and section.strip().casefold() == "hours":
                         carryover_has_hours = True
                         break
-            router_service_query = None
             router_state = class_router_result.get("router") if isinstance(class_router_result, dict) else None
             router_output = router_state.get("output") if isinstance(router_state, dict) else None
             if isinstance(router_output, dict):
@@ -10081,7 +10184,6 @@ async def _handle_webhook_payload(
                     candidate = slots.get("service_query")
                     if isinstance(candidate, str) and candidate.strip():
                         router_service_query = candidate.strip()
-            alias_service_query = None
             if message_text and payload.client_slug:
                 normalized_for_alias = _normalize_service_text(message_text)
                 if normalized_for_alias:
@@ -10098,49 +10200,67 @@ async def _handle_webhook_payload(
             intent_decomp_explicit_query = (
                 intent_decomp_service_query if intent_decomp_source != "context" else None
             )
-            explicit_service_signal = bool(
-                intent_decomp_explicit_query or router_service_query or alias_service_query
-            )
-            guest_policy_lock = guest_policy_class
-            info_bundle_lock = info_class and not explicit_service_signal
-            info_semantic_lock = guest_policy_lock or info_bundle_lock
-            info_semantic_meta: dict[str, Any] = {}
-            if info_semantic_lock:
-                if guest_policy_lock:
+        controller_low_confidence = False
+        controller_state = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
+        if isinstance(controller_state, dict):
+            controller_low_confidence = bool(controller_state.get("low_confidence"))
+        explicit_service_signal = bool(
+            intent_decomp_explicit_query or router_service_query or alias_service_query
+        )
+        service_carryover_meta = _get_service_carryover(
+            context_manager, message_count=message_count
+        )
+        carryover_service_query = None
+        if isinstance(service_carryover_meta, dict):
+            carryover_service_query = service_carryover_meta.get("service_query")
+        guest_policy_lock = guest_policy_class
+        info_bundle_lock = info_class and not (
+            explicit_service_signal or intent_decomp_explicit_query or router_service_query
+        )
+        info_semantic_lock = guest_policy_lock or info_bundle_lock or controller_low_confidence
+        info_semantic_meta: dict[str, Any] = {}
+        if info_semantic_lock:
+            if guest_policy_lock:
+                info_class_intents_for_reply.discard("pricing")
+                info_class_intents_for_reply.discard("duration")
+            else:
+                if "pricing" not in base_info_intents:
                     info_class_intents_for_reply.discard("pricing")
+                if "duration" not in base_info_intents:
                     info_class_intents_for_reply.discard("duration")
-                else:
-                    if "pricing" not in base_info_intents:
-                        info_class_intents_for_reply.discard("pricing")
-                    if "duration" not in base_info_intents:
-                        info_class_intents_for_reply.discard("duration")
-                skip_reason = "guest_policy_lock" if guest_policy_lock else "info_bundle_lock"
-                info_semantic_meta = {
-                    "info_semantic_match_skipped": True,
-                    "info_semantic_match_skip_reason": skip_reason,
-                }
-                if guest_policy_lock:
-                    info_semantic_meta.update(
-                        {
-                            "question_type": None,
-                            "service_query": None,
-                            "service_query_source": None,
-                            "service_query_score": 0.0,
-                        }
-                    )
-            force_hours_followup = (
-                carryover_has_hours
-                and _looks_like_hours_followup(message_text)
-                and not explicit_service_signal
-            )
-            info_service_query = None
-            if not info_semantic_lock:
-                if alias_service_query:
-                    info_service_query = alias_service_query
-                elif router_service_query:
-                    info_service_query = router_service_query
-                elif intent_decomp_explicit_query:
-                    info_service_query = intent_decomp_explicit_query
+            if guest_policy_lock:
+                skip_reason = "guest_policy_lock"
+            elif info_bundle_lock:
+                skip_reason = "info_bundle_lock"
+            else:
+                skip_reason = "controller_low_confidence"
+            info_semantic_meta = {
+                "info_semantic_match_skipped": True,
+                "info_semantic_match_skip_reason": skip_reason,
+            }
+            if guest_policy_lock:
+                info_semantic_meta.update(
+                    {
+                        "question_type": None,
+                        "service_query": None,
+                        "service_query_source": None,
+                        "service_query_score": 0.0,
+                    }
+                )
+            carryover_service_query = None
+        force_hours_followup = (
+            carryover_has_hours
+            and _looks_like_hours_followup(message_text)
+            and not explicit_service_signal
+        )
+        info_service_query = None
+        if not info_semantic_lock:
+            if alias_service_query:
+                info_service_query = alias_service_query
+            elif router_service_query:
+                info_service_query = router_service_query
+            elif intent_decomp_explicit_query:
+                info_service_query = intent_decomp_explicit_query
             if (
                 not force_hours_followup
                 and not info_service_query
@@ -10155,9 +10275,8 @@ async def _handle_webhook_payload(
                 and not info_semantic_lock
                 and allow_service_carryover
             ):
-                service_carryover_meta = _get_service_carryover(context_manager, message_count=message_count)
-                if service_carryover_meta:
-                    info_service_query = service_carryover_meta.get("service_query")
+                if carryover_service_query:
+                    info_service_query = carryover_service_query
             if force_hours_followup:
                 info_class_intents_for_reply.discard("duration")
                 info_class_intents_for_reply.add("hours")

@@ -686,8 +686,6 @@ def _looks_like_hours_question(normalized: str) -> bool:
             "до скольки",
             "открыты",
             "открыто",
-            "часы",
-            "часов",
             "время работы",
             "во сколько",
             "открывает",
@@ -700,6 +698,8 @@ def _looks_like_hours_question(normalized: str) -> bool:
         ],
     ):
         return True
+    if _contains_any_words(normalized, ["часы", "часов"]):
+        return not _message_has_service_token(normalized)
     if "работаете" in normalized:
         return True
     if "работает" in normalized and _contains_any(normalized, ["вы", "салон"]):
@@ -970,6 +970,16 @@ def semantic_question_type(
     if include_kinds is None:
         include_kinds = {"pricing", "duration"}
 
+    if "duration" in include_kinds and _message_has_service_token(normalized):
+        duration_hint = _has_duration_signal(normalized, text)
+        if not duration_hint and "сколько" in normalized:
+            duration_hint = _contains_any_words(
+                normalized,
+                ["час", "часа", "часов", "минута", "минуты", "минут"],
+            )
+        if duration_hint:
+            return SemanticQuestionType(kind="duration", score=1.0, second_score=0.0)
+
     query_vector = None
     use_fallback = False
     error_detail = None
@@ -1062,6 +1072,7 @@ def semantic_question_type(
 def _format_service_duration_reply(
     service: dict[str, Any] | None,
     *,
+    message: str | None = None,
     service_label: str | None = None,
 ) -> str:
     truth = load_yaml_truth()
@@ -1070,8 +1081,24 @@ def _format_service_duration_reply(
         duration_text = service.get("duration_text") if isinstance(service, dict) else None
         if isinstance(duration_text, str) and duration_text.strip():
             duration_text = duration_text.strip()
+            name_override = None
+            if message:
+                price_items = service.get("price_items")
+                if isinstance(price_items, list) and price_items:
+                    price_item = _find_best_price_item(message)
+                    if isinstance(price_item, dict):
+                        candidate = price_item.get("name")
+                        if isinstance(candidate, str) and candidate.strip():
+                            candidate = candidate.strip()
+                            normalized_items = {
+                                _normalize_text(str(item))
+                                for item in price_items
+                                if isinstance(item, str) and item.strip()
+                            }
+                            if _normalize_text(candidate) in normalized_items:
+                                name_override = candidate
             label = service_label.strip() if isinstance(service_label, str) and service_label.strip() else None
-            name = label or service.get("name") or "Услуга"
+            name = label or name_override or service.get("name") or "Услуга"
             suffix = "" if duration_text.endswith((".", "!", "?")) else "."
             return f"{name} — {duration_text}{suffix}"
 
@@ -1544,9 +1571,15 @@ def compose_multi_truth_reply(
             break
         if "duration" in kinds:
             if not service_query:
-                _add_reply(_format_service_duration_reply(None))
+                _add_reply(_format_service_duration_reply(None, message=segment))
             else:
-                _add_reply(_format_service_duration_reply(service_from_query, service_label=service_query))
+                _add_reply(
+                    _format_service_duration_reply(
+                        service_from_query,
+                        message=segment,
+                        service_label=service_query,
+                    )
+                )
         if len(replies) >= 2:
             break
         if (
@@ -1598,9 +1631,11 @@ def _format_promotions(truth: dict, intent: str | None = None) -> str:
     if intent == "promotion_first_visit":
         for promo in items:
             if "перв" in str(promo.get("name", "")).casefold():
+                stacking = promotions.get("stacking")
+                stacking_text = f" {stacking}." if stacking else " Скидки не суммируются."
                 return (
                     f"На первое посещение действует скидка {promo.get('discount_percent')}% "
-                    "на услуги. Скидки не суммируются."
+                    f"на услуги.{stacking_text}"
                 )
     if intent == "promotion_birthday":
         for promo in items:
@@ -1871,6 +1906,10 @@ def _detect_promotion_intent(normalized: str) -> str | None:
         return "promotion_first_visit"
     if "именин" in normalized or "день рождения" in normalized:
         return "promotion_birthday"
+    if "до после" in normalized and _contains_any_words(normalized, ["дней", "дня", "день"]):
+        return "promotion_birthday"
+    if "будн" in normalized:
+        return "promotion_student"
     if "студент" in normalized or "пенсион" in normalized:
         return "promotion_student"
     return None
@@ -2390,6 +2429,7 @@ def get_demo_salon_decision(
         service = _resolve_service_from_query(service_query_meta.get("service_query"))
         reply = _format_service_duration_reply(
             service,
+            message=message,
             service_label=service_query_meta.get("service_query"),
         )
         return DemoSalonDecision(
@@ -2410,6 +2450,39 @@ def get_demo_salon_decision(
         if isinstance(service_query, str) and service_query.strip():
             price_item = _find_best_price_item(service_query)
     if question_type is None and price_signal and not price_item:
+        if not location_signal and not parking_signal and not guest_signal:
+            service_query_meta = _resolve_service_query_meta(
+                message,
+                client_slug,
+                intent_decomp,
+                require_query=True,
+            )
+            service_query_value = service_query_meta.get("service_query")
+            if service_query_value:
+                service = _resolve_service_from_query(service_query_value)
+                if service:
+                    truth = load_yaml_truth()
+                    service_reply = _format_service_reply(service, truth)
+                    if service_reply:
+                        return DemoSalonDecision(
+                            action="reply",
+                            response=service_reply,
+                            intent="price_query",
+                            meta=service_query_meta,
+                        )
+                price_item = _find_best_price_item(service_query_value)
+                if price_item:
+                    reply = format_reply_from_truth(
+                        "price_query",
+                        {"price_item": price_item["item"]},
+                    )
+                    if reply:
+                        return DemoSalonDecision(
+                            action="reply",
+                            response=reply,
+                            intent="price_query",
+                            meta=service_query_meta,
+                        )
         info_reply: str | None = None
         info_meta: dict[str, Any] = {}
         if location_signal or parking_signal or guest_signal:
@@ -2587,6 +2660,23 @@ def get_demo_salon_price_item(message: str) -> str | None:
     if not item:
         return None
     return str(item).strip() or None
+
+
+def get_demo_salon_service_hint(message: str) -> str | None:
+    normalized = _normalize_text(message)
+    if not normalized:
+        return None
+    service = _match_service(normalized)
+    if isinstance(service, dict):
+        name = service.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    price_item = _find_best_price_item(message)
+    if isinstance(price_item, dict):
+        name = price_item.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return None
 
 
 def get_truth_reply(message: str) -> str | None:
