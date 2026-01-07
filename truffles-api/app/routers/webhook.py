@@ -3359,7 +3359,19 @@ def _detect_info_class_intents(message_text: str | None, *, intent_decomp_set: s
         question_like = any(_has_token_prefix(tokens, prefix) for prefix in QUESTION_WORD_PREFIXES)
     short_query = 0 < len(tokens) <= 4
 
-    parking_signal = "парков" in normalized
+    parking_signal = any(
+        token in normalized
+        for token in [
+            "парков",
+            "паркинг",
+            "во дворе",
+            "двор",
+            "авто",
+            "машин",
+            "машины",
+            "машину",
+        ]
+    ) or ("мест" in normalized and ("авто" in normalized or "машин" in normalized or "машины" in normalized))
     guest_signal = any(
         token in normalized
         for token in [
