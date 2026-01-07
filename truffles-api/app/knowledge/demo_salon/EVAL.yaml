@@ -4531,7 +4531,7 @@ eval_cases:
     - Абая 150
     - услуга
     must_include_any:
-    - 9:00
+    - '9:00'
     - ежедневно
     must_not:
     - ₸
@@ -5383,8 +5383,8 @@ eval_cases:
     - 10%
     must_include_any:
     - будням
-    - 11:00
-    - 16:00
+    - '11:00'
+    - '16:00'
 - id: E502
   user: Пенсионерам скидка?
   expected:
@@ -5394,8 +5394,8 @@ eval_cases:
     - 10%
     must_include_any:
     - будням
-    - 11:00
-    - 16:00
+    - '11:00'
+    - '16:00'
 - id: E503
   user: Скидки суммируются?
   expected:
@@ -5430,8 +5430,8 @@ eval_cases:
     - 10%
     must_include_any:
     - будням
-    - 11:00
-    - 16:00
+    - '11:00'
+    - '16:00'
 - id: E507
   tier: core
   turns:
