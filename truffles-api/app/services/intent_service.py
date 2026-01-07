@@ -29,19 +29,19 @@ RAG_BM25_TIMEOUT_SECONDS = float(os.environ.get("RAG_BM25_TIMEOUT_SECONDS", "0.8
 RAG_HYBRID_VECTOR_WEIGHT = float(os.environ.get("RAG_HYBRID_VECTOR_WEIGHT", "0.6"))
 RAG_HYBRID_BM25_WEIGHT = float(os.environ.get("RAG_HYBRID_BM25_WEIGHT", "0.4"))
 
-ROUTER_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "intent_classifier.md"
-ROUTER_TIMEOUT_SECONDS = float(os.environ.get("ROUTER_TIMEOUT_SECONDS", "3.0"))
-ROUTER_MAX_TOKENS = int(os.environ.get("ROUTER_MAX_TOKENS", "140"))
-ROUTER_CONFIDENCE_THRESHOLD = float(os.environ.get("ROUTER_CONFIDENCE_THRESHOLD", "0.30"))
-_DEFAULT_ROUTER_MODEL = (
+CONTROLLER_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "intent_classifier.md"
+CONTROLLER_TIMEOUT_SECONDS = float(os.environ.get("ROUTER_TIMEOUT_SECONDS", "3.0"))
+CONTROLLER_MAX_TOKENS = int(os.environ.get("ROUTER_MAX_TOKENS", "140"))
+CONTROLLER_CONFIDENCE_THRESHOLD = float(os.environ.get("ROUTER_CONFIDENCE_THRESHOLD", "0.30"))
+_DEFAULT_CONTROLLER_MODEL = (
     "gpt-4o-mini" if FAST_MODEL.strip().lower().startswith("gpt-5") else FAST_MODEL
 )
-ROUTER_MODEL = os.environ.get("ROUTER_MODEL", _DEFAULT_ROUTER_MODEL).strip()
+CONTROLLER_MODEL = os.environ.get("ROUTER_MODEL", _DEFAULT_CONTROLLER_MODEL).strip()
 ANSWER_INTERPRETER_TIMEOUT_SECONDS = float(
     os.environ.get("ANSWER_INTERPRETER_TIMEOUT_SECONDS", "2.5")
 )
 ANSWER_INTERPRETER_MAX_TOKENS = int(os.environ.get("ANSWER_INTERPRETER_MAX_TOKENS", "120"))
-ANSWER_INTERPRETER_MODEL = os.environ.get("ANSWER_INTERPRETER_MODEL", ROUTER_MODEL).strip()
+ANSWER_INTERPRETER_MODEL = os.environ.get("ANSWER_INTERPRETER_MODEL", CONTROLLER_MODEL).strip()
 ANSWER_INTERPRETER_SLOTS = {"service", "datetime", "name"}
 ANSWER_INTERPRETER_SLOT_ALIASES = {
     "service": "service",
@@ -57,7 +57,7 @@ ANSWER_INTERPRETER_SLOT_BY_REPLY_TYPE = {
     "time": "datetime",
     "name": "name",
 }
-ROUTER_ALLOWED_CLASSES = {
+CONTROLLER_ALLOWED_CLASSES = {
     "booking",
     "info_bundle",
     "consult",
@@ -65,7 +65,7 @@ ROUTER_ALLOWED_CLASSES = {
     "out_of_domain",
     "other",
 }
-ROUTER_ALLOWED_INTENTS = {
+CONTROLLER_ALLOWED_INTENTS = {
     "booking",
     "pricing",
     "duration",
@@ -76,13 +76,21 @@ ROUTER_ALLOWED_INTENTS = {
     "out_of_domain",
     "other",
 }
-ROUTER_PROMPT_FALLBACK = """# LLM Router Prompt (Salon)
+CONTROLLER_ALLOWED_GOALS = {
+    "booking",
+    "info",
+    "consult",
+    "greeting",
+    "out_of_domain",
+    "other",
+}
+CONTROLLER_PROMPT_FALLBACK = """# Dialogue Controller Prompt (Salon)
 
-Ты LLM‑router для салона красоты. Вход всегда JSON.
+Ты Dialogue Controller для салона красоты. Вход всегда JSON. Верни ТОЛЬКО JSON.
 
 Вход (JSON):
 ```json
-{"task":"router","message":"...","carryover":{"class":"...","intents":["..."],"info_sections":["..."],"ttl_remaining":0},"expected_reply_type":"..."}
+{"task":"controller","message":"...","carryover":{"class":"...","intents":["..."],"info_sections":["..."],"ttl_remaining":0},"expected_reply_type":"..."}
 ```
 
 или
@@ -90,37 +98,43 @@ ROUTER_PROMPT_FALLBACK = """# LLM Router Prompt (Salon)
 {"task":"answer_interpreter","message":"...","expected_reply_type":"service_choice|time|name","carryover":{"class":"...","intents":["..."],"info_sections":["..."],"ttl_remaining":0},"question_context":{"prompt_hint":"..."}}
 ```
 
-Верни ТОЛЬКО JSON. Режимы:
+Режимы:
 
-1) task="router" (или task отсутствует) → строго такого вида:
+1) task="controller" (или task отсутствует) → строго такой вид:
 ```json
-{"class":"...","intents":["..."],"slots":{"service_query":""},"confidence":0.0,"reason":"...","carryover":{}}
+{"class":"...","goal":"...","intents":["..."],"slots":{"service_query":""},"followups":[],"safety_flags":[],"confidence":0.0,"reason":"...","carryover":{}}
 ```
 
-2) task="answer_interpreter" → строго такого вида:
+2) task="answer_interpreter" → строго такой вид:
 ```json
 {"slot":"service|datetime|name","value":"...","confidence":0.0,"reason":"..."}
 ```
 
-## КЛАССЫ (выбери один)
-- booking — явная запись/перенос/отмена/окошко/время записи.
+## CLASS (одно значение)
+- booking — запись/перенос/отмена/окошко/время записи.
 - info_bundle — адрес/как добраться/график/время работы/парковка/гости/ранний приход/цены/длительность.
 - consult — совет/подбор/рекомендации по услугам без цены/адреса/записи.
 - greeting — привет/спасибо/ок.
 - out_of_domain — не по теме (погода, код, рецепты).
-- other — всё остальное/неуверенность.
+- other — остальное/неуверенность.
+
+## GOAL (одно значение)
+- booking, info, consult, greeting, out_of_domain, other — выбери наиболее точную цель диалога.
 
 ## INTENTS (список)
 Разрешённые: booking, pricing, duration, location, hours, consult, greeting, out_of_domain, other.
-- Для info_bundle перечисляй info‑интенты из текста (pricing/duration/location/hours).
+- Для info_bundle перечисляй info-интенты из текста (pricing/duration/location/hours).
 - Для booking/consult/greeting/out_of_domain ставь одноимённый интент.
 - Если не уверен — other.
 
 ## SLOTS
-- service_query: 1–6 слов, ТОЛЬКО из текста клиента, если услуга названа явно. Иначе пустая строка.
+- service_query: 1–6 слов, только из текста клиента, если услуга названа явно. Иначе пустая строка.
 
-## CARRYOVER
-- Повтори carryover из входа без выдумок (если нет — {}).
+## FOLLOWUPS
+- Список коротких подсказок (строки), что спросить дальше. Пустой список, если не нужно.
+
+## SAFETY_FLAGS
+- Список коротких меток рисков (например, "payment", "medical", "complaint") если они видны. Иначе пусто.
 
 ## CONFIDENCE
 - 0.0–1.0. Если сомневаешься — 0.0.
@@ -134,7 +148,7 @@ ROUTER_PROMPT_FALLBACK = """# LLM Router Prompt (Salon)
 - confidence: 0.0–1.0. Если сомневаешься — 0.0.
 """
 
-_ROUTER_PROMPT_CACHE: str | None = None
+_CONTROLLER_PROMPT_CACHE: str | None = None
 
 
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
@@ -143,22 +157,22 @@ def _is_env_enabled(value: str | None, default: bool = True) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
-def _load_router_prompt() -> str:
-    global _ROUTER_PROMPT_CACHE
-    if _ROUTER_PROMPT_CACHE is not None:
-        return _ROUTER_PROMPT_CACHE
+def _load_controller_prompt() -> str:
+    global _CONTROLLER_PROMPT_CACHE
+    if _CONTROLLER_PROMPT_CACHE is not None:
+        return _CONTROLLER_PROMPT_CACHE
     try:
-        _ROUTER_PROMPT_CACHE = ROUTER_PROMPT_PATH.read_text(encoding="utf-8").strip()
+        _CONTROLLER_PROMPT_CACHE = CONTROLLER_PROMPT_PATH.read_text(encoding="utf-8").strip()
     except Exception as exc:
-        logger.warning(f"Router prompt load failed: {exc}")
-        _ROUTER_PROMPT_CACHE = ""
-    if not _ROUTER_PROMPT_CACHE:
-        logger.warning("Router prompt fallback in use")
-        _ROUTER_PROMPT_CACHE = ROUTER_PROMPT_FALLBACK.strip()
-    return _ROUTER_PROMPT_CACHE
+        logger.warning(f"Dialogue controller prompt load failed: {exc}")
+        _CONTROLLER_PROMPT_CACHE = ""
+    if not _CONTROLLER_PROMPT_CACHE:
+        logger.warning("Dialogue controller prompt fallback in use")
+        _CONTROLLER_PROMPT_CACHE = CONTROLLER_PROMPT_FALLBACK.strip()
+    return _CONTROLLER_PROMPT_CACHE
 
 
-def _clean_router_class(value: str | None) -> str | None:
+def _clean_controller_class(value: str | None) -> str | None:
     if not isinstance(value, str):
         return None
     cleaned = value.strip().casefold()
@@ -166,12 +180,12 @@ def _clean_router_class(value: str | None) -> str | None:
         return None
     if cleaned in {"info", "info_bundle"}:
         return "info_bundle"
-    if cleaned in ROUTER_ALLOWED_CLASSES:
+    if cleaned in CONTROLLER_ALLOWED_CLASSES:
         return cleaned
     return None
 
 
-def _clean_router_intents(values: Any) -> list[str]:
+def _clean_controller_intents(values: Any) -> list[str]:
     cleaned: list[str] = []
     if not isinstance(values, list):
         return cleaned
@@ -180,14 +194,14 @@ def _clean_router_intents(values: Any) -> list[str]:
         if not isinstance(item, str):
             continue
         value = item.strip().casefold()
-        if not value or value not in ROUTER_ALLOWED_INTENTS or value in seen:
+        if not value or value not in CONTROLLER_ALLOWED_INTENTS or value in seen:
             continue
         cleaned.append(value)
         seen.add(value)
     return cleaned
 
 
-def _clean_router_service_query(value: Any) -> str:
+def _clean_controller_service_query(value: Any) -> str:
     if not isinstance(value, str):
         return ""
     cleaned = re.sub(r"\s+", " ", value).strip()
@@ -197,6 +211,47 @@ def _clean_router_service_query(value: Any) -> str:
     if len(tokens) > 6:
         cleaned = " ".join(tokens[:6])
     return cleaned
+
+
+def _clean_controller_goal(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().casefold()
+    if cleaned in CONTROLLER_ALLOWED_GOALS:
+        return cleaned
+    return None
+
+
+def _clean_controller_followups(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    followups: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        cleaned = re.sub(r"\s+", " ", item).strip()
+        if not cleaned or cleaned in seen:
+            continue
+        followups.append(cleaned[:120])
+        seen.add(cleaned)
+    return followups
+
+
+def _clean_controller_safety_flags(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    flags: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        cleaned = re.sub(r"\s+", " ", item).strip().casefold()
+        if not cleaned or cleaned in seen:
+            continue
+        flags.append(cleaned[:64])
+        seen.add(cleaned)
+    return flags
 
 
 def _clean_answer_slot(value: Any) -> str | None:
@@ -215,13 +270,13 @@ def _clean_answer_value(value: Any, *, slot: str) -> str:
     if not cleaned:
         return ""
     if slot == "service":
-        return _clean_router_service_query(cleaned)
+        return _clean_controller_service_query(cleaned)
     if len(cleaned) > 80:
         cleaned = cleaned[:80].strip()
     return cleaned
 
 
-def _router_retry_max_tokens(max_tokens: int) -> int:
+def _controller_retry_max_tokens(max_tokens: int) -> int:
     if max_tokens <= 1:
         return 1
     fallback = max(20, int(max_tokens * 0.6))
@@ -230,7 +285,7 @@ def _router_retry_max_tokens(max_tokens: int) -> int:
     return fallback
 
 
-def _build_router_carryover(carryover: dict | None) -> dict:
+def _build_controller_carryover(carryover: dict | None) -> dict:
     if not isinstance(carryover, dict):
         return {}
     payload: dict[str, Any] = {}
@@ -439,72 +494,80 @@ def classify_intent(message: str) -> Intent:
         return Intent.OTHER
 
 
-def route_llm_router(
+def route_dialogue_controller(
     message: str,
     *,
     carryover: dict | None = None,
     expected_reply_type: str | None = None,
 ) -> dict:
     result: dict[str, Any] = {"ok": False, "payload": None, "error": None, "raw": None}
-    carryover_input = _build_router_carryover(carryover)
+    carryover_input = _build_controller_carryover(carryover)
     normalized = (message or "").strip()
-    router_retry = False
+    controller_retry = False
     total_elapsed_ms = 0.0
 
     def _build_payload(
         *,
-        router_class: str | None = None,
+        controller_class: str | None = None,
+        goal: str | None = None,
         intents: list[str] | None = None,
         slots: dict | None = None,
+        followups: list[str] | None = None,
+        safety_flags: list[str] | None = None,
         confidence: float = 0.0,
         reason: str = "",
         carryover_payload: dict | None = None,
-        router_llm_ms: float | None = None,
-        router_error: str = "none",
-        router_retry_flag: bool | None = None,
+        controller_llm_ms: float | None = None,
+        controller_error: str = "none",
+        controller_retry_flag: bool | None = None,
     ) -> dict:
         payload = {
-            "class": router_class,
+            "class": controller_class,
+            "goal": goal,
             "intents": list(intents or []),
             "slots": dict(slots or {}),
+            "followups": list(followups or []),
+            "safety_flags": list(safety_flags or []),
             "confidence": float(confidence or 0.0),
             "reason": str(reason or ""),
             "carryover": dict(carryover_payload or carryover_input),
-            "router_llm_ms": round(router_llm_ms or 0.0, 2),
-            "router_error": router_error,
-            "router_retry": bool(router_retry_flag if router_retry_flag is not None else router_retry),
+            "controller_llm_ms": round(controller_llm_ms or 0.0, 2),
+            "controller_error": controller_error,
+            "controller_retry": bool(
+                controller_retry_flag if controller_retry_flag is not None else controller_retry
+            ),
         }
         return payload
 
     if not normalized:
         result["error"] = "empty_message"
-        result["payload"] = _build_payload(router_error="empty_message")
+        result["payload"] = _build_payload(controller_error="empty_message")
         return result
-    prompt = _load_router_prompt()
+    prompt = _load_controller_prompt()
     if not prompt:
         result["error"] = "prompt_missing"
-        result["payload"] = _build_payload(router_error="prompt_missing")
+        result["payload"] = _build_payload(controller_error="prompt_missing")
         return result
 
-    router_input = {
-        "task": "router",
+    controller_input = {
+        "task": "controller",
         "message": message,
         "carryover": carryover_input,
     }
     if isinstance(expected_reply_type, str) and expected_reply_type.strip():
-        router_input["expected_reply_type"] = expected_reply_type.strip()
+        controller_input["expected_reply_type"] = expected_reply_type.strip()
 
     llm = get_llm_provider()
     messages = [
         {"role": "system", "content": prompt},
-        {"role": "user", "content": json.dumps(router_input, ensure_ascii=False)},
+        {"role": "user", "content": json.dumps(controller_input, ensure_ascii=False)},
     ]
-    model_name = ROUTER_MODEL.strip().lower()
+    model_name = CONTROLLER_MODEL.strip().lower()
     temperature = 0.0
     temperature_override: float | None = temperature
     if model_name.startswith("gpt-5"):
         temperature_override = 1.0
-    def _call_router_llm(
+    def _call_controller_llm(
         max_tokens: int,
         *,
         temperature_override: float | None,
@@ -514,8 +577,8 @@ def route_llm_router(
             kwargs = {
                 "messages": messages,
                 "max_tokens": max_tokens,
-                "model": ROUTER_MODEL,
-                "timeout_seconds": ROUTER_TIMEOUT_SECONDS,
+                "model": CONTROLLER_MODEL,
+                "timeout_seconds": CONTROLLER_TIMEOUT_SECONDS,
             }
             if temperature_override is not None:
                 kwargs["temperature"] = temperature_override
@@ -526,18 +589,18 @@ def route_llm_router(
                 "Timing",
                 extra={
                     "context": {
-                        "stage": "router_llm_ms",
+                        "stage": "controller_llm_ms",
                         "elapsed_ms": elapsed_ms,
-                        "model_name": ROUTER_MODEL,
+                        "model_name": CONTROLLER_MODEL,
                         "model_tier": "fast",
                         "timeout": True,
-                        "timeout_seconds": ROUTER_TIMEOUT_SECONDS,
+                        "timeout_seconds": CONTROLLER_TIMEOUT_SECONDS,
                         "max_tokens": max_tokens,
                         "temperature": temperature_override,
                     }
                 },
             )
-            logger.warning(f"Router LLM timeout after {ROUTER_TIMEOUT_SECONDS}s: {exc}")
+            logger.warning(f"Dialogue controller LLM timeout after {CONTROLLER_TIMEOUT_SECONDS}s: {exc}")
             return None, elapsed_ms, "timeout"
         except Exception as exc:
             elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
@@ -549,9 +612,9 @@ def route_llm_router(
                 "Timing",
                 extra={
                     "context": {
-                        "stage": "router_llm_ms",
+                        "stage": "controller_llm_ms",
                         "elapsed_ms": elapsed_ms,
-                        "model_name": ROUTER_MODEL,
+                        "model_name": CONTROLLER_MODEL,
                         "model_tier": "fast",
                         "timeout": False,
                         "error": error_text,
@@ -560,7 +623,7 @@ def route_llm_router(
                     }
                 },
             )
-            logger.warning(f"Router LLM failed: {exc}")
+            logger.warning(f"Dialogue controller LLM failed: {exc}")
             return None, elapsed_ms, error_code
 
         elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
@@ -568,9 +631,9 @@ def route_llm_router(
             "Timing",
             extra={
                 "context": {
-                    "stage": "router_llm_ms",
+                    "stage": "controller_llm_ms",
                     "elapsed_ms": elapsed_ms,
-                    "model_name": ROUTER_MODEL,
+                    "model_name": CONTROLLER_MODEL,
                     "model_tier": "fast",
                     "timeout": False,
                     "max_tokens": max_tokens,
@@ -580,30 +643,30 @@ def route_llm_router(
         )
         return response, elapsed_ms, None
 
-    response, elapsed_ms, error = _call_router_llm(
-        ROUTER_MAX_TOKENS, temperature_override=temperature_override
+    response, elapsed_ms, error = _call_controller_llm(
+        CONTROLLER_MAX_TOKENS, temperature_override=temperature_override
     )
     total_elapsed_ms += elapsed_ms
     if error == "unsupported_temperature":
-        router_retry = True
+        controller_retry = True
         temperature_override = 1.0
-        response, elapsed_ms, error = _call_router_llm(
-            ROUTER_MAX_TOKENS, temperature_override=temperature_override
+        response, elapsed_ms, error = _call_controller_llm(
+            CONTROLLER_MAX_TOKENS, temperature_override=temperature_override
         )
         total_elapsed_ms += elapsed_ms
     if error == "timeout":
-        router_retry = True
-        retry_tokens = _router_retry_max_tokens(ROUTER_MAX_TOKENS)
-        response, elapsed_ms, error = _call_router_llm(
+        controller_retry = True
+        retry_tokens = _controller_retry_max_tokens(CONTROLLER_MAX_TOKENS)
+        response, elapsed_ms, error = _call_controller_llm(
             retry_tokens, temperature_override=temperature_override
         )
         total_elapsed_ms += elapsed_ms
     if error is not None:
         result["error"] = error
         result["payload"] = _build_payload(
-            router_error=error,
-            router_llm_ms=total_elapsed_ms,
-            router_retry_flag=router_retry,
+            controller_error=error,
+            controller_llm_ms=total_elapsed_ms,
+            controller_retry_flag=controller_retry,
         )
         return result
 
@@ -612,9 +675,9 @@ def route_llm_router(
     if not content:
         result["error"] = "empty_response"
         result["payload"] = _build_payload(
-            router_error="empty_response",
-            router_llm_ms=total_elapsed_ms,
-            router_retry_flag=router_retry,
+            controller_error="empty_response",
+            controller_llm_ms=total_elapsed_ms,
+            controller_retry_flag=controller_retry,
         )
         return result
 
@@ -631,23 +694,24 @@ def route_llm_router(
     if not isinstance(payload, dict):
         result["error"] = "invalid_json"
         result["payload"] = _build_payload(
-            router_error="invalid_json",
-            router_llm_ms=total_elapsed_ms,
-            router_retry_flag=router_retry,
+            controller_error="invalid_json",
+            controller_llm_ms=total_elapsed_ms,
+            controller_retry_flag=controller_retry,
         )
         return result
 
-    router_class = _clean_router_class(payload.get("class"))
-    if not router_class:
+    controller_class = _clean_controller_class(payload.get("class"))
+    goal = _clean_controller_goal(payload.get("goal"))
+    if not controller_class:
         result["error"] = "invalid_class"
         result["payload"] = _build_payload(
-            router_error="invalid_class",
-            router_llm_ms=total_elapsed_ms,
-            router_retry_flag=router_retry,
+            controller_error="invalid_class",
+            controller_llm_ms=total_elapsed_ms,
+            controller_retry_flag=controller_retry,
         )
         return result
 
-    intents = _clean_router_intents(payload.get("intents"))
+    intents = _clean_controller_intents(payload.get("intents"))
     confidence = payload.get("confidence")
     try:
         confidence = float(confidence)
@@ -662,25 +726,30 @@ def route_llm_router(
     if not isinstance(slots, dict):
         slots = {}
     slots = dict(slots)
-    slots["service_query"] = _clean_router_service_query(slots.get("service_query"))
+    slots["service_query"] = _clean_controller_service_query(slots.get("service_query"))
+    followups = _clean_controller_followups(payload.get("followups"))
+    safety_flags = _clean_controller_safety_flags(payload.get("safety_flags"))
 
     carryover_payload = payload.get("carryover")
     if not isinstance(carryover_payload, dict):
         carryover_payload = {}
-    if not carryover_payload and router_input.get("carryover"):
-        carryover_payload = router_input["carryover"]
+    if not carryover_payload and controller_input.get("carryover"):
+        carryover_payload = controller_input["carryover"]
 
     result["ok"] = True
     result["payload"] = _build_payload(
-        router_class=router_class,
+        controller_class=controller_class,
+        goal=goal,
         intents=intents,
         slots=slots,
+        followups=followups,
+        safety_flags=safety_flags,
         confidence=confidence,
         reason=reason,
         carryover_payload=carryover_payload,
-        router_llm_ms=total_elapsed_ms,
-        router_error="none",
-        router_retry_flag=router_retry,
+        controller_llm_ms=total_elapsed_ms,
+        controller_error="none",
+        controller_retry_flag=controller_retry,
     )
     return result
 
@@ -711,12 +780,12 @@ def interpret_expected_reply(
     if not expected_slot:
         result["error"] = "unsupported_expected_reply_type"
         return result
-    prompt = _load_router_prompt()
+    prompt = _load_controller_prompt()
     if not prompt:
         result["error"] = "prompt_missing"
         return result
 
-    carryover_input = _build_router_carryover(carryover)
+    carryover_input = _build_controller_carryover(carryover)
     interpreter_input = {
         "task": "answer_interpreter",
         "message": message,

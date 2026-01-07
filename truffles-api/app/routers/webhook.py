@@ -72,7 +72,6 @@ from app.services.demo_salon_knowledge import (
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
-    ROUTER_CONFIDENCE_THRESHOLD,
     DomainIntent,
     Intent,
     classify_domain_with_scores,
@@ -82,7 +81,7 @@ from app.services.intent_service import (
     is_human_request_message,
     is_opt_out_message,
     is_rejection,
-    route_llm_router,
+    route_dialogue_controller,
     should_escalate,
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
@@ -1095,6 +1094,8 @@ def _router_observability_meta(*, eligible: bool, reason: str) -> dict:
     return {
         "router_eligible": bool(eligible),
         "router_skipped_reason": reason,
+        "controller_eligible": bool(eligible),
+        "controller_skipped_reason": reason,
     }
 
 
@@ -3578,36 +3579,41 @@ def _format_discounts_policy_reply(*, policy_type: str | None) -> str | None:
     return None
 
 
-def _build_router_meta_output(*, error: str, retry: bool = False, elapsed_ms: float = 0.0) -> dict:
+def _build_controller_meta_output(*, error: str, retry: bool = False, elapsed_ms: float = 0.0) -> dict:
     return {
         "class": None,
+        "goal": None,
         "intents": [],
         "slots": {},
+        "followups": [],
+        "safety_flags": [],
         "confidence": 0.0,
         "reason": "",
         "carryover": {},
-        "router_llm_ms": round(elapsed_ms, 2),
-        "router_error": error,
-        "router_retry": bool(retry),
+        "controller_llm_ms": round(elapsed_ms, 2),
+        "controller_error": error,
+        "controller_retry": bool(retry),
     }
 
 
-def _ensure_router_output_meta(router_output: dict, *, error: str | None) -> dict:
-    if not isinstance(router_output.get("router_llm_ms"), (int, float)):
-        router_output["router_llm_ms"] = 0.0
-    if not isinstance(router_output.get("router_error"), str) or not router_output.get("router_error"):
-        router_output["router_error"] = error or "none"
-    if not isinstance(router_output.get("router_retry"), bool):
-        router_output["router_retry"] = False
-    return router_output
+def _ensure_controller_output_meta(controller_output: dict, *, error: str | None) -> dict:
+    if not isinstance(controller_output.get("controller_llm_ms"), (int, float)):
+        controller_output["controller_llm_ms"] = 0.0
+    if not isinstance(controller_output.get("controller_error"), str) or not controller_output.get("controller_error"):
+        controller_output["controller_error"] = error or "none"
+    if not isinstance(controller_output.get("controller_retry"), bool):
+        controller_output["controller_retry"] = False
+    if "controller_goal" in controller_output and not controller_output.get("goal"):
+        controller_output["goal"] = controller_output.get("controller_goal")
+    return controller_output
 
 
-ROUTER_FALLBACK_REASON_MAP = {
+CONTROLLER_FALLBACK_REASON_MAP = {
     "timeout": "timeout",
     "invalid_json": "invalid_json",
 }
-ROUTER_FALLBACK_ERROR_VALUES = {
-    "router_failed",
+CONTROLLER_FALLBACK_ERROR_VALUES = {
+    "controller_failed",
     "error",
     "unsupported_temperature",
     "invalid_class",
@@ -3617,19 +3623,19 @@ ROUTER_FALLBACK_ERROR_VALUES = {
 }
 
 
-def _normalize_router_fallback_reason(*, error: str | None) -> str | None:
+def _normalize_controller_fallback_reason(*, error: str | None) -> str | None:
     if not error:
         return None
     normalized = error.strip().casefold()
-    mapped = ROUTER_FALLBACK_REASON_MAP.get(normalized)
+    mapped = CONTROLLER_FALLBACK_REASON_MAP.get(normalized)
     if mapped:
         return mapped
-    if normalized in ROUTER_FALLBACK_ERROR_VALUES:
+    if normalized in CONTROLLER_FALLBACK_ERROR_VALUES:
         return "error"
     return "error"
 
 
-def _resolve_router_signal_class(*, intent_decomp_set: set[str], booking_signal: bool) -> str | None:
+def _resolve_controller_signal_class(*, intent_decomp_set: set[str], booking_signal: bool) -> str | None:
     if booking_signal:
         return "booking"
     if "consult" in intent_decomp_set:
@@ -3645,7 +3651,7 @@ def _resolve_router_signal_class(*, intent_decomp_set: set[str], booking_signal:
     return None
 
 
-def _build_class_router_result(
+def _build_class_controller_result(
     *,
     info_intents: set[str],
     info_meta: dict[str, Any] | None,
@@ -3730,7 +3736,7 @@ def _resolve_class_router_result(
     domain_meta: dict | None,
     router_state: dict | None,
 ) -> dict[str, Any]:
-    result = _build_class_router_result(
+    result = _build_class_controller_result(
         info_intents=info_intents,
         info_meta=info_meta,
         booking_signal=booking_signal,
@@ -3739,67 +3745,69 @@ def _resolve_class_router_result(
         domain_meta=domain_meta,
     )
 
-    router_output = router_state.get("output") if isinstance(router_state, dict) else None
-    router_used = router_state.get("used") if isinstance(router_state, dict) else False
-    router_error = router_state.get("error") if isinstance(router_state, dict) else None
-    router_fallback = router_state.get("fallback_reason") if isinstance(router_state, dict) else None
-    router_confidence = router_state.get("confidence") if isinstance(router_state, dict) else None
-    router_sla = router_state.get("sla") if isinstance(router_state, dict) else None
-    router_threshold = router_state.get("confidence_threshold") if isinstance(router_state, dict) else None
-    router_signal_class = router_state.get("signal_class") if isinstance(router_state, dict) else None
-    router_signal_match = router_state.get("signal_match") if isinstance(router_state, dict) else None
-    router_used_reason = router_state.get("used_reason") if isinstance(router_state, dict) else None
-    router_low_confidence = (
-        bool(router_state.get("low_confidence")) if isinstance(router_state, dict) else False
-    )
-    router_safe_class = router_state.get("safe_class") if isinstance(router_state, dict) else None
+    controller_output = router_state.get("output") if isinstance(router_state, dict) else None
+    controller_used = router_state.get("used") if isinstance(router_state, dict) else False
+    controller_error = router_state.get("error") if isinstance(router_state, dict) else None
+    controller_fallback = router_state.get("fallback_reason") if isinstance(router_state, dict) else None
+    controller_confidence = router_state.get("confidence") if isinstance(router_state, dict) else None
+    controller_sla = router_state.get("sla") if isinstance(router_state, dict) else None
+    controller_signal_class = router_state.get("signal_class") if isinstance(router_state, dict) else None
+    controller_signal_match = router_state.get("signal_match") if isinstance(router_state, dict) else None
+    controller_used_reason = router_state.get("used_reason") if isinstance(router_state, dict) else None
 
-    router_class = None
-    router_reason = None
-    router_intents: list[str] = []
-    if isinstance(router_output, dict):
-        raw_class = router_output.get("class")
+    controller_class = None
+    controller_reason = None
+    controller_intents: list[str] = []
+    controller_goal = None
+    if isinstance(controller_output, dict):
+        raw_class = controller_output.get("class")
         if isinstance(raw_class, str):
-            router_class = _normalize_class_name(raw_class)
-        raw_reason = router_output.get("reason")
+            controller_class = _normalize_class_name(raw_class)
+        raw_reason = controller_output.get("reason")
         if isinstance(raw_reason, str):
-            router_reason = raw_reason
-        raw_intents = router_output.get("intents")
+            controller_reason = raw_reason
+        raw_intents = controller_output.get("intents")
         if isinstance(raw_intents, list):
-            router_intents = [item for item in raw_intents if isinstance(item, str)]
+            controller_intents = [item for item in raw_intents if isinstance(item, str)]
+        raw_goal = controller_output.get("goal")
+        if isinstance(raw_goal, str):
+            controller_goal = raw_goal.strip()
 
-    if router_low_confidence and isinstance(router_safe_class, str) and router_safe_class.strip():
-        router_class = _normalize_class_name(router_safe_class)
-        router_intents = []
+    controller_fallback_reason = None
+    controller_error_normalized = controller_error if isinstance(controller_error, str) else None
+    controller_error_normalized = controller_error_normalized.strip() if controller_error_normalized else None
+    if controller_error_normalized:
+        controller_fallback_reason = _normalize_controller_fallback_reason(error=controller_error_normalized)
 
-    if router_used and router_class:
-        result["classes"] = [router_class]
-        info_router_intents = [intent for intent in router_intents if intent in INFO_INTENTS]
-        if router_class == "info_bundle":
-            if info_router_intents:
-                result["intents"] = sorted(info_router_intents)
+    if controller_used and controller_class:
+        result["classes"] = [controller_class]
+        info_controller_intents = [intent for intent in controller_intents if intent in INFO_INTENTS]
+        if controller_class == "info_bundle":
+            if info_controller_intents:
+                result["intents"] = sorted(info_controller_intents)
         else:
-            result["intents"] = sorted(info_router_intents)
+            result["intents"] = sorted(info_controller_intents)
+        controller_fallback_reason = None
+    elif not controller_used and isinstance(controller_fallback, str) and controller_fallback != "skipped":
+        controller_fallback_reason = controller_fallback_reason or controller_fallback
 
-    router_fallback_reason = None
-    if not router_used and isinstance(router_fallback, str) and router_fallback != "skipped":
-        router_fallback_reason = router_fallback
-
-    result["router"] = {
-        "used": bool(router_used),
-        "confidence": router_confidence,
-        "reason": router_reason,
-        "fallback_reason": router_fallback if not router_used else None,
-        "error": router_error,
-        "output": router_output,
-        "confidence_threshold": router_threshold,
-        "signal_class": router_signal_class,
-        "signal_match": router_signal_match,
-        "used_reason": router_used_reason,
-        "sla": router_sla,
-        "router_low_confidence": bool(router_low_confidence),
+    result["controller"] = {
+        "used": bool(controller_used),
+        "confidence": controller_confidence,
+        "reason": controller_reason,
+        "fallback_reason": controller_fallback_reason if not controller_used else None,
+        "error": controller_error,
+        "output": controller_output,
+        "signal_class": controller_signal_class,
+        "signal_match": controller_signal_match,
+        "used_reason": controller_used_reason,
+        "sla": controller_sla,
+        "goal": controller_goal,
     }
-    result["router_fallback_reason"] = router_fallback_reason
+    result["controller_fallback_reason"] = controller_fallback_reason
+    # Backward-compat for downstream callers still keyed on router
+    result["router"] = result["controller"]
+    result["router_fallback_reason"] = controller_fallback_reason
     return result
 
 
@@ -8134,123 +8142,102 @@ async def _handle_webhook_payload(
             {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow, "gate": "escalation"},
         )
 
-    router_signal_class = _resolve_router_signal_class(
+    controller_signal_class = _resolve_controller_signal_class(
         intent_decomp_set=intent_decomp_set,
         booking_signal=booking_signal,
     )
-    router_state: dict[str, Any] | None = {
+    controller_state: dict[str, Any] | None = {
         "used": False,
         "confidence": 0.0,
-        "output": _build_router_meta_output(error="skipped"),
+        "output": _build_controller_meta_output(error="skipped"),
         "error": "skipped",
         "fallback_reason": "skipped",
-        "low_confidence": False,
-        "safe_class": None,
-        "confidence_threshold": ROUTER_CONFIDENCE_THRESHOLD,
-        "signal_class": router_signal_class,
+        "signal_class": controller_signal_class,
         "signal_match": False,
         "used_reason": None,
         "attempted": False,
         "sla": None,
     }
-    router_should_attempt = bool(
+    controller_should_attempt = bool(
         routing["allow_bot_reply"]
         and not bypass_domain_flows
         and message_text
         and not booking_wants_flow
         and not expected_reply_shortcircuit
     )
-    if router_should_attempt:
-        router_state["attempted"] = True
-        router_state["error"] = None
-        router_state["fallback_reason"] = "skipped"
-        router_result = route_llm_router(
+    if controller_should_attempt:
+        controller_state["attempted"] = True
+        controller_state["error"] = None
+        controller_state["fallback_reason"] = "skipped"
+        controller_result = route_dialogue_controller(
             message_text,
             carryover=class_carryover,
             expected_reply_type=expected_reply_type,
         )
-        if isinstance(router_result, dict) and router_result.get("ok") is True:
-            router_output = router_result.get("payload")
-            if isinstance(router_output, dict):
-                router_state["output"] = _ensure_router_output_meta(router_output, error=None)
-                confidence = router_output.get("confidence")
+        if isinstance(controller_result, dict) and controller_result.get("ok") is True:
+            controller_output = controller_result.get("payload")
+            if isinstance(controller_output, dict):
+                controller_state["output"] = _ensure_controller_output_meta(controller_output, error=None)
+                confidence = controller_output.get("confidence")
                 if isinstance(confidence, (int, float)):
-                    router_state["confidence"] = float(confidence)
-            router_class = router_output.get("class")
+                    controller_state["confidence"] = float(confidence)
+            controller_class = controller_output.get("class")
             normalized_class = (
-                _normalize_class_name(router_class)
-                if isinstance(router_class, str) and router_class.strip()
+                _normalize_class_name(controller_class)
+                if isinstance(controller_class, str) and controller_class.strip()
                 else None
             )
-            signal_match = bool(router_signal_class and normalized_class == router_signal_class)
-            router_state["signal_match"] = signal_match
-            confidence_threshold = ROUTER_CONFIDENCE_THRESHOLD
-            if signal_match:
-                confidence_threshold = max(
-                    ROUTER_CONFIDENCE_THRESHOLD - ROUTER_SIGNAL_CONFIDENCE_BONUS,
-                    ROUTER_SIGNAL_CONFIDENCE_FLOOR,
-                )
-            router_state["confidence_threshold"] = confidence_threshold
-            low_confidence = bool(
-                normalized_class and router_state["confidence"] < confidence_threshold
-            )
+            signal_match = bool(controller_signal_class and normalized_class == controller_signal_class)
+            controller_state["signal_match"] = signal_match
             if normalized_class:
-                router_state["used"] = True
-                if low_confidence:
-                    router_state["low_confidence"] = True
-                    router_state["safe_class"] = "info_bundle"
-                    router_state["used_reason"] = "low_confidence_default"
-                else:
-                    router_state["used_reason"] = (
-                        "confidence"
-                        if router_state["confidence"] >= ROUTER_CONFIDENCE_THRESHOLD
-                        else "signal_match"
-                    )
-                router_state["fallback_reason"] = None
+                controller_state["used"] = True
+                controller_state["used_reason"] = "controller"
+                controller_state["fallback_reason"] = None
             else:
-                router_state["used"] = False
-                router_state["fallback_reason"] = _normalize_router_fallback_reason(
+                controller_state["used"] = False
+                controller_state["fallback_reason"] = _normalize_controller_fallback_reason(
                     error="invalid_class"
                 )
         else:
-            router_state["error"] = (
-                router_result.get("error")
-                if isinstance(router_result, dict)
-                else "router_failed"
+            controller_state["error"] = (
+                controller_result.get("error")
+                if isinstance(controller_result, dict)
+                else "controller_failed"
             )
-            router_state["fallback_reason"] = _normalize_router_fallback_reason(
-                error=router_state["error"]
+            controller_state["fallback_reason"] = _normalize_controller_fallback_reason(
+                error=controller_state["error"]
             )
-            router_output = router_result.get("payload") if isinstance(router_result, dict) else None
-            if isinstance(router_output, dict):
-                router_state["output"] = _ensure_router_output_meta(
-                    router_output, error=router_state["error"]
+            controller_output = controller_result.get("payload") if isinstance(controller_result, dict) else None
+            if isinstance(controller_output, dict):
+                controller_state["output"] = _ensure_controller_output_meta(
+                    controller_output, error=controller_state["error"]
                 )
             else:
-                router_state["output"] = _build_router_meta_output(error=router_state["error"])
+                controller_state["output"] = _build_controller_meta_output(error=controller_state["error"])
 
-    if isinstance(router_state, dict):
-        router_output = router_state.get("output")
-        if isinstance(router_output, dict):
-            router_output = _ensure_router_output_meta(
-                router_output, error=router_state.get("error")
+    if isinstance(controller_state, dict):
+        controller_output = controller_state.get("output")
+        if isinstance(controller_output, dict):
+            controller_output = _ensure_controller_output_meta(
+                controller_output, error=controller_state.get("error")
             )
-            router_state["output"] = router_output
-            router_error_value = router_output.get("router_error")
+            controller_state["output"] = controller_output
+            controller_error_value = controller_output.get("controller_error")
         else:
-            router_state["output"] = _build_router_meta_output(
-                error=str(router_state.get("error") or "router_failed")
+            controller_state["output"] = _build_controller_meta_output(
+                error=str(controller_state.get("error") or "controller_failed")
             )
-            router_error_value = router_state["output"].get("router_error")
-        router_timeout = isinstance(router_error_value, str) and router_error_value == "timeout"
-        router_fallback = router_state.get("fallback_reason") not in (None, "skipped")
-        router_state["timeout"] = router_timeout
-        router_state["fallback"] = router_fallback
-        router_state["sla"] = _update_router_sla(
-            attempted=bool(router_state.get("attempted")),
-            fallback=bool(router_fallback),
-            timeout=bool(router_timeout),
+            controller_error_value = controller_state["output"].get("controller_error")
+        controller_timeout = isinstance(controller_error_value, str) and controller_error_value == "timeout"
+        controller_fallback = controller_state.get("fallback_reason") not in (None, "skipped")
+        controller_state["timeout"] = controller_timeout
+        controller_state["fallback"] = controller_fallback
+        controller_state["sla"] = _update_router_sla(  # reuse SLA tracker
+            attempted=bool(controller_state.get("attempted")),
+            fallback=bool(controller_fallback),
+            timeout=bool(controller_timeout),
         )
+    router_state = controller_state
 
     early_domain_intent = DomainIntent.UNKNOWN
     early_domain_meta: dict = {}
@@ -10874,6 +10861,7 @@ async def _handle_webhook_payload(
         eligible=not expected_reply_shortcircuit,
         reason="expected_reply_shortcircuit" if expected_reply_shortcircuit else "none",
     )
+    controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
     trace_payload = {
         "stage": "class_router",
         "classes": class_router_result.get("classes"),
@@ -10887,7 +10875,13 @@ async def _handle_webhook_payload(
         "carryover_class": class_router_result.get("carryover_class"),
         "carryover_info_sections": class_router_result.get("carryover_info_sections"),
         "router_fallback_reason": class_router_result.get("router_fallback_reason"),
+        "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
         "router": class_router_result.get("router"),
+        "controller": controller_meta,
+        "controller_used": controller_meta.get("used") if isinstance(controller_meta, dict) else None,
+        "controller_confidence": controller_meta.get("confidence") if isinstance(controller_meta, dict) else None,
+        "controller_error": controller_meta.get("error") if isinstance(controller_meta, dict) else None,
+        "controller_goal": controller_meta.get("goal") if isinstance(controller_meta, dict) else None,
     }
     trace_payload.update(router_meta)
     _record_decision_trace(conversation, trace_payload)
@@ -10898,6 +10892,11 @@ async def _handle_webhook_payload(
                 "class_router": class_router_result,
                 "carryover_class": class_router_result.get("carryover_class"),
                 "router_fallback_reason": class_router_result.get("router_fallback_reason"),
+                "controller_used": controller_meta.get("used") if isinstance(controller_meta, dict) else None,
+                "controller_confidence": controller_meta.get("confidence") if isinstance(controller_meta, dict) else None,
+                "controller_error": controller_meta.get("error") if isinstance(controller_meta, dict) else None,
+                "controller_goal": controller_meta.get("goal") if isinstance(controller_meta, dict) else None,
+                "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
             },
         )
 
