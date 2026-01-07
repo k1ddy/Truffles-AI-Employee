@@ -2547,6 +2547,15 @@ def _should_reset_session_memory(message_text: str | None) -> bool:
     return any(phrase in normalized for phrase in SESSION_MEMORY_RESET_PHRASES)
 
 
+def _is_session_reset_only_message(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    return normalized in SESSION_MEMORY_RESET_PHRASES
+
+
 def _session_memory_snapshot(memory: dict) -> dict:
     pending_slots = memory.get("pending_slots")
     if isinstance(pending_slots, dict):
@@ -5904,6 +5913,32 @@ async def _handle_webhook_payload(
                 saved_message, {"session_memory_reset": session_memory_reset_reason}
             )
         session_memory = {}
+        if session_memory_reset_reason == "explicit_reset" and _is_session_reset_only_message(message_text):
+            bot_response = "Ок, давайте новую тему. Чем могу помочь?"
+            _record_message_decision_meta(
+                saved_message,
+                action="smalltalk",
+                intent="reset",
+                source="session_memory",
+                fast_intent=False,
+            )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "session_memory",
+                    "decision": "reset_ack",
+                    "reason": session_memory_reset_reason,
+                },
+            )
+            bot_response, sent = _send_and_save(bot_response)
+            result_message = "Session reset ack sent" if sent else "Session reset ack failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
     message_count = _increment_context_message_count(context_manager)
     context_manager, refusal_flags, refusal_events = _update_refusal_flags(
         context_manager,
