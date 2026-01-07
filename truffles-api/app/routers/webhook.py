@@ -10128,23 +10128,38 @@ async def _handle_webhook_payload(
             normalized = normalize_for_matching(message_text)
             service_hint = get_demo_salon_service_hint(message_text)
             if service_hint:
-                presence_keywords = [
-                    "делаете",
-                    "делает",
-                    "делают",
-                    "есть",
-                    "есть ли",
-                    "оказываете",
-                    "предоставляете",
-                ]
-                presence_hint = _contains_any(normalized, presence_keywords) or (
-                    "?" in message_text and len(normalized.split()) <= 4
-                )
-                if presence_hint and not (
-                    _has_price_signal(normalized, message_text)
-                    or _has_duration_signal(normalized, message_text)
+                if _contains_any(
+                    normalized,
+                    [
+                        "парков",
+                        "гост",
+                        "ребен",
+                        "ребён",
+                        "дет",
+                        "коляс",
+                        "ожидан",
+                        "подруг",
+                    ],
                 ):
-                    skip_info_class_for_service = True
+                    service_hint = None
+                else:
+                    presence_keywords = [
+                        "делаете",
+                        "делает",
+                        "делают",
+                        "есть",
+                        "есть ли",
+                        "оказываете",
+                        "предоставляете",
+                    ]
+                    presence_hint = _contains_any(normalized, presence_keywords) or (
+                        "?" in message_text and len(normalized.split()) <= 4
+                    )
+                    if presence_hint and not (
+                        _has_price_signal(normalized, message_text)
+                        or _has_duration_signal(normalized, message_text)
+                    ):
+                        skip_info_class_for_service = True
         if info_class and info_class_intents_for_reply and not skip_info_class_for_service:
             carryover_sections = class_router_result.get("carryover_info_sections")
             carryover_has_hours = False
