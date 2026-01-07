@@ -2597,6 +2597,8 @@ def _reset_session_memory(
     context = _set_context_manager(context, manager)
     context = _set_expected_reply_type(context, None)
     context = _set_intent_queue(context, [])
+    context = _set_booking_context(context, {"active": False})
+    context = _clear_service_hint(context)
     context = _set_session_memory(context, None)
     memory_payload = {"last_updated_at": now.isoformat(), "ttl_hours": SESSION_MEMORY_TTL_HOURS}
     return context, manager, {"reason": reason, **_session_memory_snapshot(memory_payload)}
