@@ -125,7 +125,7 @@ outbox worker (тик 2s) или POST /admin/outbox/process (cron)
 _handle_webhook_payload(skip_persist=True)
     ↓
 behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → policy‑gates (скидки/оплата info)
-→ LLM semantic router (class router) → answer‑interpreter (expected_reply_type) → early OOD (только при out‑signals без in‑signals)
+→ LLM Dialogue Controller (class+goal+slots) → answer‑interpreter (expected_reply_type) → early OOD (только при out‑signals без in‑signals)
 → info bundle / consult / booking flow / service matcher → LLM формулировка (RAG) → truth gate fallback → low‑confidence handling
     ↓
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
@@ -143,15 +143,15 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - **Host Persona** → формулировка ответа (шаблоны/LLM), CTA/quiet hours.
 - **Observability** → decision_trace/meta на каждом сообщении.
 
-### LLM Semantic Router (class router) — канон
-- Цель: устойчивый выбор **класса ответа**, не зависящий от порядка слов.
+### LLM Dialogue Controller (single arbiter) — канон
+- Цель: **единый арбитр смысла**. Ни один другой слой не меняет класс/цель/слоты.
+- Выход (structured JSON): `class`, `goal`, `intents`, `slots`, `followups`, `confidence`, `safety_flags`, `reason`.
 - Классы (по приоритету): Hard‑LAW → policy → opt‑out → human/frustration → booking → info‑bundle → consult → greeting → OOD.
-- Источник истины класса: **LLM‑router** (structured JSON: class/intents/slots/confidence/reason).
-- Anchors/лексика/эвристики — **только fallback/boost**, не основной источник класса.
+- Anchors/лексика/эвристики — **только fallback/boost**, не основной источник смысла.
 - OOD допустим **только** если есть out‑signals и **нет** in‑signals (strict‑in).
-- Если confidence ниже порога или LLM недоступен → fallback на детерминированный router и фиксируем это в trace.
-- Если несколько классов в одном сообщении — отвечаем по сильному + сохраняем очередь (intent_queue).
-- `info_bundle` — **отдельный класс**, выводится class‑router и не “схлопывается” в `info`.
+- Если confidence ниже порога/LLM недоступен → fallback на детерминированный router; **обязательная фиксация** в trace.
+- Multi‑intent: сильный класс отвечает первым, остальные идут в очередь (intent_queue) с возвратом к цели.
+- `info_bundle` — **отдельный класс**, не “схлопывается” в `info`.
 
 ### Answer‑Interpreter (expected_reply_type) — канон
 - Включается **только** если ожидается ответ на вопрос (`expected_reply_type` активен).
@@ -202,17 +202,23 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 **Reset rules:**
 - gap > 24h между сообщениями → полный reset памяти.
 - явный текст пользователя “новый запрос” → reset.
-- любые эскалации (pending/manager_active) → reset, **но** сохраняем `pending_resume` для возврата.
+- pending/manager_active → сохранить `pending_resume` (snapshot контекста) и восстановить на `pending_ack`.
 
-**Pending resume (context.pending_resume):**
-- При эскалации в `pending` сохраняем снимок (`context_manager`, `expected_reply_type`, `intent_queue`, `booking`,
-  `session_memory`) и очищаем активную память.
-- При `pending_ack` восстанавливаем снимок и продолжаем диалог с прежней целью.
+### Pending Resume (context snapshot)
+- При уходе в `pending` сохраняем snapshot (`expected_reply_type`, `intent_queue`, `booking`, `session_memory`).
+- На `pending_ack` восстанавливаем snapshot и продолжаем с `pre_pending_goal`.
+- На `pending_close`/auto‑close — snapshot удаляется.
 
 ### Base‑80 батарея (acceptance)
 - 80% входящих классов (по объёму) покрыты перефраз‑battery и 5–6‑ходовыми комбинациями.
 - 10–20 перефраз на класс, проверка только инвариантов (facts/must_not), без точных строк.
 - Статус “устойчивый хост” невозможен без 100% pass Base‑80.
+
+### Контрактные сценарии (block‑gate)
+- **Basic‑20**: базовые вопросы и короткие ответы (включая “да/ок/в субботу”) → блокирующий gate CI.
+- **ASR‑battery**: шум/склейка/опечатки → блокирующий gate CI.
+- **Long‑chaos (12–15 ходов)**: перебивки, возвраты, pending‑resume → блокирующий gate CI.
+- Инварианты проверяются по trace/meta (`class_router`, `expected_reply_type`, `current_goal`, `pending_resume`).
 
 ### Policy‑gates (конфиг per client)
 - Hard‑LAW всегда эскалирует (оплата: подтверждение/проверка/возвраты, медицинка, жалобы, переносы).
