@@ -10428,9 +10428,83 @@ async def _handle_webhook_payload(
                         consult_return_prompt=consult_return_prompt,
                         consult_context=consult_context,
                         reason=consult_return_reason or "info_class",
-                    )
+                )
                 bot_response, sent = _send_and_save(bot_response)
                 result_message = "Info class reply sent" if sent else "Info class reply failed"
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+
+        if guest_policy_class and routing["allow_bot_reply"]:
+            include_parking = bool(info_signals.get("parking")) if isinstance(info_signals, dict) else False
+            base_bundle_reply, base_bundle_meta = build_info_combined_reply(
+                include_parking=include_parking,
+                include_guest=True,
+            )
+            if base_bundle_meta:
+                info_class_intents_for_reply.add("guest_policy")
+            if isinstance(base_bundle_reply, str) and base_bundle_reply.strip():
+                bot_response = base_bundle_reply.strip()
+                bot_response = _maybe_append_booking_cta(
+                    bot_response,
+                    conversation_state=conversation.state,
+                    allow_booking_flow=routing["allow_booking_flow"],
+                    has_followup=bool(multi_intent_other_followup),
+                )
+                bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+                _reset_low_confidence_retry(conversation)
+                trace_payload = {
+                    "stage": "info_class",
+                    "decision": "reply",
+                    "state": conversation.state,
+                    "intents": sorted(info_class_intents_for_reply or {"guest_policy"}),
+                    "class_router": class_router_result,
+                }
+                if isinstance(base_bundle_meta, dict) and base_bundle_meta:
+                    trace_payload.update(base_bundle_meta)
+                _record_decision_trace(conversation, trace_payload)
+                _record_message_decision_meta(
+                    saved_message,
+                    action="reply",
+                    intent="info_bundle",
+                    source="class_router",
+                    fast_intent=False,
+                )
+                if saved_message:
+                    meta_updates = {"class_router": class_router_result}
+                    if isinstance(base_bundle_meta, dict) and base_bundle_meta:
+                        meta_updates.update(base_bundle_meta)
+                    _update_message_decision_metadata(saved_message, meta_updates)
+                _maybe_store_class_carryover(
+                    conversation=conversation,
+                    class_name="info_bundle",
+                    intents=sorted(info_class_intents_for_reply or {"guest_policy"}),
+                    info_meta=base_bundle_meta if isinstance(base_bundle_meta, dict) else {},
+                    message_count=message_count,
+                    reason="guest_policy_lock",
+                )
+                _maybe_store_service_carryover(
+                    conversation=conversation,
+                    service_meta=base_bundle_meta if isinstance(base_bundle_meta, dict) else None,
+                    intent="info_bundle",
+                    message_count=message_count,
+                    reason="guest_policy_lock",
+                )
+                if consult_return_pending:
+                    bot_response = _apply_consult_return(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        bot_response=bot_response,
+                        consult_return_prompt=consult_return_prompt,
+                        consult_context=consult_context,
+                        reason=consult_return_reason or "info_class",
+                    )
+                bot_response, sent = _send_and_save(bot_response)
+                result_message = "Guest policy reply sent" if sent else "Guest policy reply failed"
                 db.commit()
                 return WebhookResponse(
                     success=True,
