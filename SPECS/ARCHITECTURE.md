@@ -182,13 +182,14 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Храним `class=info_bundle` + `info_sections`; service‑carryover не может переопределить hours‑follow‑up.
 - Goal‑keeper: `current_goal` сохраняется при перебивках; ответ на перебивку возвращает к цели.
 
-### Session Memory v1 (conversation.context.session_memory)
+### Session Memory v1.1 (conversation.context.session_memory)
 **Назначение:** удерживать краткую память о вопросах/целях без точных цитат.
 
 **Структура:**
 - `last_question_type` — последний тип вопроса (hours/pricing/duration/booking/consult/info_bundle/other).
 - `pending_slots` — какие слоты ещё нужны (service/datetime/branch/etc).
 - `active_goal` — текущая цель (info_bundle/consult/booking/other).
+- `goal_stack` — стек целей (до 3), чтобы возвращать цель после перебивок.
 - `constraints` — активные ограничения (branch_id, service_query, policy locks и т.п.).
 - `unanswered_questions` — список вопросов, на которые ещё не ответили.
 - `ttl` — истечение памяти (now + 24h по умолчанию).
@@ -201,7 +202,12 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 **Reset rules:**
 - gap > 24h между сообщениями → полный reset памяти.
 - явный текст пользователя “новый запрос” → reset.
-- любые эскалации (pending/manager_active) → reset.
+- любые эскалации (pending/manager_active) → reset, **но** сохраняем `pending_resume` для возврата.
+
+**Pending resume (context.pending_resume):**
+- При эскалации в `pending` сохраняем снимок (`context_manager`, `expected_reply_type`, `intent_queue`, `booking`,
+  `session_memory`) и очищаем активную память.
+- При `pending_ack` восстанавливаем снимок и продолжаем диалог с прежней целью.
 
 ### Base‑80 батарея (acceptance)
 - 80% входящих классов (по объёму) покрыты перефраз‑battery и 5–6‑ходовыми комбинациями.

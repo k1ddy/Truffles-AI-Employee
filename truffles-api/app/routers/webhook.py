@@ -1692,6 +1692,7 @@ PENDING_AUTO_CLOSE_HOURS = 4
 PENDING_SLA_CONTEXT_KEY = "pending_sla"
 PENDING_SLA_PING_SENT_KEY = "ping_sent_at"
 PENDING_SLA_AUTO_CLOSE_KEY = "auto_closed_at"
+PENDING_RESUME_KEY = "pending_resume"
 
 PENDING_ACK_PHRASES = {
     "ага",
@@ -2514,6 +2515,84 @@ def _set_session_memory(context: dict, memory: dict | None) -> dict:
     return context
 
 
+def _get_pending_resume(context: dict) -> dict | None:
+    payload = context.get(PENDING_RESUME_KEY) if isinstance(context, dict) else None
+    if isinstance(payload, dict):
+        return dict(payload)
+    return None
+
+
+def _set_pending_resume(context: dict, payload: dict | None) -> dict:
+    context = dict(context)
+    if payload:
+        context[PENDING_RESUME_KEY] = payload
+    else:
+        context.pop(PENDING_RESUME_KEY, None)
+    return context
+
+
+def _build_pending_resume_snapshot(
+    *,
+    context: dict,
+    context_manager: dict,
+    expected_reply_type: str | None,
+    intent_queue: list[str] | None,
+    booking_context: dict | None,
+    session_memory: dict,
+) -> dict:
+    service_hint = context.get(SERVICE_HINT_KEY) if isinstance(context, dict) else None
+    service_hint_at = context.get(SERVICE_HINT_AT_KEY) if isinstance(context, dict) else None
+    return {
+        "context_manager": dict(context_manager) if isinstance(context_manager, dict) else {},
+        "expected_reply_type": expected_reply_type,
+        "intent_queue": list(intent_queue) if isinstance(intent_queue, list) else [],
+        "booking": dict(booking_context) if isinstance(booking_context, dict) else {"active": False},
+        "session_memory": dict(session_memory) if isinstance(session_memory, dict) else {},
+        "service_hint": service_hint,
+        "service_hint_at": service_hint_at,
+    }
+
+
+def _restore_pending_resume(
+    *,
+    context: dict,
+    pending_resume: dict,
+    now: datetime,
+) -> dict:
+    context = _set_pending_resume(context, None)
+    context = _set_pending_sla(context, {})
+    context.pop("handover_confirmation", None)
+    context = _set_context_manager(
+        context,
+        pending_resume.get("context_manager") if isinstance(pending_resume, dict) else {},
+    )
+    context = _set_expected_reply_type(
+        context,
+        pending_resume.get("expected_reply_type") if isinstance(pending_resume, dict) else None,
+    )
+    context = _set_intent_queue(
+        context,
+        pending_resume.get("intent_queue") if isinstance(pending_resume, dict) else [],
+    )
+    booking_context = pending_resume.get("booking") if isinstance(pending_resume, dict) else None
+    if isinstance(booking_context, dict):
+        context = _set_booking_context(context, booking_context)
+    else:
+        context = _set_booking_context(context, {"active": False})
+    session_memory = pending_resume.get("session_memory") if isinstance(pending_resume, dict) else None
+    if isinstance(session_memory, dict) and session_memory:
+        session_memory["last_updated_at"] = now.isoformat()
+        context = _set_session_memory(context, session_memory)
+    else:
+        context = _set_session_memory(context, None)
+    service_hint = pending_resume.get("service_hint") if isinstance(pending_resume, dict) else None
+    if isinstance(service_hint, str) and service_hint.strip():
+        context = _set_service_hint(context, service_hint.strip(), now)
+    else:
+        context = _clear_service_hint(context)
+    return context
+
+
 def _parse_session_memory_time(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -2564,6 +2643,11 @@ def _session_memory_snapshot(memory: dict) -> dict:
         )
     else:
         pending_keys = []
+    goal_stack = memory.get("goal_stack")
+    if isinstance(goal_stack, list):
+        cleaned_goals = [item for item in goal_stack if isinstance(item, str) and item.strip()]
+    else:
+        cleaned_goals = []
     unanswered = memory.get("unanswered_questions")
     if isinstance(unanswered, list):
         unanswered_count = len([item for item in unanswered if isinstance(item, str) and item.strip()])
@@ -2572,6 +2656,8 @@ def _session_memory_snapshot(memory: dict) -> dict:
     return {
         "last_question_type": memory.get("last_question_type"),
         "active_goal": memory.get("active_goal"),
+        "goal_stack_depth": len(cleaned_goals),
+        "goal_stack_top": cleaned_goals[-1] if cleaned_goals else None,
         "pending_slots": pending_keys,
         "unanswered_questions_count": unanswered_count,
     }
@@ -2632,6 +2718,12 @@ def _update_session_memory_on_question(
     memory["last_question_type"] = expected_reply_type
     if active_goal:
         memory["active_goal"] = active_goal
+        goal_stack = memory.get("goal_stack")
+        if not isinstance(goal_stack, list):
+            goal_stack = []
+        if not goal_stack or goal_stack[-1] != active_goal:
+            goal_stack.append(active_goal)
+        memory["goal_stack"] = goal_stack[-3:]
     memory["unanswered_questions"] = unanswered_list
     memory["last_updated_at"] = now.isoformat()
     memory["ttl_hours"] = SESSION_MEMORY_TTL_HOURS
@@ -2681,6 +2773,12 @@ def _update_session_memory_goal(
 ) -> tuple[dict, dict]:
     memory = _get_session_memory(context)
     memory["active_goal"] = active_goal
+    goal_stack = memory.get("goal_stack")
+    if not isinstance(goal_stack, list):
+        goal_stack = []
+    if not goal_stack or goal_stack[-1] != active_goal:
+        goal_stack.append(active_goal)
+    memory["goal_stack"] = goal_stack[-3:]
     memory["last_updated_at"] = now.isoformat()
     memory["ttl_hours"] = SESSION_MEMORY_TTL_HOURS
     context = _set_session_memory(context, memory)
@@ -6016,11 +6114,13 @@ async def _handle_webhook_payload(
     session_memory = _get_session_memory(context)
     memory_expected_reply_type = None
     if not expected_reply_type and session_memory and not _is_session_memory_expired(session_memory, now):
+        memory_active_goal = session_memory.get("active_goal")
         last_question_type = session_memory.get("last_question_type")
         if isinstance(last_question_type, str):
             last_question_type = last_question_type.strip()
         if (
-            last_question_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+            (not memory_active_goal or not current_goal or memory_active_goal == current_goal)
+            and last_question_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
             and _is_short_reply(message_text)
             and not _looks_like_info_query(message_text)
             and not _looks_like_policy_topic(message_text)
@@ -6903,8 +7003,31 @@ async def _handle_webhook_payload(
         if _is_pending_ack(message_text):
             handover = get_active_handover(db, conversation.id)
             if handover:
-                manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
+                manager_resolve(
+                    db,
+                    conversation,
+                    handover,
+                    manager_id="system",
+                    manager_name="system",
+                    preserve_context=True,
+                )
             conversation.bot_status = "active"
+            pending_resume = _get_pending_resume(_get_conversation_context(conversation))
+            if pending_resume:
+                restored_context = _restore_pending_resume(
+                    context=_get_conversation_context(conversation),
+                    pending_resume=pending_resume,
+                    now=now,
+                )
+                _set_conversation_context(conversation, restored_context)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "pending_resume",
+                        "decision": "restore",
+                        "reason": "pending_ack",
+                    },
+                )
             trace_payload = {
                 "stage": "pending_sla",
                 "decision": "pending_ack",
@@ -6917,6 +7040,7 @@ async def _handle_webhook_payload(
                     saved_message,
                     {
                         "pending_action": "pending_ack",
+                        "pending_resume_restored": bool(pending_resume),
                     },
                 )
             bot_response = MSG_PENDING_ACK

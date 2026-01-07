@@ -175,6 +175,8 @@ if is_rejection(intent):
 - История последних 10 сообщений передаётся в LLM
 - `conversation.last_message_at` отслеживается
 - Краткий контекст диалога: `conversations.context` (слоты записи + последний вопрос)
+- Session Memory v1.1: `last_question_type`, `pending_slots`, `active_goal`, `goal_stack` (до 3 целей)
+  + pending‑resume при `pending_ack` (возврат к цели после ожидания менеджера)
  - **Context Manager (P0):**
    - `context_manager.current_goal` = info|consult|booking (ставится по intent_decomp)
    - `context_manager.refusal_flags` (name/phone) — только явные отказы, TTL 10 сообщений или до явной инициативы
