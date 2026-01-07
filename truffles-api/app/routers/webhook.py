@@ -3812,6 +3812,24 @@ def _should_escalate_for_clarify(manager: dict, intent: str) -> bool:
     return count >= CLARIFY_MAX_ATTEMPTS
 
 
+def _booking_clarify_guard_reason(
+    *,
+    booking_interrupt_info: bool,
+    basic_info_message: bool,
+    session_memory_reset_reason: str | None,
+    memory_expected_reply_type: str | None,
+) -> str | None:
+    if booking_interrupt_info:
+        return "booking_interrupt_info"
+    if session_memory_reset_reason:
+        return f"session_memory_{session_memory_reset_reason}"
+    if memory_expected_reply_type:
+        return "session_memory_expected_reply"
+    if basic_info_message:
+        return "basic_info_message"
+    return None
+
+
 def _register_clarify_attempt(
     *,
     conversation: Conversation,
@@ -9314,7 +9332,31 @@ async def _handle_webhook_payload(
 
                 if prompt and not booking_time_service_interrupt and not booking_interrupt_info:
                     context_manager = _get_context_manager(context)
-                    if _should_escalate_for_clarify(context_manager, "booking"):
+                    clarify_guard_reason = _booking_clarify_guard_reason(
+                        booking_interrupt_info=booking_interrupt_info,
+                        basic_info_message=basic_info_message,
+                        session_memory_reset_reason=session_memory_reset_reason,
+                        memory_expected_reply_type=memory_expected_reply_type,
+                    )
+                    if clarify_guard_reason:
+                        if saved_message:
+                            _update_message_decision_metadata(
+                                saved_message,
+                                {
+                                    "clarify_guard": True,
+                                    "clarify_guard_reason": clarify_guard_reason,
+                                },
+                            )
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "clarify_guard",
+                                "decision": "skip",
+                                "intent": "booking",
+                                "reason": clarify_guard_reason,
+                            },
+                        )
+                    elif _should_escalate_for_clarify(context_manager, "booking"):
                         clarify_count, _ = _get_clarify_attempt_state(context_manager, "booking")
                         _record_context_manager_decision(
                             conversation,
@@ -9337,13 +9379,14 @@ async def _handle_webhook_payload(
                             send_response=_send_response,
                             finalize_response=_finalize_bot_response,
                         )
-                    _register_clarify_attempt(
-                        conversation=conversation,
-                        saved_message=saved_message,
-                        intent="booking",
-                        now=now,
-                        reason="booking_prompt",
-                    )
+                    elif clarify_guard_reason is None:
+                        _register_clarify_attempt(
+                            conversation=conversation,
+                            saved_message=saved_message,
+                            intent="booking",
+                            now=now,
+                            reason="booking_prompt",
+                        )
 
                 trace_payload = {
                     "stage": "booking_interrupt",
@@ -9557,7 +9600,31 @@ async def _handle_webhook_payload(
 
             if prompt:
                 context_manager = _get_context_manager(context)
-                if _should_escalate_for_clarify(context_manager, "booking"):
+                clarify_guard_reason = _booking_clarify_guard_reason(
+                    booking_interrupt_info=False,
+                    basic_info_message=basic_info_message,
+                    session_memory_reset_reason=session_memory_reset_reason,
+                    memory_expected_reply_type=memory_expected_reply_type,
+                )
+                if clarify_guard_reason:
+                    if saved_message:
+                        _update_message_decision_metadata(
+                            saved_message,
+                            {
+                                "clarify_guard": True,
+                                "clarify_guard_reason": clarify_guard_reason,
+                            },
+                        )
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "clarify_guard",
+                            "decision": "skip",
+                            "intent": "booking",
+                            "reason": clarify_guard_reason,
+                        },
+                    )
+                elif _should_escalate_for_clarify(context_manager, "booking"):
                     clarify_count, _ = _get_clarify_attempt_state(context_manager, "booking")
                     _record_context_manager_decision(
                         conversation,
@@ -9580,13 +9647,14 @@ async def _handle_webhook_payload(
                         send_response=_send_response,
                         finalize_response=_finalize_bot_response,
                     )
-                _register_clarify_attempt(
-                    conversation=conversation,
-                    saved_message=saved_message,
-                    intent="booking",
-                    now=now,
-                    reason="booking_prompt",
-                )
+                elif clarify_guard_reason is None:
+                    _register_clarify_attempt(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        intent="booking",
+                        now=now,
+                        reason="booking_prompt",
+                    )
                 _record_decision_trace(
                     conversation,
                     {
