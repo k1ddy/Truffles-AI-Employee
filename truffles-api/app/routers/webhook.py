@@ -10213,52 +10213,53 @@ async def _handle_webhook_payload(
         if isinstance(service_carryover_meta, dict):
             carryover_service_query = service_carryover_meta.get("service_query")
         guest_policy_lock = guest_policy_class
-        info_bundle_lock = info_class and not (explicit_service_signal or intent_decomp_explicit_query or router_service_query)
+        info_bundle_lock = info_class and not (
+            explicit_service_signal or intent_decomp_explicit_query or router_service_query
+        )
         info_semantic_lock = guest_policy_lock or info_bundle_lock or controller_low_confidence
         info_semantic_meta: dict[str, Any] = {}
-            if info_semantic_lock:
-                if guest_policy_lock:
+        if info_semantic_lock:
+            if guest_policy_lock:
+                info_class_intents_for_reply.discard("pricing")
+                info_class_intents_for_reply.discard("duration")
+            else:
+                if "pricing" not in base_info_intents:
                     info_class_intents_for_reply.discard("pricing")
+                if "duration" not in base_info_intents:
                     info_class_intents_for_reply.discard("duration")
-                else:
-                    if "pricing" not in base_info_intents:
-                        info_class_intents_for_reply.discard("pricing")
-                    if "duration" not in base_info_intents:
-                        info_class_intents_for_reply.discard("duration")
-                if guest_policy_lock:
-                    skip_reason = "guest_policy_lock"
-                elif info_bundle_lock:
-                    skip_reason = "info_bundle_lock"
-                else:
-                    skip_reason = "controller_low_confidence"
-                info_semantic_meta = {
-                    "info_semantic_match_skipped": True,
-                    "info_semantic_match_skip_reason": skip_reason,
-                }
-                if guest_policy_lock:
-                    info_semantic_meta.update(
-                        {
-                            "question_type": None,
-                            "service_query": None,
-                            "service_query_source": None,
-                            "service_query_score": 0.0,
-                        }
-                    )
-            if info_semantic_lock:
-                carryover_service_query = None
+            if guest_policy_lock:
+                skip_reason = "guest_policy_lock"
+            elif info_bundle_lock:
+                skip_reason = "info_bundle_lock"
+            else:
+                skip_reason = "controller_low_confidence"
+            info_semantic_meta = {
+                "info_semantic_match_skipped": True,
+                "info_semantic_match_skip_reason": skip_reason,
+            }
+            if guest_policy_lock:
+                info_semantic_meta.update(
+                    {
+                        "question_type": None,
+                        "service_query": None,
+                        "service_query_source": None,
+                        "service_query_score": 0.0,
+                    }
+                )
+            carryover_service_query = None
         force_hours_followup = (
             carryover_has_hours
             and _looks_like_hours_followup(message_text)
             and not explicit_service_signal
         )
-            info_service_query = None
-            if not info_semantic_lock:
-                if alias_service_query:
-                    info_service_query = alias_service_query
-                elif router_service_query:
-                    info_service_query = router_service_query
-                elif intent_decomp_explicit_query:
-                    info_service_query = intent_decomp_explicit_query
+        info_service_query = None
+        if not info_semantic_lock:
+            if alias_service_query:
+                info_service_query = alias_service_query
+            elif router_service_query:
+                info_service_query = router_service_query
+            elif intent_decomp_explicit_query:
+                info_service_query = intent_decomp_explicit_query
             if (
                 not force_hours_followup
                 and not info_service_query
