@@ -7885,3 +7885,70 @@ eval_cases:
       - stage: pending_sla
         decision: pending_close
         state: bot_active
+- id: E738
+  user: Где вы находитесь и до скольки работаете?
+  expected:
+    action: reply
+    intent: info_bundle
+    trace_contains:
+    - stage: class_router
+      controller_used: true
+      controller_goal: info
+      classes:
+      - info_bundle
+- id: E739
+  user: С подругой можно?
+  expected:
+    action: reply
+    intent: info_bundle
+    trace_contains:
+    - stage: class_router
+      controller_used: true
+      classes:
+      - info_bundle
+      in_signals:
+      - info_guest
+- id: E740
+  user: Подскажите уход для сухих волос
+  expected:
+    action: reply
+    intent: consult_reply
+    trace_contains:
+    - stage: class_router
+      controller_used: true
+      controller_goal: consult
+      classes:
+      - consult
+- id: E741
+  user: Хочу записаться на маникюр на субботу
+  expected:
+    action: reply
+    intent: booking_intake
+    trace_contains:
+    - stage: class_router
+      controller_used: true
+      controller_goal: booking
+      classes:
+      - booking
+- id: E742
+  user: Сколько стоит биткоин?
+  expected:
+    action: reply
+    intent: off_topic
+    trace_contains:
+    - stage: class_router
+      controller_used: true
+      controller_goal: out_of_domain
+      classes:
+      - out_of_domain
+- id: E743
+  user: Сколько длится маникюр?
+  expected:
+    action: reply
+    intent: duration
+    trace_contains:
+    - stage: class_router
+      controller_used: true
+      controller_goal: info
+      classes:
+      - info_bundle
