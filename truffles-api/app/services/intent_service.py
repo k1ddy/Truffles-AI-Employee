@@ -509,7 +509,6 @@ def route_dialogue_controller(
         result["error"] = "no_api_key"
         result["payload"] = _build_payload(
             controller_class=None,
-            goal=None,
             intents=[],
             slots={},
             followups=[],
