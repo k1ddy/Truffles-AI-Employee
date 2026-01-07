@@ -9608,63 +9608,64 @@ async def _handle_webhook_payload(
                     now=now,
                 )
 
-            if prompt and booking_prompt_repeat:
+            if prompt:
                 context_manager = _get_context_manager(context)
-                clarify_guard_reason = _booking_clarify_guard_reason(
-                    booking_interrupt_info=False,
-                    basic_info_message=basic_info_message,
-                    session_memory_reset_reason=session_memory_reset_reason,
-                    memory_expected_reply_type=memory_expected_reply_type,
-                )
-                if clarify_guard_reason:
-                    if saved_message:
-                        _update_message_decision_metadata(
-                            saved_message,
+                if booking_prompt_repeat:
+                    clarify_guard_reason = _booking_clarify_guard_reason(
+                        booking_interrupt_info=False,
+                        basic_info_message=basic_info_message,
+                        session_memory_reset_reason=session_memory_reset_reason,
+                        memory_expected_reply_type=memory_expected_reply_type,
+                    )
+                    if clarify_guard_reason:
+                        if saved_message:
+                            _update_message_decision_metadata(
+                                saved_message,
+                                {
+                                    "clarify_guard": True,
+                                    "clarify_guard_reason": clarify_guard_reason,
+                                },
+                            )
+                        _record_decision_trace(
+                            conversation,
                             {
-                                "clarify_guard": True,
-                                "clarify_guard_reason": clarify_guard_reason,
+                                "stage": "clarify_guard",
+                                "decision": "skip",
+                                "intent": "booking",
+                                "reason": clarify_guard_reason,
                             },
                         )
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "clarify_guard",
-                            "decision": "skip",
-                            "intent": "booking",
-                            "reason": clarify_guard_reason,
-                        },
-                    )
-                elif _should_escalate_for_clarify(context_manager, "booking"):
-                    clarify_count, _ = _get_clarify_attempt_state(context_manager, "booking")
-                    _record_context_manager_decision(
-                        conversation,
-                        saved_message,
-                        decision="clarify_limit",
-                        updates={
-                            "clarify_attempt": {"intent": "booking", "count": clarify_count},
-                            "clarify_reason": "booking_prompt",
-                            "clarify_limit": True,
-                        },
-                    )
-                    return _handle_clarify_limit_escalation(
-                        db=db,
-                        conversation=conversation,
-                        user=user,
-                        message_text=message_text,
-                        saved_message=saved_message,
-                        source="booking",
-                        allow_handover=routing.get("allow_handover_create", False),
-                        send_response=_send_response,
-                        finalize_response=_finalize_bot_response,
-                    )
-                elif clarify_guard_reason is None:
-                    _register_clarify_attempt(
-                        conversation=conversation,
-                        saved_message=saved_message,
-                        intent="booking",
-                        now=now,
-                        reason="booking_prompt",
-                    )
+                    elif _should_escalate_for_clarify(context_manager, "booking"):
+                        clarify_count, _ = _get_clarify_attempt_state(context_manager, "booking")
+                        _record_context_manager_decision(
+                            conversation,
+                            saved_message,
+                            decision="clarify_limit",
+                            updates={
+                                "clarify_attempt": {"intent": "booking", "count": clarify_count},
+                                "clarify_reason": "booking_prompt",
+                                "clarify_limit": True,
+                            },
+                        )
+                        return _handle_clarify_limit_escalation(
+                            db=db,
+                            conversation=conversation,
+                            user=user,
+                            message_text=message_text,
+                            saved_message=saved_message,
+                            source="booking",
+                            allow_handover=routing.get("allow_handover_create", False),
+                            send_response=_send_response,
+                            finalize_response=_finalize_bot_response,
+                        )
+                    elif clarify_guard_reason is None:
+                        _register_clarify_attempt(
+                            conversation=conversation,
+                            saved_message=saved_message,
+                            intent="booking",
+                            now=now,
+                            reason="booking_prompt",
+                        )
                 _record_decision_trace(
                     conversation,
                     {
