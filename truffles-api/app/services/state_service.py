@@ -11,6 +11,41 @@ from app.services.telegram_service import TelegramService
 
 logger = get_logger("state_service")
 
+PENDING_RESUME_KEY = "pending_resume"
+PENDING_RESUME_SNAPSHOT_KEYS = {
+    "context_manager",
+    "expected_reply_type",
+    "intent_queue",
+    "booking",
+    "session_memory",
+    "last_service_hint",
+    "last_service_hint_at",
+}
+PENDING_RESUME_CLEAR_KEYS = {
+    "context_manager",
+    "expected_reply_type",
+    "intent_queue",
+    "booking",
+    "session_memory",
+    "last_service_hint",
+    "last_service_hint_at",
+}
+
+
+def _capture_pending_resume_context(context: dict | None) -> dict:
+    if not isinstance(context, dict):
+        return {}
+    if PENDING_RESUME_KEY in context:
+        return context
+    resume_payload = {key: context.get(key) for key in PENDING_RESUME_SNAPSHOT_KEYS if key in context}
+    if not resume_payload:
+        return context
+    updated = dict(context)
+    updated[PENDING_RESUME_KEY] = resume_payload
+    for key in PENDING_RESUME_CLEAR_KEYS:
+        updated.pop(key, None)
+    return updated
+
 
 def escalate_to_pending(
     db: Session,
@@ -25,6 +60,7 @@ def escalate_to_pending(
         return Result.failure(f"Cannot escalate from state {conversation.state}", "invalid_state")
 
     try:
+        conversation.context = _capture_pending_resume_context(conversation.context)
         bot_token, chat_id = get_telegram_credentials(db, conversation.client_id)
         if not bot_token or not chat_id:
             return Result.failure("No Telegram credentials", "no_telegram")
@@ -107,6 +143,8 @@ def manager_resolve(
     handover: Handover,
     manager_id: str,
     manager_name: str,
+    *,
+    preserve_context: bool = False,
 ) -> Result[bool]:
     """Атомарный переход manager_active/pending → bot_active."""
 
@@ -120,7 +158,10 @@ def manager_resolve(
         conversation.bot_muted_until = None
         conversation.no_count = 0
         conversation.retry_offered_at = None
-        conversation.context = {}
+        if not preserve_context:
+            conversation.context = {}
+        elif not isinstance(conversation.context, dict):
+            conversation.context = {}
 
         handover.status = "resolved"
         handover.resolved_at = now
