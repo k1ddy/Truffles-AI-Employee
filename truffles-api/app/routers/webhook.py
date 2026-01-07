@@ -3359,7 +3359,19 @@ def _detect_info_class_intents(message_text: str | None, *, intent_decomp_set: s
         question_like = any(_has_token_prefix(tokens, prefix) for prefix in QUESTION_WORD_PREFIXES)
     short_query = 0 < len(tokens) <= 4
 
-    parking_signal = "парков" in normalized
+    parking_signal = any(
+        token in normalized
+        for token in [
+            "парков",
+            "паркинг",
+            "во дворе",
+            "двор",
+            "авто",
+            "машин",
+            "машины",
+            "машину",
+        ]
+    ) or ("мест" in normalized and ("авто" in normalized or "машин" in normalized or "машины" in normalized))
     guest_signal = any(
         token in normalized
         for token in [
@@ -7814,11 +7826,17 @@ async def _handle_webhook_payload(
     )
     carryover_followup = _looks_like_carryover_followup(message_text)
     allow_service_carryover = bool(carryover_followup and not basic_info_message)
+    preserve_info_carryover = bool(
+        not os.environ.get("OPENAI_API_KEY")
+        and isinstance(class_carryover, dict)
+        and class_carryover.get("class") == "info_bundle"
+        and class_carryover.get("info_sections")
+    )
     if not allow_service_carryover:
         existing_service_carryover = _get_service_carryover(
             context_manager, message_count=message_count
         )
-        if basic_info_message or class_carryover or existing_service_carryover:
+        if (basic_info_message or class_carryover or existing_service_carryover) and not preserve_info_carryover:
             carryover_reason = "basic_info_lock" if basic_info_message else "no_followup"
             if saved_message:
                 _update_message_decision_metadata(
@@ -7836,7 +7854,8 @@ async def _handle_webhook_payload(
                     "reason": carryover_reason,
                 },
             )
-        class_carryover = None
+        if not preserve_info_carryover:
+            class_carryover = None
     consult_interrupt_intents = (
         intent_decomp_set & CONSULT_INTERRUPT_INTENTS if intent_decomp_used else set()
     )
@@ -10168,9 +10187,9 @@ async def _handle_webhook_payload(
         router_service_query = None
         alias_service_query = None
         intent_decomp_explicit_query = None
+        carryover_has_hours = False
         if info_class and info_class_intents_for_reply and not skip_info_class_for_service:
             carryover_sections = class_router_result.get("carryover_info_sections")
-            carryover_has_hours = False
             if isinstance(carryover_sections, list):
                 for section in carryover_sections:
                     if isinstance(section, str) and section.strip().casefold() == "hours":
@@ -10868,6 +10887,21 @@ async def _handle_webhook_payload(
                             clarify_reason = "missing_service_query"
                 if clarify_reason:
                     _update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})
+            decision_meta = decision.meta if isinstance(getattr(decision, "meta", None), dict) else {}
+            info_carryover_intents: list[str] = []
+            if decision.intent in INFO_INTENTS:
+                info_carryover_intents.append(decision.intent)
+            if decision.intent in {"parking", "guest_policy"}:
+                info_carryover_intents.append(decision.intent)
+            if info_carryover_intents or decision_meta.get("info_sections"):
+                _maybe_store_class_carryover(
+                    conversation=conversation,
+                    class_name="info_bundle",
+                    intents=info_carryover_intents,
+                    info_meta=decision_meta,
+                    message_count=message_count,
+                    reason="truth_gate",
+                )
             _maybe_store_service_carryover(
                 conversation=conversation,
                 service_meta=decision.meta if isinstance(decision.meta, dict) else None,
@@ -11033,6 +11067,123 @@ async def _handle_webhook_payload(
             "info_intents": sorted(info_class_intents),
         },
     )
+
+    controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
+    controller_error = controller_meta.get("error") if isinstance(controller_meta, dict) else None
+    offline_controller = (not os.environ.get("OPENAI_API_KEY")) or controller_error == "no_api_key"
+    info_intents_for_reply: set[str] = set(class_router_result.get("intents") or [])
+    for item in class_router_result.get("carryover_intents") or []:
+        if isinstance(item, str) and item.strip():
+            info_intents_for_reply.add(item.strip().casefold())
+    carryover_sections = (
+        [item for item in class_router_result.get("carryover_info_sections") or [] if isinstance(item, str)]
+        if isinstance(class_router_result, dict)
+        else []
+    )
+    for section in carryover_sections:
+        normalized_section = section.strip().casefold()
+        if normalized_section in {"location", "hours"}:
+            info_intents_for_reply.add(normalized_section)
+    info_signals = info_class_meta.get("info_signals") if isinstance(info_class_meta, dict) else None
+    base_info_requested = bool(
+        {"location", "hours"} & info_intents_for_reply
+        or (
+            isinstance(info_signals, dict)
+            and (info_signals.get("parking") or info_signals.get("guest"))
+        )
+        or any(
+            isinstance(section, str) and section.strip().casefold() in {"location", "hours", "parking", "guest_policy"}
+            for section in carryover_sections
+        )
+    )
+    if (
+        offline_controller
+        and routing["allow_bot_reply"]
+        and not booking_wants_flow
+        and not bypass_domain_flows
+        and policy_handler
+        and base_info_requested
+        and "info_bundle" in (class_router_result.get("classes") or [])
+    ):
+        carryover_sections_normalized = {section.strip().casefold() for section in carryover_sections}
+        include_parking = (
+            bool(info_signals.get("parking")) if isinstance(info_signals, dict) else False
+        ) or "parking" in carryover_sections_normalized
+        include_guest = (
+            bool(info_signals.get("guest")) if isinstance(info_signals, dict) else False
+        ) or "guest_policy" in carryover_sections_normalized
+        base_bundle_reply, base_bundle_meta = build_info_combined_reply(
+            include_parking=include_parking,
+            include_guest=include_guest,
+        )
+        if isinstance(base_bundle_reply, str) and base_bundle_reply.strip():
+            info_meta_combined: dict[str, Any] = {}
+            if isinstance(base_bundle_meta, dict) and base_bundle_meta:
+                info_meta_combined.update(base_bundle_meta)
+            bot_response = base_bundle_reply.strip()
+            bot_response = _maybe_append_booking_cta(
+                bot_response,
+                conversation_state=conversation.state,
+                allow_booking_flow=routing["allow_booking_flow"],
+                has_followup=False,
+            )
+            bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
+            _reset_low_confidence_retry(conversation)
+            trace_payload = {
+                "stage": "info_class",
+                "decision": "reply",
+                "state": conversation.state,
+                "intents": sorted(info_intents_for_reply),
+                "class_router": class_router_result,
+            }
+            if info_meta_combined:
+                trace_payload.update(info_meta_combined)
+            _record_decision_trace(conversation, trace_payload)
+            _record_message_decision_meta(
+                saved_message,
+                action="reply",
+                intent="info_bundle",
+                source="class_router",
+                fast_intent=False,
+            )
+            if saved_message:
+                meta_updates = {"class_router": class_router_result}
+                if info_meta_combined:
+                    meta_updates.update(info_meta_combined)
+                _update_message_decision_metadata(saved_message, meta_updates)
+            _maybe_store_class_carryover(
+                conversation=conversation,
+                class_name="info_bundle",
+                intents=sorted(info_intents_for_reply),
+                info_meta=info_meta_combined,
+                message_count=message_count,
+                reason="class_router_offline",
+            )
+            _maybe_store_service_carryover(
+                conversation=conversation,
+                service_meta=info_meta_combined,
+                intent="info_bundle",
+                message_count=message_count,
+                reason="class_router_offline",
+            )
+            if consult_return_pending:
+                bot_response = _apply_consult_return(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    bot_response=bot_response,
+                    consult_return_prompt=consult_return_prompt,
+                    consult_context=consult_context,
+                    reason=consult_return_reason or "info_class",
+                )
+            bot_response, sent = _send_and_save(bot_response)
+            result_message = "Info class reply sent" if sent else "Info class reply failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
 
     # 10.1 Self-healing moved to health_service.check_and_heal_conversations()
     # Call POST /admin/heal periodically to fix broken states

@@ -437,6 +437,10 @@ def classify_intent(message: str) -> Intent:
         if is_human_request_message(message):
             return Intent.HUMAN_REQUEST
 
+        if not os.environ.get("OPENAI_API_KEY"):
+            logger.info("Intent classification skipped: OPENAI_API_KEY missing")
+            return Intent.OTHER
+
         llm = get_llm_provider()
 
         prompt = CLASSIFY_PROMPT.format(message=message)
@@ -505,23 +509,6 @@ def route_dialogue_controller(
     normalized = (message or "").strip()
     controller_retry = False
     total_elapsed_ms = 0.0
-    if not os.environ.get("OPENAI_API_KEY"):
-        result["error"] = "no_api_key"
-        result["payload"] = {
-            "class": None,
-            "goal": None,
-            "intents": [],
-            "slots": {},
-            "followups": [],
-            "safety_flags": [],
-            "confidence": 0.0,
-            "reason": "",
-            "carryover": dict(carryover_input),
-            "controller_llm_ms": 0.0,
-            "controller_error": "no_api_key",
-            "controller_retry": False,
-        }
-        return result
 
     def _build_payload(
         *,
@@ -555,6 +542,23 @@ def route_dialogue_controller(
             ),
         }
         return payload
+
+    if not os.environ.get("OPENAI_API_KEY"):
+        result["error"] = "no_api_key"
+        result["payload"] = _build_payload(
+            controller_class=None,
+            intents=[],
+            slots={},
+            followups=[],
+            safety_flags=[],
+            confidence=0.0,
+            reason="",
+            carryover_payload=carryover_input,
+            controller_llm_ms=0.0,
+            controller_error="no_api_key",
+            controller_retry_flag=False,
+        )
+        return result
 
     if not normalized:
         result["error"] = "empty_message"
