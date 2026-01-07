@@ -11111,6 +11111,47 @@ async def _handle_webhook_payload(
                     llm_primary_failed = True
                     llm_primary_reason = "low_confidence"
                 else:
+                    router_meta = None
+                    router_output = None
+                    router_output_class = None
+                    if isinstance(class_router_result, dict):
+                        router_meta = class_router_result.get("router")
+                        if isinstance(router_meta, dict):
+                            router_output = router_meta.get("output")
+                            if isinstance(router_output, dict):
+                                router_output_class = router_output.get("class")
+                    if (
+                        router_output_class == "out_of_domain"
+                        and not (class_router_result.get("in_signals") or [])
+                        and not expected_reply_shortcircuit
+                    ):
+                        bot_response = OUT_OF_DOMAIN_RESPONSE
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "out_of_domain",
+                                "decision": "router_low_confidence",
+                                "state": conversation.state,
+                            },
+                        )
+                        _record_message_decision_meta(
+                            saved_message,
+                            action="out_of_domain",
+                            intent="out_of_domain",
+                            source="router_low_confidence",
+                            fast_intent=False,
+                        )
+                        bot_response, sent = _send_and_save(bot_response)
+                        result_message = (
+                            "Router OOD reply sent" if sent else "Router OOD reply send failed"
+                        )
+                        db.commit()
+                        return WebhookResponse(
+                            success=True,
+                            message=result_message,
+                            conversation_id=conversation.id,
+                            bot_response=bot_response,
+                        )
                     if _looks_like_time_only_request(message_text):
                         bot_response = MSG_EXPECTED_SERVICE_OFF_TOPIC
                         _record_decision_trace(
