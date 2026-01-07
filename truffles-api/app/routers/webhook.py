@@ -9861,13 +9861,13 @@ async def _handle_webhook_payload(
                             finalize_response=_finalize_bot_response,
                         )
                     elif clarify_guard_reason is None:
-                        _register_clarify_attempt(
-                            conversation=conversation,
-                            saved_message=saved_message,
-                            intent="booking",
-                            now=now,
-                            reason="booking_prompt",
-                        )
+                            _register_clarify_attempt(
+                                conversation=conversation,
+                                saved_message=saved_message,
+                                intent="booking",
+                                now=now,
+                                reason="booking_prompt",
+                            )
                 _record_decision_trace(
                     conversation,
                     {
