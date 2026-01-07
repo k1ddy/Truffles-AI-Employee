@@ -437,6 +437,10 @@ def classify_intent(message: str) -> Intent:
         if is_human_request_message(message):
             return Intent.HUMAN_REQUEST
 
+        if not os.environ.get("OPENAI_API_KEY"):
+            logger.info("Intent classification skipped: OPENAI_API_KEY missing")
+            return Intent.OTHER
+
         llm = get_llm_provider()
 
         prompt = CLASSIFY_PROMPT.format(message=message)
