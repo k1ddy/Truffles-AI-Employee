@@ -53,26 +53,24 @@ from app.services.conversation_service import (
 )
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
+    _detect_promotion_intent,
+    _has_duration_signal,
+    _has_price_signal,
     _match_service,
+    _normalize_text as _normalize_service_text,
     build_consult_reply,
     build_info_combined_reply,
     build_quiet_hours_notice,
     compose_multi_truth_reply,
     format_reply_from_truth,
-    _detect_promotion_intent,
     get_demo_salon_decision,
     get_demo_salon_price_item,
     get_demo_salon_price_reply,
     get_demo_salon_service_decision,
     get_demo_salon_service_hint,
-    _has_duration_signal,
-    _has_price_signal,
     load_yaml_truth,
     semantic_question_type,
     semantic_service_match,
-)
-from app.services.demo_salon_knowledge import (
-    _normalize_text as _normalize_service_text,
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
