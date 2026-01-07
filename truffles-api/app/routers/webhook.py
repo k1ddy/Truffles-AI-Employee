@@ -108,6 +108,9 @@ _router_sla_counts = {"attempts": 0, "fallbacks": 0, "timeouts": 0}
 _router_fallback_flag_threshold = 0.1
 ROUTER_SIGNAL_CONFIDENCE_BONUS = 0.1
 ROUTER_SIGNAL_CONFIDENCE_FLOOR = 0.2
+CONTROLLER_CONFIDENCE_THRESHOLD = float(
+    os.getenv("CONTROLLER_CONFIDENCE_THRESHOLD", "0.3") or 0.3
+)
 
 
 def _update_router_sla(*, attempted: bool, fallback: bool, timeout: bool) -> dict:
@@ -3773,13 +3776,19 @@ def _resolve_class_router_result(
         if isinstance(raw_goal, str):
             controller_goal = raw_goal.strip()
 
+    controller_confidence_value = controller_confidence
+    controller_low_confidence = bool(
+        isinstance(controller_confidence_value, (int, float))
+        and controller_confidence_value < CONTROLLER_CONFIDENCE_THRESHOLD
+    )
+
     controller_fallback_reason = None
     controller_error_normalized = controller_error if isinstance(controller_error, str) else None
     controller_error_normalized = controller_error_normalized.strip() if controller_error_normalized else None
     if controller_error_normalized:
         controller_fallback_reason = _normalize_controller_fallback_reason(error=controller_error_normalized)
 
-    if controller_used and controller_class:
+    if controller_used and controller_class and not controller_low_confidence:
         result["classes"] = [controller_class]
         info_controller_intents = [intent for intent in controller_intents if intent in INFO_INTENTS]
         if controller_class == "info_bundle":
@@ -3788,6 +3797,10 @@ def _resolve_class_router_result(
         else:
             result["intents"] = sorted(info_controller_intents)
         controller_fallback_reason = None
+    elif controller_used and controller_class and controller_low_confidence:
+        controller_used = False
+        controller_used_reason = "low_confidence"
+        controller_fallback_reason = "low_confidence"
     elif not controller_used and isinstance(controller_fallback, str) and controller_fallback != "skipped":
         controller_fallback_reason = controller_fallback_reason or controller_fallback
 
@@ -3803,6 +3816,7 @@ def _resolve_class_router_result(
         "used_reason": controller_used_reason,
         "sla": controller_sla,
         "goal": controller_goal,
+        "low_confidence": controller_low_confidence,
     }
     result["controller_fallback_reason"] = controller_fallback_reason
     # Backward-compat for downstream callers still keyed on router
