@@ -7814,11 +7814,17 @@ async def _handle_webhook_payload(
     )
     carryover_followup = _looks_like_carryover_followup(message_text)
     allow_service_carryover = bool(carryover_followup and not basic_info_message)
+    preserve_info_carryover = bool(
+        not os.environ.get("OPENAI_API_KEY")
+        and isinstance(class_carryover, dict)
+        and class_carryover.get("class") == "info_bundle"
+        and class_carryover.get("info_sections")
+    )
     if not allow_service_carryover:
         existing_service_carryover = _get_service_carryover(
             context_manager, message_count=message_count
         )
-        if basic_info_message or class_carryover or existing_service_carryover:
+        if (basic_info_message or class_carryover or existing_service_carryover) and not preserve_info_carryover:
             carryover_reason = "basic_info_lock" if basic_info_message else "no_followup"
             if saved_message:
                 _update_message_decision_metadata(
@@ -7836,7 +7842,8 @@ async def _handle_webhook_payload(
                     "reason": carryover_reason,
                 },
             )
-        class_carryover = None
+        if not preserve_info_carryover:
+            class_carryover = None
     consult_interrupt_intents = (
         intent_decomp_set & CONSULT_INTERRUPT_INTENTS if intent_decomp_used else set()
     )
@@ -10868,6 +10875,21 @@ async def _handle_webhook_payload(
                             clarify_reason = "missing_service_query"
                 if clarify_reason:
                     _update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})
+            decision_meta = decision.meta if isinstance(getattr(decision, "meta", None), dict) else {}
+            info_carryover_intents: list[str] = []
+            if decision.intent in INFO_INTENTS:
+                info_carryover_intents.append(decision.intent)
+            if decision.intent in {"parking", "guest_policy"}:
+                info_carryover_intents.append(decision.intent)
+            if info_carryover_intents or decision_meta.get("info_sections"):
+                _maybe_store_class_carryover(
+                    conversation=conversation,
+                    class_name="info_bundle",
+                    intents=info_carryover_intents,
+                    info_meta=decision_meta,
+                    message_count=message_count,
+                    reason="truth_gate",
+                )
             _maybe_store_service_carryover(
                 conversation=conversation,
                 service_meta=decision.meta if isinstance(decision.meta, dict) else None,
@@ -11041,12 +11063,25 @@ async def _handle_webhook_payload(
     for item in class_router_result.get("carryover_intents") or []:
         if isinstance(item, str) and item.strip():
             info_intents_for_reply.add(item.strip().casefold())
+    carryover_sections = (
+        [item for item in class_router_result.get("carryover_info_sections") or [] if isinstance(item, str)]
+        if isinstance(class_router_result, dict)
+        else []
+    )
+    for section in carryover_sections:
+        normalized_section = section.strip().casefold()
+        if normalized_section in {"location", "hours"}:
+            info_intents_for_reply.add(normalized_section)
     info_signals = info_class_meta.get("info_signals") if isinstance(info_class_meta, dict) else None
     base_info_requested = bool(
         {"location", "hours"} & info_intents_for_reply
         or (
             isinstance(info_signals, dict)
             and (info_signals.get("parking") or info_signals.get("guest"))
+        )
+        or any(
+            isinstance(section, str) and section.strip().casefold() in {"location", "hours", "parking", "guest_policy"}
+            for section in carryover_sections
         )
     )
     if (
@@ -11058,8 +11093,13 @@ async def _handle_webhook_payload(
         and base_info_requested
         and "info_bundle" in (class_router_result.get("classes") or [])
     ):
-        include_parking = bool(info_signals.get("parking")) if isinstance(info_signals, dict) else False
-        include_guest = bool(info_signals.get("guest")) if isinstance(info_signals, dict) else False
+        carryover_sections_normalized = {section.strip().casefold() for section in carryover_sections}
+        include_parking = (
+            bool(info_signals.get("parking")) if isinstance(info_signals, dict) else False
+        ) or "parking" in carryover_sections_normalized
+        include_guest = (
+            bool(info_signals.get("guest")) if isinstance(info_signals, dict) else False
+        ) or "guest_policy" in carryover_sections_normalized
         base_bundle_reply, base_bundle_meta = build_info_combined_reply(
             include_parking=include_parking,
             include_guest=include_guest,
