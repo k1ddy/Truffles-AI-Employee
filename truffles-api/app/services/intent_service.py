@@ -507,20 +507,20 @@ def route_dialogue_controller(
     total_elapsed_ms = 0.0
     if not os.environ.get("OPENAI_API_KEY"):
         result["error"] = "no_api_key"
-        result["payload"] = {
-            "class": None,
-            "goal": None,
-            "intents": [],
-            "slots": {},
-            "followups": [],
-            "safety_flags": [],
-            "confidence": 0.0,
-            "reason": "",
-            "carryover": dict(carryover_input),
-            "controller_llm_ms": 0.0,
-            "controller_error": "no_api_key",
-            "controller_retry": False,
-        }
+        result["payload"] = _build_payload(
+            controller_class=None,
+            goal=None,
+            intents=[],
+            slots={},
+            followups=[],
+            safety_flags=[],
+            confidence=0.0,
+            reason="",
+            carryover_payload=carryover_input,
+            controller_llm_ms=0.0,
+            controller_error="no_api_key",
+            controller_retry_flag=False,
+        )
         return result
 
     def _build_payload(
