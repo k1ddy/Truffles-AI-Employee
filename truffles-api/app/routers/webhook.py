@@ -9271,6 +9271,11 @@ async def _handle_webhook_payload(
                 context = _set_booking_context(context, booking_state)
                 _set_conversation_context(conversation, context)
                 booking_expected = _expected_reply_for_booking_question(booking_state.get("last_question"))
+                booking_prompt_repeat = bool(
+                    booking_expected
+                    and expected_reply_type == booking_expected
+                    and expected_reply_matched is False
+                )
                 if prompt and booking_expected:
                     context = _set_expected_reply_context(
                         conversation=conversation,
@@ -9330,7 +9335,7 @@ async def _handle_webhook_payload(
                         )
                         prompt = None
 
-                if prompt and not booking_time_service_interrupt and not booking_interrupt_info:
+                if prompt and not booking_time_service_interrupt and not booking_interrupt_info and booking_prompt_repeat:
                     context_manager = _get_context_manager(context)
                     clarify_guard_reason = _booking_clarify_guard_reason(
                         booking_interrupt_info=booking_interrupt_info,
@@ -9588,6 +9593,11 @@ async def _handle_webhook_payload(
             context = _set_booking_context(context, booking_state)
             _set_conversation_context(conversation, context)
             booking_expected = _expected_reply_for_booking_question(booking_state.get("last_question"))
+            booking_prompt_repeat = bool(
+                booking_expected
+                and expected_reply_type == booking_expected
+                and expected_reply_matched is False
+            )
             if prompt and booking_expected:
                 context = _set_expected_reply_context(
                     conversation=conversation,
@@ -9598,7 +9608,7 @@ async def _handle_webhook_payload(
                     now=now,
                 )
 
-            if prompt:
+            if prompt and booking_prompt_repeat:
                 context_manager = _get_context_manager(context)
                 clarify_guard_reason = _booking_clarify_guard_reason(
                     booking_interrupt_info=False,
