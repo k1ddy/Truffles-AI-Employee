@@ -3811,11 +3811,15 @@ def _resolve_class_router_result(
             result["intents"] = sorted(info_controller_intents)
         controller_fallback_reason = None
     elif controller_used and controller_class and controller_low_confidence:
-        controller_used = False
+        # Low confidence: keep deterministic class_router result, but mark fallback_reason for observability.
         controller_used_reason = "low_confidence"
         controller_fallback_reason = "low_confidence"
+        controller_used = True
     elif not controller_used and isinstance(controller_fallback, str) and controller_fallback != "skipped":
         controller_fallback_reason = controller_fallback_reason or controller_fallback
+
+    if controller_fallback_reason and not controller_low_confidence:
+        controller_low_confidence = True
 
     result["controller"] = {
         "used": bool(controller_used),
@@ -8241,6 +8245,7 @@ async def _handle_webhook_payload(
             controller_state["fallback_reason"] = _normalize_controller_fallback_reason(
                 error=controller_state["error"]
             )
+            controller_state["confidence"] = 0.0
             controller_output = controller_result.get("payload") if isinstance(controller_result, dict) else None
             if isinstance(controller_output, dict):
                 controller_state["output"] = _ensure_controller_output_meta(
@@ -10194,19 +10199,23 @@ async def _handle_webhook_payload(
             intent_decomp_explicit_query = (
                 intent_decomp_service_query if intent_decomp_source != "context" else None
             )
-            explicit_service_signal = bool(
-                intent_decomp_explicit_query or router_service_query or alias_service_query
-            )
-            service_carryover_meta = _get_service_carryover(
-                context_manager, message_count=message_count
-            )
-            carryover_service_query = None
-            if isinstance(service_carryover_meta, dict):
-                carryover_service_query = service_carryover_meta.get("service_query")
-            guest_policy_lock = guest_policy_class
-            info_bundle_lock = info_class and not explicit_service_signal
-            info_semantic_lock = guest_policy_lock or info_bundle_lock
-            info_semantic_meta: dict[str, Any] = {}
+        controller_low_confidence = False
+        controller_state = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
+        if isinstance(controller_state, dict):
+            controller_low_confidence = bool(controller_state.get("low_confidence"))
+        explicit_service_signal = bool(
+            intent_decomp_explicit_query or router_service_query or alias_service_query
+        )
+        service_carryover_meta = _get_service_carryover(
+            context_manager, message_count=message_count
+        )
+        carryover_service_query = None
+        if isinstance(service_carryover_meta, dict):
+            carryover_service_query = service_carryover_meta.get("service_query")
+        guest_policy_lock = guest_policy_class
+        info_bundle_lock = info_class and not (explicit_service_signal or intent_decomp_explicit_query or router_service_query)
+        info_semantic_lock = guest_policy_lock or info_bundle_lock or controller_low_confidence
+        info_semantic_meta: dict[str, Any] = {}
             if info_semantic_lock:
                 if guest_policy_lock:
                     info_class_intents_for_reply.discard("pricing")
@@ -10216,7 +10225,12 @@ async def _handle_webhook_payload(
                         info_class_intents_for_reply.discard("pricing")
                     if "duration" not in base_info_intents:
                         info_class_intents_for_reply.discard("duration")
-                skip_reason = "guest_policy_lock" if guest_policy_lock else "info_bundle_lock"
+                if guest_policy_lock:
+                    skip_reason = "guest_policy_lock"
+                elif info_bundle_lock:
+                    skip_reason = "info_bundle_lock"
+                else:
+                    skip_reason = "controller_low_confidence"
                 info_semantic_meta = {
                     "info_semantic_match_skipped": True,
                     "info_semantic_match_skip_reason": skip_reason,
@@ -10230,11 +10244,13 @@ async def _handle_webhook_payload(
                             "service_query_score": 0.0,
                         }
                     )
-            force_hours_followup = (
-                carryover_has_hours
-                and _looks_like_hours_followup(message_text)
-                and not explicit_service_signal
-            )
+            if info_semantic_lock:
+                carryover_service_query = None
+        force_hours_followup = (
+            carryover_has_hours
+            and _looks_like_hours_followup(message_text)
+            and not explicit_service_signal
+        )
             info_service_query = None
             if not info_semantic_lock:
                 if alias_service_query:
