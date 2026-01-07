@@ -10166,6 +10166,7 @@ async def _handle_webhook_payload(
                     ):
                         skip_info_class_for_service = True
         intent_decomp_explicit_query = None
+        router_service_query = None
         if info_class and info_class_intents_for_reply and not skip_info_class_for_service:
             carryover_sections = class_router_result.get("carryover_info_sections")
             carryover_has_hours = False
@@ -10174,7 +10175,6 @@ async def _handle_webhook_payload(
                     if isinstance(section, str) and section.strip().casefold() == "hours":
                         carryover_has_hours = True
                         break
-            router_service_query = None
             router_state = class_router_result.get("router") if isinstance(class_router_result, dict) else None
             router_output = router_state.get("output") if isinstance(router_state, dict) else None
             if isinstance(router_output, dict):
