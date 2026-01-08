@@ -1,0 +1,235 @@
+"""Session memory helpers for tracking question/answer context."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+from app.models import Conversation, Message
+from app.routers.webhook.trace import _record_decision_trace, _update_message_decision_metadata
+from app.services.ai_service import normalize_for_matching
+
+
+def _get_session_memory(context: dict) -> dict:
+    from . import _legacy as legacy
+
+    payload = context.get(legacy.SESSION_MEMORY_KEY) if isinstance(context, dict) else None
+    if isinstance(payload, dict):
+        return dict(payload)
+    return {}
+
+
+def _set_session_memory(context: dict, memory: dict | None) -> dict:
+    from . import _legacy as legacy
+
+    context = dict(context)
+    if memory:
+        context[legacy.SESSION_MEMORY_KEY] = memory
+    else:
+        context.pop(legacy.SESSION_MEMORY_KEY, None)
+    return context
+
+
+def _parse_session_memory_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _is_session_memory_expired(memory: dict, now: datetime) -> bool:
+    from . import _legacy as legacy
+
+    ttl_hours = memory.get("ttl_hours", legacy.SESSION_MEMORY_TTL_HOURS)
+    try:
+        ttl_hours = int(ttl_hours)
+    except (TypeError, ValueError):
+        ttl_hours = legacy.SESSION_MEMORY_TTL_HOURS
+    last_updated_at = _parse_session_memory_time(memory.get("last_updated_at"))
+    if not last_updated_at:
+        return True
+    return (now - last_updated_at) > timedelta(hours=max(1, ttl_hours))
+
+
+def _should_reset_session_memory(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    from . import _legacy as legacy
+
+    return any(phrase in normalized for phrase in legacy.SESSION_MEMORY_RESET_PHRASES)
+
+
+def _is_session_reset_only_message(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    from . import _legacy as legacy
+
+    return normalized in legacy.SESSION_MEMORY_RESET_PHRASES
+
+
+def _session_memory_snapshot(memory: dict) -> dict:
+    pending_slots = memory.get("pending_slots")
+    if isinstance(pending_slots, dict):
+        pending_keys = sorted(
+            key for key in pending_slots.keys() if isinstance(key, str) and key.strip()
+        )
+    else:
+        pending_keys = []
+    goal_stack = memory.get("goal_stack")
+    if isinstance(goal_stack, list):
+        cleaned_goals = [item for item in goal_stack if isinstance(item, str) and item.strip()]
+    else:
+        cleaned_goals = []
+    unanswered = memory.get("unanswered_questions")
+    if isinstance(unanswered, list):
+        unanswered_count = len([item for item in unanswered if isinstance(item, str) and item.strip()])
+    else:
+        unanswered_count = 0
+    return {
+        "last_question_type": memory.get("last_question_type"),
+        "active_goal": memory.get("active_goal"),
+        "goal_stack_depth": len(cleaned_goals),
+        "goal_stack_top": cleaned_goals[-1] if cleaned_goals else None,
+        "pending_slots": pending_keys,
+        "unanswered_questions_count": unanswered_count,
+    }
+
+
+def _record_session_memory_update(
+    conversation: Conversation,
+    saved_message: Message | None,
+    *,
+    memory: dict,
+    reason: str,
+) -> None:
+    snapshot = _session_memory_snapshot(memory)
+    trace = {"stage": "session_memory", "decision": "update", "reason": reason}
+    trace.update(snapshot)
+    _record_decision_trace(conversation, trace)
+    if saved_message:
+        _update_message_decision_metadata(saved_message, {"session_memory_update": snapshot})
+
+
+def _reset_session_memory(
+    *,
+    context: dict,
+    context_manager: dict,
+    reason: str,
+    now: datetime,
+) -> tuple[dict, dict, dict]:
+    from . import _legacy as legacy
+
+    manager = dict(context_manager)
+    manager.pop(legacy.CLASS_CARRYOVER_KEY, None)
+    manager.pop(legacy.SERVICE_CARRYOVER_KEY, None)
+    manager.pop(legacy.CONSULT_CONTEXT_KEY, None)
+    context = legacy._set_context_manager(context, manager)
+    context = legacy._set_expected_reply_type(context, None)
+    context = legacy._set_intent_queue(context, [])
+    context = legacy._set_booking_context(context, {"active": False})
+    context = legacy._clear_service_hint(context)
+    context = _set_session_memory(context, None)
+    memory_payload = {"last_updated_at": now.isoformat(), "ttl_hours": legacy.SESSION_MEMORY_TTL_HOURS}
+    return context, manager, {"reason": reason, **_session_memory_snapshot(memory_payload)}
+
+
+def _update_session_memory_on_question(
+    context: dict,
+    *,
+    expected_reply_type: str,
+    active_goal: str | None,
+    now: datetime,
+) -> tuple[dict, dict]:
+    from . import _legacy as legacy
+
+    memory = _get_session_memory(context)
+    unanswered = memory.get("unanswered_questions")
+    unanswered_list = (
+        [item for item in unanswered if isinstance(item, str) and item.strip()]
+        if isinstance(unanswered, list)
+        else []
+    )
+    if expected_reply_type not in unanswered_list:
+        unanswered_list.append(expected_reply_type)
+    memory["last_question_type"] = expected_reply_type
+    if active_goal:
+        memory["active_goal"] = active_goal
+        goal_stack = memory.get("goal_stack")
+        if not isinstance(goal_stack, list):
+            goal_stack = []
+        if not goal_stack or goal_stack[-1] != active_goal:
+            goal_stack.append(active_goal)
+        memory["goal_stack"] = goal_stack[-3:]
+    memory["unanswered_questions"] = unanswered_list
+    memory["last_updated_at"] = now.isoformat()
+    memory["ttl_hours"] = legacy.SESSION_MEMORY_TTL_HOURS
+    context = _set_session_memory(context, memory)
+    return context, memory
+
+
+def _update_session_memory_on_answer(
+    context: dict,
+    *,
+    expected_reply_type: str,
+    value: str,
+    now: datetime,
+) -> tuple[dict, dict]:
+    from . import _legacy as legacy
+
+    memory = _get_session_memory(context)
+    pending_slots = memory.get("pending_slots")
+    pending_map = dict(pending_slots) if isinstance(pending_slots, dict) else {}
+    unanswered = memory.get("unanswered_questions")
+    unanswered_list = (
+        [item for item in unanswered if isinstance(item, str) and item.strip()]
+        if isinstance(unanswered, list)
+        else []
+    )
+    if expected_reply_type in unanswered_list:
+        unanswered_list = [item for item in unanswered_list if item != expected_reply_type]
+    slot_map = {
+        legacy.EXPECTED_REPLY_SERVICE: "service",
+        legacy.EXPECTED_REPLY_TIME: "datetime",
+        legacy.EXPECTED_REPLY_NAME: "name",
+    }
+    slot_key = slot_map.get(expected_reply_type)
+    if slot_key and isinstance(value, str) and value.strip():
+        pending_map[slot_key] = value.strip()
+    memory["pending_slots"] = pending_map
+    memory["unanswered_questions"] = unanswered_list
+    memory["last_updated_at"] = now.isoformat()
+    memory["ttl_hours"] = legacy.SESSION_MEMORY_TTL_HOURS
+    context = _set_session_memory(context, memory)
+    return context, memory
+
+
+def _update_session_memory_goal(
+    context: dict,
+    *,
+    active_goal: str,
+    now: datetime,
+) -> tuple[dict, dict]:
+    from . import _legacy as legacy
+
+    memory = _get_session_memory(context)
+    memory["active_goal"] = active_goal
+    goal_stack = memory.get("goal_stack")
+    if not isinstance(goal_stack, list):
+        goal_stack = []
+    if not goal_stack or goal_stack[-1] != active_goal:
+        goal_stack.append(active_goal)
+    memory["goal_stack"] = goal_stack[-3:]
+    memory["last_updated_at"] = now.isoformat()
+    memory["ttl_hours"] = legacy.SESSION_MEMORY_TTL_HOURS
+    context = _set_session_memory(context, memory)
+    return context, memory
