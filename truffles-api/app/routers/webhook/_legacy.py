@@ -23,6 +23,7 @@ from starlette.requests import ClientDisconnect
 from app.database import get_db
 from app.logging_config import get_logger
 from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
+from app.routers.webhook.response import _apply_quiet_hours_notice, _maybe_append_booking_cta
 from app.schemas.webhook import WebhookBody, WebhookRequest, WebhookResponse
 from app.services.ai_service import (
     ACKNOWLEDGEMENT_RESPONSE,
@@ -93,7 +94,6 @@ from app.services.outbox_service import build_inbound_message_id, enqueue_outbox
 from app.services.state_machine import ConversationState
 from app.services.state_service import escalate_to_pending, manager_resolve
 from app.services.telegram_service import TelegramService
-from app.routers.webhook.response import _apply_quiet_hours_notice, _maybe_append_booking_cta
 
 logger = get_logger("webhook")
 
