@@ -9,6 +9,7 @@
 """
 import os
 import subprocess
+from datetime import datetime, timezone
 
 def run_command(command):
     return subprocess.run(command, capture_output=True, text=True)
@@ -35,6 +36,17 @@ def resolve_container_name():
     if API_CONTAINER_HINT in names:
         return API_CONTAINER_HINT, ""
     return names[0], ""
+
+def run_docker_exec(container_name, command):
+    return run_command(["docker", "exec", "-i", container_name, "/bin/sh", "-lc", command])
+
+def run_curl(url, headers=None):
+    cmd = ["curl", "-s"]
+    if headers:
+        for key, value in headers.items():
+            cmd.extend(["-H", f"{key}: {value}"])
+    cmd.append(url)
+    return run_command(cmd)
 
 print("=" * 60)
 print("ДИАГНОСТИКА TRUFFLES")
@@ -74,11 +86,15 @@ else:
 
 if status == "running":
     env_checks = [
+        ("TEST_MODE", True),
+        ("OUTBOUND_ALLOWLIST_JIDS", True),
+        ("OUTBOX_WORKER_ENABLED", True),
         ("PUBLIC_BASE_URL", True),
         ("MEDIA_SIGNING_SECRET", False),
         ("MEDIA_URL_TTL_SECONDS", True),
         ("MEDIA_CLEANUP_TTL_DAYS", True),
         ("CHATFLOW_MEDIA_TIMEOUT_SECONDS", True),
+        ("ALERTS_ADMIN_TOKEN", False),
     ]
     for name, show_value in env_checks:
         if show_value:
@@ -91,9 +107,7 @@ if status == "running":
                 f'if [ -n "${name}" ]; then echo "{name}=SET"; '
                 f'else echo "{name}=MISSING"; fi'
             )
-        result = run_command(
-            ["docker", "exec", "-i", container_name, "/bin/sh", "-lc", cmd]
-        )
+        result = run_docker_exec(container_name, cmd)
         if result.returncode == 0:
             print(result.stdout.strip())
         else:
@@ -140,6 +154,52 @@ if result.returncode == 0:
     parts = result.stdout.strip().split('|')
     if len(parts) >= 3:
         print(f"Handovers: {parts[0].strip()} total, {parts[1].strip()} pending, {parts[2].strip()} active")
+
+print("\n📮 OUTBOX STATUS:")
+print("-" * 40)
+result = subprocess.run(
+    [
+        'docker',
+        'exec',
+        '-i',
+        'truffles_postgres_1',
+        'psql',
+        '-U',
+        db_user,
+        '-d',
+        'chatbot',
+        '-t',
+        '-c',
+        "SELECT status, COUNT(*) FROM outbox_messages GROUP BY status;",
+    ],
+    capture_output=True,
+    text=True,
+)
+if result.returncode == 0:
+    print(result.stdout.strip())
+
+print("\n🧩 DECISION_META (last 3):")
+print("-" * 40)
+result = subprocess.run(
+    [
+        'docker',
+        'exec',
+        '-i',
+        'truffles_postgres_1',
+        'psql',
+        '-U',
+        db_user,
+        '-d',
+        'chatbot',
+        '-t',
+        '-c',
+        "SELECT metadata->'decision_meta' FROM messages ORDER BY created_at DESC LIMIT 3;",
+    ],
+    capture_output=True,
+    text=True,
+)
+if result.returncode == 0:
+    print(result.stdout.strip())
 
 print("\n🧾 ПОСЛЕДНИЕ HANDOVERS:")
 print("-" * 40)
@@ -189,5 +249,40 @@ result = subprocess.run(
 )
 if result.returncode == 0:
     print(result.stdout.strip())
+
+print("\n🌐 ADMIN ENDPOINTS:")
+print("-" * 40)
+version_result = run_curl("http://localhost:8000/admin/version")
+if version_result.returncode == 0 and version_result.stdout.strip():
+    print(f"/admin/version: {version_result.stdout.strip()}")
+else:
+    print("/admin/version: FAILED")
+
+health_result = run_curl("http://localhost:8000/admin/health")
+if health_result.returncode == 0 and health_result.stdout.strip():
+    print(f"/admin/health: {health_result.stdout.strip()}")
+else:
+    print("/admin/health: FAILED")
+
+admin_token = ""
+if container_name:
+    token_result = run_docker_exec(
+        container_name, 'printf "%s" "${ALERTS_ADMIN_TOKEN:-}"'
+    )
+    if token_result.returncode == 0:
+        admin_token = token_result.stdout.strip()
+
+if admin_token:
+    metric_date = datetime.now(timezone.utc).date().isoformat()
+    metrics_result = run_curl(
+        f"http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date={metric_date}",
+        headers={"X-Admin-Token": admin_token},
+    )
+    if metrics_result.returncode == 0 and metrics_result.stdout.strip():
+        print(f"/admin/metrics: {metrics_result.stdout.strip()}")
+    else:
+        print("/admin/metrics: FAILED")
+else:
+    print("/admin/metrics: SKIPPED (ALERTS_ADMIN_TOKEN missing)")
 
 print("\n" + "=" * 60)
