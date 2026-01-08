@@ -4,7 +4,6 @@ import hashlib
 import mimetypes
 import os
 import re
-import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,12 +12,10 @@ from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import FileResponse
+from fastapi import HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.database import get_db
 from app.logging_config import get_logger
 from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
 from app.routers.webhook.booking import (
@@ -160,7 +157,6 @@ from app.routers.webhook.media import (
     _update_message_asr_metadata,
     _update_message_media_metadata,
 )
-from app.routers.webhook.parsing import _parse_webhook_request
 from app.routers.webhook.pending import (
     _build_pending_resume_snapshot,
     _get_pending_resume,
@@ -190,6 +186,8 @@ from app.routers.webhook.policy import (
     _should_run_truth_gate,
 )
 from app.routers.webhook.response import _apply_quiet_hours_notice, _maybe_append_booking_cta
+from app.routers.webhook.router_sla import _update_router_sla
+from app.routers.webhook.secrets import _get_client_webhook_secret
 from app.routers.webhook.session_memory import (
     _get_session_memory,
     _is_session_memory_expired,
@@ -216,7 +214,7 @@ from app.routers.webhook.trace import (
     _record_message_decision_meta,
     _update_message_decision_metadata,
 )
-from app.schemas.webhook import WebhookBody, WebhookRequest, WebhookResponse
+from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.ai_service import (
     ACKNOWLEDGEMENT_RESPONSE,
     BOT_STATUS_RESPONSE,
@@ -239,7 +237,7 @@ from app.services.ai_service import (
     transcribe_audio_with_fallback,
 )
 from app.services.alert_service import alert_warning
-from app.services.chatflow_service import send_bot_response, verify_signed_media_path
+from app.services.chatflow_service import send_bot_response
 from app.services.conversation_service import (
     get_or_create_conversation,
     get_or_create_user,
@@ -282,53 +280,17 @@ from app.services.intent_service import (
     should_escalate,
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
-from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message, mark_outbox_status
+from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.state_machine import ConversationState
 from app.services.state_service import escalate_to_pending, manager_resolve
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("webhook")
-
-router = APIRouter()
-_router_sla_lock = threading.Lock()
-_router_sla_counts = {"attempts": 0, "fallbacks": 0, "timeouts": 0}
-_router_fallback_flag_threshold = 0.1
 ROUTER_SIGNAL_CONFIDENCE_BONUS = 0.1
 ROUTER_SIGNAL_CONFIDENCE_FLOOR = 0.2
 CONTROLLER_CONFIDENCE_THRESHOLD = float(
     os.getenv("CONTROLLER_CONFIDENCE_THRESHOLD", "0.3") or 0.3
 )
-
-
-def _update_router_sla(*, attempted: bool, fallback: bool, timeout: bool) -> dict:
-    if not attempted:
-        return {
-            "attempts": 0,
-            "fallbacks": 0,
-            "timeouts": 0,
-            "fallback_rate": 0.0,
-            "timeout_rate": 0.0,
-            "fallback_rate_flag": False,
-        }
-    with _router_sla_lock:
-        _router_sla_counts["attempts"] += 1
-        if fallback:
-            _router_sla_counts["fallbacks"] += 1
-        if timeout:
-            _router_sla_counts["timeouts"] += 1
-        attempts = _router_sla_counts["attempts"]
-        fallbacks = _router_sla_counts["fallbacks"]
-        timeouts = _router_sla_counts["timeouts"]
-    fallback_rate = fallbacks / max(attempts, 1)
-    timeout_rate = timeouts / max(attempts, 1)
-    return {
-        "attempts": attempts,
-        "fallbacks": fallbacks,
-        "timeouts": timeouts,
-        "fallback_rate": round(fallback_rate, 4),
-        "timeout_rate": round(timeout_rate, 4),
-        "fallback_rate_flag": fallback_rate > _router_fallback_flag_threshold,
-    }
 
 
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
@@ -375,25 +337,6 @@ STYLE_REFERENCE_PATTERNS = (
     re.compile(r"\bпохоже на\b"),
 )
 STYLE_REFERENCE_HINT_TOKENS = ("фото", "картин", "референс", "реф", "пример")
-
-
-@router.get("/media/{media_path:path}")
-async def serve_media(media_path: str, expires: int, sig: str):
-    """Serve locally stored media via signed URLs."""
-    normalized_path = (media_path or "").strip().lstrip("/")
-    if not normalized_path:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing media path")
-    if not verify_signed_media_path(normalized_path, expires, sig):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired signature")
-
-    base_dir = Path(MEDIA_STORAGE_DEFAULT_DIR).resolve()
-    target_path = (base_dir / normalized_path).resolve()
-    if base_dir not in target_path.parents and target_path != base_dir:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid media path")
-    if not target_path.exists() or not target_path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found")
-
-    return FileResponse(target_path)
 
 
 def _find_message_by_message_id(db: Session, client_id: UUID, message_id: str) -> Message | None:
@@ -1724,26 +1667,6 @@ def should_offer_low_confidence_retry(conversation: Conversation, now: datetime)
     return (now - offered_at) > timedelta(minutes=LOW_CONFIDENCE_RETRY_WINDOW_MINUTES)
 
 
-def _get_client_webhook_secret(settings: ClientSettings | None) -> str | None:
-    if not settings:
-        return None
-    secret = getattr(settings, "webhook_secret", None)
-    if not secret:
-        return None
-    cleaned = str(secret).strip()
-    return cleaned or None
-
-
-def _get_request_webhook_secret(request: Request) -> str | None:
-    header_secret = request.headers.get("X-Webhook-Secret")
-    if header_secret:
-        return header_secret.strip()
-    query_secret = request.query_params.get("webhook_secret")
-    if query_secret:
-        return query_secret.strip()
-    return None
-
-
 async def _process_outbox_rows(
     db: Session,
     rows: list[dict],
@@ -1758,68 +1681,6 @@ async def _process_outbox_rows(
         rows,
         max_attempts=max_attempts,
         retry_backoff_seconds=retry_backoff_seconds,
-    )
-
-
-@router.post("/webhook/debug")
-async def debug_webhook(request: Request):
-    """Debug endpoint to see raw request."""
-    if not _is_env_enabled(os.environ.get("DEBUG_WEBHOOK_ENABLED"), default=False):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
-    admin_token = request.headers.get("X-Admin-Token")
-    expected_token = os.environ.get("ALERTS_ADMIN_TOKEN")
-    if not expected_token or admin_token != expected_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
-    body = await request.json()
-    logger.debug(f"DEBUG webhook body: {body}")
-    return {"received": body}
-
-
-@router.post("/webhook/{client_slug}", response_model=WebhookResponse)
-async def handle_webhook_direct(client_slug: str, request: Request, db: Session = Depends(get_db)):
-    """Handle direct ChatFlow webhook without wrapper."""
-    parsed = await _parse_webhook_request(request, client_slug=client_slug)
-    if isinstance(parsed, WebhookResponse):
-        return parsed
-
-    provided_secret = _get_request_webhook_secret(request)
-    client = db.query(Client).filter(Client.name == parsed.client_slug).first()
-    if not client:
-        return WebhookResponse(success=False, message=f"Client '{parsed.client_slug}' not found")
-
-    settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
-    expected_secret = _get_client_webhook_secret(settings)
-    if expected_secret:
-        if not provided_secret or provided_secret != expected_secret:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
-    elif not provided_secret:
-        alert_warning("Webhook secret missing", {"client_slug": parsed.client_slug})
-
-    return await _handle_webhook_payload(
-        parsed,
-        db,
-        provided_secret=provided_secret,
-        enforce_secret=False,
-        enqueue_only=True,
-    )
-
-
-@router.get("/webhook/{client_slug}")
-async def handle_webhook_probe(client_slug: str):
-    """Health probe for ChatFlow UI checks; real webhooks must use POST."""
-    return {"ok": True, "message": "Use POST with JSON payload", "client_slug": client_slug}
-
-
-@router.post("/webhook", response_model=WebhookResponse)
-async def handle_webhook(payload: WebhookRequest, http_request: Request, db: Session = Depends(get_db)):
-    """Handle legacy webhook wrapper (same format as ChatFlow webhook)."""
-    provided_secret = _get_request_webhook_secret(http_request)
-    return await _handle_webhook_payload(
-        payload,
-        db,
-        provided_secret=provided_secret,
-        enforce_secret=True,
-        enqueue_only=True,
     )
 
 
