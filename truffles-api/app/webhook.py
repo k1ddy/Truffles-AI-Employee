@@ -1,3 +1,4 @@
+# LEGACY MODULE: DO NOT USE FOR NEW WEBHOOKS.
 import asyncio
 import os
 import re
