@@ -24,6 +24,12 @@ from app.database import get_db
 from app.logging_config import get_logger
 from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
 from app.routers.webhook.response import _apply_quiet_hours_notice, _maybe_append_booking_cta
+from app.routers.webhook.trace import (
+    _attach_llm_cache_flag,
+    _record_decision_trace,
+    _record_message_decision_meta,
+    _update_message_decision_metadata,
+)
 from app.schemas.webhook import WebhookBody, WebhookRequest, WebhookResponse
 from app.services.ai_service import (
     ACKNOWLEDGEMENT_RESPONSE,
@@ -1090,14 +1096,6 @@ def _update_message_asr_metadata(message: Message, updates: dict) -> None:
     message.message_metadata = metadata
 
 
-def _update_message_decision_metadata(message: Message, updates: dict) -> None:
-    metadata = dict(message.message_metadata or {})
-    decision_meta = dict(metadata.get("decision_meta") or {})
-    decision_meta.update(updates)
-    metadata["decision_meta"] = decision_meta
-    message.message_metadata = metadata
-
-
 def _router_observability_meta(*, eligible: bool, reason: str) -> dict:
     return {
         "router_eligible": bool(eligible),
@@ -1159,31 +1157,6 @@ def _ensure_rag_meta_defaults(message: Message | None) -> None:
     if "router_skipped_reason" not in decision_meta:
         updates["router_skipped_reason"] = "none"
     _update_message_decision_metadata(message, updates)
-
-
-def _record_message_decision_meta(
-    message: Message | None,
-    *,
-    action: str | None,
-    intent: str | None,
-    source: str,
-    fast_intent: bool,
-) -> None:
-    if not message:
-        return
-    _update_message_decision_metadata(
-        message,
-        {
-            "action": action,
-            "intent": intent,
-            "source": source,
-            "fast_intent": fast_intent,
-            "llm_primary_used": False,
-            "llm_used": False,
-            "llm_timeout": False,
-            "llm_cache_hit": False,
-        },
-    )
 
 
 def _resolve_backlog_language(message: Message | None) -> str:
@@ -2442,24 +2415,6 @@ def _set_expected_reply_type(context: dict, expected_reply_type: str | None) -> 
     else:
         context.pop(EXPECTED_REPLY_TYPE_KEY, None)
     return context
-
-
-def _record_decision_trace(conversation: Conversation, trace: dict) -> None:
-    context = _get_conversation_context(conversation)
-    payload = dict(trace)
-    payload["recorded_at"] = datetime.now(timezone.utc).isoformat()
-    existing = context.get(DECISION_TRACE_KEY)
-    if isinstance(existing, list):
-        trace_list = [item for item in existing if isinstance(item, dict)]
-    elif isinstance(existing, dict):
-        trace_list = [existing]
-    else:
-        trace_list = []
-    trace_list.append(payload)
-    if len(trace_list) > 12:
-        trace_list = trace_list[-12:]
-    context[DECISION_TRACE_KEY] = trace_list
-    _set_conversation_context(conversation, context)
 
 
 def _set_expected_reply_context(
@@ -4200,12 +4155,6 @@ def _handle_clarify_limit_escalation(
         conversation_id=conversation.id,
         bot_response=bot_response,
     )
-
-
-def _attach_llm_cache_flag(trace: dict, timing_context: dict | None) -> dict:
-    if timing_context and "llm_cache_hit" in timing_context:
-        trace["llm_cache_hit"] = timing_context["llm_cache_hit"]
-    return trace
 
 
 def _get_low_confidence_retry_count(context: dict) -> int:
