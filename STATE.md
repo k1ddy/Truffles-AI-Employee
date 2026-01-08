@@ -4,6 +4,31 @@
 
 ---
 
+## СЕССИОННЫЙ СНИМОК (читать первым)
+
+**NOW (1 экран)**
+- DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
+- DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
+- DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
+- DOING: P0 offline устойчивость без `OPENAI_API_KEY` (диагностика + план).
+- NEXT: Session Memory v1.1 → ASR/long‑chaos gate → Monitoring/observability.
+- BLOCKERS: нет.
+
+- **Фокус:** P0 offline устойчивость + Session Memory v1.1 + ASR/long‑chaos gate + monitoring; дальше webhook не дробим.
+- **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
+- **Следующий шаг:** offline устойчивость без `OPENAI_API_KEY` (выявить LLM‑вызовы в тестах/контроллере, зафиксировать fallback).
+- **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
+- **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
+- **Последняя диагностика:** 2026-01-08T04:55:38Z (diagnose без DeprecationWarning; metrics snapshot восстановлен).
+
+**IMPERIUM DoD (short)**
+- Truth-first: ответ только из KB/правил; догадки запрещены; LAW/оплата/медицина/жалобы → эскалация.
+- LLM = смысл (класс/цель/слоты), gates = контроль; low-signal/OOD → мягкий редирект.
+- Booking-first: держим цель, допускаем 1–2 факта и возвращаемся к записи.
+- Small talk: короткий ответ + мягкий редирект к салону/записи.
+- Clarify policy: максимум 2 уточнения, дальше эскалация/hand over.
+- Gates: CI core/long/ASR зелёные, offline без ключа, метрики/trace пишутся всегда.
+
 ## ТЕКУЩЕЕ СОСТОЯНИЕ
 
 ⚠️ Требует проверки: факты ниже нужно подтверждать через API/DB/логи, не полагаться на записи.
@@ -31,7 +56,7 @@
 - Session Canon updated in `docs/SESSION_START_PROMPT.txt`.
 - Pilot readiness checklist added.
 - Pilot readiness run PASS (2025-12-31) зафиксирован в `docs/TECH_STATUS.md`.
-- Док‑синхронизация: убраны дубли в `STATE.md`/`STRUCTURE.md`, `SPECS/CONSULTANT.md` обновлён под `webhook.py`, уточнён источник истины в `docs/SESSION_START_PROMPT.txt`.
+- Док‑синхронизация: убраны дубли в `STATE.md`/`STRUCTURE.md`, `SPECS/CONSULTANT.md` обновлён под `webhook/_legacy.py`, уточнён источник истины в `docs/SESSION_START_PROMPT.txt`.
 - Док‑синхронизация: `SPECS/MULTI_TENANT.md` и `SPECS/ARCHITECTURE.md` приведены к текущей реализации (branch routing частично, pipeline/вход /webhook/{client_slug}, ChatFlow без retries).
 - Док‑синхронизация: `SPECS/ESCALATION.md` приведён к факту (roles/agent_identities/learned_responses — схема есть, wiring pending; branch config перенесён в реализованное).
 - Док‑синхронизация: `AGENTS.md` и `docs/SESSION_START_PROMPT.txt` обновлены под роли Top Architect / Brain / Hands.
@@ -78,12 +103,12 @@
 - Multi-truth: hours добавляются по _looks_like_hours_question; price_item может переопределить широкий service_query при более точном совпадении.
 - Multi-truth: single-сегмент (без пунктуации) с 2+ сигналами (hours/price/duration) даёт детерминированный ответ.
 - Инструменты фактов: `docker logs truffles-api --tail 200`, SQL по `outbox_messages`/`handovers`.
-- Early OOD guard: блок только при `out_hits>0`, `strict_in_hits==0`, без `booking_signal`; booking/intents проходят к booking/truth. Evidence: `truffles-api/app/routers/webhook.py:5888-5916`; EVAL `E359` ("хочу записаться" → booking_intake) и `E360` ("какая погода" → off_topic) в `truffles-api/app/knowledge/demo_salon/EVAL.yaml:3974-3995`; тест `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` PASS (2026-01-02, 108.6s).
+- Early OOD guard: блок только при `out_hits>0`, `strict_in_hits==0`, без `booking_signal`; booking/intents проходят к booking/truth. Evidence: `truffles-api/app/routers/webhook/_legacy.py:5888-5916`; EVAL `E359` ("хочу записаться" → booking_intake) и `E360` ("какая погода" → off_topic) в `truffles-api/app/knowledge/demo_salon/EVAL.yaml:3974-3995`; тест `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` PASS (2026-01-02, 108.6s).
 - Live-check (prod, test number 77015705555@s.whatsapp.net): "хочу записаться" → booking prompt (no OOD), conversation_id=99306198-1ecf-44d6-9066-72bb4e76e915, decision_meta action=booking_prompt; "какая погода" → out_of_domain early_block, same conversation, decision_meta action=out_of_domain, trace stage=out_of_domain/out_hits=1/strict_in_hits=0. Messages at 2026-01-02 15:02:11Z and 15:02:50Z; bot replies 15:02:22Z and 15:02:53Z. CI PASS https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20660665559; /admin/version git_commit 616c66f68da7a98246ce427ea02d6128261f156a (build_time 2026-01-02T15:12:34Z).
 - Clarify diagnostics (2026-01-02): pricing queries (“Сколько стоит?”, “Какая цена?”) получают clarify из-за отсутствия service_query (service_query=null, service_query_source=none; e.g. msg dd8eee2b-b7f4-4cd4-8516-e1fa4e6ccb46, 6995cc99-d204-4a4d-856c-786d72e432c2). Booking prompts (“а парковка есть?”, “хочу записаться”) тоже без service_query (source=intent_decomp). SQL: SELECT ... ILIKE '%clarify%' LIMIT 50; SELECT ... ILIKE '%clarify%' AND ... '%service_query%' LIMIT 50.
 - Clarify root cause (pricing/duration): 71 user messages with clarify meta, только 2 с непустым service_query; топ-5 кейсов показывают отсутствие упоминания услуги (“Сколько стоит?”, “Какая цена?”, “парковка”, “хочу записаться”) при наличии услуг в catalog → data/input gap, не баг intent_decomp. Evidence: SQL counts (clarify total/with service_query), samples with service_query_source=none/intent_decomp (ids dd8eee2b…, 96ed57b0…, 6995cc99…, d019abfb…, 34978f55…). Рекомендация: data/process — требовать услугу в вопросах о цене/парковке или добавить авто-подстановку default услуги, logic-fix не требуется по текущим примерам.
 - Процессный запрет: локальный `pytest` без разрешения нельзя; единственный gate — CI, core и long гоняются отдельными джобами. Любое нарушение → stop-line и фиксация в STATE (команда/контекст).
-- Service carryover on expected reply: matched `expected_reply_type=service_choice` now сохраняет `service_carryover` (service_query=value, source=expected_reply, score=1.0) → pricing follow-up использует контекст. Evidence: `truffles-api/app/routers/webhook.py:4478-4504`; new eval conversation `E361` (маникюр → “сколько стоит?”) in `truffles-api/app/knowledge/demo_salon/EVAL.yaml:3980-3995`. Tests: `pytest truffles-api/tests/test_demo_salon_eval.py -q` (local env) FAIL due to OOD case E360 returning error (“Извините, произошла ошибка…”) when services_index/embed not available; needs rerun in full env.
+- Service carryover on expected reply: matched `expected_reply_type=service_choice` now сохраняет `service_carryover` (service_query=value, source=expected_reply, score=1.0) → pricing follow-up использует контекст. Evidence: `truffles-api/app/routers/webhook/_legacy.py:4478-4504`; new eval conversation `E361` (маникюр → “сколько стоит?”) in `truffles-api/app/knowledge/demo_salon/EVAL.yaml:3980-3995`. Tests: `pytest truffles-api/tests/test_demo_salon_eval.py -q` (local env) FAIL due to OOD case E360 returning error (“Извините, произошла ошибка…”) when services_index/embed not available; needs rerun in full env.
 - Проверка 2026-01-02: open handovers duplicates 0 (handovers.status IN pending/active) по conversation_id и по conversations.user_id (join); SQL `SELECT conversation_id, count(*) ... HAVING count(*) > 1` → 0; `SELECT c.user_id, count(*) ... HAVING count(*) > 1` → 0.
 - Фиксация: шаблон рассуждений + обновление `STATE.md` каждый раз.
 - Детальный бриф салона заполнен эталоном (фейковые данные): `Business/Sales/Бриф_клиента.md`.
@@ -114,7 +139,7 @@
 - Booking + 2+ info (или total 3+) → defer booking, отвечаем на 1–2 info (service_query: price+duration; иначе location+hours), остаток в intent_queue, expected_reply_type=intent_choice.
 - Standalone info-ответы (price/duration/hours/location) получают CTA "Хотите записаться?" только в bot_active без followup/booking-prompt; skip non-bot-active + если ответ уже про запись; EVAL E003l/E003m/E014d, negative E039b; тест `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` PASS.
 - Soft price defense: `why_price_from`/`objection_price` реализованы в demo_salon knowledge + покрыты EVAL; SPECS/CONSULTANT.md Rule 4 синхронизирован (частично реализовано + мягкая защита цены). Tests: не запускались (doc sync). Evidence: `truffles-api/app/services/demo_salon_knowledge.py:2045-2053`, `truffles-api/app/knowledge/demo_salon/EVAL.yaml:162-216`, `SPECS/CONSULTANT.md:209-248`.
-- Night tone/timezone: `salon.timezone` в client_pack (Asia/Almaty) + quiet-hours notice использует локальное время и salon hours (open/close) в коде; исключения pending/manager_active + LAW/opt-out/OOD; EVAL `E014e/E014f`; тест `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` PASS (commit `8b08a71b985c458f388f3d6686b75a5431c6ec92`). Spec gap: SPECS/CONSULTANT.md задаёт фиксированное окно 22:00–09:00 → нужно решение (выровнять spec или код). Evidence: `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml:1-25`, `truffles-api/app/services/demo_salon_knowledge.py:161-188`, `truffles-api/app/routers/webhook.py:4386-4408`, `SPECS/CONSULTANT.md:162-166`.
+- Night tone/timezone: `salon.timezone` в client_pack (Asia/Almaty) + quiet-hours notice использует локальное время и salon hours (open/close) в коде; исключения pending/manager_active + LAW/opt-out/OOD; EVAL `E014e/E014f`; тест `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` PASS (commit `8b08a71b985c458f388f3d6686b75a5431c6ec92`). Spec gap: SPECS/CONSULTANT.md задаёт фиксированное окно 22:00–09:00 → нужно решение (выровнять spec или код). Evidence: `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml:1-25`, `truffles-api/app/services/demo_salon_knowledge.py:161-188`, `truffles-api/app/routers/webhook/_legacy.py:4386-4408`, `SPECS/CONSULTANT.md:162-166`.
 - Doc sync (soft price defense + quiet hours): Rule 4 в SPECS/CONSULTANT.md отмечен как частично реализованный с мягкой защитой цены; quiet-hours правило в SPECS/CONSULTANT.md задаёт timezone‑source + окно 22:00–09:00, но код применяет “вне salon.hours” и при отсутствии timezone сейчас падает на UTC → нужен logic‑fix: skip, если timezone нет. Tests: not run (doc sync). Evidence: `SPECS/CONSULTANT.md:162-166`, `SPECS/CONSULTANT.md:209-248`, `truffles-api/app/services/demo_salon_knowledge.py:161-188`, `truffles-api/app/services/demo_salon_knowledge.py:2045-2053`, `truffles-api/app/knowledge/demo_salon/EVAL.yaml:162-216`.
 - Quiet-hours fix: пропуск notice при отсутствующей/невалидной timezone (ZoneInfo) + подтверждённый деплой. CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20655575365 PASS; prod `/admin/version` git_commit `8a51d28b1a9932b302bca3626097dee751ccec3a`; тест `docker exec -i truffles-api pytest /app/tests/test_demo_salon_eval.py -q` PASS. Evidence: `truffles-api/app/services/demo_salon_knowledge.py:116-181`.
 - Agentic orchestration: закреплено, что “agentic” = логические роли стадий одного пайплайна `_handle_webhook_payload`, не отдельные рантайм‑агенты; роли сопоставлены с фактическим порядком стадий. Evidence: `SPECS/ARCHITECTURE.md:132-142`.
@@ -125,9 +150,9 @@
 - Consult playbooks: `domain_pack.consult_playbooks` расширен (hair_aftercolor/hair_damage/hair_color_choice/nails_care/brows_lashes_care/sensitive_skin/style_reference/general_consult) с questions/options/next_step.
 - CI (main@8a6164f) green: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20678138128 (head_sha 8a6164fac4607260f09c63e60a7fee3d96a2961c, conclusion=success).
 - Прод: `/admin/version` → `{"version":"main","git_commit":"8a6164fac4607260f09c63e60a7fee3d96a2961c","build_time":"2026-01-03T13:49:12Z"}` (команда `curl -s http://localhost:8000/admin/version`).
-- Info-combo bundle: location/hours (и pricing/duration при сигнале адрес/парковка/гость) объединяют адрес+часы, опционально парковку/гостей, пишут info_sections meta. Evidence: `truffles-api/app/services/demo_salon_knowledge.py:207-285`, `truffles-api/app/routers/webhook.py:3408-3465`.
+- Info-combo bundle: location/hours (и pricing/duration при сигнале адрес/парковка/гость) объединяют адрес+часы, опционально парковку/гостей, пишут info_sections meta. Evidence: `truffles-api/app/services/demo_salon_knowledge.py:207-285`, `truffles-api/app/routers/webhook/_legacy.py:3408-3465`.
 - Core EVAL расширен инфо-комбо кейсами (адрес/часы/парковка/guest/quiet/clarify) E422–E428. Evidence: `truffles-api/app/knowledge/demo_salon/EVAL.yaml:4484-4558`.
-- Class-router info-bundle: при info-интентах отвечает bundle по приоритету + пишет class_carryover (TTL 4), decision_meta `intent=info_bundle`/`class_router`/`info_sections`. Evidence: `truffles-api/app/routers/webhook.py:2102-2365`, `truffles-api/app/routers/webhook.py:7866-7967`.
+- Class-router info-bundle: при info-интентах отвечает bundle по приоритету + пишет class_carryover (TTL 4), decision_meta `intent=info_bundle`/`class_router`/`info_sections`. Evidence: `truffles-api/app/routers/webhook/_legacy.py:2102-2365`, `truffles-api/app/routers/webhook/_legacy.py:7866-7967`.
 - Long EVAL info-bundle paraphrases E429–E434 добавлены. Evidence: `truffles-api/app/knowledge/demo_salon/EVAL.yaml:4564-4688`.
 - CI (main@e36337e) green с build/push/deploy: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20687244044.
 - Прод: `/admin/version` → `{"version":"main","git_commit":"e36337e63780619e598176f3370680b86573f8bb","build_time":"2026-01-04T03:55:04Z"}` (команда `curl -s https://api.truffles.kz/admin/version`).
@@ -135,14 +160,14 @@
 - Doc sync PR #7: "Canonize info_bundle carryover invariants" merged (commit `eb3477ce1bbc118a38561b76a726ca4b3c0b4e16`): https://github.com/k1ddy/Truffles-AI-Employee/pull/7.
 - P0 fix info_bundle hours follow-up (PR #8): CI core/long PASS https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20688985111; prod `/admin/version` → `{"version":"main","git_commit":"6a90da1d4c465592c17b2b8cd14dd6805322ea9a","build_time":"2026-01-04T06:40:40Z"}`; live-check R3 (gap ~1.7s) conv_id `c0ab977f-0434-496a-ae66-05fface8fb7b`, user msg `aefc48a9-4b06-4ae3-9854-c3f5bac203ed`: decision_meta question_type=hours, service_query=null, class_router carryover_class=info_bundle, carryover_info_sections=["address","hours"]; trace info_class question_type=hours; reply address+hours (assistant msg `24bf46a8-1992-488e-a31d-431a58fd4dc7`).
 - Base-80 battery (8 классов, core 5–6 turns + long 10 turns + 10 перефразов на класс) добавлена E435–E530. Evidence: `truffles-api/app/knowledge/demo_salon/EVAL.yaml:4704-5680`.
-- Class stability: anchor boost для pricing/duration/hours/location + class_router.in_signals пишет `info_anchor_*`. Evidence: `truffles-api/app/routers/webhook.py:2608-2801`.
+- Class stability: anchor boost для pricing/duration/hours/location + class_router.in_signals пишет `info_anchor_*`. Evidence: `truffles-api/app/routers/webhook/_legacy.py:2608-2801`.
 - CI (main@2d8bf94) build/push/deploy green: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20689515956.
 - Прод: `/admin/version` → `{"version":"main","git_commit":"2d8bf940313178fdf43ad0270325f9008842a9e6","build_time":"2026-01-04T07:28:48Z"}`.
 - Live-check (prod): paraphrase “На каком перекрёстке вы?” → info_bundle; conv_id `a271e3d0-053d-4d83-9852-f3ea3167efe9`, user msg `cca7722f-8e03-45e4-9119-8deafaed2478` class_router.in_signals `info_anchor_location`; reply `c54d7be2-81db-4d52-b607-b53d857da061` (address+hours).
 - Live-check (prod): chaotic follow-up “Когда заканчиваете работу?” после price+parking → info_bundle; conv_id `4f9026c2-9c94-4b38-8248-b5aacf635cdf`, user msg `0e679f43-08dd-40e4-932f-7c0022811788` class_router.in_signals `info_anchor_hours`, `info_anchor_pricing`; reply `6489ceb6-27cc-474d-bd73-8609b081e749` (hours+address+pricing).
 - Live-check (prod): booking+info interrupt “Где вы находитесь и до скольки работаете?” после “Хочу записаться” → info reply + intent choice; conv_id `cd10fbb4-a5b9-4d98-87fb-b7dbb16a6766`, user msg `4cd2d8a9-2ae6-4652-9264-e08a6985247c` decision_meta intent=multi_intent_info booking_deferred=true info_sections=["address","hours"]; reply `425f22fe-6234-4e09-80fb-c4de27c65b90`.
 - Канон LLM-router: источник класса = LLM-router (doc commit `49c81ba`).
-- LLM-router внедрён как источник класса с fallback на детерминизм + запись router output в trace/meta; prompt fallback встроен для контейнера. Evidence: `truffles-api/app/routers/webhook.py:2839`, `truffles-api/app/routers/webhook.py:6597`, `truffles-api/app/services/intent_service.py:32`, `truffles-api/app/services/intent_service.py:323`, `prompts/intent_classifier.md`.
+- LLM-router внедрён как источник класса с fallback на детерминизм + запись router output в trace/meta; prompt fallback встроен для контейнера. Evidence: `truffles-api/app/routers/webhook/_legacy.py:2839`, `truffles-api/app/routers/webhook/_legacy.py:6597`, `truffles-api/app/services/intent_service.py:32`, `truffles-api/app/services/intent_service.py:323`, `prompts/intent_classifier.md`.
 - Router eval: инварианты класса (перефраз/перестановка/хаотичный follow-up) E531–E537 добавлены. Evidence: `truffles-api/app/knowledge/demo_salon/EVAL.yaml:5687`.
 - CI (main@223fe9f) build/push/deploy green: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20690022936.
 - Прод: `/admin/version` → `{"version":"main","git_commit":"223fe9f12bec2f030fc40d878f644868d2fdd631","build_time":"2026-01-04T08:16:45Z"}`.
@@ -157,7 +182,7 @@
 - Live-check (prod): consult + перебивка “Посоветуйте уход для сухих волос.” → consult reply `af9fe942-cbc1-4032-8467-b5fd9c3646fb`, затем “Кстати, где вы находитесь?” → info_bundle reply; conv_id `624c6087-cbd6-4197-8131-4091cec563d0`, user msg `msg-ffdc3336-87d0-48a2-a8e5-37afda5f7e91` decision_meta class_router.router.output router_error=none router_retry=false router_llm_ms=2069.72; reply `a43d61dc-d999-4bbb-a442-1054e194b682` (address+hours + CTA).
 - Discounts policy gate: скидки/акции → policy_gate=discounts (без pricing fallback), ответы только из client_pack.discounts; E544/E545 добавлены. CI (main@baffbf2) build/push/deploy green: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20693070009. Прод: `/admin/version` → `{"version":"main","git_commit":"baffbf2bcbd8a563242f96770f742d7790f42a0a","build_time":"2026-01-04T12:43:02Z"}`. Live-check (prod): "Есть скидки или акции?" → policy reply; conv_id `a2034d97-64d3-4d3d-9f4f-3ddbc37a4305`, user msg `893ae6b2-78f5-4e0a-8d7e-aba64afcbfb1` decision_meta policy_gate=discounts service_query=null; trace stage=policy_gate policy_gate=discounts; reply `dd71b7d9-ad1b-47cb-8427-197f59264437` (без прайса).
 - Info_bundle dedupe: base bundle отвечает один раз при multiple info intents (pricing+location), без повторов адрес/часы; PR #23. CI (main@6a51bac) build/push/deploy green: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20693678478. Прод: `/admin/version` → `{"version":"main","git_commit":"6a51bacf65e5d9c2c9ffd5598a83eeef937934de","build_time":"2026-01-04T13:32:56Z"}`. Live-check (prod): “Сколько стоит маникюр и где вы находитесь?” → reply с одним блоком адрес/часы + прайс; conv_id `a271e3d0-053d-4d83-9852-f3ea3167efe9`, user msg `eb97dfbd-a480-4b4b-90c6-a50532f1e50b` decision_meta intent=info_bundle source=class_router info_sections=["address","hours"]; trace stage=info_class intents=["pricing","location"]; reply `c2e0a61d-01c6-4d5c-a4f6-93bef36843a7`.
-- Answer contract priority: matched expected_reply форсирует booking shortcircuit (expected_reply_shortcircuit=true), booking_signal override и без info/service matcher (no pricing on time replies). Evidence: `truffles-api/app/routers/webhook.py:5226-5346`, `truffles-api/app/routers/webhook.py:5718-5732`, `truffles-api/app/routers/webhook.py:6667-6687`; PR #28 https://github.com/k1ddy/Truffles-AI-Employee/pull/28; CI core/long PASS https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20709873371.
+- Answer contract priority: matched expected_reply форсирует booking shortcircuit (expected_reply_shortcircuit=true), booking_signal override и без info/service matcher (no pricing on time replies). Evidence: `truffles-api/app/routers/webhook/_legacy.py:5226-5346`, `truffles-api/app/routers/webhook/_legacy.py:5718-5732`, `truffles-api/app/routers/webhook/_legacy.py:6667-6687`; PR #28 https://github.com/k1ddy/Truffles-AI-Employee/pull/28; CI core/long PASS https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20709873371.
 - EVAL: кейс time reply “в субботу вечером” без прайса, требуется expected_reply_shortcircuit=true (E559). Evidence: `truffles-api/app/knowledge/demo_salon/EVAL.yaml:6191-6209`; PR #29 https://github.com/k1ddy/Truffles-AI-Employee/pull/29; CI core/long PASS https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20709890713.
 - CI deploy fail (main): run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20709918013, job deploy, step “Deploy to VPS”, cmd `IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash ~/restart_api.sh`, error: container name "/truffles-api" already in use (status 125). Manual deploy with sha image; prod `/admin/version` → `{"version":"main","git_commit":"4a38f0f41fa41810e6923d5658ca867655125f5b","build_time":"2026-01-05T08:48:20Z"}`.
 - Live-check (prod): “хочу записаться” → “в субботу вечером” → booking продолжился на имя, без прайса. conv_id `fc2ff625-f678-4544-a477-1fc2c9b93b63`; last 4 msgs: user “хочу записаться” → assistant “На какую услугу хотите записаться?” → user “в субботу вечером” → assistant “Как вас зовут?”. decision_meta expected_reply_shortcircuit=true (message_id `live3-time-1767603759193`); decision_trace stage=question_contract decision=matched expected_reply_type=service_choice expected_reply_shortcircuit=true.
@@ -182,7 +207,7 @@
 - DB outbox (2025-12-31): FAILED 12, SENT 767. Evidence: `docker exec -i truffles_postgres_1 psql -U $DB_USER -d chatbot -c "SELECT status, count(*) FROM outbox_messages GROUP BY status;"` with `DB_USER=n8n` → `FAILED=12, SENT=767`.
 
 ### MEDIA RUNBOOK (амнезия, 3–5 минут)
-- Точка входа: `truffles-api/app/routers/webhook.py` → `_handle_webhook_payload()` + outbox coalesce.
+- Точка входа: `truffles-api/app/routers/webhook/_legacy.py` → `_handle_webhook_payload()` + outbox coalesce.
 - Guardrails: тип/размер/rate‑limit → `clients.config.media` (см. `SPECS/ARCHITECTURE.md`).
 - Хранение: `/home/zhan/truffles-media/<client>/<conversation>/` + мета в `messages.metadata.media`.
 - Forward: Telegram `sendPhoto/sendAudio/sendVoice/sendDocument` (см. `truffles-api/app/services/telegram_service.py`).
@@ -218,7 +243,7 @@
 - [ ] **⚠️ OOD anchors (data-driven)** — demo_salon: anchors_in/out расширены (животные/погода/политика/кулинария/код/советы/анекдоты + style/booking/адрес/часы), offtopic_examples дополнил; SQL зафиксирован в `ops/update_instance_demo.sql`, нужен деплой, если API ещё на старом образе
 - [ ] **⚠️ Закрепы заявок в Telegram** — фикс в коде: `unpin` теперь использует `handover.telegram_message_id` (fallback на callback message_id); нужен деплой/проверка
 - [ ] **⚠️ Дубли заявок на одного клиента** — владельцу неудобно; нужен guard: при open handover не создавать новый, а писать в текущий топик
-- [ ] **Branch подключен частично** — выбор branch и запись `conversation.branch_id` есть в `webhook.py`, но Telegram per branch и RAG фильтры всё ещё по client → `SPECS/MULTI_TENANT.md`
+- [ ] **Branch подключен частично** — выбор branch и запись `conversation.branch_id` есть в `webhook/_legacy.py`, но Telegram per branch и RAG фильтры всё ещё по client → `SPECS/MULTI_TENANT.md`
 - [ ] **⚠️ by_instance зависит от instanceId** — demo_salon исправлен (query‑param даёт instanceId), остальным клиентам нужно прокинуть
 - [ ] **⚠️ demo_salon truth-gate даёт цену на "как у/в стиле"** — нет правила style_reference, фото не поддерживаются; нужен отдельный ответ/эскалация
 - [ ] **⚠️ Медиа (аудио/фото/документы)** — guardrails + Telegram forward + локальное хранение + транскрипция коротких PTT добавлены в код (нужен деплой); длинные аудио/видео и OCR/vision отсутствуют
@@ -260,6 +285,22 @@
 
 > Источники: `STRATEGY/TECH_ROADMAP.md`, `STRATEGY/REQUIREMENTS.md`
 
+### Протокол задач (единый источник правды)
+
+- Любая задача/приоритет существует только если записана в этом разделе (иначе “не существует”).
+- Формат задачи для Brain (6 строк): Goal / Scope / Steps / Evidence / Tests / Stop.
+- Формат отчёта Hands (7 строк): GOAL / FILES / TESTS / LIVE-CHECK / EVIDENCE / COMMIT / RISKS.
+- One-issue flow: 1 проблема → 1 правка → 1 проверка → запись в `STATE.md`.
+
+### Канон (North Star / DoD / Epics / порядок)
+
+- **North Star:** бережный консультант‑хост, truth‑first, держит цель booking; эскалация всегда доступна пользователю.
+- **P0 DoD:** см. `docs/TECH_STATUS.md:135-141` (LAW, truth‑first, outbox/dedup, /admin/version, Core‑50 CI, smoke‑run).
+- **Эпики P0:** диалоговая устойчивость (intent_queue/expected_reply/booking_interrupt/answer‑interpreter), truth/policy (info‑bundle/CTA/policy‑gates), эскалация+AL (takeover + auto‑upsert, роли/очередь/moderation/branch pending), ops/infra (diagnose/backup/ пилот‑чеклист).
+- **Confidence router:** multi‑level confidence сейчас P2 в `SPECS/CONSULTANT.md:914-920`; если повышаем приоритет — фиксируем отдельным решением.
+- **Порядок закрытия:** 1) repo‑audit через CI (локальный pytest запрещён) 2) DoD‑чек 3) закрыть P0 gaps 4) live‑check 5) update `STATE.md`.
+- **Открытые вопросы:** retention (рекомендовано 6 мес архив → delete), dashboard (P2–P3), media/ASR/OCR (fallback сейчас, расширение позже).
+
 ### Сейчас (эта сессия / неделя)
 1. [x] Аудит документов и структуры
 2. [x] **Gap в спеке: state=manager_active без топика** (P0) ✅
@@ -272,6 +313,79 @@
 7. [x] Policy engine: normalize → detect signals → resolve → action; demo_salon вынесен в policy handler (без client-specific if в flow)
 8. [x] Модель слотов записи: валидаторы service/datetime/name + запрет opt-out/фрустрации в слотах
 9. [x] Golden-scenarios: автопрогон ключевых кейсов из truffles-api/tests/test_cases.json (decision/signals)
+
+### Возобновить (P0 — план остановлен, нужен DoD/верификация)
+
+1. [ ] Offline устойчивость без `OPENAI_API_KEY`
+   - DoD: CI core/long/ASR зелёные без ключа; offline controller возвращает фиксированный class/goal; тесты не вызывают LLM.
+2. [ ] Session Memory v1.1 (goal_stack/pending_slots/unanswered/TTL=24h)
+   - DoD: короткие ответы ("да/ок/в субботу") маппятся к последнему вопросу; reset по "новая тема"/pending/manager.
+3. [ ] ASR battery + long-chaos (12-15 ходов) как блокирующий gate CI, без OpenAI
+   - DoD: CI конфигирует gate и проходит в оффлайне.
+4. [ ] Monitoring/observability
+   - DoD: trace/meta полей controller_used/confidence/error, info_semantic_match_skip_reason, session_memory_update; алерты clarify/escalation/latency.
+5. [ ] Pending SLA ping/auto-close (15 мин / 4 ч) + pending_ack/close intent + meta pending_action
+   - DoD: подтверждённые интервалы/trace/meta + CI evidence.
+
+### P0 — Молчание/живость (операционный триаж)
+
+1. [x] Outbound guard + outbox worker (TEST_MODE/allowlist/worker)
+   - DoD: подтверждено по логам/метрикам, что outbound не скипается и outbox не копится.
+   - Evidence (ops, 2026-01-08): TEST_MODE=1, allowlist=77015705555@s.whatsapp.net; logs show "Outbox worker started"; /admin/health pending=0; outbox status counts SENT=1222, FAILED=12; /admin/outbox/process POST (container token) returned {"claimed":0,"sent":0,"failed":0,"retry_scheduled":0}.
+2. [x] Qdrant headers при отсутствии API key
+   - DoD: headers не содержат None; knowledge search не падает.
+   - Evidence: PR #77 https://github.com/k1ddy/Truffles-AI-Employee/pull/77, merge `f31bdd2`; CI (core/long + build/push + deploy) https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20805150698; prod `/admin/version` → `{"version":"main","git_commit":"f31bdd26bdfdf68f24f80954afa95e1af69cbc01","build_time":"2026-01-08T04:08:40Z"}`.
+3. [x] Carryover follow-up для коротких pricing-вопросов
+   - DoD: `test_service_carryover_applies_for_pricing` зелёный.
+   - Evidence: PR #78 https://github.com/k1ddy/Truffles-AI-Employee/pull/78; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20805338690; prod `/admin/version` → `{"version":"main","git_commit":"4bdfcf1d020f11d7b1d8f4a7aef061e3304438ef","build_time":"2026-01-08T04:18:53Z"}`. Note: CI jobs run eval only; unit test not in CI.
+4. [x] `/webhook/debug` закрыт/защищён
+   - DoD: доступ только с админ‑токеном или флагом DEBUG_WEBHOOK_ENABLED.
+   - Evidence: CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20805515456; prod `/admin/version` → `{"version":"main","git_commit":"d0da998ae6c1181da2f2b3ae78628f2e1df8e4ce","build_time":"2026-01-08T04:29:12Z"}`.
+5. [x] Answer‑Interpreter для expected_reply + datetime fallback
+   - DoD: короткие ответы времени/услуги маппятся без цикла уточнений.
+   - Evidence: CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20805662030; prod `/admin/version` → `{"version":"main","git_commit":"bb11f104a5523688d16e8c835ae5ea99b05dd80f","build_time":"2026-01-08T04:37:50Z"}`.
+
+### P0 — Ops hygiene (после триажа)
+
+1. [x] Fix warning в `ops/diagnose.py` (datetime.utcnow deprecation)
+   - DoD: diagnose без warning.
+   - Evidence: 2026-01-08T04:55:38Z, diagnose output без DeprecationWarning.
+2. [x] Metrics daily snapshot отсутствует для текущей даты
+   - DoD: `/admin/metrics` возвращает данные для валидной даты (today или latest), evidence через SQL snapshot/endpoint.
+   - Evidence: metrics_daily max=2026-01-06 → snapshot run for 2026-01-08 (INSERT 0 1); /admin/metrics OK (payload with metric_date=2026-01-08).
+
+### P1 — Структурные риски (из анализов)
+
+1. [ ] Sync HTTP вызовы внутри async пайплайна
+   - DoD: ChatFlow/Qdrant/LLM вызовы не блокируют event loop (async/threads), есть общий клиент/pool.
+2. [ ] Mutable defaults в моделях JSONB
+   - DoD: default=dict для JSONB полей; нет shared mutable.
+3. [ ] Legacy `app/webhook.py`
+   - DoD: файл удалён или явно помечен LEGACY + исключён из документации.
+4. [ ] Demo‑only ветвления
+   - DoD: core‑логика не зависит от `client_slug == "demo_salon"`; policy handlers по policy_type.
+5. [ ] Несостыковка промпта/логики (disclosure/телефон)
+   - DoD: решение записано и промпт приведён к фактическому поведению.
+6. [ ] Централизация env‑конфигурации
+   - DoD: ключевые env читаются через Settings, тесты могут подменять.
+7. [ ] Outbox failsafe
+   - DoD: если worker отключён, webhook явно сигналит или запускает sync‑процесс.
+8. [ ] CI coverage для unit‑тестов роутера
+   - DoD: `tests/test_message_endpoint.py` (или таргетные кейсы) запускаются в CI.
+
+### Webhook refactor checkpoint (2026-01-08)
+
+- **Сделано:** монолит `webhook.py` разнесён на модули в `truffles-api/app/routers/webhook/`; активная оркестрация остаётся в `truffles-api/app/routers/webhook/_legacy.py`, совместимость — через `truffles-api/app/routers/webhook/__init__.py`.
+- **Модули уже выделены:** `parsing.py`, `dedup.py`, `booking.py`, `info.py`, `policy.py`, `decision.py`, `pending.py`, `session_memory.py`, `media.py`, `shield.py`, `guards.py`, `trace.py`, `response.py`.
+- **Evidence (merged PRs):** #92–#102 (trace/parsing/dedup/booking/info/policy/decision/pending+session_memory/media/shield/guards) — https://github.com/k1ddy/Truffles-AI-Employee/pulls?q=is%3Apr+is%3Amerged+webhook+extract
+- **Устаревшие PR закрыты:** #81, #82, #83, #87 (obsolete после реальных модулей).
+- **Следующий блок выноса (рекомендован):** контекст/контроллер диалога (expected_reply_type, context_manager, carryover, confirmations) → новый модуль `context_manager.py`; затем booking update/prompt; затем branch selection; затем router/outbox.
+- **Merged:** PR #103 “Extract webhook context manager helpers” — https://github.com/k1ddy/Truffles-AI-Employee/pull/103 (merge commit 140aa7b88c9e81583a1ad296e2dffc7784b97587).
+- **Merged:** PR #104 “Extract webhook booking prompt helpers” — https://github.com/k1ddy/Truffles-AI-Employee/pull/104 (merge commit d286beaaaa1b80fdaf65b0fc669c74ec558b9c3a).
+- **Merged:** PR #105 “Extract webhook branch selection helpers” — https://github.com/k1ddy/Truffles-AI-Employee/pull/105 (merge commit 41442837cb430106bd130758fe9ccc1f85c5dc8c).
+- **Merged:** PR #106 “Extract webhook outbox helpers” — https://github.com/k1ddy/Truffles-AI-Employee/pull/106 (merge commit 9ab3196d905a744eee73ed026a24e0f1b446b6a3).
+- **Merged:** PR #107 “Extract webhook HTTP routing helpers” — https://github.com/k1ddy/Truffles-AI-Employee/pull/107 (merge commit b39712735ae41684e1c967e1adc5fb56f3f3898e).
+- **Осталось в `_legacy.py` (сводка):** оркестратор `_handle_webhook_payload`; wrapper `_process_outbox_rows` (compat); observability/RAG meta/backlog; эвристики booking/policy/carryover/time; controller/router logic; refusal flags; response composition helpers; convo/handover DB helpers; low-confidence retry.
 
 ### Следующее (по порядку)
 
@@ -604,7 +718,7 @@
 ### 2025-12-25 — Media: rate-limit double count + fast-forward storage
 
 **Что сделали:**
-- В `webhook.py` добавили `count_rate_limit` и выключили счётчик при `skip_persist=True` (outbox), чтобы лимиты не считались повторно.
+- В `webhook/_legacy.py` добавили `count_rate_limit` и выключили счётчик при `skip_persist=True` (outbox), чтобы лимиты не считались повторно.
 - В fast-forward (enqueue_only) сохраняем медиа до отправки в Telegram, используем `stored_path` при отправке.
 - В metadata сообщения пишем `storage_path/stored/storage_error/sha256`, чтобы storage не повторялся.
 
@@ -806,7 +920,7 @@
    - Чёткие приоритеты: opt‑out vs booking vs frustration vs human_request.
 
 2) **Policy Engine**
-   - Убрать client_slug if’ы из `webhook.py`.
+   - Убрать client_slug if’ы из `webhook/_legacy.py`.
    - Правила/порог/таймауты в конфиге (DB/YAML), код — исполнитель.
 
 3) **Slot Manager**
@@ -959,7 +1073,7 @@
 - Расширили `/admin/settings` под branch routing + auto-approve роли.
 - Починили маппинг reminder_* → `reminder_timeout_*` в настройках.
 - Добавили миграцию `ops/migrations/014_add_branch_routing_settings.sql`.
-- Встроили branch routing (by_instance/ask_user/hybrid) и remember_branch в `webhook.py`.
+- Встроили branch routing (by_instance/ask_user/hybrid) и remember_branch в `webhook/_legacy.py`.
 - Дефолт auto-approve обновлён на `owner,admin` (спека/модель/миграция).
 - **Prod fix:** применили миграцию 013/014 (не было `conversations.branch_id` → webhook падал).
 
@@ -1111,7 +1225,7 @@
 **Что сделали:**
 - Добавили "strong out-of-domain" с более строгими порогами + min_len (консервативный OOD)
 - Добавили `get_rag_confidence()` и проверку RAG перед OOD‑ответом
-- В `webhook.py` и `message.py` OOD‑ответ только если strong OOD / intent=out_of_domain и **нет** уверенного RAG
+- В `webhook/_legacy.py` и `message.py` OOD‑ответ только если strong OOD / intent=out_of_domain и **нет** уверенного RAG
 - Добавили логи "Domain out-of-domain gate" при `DOMAIN_ROUTER_LOG_SCORES=1`
 
 ### 2025-12-21 — Webhook auth + тесты
@@ -1188,10 +1302,10 @@
 - Добавили подтверждение эскалации после low_confidence (да/нет) с окном 15 минут.
 - Исправили битые domain anchors (кодировка).
 - Протянули логику в `/webhook` и legacy `/message`.
-- Задеплоили `webhook.py`, `message.py`, `intent_service.py` и перезапустили API.
+- Задеплоили `webhook/_legacy.py`, `message.py`, `intent_service.py` и перезапустили API.
 - Добавили domain router config per-client (anchors + thresholds) в `clients.config`.
 - Включили логирование domain scores через `DOMAIN_ROUTER_LOG_SCORES=1`.
-- Перезалили `intent_service.py`, `webhook.py`, `message.py` и перезапустили API.
+- Перезалили `intent_service.py`, `webhook/_legacy.py`, `message.py` и перезапустили API.
 
 ### 2025-12-19 - AL наблюдаемость + дедуп + KB sync
 
@@ -1331,7 +1445,7 @@ Runbook (если “всё странно” или сессия оборвал
 - Быстрые сообщения подряд (“подскажите/…/…”) теперь debounced на уровне API → промежуточные сообщения сохраняются в историю, но бот отвечает один раз (по последнему сообщению после паузы).
 - После тестов закрывать заявки кнопкой [Решено] или делать `reset.sql`, чтобы диалоги не оставались в `pending/manager_active`.
 
-Ключевые файлы для отладки: `truffles-api/app/routers/webhook.py`, `truffles-api/app/routers/telegram_webhook.py`, `truffles-api/app/services/ai_service.py`, `truffles-api/app/services/manager_message_service.py`, `truffles-api/app/services/state_service.py`, `ops/reset.sql`.
+Ключевые файлы для отладки: `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/app/routers/telegram_webhook.py`, `truffles-api/app/services/ai_service.py`, `truffles-api/app/services/manager_message_service.py`, `truffles-api/app/services/state_service.py`, `ops/reset.sql`.
 
 Что работает:
 - Бот отвечает при RAG score ≥ 0.5 (medium/high), а приветствия/«спасибо»/«ок?»/«???» — без заявок (guardrails)
@@ -1463,37 +1577,37 @@ LIMIT 1;
 | `SALON_TRUTH.yaml` | Добавлены RU/KZ примеры для `domain_pack.typical_questions.hours` |
 | `EVAL.yaml` | Кейс multi-truth (часы + маникюр) |
 | `tests/test_message_endpoint.py` | Тест multi-truth: часы+услуга без booking, "ислам" не создаёт заявку |
-| `webhook.py` | Booking gate: info-вопросы распознаются по сегментам ?!.; блокировка очищает booking_state и отключает flow |
+| `webhook/_legacy.py` | Booking gate: info-вопросы распознаются по сегментам ?!.; блокировка очищает booking_state и отключает flow |
 | `conversation.py` | Добавлен `context` (JSONB) для краткого контекста/слотов |
-| `webhook.py` | Слот-филлинг записи + контекст диалога |
+| `webhook/_legacy.py` | Слот-филлинг записи + контекст диалога |
 | `state_service.py` | Очистка контекста при resolve |
 | `ops/reset.sql` | Сброс контекста при emergency reset |
 | `reminder_service.py` | Авто‑закрытие handover + алерт “нет ответа” |
 | `ai_service.py` | Возвращает `Result[Tuple[str, str]]` с confidence |
 | `message.py` | Обработка low_confidence → эскалация |
-| `webhook.py` | То же самое (ОБА файла обрабатывают сообщения!) |
+| `webhook/_legacy.py` | То же самое (ОБА файла обрабатывают сообщения!) |
 | `learning_service.py` | СОЗДАН: `is_owner_response()`, `add_to_knowledge()` |
 | `manager_message_service.py` | Добавлен вызов `add_to_knowledge()` для owner |
 | `main.py` | Фоновый outbox worker (тик 2s, опционально через env) |
 | `admin.py` | Outbox processing вынесен в общий хелпер |
-| `webhook.py` | Добавлен `_process_outbox_rows()` для reuse в admin/worker |
+| `webhook/_legacy.py` | Добавлен `_process_outbox_rows()` для reuse в admin/worker |
 | `schemas/telegram.py` | Добавлены `sender_chat`/`author_signature`, username у chat |
 | `telegram_webhook.py` | sender_chat fallback для идентификации менеджера |
 | `telegram_webhook.py` | unpin использует `handover.telegram_message_id` (fallback на callback message_id) |
 | `manager_message_service.py` | Не затирает assigned_to при unknown, fallback на assigned_to для owner-check |
 | `learning_service.py` | Owner match принимает отрицательные ID (sender_chat) |
 | `message_service.py` | Выбор последнего содержательного user-сообщения для handover |
-| `webhook.py` | human_request эскалируется с последним meaningful сообщением |
+| `webhook/_legacy.py` | human_request эскалируется с последним meaningful сообщением |
 | `message.py` | То же поведение для `/message` |
-| `webhook.py` | Decision engine (normalize → signals → resolve → action) + policy handler для truth gate |
-| `webhook.py` | Валидация слотов записи (service/datetime/name) + запрет opt-out/фрустрации |
+| `webhook/_legacy.py` | Decision engine (normalize → signals → resolve → action) + policy handler для truth gate |
+| `webhook/_legacy.py` | Валидация слотов записи (service/datetime/name) + запрет opt-out/фрустрации |
 | `config.py` | Settings: игнорировать лишние env-поля (запуск тестов в окружении с .env) |
 | `truffles-api/tests/test_cases.json` | Добавлены автоматизируемые кейсы для golden-прогона |
 | `tests/test_message_endpoint.py` | Автотесты golden-cases (decision/signals) |
 | `schemas/telegram.py` | Перевёл Pydantic Config на ConfigDict (убрал депрекейшн) |
 | `demo_salon_knowledge.py` | Фикс ложной payment-эскалации: короткие ключи/фразы → word-boundary |
 | `EVAL.yaml` | Добавлен кейс “какие услуги” для services_overview |
-| `webhook.py` | Fast-intent: короткий путь (phrase/truth) до LLM |
+| `webhook/_legacy.py` | Fast-intent: короткий путь (phrase/truth) до LLM |
 | `ai_service.py` | Model routing FAST/SLOW + LLM timeout (6s) + model_tier в логах |
 | `intent_service.py` | Intent классификация на FAST_MODEL + timeout 2s + timing logs |
 | `services/llm/base.py` | generate() принимает timeout_seconds |
@@ -1505,26 +1619,26 @@ LIMIT 1;
 | `truffles-api/tests/test_cases.json` | Golden cases для новых fast-intent |
 | `tests/test_message_endpoint.py` | Обновлён fallback case для LLM |
 | `ai_service.py` | Добавлены флаги `llm_used`/`llm_timeout` в timing_context для метрик |
-| `webhook.py` | Запись decision_meta в metadata user-сообщений (fast_intent/LLM) |
+| `webhook/_legacy.py` | Запись decision_meta в metadata user-сообщений (fast_intent/LLM) |
 | `admin.py` | Новый /admin/metrics (читает дневные метрики) |
 | `ops/migrations/015_add_metrics_daily.sql` | Таблица дневных метрик SLA/LLM/эскалаций |
 | `ops/metrics_daily_snapshot.sql` | SQL snapshot метрик по дню/клиенту |
 | `truffles-api/tests/test_cases.json` | Добавлены fast_intent golden cases |
 | `tests/test_message_endpoint.py` | Тесты fast_intent + LLM fallback |
 | `.env.example` | Добавлены FAST_MODEL/SLOW_MODEL + таймауты |
-| `webhook.py` | Outbox skip_persist пишет decision_meta (message_id/created_at fallback), messageId добавляется в payload |
+| `webhook/_legacy.py` | Outbox skip_persist пишет decision_meta (message_id/created_at fallback), messageId добавляется в payload |
 | `demo_salon_knowledge.py` | Часы работы распознаются шире, “сколько” не триггерит прайс без price-сигнала |
 | `EVAL.yaml` | Кейс “Во сколько вы открываетесь в будни?” → hours |
 | `truffles-api/tests/test_cases.json` | Golden‑кейс для hours (fast_intent) |
 | `ai_service.py` | LLM timeout default поднят до 6s |
 | `intent_service.py` | Domain router: подсчёт hit‑якорей + strict in‑anchors для OOD override |
-| `webhook.py` | OOD override по anchor hit + OOD проверка до style_reference; decision_trace/logs расширены |
+| `webhook/_legacy.py` | OOD override по anchor hit + OOD проверка до style_reference; decision_trace/logs расширены |
 | `ops/update_instance_demo.sql` | anchors_in/out расширены, добавлен anchors_in_strict + “кошачий глаз” |
 | `tests/test_message_endpoint.py` | Demo domain_router config обновлён (anchors_in/out + strict) |
 | `truffles-api/tests/test_cases.json` | Кейсы OOD/style/“кошачий глаз” для domain_router и fast_intent |
-| `webhook.py` | Порядок гейтов обновлён: было policy/truth → booking → fast_intent → intent/domain → LLM; стало pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → LLM-first → truth gate fallback |
-| `webhook.py` | LLM guard: темы оплат/медиц/жалоб/скидок/возвратов → эскалация + decision_meta `llm_primary_used` |
-| `webhook.py` | Fast-intent теперь только smalltalk (greeting/thanks/ok), booking slang "маник" добавлен в keywords |
+| `webhook/_legacy.py` | Порядок гейтов обновлён: было policy/truth → booking → fast_intent → intent/domain → LLM; стало pending/opt-out/policy escalation → OOD (strong anchors) → booking guard/flow → LLM-first → truth gate fallback |
+| `webhook/_legacy.py` | LLM guard: темы оплат/медиц/жалоб/скидок/возвратов → эскалация + decision_meta `llm_primary_used` |
+| `webhook/_legacy.py` | Fast-intent теперь только smalltalk (greeting/thanks/ok), booking slang "маник" добавлен в keywords |
 | `ai_service.py` | GREETING_PHRASES расширен ("сәлем") для smalltalk |
 | `ai_service.py` | THANKS_PHRASES расширен ("пожалуйста") для smalltalk |
 | `demo_salon_knowledge.py` | Price сигнал: добавлен сленг "скок/скока", маникюр распознаётся как "маник" |
@@ -1535,11 +1649,11 @@ LIMIT 1;
 | `SPECS/CONSULTANT.md` | Зафиксировано: LLM-first с жёсткими правилами и fallback |
 | `SALON_TRUTH.yaml` | Добавлен services_catalog с алиасами и базовыми подсказками услуг |
 | `demo_salon_knowledge.py` | Service matcher по услугам (data-driven) + обработка "сколько стоит" |
-| `webhook.py` | Service matcher в LLM-first до LLM, source=service_matcher |
+| `webhook/_legacy.py` | Service matcher в LLM-first до LLM, source=service_matcher |
 | `tests/test_message_endpoint.py` | Тест: service matcher шортсёркит LLM |
 | `EVAL.yaml` | Кейсы: педикюр/массаж ног/адрес |
 | `ai_service.py` | ASR default provider: ElevenLabs scribe_v1, fallback whisper-1 |
-| `webhook.py` | ASR primary default aligned to ElevenLabs (scribe_v1) |
+| `webhook/_legacy.py` | ASR primary default aligned to ElevenLabs (scribe_v1) |
 
 **owner_telegram_id:** было `@ent3rprise` (НЕ РАБОТАЛО), исправлено на `1969855532`
 
@@ -1746,7 +1860,7 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - CI/деплой/pytest PASS; allowlist снят после успеха.
 
 **Evidence:**
-- Code: `truffles-api/app/routers/webhook.py` (allow_service flag + selection).
+- Code: `truffles-api/app/routers/webhook/_legacy.py` (allow_service flag + selection).
 - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20658445278 (commit 7b971713b4863094ce39910f03c5e60e97688b16).
 - Prod: `/admin/version` commit 7b971713b4863094ce39910f03c5e60e97688b16.
 - Live‑check: conversation `99306198-1ecf-44d6-9066-72bb4e76e915`, decision_meta.booking_info_interrupt=true.
@@ -1782,7 +1896,7 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - Merge 3 PR → CI core/long PASS → deploy HEAD.
 
 **Evidence:**
-- Code: `truffles-api/app/routers/webhook.py:2762`, `truffles-api/app/routers/webhook.py:6766`, `truffles-api/app/routers/webhook.py:7963`.
+- Code: `truffles-api/app/routers/webhook/_legacy.py:2762`, `truffles-api/app/routers/webhook/_legacy.py:6766`, `truffles-api/app/routers/webhook/_legacy.py:7963`.
 - EVAL cases: `truffles-api/app/knowledge/demo_salon/EVAL.yaml:6210`, `truffles-api/app/knowledge/demo_salon/EVAL.yaml:6390`.
 - PRs: https://github.com/k1ddy/Truffles-AI-Employee/pull/30, https://github.com/k1ddy/Truffles-AI-Employee/pull/31, https://github.com/k1ddy/Truffles-AI-Employee/pull/32.
 - CI core/long: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20711370449, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20711403858, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20711520186.

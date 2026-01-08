@@ -115,6 +115,7 @@
 truffles-api/
 ├── app/
 │   ├── main.py              # FastAPI entry point
+│   ├── webhook.py           # LEGACY: unused; kept for backward compatibility (use routers/webhook/)
 │   ├── routers/
 │   │   ├── webhook/             # POST /webhook/{client_slug} (direct), POST /webhook (legacy wrapper) — входящие WhatsApp
 │   │   ├── telegram_webhook.py  # POST /telegram-webhook — сообщения/кнопки менеджеров

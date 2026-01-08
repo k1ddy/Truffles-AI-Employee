@@ -670,7 +670,7 @@ pytest tests/ -v
 
 | Файл | Назначение |
 |------|------------|
-| `app/routers/webhook.py` | Входящие от WhatsApp |
+| `app/routers/webhook/_legacy.py` | Входящие от WhatsApp |
 | `app/routers/telegram_webhook.py` | Входящие от Telegram |
 | `app/routers/message.py` | Альтернативный endpoint сообщений |
 | `app/services/ai_service.py` | Генерация ответов, confidence |
@@ -740,4 +740,22 @@ pytest tests/ -v
 
 ---
 
-*Последнее обновление: 2025-12-13*
+## 19. Refactor Plan — webhook pipeline (P1)
+
+- Цель: уменьшить регрессы и стоимость изменений без смены поведения.
+- Границы: HTTP‑слой остаётся в `app/routers/webhook/_legacy.py`, логика переносится по стадиям.
+- Декомпозиция:
+  - `pipeline/guards.py` — spam/toxic/opt‑out/LAW/pending gates.
+  - `pipeline/router.py` — LLM router + fallback, intent_queue/expected_reply orchestration.
+  - `pipeline/policy.py` — policy‑gates (discount/payment).
+  - `pipeline/info_bundle.py` — info‑bundle + carryover.
+  - `pipeline/service_carryover.py` — service carryover guard + TTL.
+  - `pipeline/service_matcher.py` — pricing/duration/service matcher.
+  - `pipeline/booking.py` — booking flow + expected_reply.
+  - `pipeline/response_sender.py` — send/save/trace/meta.
+- Контекст: единый `RequestContext` (dataclass) вместо разрозненных dict‑ов.
+- Инварианты: поведение не меняем; CI core/long зелёные; trace/meta сохраняются.
+
+---
+
+*Последнее обновление: 2026-01-07*

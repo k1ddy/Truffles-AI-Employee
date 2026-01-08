@@ -84,4 +84,4 @@ LLM допускается только как **перефразировани�
 - `truffles-api/app/services/ai_service.py` — gate + generation
 - `truffles-api/app/services/intent_service.py` — phrase matcher / router
 - `truffles-api/app/services/outbox_service.py` (или воркер) — coalescing
-- `truffles-api/app/routers/webhook.py` — state-machine/manager_active и вызов сервиса
+- `truffles-api/app/routers/webhook/_legacy.py` — state-machine/manager_active и вызов сервиса
