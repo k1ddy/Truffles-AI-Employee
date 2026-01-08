@@ -7684,6 +7684,36 @@ async def _handle_webhook_payload(
                             conversation_id=conversation.id,
                             bot_response=bot_response,
                         )
+                    if out_of_domain_signal and not expected_reply_shortcircuit:
+                        bot_response = OUT_OF_DOMAIN_RESPONSE
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "out_of_domain",
+                                "decision": "domain_anchor",
+                                "state": conversation.state,
+                            },
+                        )
+                        _record_message_decision_meta(
+                            saved_message,
+                            action="out_of_domain",
+                            intent="out_of_domain",
+                            source="domain_anchor",
+                            fast_intent=False,
+                        )
+                        bot_response, sent = _send_and_save(bot_response)
+                        result_message = (
+                            "Domain anchor OOD reply sent"
+                            if sent
+                            else "Domain anchor OOD reply send failed"
+                        )
+                        db.commit()
+                        return WebhookResponse(
+                            success=True,
+                            message=result_message,
+                            conversation_id=conversation.id,
+                            bot_response=bot_response,
+                        )
                     if _looks_like_time_only_request(message_text):
                         bot_response = MSG_EXPECTED_SERVICE_OFF_TOPIC
                         _record_decision_trace(
@@ -7717,6 +7747,69 @@ async def _handle_webhook_payload(
                             bot_response=bot_response,
                         )
                     if not out_of_domain_signal:
+                        explicit_service_hint = None
+                        if message_text and payload.client_slug:
+                            explicit_service_hint = _extract_service_hint(
+                                message_text, payload.client_slug
+                            )
+                        intent_decomp_explicit_query = None
+                        if isinstance(intent_decomp_payload, dict):
+                            raw_source = intent_decomp_payload.get("service_query_source")
+                            raw_query = intent_decomp_payload.get("service_query")
+                            if (
+                                isinstance(raw_query, str)
+                                and raw_query.strip()
+                                and raw_source != "context"
+                            ):
+                                intent_decomp_explicit_query = raw_query.strip()
+                        in_signals = class_router_result.get("in_signals") or []
+                        anchors_in_hits = int(class_router_result.get("anchors_in_hits") or 0)
+                        service_semantic_allowed = bool(
+                            explicit_service_hint
+                            or intent_decomp_explicit_query
+                            or booking_signal
+                            or info_intent_hint
+                            or in_signals
+                            or anchors_in_hits > 0
+                        )
+                        if not service_semantic_allowed:
+                            bot_response = OUT_OF_DOMAIN_RESPONSE
+                            _record_decision_trace(
+                                conversation,
+                                {
+                                    "stage": "out_of_domain",
+                                    "decision": "service_semantic_guard",
+                                    "state": conversation.state,
+                                },
+                            )
+                            _record_message_decision_meta(
+                                saved_message,
+                                action="out_of_domain",
+                                intent="out_of_domain",
+                                source="service_semantic_guard",
+                                fast_intent=False,
+                            )
+                            if saved_message:
+                                _update_message_decision_metadata(
+                                    saved_message,
+                                    {
+                                        "service_semantic_match_skipped": True,
+                                        "service_semantic_match_skip_reason": "low_signal",
+                                    },
+                                )
+                            bot_response, sent = _send_and_save(bot_response)
+                            result_message = (
+                                "Service semantic guard reply sent"
+                                if sent
+                                else "Service semantic guard reply send failed"
+                            )
+                            db.commit()
+                            return WebhookResponse(
+                                success=True,
+                                message=result_message,
+                                conversation_id=conversation.id,
+                                bot_response=bot_response,
+                            )
                         semantic_result = semantic_service_match(message_text, payload.client_slug)
                         if not semantic_result:
                             rewrite_query = rewrite_for_service_match(message_text, payload.client_slug)
@@ -7903,6 +7996,70 @@ async def _handle_webhook_payload(
                     user_text=message_text,
                     miss_type="clarify",
                 )
+                explicit_service_hint = None
+                if message_text and payload.client_slug:
+                    explicit_service_hint = _extract_service_hint(
+                        message_text, payload.client_slug
+                    )
+                intent_decomp_explicit_query = None
+                info_intent_hint = False
+                if isinstance(intent_decomp_payload, dict):
+                    raw_source = intent_decomp_payload.get("service_query_source")
+                    raw_query = intent_decomp_payload.get("service_query")
+                    if (
+                        isinstance(raw_query, str)
+                        and raw_query.strip()
+                        and raw_source != "context"
+                    ):
+                        intent_decomp_explicit_query = raw_query.strip()
+                    raw_intents = intent_decomp_payload.get("intents")
+                    if isinstance(raw_intents, list):
+                        normalized_intents = {
+                            item.strip().casefold()
+                            for item in raw_intents
+                            if isinstance(item, str) and item.strip()
+                        }
+                        info_intent_hint = bool(
+                            normalized_intents & {"hours", "pricing", "duration", "location"}
+                        )
+                has_domain_signal = bool(
+                    explicit_service_hint
+                    or intent_decomp_explicit_query
+                    or booking_signal
+                    or info_class_intents
+                    or info_intent_hint
+                    or int(class_router_result.get("anchors_in_hits") or 0) > 0
+                )
+                if not has_domain_signal and not expected_reply_shortcircuit:
+                    bot_response = OUT_OF_DOMAIN_RESPONSE
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "out_of_domain",
+                            "decision": "no_response_guard",
+                            "state": conversation.state,
+                        },
+                    )
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="out_of_domain",
+                        intent="out_of_domain",
+                        source="no_response_guard",
+                        fast_intent=False,
+                    )
+                    bot_response, sent = _send_and_save(bot_response)
+                    result_message = (
+                        "No-response OOD reply sent"
+                        if sent
+                        else "No-response OOD reply send failed"
+                    )
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
                 context = _get_conversation_context(conversation)
                 retry_count = _get_low_confidence_retry_count(context)
                 if should_offer_low_confidence_retry(conversation, now):
