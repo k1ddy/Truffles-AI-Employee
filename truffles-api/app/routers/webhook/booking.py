@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.demo_salon_knowledge import DemoSalonDecision
 
 BOOKING_SLOT_ORDER = ("service", "datetime", "name")
 
@@ -298,11 +302,103 @@ def _apply_booking_slot(
     return booking
 
 
+def _update_booking_from_message(booking: dict, message_text: str, *, client_slug: str | None) -> dict:
+    booking = dict(booking)
+    last_question = booking.get("last_question")
+    if _is_blocked_slot_message(message_text):
+        return booking
+
+    if last_question in BOOKING_SLOT_ORDER:
+        booking = _apply_booking_slot(
+            booking,
+            last_question,
+            message_text,
+            allow_freeform=True,
+            client_slug=client_slug,
+        )
+
+    for slot_key in BOOKING_SLOT_ORDER:
+        booking = _apply_booking_slot(
+            booking,
+            slot_key,
+            message_text,
+            allow_freeform=False,
+            client_slug=client_slug,
+        )
+
+    return booking
+
+
+def _update_booking_from_messages(
+    booking: dict,
+    messages: list[str],
+    *,
+    client_slug: str | None,
+) -> dict:
+    updated = dict(booking)
+    for message in messages:
+        updated = _update_booking_from_message(updated, message, client_slug=client_slug)
+    return updated
+
+
+def _next_booking_prompt(booking: dict, *, refusal_flags: dict | None = None) -> tuple[dict, str | None]:
+    booking = dict(booking)
+    if not booking.get("service"):
+        booking["last_question"] = "service"
+        from . import _legacy as legacy
+
+        return booking, legacy.MSG_BOOKING_ASK_SERVICE
+    if not booking.get("datetime"):
+        booking["last_question"] = "datetime"
+        from . import _legacy as legacy
+
+        return booking, legacy.MSG_BOOKING_ASK_DATETIME
+    if not booking.get("name"):
+        from . import _legacy as legacy
+
+        if legacy._is_refusal_flag_active(refusal_flags, "name"):
+            booking["last_question"] = None
+            return booking, None
+        booking["last_question"] = "name"
+        return booking, legacy.MSG_BOOKING_ASK_NAME
+    booking["last_question"] = None
+    return booking, None
+
+
+def _is_booking_time_service_decision(decision: DemoSalonDecision | None) -> bool:
+    if not decision or getattr(decision, "action", None) != "reply":
+        return False
+    intent = getattr(decision, "intent", None)
+    if not isinstance(intent, str):
+        return False
+    from . import _legacy as legacy
+
+    return intent.strip().casefold() in legacy.BOOKING_TIME_SERVICE_INTENTS
+
+
+def _build_booking_summary(booking: dict, *, refusal_flags: dict | None = None) -> str:
+    service = booking.get("service") or "не указано"
+    datetime_pref = booking.get("datetime") or "не указано"
+    name = booking.get("name")
+    from . import _legacy as legacy
+
+    name_refused = legacy._is_refusal_flag_active(refusal_flags, "name")
+    if not name and name_refused:
+        name_value = "отказ"
+    else:
+        name_value = name or "не указано"
+    summary = f"Запись: услуга={service}; дата/время={datetime_pref}; имя={name_value}."
+    if legacy._is_refusal_flag_active(refusal_flags, "phone"):
+        summary = f"{summary} Телефон: отказ."
+    return summary
+
+
 __all__ = [
     "BOOKING_SLOT_ORDER",
     "BOOKING_SLOT_VALIDATORS",
     "_apply_booking_slot",
     "_apply_expected_reply_slot",
+    "_build_booking_summary",
     "_clean_name_candidate",
     "_clear_service_hint",
     "_expected_reply_for_booking_question",
@@ -310,12 +406,16 @@ __all__ = [
     "_get_recent_service_hint",
     "_is_blocked_slot_message",
     "_is_booking_related_message",
+    "_is_booking_time_service_decision",
     "_is_noise_slot_message",
     "_match_expected_reply",
+    "_next_booking_prompt",
     "_select_expected_reply_message",
     "_select_last_non_booking_message",
     "_set_booking_context",
     "_set_service_hint",
+    "_update_booking_from_message",
+    "_update_booking_from_messages",
     "_validate_datetime_slot",
     "_validate_name_slot",
     "_validate_service_slot",
