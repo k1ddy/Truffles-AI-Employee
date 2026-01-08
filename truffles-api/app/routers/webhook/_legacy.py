@@ -66,6 +66,17 @@ from app.routers.webhook.info import (
     _tokenize_for_matching,
 )
 from app.routers.webhook.parsing import _parse_webhook_request
+from app.routers.webhook.pending import (
+    _build_pending_resume_snapshot,
+    _get_pending_resume,
+    _get_pending_sla,
+    _is_pending_ack,
+    _is_pending_close,
+    _normalize_pending_text,
+    _restore_pending_resume,
+    _set_pending_resume,
+    _set_pending_sla,
+)
 from app.routers.webhook.policy import (
     _demo_salon_escalation_gate,
     _demo_salon_price_sidecar,
@@ -84,6 +95,20 @@ from app.routers.webhook.policy import (
     _should_run_truth_gate,
 )
 from app.routers.webhook.response import _apply_quiet_hours_notice, _maybe_append_booking_cta
+from app.routers.webhook.session_memory import (
+    _get_session_memory,
+    _is_session_memory_expired,
+    _is_session_reset_only_message,
+    _parse_session_memory_time,
+    _record_session_memory_update,
+    _reset_session_memory,
+    _session_memory_snapshot,
+    _set_session_memory,
+    _should_reset_session_memory,
+    _update_session_memory_goal,
+    _update_session_memory_on_answer,
+    _update_session_memory_on_question,
+)
 from app.routers.webhook.trace import (
     _attach_llm_cache_flag,
     _record_decision_trace,
@@ -1682,35 +1707,6 @@ def _contains_any(normalized: str, keywords: list[str]) -> bool:
     return any(keyword in normalized for keyword in keywords)
 
 
-def _normalize_pending_text(text: str) -> str:
-    normalized = normalize_for_matching(text)
-    if not normalized:
-        return ""
-    return normalized.replace("ё", "е")
-
-
-def _is_pending_ack(text: str) -> bool:
-    normalized = _normalize_pending_text(text)
-    return normalized in PENDING_ACK_PHRASES
-
-
-def _is_pending_close(text: str) -> bool:
-    normalized = _normalize_pending_text(text)
-    return normalized in PENDING_CLOSE_PHRASES
-
-
-def _get_pending_sla(context: dict) -> dict:
-    payload = context.get(PENDING_SLA_CONTEXT_KEY) if isinstance(context, dict) else None
-    return payload if isinstance(payload, dict) else {}
-
-
-def _set_pending_sla(context: dict, payload: dict) -> dict:
-    if not isinstance(context, dict):
-        context = {}
-    context[PENDING_SLA_CONTEXT_KEY] = payload
-    return context
-
-
 def _is_booking_request(text: str) -> bool:
     normalized = _normalize_text(text)
     if not normalized:
@@ -1989,292 +1985,6 @@ def _set_context_manager(context: dict, manager: dict) -> dict:
     context = dict(context)
     context[CONTEXT_MANAGER_KEY] = manager
     return context
-
-
-def _get_session_memory(context: dict) -> dict:
-    payload = context.get(SESSION_MEMORY_KEY) if isinstance(context, dict) else None
-    if isinstance(payload, dict):
-        return dict(payload)
-    return {}
-
-
-def _set_session_memory(context: dict, memory: dict | None) -> dict:
-    context = dict(context)
-    if memory:
-        context[SESSION_MEMORY_KEY] = memory
-    else:
-        context.pop(SESSION_MEMORY_KEY, None)
-    return context
-
-
-def _get_pending_resume(context: dict) -> dict | None:
-    payload = context.get(PENDING_RESUME_KEY) if isinstance(context, dict) else None
-    if isinstance(payload, dict):
-        return dict(payload)
-    return None
-
-
-def _set_pending_resume(context: dict, payload: dict | None) -> dict:
-    context = dict(context)
-    if payload:
-        context[PENDING_RESUME_KEY] = payload
-    else:
-        context.pop(PENDING_RESUME_KEY, None)
-    return context
-
-
-def _build_pending_resume_snapshot(
-    *,
-    context: dict,
-    context_manager: dict,
-    expected_reply_type: str | None,
-    intent_queue: list[str] | None,
-    booking_context: dict | None,
-    session_memory: dict,
-) -> dict:
-    service_hint = context.get(SERVICE_HINT_KEY) if isinstance(context, dict) else None
-    service_hint_at = context.get(SERVICE_HINT_AT_KEY) if isinstance(context, dict) else None
-    return {
-        "context_manager": dict(context_manager) if isinstance(context_manager, dict) else {},
-        "expected_reply_type": expected_reply_type,
-        "intent_queue": list(intent_queue) if isinstance(intent_queue, list) else [],
-        "booking": dict(booking_context) if isinstance(booking_context, dict) else {"active": False},
-        "session_memory": dict(session_memory) if isinstance(session_memory, dict) else {},
-        "service_hint": service_hint,
-        "service_hint_at": service_hint_at,
-    }
-
-
-def _restore_pending_resume(
-    *,
-    context: dict,
-    pending_resume: dict,
-    now: datetime,
-) -> dict:
-    context = _set_pending_resume(context, None)
-    context = _set_pending_sla(context, {})
-    context.pop("handover_confirmation", None)
-    context = _set_context_manager(
-        context,
-        pending_resume.get("context_manager") if isinstance(pending_resume, dict) else {},
-    )
-    context = _set_expected_reply_type(
-        context,
-        pending_resume.get("expected_reply_type") if isinstance(pending_resume, dict) else None,
-    )
-    context = _set_intent_queue(
-        context,
-        pending_resume.get("intent_queue") if isinstance(pending_resume, dict) else [],
-    )
-    booking_context = pending_resume.get("booking") if isinstance(pending_resume, dict) else None
-    if isinstance(booking_context, dict):
-        context = _set_booking_context(context, booking_context)
-    else:
-        context = _set_booking_context(context, {"active": False})
-    session_memory = pending_resume.get("session_memory") if isinstance(pending_resume, dict) else None
-    if isinstance(session_memory, dict) and session_memory:
-        session_memory["last_updated_at"] = now.isoformat()
-        context = _set_session_memory(context, session_memory)
-    else:
-        context = _set_session_memory(context, None)
-    service_hint = pending_resume.get("service_hint") if isinstance(pending_resume, dict) else None
-    if isinstance(service_hint, str) and service_hint.strip():
-        context = _set_service_hint(context, service_hint.strip(), now)
-    else:
-        context = _clear_service_hint(context)
-    return context
-
-
-def _parse_session_memory_time(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except (TypeError, ValueError):
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
-def _is_session_memory_expired(memory: dict, now: datetime) -> bool:
-    ttl_hours = memory.get("ttl_hours", SESSION_MEMORY_TTL_HOURS)
-    try:
-        ttl_hours = int(ttl_hours)
-    except (TypeError, ValueError):
-        ttl_hours = SESSION_MEMORY_TTL_HOURS
-    last_updated_at = _parse_session_memory_time(memory.get("last_updated_at"))
-    if not last_updated_at:
-        return True
-    return (now - last_updated_at) > timedelta(hours=max(1, ttl_hours))
-
-
-def _should_reset_session_memory(message_text: str | None) -> bool:
-    if not message_text:
-        return False
-    normalized = normalize_for_matching(message_text)
-    if not normalized:
-        return False
-    return any(phrase in normalized for phrase in SESSION_MEMORY_RESET_PHRASES)
-
-
-def _is_session_reset_only_message(message_text: str | None) -> bool:
-    if not message_text:
-        return False
-    normalized = normalize_for_matching(message_text)
-    if not normalized:
-        return False
-    return normalized in SESSION_MEMORY_RESET_PHRASES
-
-
-def _session_memory_snapshot(memory: dict) -> dict:
-    pending_slots = memory.get("pending_slots")
-    if isinstance(pending_slots, dict):
-        pending_keys = sorted(
-            key for key in pending_slots.keys() if isinstance(key, str) and key.strip()
-        )
-    else:
-        pending_keys = []
-    goal_stack = memory.get("goal_stack")
-    if isinstance(goal_stack, list):
-        cleaned_goals = [item for item in goal_stack if isinstance(item, str) and item.strip()]
-    else:
-        cleaned_goals = []
-    unanswered = memory.get("unanswered_questions")
-    if isinstance(unanswered, list):
-        unanswered_count = len([item for item in unanswered if isinstance(item, str) and item.strip()])
-    else:
-        unanswered_count = 0
-    return {
-        "last_question_type": memory.get("last_question_type"),
-        "active_goal": memory.get("active_goal"),
-        "goal_stack_depth": len(cleaned_goals),
-        "goal_stack_top": cleaned_goals[-1] if cleaned_goals else None,
-        "pending_slots": pending_keys,
-        "unanswered_questions_count": unanswered_count,
-    }
-
-
-def _record_session_memory_update(
-    conversation: Conversation,
-    saved_message: Message | None,
-    *,
-    memory: dict,
-    reason: str,
-) -> None:
-    snapshot = _session_memory_snapshot(memory)
-    trace = {"stage": "session_memory", "decision": "update", "reason": reason}
-    trace.update(snapshot)
-    _record_decision_trace(conversation, trace)
-    if saved_message:
-        _update_message_decision_metadata(saved_message, {"session_memory_update": snapshot})
-
-
-def _reset_session_memory(
-    *,
-    context: dict,
-    context_manager: dict,
-    reason: str,
-    now: datetime,
-) -> tuple[dict, dict, dict]:
-    manager = dict(context_manager)
-    manager.pop(CLASS_CARRYOVER_KEY, None)
-    manager.pop(SERVICE_CARRYOVER_KEY, None)
-    manager.pop(CONSULT_CONTEXT_KEY, None)
-    context = _set_context_manager(context, manager)
-    context = _set_expected_reply_type(context, None)
-    context = _set_intent_queue(context, [])
-    context = _set_booking_context(context, {"active": False})
-    context = _clear_service_hint(context)
-    context = _set_session_memory(context, None)
-    memory_payload = {"last_updated_at": now.isoformat(), "ttl_hours": SESSION_MEMORY_TTL_HOURS}
-    return context, manager, {"reason": reason, **_session_memory_snapshot(memory_payload)}
-
-
-def _update_session_memory_on_question(
-    context: dict,
-    *,
-    expected_reply_type: str,
-    active_goal: str | None,
-    now: datetime,
-) -> tuple[dict, dict]:
-    memory = _get_session_memory(context)
-    unanswered = memory.get("unanswered_questions")
-    unanswered_list = (
-        [item for item in unanswered if isinstance(item, str) and item.strip()]
-        if isinstance(unanswered, list)
-        else []
-    )
-    if expected_reply_type not in unanswered_list:
-        unanswered_list.append(expected_reply_type)
-    memory["last_question_type"] = expected_reply_type
-    if active_goal:
-        memory["active_goal"] = active_goal
-        goal_stack = memory.get("goal_stack")
-        if not isinstance(goal_stack, list):
-            goal_stack = []
-        if not goal_stack or goal_stack[-1] != active_goal:
-            goal_stack.append(active_goal)
-        memory["goal_stack"] = goal_stack[-3:]
-    memory["unanswered_questions"] = unanswered_list
-    memory["last_updated_at"] = now.isoformat()
-    memory["ttl_hours"] = SESSION_MEMORY_TTL_HOURS
-    context = _set_session_memory(context, memory)
-    return context, memory
-
-
-def _update_session_memory_on_answer(
-    context: dict,
-    *,
-    expected_reply_type: str,
-    value: str,
-    now: datetime,
-) -> tuple[dict, dict]:
-    memory = _get_session_memory(context)
-    pending_slots = memory.get("pending_slots")
-    pending_map = dict(pending_slots) if isinstance(pending_slots, dict) else {}
-    unanswered = memory.get("unanswered_questions")
-    unanswered_list = (
-        [item for item in unanswered if isinstance(item, str) and item.strip()]
-        if isinstance(unanswered, list)
-        else []
-    )
-    if expected_reply_type in unanswered_list:
-        unanswered_list = [item for item in unanswered_list if item != expected_reply_type]
-    slot_map = {
-        EXPECTED_REPLY_SERVICE: "service",
-        EXPECTED_REPLY_TIME: "datetime",
-        EXPECTED_REPLY_NAME: "name",
-    }
-    slot_key = slot_map.get(expected_reply_type)
-    if slot_key and isinstance(value, str) and value.strip():
-        pending_map[slot_key] = value.strip()
-    memory["pending_slots"] = pending_map
-    memory["unanswered_questions"] = unanswered_list
-    memory["last_updated_at"] = now.isoformat()
-    memory["ttl_hours"] = SESSION_MEMORY_TTL_HOURS
-    context = _set_session_memory(context, memory)
-    return context, memory
-
-
-def _update_session_memory_goal(
-    context: dict,
-    *,
-    active_goal: str,
-    now: datetime,
-) -> tuple[dict, dict]:
-    memory = _get_session_memory(context)
-    memory["active_goal"] = active_goal
-    goal_stack = memory.get("goal_stack")
-    if not isinstance(goal_stack, list):
-        goal_stack = []
-    if not goal_stack or goal_stack[-1] != active_goal:
-        goal_stack.append(active_goal)
-    memory["goal_stack"] = goal_stack[-3:]
-    memory["last_updated_at"] = now.isoformat()
-    memory["ttl_hours"] = SESSION_MEMORY_TTL_HOURS
-    context = _set_session_memory(context, memory)
-    return context, memory
 
 
 def _get_shield_context(context: dict) -> dict:
