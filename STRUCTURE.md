@@ -52,7 +52,7 @@
 | `STATE.md` | Базовые факты, текущие блокеры, следующий шаг |
 | `docs/SESSION_START_PROMPT.txt` | Минимальный протокол старта и проверки фактов |
 | `TECH.md` | Доступы, команды, где что работает |
-| `truffles-api/app/routers/webhook/` | Входящие WhatsApp (direct + legacy) |
+| `truffles-api/app/routers/webhook/` | Входящие WhatsApp (direct + legacy). Модули: `_legacy.py`, `booking.py`, `decision.py`, `dedup.py`, `info.py`, `parsing.py`, `policy.py`, `response.py`, `trace.py`. |
 | `truffles-api/app/routers/telegram_webhook.py` | Telegram сообщения/кнопки менеджеров |
 
 ---
