@@ -2140,6 +2140,7 @@ DATE_MONTH_PATTERN = re.compile(
 )
 NAME_PATTERN = re.compile(r"\bменя зовут\s+([a-zа-яё-]{2,})", re.IGNORECASE)
 PHONE_PATTERN = re.compile(r"\+?\d[\d\s\-\(\)]{8,}\d")
+NAME_NOISE_TOKENS = {"меня", "зовут", "это", "я", "имя"}
 
 
 def _normalize_text(text: str) -> str:
@@ -4443,6 +4444,8 @@ def _validate_name_slot(
     if not tokens or len(tokens) > 3:
         return None
     if any(len(token) < 2 for token in tokens):
+        return None
+    if all(token in NAME_NOISE_TOKENS for token in tokens):
         return None
     return cleaned
 

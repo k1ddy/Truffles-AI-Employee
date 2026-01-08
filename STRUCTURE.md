@@ -260,6 +260,9 @@ truffles-api/
 | Файл | Что тестирует |
 |------|---------------|
 | `truffles-api/tests/test_cases.json` | Тестовые сценарии диалогов |
+| `truffles-api/tests/test_webhook_booking.py` | Unit: expected_reply_type и booking slot validators |
+| `truffles-api/tests/test_webhook_dedup.py` | Unit: webhook buffer/dedup helpers |
+| `truffles-api/tests/test_webhook_response.py` | Unit: CTA и quiet hours helpers |
 
 ---
 

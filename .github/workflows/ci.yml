@@ -38,6 +38,30 @@ jobs:
       - name: Lint (ruff)
         run: ruff check app tests
 
+  unit-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: truffles-api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: truffles-api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov ruff
+
+      - name: Unit tests (webhook helpers)
+        run: pytest -q tests/test_webhook_*.py
+
   core-eval:
     runs-on: ubuntu-latest
     defaults:
@@ -101,7 +125,7 @@ jobs:
 
   build-push:
     if: github.ref == 'refs/heads/main'
-    needs: [lint, core-eval, long-eval, secret-scan]
+    needs: [lint, unit-tests, core-eval, long-eval, secret-scan]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
