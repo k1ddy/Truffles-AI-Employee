@@ -58,6 +58,23 @@ from app.routers.webhook.info import (
     _tokenize_for_matching,
 )
 from app.routers.webhook.parsing import _parse_webhook_request
+from app.routers.webhook.policy import (
+    _demo_salon_escalation_gate,
+    _demo_salon_price_sidecar,
+    _detect_llm_guard_topics,
+    _format_discounts_policy_reply,
+    _get_policy_handler,
+    _get_policy_type,
+    _get_routing_policy,
+    _has_discount_policy_rules,
+    _is_hard_law_intent,
+    _looks_like_policy_topic,
+    _looks_like_promotions_request,
+    _should_escalate_to_pending,
+    _should_run_booking_flow,
+    _should_run_demo_truth_gate,
+    _should_run_truth_gate,
+)
 from app.routers.webhook.response import _apply_quiet_hours_notice, _maybe_append_booking_cta
 from app.routers.webhook.trace import (
     _attach_llm_cache_flag,
@@ -1528,39 +1545,6 @@ ROUTING_MATRIX = {
 }
 
 
-def _get_routing_policy(state: str) -> dict[str, bool]:
-    policy = ROUTING_MATRIX.get(state)
-    if policy:
-        return dict(policy)
-    return {
-        "allow_booking_flow": False,
-        "allow_truth_gate_reply": False,
-        "allow_handover_create": False,
-        "allow_bot_reply": False,
-    }
-
-
-def _should_run_booking_flow(
-    policy: dict[str, bool],
-    *,
-    booking_active: bool,
-    booking_signal: bool,
-) -> bool:
-    return bool(policy.get("allow_booking_flow")) and (booking_active or booking_signal)
-
-
-def _should_run_truth_gate(policy: dict[str, bool], booking_wants_flow: bool) -> bool:
-    return bool(policy.get("allow_truth_gate_reply")) and not booking_wants_flow
-
-
-def _should_run_demo_truth_gate(policy: dict[str, bool], booking_wants_flow: bool) -> bool:
-    return _should_run_truth_gate(policy, booking_wants_flow)
-
-
-def _should_escalate_to_pending(policy: dict[str, bool], intent: Intent) -> bool:
-    return bool(policy.get("allow_handover_create")) and should_escalate(intent)
-
-
 @dataclass(frozen=True)
 class DecisionSignals:
     intent: Intent
@@ -1799,34 +1783,6 @@ def _normalize_text(text: str) -> str:
     normalized = re.sub(r"[^\w\s]", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized
-
-
-def _is_hard_law_intent(intent: str | None) -> bool:
-    if not isinstance(intent, str):
-        return False
-    return intent.strip().casefold() in HARD_LAW_INTENTS
-
-
-def _looks_like_policy_topic(message_text: str | None) -> bool:
-    normalized = _normalize_text(message_text)
-    if not normalized:
-        return False
-    for topic in ("payment", "medical", "complaint", "discount"):
-        keywords = LLM_GUARD_TOPICS.get(topic) or []
-        if any(keyword in normalized for keyword in keywords):
-            return True
-    return False
-
-
-def _detect_llm_guard_topics(response_text: str) -> list[str]:
-    normalized = _normalize_text(response_text)
-    if not normalized:
-        return []
-    hits: list[str] = []
-    for topic, keywords in LLM_GUARD_TOPICS.items():
-        if any(keyword in normalized for keyword in keywords):
-            hits.append(topic)
-    return hits
 
 
 def _coerce_batch_messages(message_text: str, batch_messages: list[str] | None) -> list[str]:
@@ -3033,91 +2989,6 @@ def _looks_like_carryover_followup(message_text: str | None) -> bool:
     return False
 
 
-def _looks_like_promotions_request(message_text: str | None) -> bool:
-    if not message_text:
-        return False
-    normalized = _normalize_text(message_text)
-    if not normalized:
-        return False
-    keywords = LLM_GUARD_TOPICS.get("discount") or []
-    if _contains_any(normalized, keywords):
-        return True
-    if "до после" in normalized and _contains_any(normalized, ["дней", "дня", "день"]):
-        return True
-    return False
-
-
-def _load_discount_policy_payload(*, policy_type: str | None) -> dict | None:
-    if policy_type != "demo_salon":
-        return None
-    truth = load_yaml_truth()
-    if not isinstance(truth, dict):
-        return None
-    client_pack = truth.get("client_pack")
-    if not isinstance(client_pack, dict):
-        return None
-    discounts = client_pack.get("discounts")
-    if not isinstance(discounts, dict):
-        return None
-    if discounts.get("enabled") is False:
-        return None
-    return discounts
-
-
-def _has_discount_policy_rules(*, policy_type: str | None) -> bool:
-    discounts = _load_discount_policy_payload(policy_type=policy_type)
-    if not discounts:
-        return False
-    rules = discounts.get("rules")
-    if isinstance(rules, list) and rules:
-        return True
-    items = discounts.get("items")
-    if isinstance(items, list) and items:
-        return True
-    stacking = discounts.get("stacking") or discounts.get("stacking_notes")
-    if isinstance(stacking, str) and stacking.strip():
-        return True
-    fallback_text = discounts.get("value_text") or discounts.get("text") or discounts.get("notes")
-    if isinstance(fallback_text, str) and fallback_text.strip():
-        return True
-    return False
-
-
-def _format_discounts_policy_reply(*, policy_type: str | None) -> str | None:
-    discounts = _load_discount_policy_payload(policy_type=policy_type)
-    if not discounts:
-        return None
-    rules = discounts.get("rules")
-    if isinstance(rules, list) and rules:
-        parts = [str(rule).strip() for rule in rules if str(rule).strip()]
-        if parts:
-            return " ".join(parts)
-    fallback_text = discounts.get("value_text") or discounts.get("text") or discounts.get("notes")
-    if isinstance(fallback_text, str) and fallback_text.strip():
-        return fallback_text.strip()
-    items = discounts.get("items")
-    if not isinstance(items, list):
-        items = []
-    parts: list[str] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        name = item.get("name")
-        percent = item.get("discount_percent") or item.get("discount")
-        if name and percent:
-            parts.append(f"{name}: {percent}%")
-    if parts:
-        stacking = discounts.get("stacking") or discounts.get("stacking_notes")
-        stacking_text = ""
-        if isinstance(stacking, str) and stacking.strip():
-            stacking_text = f" {stacking}."
-        return "Официальные акции: " + "; ".join(parts) + "." + stacking_text
-    stacking = discounts.get("stacking") or discounts.get("stacking_notes")
-    if isinstance(stacking, str) and stacking.strip():
-        return stacking.strip()
-    return None
-
-
 def _build_controller_meta_output(*, error: str, retry: bool = False, elapsed_ms: float = 0.0) -> dict:
     return {
         "class": None,
@@ -4124,25 +3995,6 @@ def _build_booking_summary(booking: dict, *, refusal_flags: dict | None = None) 
     return summary
 
 
-def _demo_salon_escalation_gate(messages: list[str]):
-    for message in messages:
-        decision = get_demo_salon_decision(message)
-        if not decision or decision.action != "escalate":
-            continue
-        if decision.intent in {"medical"} and _is_hygiene_context_text(message):
-            continue
-        return decision
-    return None
-
-
-def _demo_salon_price_sidecar(messages: list[str]) -> tuple[str | None, str | None]:
-    for message in messages:
-        price_reply = get_demo_salon_price_reply(message)
-        if price_reply:
-            return price_reply, get_demo_salon_price_item(message)
-    return None, None
-
-
 _POLICY_HANDLERS = {
     "demo_salon": {
         "policy_type": "demo_salon",
@@ -4153,30 +4005,6 @@ _POLICY_HANDLERS = {
         "price_sidecar": _demo_salon_price_sidecar,
     }
 }
-
-
-def _get_policy_type(client: Client | None) -> str | None:
-    if not client or not isinstance(client.config, dict):
-        return None
-    policy = client.config.get("policy")
-    if isinstance(policy, dict):
-        policy_type = policy.get("type") or policy.get("policy_type")
-        if isinstance(policy_type, str) and policy_type.strip():
-            return policy_type.strip()
-    legacy = client.config.get("policy_type")
-    if isinstance(legacy, str) and legacy.strip():
-        return legacy.strip()
-    # Legacy fallback to preserve behavior until policy config is set.
-    if client.name == "demo_salon":
-        return "demo_salon"
-    return None
-
-
-def _get_policy_handler(client: Client | None) -> dict | None:
-    policy_type = _get_policy_type(client)
-    if not policy_type:
-        return None
-    return _POLICY_HANDLERS.get(policy_type)
 
 
 def _is_hygiene_context_text(text: str) -> bool:
