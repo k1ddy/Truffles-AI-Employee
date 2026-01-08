@@ -55,6 +55,8 @@
 | `truffles-api/app/routers/webhook.py` | Входящие WhatsApp (direct + legacy) |
 | `truffles-api/app/routers/telegram_webhook.py` | Telegram сообщения/кнопки менеджеров |
 
+**Правило:** агент всегда начинает с `truffles-api/app/routers/webhook.py`, затем смотрит модули в `truffles-api/app/routers/webhook/`.
+
 ---
 
 ## .github/ — CI/CD
@@ -117,6 +119,7 @@ truffles-api/
 │   ├── main.py              # FastAPI entry point
 │   ├── routers/
 │   │   ├── webhook.py           # POST /webhook/{client_slug} (direct), POST /webhook (legacy wrapper) — входящие WhatsApp
+│   │   ├── webhook/             # Ре-экспорт ключевых функций webhook.py для удобного импорта
 │   │   ├── telegram_webhook.py  # POST /telegram-webhook — сообщения/кнопки менеджеров
 │   │   ├── admin.py             # /admin/* (health/heal/prompt/settings/version)
 │   │   ├── alerts.py            # /alerts/test — проверка алертов (токен)
