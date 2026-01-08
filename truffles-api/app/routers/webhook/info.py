@@ -170,6 +170,7 @@ def _build_info_intent_reply(
         get_demo_salon_decision,
         get_demo_salon_service_hint,
     )
+
     from . import _legacy as legacy
 
     normalized = legacy.normalize_for_matching(message_text) if message_text else ""
