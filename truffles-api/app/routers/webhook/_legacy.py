@@ -93,6 +93,7 @@ from app.services.outbox_service import build_inbound_message_id, enqueue_outbox
 from app.services.state_machine import ConversationState
 from app.services.state_service import escalate_to_pending, manager_resolve
 from app.services.telegram_service import TelegramService
+from app.routers.webhook.response import _apply_quiet_hours_notice, _maybe_append_booking_cta
 
 logger = get_logger("webhook")
 
@@ -4793,37 +4794,6 @@ def _append_followup(primary: str, followup: str | None) -> str:
     if not followup:
         return primary
     return f"{primary}\n\n{followup}"
-
-
-def _maybe_append_booking_cta(
-    bot_response: str | None,
-    *,
-    conversation_state: str,
-    allow_booking_flow: bool,
-    has_followup: bool = False,
-) -> str | None:
-    if not bot_response:
-        return bot_response
-    if conversation_state != ConversationState.BOT_ACTIVE.value:
-        return bot_response
-    if not allow_booking_flow or has_followup:
-        return bot_response
-    normalized = _normalize_text(bot_response)
-    if not normalized or "запис" in normalized:
-        return bot_response
-    return f"{bot_response}\n\n{MSG_BOOKING_CTA}"
-
-
-def _apply_quiet_hours_notice(text: str, notice: str | None) -> str:
-    if not text or not notice:
-        return text
-    normalized_text = _normalize_text(text)
-    normalized_notice = _normalize_text(notice)
-    if normalized_notice and normalized_notice in normalized_text:
-        return text
-    if "салон закрыт" in normalized_text:
-        return text
-    return f"{notice}\n\n{text}"
 
 
 MULTI_INTENT_LABELS = {
