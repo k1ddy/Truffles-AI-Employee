@@ -5,7 +5,7 @@
 ---
 
 ## 1) “Бот не выдумывает факты”
-- Proof: truth‑first + policy‑gate в `truffles-api/app/services/demo_salon_knowledge.py`, `truffles-api/app/routers/webhook.py`; тесты в `truffles-api/app/knowledge/demo_salon/EVAL.yaml`.
+- Proof: truth‑first + policy‑gate в `truffles-api/app/services/demo_salon_knowledge.py`, `truffles-api/app/routers/webhook/_legacy.py`; тесты в `truffles-api/app/knowledge/demo_salon/EVAL.yaml`.
 - Boundary: если факт отсутствует в Client Pack → уточнение/эскалация.
 
 ## 2) “Оплата/медицина/жалобы/перенос — только менеджер”

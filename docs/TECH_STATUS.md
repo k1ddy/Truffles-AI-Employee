@@ -16,11 +16,19 @@
 
 ### Надёжность доставки (outbox/retry/dedup)
 - Status: OK
-- Evidence: `truffles-api/app/services/outbox_service.py`, `truffles-api/app/routers/webhook.py`, `truffles-api/app/services/chatflow_service.py`, `ops/migrations/012_add_outbox_messages.sql`, `ops/migrations/010_add_message_dedup.sql`
+- Evidence: `truffles-api/app/services/outbox_service.py`, `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/app/services/chatflow_service.py`, `ops/migrations/012_add_outbox_messages.sql`, `ops/migrations/010_add_message_dedup.sql`
 - Факт: ACK‑first → outbox; retries + backoff; inbound dedup (Redis + DB); outbound idempotency `msg_id`.
 - Boundary: гарантия “at‑least‑once”, не “exactly once”.
 - Fix plan: добавить outbox status history/processing_started_at (для SLA decomposition).
 - Go‑to‑market impact: можно обещать “сообщения не теряются, есть повторные попытки”.
+
+### Outbound guard (TEST_MODE + allowlist)
+- Status: RISK
+- Evidence: `truffles-api/app/services/chatflow_service.py`
+- Факт: при `TEST_MODE=1` отправка SKIP (возвращает `True`), если JID не в `OUTBOUND_ALLOWLIST_JIDS`.
+- Boundary: выглядит как “бот молчит” при реальном тесте без allowlist.
+- Fix plan: `TEST_MODE=0` на проде или явное ведение allowlist; вывести флаг в /admin/health.
+- Go‑to‑market impact: без этого нельзя гарантировать ответы пользователю.
 
 ### SLA ответов
 - Status: PARTIAL
@@ -32,7 +40,7 @@
 
 ### Rate limiting
 - Status: PARTIAL
-- Evidence: `truffles-api/app/routers/webhook.py` (media rate limit)
+- Evidence: `truffles-api/app/routers/webhook/_legacy.py` (media rate limit)
 - Факт: rate‑limit есть только для медиа; текстовые сообщения без лимитов.
 - Fix plan: добавить per‑tenant rate‑limits для текста.
 - Go‑to‑market impact: не обещать “безлимитный поток сообщений”.
@@ -70,7 +78,7 @@
 
 ### Truth‑first / policy‑gate
 - Status: OK (demo_salon)
-- Evidence: `truffles-api/app/services/demo_salon_knowledge.py`, `truffles-api/app/routers/webhook.py`, `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
+- Evidence: `truffles-api/app/services/demo_salon_knowledge.py`, `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
 - Факт: факты из Client Pack; риск‑темы эскалируются; low_confidence → clarify.
 - Boundary: truth‑first гарантируется только при заполненном Client Pack.
 
@@ -94,7 +102,7 @@
 
 ### Изоляция tenant
 - Status: PARTIAL
-- Evidence: `truffles-api/app/services/knowledge_service.py`, `truffles-api/app/routers/webhook.py`, `SPECS/MULTI_TENANT.md`
+- Evidence: `truffles-api/app/services/knowledge_service.py`, `truffles-api/app/routers/webhook/_legacy.py`, `SPECS/MULTI_TENANT.md`
 - Факт: фильтрация по client_slug/client_id в RAG и routing.
 - Boundary: нет формального теста на cross‑tenant leakage.
 - Fix plan: добавить тест‑контракт “tenant isolation”.
@@ -105,6 +113,13 @@
 - Факт: секреты ожидаются в `.env`/GitHub Secrets; gitleaks включён в CI.
 - Boundary: нужна регулярная проверка истории/логов.
 - Fix plan: добавить “secret audit” в операционный чеклист.
+
+### Debug endpoint exposure
+- Status: OK
+- Evidence: `truffles-api/app/routers/webhook/_legacy.py` (`/webhook/debug`)
+- Факт: доступ только при `DEBUG_WEBHOOK_ENABLED=true` и валидном `X-Admin-Token`; иначе 404/401.
+- Boundary: флаг/токен должны быть под контролем (prod default — disabled).
+- Fix plan: держать `DEBUG_WEBHOOK_ENABLED=false` по умолчанию.
 
 ---
 
@@ -132,6 +147,29 @@
 
 ---
 
+## F) Диалог и живость
+
+### Answer‑Interpreter порог
+- Status: OK
+- Evidence: `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/app/services/ai_service.py`
+- Факт: интерпретатор принимается при `confidence >= 0.65` или валидном slot/value (expected_reply).
+- Boundary: нет отдельного eval‑контракта на expected_reply.
+- Fix plan: добавить eval‑кейсы для expected_reply.
+
+### Datetime fallback
+- Status: PARTIAL
+- Evidence: `truffles-api/app/routers/webhook/_legacy.py`
+- Факт: распознаёт `HH:MM`/`HH.MM`, “в 6/к 3”, `01.02`, “10 января” + базовые ключевые слова.
+- Boundary: “после 7”, “в конце недели” остаются слабо покрыты.
+- Fix plan: расширить эвристики или полагаться на Answer‑Interpreter.
+
+### Carryover follow‑up (pricing)
+- Status: OK
+- Evidence: `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/tests/test_message_endpoint.py`
+- Факт: короткие pricing‑вопросы (“Сколько стоит?”, “Цена?”) считаются follow‑up.
+- Boundary: нет отдельного CI‑кейса на carryover follow‑up.
+- Fix plan: добавить eval‑кейс в core/long.
+
 ## Phase‑0 Definition of Done (перед первым платным клиентом)
 - LAW‑темы всегда эскалируются (тесты + live‑check).
 - Truth‑first по топ‑вопросам (часы, адрес, услуги, цены, запись).
@@ -149,6 +187,8 @@
 - 4) Outbox processing отвечает (C4) — OK/Fail
 - 5) Outbox backlog в норме (S1) — OK/Fail
 - 6) Decision meta/trace пишутся (S2) — OK/Fail
+ 
+Быстрый прогон: `python3 ops/diagnose.py` (version/health/metrics/outbox/decision_meta).
 
 ### Run Log (fill after checklist)
 - Date/Time: 2025-12-31T11:07:15+05:00

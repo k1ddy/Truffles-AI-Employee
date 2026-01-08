@@ -151,7 +151,7 @@ api_service:
   evidence:
     - "truffles-api/app/main.py:11-42"
     - "truffles-api/app/routers/webhook/_legacy.py:610-612"
-    - "truffles-api/app/routers/telegram_webhook/_legacy.py:44-68"
+    - "truffles-api/app/routers/telegram_webhook.py:44-68"
     - "truffles-api/app/routers/reminders.py:42-50"
 
 tenancy:
@@ -160,7 +160,7 @@ tenancy:
     inbound: "WebhookRequest.client_slug -> clients.name"
     storage: "client_id on core tables"
   evidence:
-    - "truffles-api/app/schemas/webhook/_legacy.py:21-23"
+    - "truffles-api/app/schemas/webhook.py:21-23"
     - "truffles-api/app/routers/webhook/_legacy.py:621-623"
     - "truffles-api/app/models/conversation.py:13-16"
     - "truffles-api/app/models/message.py:13-16"
@@ -175,7 +175,7 @@ whatsapp_chatflow_integration:
     ack_strategy: "direct: async (ack before processing), legacy: sync"
     deduplication: "redis + message_dedup table"
     evidence:
-      - "truffles-api/app/schemas/webhook/_legacy.py:7-24"
+      - "truffles-api/app/schemas/webhook.py:7-24"
       - "truffles-api/app/routers/webhook/_legacy.py:610-655"
       - "truffles-api/app/routers/webhook/_legacy.py:185-240"
       - "truffles-api/app/routers/webhook/_legacy.py:839-849"

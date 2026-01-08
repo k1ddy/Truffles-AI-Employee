@@ -381,7 +381,7 @@ pytest tests/ -v
 
 | Файл | Назначение |
 |------|------------|
-| `app/routers/webhook.py` | Входящие от WhatsApp |
+| `app/routers/webhook/_legacy.py` | Входящие от WhatsApp |
 | `app/routers/telegram_webhook.py` | Входящие от Telegram |
 | `app/routers/message.py` | Альтернативный endpoint сообщений |
 | `app/services/ai_service.py` | Генерация ответов, confidence |

@@ -108,7 +108,7 @@
 - Бот отвечает на все сообщения
 - Нормальная работа
 
-**Реализация:** `truffles-api/app/routers/webhook.py` (основной путь), `truffles-api/app/routers/message.py` (legacy)
+**Реализация:** `truffles-api/app/routers/webhook/_legacy.py` (основной путь), `truffles-api/app/routers/message.py` (legacy)
 
 ### Когда `pending`:
 - Бот УЖЕ ответил клиенту ("Передал менеджеру")
@@ -149,7 +149,7 @@
 - Документы: только пересылка (обработка позже).
 - Ограничения по размеру и rate‑limit до обработки.
 
-**Реализация:** `truffles-api/app/routers/webhook.py` (media guardrails + forward), `truffles-api/app/services/telegram_service.py` (sendPhoto/sendAudio/sendDocument/sendVoice).
+**Реализация:** `truffles-api/app/routers/webhook/_legacy.py` (media guardrails + forward), `truffles-api/app/services/telegram_service.py` (sendPhoto/sendAudio/sendDocument/sendVoice).
 
 ---
 
@@ -212,7 +212,7 @@
 | Opt‑out + запись в одном сообщении | Запросить подтверждение “да/нет” |
 
 **Реализация:** 
-- `truffles-api/app/routers/webhook.py` / `truffles-api/app/routers/message.py` — `is_rejection(intent)`
+- `truffles-api/app/routers/webhook/_legacy.py` / `truffles-api/app/routers/message.py` — `is_rejection(intent)`
 - `conversation.bot_muted_until`, `conversation.no_count`
 - `client_settings.mute_duration_first_minutes`, `mute_duration_second_hours`
 
@@ -811,7 +811,7 @@ updated_at      TIMESTAMP
 ## Fallback сообщения [РЕАЛИЗОВАНО]
 
 ```python
-# Реализация: truffles-api/app/routers/webhook.py (и legacy: truffles-api/app/routers/message.py)
+# Реализация: truffles-api/app/routers/webhook/_legacy.py (и legacy: truffles-api/app/routers/message.py)
 
 MSG_ESCALATED = "Передал менеджеру. Могу чем-то помочь пока ждёте?"
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."

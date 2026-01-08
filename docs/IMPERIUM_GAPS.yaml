@@ -4,7 +4,7 @@ gaps:
     status: "DONE"
     why_it_matters: "Anyone who can reach /webhook can inject messages, escalate, or spam tenants."
     evidence:
-      - "truffles-api/app/routers/webhook.py (X-Webhook-Secret check)"
+      - "truffles-api/app/routers/webhook/_legacy.py (X-Webhook-Secret check)"
       - "truffles-api/app/models/client_settings.py (webhook_secret)"
       - "ops/migrations/011_add_webhook_secret.sql"
     proposed_fix_mvp: "Require webhook_secret (header or query param) per client (client_settings.webhook_secret); reject missing/invalid secrets with 401."
@@ -114,7 +114,7 @@ gaps:
     status: "DONE"
     why_it_matters: "Slow LLM/ChatFlow calls can cause webhook timeouts and duplicate deliveries."
     evidence:
-      - "truffles-api/app/routers/webhook.py (enqueue_only=True for /webhook and /webhook/{client_slug})"
+      - "truffles-api/app/routers/webhook/_legacy.py (enqueue_only=True for /webhook and /webhook/{client_slug})"
       - "truffles-api/app/services/outbox_service.py (enqueue/claim/mark)"
       - "truffles-api/app/routers/admin.py (/admin/outbox/process)"
     proposed_fix_mvp: "Write inbound message to outbox and return 200 immediately; process via outbox worker."
@@ -127,8 +127,8 @@ gaps:
     status: "PARTIAL"
     why_it_matters: "Duplicate outbound sends can occur on retries or multi-callbacks."
     evidence:
-      - "truffles-api/app/routers/webhook.py:185-240 (inbound dedup)"
-      - "truffles-api/app/routers/webhook.py (outbound_idempotency_key via msg_id)"
+      - "truffles-api/app/routers/webhook/_legacy.py:185-240 (inbound dedup)"
+      - "truffles-api/app/routers/webhook/_legacy.py (outbound_idempotency_key via msg_id)"
       - "truffles-api/app/services/chatflow_service.py (msg_id passthrough)"
     proposed_fix_mvp: "Extend outbound idempotency key to all send paths (not only webhook/outbox)."
     acceptance_tests:

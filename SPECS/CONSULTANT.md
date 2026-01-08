@@ -364,7 +364,7 @@ if intent == Intent.PRICE_OBJECTION:
 **Реализация:** Архитектура API — один запрос = один ответ.
 
 ```python
-# webhook.py (outbox → один ответ)
+# webhook/_legacy.py (outbox → один ответ)
 bot_response = generate_bot_response(db, conversation, request.content)
 send_bot_response(db, request.client_id, request.remote_jid, bot_response)
 # Один вызов send — одно сообщение
@@ -385,7 +385,7 @@ send_bot_response(db, request.client_id, request.remote_jid, bot_response)
 **Что нужно реализовать:**
 
 ```python
-# В webhook.py или отдельном сервисе
+# В webhook/_legacy.py или отдельном сервисе
 
 import asyncio
 
