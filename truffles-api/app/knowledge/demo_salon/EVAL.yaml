@@ -7952,3 +7952,21 @@ eval_cases:
       controller_goal: info
       classes:
       - info_bundle
+- id: E744
+  user: плов
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - услугам
+    - записи
+    - ценам
+- id: E745
+  user: носки у меня черного цвета
+  expected:
+    action: reply
+    intent: off_topic
+    must_include_any:
+    - услугам
+    - записи
+    - ценам
