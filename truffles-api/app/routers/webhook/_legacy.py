@@ -2122,6 +2122,11 @@ async def _handle_webhook_payload(
         session_memory_reset_reason = "expired"
     elif _should_reset_session_memory(message_text):
         session_memory_reset_reason = "explicit_reset"
+    elif session_memory and conversation.state in [
+        ConversationState.PENDING.value,
+        ConversationState.MANAGER_ACTIVE.value,
+    ]:
+        session_memory_reset_reason = "handover"
     if session_memory_reset_reason:
         context, context_manager, reset_snapshot = _reset_session_memory(
             context=context,
