@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from app.services.intent_service import (
     ESCALATION_INTENTS,
     REJECTION_INTENTS,
@@ -6,6 +8,7 @@ from app.services.intent_service import (
     is_human_request_message,
     is_opt_out_message,
     is_rejection,
+    route_dialogue_controller,
     should_escalate,
 )
 
@@ -102,3 +105,18 @@ class TestFrustrationHeuristics:
 
     def test_ignores_regular_text(self):
         assert is_frustration_message("спасибо") is False
+
+
+class TestDialogueControllerOffline:
+    def test_returns_fixed_class_and_goal_without_key(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            result = route_dialogue_controller("Привет")
+
+        assert result["error"] == "no_api_key"
+        assert result["ok"] is False
+        payload = result["payload"]
+        assert payload["class"] == "other"
+        assert payload["goal"] == "other"
+        assert payload["controller_error"] == "no_api_key"
+        mock_llm.assert_not_called()
