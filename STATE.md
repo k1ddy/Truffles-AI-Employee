@@ -10,17 +10,17 @@
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
-- DONE: PR #109 (diagnose + smalltalk) и PR #111 (docs sync) merged; CI main зелёный; `/admin/version` = `3c99abd4...`.
-- DOING: P0 offline устойчивость без `OPENAI_API_KEY` (диагностика + план).
+- DONE: PR #109 (diagnose + smalltalk) и PR #111 (docs sync) merged; CI main зелёный.
+- DONE: P0 offline устойчивость без `OPENAI_API_KEY` (offline controller fixed + test; PR #112 merged; CI main зелёный).
 - NEXT: Session Memory v1.1 → ASR/long‑chaos gate → Monitoring/observability.
 - BLOCKERS: нет.
 
-- **Фокус:** P0 offline устойчивость + Session Memory v1.1 + ASR/long‑chaos gate + monitoring; дальше webhook не дробим.
+- **Фокус:** Session Memory v1.1 + ASR/long‑chaos gate + monitoring; дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
-- **Следующий шаг:** offline устойчивость без `OPENAI_API_KEY` (выявить LLM‑вызовы в тестах/контроллере, зафиксировать fallback).
+- **Следующий шаг:** Session Memory v1.1 (goal_stack/pending_slots/unanswered/TTL=24h + reset rules).
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
 - **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
-- **Последняя диагностика:** 2026-01-08T15:12:37Z (ops/diagnose.py: outbox FAILED 12 / SENT 1235; `OUTBOX_WORKER_ENABLED=MISSING`; `/admin/version` `3c99abd4...`).
+- **Последняя диагностика:** 2026-01-08T15:31:14Z (ops/diagnose.py: outbox FAILED 12 / SENT 1235; `OUTBOX_WORKER_ENABLED=MISSING`; `/admin/version` `aaca16c5...`).
 
 **IMPERIUM DoD (short)**
 - Truth-first: ответ только из KB/правил; догадки запрещены; LAW/оплата/медицина/жалобы → эскалация.
