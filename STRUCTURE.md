@@ -123,6 +123,7 @@ truffles-api/
 │   │   ├── reminders.py         # /reminders/* — cron напоминаний
 │   │   ├── callback.py          # /callback — legacy
 │   │   └── message.py           # /message — legacy/manual, не основной путь
+│   ├── webhook.py           # LEGACY (unused); do not edit
 │   ├── services/
 │   │   ├── ai_service.py            # LLM + RAG thresholds + guardrails
 │   │   ├── alert_service.py         # Telegram alerts (errors/warnings)
