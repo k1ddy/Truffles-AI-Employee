@@ -5561,6 +5561,12 @@ async def _process_outbox_rows(
 @router.post("/webhook/debug")
 async def debug_webhook(request: Request):
     """Debug endpoint to see raw request."""
+    if not _is_env_enabled(os.environ.get("DEBUG_WEBHOOK_ENABLED"), default=False):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    admin_token = request.headers.get("X-Admin-Token")
+    expected_token = os.environ.get("ALERTS_ADMIN_TOKEN")
+    if not expected_token or admin_token != expected_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
     body = await request.json()
     logger.debug(f"DEBUG webhook body: {body}")
     return {"received": body}
