@@ -1,3 +1,7 @@
+# =====================================================================
+# LEGACY MODULE: DO NOT USE FOR NEW WEBHOOKS
+# Kept for backward compatibility; use app/routers/webhook/ instead.
+# =====================================================================
 # LEGACY MODULE: DO NOT USE FOR NEW WEBHOOKS.
 import asyncio
 import os
