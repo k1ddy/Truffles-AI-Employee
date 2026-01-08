@@ -40,10 +40,11 @@ def search_knowledge(
     embedding = get_embedding(query)
 
     # Search in Qdrant
+    headers = {"api-key": QDRANT_API_KEY} if QDRANT_API_KEY else None
     with httpx.Client(timeout=30.0) as client:
         response = client.post(
             f"{QDRANT_HOST}/collections/{QDRANT_COLLECTION}/points/search",
-            headers={"api-key": QDRANT_API_KEY},
+            headers=headers,
             json={
                 "vector": embedding,
                 "limit": limit,
