@@ -22,6 +22,23 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.logging_config import get_logger
 from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
+from app.routers.webhook.booking import (
+    BOOKING_SLOT_ORDER,
+    _apply_booking_slot,
+    _apply_expected_reply_slot,
+    _clear_service_hint,
+    _expected_reply_for_booking_question,
+    _get_booking_context,
+    _get_recent_service_hint,
+    _is_blocked_slot_message,
+    _is_booking_related_message,
+    _match_expected_reply,
+    _select_expected_reply_message,
+    _select_last_non_booking_message,
+    _set_booking_context,
+    _set_service_hint,
+    _validate_name_slot,
+)
 from app.routers.webhook.dedup import (
     _buffer_user_message,
     _drain_buffered_messages,
@@ -3913,275 +3930,6 @@ def _is_asr_confirmation_active(confirmation: dict, now: datetime) -> bool:
     if asked_at.tzinfo is None:
         asked_at = asked_at.replace(tzinfo=timezone.utc)
     return (now - asked_at) <= timedelta(minutes=ASR_CONFIRM_WINDOW_MINUTES)
-
-
-def _get_booking_context(context: dict) -> dict:
-    booking = context.get("booking") if isinstance(context, dict) else None
-    if isinstance(booking, dict):
-        return dict(booking)
-    return {}
-
-
-def _set_booking_context(context: dict, booking: dict) -> dict:
-    context = dict(context)
-    context["booking"] = booking
-    return context
-
-
-def _set_service_hint(context: dict, service: str, now: datetime) -> dict:
-    context = dict(context)
-    context[SERVICE_HINT_KEY] = service
-    context[SERVICE_HINT_AT_KEY] = now.isoformat()
-    return context
-
-
-def _clear_service_hint(context: dict) -> dict:
-    context = dict(context)
-    context.pop(SERVICE_HINT_KEY, None)
-    context.pop(SERVICE_HINT_AT_KEY, None)
-    return context
-
-
-def _get_recent_service_hint(context: dict, now: datetime) -> str | None:
-    if not isinstance(context, dict):
-        return None
-    value = context.get(SERVICE_HINT_KEY)
-    if not value:
-        return None
-    timestamp_raw = context.get(SERVICE_HINT_AT_KEY)
-    if not timestamp_raw:
-        return None
-    try:
-        timestamp = datetime.fromisoformat(timestamp_raw)
-    except (TypeError, ValueError):
-        return None
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
-    if (now - timestamp) > timedelta(minutes=SERVICE_HINT_WINDOW_MINUTES):
-        return None
-    return str(value).strip() or None
-
-
-BOOKING_SLOT_ORDER = ("service", "datetime", "name")
-
-
-def _is_blocked_slot_message(message_text: str) -> bool:
-    return is_opt_out_message(message_text) or is_frustration_message(message_text)
-
-
-def _is_noise_slot_message(message_text: str) -> bool:
-    return (
-        is_low_signal_message(message_text)
-        or is_acknowledgement_message(message_text)
-        or is_greeting_message(message_text)
-        or is_thanks_message(message_text)
-        or is_bot_status_question(message_text)
-        or is_human_request_message(message_text)
-    )
-
-
-def _clean_name_candidate(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-zА-Яа-яЁё\s-]", " ", value or "")
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return cleaned
-
-
-def _validate_service_slot(
-    message_text: str,
-    *,
-    allow_freeform: bool,
-    client_slug: str | None,
-) -> str | None:
-    if _is_blocked_slot_message(message_text):
-        return None
-    extracted = _extract_service_hint(message_text, client_slug)
-    if extracted:
-        return extracted
-    return None
-
-
-def _validate_datetime_slot(
-    message_text: str,
-    *,
-    allow_freeform: bool,
-    client_slug: str | None,
-) -> str | None:
-    if _is_blocked_slot_message(message_text):
-        return None
-    extracted = _extract_datetime(message_text)
-    if extracted:
-        return extracted
-    return None
-
-
-def _validate_name_slot(
-    message_text: str,
-    *,
-    allow_freeform: bool,
-    client_slug: str | None,
-) -> str | None:
-    if _is_blocked_slot_message(message_text):
-        return None
-    if _is_noise_slot_message(message_text):
-        return None
-    if _extract_service_hint(message_text, client_slug) or _extract_datetime(message_text):
-        return None
-    name_match = NAME_PATTERN.search(message_text)
-    if name_match:
-        candidate = name_match.group(1)
-    elif not allow_freeform:
-        return None
-    else:
-        candidate = message_text
-    cleaned = _clean_name_candidate(candidate)
-    if not cleaned:
-        return None
-    if any(char.isdigit() for char in cleaned):
-        return None
-    normalized = _normalize_text(cleaned)
-    tokens = normalized.split()
-    if not tokens or len(tokens) > 3:
-        return None
-    if any(len(token) < 2 for token in tokens):
-        return None
-    if all(token in NAME_NOISE_TOKENS for token in tokens):
-        return None
-    return cleaned
-
-
-BOOKING_SLOT_VALIDATORS = {
-    "service": _validate_service_slot,
-    "datetime": _validate_datetime_slot,
-    "name": _validate_name_slot,
-}
-
-
-def _expected_reply_for_booking_question(last_question: str | None) -> str | None:
-    if last_question == "service":
-        return EXPECTED_REPLY_SERVICE
-    if last_question == "datetime":
-        return EXPECTED_REPLY_TIME
-    if last_question == "name":
-        return EXPECTED_REPLY_NAME
-    return None
-
-
-def _match_expected_reply(
-    *,
-    expected_reply_type: str | None,
-    message_text: str,
-    client_slug: str | None,
-) -> tuple[bool, str | None]:
-    if not expected_reply_type or not message_text:
-        return False, None
-    if expected_reply_type == EXPECTED_REPLY_SERVICE:
-        value = _validate_service_slot(message_text, allow_freeform=True, client_slug=client_slug)
-    elif expected_reply_type == EXPECTED_REPLY_TIME:
-        value = _validate_datetime_slot(message_text, allow_freeform=True, client_slug=client_slug)
-    elif expected_reply_type == EXPECTED_REPLY_NAME:
-        value = _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug)
-    else:
-        return False, None
-    if not value:
-        return False, None
-    return True, value
-
-
-def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None, value: str) -> dict:
-    if not expected_reply_type or not value:
-        return context
-    if expected_reply_type == EXPECTED_REPLY_SERVICE:
-        slot_key = "service"
-    elif expected_reply_type == EXPECTED_REPLY_TIME:
-        slot_key = "datetime"
-    elif expected_reply_type == EXPECTED_REPLY_NAME:
-        slot_key = "name"
-    else:
-        return context
-    booking_state = _get_booking_context(context)
-    if not isinstance(booking_state, dict) or not booking_state:
-        return context
-    if booking_state.get(slot_key):
-        return context
-    last_question = booking_state.get("last_question")
-    if not booking_state.get("active") and last_question != slot_key:
-        return context
-    booking_state = dict(booking_state)
-    booking_state[slot_key] = value
-    return _set_booking_context(context, booking_state)
-
-
-def _is_booking_related_message(
-    message_text: str,
-    client_slug: str | None,
-    *,
-    allow_name: bool = True,
-    allow_service: bool = True,
-) -> bool:
-    if not message_text:
-        return False
-    if _is_booking_request(message_text):
-        return True
-    refusal_flags = detect_refusal_flags(message_text)
-    if refusal_flags.get("name") or refusal_flags.get("phone"):
-        return True
-    if allow_service and _extract_service_hint(message_text, client_slug):
-        return True
-    if _extract_datetime(message_text):
-        return True
-    if allow_name and _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug):
-        return True
-    return False
-
-
-def _select_last_non_booking_message(messages: list[str], *, client_slug: str | None) -> str | None:
-    for message in reversed(messages or []):
-        if not message:
-            continue
-        if _is_booking_related_message(message, client_slug, allow_name=False, allow_service=False):
-            continue
-        return message
-    return None
-
-
-def _select_expected_reply_message(
-    messages: list[str],
-    *,
-    expected_reply_type: str | None,
-    client_slug: str | None,
-) -> str | None:
-    if not messages or not expected_reply_type:
-        return None
-    for message in reversed(messages or []):
-        if not message:
-            continue
-        matched, _ = _match_expected_reply(
-            expected_reply_type=expected_reply_type,
-            message_text=message,
-            client_slug=client_slug,
-        )
-        if matched:
-            return message
-    return None
-
-
-def _apply_booking_slot(
-    booking: dict,
-    slot_key: str,
-    message_text: str,
-    *,
-    allow_freeform: bool,
-    client_slug: str | None,
-) -> dict:
-    if booking.get(slot_key):
-        return booking
-    validator = BOOKING_SLOT_VALIDATORS.get(slot_key)
-    if not validator:
-        return booking
-    value = validator(message_text, allow_freeform=allow_freeform, client_slug=client_slug)
-    if value:
-        booking[slot_key] = value
-    return booking
 
 
 BRANCH_SELECTION_KEY = "branch_selection"
