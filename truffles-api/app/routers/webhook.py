@@ -3503,6 +3503,10 @@ def _looks_like_carryover_followup(message_text: str | None) -> bool:
     ]
     if _contains_any(normalized, followup_phrases):
         return True
+    if len(tokens) <= SESSION_MEMORY_SHORT_TOKENS:
+        pricing_groups = INFO_ANCHOR_GROUPS.get("pricing", [])
+        if pricing_groups and _count_anchor_hits(tokens, pricing_groups) > 0:
+            return True
     if tokens[0] in {"и", "а", "еще", "ещё"} and _contains_any(
         normalized,
         [
