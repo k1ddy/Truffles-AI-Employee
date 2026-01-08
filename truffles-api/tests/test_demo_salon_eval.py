@@ -466,7 +466,7 @@ def _build_service_carryover_patch() -> tuple[list[patch], list[dict]]:
             webhook_router._set_conversation_context(conversation, context)
         return result
 
-    maybe_patch = patch("app.routers.webhook._maybe_store_service_carryover", side_effect=_wrapped)
+    maybe_patch = patch("app.routers.webhook._legacy._maybe_store_service_carryover", side_effect=_wrapped)
 
     def _get_carryover(manager: dict, *, message_count: int) -> dict | None:
         if carryover_payload:
@@ -492,7 +492,7 @@ def _build_service_carryover_patch() -> tuple[list[patch], list[dict]]:
                 }
         return real_get(manager, message_count=message_count)
 
-    get_patch = patch("app.routers.webhook._get_service_carryover", side_effect=_get_carryover)
+    get_patch = patch("app.routers.webhook._legacy._get_service_carryover", side_effect=_get_carryover)
 
     return [maybe_patch, get_patch], events
 
@@ -649,15 +649,15 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
 
     carryover_patches, _ = _build_service_carryover_patch()
     patches = [
-        patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint),
-        patch("app.routers.webhook.detect_multi_intent", side_effect=_fake_intent_decomp),
-        patch("app.routers.webhook._get_debounce_redis", return_value=None),
-        patch("app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)),
-        patch("app.routers.webhook.send_bot_response", return_value=True),
-        patch("app.routers.webhook._find_message_by_message_id", return_value=saved_message),
-        patch("app.routers.webhook._get_user_branch_preference", return_value=None),
+        patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint),
+        patch("app.routers.webhook._legacy.detect_multi_intent", side_effect=_fake_intent_decomp),
+        patch("app.routers.webhook._legacy._get_debounce_redis", return_value=None),
+        patch("app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)),
+        patch("app.routers.webhook._legacy.send_bot_response", return_value=True),
+        patch("app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message),
+        patch("app.routers.webhook._legacy._get_user_branch_preference", return_value=None),
         patch(
-            "app.routers.webhook.generate_bot_response",
+            "app.routers.webhook._legacy.generate_bot_response",
             return_value=SimpleNamespace(ok=True, error=None, error_code=None, value=("", 0.0)),
         ),
         patch("app.services.demo_salon_knowledge.get_embedding", side_effect=lambda text, *_args, **_kwargs: demo_knowledge._local_text_embedding(text)),
@@ -675,7 +675,7 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
             def now(cls, tz=None):
                 return fixed_now if tz is None else fixed_now.astimezone(tz)
 
-        patches.append(patch("app.routers.webhook.datetime", _FixedDateTime))
+        patches.append(patch("app.routers.webhook._legacy.datetime", _FixedDateTime))
         patches.append(patch("app.services.demo_salon_knowledge.datetime", _FixedDateTime))
 
     with ExitStack() as stack:
@@ -737,15 +737,15 @@ def _run_webhook_conversation_turns(
 
     carryover_patches, _ = _build_service_carryover_patch()
     patches = [
-        patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint),
-        patch("app.routers.webhook.detect_multi_intent", side_effect=_fake_intent_decomp),
-        patch("app.routers.webhook._get_debounce_redis", return_value=None),
-        patch("app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)),
-        patch("app.routers.webhook.send_bot_response", return_value=True),
-        patch("app.routers.webhook._find_message_by_message_id", return_value=saved_message),
-        patch("app.routers.webhook._get_user_branch_preference", return_value=None),
+        patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint),
+        patch("app.routers.webhook._legacy.detect_multi_intent", side_effect=_fake_intent_decomp),
+        patch("app.routers.webhook._legacy._get_debounce_redis", return_value=None),
+        patch("app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)),
+        patch("app.routers.webhook._legacy.send_bot_response", return_value=True),
+        patch("app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message),
+        patch("app.routers.webhook._legacy._get_user_branch_preference", return_value=None),
         patch(
-            "app.routers.webhook.generate_bot_response",
+            "app.routers.webhook._legacy.generate_bot_response",
             return_value=SimpleNamespace(ok=True, error=None, error_code=None, value=("", 0.0)),
         ),
         patch("app.services.demo_salon_knowledge.get_embedding", side_effect=lambda text, *_args, **_kwargs: demo_knowledge._local_text_embedding(text)),
@@ -764,7 +764,7 @@ def _run_webhook_conversation_turns(
             def now(cls, tz=None):
                 return fixed_now if tz is None else fixed_now.astimezone(tz)
 
-        patches.append(patch("app.routers.webhook.datetime", _FixedDateTime))
+        patches.append(patch("app.routers.webhook._legacy.datetime", _FixedDateTime))
         patches.append(patch("app.services.demo_salon_knowledge.datetime", _FixedDateTime))
 
     responses: list[str] = []
@@ -955,7 +955,7 @@ def test_demo_salon_eval_cases():
         expected_action = case_expected.get("action")
         if expected_action == "booking_flow":
             booking_messages = messages if messages else ([user_text] if user_text else [])
-            with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
+            with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint):
                 booking_signal = webhook_router._has_booking_signal(
                     booking_messages,
                     client_slug="demo_salon",

@@ -38,7 +38,7 @@
 - Правила: не редактировать параллельно один и тот же файл в разных ветках/терминалах; merge только после CI green.
 | Branch | Scope | Touch-list (основные файлы/папки) |
 |--------|-------|-----------------------------------|
-| `dev` | webhook + services | `truffles-api/app/routers/webhook.py`, `truffles-api/app/services/*` |
+| `dev` | webhook + services | `truffles-api/app/routers/webhook/`, `truffles-api/app/services/*` |
 | `data` | eval + facts | `truffles-api/app/knowledge/demo_salon/EVAL.yaml`, `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml` |
 | `docs` | specs + состояния | `SPECS/*`, `STATE.md`, `STRUCTURE.md`, `AGENTS.md` |
 | `ops` | CI + deploy | `.github/workflows/*`, `TECH.md`, `/home/zhan/restart_api.sh`, infra compose (не в этом репо) |
@@ -52,7 +52,7 @@
 | `STATE.md` | Базовые факты, текущие блокеры, следующий шаг |
 | `docs/SESSION_START_PROMPT.txt` | Минимальный протокол старта и проверки фактов |
 | `TECH.md` | Доступы, команды, где что работает |
-| `truffles-api/app/routers/webhook.py` | Входящие WhatsApp (direct + legacy) |
+| `truffles-api/app/routers/webhook/` | Входящие WhatsApp (direct + legacy) |
 | `truffles-api/app/routers/telegram_webhook.py` | Telegram сообщения/кнопки менеджеров |
 
 ---
@@ -116,7 +116,7 @@ truffles-api/
 ├── app/
 │   ├── main.py              # FastAPI entry point
 │   ├── routers/
-│   │   ├── webhook.py           # POST /webhook/{client_slug} (direct), POST /webhook (legacy wrapper) — входящие WhatsApp
+│   │   ├── webhook/             # POST /webhook/{client_slug} (direct), POST /webhook (legacy wrapper) — входящие WhatsApp
 │   │   ├── telegram_webhook.py  # POST /telegram-webhook — сообщения/кнопки менеджеров
 │   │   ├── admin.py             # /admin/* (health/heal/prompt/settings/version)
 │   │   ├── alerts.py            # /alerts/test — проверка алертов (токен)

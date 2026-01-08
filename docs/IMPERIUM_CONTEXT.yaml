@@ -150,8 +150,8 @@ api_service:
       purpose: "DB sanity counts"
   evidence:
     - "truffles-api/app/main.py:11-42"
-    - "truffles-api/app/routers/webhook.py:610-612"
-    - "truffles-api/app/routers/telegram_webhook.py:44-68"
+    - "truffles-api/app/routers/webhook/_legacy.py:610-612"
+    - "truffles-api/app/routers/telegram_webhook/_legacy.py:44-68"
     - "truffles-api/app/routers/reminders.py:42-50"
 
 tenancy:
@@ -160,8 +160,8 @@ tenancy:
     inbound: "WebhookRequest.client_slug -> clients.name"
     storage: "client_id on core tables"
   evidence:
-    - "truffles-api/app/schemas/webhook.py:21-23"
-    - "truffles-api/app/routers/webhook.py:621-623"
+    - "truffles-api/app/schemas/webhook/_legacy.py:21-23"
+    - "truffles-api/app/routers/webhook/_legacy.py:621-623"
     - "truffles-api/app/models/conversation.py:13-16"
     - "truffles-api/app/models/message.py:13-16"
     - "truffles-api/app/models/user.py:13-15"
@@ -175,10 +175,10 @@ whatsapp_chatflow_integration:
     ack_strategy: "direct: async (ack before processing), legacy: sync"
     deduplication: "redis + message_dedup table"
     evidence:
-      - "truffles-api/app/schemas/webhook.py:7-24"
-      - "truffles-api/app/routers/webhook.py:610-655"
-      - "truffles-api/app/routers/webhook.py:185-240"
-      - "truffles-api/app/routers/webhook.py:839-849"
+      - "truffles-api/app/schemas/webhook/_legacy.py:7-24"
+      - "truffles-api/app/routers/webhook/_legacy.py:610-655"
+      - "truffles-api/app/routers/webhook/_legacy.py:185-240"
+      - "truffles-api/app/routers/webhook/_legacy.py:839-849"
       - "docker exec truffles_postgres_1 psql -U $DB_USER -d chatbot -c \\dt+ (message_dedup) (2025-12-21)"
   outbound_send:
     function: "send_bot_response -> send_whatsapp_message"
@@ -187,14 +187,14 @@ whatsapp_chatflow_integration:
     retries: "none in code"
     evidence:
       - "truffles-api/app/services/chatflow_service.py:14-52"
-      - "truffles-api/app/routers/webhook.py:839-849"
+      - "truffles-api/app/routers/webhook/_legacy.py:839-849"
 
 telegram_control_plane:
   inbound_route: "/telegram-webhook"
   purpose: "manager replies + callback buttons"
   outbound: "TelegramService.send_message"
   evidence:
-    - "truffles-api/app/routers/telegram_webhook.py:44-159"
+    - "truffles-api/app/routers/telegram_webhook/_legacy.py:44-159"
 
 data_stores:
   postgres:
@@ -255,7 +255,7 @@ data_stores:
     usage: "debounce + dedup in webhook"
     evidence:
       - "docker ps (2025-12-21)"
-      - "truffles-api/app/routers/webhook.py:185-205"
+      - "truffles-api/app/routers/webhook/_legacy.py:185-205"
 
 knowledge_pipeline:
   retrieval:

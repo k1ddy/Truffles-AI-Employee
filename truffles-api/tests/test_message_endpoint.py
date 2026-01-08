@@ -101,13 +101,13 @@ def _fake_intent_decomp():
             "consult_question": "",
         }
 
-    with patch("app.routers.webhook.detect_multi_intent", side_effect=_detect_stub):
+    with patch("app.routers.webhook._legacy.detect_multi_intent", side_effect=_detect_stub):
         yield
 
 
 @pytest.fixture(autouse=True)
 def _disable_debounce_redis():
-    with patch("app.routers.webhook._get_debounce_redis", return_value=None):
+    with patch("app.routers.webhook._legacy._get_debounce_redis", return_value=None):
         yield
 
 
@@ -292,7 +292,7 @@ class TestWebhookAuth:
         finally:
             app.dependency_overrides.clear()
 
-    @patch("app.routers.webhook.alert_warning")
+    @patch("app.routers.webhook._legacy.alert_warning")
     def test_missing_secret_allows_request_with_warning(self, mock_alert):
         db = _build_db("test", None)
         client = self._client_with_db(db)
@@ -365,7 +365,7 @@ class TestSelectHandoverUserMessage:
 class TestBatchBookingSignals:
     def test_booking_signal_across_messages(self):
         messages = ["сколько стоит маникюр", "на завтра в 5"]
-        with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
+        with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint):
             assert (
                 webhook_router._has_booking_signal(
                     messages,
@@ -377,8 +377,8 @@ class TestBatchBookingSignals:
 
     def test_booking_signal_blocked_for_info_question(self):
         messages = ["Вы сегодня работаете? Сколько стоит педикюр?"]
-        with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint), patch(
-            "app.routers.webhook.semantic_question_type",
+        with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint), patch(
+            "app.routers.webhook._legacy.semantic_question_type",
             return_value=SimpleNamespace(kind="pricing", score=0.72, second_score=0.1),
         ):
             assert (
@@ -392,7 +392,7 @@ class TestBatchBookingSignals:
 
     def test_booking_updates_across_messages(self):
         booking = {"active": True}
-        with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
+        with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint):
             updated = webhook_router._update_booking_from_messages(
                 booking,
                 ["маникюр", "на завтра в 5"],
@@ -545,7 +545,7 @@ class TestFastIntent:
 
         assert decision is None
 
-        with patch("app.routers.webhook.classify_intent", return_value=Intent.QUESTION) as mock_classify:
+        with patch("app.routers.webhook._legacy.classify_intent", return_value=Intent.QUESTION) as mock_classify:
             signals = webhook_router._detect_intent_signals(message)
         assert signals.intent == Intent.QUESTION
         mock_classify.assert_called_once()
@@ -615,18 +615,18 @@ def test_truth_gate_sets_decision_meta():
     policy_handler = {"policy_type": "demo_salon", "truth_gate": _truth_gate}
     low_confidence = SimpleNamespace(ok=True, value=(None, "low_confidence"))
 
-    with patch("app.routers.webhook._get_policy_handler", return_value=policy_handler), patch(
-        "app.routers.webhook.generate_bot_response", return_value=low_confidence
+    with patch("app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler), patch(
+        "app.routers.webhook._legacy.generate_bot_response", return_value=low_confidence
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
-        "app.routers.webhook._update_message_decision_metadata"
+        "app.routers.webhook._legacy._update_message_decision_metadata"
     ) as mock_update:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -715,18 +715,18 @@ def test_consult_reply_writes_decision_meta():
         "consult_question": "уход после окрашивания",
     }
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook._get_policy_handler", return_value=None
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
-        "app.routers.webhook.generate_bot_response"
+        "app.routers.webhook._legacy.generate_bot_response"
     ) as mock_llm:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -826,21 +826,21 @@ def test_consult_precedence_over_booking_flow():
         meta={"consult_intent": True},
     )
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook.build_consult_reply",
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy.build_consult_reply",
         return_value=consult_decision,
     ), patch(
-        "app.routers.webhook._get_policy_handler", return_value=None
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
-        "app.routers.webhook.generate_bot_response"
+        "app.routers.webhook._legacy.generate_bot_response"
     ) as mock_llm:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -942,18 +942,18 @@ def test_booking_info_interrupt_appends_prompt():
 
     policy_handler = {"policy_type": "demo_salon", "truth_gate": _truth_gate}
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook._get_policy_handler", return_value=policy_handler
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
-        "app.routers.webhook.generate_bot_response"
+        "app.routers.webhook._legacy.generate_bot_response"
     ) as mock_llm:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -1066,18 +1066,18 @@ def test_booking_time_service_question_keeps_time_contract():
 
     policy_handler = {"policy_type": "demo_salon", "truth_gate": _truth_gate}
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook._get_policy_handler", return_value=policy_handler
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
-        "app.routers.webhook.generate_bot_response"
+        "app.routers.webhook._legacy.generate_bot_response"
     ) as mock_llm:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -1198,18 +1198,18 @@ def test_service_carryover_applies_for_pricing():
 
     policy_handler = {"policy_type": "demo_salon", "service_matcher": _service_matcher}
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook._get_policy_handler", return_value=policy_handler
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
-        "app.routers.webhook.generate_bot_response"
+        "app.routers.webhook._legacy.generate_bot_response"
     ) as mock_llm:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -1295,20 +1295,20 @@ def test_semantic_service_matcher_handles_low_confidence_match():
     low_confidence = SimpleNamespace(ok=True, value=(None, "low_confidence"))
     semantic = SemanticServiceMatch(action="match", response="Маникюр — 2 500 ₸.", score=0.52)
 
-    with patch("app.routers.webhook._get_policy_handler", return_value=None), patch(
-        "app.routers.webhook.generate_bot_response", return_value=low_confidence
+    with patch("app.routers.webhook._legacy._get_policy_handler", return_value=None), patch(
+        "app.routers.webhook._legacy.generate_bot_response", return_value=low_confidence
     ), patch(
-        "app.routers.webhook.semantic_service_match", return_value=semantic
+        "app.routers.webhook._legacy.semantic_service_match", return_value=semantic
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
-        "app.routers.webhook._extract_service_hint", return_value=None
+        "app.routers.webhook._legacy._extract_service_hint", return_value=None
     ), patch(
-        "app.routers.webhook._update_message_decision_metadata"
+        "app.routers.webhook._legacy._update_message_decision_metadata"
     ) as mock_update:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -1393,20 +1393,20 @@ def test_semantic_service_matcher_handles_low_confidence_suggest():
         suggestions=["Уход за лицом"],
     )
 
-    with patch("app.routers.webhook._get_policy_handler", return_value=None), patch(
-        "app.routers.webhook.generate_bot_response", return_value=low_confidence
+    with patch("app.routers.webhook._legacy._get_policy_handler", return_value=None), patch(
+        "app.routers.webhook._legacy.generate_bot_response", return_value=low_confidence
     ), patch(
-        "app.routers.webhook.semantic_service_match", return_value=semantic
+        "app.routers.webhook._legacy.semantic_service_match", return_value=semantic
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
-        "app.routers.webhook._extract_service_hint", return_value=None
+        "app.routers.webhook._legacy._extract_service_hint", return_value=None
     ), patch(
-        "app.routers.webhook._update_message_decision_metadata"
+        "app.routers.webhook._legacy._update_message_decision_metadata"
     ) as mock_update:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -1491,22 +1491,22 @@ def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
             return semantic
         return None
 
-    with patch("app.routers.webhook._get_policy_handler", return_value=None), patch(
-        "app.routers.webhook.generate_bot_response", return_value=low_confidence
+    with patch("app.routers.webhook._legacy._get_policy_handler", return_value=None), patch(
+        "app.routers.webhook._legacy.generate_bot_response", return_value=low_confidence
     ), patch(
-        "app.routers.webhook.semantic_service_match", side_effect=semantic_side_effect
+        "app.routers.webhook._legacy.semantic_service_match", side_effect=semantic_side_effect
     ) as mock_semantic, patch(
-        "app.routers.webhook.rewrite_for_service_match", return_value="маникюр"
+        "app.routers.webhook._legacy.rewrite_for_service_match", return_value="маникюр"
     ) as mock_rewrite, patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
-        "app.routers.webhook._extract_service_hint", return_value=None
+        "app.routers.webhook._legacy._extract_service_hint", return_value=None
     ), patch(
-        "app.routers.webhook._update_message_decision_metadata"
+        "app.routers.webhook._legacy._update_message_decision_metadata"
     ) as mock_update:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -1609,21 +1609,21 @@ def test_rag_rewrite_and_scores_logged():
     }
 
     with patch(
-        "app.routers.webhook.rewrite_query_for_retrieval",
+        "app.routers.webhook._legacy.rewrite_query_for_retrieval",
         return_value={"rewrite_used": True, "rewrite_text": "адрес салона", "reason": "rewritten"},
     ), patch(
-        "app.routers.webhook.generate_bot_response",
+        "app.routers.webhook._legacy.generate_bot_response",
         side_effect=fake_generate_bot_response,
     ), patch(
-        "app.routers.webhook.detect_multi_intent",
+        "app.routers.webhook._legacy.detect_multi_intent",
         return_value=intent_decomp,
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id",
+        "app.routers.webhook._legacy._find_message_by_message_id",
         return_value=saved_message,
     ), patch(
-        "app.routers.webhook.should_process_debounced_message",
+        "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
     ):
         response = asyncio.run(
@@ -1766,19 +1766,19 @@ def test_service_matcher_short_circuits_llm():
 
     policy_handler = {"policy_type": "demo_salon", "service_matcher": webhook_router.get_demo_salon_service_decision}
 
-    with patch("app.routers.webhook._get_policy_handler", return_value=policy_handler), patch(
-        "app.routers.webhook.generate_bot_response"
+    with patch("app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler), patch(
+        "app.routers.webhook._legacy.generate_bot_response"
     ) as mock_llm, patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
-        "app.routers.webhook.should_process_debounced_message",
+        "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
     ), patch(
-        "app.routers.webhook._update_message_decision_metadata"
+        "app.routers.webhook._legacy._update_message_decision_metadata"
     ) as mock_update:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -1866,18 +1866,18 @@ def test_price_clarify_asks_only_service_and_sets_reason():
 
     policy_handler = {"policy_type": "demo_salon", "service_matcher": _service_matcher}
 
-    with patch("app.routers.webhook._get_policy_handler", return_value=policy_handler), patch(
-        "app.routers.webhook.generate_bot_response"
+    with patch("app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler), patch(
+        "app.routers.webhook._legacy.generate_bot_response"
     ) as mock_llm, patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_active_branches", return_value=[]
+        "app.routers.webhook._legacy._get_active_branches", return_value=[]
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message",
+        "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
     ):
         response = asyncio.run(
@@ -1959,16 +1959,16 @@ def test_context_manager_sets_refusal_flag_in_decision_meta():
 
     llm_result = SimpleNamespace(ok=True, value=("Понял вас.", "high"))
 
-    with patch("app.routers.webhook._get_policy_handler", return_value=None), patch(
-        "app.routers.webhook.generate_bot_response", return_value=llm_result
+    with patch("app.routers.webhook._legacy._get_policy_handler", return_value=None), patch(
+        "app.routers.webhook._legacy.generate_bot_response", return_value=llm_result
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message",
+        "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
     ):
         response = asyncio.run(
@@ -2056,20 +2056,20 @@ def test_clarify_limit_escalates_after_two_attempts():
             ),
         )
 
-        with patch("app.routers.webhook._get_policy_handler", return_value=policy_handler), patch(
-            "app.routers.webhook.send_bot_response", return_value=True
+        with patch("app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler), patch(
+            "app.routers.webhook._legacy.send_bot_response", return_value=True
         ), patch(
-            "app.routers.webhook._reuse_active_handover", return_value=(None, False, False)
+            "app.routers.webhook._legacy._reuse_active_handover", return_value=(None, False, False)
         ), patch(
-            "app.routers.webhook.escalate_to_pending", return_value=SimpleNamespace(ok=True, value=SimpleNamespace())
+            "app.routers.webhook._legacy.escalate_to_pending", return_value=SimpleNamespace(ok=True, value=SimpleNamespace())
         ), patch(
-            "app.routers.webhook.send_telegram_notification", return_value=True
+            "app.routers.webhook._legacy.send_telegram_notification", return_value=True
         ), patch(
-            "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+            "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
         ), patch(
-            "app.routers.webhook._get_user_branch_preference", return_value=None
+            "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
         ), patch(
-            "app.routers.webhook.should_process_debounced_message",
+            "app.routers.webhook._legacy.should_process_debounced_message",
             AsyncMock(return_value=True),
         ):
             response = asyncio.run(
@@ -2155,22 +2155,22 @@ def test_llm_guard_blocks_payment_response():
     llm_result = SimpleNamespace(ok=True, value=("Оплата картой возможна.", "high"))
     handover = SimpleNamespace(id="handover-123")
 
-    with patch("app.routers.webhook._get_policy_handler", return_value=None), patch(
-        "app.routers.webhook.generate_bot_response", return_value=llm_result
+    with patch("app.routers.webhook._legacy._get_policy_handler", return_value=None), patch(
+        "app.routers.webhook._legacy.generate_bot_response", return_value=llm_result
     ), patch(
-        "app.routers.webhook._reuse_active_handover", return_value=(None, False, False)
+        "app.routers.webhook._legacy._reuse_active_handover", return_value=(None, False, False)
     ), patch(
-        "app.routers.webhook.escalate_to_pending", return_value=SimpleNamespace(ok=True, value=handover)
+        "app.routers.webhook._legacy.escalate_to_pending", return_value=SimpleNamespace(ok=True, value=handover)
     ), patch(
-        "app.routers.webhook.send_telegram_notification", return_value=True
+        "app.routers.webhook._legacy.send_telegram_notification", return_value=True
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=branch_id
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
-        "app.routers.webhook._update_message_decision_metadata"
+        "app.routers.webhook._legacy._update_message_decision_metadata"
     ) as mock_update:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -2255,19 +2255,19 @@ def test_audio_transcription_failure_returns_prompt():
     }
 
     with patch(
-        "app.routers.webhook._maybe_transcribe_voice",
+        "app.routers.webhook._legacy._maybe_transcribe_voice",
         AsyncMock(return_value=(None, "empty_transcript", asr_meta)),
     ), patch(
-        "app.routers.webhook._evaluate_media_decision",
+        "app.routers.webhook._legacy._evaluate_media_decision",
         AsyncMock(return_value=webhook_router.MediaDecision(allowed=True)),
     ), patch(
-        "app.routers.webhook._store_media_locally",
+        "app.routers.webhook._legacy._store_media_locally",
         return_value={"stored": False, "path": None, "error": None},
     ), patch(
-        "app.routers.webhook.send_bot_response",
+        "app.routers.webhook._legacy.send_bot_response",
         return_value=True,
     ), patch(
-        "app.routers.webhook._find_message_by_message_id",
+        "app.routers.webhook._legacy._find_message_by_message_id",
         return_value=saved_message,
     ):
         response = asyncio.run(
@@ -2355,13 +2355,13 @@ def test_multi_intent_long_message_prioritizes_booking():
     }
 
     with patch(
-        "app.routers.webhook.detect_multi_intent",
+        "app.routers.webhook._legacy.detect_multi_intent",
         return_value=multi_payload,
     ), patch(
-        "app.routers.webhook.send_bot_response",
+        "app.routers.webhook._legacy.send_bot_response",
         return_value=True,
     ), patch(
-        "app.routers.webhook._find_message_by_message_id",
+        "app.routers.webhook._legacy._find_message_by_message_id",
         return_value=saved_message,
     ):
         response = asyncio.run(
@@ -2465,16 +2465,16 @@ def test_intent_queue_sets_context_and_prompt():
 
     policy_handler = {"policy_type": "demo_salon", "service_matcher": _service_matcher}
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook._get_policy_handler", return_value=policy_handler
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -2587,18 +2587,18 @@ def test_intent_queue_info_limit_skips_booking():
 
     policy_handler = {"policy_type": "demo_salon", "truth_gate": _truth_gate}
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook._get_policy_handler", return_value=policy_handler
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook.get_demo_salon_decision", side_effect=_info_decision
+        "app.routers.webhook._legacy.get_demo_salon_decision", side_effect=_info_decision
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -2702,18 +2702,18 @@ def test_intent_queue_choice_pricing_replies_and_updates_queue():
             meta={"service_query": "маникюр"},
         )
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook._get_policy_handler", return_value=None
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook.get_demo_salon_decision", side_effect=_price_decision
+        "app.routers.webhook._legacy.get_demo_salon_decision", side_effect=_price_decision
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -2812,18 +2812,18 @@ def test_intent_queue_choice_hours_matches_time_phrase():
         assert key == "hours"
         return "HOURS"
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook._get_policy_handler", return_value=None
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook.format_reply_from_truth", side_effect=_truth_reply
+        "app.routers.webhook._legacy.format_reply_from_truth", side_effect=_truth_reply
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -2928,16 +2928,16 @@ def test_intent_queue_choice_booking_starts_prompt_and_clears_queue():
         "consult_question": "",
     }
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook._get_policy_handler", return_value=None
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -3032,20 +3032,20 @@ def test_expected_reply_type_clears_on_match():
 
     llm_result = SimpleNamespace(ok=True, value=("OK", "high_confidence"))
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook._get_policy_handler", return_value=None
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
-        "app.routers.webhook.generate_bot_response", return_value=llm_result
+        "app.routers.webhook._legacy.generate_bot_response", return_value=llm_result
     ), patch(
-        "app.routers.webhook._extract_service_hint", return_value="маникюр"
+        "app.routers.webhook._legacy._extract_service_hint", return_value="маникюр"
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -3136,20 +3136,20 @@ def test_expected_reply_type_off_topic_keeps_contract():
 
     domain_result = (DomainIntent.OUT_OF_DOMAIN, 0.1, 0.9, {"out_hits": 1, "strict_in_hits": 0})
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook.classify_domain_with_scores", return_value=domain_result
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy.classify_domain_with_scores", return_value=domain_result
     ), patch(
-        "app.routers.webhook._get_policy_handler", return_value=None
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
-        "app.routers.webhook._extract_service_hint", return_value=None
+        "app.routers.webhook._legacy._extract_service_hint", return_value=None
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -3243,22 +3243,22 @@ def test_expected_reply_type_invalid_choice_keeps_contract():
 
     domain_result = (DomainIntent.UNKNOWN, 0.0, 0.0, {"out_hits": 0, "strict_in_hits": 0})
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook.classify_domain_with_scores", return_value=domain_result
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy.classify_domain_with_scores", return_value=domain_result
     ), patch(
-        "app.routers.webhook.semantic_service_match", return_value=None
+        "app.routers.webhook._legacy.semantic_service_match", return_value=None
     ), patch(
-        "app.routers.webhook._get_policy_handler", return_value=None
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id", return_value=saved_message
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._get_user_branch_preference", return_value=None
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
-        "app.routers.webhook.should_process_debounced_message", AsyncMock(return_value=True)
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
-        "app.routers.webhook._extract_service_hint", return_value=None
+        "app.routers.webhook._legacy._extract_service_hint", return_value=None
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -3368,30 +3368,30 @@ def test_multi_truth_reply_handles_hours_and_service_without_booking():
             return [{"score": 0.5, "payload": {"canonical_name": "Маникюр"}}]
         return []
 
-    with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint), patch(
-        "app.routers.webhook.semantic_question_type", side_effect=_fake_question_type
+    with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint), patch(
+        "app.routers.webhook._legacy.semantic_question_type", side_effect=_fake_question_type
     ), patch(
         "app.services.demo_salon_knowledge.semantic_question_type", side_effect=_fake_question_type
     ), patch(
         "app.services.demo_salon_knowledge._search_services_index", side_effect=_fake_search_services_index
     ), patch(
-        "app.routers.webhook.generate_bot_response",
+        "app.routers.webhook._legacy.generate_bot_response",
         side_effect=[
             Result.success((None, "low_confidence")),
             Result.success(("ok", "high")),
         ],
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id",
+        "app.routers.webhook._legacy._find_message_by_message_id",
         side_effect=[saved_message_first, saved_message_second],
     ), patch(
-        "app.routers.webhook.should_process_debounced_message",
+        "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
     ), patch(
-        "app.routers.webhook._reuse_active_handover"
+        "app.routers.webhook._legacy._reuse_active_handover"
     ) as mock_reuse, patch(
-        "app.routers.webhook.escalate_to_pending"
+        "app.routers.webhook._legacy.escalate_to_pending"
     ) as mock_escalate:
         mock_reuse.return_value = (None, False, False)
         mock_escalate.return_value = SimpleNamespace(ok=False, error="test")
@@ -3525,27 +3525,27 @@ def test_multi_truth_reply_handles_hours_and_price_in_single_segment():
             return semantic_match
         return None
 
-    with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint), patch(
-        "app.routers.webhook.semantic_question_type", side_effect=_fake_question_type
+    with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint), patch(
+        "app.routers.webhook._legacy.semantic_question_type", side_effect=_fake_question_type
     ), patch(
         "app.services.demo_salon_knowledge.semantic_question_type", side_effect=_fake_question_type
     ), patch(
         "app.services.demo_salon_knowledge.semantic_service_match", side_effect=_fake_semantic_match
     ), patch(
-        "app.routers.webhook.generate_bot_response",
+        "app.routers.webhook._legacy.generate_bot_response",
         return_value=Result.success((None, "low_confidence")),
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id",
+        "app.routers.webhook._legacy._find_message_by_message_id",
         return_value=saved_message,
     ), patch(
-        "app.routers.webhook.should_process_debounced_message",
+        "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
     ), patch(
-        "app.routers.webhook._reuse_active_handover"
+        "app.routers.webhook._legacy._reuse_active_handover"
     ) as mock_reuse, patch(
-        "app.routers.webhook.escalate_to_pending"
+        "app.routers.webhook._legacy.escalate_to_pending"
     ) as mock_escalate:
         mock_reuse.return_value = (None, False, False)
         mock_escalate.return_value = SimpleNamespace(ok=False, error="test")
@@ -3660,29 +3660,29 @@ def test_intent_decomp_blocks_booking_and_drives_multi_truth():
         "service_query": "педикюр",
     }
 
-    with patch("app.routers.webhook.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook.semantic_question_type", side_effect=_empty_question_type
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy.semantic_question_type", side_effect=_empty_question_type
     ), patch(
         "app.services.demo_salon_knowledge.semantic_question_type", side_effect=_empty_question_type
     ), patch(
-        "app.routers.webhook.semantic_service_match", side_effect=_fake_semantic_match
+        "app.routers.webhook._legacy.semantic_service_match", side_effect=_fake_semantic_match
     ), patch(
         "app.services.demo_salon_knowledge.semantic_service_match", side_effect=_fake_semantic_match
     ), patch(
-        "app.routers.webhook.generate_bot_response",
+        "app.routers.webhook._legacy.generate_bot_response",
         return_value=Result.success(("llm", "high")),
     ), patch(
-        "app.routers.webhook.send_bot_response", return_value=True
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
-        "app.routers.webhook._find_message_by_message_id",
+        "app.routers.webhook._legacy._find_message_by_message_id",
         return_value=saved_message,
     ), patch(
-        "app.routers.webhook.should_process_debounced_message",
+        "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
     ), patch(
-        "app.routers.webhook._reuse_active_handover"
+        "app.routers.webhook._legacy._reuse_active_handover"
     ) as mock_reuse, patch(
-        "app.routers.webhook.escalate_to_pending"
+        "app.routers.webhook._legacy.escalate_to_pending"
     ) as mock_escalate:
         mock_reuse.return_value = (None, False, False)
         mock_escalate.return_value = SimpleNamespace(ok=False, error="test")
@@ -3799,16 +3799,16 @@ def test_asr_low_confidence_requires_confirmation_then_accepts_yes():
     }
 
     with patch(
-        "app.routers.webhook._maybe_transcribe_voice",
+        "app.routers.webhook._legacy._maybe_transcribe_voice",
         AsyncMock(return_value=("маникюр", "ok", asr_meta)),
     ), patch(
-        "app.routers.webhook._evaluate_media_decision",
+        "app.routers.webhook._legacy._evaluate_media_decision",
         AsyncMock(return_value=webhook_router.MediaDecision(allowed=True)),
     ), patch(
-        "app.routers.webhook.send_bot_response",
+        "app.routers.webhook._legacy.send_bot_response",
         return_value=True,
     ), patch(
-        "app.routers.webhook._find_message_by_message_id",
+        "app.routers.webhook._legacy._find_message_by_message_id",
         return_value=saved_message,
     ):
         response = asyncio.run(
@@ -3842,13 +3842,13 @@ def test_asr_low_confidence_requires_confirmation_then_accepts_yes():
     )
 
     with patch(
-        "app.routers.webhook.generate_bot_response",
+        "app.routers.webhook._legacy.generate_bot_response",
         return_value=Result.success(("ok", "high")),
     ) as mock_generate, patch(
-        "app.routers.webhook.send_bot_response",
+        "app.routers.webhook._legacy.send_bot_response",
         return_value=True,
     ), patch(
-        "app.routers.webhook._find_message_by_message_id",
+        "app.routers.webhook._legacy._find_message_by_message_id",
         return_value=saved_message,
     ):
         response = asyncio.run(
@@ -3979,7 +3979,7 @@ def test_golden_cases(case):
     if check == "signals":
         messages = automation.get("messages") or ([case.get("input")] if case.get("input") else [])
         messages = [msg for msg in messages if isinstance(msg, str)]
-        with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
+        with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint):
             booking_signal = webhook_router._has_booking_signal(
                 messages,
                 client_slug="demo_salon",
@@ -3996,7 +3996,7 @@ def test_golden_cases(case):
     if check == "booking_flow":
         messages = automation.get("messages") or ([case.get("input")] if case.get("input") else [])
         messages = [msg for msg in messages if isinstance(msg, str)]
-        with patch("app.routers.webhook._extract_service_hint", side_effect=_fake_service_hint):
+        with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint):
             booking_signal = webhook_router._has_booking_signal(
                 messages,
                 client_slug="demo_salon",

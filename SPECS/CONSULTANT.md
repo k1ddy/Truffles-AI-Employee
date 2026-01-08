@@ -142,7 +142,7 @@
 
 **Реализация:**
 ```python
-# truffles-api/app/routers/webhook.py (основной путь; message.py — legacy)
+# truffles-api/app/routers/webhook/_legacy.py (основной путь; message.py — legacy)
 
 if is_rejection(intent):
     if conversation.no_count == 0:
@@ -677,7 +677,7 @@ WhatsApp (ChatFlow)
 
 | Файл | Назначение |
 |------|------------|
-| `routers/webhook.py` | Входная точка, основная логика (message.py — legacy) |
+| `routers/webhook/_legacy.py` | Входная точка, основная логика (message.py — legacy) |
 | `services/intent_service.py` | Классификация intent |
 | `services/ai_service.py` | Генерация ответа, RAG |
 | `services/knowledge_service.py` | Поиск в Qdrant |
@@ -889,7 +889,7 @@ RAG score = 0      →  ESCALATION + "пробел в базе"
 
 ### Шаг 1: Low confidence → эскалация [✅ РЕАЛИЗОВАНО]
 
-**Где:** `truffles-api/app/services/ai_service.py`, `truffles-api/app/routers/webhook.py`
+**Где:** `truffles-api/app/services/ai_service.py`, `truffles-api/app/routers/webhook/_legacy.py`
 
 **Как сейчас работает (факт):**
 - RAG max_score ≥ 0.85 → `high`
