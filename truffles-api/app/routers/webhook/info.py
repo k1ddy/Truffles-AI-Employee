@@ -164,13 +164,13 @@ def _build_info_intent_reply(
     message_text: str | None = None,
     include_info_bundle: bool = True,
 ) -> tuple[str | None, dict | None]:
-    from . import _legacy as legacy
     from app.services.demo_salon_knowledge import (
         build_info_combined_reply,
         format_reply_from_truth,
         get_demo_salon_decision,
         get_demo_salon_service_hint,
     )
+    from . import _legacy as legacy
 
     normalized = legacy.normalize_for_matching(message_text) if message_text else ""
     parking_signal = "парков" in normalized if normalized else False
