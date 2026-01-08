@@ -1,3 +1,5 @@
+"""Start here — see modules in routers/webhook/."""
+
 import asyncio
 import base64
 import hashlib
