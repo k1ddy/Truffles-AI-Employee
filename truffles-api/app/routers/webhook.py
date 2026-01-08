@@ -2128,8 +2128,14 @@ DATE_KEYWORDS = [
 ]
 
 TIME_PATTERN = re.compile(r"\b\d{1,2}[:.]\d{2}\b")
+TIME_HOUR_PATTERN = re.compile(r"\b(?:в|к)\s*(?:[01]?\d|2[0-3])\b", re.IGNORECASE)
 DATE_PATTERN = re.compile(
     r"\b(?:сегодня|завтра|послезавтра|понедель\w*|вторник\w*|сред\w*|четверг\w*|пятниц\w*|суббот\w*|воскрес\w*|утром|днем|днём|вечером)\b",
+    re.IGNORECASE,
+)
+DATE_NUMERIC_PATTERN = re.compile(r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b")
+DATE_MONTH_PATTERN = re.compile(
+    r"\b\d{1,2}\s*(?:январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*\b",
     re.IGNORECASE,
 )
 NAME_PATTERN = re.compile(r"\bменя зовут\s+([a-zа-яё-]{2,})", re.IGNORECASE)
@@ -2258,6 +2264,15 @@ def _extract_datetime(text: str) -> str | None:
     time_match = TIME_PATTERN.search(text)
     if time_match:
         return time_match.group(0)
+    hour_match = TIME_HOUR_PATTERN.search(text)
+    if hour_match:
+        return hour_match.group(0)
+    numeric_date_match = DATE_NUMERIC_PATTERN.search(text)
+    if numeric_date_match:
+        return numeric_date_match.group(0)
+    month_date_match = DATE_MONTH_PATTERN.search(text)
+    if month_date_match:
+        return month_date_match.group(0)
     date_match = DATE_PATTERN.search(text)
     if date_match:
         return date_match.group(0)
@@ -6269,13 +6284,15 @@ async def _handle_webhook_payload(
             "answer_error": answer_error,
         }
 
-        answer_used = (
-            isinstance(answer_result, dict)
-            and answer_result.get("ok") is True
-            and isinstance(answer_value, str)
-            and answer_value.strip()
-            and answer_confidence >= HIGH_CONFIDENCE_THRESHOLD
+        answer_confidence_floor = 0.65
+        answer_value_ok = isinstance(answer_value, str) and answer_value.strip()
+        answer_slot_ok = isinstance(answer_slot, str) and answer_slot.strip()
+        answer_result_ok = isinstance(answer_result, dict) and answer_result.get("ok") is True
+        answer_valid = answer_result_ok and answer_slot_ok and answer_value_ok
+        answer_confidence_ok = (
+            answer_result_ok and answer_value_ok and answer_confidence >= answer_confidence_floor
         )
+        answer_used = answer_confidence_ok or answer_valid
         if answer_used:
             matched = True
             value = answer_value
