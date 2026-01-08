@@ -7684,6 +7684,36 @@ async def _handle_webhook_payload(
                             conversation_id=conversation.id,
                             bot_response=bot_response,
                         )
+                    if out_of_domain_signal and not expected_reply_shortcircuit:
+                        bot_response = OUT_OF_DOMAIN_RESPONSE
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "out_of_domain",
+                                "decision": "domain_anchor",
+                                "state": conversation.state,
+                            },
+                        )
+                        _record_message_decision_meta(
+                            saved_message,
+                            action="out_of_domain",
+                            intent="out_of_domain",
+                            source="domain_anchor",
+                            fast_intent=False,
+                        )
+                        bot_response, sent = _send_and_save(bot_response)
+                        result_message = (
+                            "Domain anchor OOD reply sent"
+                            if sent
+                            else "Domain anchor OOD reply send failed"
+                        )
+                        db.commit()
+                        return WebhookResponse(
+                            success=True,
+                            message=result_message,
+                            conversation_id=conversation.id,
+                            bot_response=bot_response,
+                        )
                     if _looks_like_time_only_request(message_text):
                         bot_response = MSG_EXPECTED_SERVICE_OFF_TOPIC
                         _record_decision_trace(
