@@ -84,6 +84,8 @@ CONTROLLER_ALLOWED_GOALS = {
     "out_of_domain",
     "other",
 }
+OFFLINE_CONTROLLER_CLASS = "other"
+OFFLINE_CONTROLLER_GOAL = "other"
 CONTROLLER_PROMPT_FALLBACK = """# Dialogue Controller Prompt (Salon)
 
 Ты Dialogue Controller для салона красоты. Вход всегда JSON. Верни ТОЛЬКО JSON.
@@ -546,13 +548,14 @@ def route_dialogue_controller(
     if not os.environ.get("OPENAI_API_KEY"):
         result["error"] = "no_api_key"
         result["payload"] = _build_payload(
-            controller_class=None,
+            controller_class=OFFLINE_CONTROLLER_CLASS,
+            goal=OFFLINE_CONTROLLER_GOAL,
             intents=[],
             slots={},
             followups=[],
             safety_flags=[],
             confidence=0.0,
-            reason="",
+            reason="offline_no_api_key",
             carryover_payload=carryover_input,
             controller_llm_ms=0.0,
             controller_error="no_api_key",
