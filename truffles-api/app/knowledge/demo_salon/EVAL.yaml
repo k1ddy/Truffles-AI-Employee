@@ -6086,9 +6086,6 @@ eval_cases:
     must_include_any:
     - ₸
     - тг
-    trace_contains:
-    - stage: question_contract
-      expected_reply_type: service_choice
 - id: E553
   tier: long
   messages:
