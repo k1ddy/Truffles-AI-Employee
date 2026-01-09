@@ -25,6 +25,11 @@ Roles & ownership (who updates what):
 Process (always):
 Architect -> Brain -> Hands. One writer at a time unless using worktrees.
 
+Roadmap binding (mandatory):
+- Active stage must be one of A0–A7 from `STRATEGY/TECH_ROADMAP.md`.
+- Session Card format is required (Goal/Stage/Blocker/Evidence/Scope/DoD/Tests/Risks/Owner).
+- Stage Card defines the allowed steps for each A-stage; no deviations without Architect approval.
+
 Multi-terminal protocol (mandatory):
 - Terminal 1: Architect (sets course; no code changes unless explicitly asked).
 - Terminal 2: Brain (defines tasks, accepts results, sole authority to commit/push).
@@ -99,10 +104,11 @@ Minimum start (avoid dumb mistakes):
    - Infra stack is managed from `/home/zhan/infrastructure/docker-compose.yml` (traefik/website) and `/home/zhan/infrastructure/docker-compose.truffles.yml` (core stack); do NOT run `docker compose` in `/home/zhan/truffles-main`.
 1) Read `AGENTS.md` (rules) and `STATE.md` (current status) before any other doc
    - In `STATE.md` first: **БАЗОВЫЕ ФАКТЫ (читать первым делом)**
-2) Preflight (no guesses): run `python3 ops/diagnose.py`
+2) Read `STRATEGY/TECH_ROADMAP.md` and identify the active stage A0–A7
+3) Preflight (no guesses): run `python3 ops/diagnose.py`
    - Confirms container status + image and key envs (`PUBLIC_BASE_URL`, `MEDIA_SIGNING_SECRET`, `MEDIA_URL_TTL_SECONDS`, `MEDIA_CLEANUP_TTL_DAYS`, `CHATFLOW_MEDIA_TIMEOUT_SECONDS`)
-3) Before asking questions about runtime: check facts via repo/DB/logs first
-4) If you plan to deploy: read `TECH.md` (Deploy API) and `/home/zhan/restart_api.sh` (flags)
+4) Before asking questions about runtime: check facts via repo/DB/logs first
+5) If you plan to deploy: read `TECH.md` (Deploy API) and `/home/zhan/restart_api.sh` (flags)
 
 Full context (when doing architecture/debug/review):
 5) Read `docs/IMPERIUM_CONTEXT.yaml`
