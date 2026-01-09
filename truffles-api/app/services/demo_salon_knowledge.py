@@ -2053,7 +2053,6 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
         "раздраж",
         "анестез",
         "обезбол",
-        "кож",
         "дермат",
         "болезн",
         "лиценз",
