@@ -233,6 +233,10 @@ def _is_env_enabled(value: str | None, default: bool = True) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _is_test_env() -> bool:
+    return bool(os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CI"))
+
+
 def _log_timing(
     stage: str,
     elapsed_ms: float,
@@ -353,7 +357,8 @@ def transcribe_audio(
 ) -> Optional[str]:
     """Transcribe short audio to text. Returns None on failure."""
     if not OPENAI_API_KEY:
-        logger.warning("Audio transcription skipped: OPENAI_API_KEY missing")
+        if not _is_test_env():
+            logger.warning("Audio transcription skipped: OPENAI_API_KEY missing")
         return None
 
     provider = get_llm_provider()
@@ -655,7 +660,8 @@ def rewrite_for_service_match(text: str, client_slug: str) -> str | None:
     if not normalized or len(normalized) < 3:
         return None
     if not OPENAI_API_KEY:
-        logger.warning("Service rewrite skipped: OPENAI_API_KEY missing")
+        if not _is_test_env():
+            logger.warning("Service rewrite skipped: OPENAI_API_KEY missing")
         return None
 
     system_prompt = (
@@ -747,7 +753,8 @@ def rewrite_query_for_retrieval(text: str, client_slug: str | None = None) -> di
     if not normalized or len(normalized) < 3:
         return {"rewrite_used": False, "rewrite_text": "", "reason": "too_short"}
     if not OPENAI_API_KEY:
-        logger.warning("RAG rewrite skipped: OPENAI_API_KEY missing")
+        if not _is_test_env():
+            logger.warning("RAG rewrite skipped: OPENAI_API_KEY missing")
         return {"rewrite_used": False, "rewrite_text": "", "reason": "missing_api_key"}
 
     system_prompt = (
@@ -996,7 +1003,8 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
     if len(normalized) < 3:
         return _fallback_payload()
     if not OPENAI_API_KEY:
-        logger.warning("Multi-intent detection skipped: OPENAI_API_KEY missing")
+        if not _is_test_env():
+            logger.warning("Multi-intent detection skipped: OPENAI_API_KEY missing")
         return _fallback_payload()
 
     system_prompt = (

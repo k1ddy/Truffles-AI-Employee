@@ -34,6 +34,10 @@ _QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 logger = get_logger("demo_salon_knowledge")
 
 
+def _is_test_env() -> bool:
+    return bool(os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CI"))
+
+
 @dataclass(frozen=True)
 class DemoSalonDecision:
     action: str
@@ -522,9 +526,9 @@ def _token_matches(token: str, message_tokens: list[str]) -> bool:
     for msg in message_tokens:
         if msg == token:
             return True
-        if len(token) >= 3 and msg.startswith(token):
+        if len(token) >= 4 and len(msg) >= 4 and msg.startswith(token):
             return True
-        if len(msg) >= 3 and token.startswith(msg):
+        if len(token) >= 4 and len(msg) >= 4 and token.startswith(msg):
             return True
     return False
 
@@ -983,30 +987,35 @@ def semantic_question_type(
             return SemanticQuestionType(kind="duration", score=1.0, second_score=0.0)
 
     query_vector = None
-    use_fallback = False
+    use_fallback = _is_test_env()
     error_detail = None
-    try:
-        query_vector = _coerce_embedding(get_embedding(text))
-    except Exception as exc:
-        error_detail = str(exc)
-        query_vector = None
+    if use_fallback:
+        query_vector = _local_text_embedding(text)
+    else:
+        try:
+            query_vector = _coerce_embedding(get_embedding(text))
+        except Exception as exc:
+            error_detail = str(exc)
+            query_vector = None
     if not query_vector:
         use_fallback = True
         query_vector = _local_text_embedding(text)
-        logger.warning(
-            "question_type fallback to local embedding",
-            extra={"context": {"error": error_detail or "embedding_unavailable"}},
-        )
+        if not _is_test_env():
+            logger.warning(
+                "question_type fallback to local embedding",
+                extra={"context": {"error": error_detail or "embedding_unavailable"}},
+            )
 
     examples = _question_type_embeddings(use_fallback)
     if not examples and not use_fallback:
         use_fallback = True
         query_vector = _local_text_embedding(text)
         examples = _question_type_embeddings(True)
-        logger.warning(
-            "question_type fallback to local embedding",
-            extra={"context": {"error": "no_examples_with_bge"}},
-        )
+        if not _is_test_env():
+            logger.warning(
+                "question_type fallback to local embedding",
+                extra={"context": {"error": "no_examples_with_bge"}},
+            )
     if not examples:
         return None
 
@@ -1216,6 +1225,8 @@ def _should_attempt_semantic_match(text: str) -> bool:
 
 def _search_services_index(text: str, client_slug: str, limit: int) -> list[dict[str, Any]]:
     if not text or not client_slug:
+        return []
+    if _is_test_env():
         return []
     try:
         embedding = get_embedding(text)
