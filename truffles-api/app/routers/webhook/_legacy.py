@@ -4080,6 +4080,7 @@ async def _handle_webhook_payload(
                     },
                 )
     intent_decomp_has_booking = "booking" in intent_decomp_set
+    booking_explicit = any(_is_booking_request(message) for message in booking_messages)
     intent_decomp_info = intent_decomp_set & BOOKING_INFO_QUESTION_TYPES
     if expected_reply_shortcircuit:
         booking_signal = True
@@ -4095,11 +4096,14 @@ async def _handle_webhook_payload(
                     "booking_blocked_reason": "info_question",
                     "question_intents": sorted(intent_decomp_info),
                 }
-            else:
+            elif not booking_explicit:
                 booking_block_meta = {
-                    "booking_blocked_reason": "intent_decomp_missing" if not intent_decomp_used else "intent_decomp_no_booking",
+                    "booking_blocked_reason": "intent_decomp_missing"
+                    if not intent_decomp_used
+                    else "intent_decomp_no_booking",
                 }
-        booking_signal = False
+        if booking_block_meta:
+            booking_signal = False
 
     booking_wants_flow = (
         _should_run_booking_flow(
