@@ -2231,15 +2231,17 @@ def get_demo_salon_decision(
             intent="complaint",
         )
 
-    if "сегодня" in normalized or "прямо сейчас" in normalized:
+    same_day_signal = _contains_any(normalized, ["сегодня", "прямо сейчас", "без запис"])
+    if same_day_signal:
         if _contains_any(normalized, ["запис", "окошк", "свободн"]):
             return DemoSalonDecision(
                 action="escalate",
                 response=(
-                    "На сегодня уточню у администратора. Подскажите, пожалуйста: услуга и удобное время — передам."
+                    "На сегодня уточню у администратора. Подскажите, пожалуйста: "
+                    "услуга, точная дата, точное время, имя, контактный номер — передам."
                 ),
                 intent="same_day_booking",
-                collect=["услуга", "время"],
+                collect=["услуга", "точная дата", "точное время", "имя", "контактный номер"],
             )
 
     consult_decision = build_consult_reply(
