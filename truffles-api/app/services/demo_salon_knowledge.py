@@ -2095,6 +2095,7 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
         "порез",
         "кров",
         "не слыш",
+        "игнор",
         "одно и то же",
         "одно и тоже",
     ]
