@@ -531,6 +531,7 @@ def _build_query(result):
     query = Mock()
     query.filter.return_value = query
     query.order_by.return_value = query
+    query.limit.return_value = query
     if isinstance(result, list):
         query.first.return_value = result[0] if result else None
         query.all.return_value = result
