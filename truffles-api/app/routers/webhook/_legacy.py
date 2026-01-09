@@ -576,6 +576,9 @@ MSG_PENDING_LOW_CONFIDENCE = (
 MSG_PENDING_ESCALATION = "Я уже передал менеджеру — он скоро подключится."
 MSG_PENDING_STATUS = "Да, я передал. Сейчас менеджер ещё не взял заявку. Как только возьмёт — ответит здесь. Пока ждём, могу помочь: уточните, что нужно?"
 MSG_PENDING_WAIT = "Администратор подключится. Передам администратору — разберутся."
+MSG_PENDING_WAIT_RESCHEDULE = (
+    "По переносу записи передам администратору — разберутся. Администратор подключится."
+)
 MSG_PENDING_SLA_PING = "Напоминаю: менеджер ещё не подключился. Я на связи — напишите, что нужно уточнить."
 MSG_PENDING_AUTO_CLOSE = "Закрываю ожидание. Если всё ещё актуально — напишите, я помогу."
 MSG_PENDING_ACK = "Хорошо. Напишите, что именно нужно: цена/запись/адрес/мастер."
@@ -3293,6 +3296,10 @@ async def _handle_webhook_payload(
             )
 
         bot_response = MSG_PENDING_WAIT
+        pending_handover = get_active_handover(db, conversation.id)
+        trigger_value = pending_handover.trigger_value if pending_handover else None
+        if isinstance(trigger_value, str) and trigger_value.strip().casefold() == "reschedule":
+            bot_response = MSG_PENDING_WAIT_RESCHEDULE
         trace_payload = {
             "stage": "routing",
             "decision": "pending_wait",
