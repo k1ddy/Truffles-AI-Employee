@@ -2218,7 +2218,7 @@ def get_demo_salon_decision(
     if policy_intent == "policy_complaint":
         return DemoSalonDecision(
             action="escalate",
-            response="Жаль, что так вышло. Передам администратору, чтобы разобрались.",
+            response="Жаль, что так вышло. Передам администратору — разберутся.",
             intent="complaint",
         )
 
