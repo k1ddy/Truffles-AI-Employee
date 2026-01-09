@@ -2035,13 +2035,15 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
         "юрист",
         "закон",
         "суд",
-        "иск",
         "ответствен",
         "компенсац",
         "штраф",
         "прав потреб",
     ]
-    if _contains_any(normalized, legal_keywords):
+    if re.search(r"\bиск(а|у|е|ом|и)?\b|\bисков\w*\b", normalized) or _contains_any(
+        normalized,
+        legal_keywords,
+    ):
         return "policy_legal"
 
     hours_like = _looks_like_hours_question(normalized)
