@@ -1832,7 +1832,15 @@ def format_reply_from_truth(intent: str, slots: dict | None = None) -> str | Non
         return reason or "Цена «от» зависит от деталей услуги."
     if intent == "promotions_rules":
         stacking = truth.get("promotions", {}).get("stacking")
-        return stacking or "Скидки не суммируются."
+        notes = truth.get("promotions", {}).get("stacking_notes")
+        stacking_text = str(stacking).strip() if stacking else ""
+        notes_text = str(notes).strip() if notes else ""
+        if stacking_text and notes_text and notes_text not in stacking_text:
+            joiner = " " if stacking_text.endswith((".", "!", "?")) else ". "
+            return f"{stacking_text}{joiner}{notes_text}"
+        if stacking_text:
+            return stacking_text
+        return notes_text or "Скидки не суммируются."
     if intent == "promotions":
         return _format_promotions(truth, slots.get("promotion_intent"))
     if intent == "objection_price":
