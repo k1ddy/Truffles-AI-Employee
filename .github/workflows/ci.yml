@@ -108,7 +108,7 @@ jobs:
           pip install pytest pytest-cov ruff
 
       - name: Tests (long)
-        run: pytest -q tests/test_demo_salon_eval.py -o EVAL_TIER=long
+        run: EVAL_TIER=long pytest -q tests/test_demo_salon_eval.py
 
   secret-scan:
     runs-on: ubuntu-latest
