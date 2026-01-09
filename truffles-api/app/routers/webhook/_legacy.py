@@ -801,6 +801,7 @@ HYGIENE_KEYWORDS = [
     "стерилиз",
     "дезраств",
     "дезинф",
+    "инфек",
     "ультразвук",
     "уз-ванн",
     "сухожар",
@@ -7336,6 +7337,8 @@ async def _handle_webhook_payload(
         conversation.state == ConversationState.PENDING.value and is_handover_status_question(message_text)
     )
     style_reference = not has_media and _is_style_reference_request(message_text, has_media=False)
+    if message_text and _is_hygiene_context_text(message_text):
+        out_of_domain_signal = False
     decision = _resolve_action(
         routing=routing,
         state=conversation.state,

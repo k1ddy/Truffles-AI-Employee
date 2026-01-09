@@ -2530,7 +2530,7 @@ def get_demo_salon_decision(
                     meta=meta,
                 )
 
-    if _contains_any(normalized, ["стерилиз", "инструмент", "обрабатываете", "дез", "сухожар"]):
+    if _contains_any(normalized, ["стерилиз", "инструмент", "обрабатываете", "дез", "сухожар", "инфек"]):
         reply = format_reply_from_truth("hygiene")
         if reply:
             return DemoSalonDecision(action="reply", response=reply, intent="hygiene")
