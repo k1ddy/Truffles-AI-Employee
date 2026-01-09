@@ -2046,7 +2046,6 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
         "болит",
         "больно",
         "кров",
-        "воспал",
         "покрасн",
         "сып",
         "реакц",
@@ -2058,7 +2057,12 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
         "лиценз",
         "медобраз",
     ]
-    if _contains_any(normalized, medical_keywords):
+    inflammation_signal = "воспал" in normalized
+    inflammation_fear = _contains_any(normalized, ["страш", "боюс", "опасаюс", "тревож"])
+    inflammation_personal = "у меня" in normalized
+    if _contains_any(normalized, medical_keywords) or (
+        inflammation_signal and not (inflammation_fear and not inflammation_personal)
+    ):
         return "policy_medical"
 
     legal_keywords = [
