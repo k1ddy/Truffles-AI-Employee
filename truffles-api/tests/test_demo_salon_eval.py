@@ -349,6 +349,8 @@ def _fake_service_hint(text: str, client_slug: str | None) -> str | None:
     normalized = (text or "").casefold()
     if "маник" in normalized:
         return "маникюр"
+    if "ногт" in normalized:
+        return "маникюр"
     if "педик" in normalized:
         return "педикюр"
     if "стриж" in normalized:
