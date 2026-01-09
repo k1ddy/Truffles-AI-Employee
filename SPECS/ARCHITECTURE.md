@@ -131,27 +131,79 @@ behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → p
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
 ```
 
-### Agentic orchestration = роли пайплайна (без отдельных агентов)
-Термин “agentic” — это **логические роли стадий** в одном потоке `_handle_webhook_payload`, а не отдельные рантайм‑агенты.
+### Decision Graph (канон принятия решений)
+```
+State Gate → Risk Gate → Expected Reply → Semantic → Data → Action → Response → Update
+```
+- **State Gate:** pending/manager_active/opt‑out → статус/молчание и стоп.
+- **Risk Gate:** Hard‑LAW/policy/complaint/reschedule/payment → эскалация и стоп.
+- **Expected Reply:** если активен expected_reply_type, сначала интерпретируем ответ в слот.
+- **Semantic:** LLM определяет intent/goal/slots/язык/эмоцию, без фактов.
+- **Data:** берём факты только из client/branch pack; если факта нет → уточнение (макс 1–2) или эскалация.
+- **Action:** один следующий шаг (reply/ask/escalate).
+- **Response:** контракт живого ответа (эмпатия → компетентность → факт → шаг).
+- **Update:** память, trace/meta, статистика.
 
-**Соответствие ролей фактическому порядку:**
-- **Router** → вход + outbox + порядок стадий из цепочки выше.
-- **Safety Guard** → pending/opt‑out/Hard‑LAW escalation + policy‑gates (скидки/оплата info).
-- **OOD Guard** → early OOD (только если нет in‑signals).
-- **Booking Guard** → booking guard/flow + expected_reply_type контракт.
-- **Info/RAG Specialist** → info bundle / consult / service matcher → LLM‑формулировка (RAG) → truth gate fallback.
-- **Host Persona** → формулировка ответа (шаблоны/LLM), CTA/quiet hours.
-- **Observability** → decision_trace/meta на каждом сообщении.
+### Core Roles (канон)
+Роли — **логические**, реализуются в одном пайплайне `_handle_webhook_payload`, не отдельные агенты.
+- **Channel Adapter:** принимает и нормализует вход (ChatFlow → outbox → `_handle_webhook_payload`), решений не принимает.
+- **Session Orchestrator:** конечный автомат диалога и единственный арбитр шага (gates + state machine).
+- **Safety/Policy Gate:** жёсткое соблюдение риск‑политик (Hard‑LAW/policy‑gates) и перевод в эскалацию.
+- **Semantic Service (LLM):** смысл (класс/слоты/язык/эмоция), **без фактов**.
+- **Data Resolver:** только проверенные факты из client/branch packs и RAG‑контекста.
+- **Action + Response:** один следующий шаг + ответ по контракту тона.
 
-### LLM Dialogue Controller (single arbiter) — канон
-- Цель: **единый арбитр смысла**. Ни один другой слой не меняет класс/цель/слоты.
+**Факт реализации (опорные файлы):**
+- Channel Adapter: `truffles-api/app/routers/webhook/_legacy.py`, outbox worker.
+- Session Orchestrator: `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/app/services/state_service.py`.
+- Safety/Policy Gate: `truffles-api/app/routers/webhook/policy.py`, guard‑ветки в `_legacy.py`.
+- Semantic Service: `truffles-api/app/services/intent_service.py` (`classify_intent`).
+- Data Resolver: `truffles-api/app/services/knowledge_service.py`, truth gate/инфо‑ветки в `_legacy.py`.
+- Action + Response: `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/app/routers/webhook/response.py`.
+
+### System Services (канон)
+- **Escalation Manager:** handover + SLA + статусы клиента/менеджера.
+- **Memory Store:** режим/слоты/summary/TTL, snapshot на pending.
+- **Audit/Trace:** decision_trace + decision_meta на каждом входе.
+- **Budget/Rate Control:** лимиты LLM и деградации по тенантам.
+- **Learning Backlog:** пропуски → обновление data packs (без правок логики).
+
+**Факт реализации (опорные файлы):**
+- Escalation Manager: `truffles-api/app/services/state_service.py`, `truffles-api/app/services/escalation_service.py`,
+  `truffles-api/app/services/telegram_service.py`, `truffles-api/app/services/reminder_service.py`,
+  `truffles-api/app/routers/telegram_webhook.py`.
+- Memory Store: `truffles-api/app/routers/webhook/session_memory.py`, `conversation.context`.
+- Audit/Trace: `truffles-api/app/routers/webhook/trace.py`, `messages.metadata.decision_meta`.
+- Budget/Rate Control: **GAP** (нужны лимиты/деградации в `client_settings` + enforcement).
+- Learning Backlog: `truffles-api/app/services/learning_service.py` (частично; сейчас пишет в RAG, нужен backlog‑контур).
+
+### Контракты между мышлением и фактами (канон)
+- **Intent Contract:** intent, slots, confidence, language, emotion, risk_signals (семантика, без фактов).
+- **Context Contract:** tenant_id, branch_id, state, mode, timezone, channel, open_status.
+- **Fact Contract:** только проверенные факты/политики с source, version, language, branch_id.
+- **Action Contract:** action_type, required_next_slots, escalation_reason.
+- **Response Contract:** tone, must_include, must_not_include, language, max_length.
+- **Memory Contract:** mode, slots, summary, last_updated, ttl.
+- **Trace Contract:** decision, reason, rules_hit, data_version, router_stats.
+
+**Envelope (input) обязательный минимум:** message_id, conversation_id, timestamp, text, attachments.
+
+### LLM Dialogue Controller (semantic arbiter) — канон
+- Цель: **единый арбитр смысла** (class/goal/slots), но не безопасности и не фактов.
 - Выход (structured JSON): `class`, `goal`, `intents`, `slots`, `followups`, `confidence`, `safety_flags`, `reason`.
-- Классы (по приоритету): Hard‑LAW → policy → opt‑out → human/frustration → booking → info‑bundle → consult → greeting → OOD.
+- Допустимые классы: `booking`, `info_bundle`, `consult`, `greeting`, `out_of_domain`, `other`.
+- `safety_flags` — только сигналы риска; решение об эскалации принимает Safety/Policy Gate.
 - Anchors/лексика/эвристики — **только fallback/boost**, не основной источник смысла.
 - OOD допустим **только** если есть out‑signals и **нет** in‑signals (strict‑in).
-- Если confidence ниже порога/LLM недоступен → fallback на детерминированный router; **обязательная фиксация** в trace.
+- Невалидный JSON/ошибка/низкая уверенность → fallback на детерминированный router; **обязательная фиксация** в trace.
 - Multi‑intent: сильный класс отвечает первым, остальные идут в очередь (intent_queue) с возвратом к цели.
 - `info_bundle` — **отдельный класс**, не “схлопывается” в `info`.
+
+### Safety/Policy Gate (enforcement, deterministic)
+- Работает как жёсткий слой безопасности и имеет приоритет над семантикой.
+- Источник правил: policy‑pack клиента (rules‑as‑data), не эвристики в коде.
+- Выход: `policy_gate`, `risk_level`, `escalation_required`, `allowed_actions`.
+- Любой риск/LAW‑сигнал → эскалация без попытки “договорить”.
 
 ### Answer‑Interpreter (expected_reply_type) — канон
 - Включается **только** если ожидается ответ на вопрос (`expected_reply_type` активен).
@@ -165,6 +217,12 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Источник: только client_pack (truth‑first), без фантазий.
 - Follow‑up “по времени/по часам”: если carryover содержит `hours` и нет явной услуги — **не** используем service‑matcher/carryover, ответ остаётся в `hours`.
 
+### Response Contract (Host Persona)
+- Формула ответа: эмпатия → компетентность → факт → шаг.
+- 2–3 предложения, без воды; если нужен список — короткий и по делу.
+- Факты только из Data Contract; если факта нет → уточнение или эскалация.
+- В pending/manager_active — статус и ожидание, без обещаний решений.
+
 ### Pack Compiler и онбординг (offline‑pipeline)
 - Источники: CRM/Calendar/Excel/Sheets/сайт → единый формат.
 - Нормализация: услуги/категории/правила → client_pack факты.
@@ -175,6 +233,14 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Output: compiled client_pack → Qdrant sync + Base‑80 EVAL генерация.
 
 **Runtime использует только compiled client_pack**; domain taxonomy не даёт право на ответ, если факта нет.
+
+### Data Contract (client/branch/policy, RU/KZ)
+- `client_pack`: услуги, цены, длительности, бренд‑тон, языковые варианты.
+- `branch_pack`: адрес, часы, парковка, branch‑специфика, branch‑цены/правила.
+- `policy_pack`: оплаты, скидки, переносы, жалобы, медицинские ограничения.
+- Фактовые поля обязаны иметь RU/KZ версии; отсутствие перевода → уточнение/эскалация.
+- Валидация по схеме (JSON Schema/Pydantic); pack без обязательных полей не допускается.
+- `data_version` и `compiled_at` обязательны для trace/meta.
 
 ### Context carryover (класс‑уровень)
 - После info‑bundle хранить класс и ключевые факты в контексте, чтобы перестановка вопросов не сбрасывала ветку.
@@ -189,6 +255,8 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - `last_question_type` — последний тип вопроса (hours/pricing/duration/booking/consult/info_bundle/other).
 - `pending_slots` — какие слоты ещё нужны (service/datetime/branch/etc).
 - `active_goal` — текущая цель (info_bundle/consult/booking/other).
+- `summary` — 3–5 подтверждённых фактов + текущая цель.
+- `language` — язык клиента (RU/KZ) для устойчивого тона.
 - `goal_stack` — стек целей (до 3), чтобы возвращать цель после перебивок.
 - `constraints` — активные ограничения (branch_id, service_query, policy locks и т.п.).
 - `unanswered_questions` — список вопросов, на которые ещё не ответили.
@@ -202,12 +270,28 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 **Reset rules:**
 - gap > 24h между сообщениями → полный reset памяти.
 - явный текст пользователя “новый запрос” → reset.
+- при re‑entry после TTL → диалог считается NEW; старые слоты требуют подтверждения.
 - pending/manager_active → сохранить `pending_resume` (snapshot контекста) и восстановить на `pending_ack`.
 
 ### Pending Resume (context snapshot)
 - При уходе в `pending` сохраняем snapshot (`expected_reply_type`, `intent_queue`, `booking`, `session_memory`).
 - На `pending_ack` восстанавливаем snapshot и продолжаем с `pre_pending_goal`.
 - На `pending_close`/auto‑close — snapshot удаляется.
+
+### Долгий горизонт (дни/годы)
+- Диалог хранится как события + краткая сводка; LLM не “помнит” сам по себе.
+- Любые старые факты требуют подтверждения, а не повторения “по памяти”.
+- Re‑entry после паузы = новая сессия с мягкой привязкой к summary.
+- **Факт реализации:** summary хранится в `conversation.context.session_memory.summary`.
+- **GAP:** сегменты/архив диалогов и явная политика подтверждения устаревших фактов.
+
+### Dialogue Lifecycle (state machine)
+- **Session Start/Resume:** определяем NEW или продолжение по TTL; при re‑entry используем summary.
+- **NEW → ACTIVE:** первое сообщение или re‑entry после TTL.
+- **ACTIVE → PENDING:** риск/LAW, нет фактов после 1–2 уточнений, запрос человека.
+- **PENDING → MANAGER_ACTIVE:** менеджер взял заявку (TAKE).
+- **MANAGER_ACTIVE → RESOLVED:** менеджер завершил (RESOLVE).
+- **RESOLVED → NEW:** новая тема или истёк TTL.
 
 ### Base‑80 батарея (acceptance)
 - 80% входящих классов (по объёму) покрыты перефраз‑battery и 5–6‑ходовыми комбинациями.
@@ -224,6 +308,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Hard‑LAW всегда эскалирует (оплата: подтверждение/проверка/возвраты, медицинка, жалобы, переносы).
 - Policy‑gates (скидки/оплата info) исполняются детерминированно по `client_pack.discounts` и `client_pack.payment`.
 - Если правило отсутствует/не совпало — эскалация (без попытки торга).
+- Policy‑gates — rules‑as‑data; семантика не может их обойти.
 
 ### Booking mode (с/без CRM)
 - `booking_mode`: `collect_preferences` (без провайдера) или `confirm_slots` (live‑провайдер).
@@ -234,6 +319,12 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Цель: отсечь спам/машинную скорость и токсичные сообщения до LLM.
 - Каналы: для WhatsApp нет IP, поэтому ключ — `remote_jid`.
 - Реализация: burst/drop (повторы/короткие bursts) + too‑long → silent drop; toxic/nonsense → эскалация.
+
+### Economics & Budget Control (LLM)
+- Лимит вызовов на диалог и бюджет на тенанта (день/месяц).
+- Деградация при бюджете: меньше LLM‑вызовов → детерминированные ответы → эскалация.
+- Кэширование повторов и summary, чтобы снизить стоимость.
+- Решения о деградации пишутся в trace/meta.
 
 ### Pricing media (P1, план)
 - `client_pack.pricing_media.mode`: `text_only` | `image_only` | `text_plus_image`.
@@ -271,8 +362,10 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - В `bot_active` медиа не создаёт handover автоматически: если есть текст/транскрипт, обрабатываем как обычное сообщение; если нет текста — просим описание. Референсы/«как на фото» → эскалация.
 
 ### Эскалация
+- Клиент получает подтверждение, SLA и статус заявки.
+- Карточка менеджера: **сейчас** имя/телефон/причина/последнее сообщение; **цель** — summary + next step (см. `SPECS/ESCALATION.md`).
 ```
-Low confidence (RAG score < MID_CONFIDENCE_THRESHOLD, сейчас 0.5) ИЛИ intent=HUMAN_REQUEST/FRUSTRATION
+Risk Gate / нет факта после 1–2 уточнений / human_request / low‑confidence
     ↓
 state_service.escalate_to_pending() + escalation_service.send_telegram_notification()
     ↓
@@ -280,7 +373,7 @@ state_service.escalate_to_pending() + escalation_service.send_telegram_notificat
     ↓
 Topic в Telegram: если у клиента нет topic_id — создать, иначе использовать существующий
     ↓
-Кнопки [Беру] [Решено]
+Кнопки [Беру] [Вернуть боту] [Не могу] → при TAKE кнопки меняются на [Решено]
 ```
 
 ### Pending‑SLA (ожидание менеджера)
@@ -299,15 +392,11 @@ POST /telegram-webhook
     ↓
 manager_message_service.process_manager_message()
     ↓
-resolve user/topic → active handover (pending/active)
+resolve user/topic → активный handover (pending/active)
     ↓
 chatflow_service → WhatsApp клиент
     ↓
-resolve agent_identity → agent.role
-    ↓
-learning: create learned_responses(status=pending)
-    ↓
-if role=owner → auto-approve → add_to_knowledge()
+если role=owner → auto‑add в knowledge (через learning_service)
 ```
 
 ### Определение филиала (branch routing)
@@ -332,7 +421,7 @@ if role=owner → auto-approve → add_to_knowledge()
 ```sql
 id                  UUID PRIMARY KEY
 client_id           UUID
-branch_id           UUID  -- TODO: добавить для маршрутизации на филиал
+branch_id           UUID  -- NULL если филиалы не используются; обязателен при branch routing
 user_id             UUID REFERENCES users
 channel             TEXT  -- whatsapp, telegram, instagram
 state               TEXT  -- bot_active, pending, manager_active
@@ -538,7 +627,7 @@ curl "https://api.telegram.org/bot{TOKEN}/getWebhookInfo"
 **Входящий webhook payload:**
 ```json
 {
-  "client_slug": "demo_salon",
+  "client_slug": "client_slug",
   "body": {
     "messageType": "text",
     "message": "текст сообщения",
@@ -571,7 +660,9 @@ GET https://app.chatflow.kz/api/v1/send-text
 | Параметр | Значение | Файл |
 |----------|----------|------|
 | Qdrant score_threshold | 0.5 | knowledge_service.py |
-| KNOWLEDGE_CONFIDENCE_THRESHOLD | 0.7 | ai_service.py |
+| KNOWLEDGE_CONFIDENCE_THRESHOLD | 0.5 | ai_service.py |
+
+Источник истины по порогам — код/ENV (ai_service.py); документы должны совпадать.
 
 ### Intents
 | Всегда эскалируются | `HUMAN_REQUEST`, `FRUSTRATION` |
@@ -588,21 +679,24 @@ GET https://app.chatflow.kz/api/v1/send-text
 
 ## 11. Learning (Active Learning)
 
-**Триггер:** В `manager_message_service.py` после ответа owner.
+**Канон:** обучение идёт через данные, а не через код/LLM: backlog → review → pack update → compile → sync.
 
-**Что сохраняется в Qdrant:**
-```python
-content = f"Вопрос: {handover.user_message}\nОтвет: {handover.manager_response}"
-metadata = {
-    "client_slug": client_slug,
-    "source": "owner",
-    "handover_id": str(handover.id),
-    "question": handover.user_message,
-    "answer": handover.manager_response
-}
-```
+**Триггеры:**
+- ответы менеджера,
+- low‑confidence/unknown,
+- повторяющиеся запросы из knowledge_backlog.
 
-**Qdrant коллекция:** из env `QDRANT_COLLECTION`, размерность 1024
+**Pipeline:**
+1) кандидат в backlog (question/answer, context, tenant/branch),
+2) валидация человеком (approve/reject),
+3) обновление client/branch/policy pack,
+4) компиляция пакета и синк в Qdrant,
+5) мониторинг эффекта.
+
+**Текущая реализация (для факта):**
+- owner‑ответы пишутся в Qdrant как learned_responses после ответа.
+- это допускается только как отражение утверждённого пакета и требует переноса в data pack.
+- Qdrant коллекция: env `QDRANT_COLLECTION`, размерность 1024.
 
 ---
 
@@ -619,6 +713,15 @@ metadata = {
 - В decision_trace/meta всегда пишем: `router_llm_ms`, `router_error`, `router_retry`, `router_fallback_reason`.
 - SLO: `router_fallback_rate < 10%`, `timeout_rate < 2%`.
 - Нужен минимальный trace‑viewer: фильтры по router_error/fallback/LAW/clarify, топ‑кейсы из knowledge_backlog.
+
+## 12.2 Required Metrics (операционные)
+- время до ответа (p50/p90),
+- доля эскалаций,
+- доля уточнений,
+- доля непонятых запросов,
+- стоимость LLM на диалог,
+- доля диалогов без менеджера,
+- доля попаданий в policy‑gates.
 
 ---
 

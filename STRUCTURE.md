@@ -103,6 +103,7 @@
 | `IMPERIUM_CONTEXT.yaml` | Единый контекст проекта (факты + evidence) |
 | `IMPERIUM_DECISIONS.yaml` | CEO-level решения (policy) |
 | `IMPERIUM_GAPS.yaml` | Критические пробелы и MVP фиксы |
+| `NORTHSTAR.md` | Северная звезда: источники проблем, целевая модель, процессы |
 | `SESSION_START_PROMPT.txt` | Стартовый промпт для новых сессий |
 | `TECH_STATUS.md` | Тех‑статус (OK/PARTIAL/BROKEN + evidence) |
 | `SELLING_TRUTHS.md` | Честные продающие утверждения (claim/proof/boundary) |
