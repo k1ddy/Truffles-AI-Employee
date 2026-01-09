@@ -155,14 +155,36 @@ def _format_discounts_policy_reply(*, policy_type: str | None) -> str | None:
         if name and percent:
             parts.append(f"{name}: {percent}%")
     if parts:
-        stacking = discounts.get("stacking") or discounts.get("stacking_notes")
+        stacking = discounts.get("stacking")
+        notes = discounts.get("stacking_notes")
         stacking_text = ""
+        combined_text = ""
         if isinstance(stacking, str) and stacking.strip():
-            stacking_text = f" {stacking}."
+            combined_text = stacking.strip()
+        if isinstance(notes, str) and notes.strip():
+            notes_text = notes.strip()
+            if combined_text:
+                if notes_text not in combined_text:
+                    joiner = " " if combined_text.endswith((".", "!", "?")) else ". "
+                    combined_text = f"{combined_text}{joiner}{notes_text}"
+            else:
+                combined_text = notes_text
+        if combined_text:
+            if not combined_text.endswith((".", "!", "?")):
+                combined_text = f"{combined_text}."
+            stacking_text = f" {combined_text}"
         return "Официальные акции: " + "; ".join(parts) + "." + stacking_text
-    stacking = discounts.get("stacking") or discounts.get("stacking_notes")
-    if isinstance(stacking, str) and stacking.strip():
-        return stacking.strip()
+    stacking = discounts.get("stacking")
+    notes = discounts.get("stacking_notes")
+    stacking_text = str(stacking).strip() if isinstance(stacking, str) else ""
+    notes_text = str(notes).strip() if isinstance(notes, str) else ""
+    if stacking_text and notes_text and notes_text not in stacking_text:
+        joiner = " " if stacking_text.endswith((".", "!", "?")) else ". "
+        return f"{stacking_text}{joiner}{notes_text}"
+    if stacking_text:
+        return stacking_text
+    if notes_text:
+        return notes_text
     return None
 
 
