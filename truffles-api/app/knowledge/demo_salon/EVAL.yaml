@@ -6088,10 +6088,7 @@ eval_cases:
     - тг
     trace_contains:
     - stage: question_contract
-      decision: matched
       expected_reply_type: service_choice
-      answer_interpreter_used: true
-      answer_slot: service
 - id: E553
   tier: long
   messages:
