@@ -98,9 +98,27 @@ def _detect_info_class_intents(
             "подожд",
             "пораньше",
             "раньше",
-            "подруг",
         ]
     )
+    if "подруг" in normalized:
+        guest_context = any(
+            token in normalized
+            for token in [
+                "можно",
+                "прийти",
+                "приду",
+                "привед",
+                "посид",
+                "подожд",
+                "ожидан",
+                "хочу",
+                "хотел",
+            ]
+        )
+        guest_context = guest_context or bool(
+            re.search(r"\bс\s+подруг|\bсо\s+подруг", normalized)
+        )
+        guest_signal = guest_signal or guest_context
     location_signal = parking_signal or guest_signal or any(
         token in normalized
         for token in ["адрес", "где вы", "где находитесь", "куда ехать", "локац", "как доехать"]
@@ -190,9 +208,27 @@ def _build_info_intent_reply(
                 "раньше",
                 "подожд",
                 "заранее",
-                "подруг",
             ]
         )
+        if "подруг" in normalized:
+            guest_context = any(
+                token in normalized
+                for token in [
+                    "можно",
+                    "прийти",
+                    "приду",
+                    "привед",
+                    "посид",
+                    "подожд",
+                    "ожидан",
+                    "хочу",
+                    "хотел",
+                ]
+            )
+            guest_context = guest_context or bool(
+                re.search(r"\bс\s+подруг|\bсо\s+подруг", normalized)
+            )
+            guest_signal = guest_signal or guest_context
     location_signal = False
     if normalized:
         location_signal = any(token in normalized for token in ["адрес", "где вы", "где наход", "где вы находитесь"])
