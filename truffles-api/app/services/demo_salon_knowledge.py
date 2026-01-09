@@ -2073,9 +2073,8 @@ def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | No
         "штраф",
         "прав потреб",
     ]
-    if re.search(r"\bиск(а|у|е|ом|и)?\b|\bисков\w*\b", normalized) or _contains_any(
-        normalized,
-        legal_keywords,
+    if re.search(r"\bиск(а|у|е|ом|и)?\b|\bисков\w*\b", normalized) or any(
+        _contains_keyword(keyword) for keyword in legal_keywords
     ):
         return "policy_legal"
 
