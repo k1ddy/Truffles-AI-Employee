@@ -742,6 +742,23 @@ COMPLAINT_CONSULT_OVERRIDE_KEYWORDS = [
     "сомнева",
 ]
 
+PENDING_RESCHEDULE_KEYWORDS = [
+    "перенес",
+    "перенос",
+    "перезапис",
+    "перепис",
+    "сдвин",
+    "передвин",
+    "перемест",
+    "изменить запись",
+    "поменять время",
+    "поменять дату",
+    "изменить дату",
+    "на другое время",
+    "на другой день",
+    "на другую дату",
+]
+
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
 MSG_BOOKING_ASK_NAME = "Как вас зовут?"
@@ -3316,6 +3333,10 @@ async def _handle_webhook_payload(
         trigger_value = pending_handover.trigger_value if pending_handover else None
         if isinstance(trigger_value, str) and trigger_value.strip().casefold() == "reschedule":
             bot_response = MSG_PENDING_WAIT_RESCHEDULE
+        else:
+            normalized_message = _normalize_text(message_text)
+            if normalized_message and _contains_any(normalized_message, PENDING_RESCHEDULE_KEYWORDS):
+                bot_response = MSG_PENDING_WAIT_RESCHEDULE
         trace_payload = {
             "stage": "routing",
             "decision": "pending_wait",
