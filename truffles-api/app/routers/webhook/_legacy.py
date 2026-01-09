@@ -1629,15 +1629,31 @@ def get_mute_settings(db: Session, client_id) -> tuple[int, int]:
 
 def get_active_handover(db: Session, conversation_id) -> Handover | None:
     """Get latest pending/active handover for conversation."""
-    return (
-        db.query(Handover)
-        .filter(
-            Handover.conversation_id == conversation_id,
-            Handover.status.in_(["pending", "active"]),
-        )
-        .order_by(Handover.created_at.desc())
-        .first()
+    query = db.query(Handover).filter(
+        Handover.conversation_id == conversation_id,
+        Handover.status.in_(["pending", "active"]),
     )
+    try:
+        handovers = query.order_by(Handover.created_at.desc()).all()
+    except Exception:
+        handovers = None
+    if isinstance(handovers, list) and handovers:
+        latest = None
+        latest_key = None
+        for handover in handovers:
+            created_at = getattr(handover, "created_at", None)
+            if isinstance(created_at, datetime):
+                try:
+                    key = created_at.timestamp()
+                except (OSError, ValueError):
+                    key = 0.0
+            else:
+                key = 0.0
+            if latest is None or key > latest_key:
+                latest = handover
+                latest_key = key
+        return latest or handovers[-1]
+    return query.order_by(Handover.created_at.desc()).first()
 
 
 def _reuse_active_handover(
