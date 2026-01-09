@@ -92,7 +92,6 @@ def _detect_info_class_intents(
             "гост",
             "ребен",
             "ребён",
-            "дет",
             "коляс",
             "ожидан",
             "подожд",
@@ -100,6 +99,8 @@ def _detect_info_class_intents(
             "раньше",
         ]
     )
+    if _has_token_prefix(tokens, "дет"):
+        guest_signal = True
     if "подруг" in normalized:
         guest_context = any(
             token in normalized
@@ -195,13 +196,13 @@ def _build_info_intent_reply(
     parking_signal = "парков" in normalized if normalized else False
     guest_signal = False
     if normalized:
+        tokens = _tokenize_for_matching(normalized)
         guest_signal = any(
             token in normalized
             for token in [
                 "гост",
                 "ребен",
                 "ребён",
-                "дет",
                 "коляс",
                 "ожидан",
                 "пораньше",
@@ -210,6 +211,8 @@ def _build_info_intent_reply(
                 "заранее",
             ]
         )
+        if _has_token_prefix(tokens, "дет"):
+            guest_signal = True
         if "подруг" in normalized:
             guest_context = any(
                 token in normalized

@@ -723,7 +723,6 @@ def _has_guest_waiting_signal(normalized: str) -> bool:
             "гост",
             "ребен",
             "ребён",
-            "дет",
             "коляс",
             "ожидан",
             "пораньше",
@@ -733,6 +732,9 @@ def _has_guest_waiting_signal(normalized: str) -> bool:
             "сопровожд",
         ],
     ):
+        return True
+    tokens = _tokenize(normalized)
+    if any(token.startswith("дет") for token in tokens):
         return True
     return _contains_any_words(normalized, ["муж", "супруг", "подруг", "сопровожд"])
 
