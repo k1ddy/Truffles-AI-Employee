@@ -1662,7 +1662,20 @@ def _format_promotions(truth: dict, intent: str | None = None) -> str:
             parts.append(f"{name}: {percent}%")
     if parts:
         stacking = promotions.get("stacking")
-        stacking_text = f" {stacking}." if stacking else ""
+        notes = promotions.get("stacking_notes")
+        stacking_text = ""
+        stacking_parts: list[str] = []
+        for item in (stacking, notes):
+            text = str(item).strip() if item else ""
+            if text and text not in stacking_parts:
+                stacking_parts.append(text)
+        if stacking_parts:
+            first = stacking_parts[0]
+            if not first.endswith((".", "!", "?")):
+                first = f"{first}."
+            stacking_text = " " + first
+            if len(stacking_parts) > 1:
+                stacking_text += " " + " ".join(stacking_parts[1:])
         return "Официальные акции: " + "; ".join(parts) + "." + stacking_text
     return "Скидки действуют только по официальным акциям."
 
