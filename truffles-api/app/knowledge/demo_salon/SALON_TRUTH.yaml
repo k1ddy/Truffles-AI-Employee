@@ -64,6 +64,7 @@ services_catalog: &services_catalog
         - маникюр с покрытием гель-лак
         - маникюр + гель-лак
         - маникюр + гель лак
+        - ногти
       quick_price_key: manicure
       duration_text: "Обычно 45–90 минут, зависит от вида и покрытия."
     - name: Дизайн ногтей

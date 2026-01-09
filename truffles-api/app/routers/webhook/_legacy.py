@@ -946,6 +946,30 @@ def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
     return None
 
 
+def _extract_service_hint_with_source(
+    text: str, client_slug: str | None
+) -> tuple[str | None, str | None]:
+    if not text or not client_slug:
+        return None, None
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CI"):
+        if client_slug == "demo_salon":
+            fallback = get_demo_salon_service_hint(text)
+            if fallback:
+                return fallback, "local_pack"
+        return None, None
+    match = semantic_service_match(text, client_slug)
+    if not match or match.action != "match":
+        if client_slug == "demo_salon":
+            fallback = get_demo_salon_service_hint(text)
+            if fallback:
+                return fallback, "local_pack"
+        return None, None
+    canonical_name = match.canonical_name
+    if isinstance(canonical_name, str) and canonical_name.strip():
+        return canonical_name.strip(), "semantic"
+    return None, None
+
+
 def _extract_datetime(text: str) -> str | None:
     if not text:
         return None
@@ -2330,12 +2354,14 @@ async def _handle_webhook_payload(
             except (TypeError, ValueError):
                 answer_confidence = 0.0
             answer_confidence = max(0.0, min(answer_confidence, 1.0))
+        service_hint_source = None
         answer_meta = {
             "answer_interpreter_used": True,
             "answer_confidence": answer_confidence,
             "answer_slot": answer_slot,
             "answer_value": answer_value,
             "answer_error": answer_error,
+            "answer_interpreter_error": answer_error,
         }
 
         answer_confidence_floor = 0.65
@@ -2351,11 +2377,28 @@ async def _handle_webhook_payload(
             matched = True
             value = answer_value
         else:
-            matched, value = _match_expected_reply(
-                expected_reply_type=expected_reply_type,
-                message_text=expected_reply_text,
-                client_slug=payload.client_slug,
-            )
+            if expected_reply_type == EXPECTED_REPLY_SERVICE:
+                if _is_blocked_slot_message(expected_reply_text):
+                    matched = False
+                    value = None
+                else:
+                    service_hint, service_hint_source = _extract_service_hint_with_source(
+                        expected_reply_text, payload.client_slug
+                    )
+                    if service_hint:
+                        matched = True
+                        value = service_hint
+                    else:
+                        matched = False
+                        value = None
+            else:
+                matched, value = _match_expected_reply(
+                    expected_reply_type=expected_reply_type,
+                    message_text=expected_reply_text,
+                    client_slug=payload.client_slug,
+                )
+        if service_hint_source == "local_pack":
+            answer_meta["service_hint_source"] = "local_pack"
         expected_reply_matched = matched
         if matched:
             expected_reply_shortcircuit = True

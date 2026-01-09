@@ -13,6 +13,7 @@ from app.logging_config import get_logger
 from app.services.ai_service import (
     FAST_MODEL,
     INTENT_TIMEOUT_SECONDS,
+    OPENAI_API_KEY,
     get_llm_provider,
     normalize_for_matching,
 )
@@ -807,6 +808,9 @@ def interpret_expected_reply(
     prompt = _load_controller_prompt()
     if not prompt:
         result["error"] = "prompt_missing"
+        return result
+    if not OPENAI_API_KEY:
+        result["error"] = "llm_disabled"
         return result
 
     carryover_input = _build_controller_carryover(carryover)

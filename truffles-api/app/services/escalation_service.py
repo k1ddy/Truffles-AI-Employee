@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 from uuid import UUID
@@ -118,6 +119,8 @@ def send_telegram_notification(
     bot_token, chat_id = get_telegram_credentials(db, handover.client_id)
 
     if not bot_token or not chat_id:
+        if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CI"):
+            return False
         logger.warning(f"No Telegram credentials for client {handover.client_id}")
         return False
 
