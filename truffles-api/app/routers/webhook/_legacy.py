@@ -886,16 +886,35 @@ DATE_KEYWORDS = [
     "пятниц",
     "суббот",
     "воскрес",
-    "утром",
-    "днем",
-    "днём",
-    "вечером",
+    "бүгін",
+    "ертең",
+    "арғы күн",
+    "дүйсенбі",
+    "сейсенбі",
+    "сәрсенбі",
+    "бейсенбі",
+    "жұма",
+    "сенбі",
+    "жексенбі",
 ]
 
 TIME_PATTERN = re.compile(r"\b\d{1,2}[:.]\d{2}\b")
 TIME_HOUR_PATTERN = re.compile(r"\b(?:в|к)\s*(?:[01]?\d|2[0-3])\b", re.IGNORECASE)
-DATE_PATTERN = re.compile(
-    r"\b(?:сегодня|завтра|послезавтра|понедель\w*|вторник\w*|сред\w*|четверг\w*|пятниц\w*|суббот\w*|воскрес\w*|утром|днем|днём|вечером)\b",
+RELATIVE_DATE_PATTERN = re.compile(
+    r"\b(?:сегодня|завтра|послезавтра|бүгін|ертең|арғы\s*күн(?:і)?)\b",
+    re.IGNORECASE,
+)
+WEEKDAY_PATTERN = re.compile(
+    r"\b(?:понедель\w*|вторник\w*|сред\w*|четверг\w*|пятниц\w*|суббот\w*|воскрес\w*|"
+    r"дүйсенбі|сейсенбі|сәрсенбі|бейсенбі|жұма|сенбі|жексенбі)\b",
+    re.IGNORECASE,
+)
+TIME_OF_DAY_PATTERN = re.compile(
+    r"\b(?:утром|днем|днём|вечером|ночью|таңертең|түсте|кешке|кешкісін)\b",
+    re.IGNORECASE,
+)
+LUNCH_TIME_PATTERN = re.compile(
+    r"\b(?:после|до)\s+обед\w*\b|\bтүстен\s+кейін\b|\bтүске\s+дейін\b",
     re.IGNORECASE,
 )
 DATE_NUMERIC_PATTERN = re.compile(r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b")
@@ -1006,9 +1025,18 @@ def _extract_datetime(text: str) -> str | None:
     month_date_match = DATE_MONTH_PATTERN.search(text)
     if month_date_match:
         return month_date_match.group(0)
-    date_match = DATE_PATTERN.search(text)
+    date_match = RELATIVE_DATE_PATTERN.search(text)
     if date_match:
         return date_match.group(0)
+    weekday_match = WEEKDAY_PATTERN.search(text)
+    if weekday_match:
+        return weekday_match.group(0)
+    lunch_match = LUNCH_TIME_PATTERN.search(text)
+    if lunch_match:
+        return lunch_match.group(0)
+    time_of_day_match = TIME_OF_DAY_PATTERN.search(text)
+    if time_of_day_match:
+        return time_of_day_match.group(0)
     return None
 
 
@@ -1166,7 +1194,13 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
         return False
     if TIME_PATTERN.search(message_text):
         return True
-    return bool(DATE_PATTERN.search(normalized))
+    if DATE_NUMERIC_PATTERN.search(normalized) or DATE_MONTH_PATTERN.search(normalized):
+        return True
+    if RELATIVE_DATE_PATTERN.search(normalized) or WEEKDAY_PATTERN.search(normalized):
+        return True
+    if LUNCH_TIME_PATTERN.search(normalized) or TIME_OF_DAY_PATTERN.search(normalized):
+        return True
+    return False
 
 
 def _looks_like_hours_followup(message_text: str | None) -> bool:
