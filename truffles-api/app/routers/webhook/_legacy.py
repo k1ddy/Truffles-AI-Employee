@@ -771,6 +771,7 @@ SERVICE_HINT_AT_KEY = "last_service_hint_at"
 REENGAGE_CONFIRM_KEY = "reengage_confirmation"
 ASR_CONFIRM_KEY = "asr_confirm_pending"
 DECISION_TRACE_KEY = "decision_trace"
+DECISION_TRACE_MAX = 20
 CONTEXT_MANAGER_KEY = "context_manager"
 INTENT_QUEUE_KEY = "intent_queue"
 EXPECTED_REPLY_TYPE_KEY = "expected_reply_type"

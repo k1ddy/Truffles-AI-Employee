@@ -468,7 +468,7 @@ def _build_service_carryover_patch() -> tuple[list[patch], list[dict]]:
                     "recorded_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
-            context[webhook_router.DECISION_TRACE_KEY] = trace_list[-12:]
+            context[webhook_router.DECISION_TRACE_KEY] = trace_list[-webhook_router.DECISION_TRACE_MAX:]
             webhook_router._set_conversation_context(conversation, context)
         return result
 

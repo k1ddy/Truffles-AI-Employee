@@ -57,8 +57,9 @@ def _record_decision_trace(conversation: Conversation, trace: dict[str, Any]) ->
     else:
         trace_list = []
     trace_list.append(payload)
-    if len(trace_list) > 12:
-        trace_list = trace_list[-12:]
+    max_items = getattr(legacy, "DECISION_TRACE_MAX", 12)
+    if len(trace_list) > max_items:
+        trace_list = trace_list[-max_items:]
     context[DECISION_TRACE_KEY] = trace_list
     legacy._set_conversation_context(conversation, context)
 
