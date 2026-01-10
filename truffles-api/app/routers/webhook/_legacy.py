@@ -793,9 +793,9 @@ ROUTING_MATRIX = {
     },
     ConversationState.PENDING.value: {
         "allow_booking_flow": False,
-        "allow_truth_gate_reply": False,
+        "allow_truth_gate_reply": True,
         "allow_handover_create": False,
-        "allow_bot_reply": False,
+        "allow_bot_reply": True,
     },
     ConversationState.MANAGER_ACTIVE.value: {
         "allow_booking_flow": False,
@@ -3146,12 +3146,12 @@ async def _handle_webhook_payload(
             )
 
     if conversation.state == ConversationState.PENDING.value:
-        router_pending_meta = _set_router_observability(
-            saved_message,
-            eligible=False,
-            reason="pending",
-        )
         if is_opt_out_message(message_text):
+            router_pending_meta = _set_router_observability(
+                saved_message,
+                eligible=False,
+                reason="pending",
+            )
             handover = get_active_handover(db, conversation.id)
             if handover:
                 manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
@@ -3181,6 +3181,11 @@ async def _handle_webhook_payload(
             )
 
         if _is_pending_close(message_text):
+            router_pending_meta = _set_router_observability(
+                saved_message,
+                eligible=False,
+                reason="pending",
+            )
             handover = get_active_handover(db, conversation.id)
             if handover:
                 manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
@@ -3209,6 +3214,11 @@ async def _handle_webhook_payload(
             )
 
         if _is_pending_ack(message_text):
+            router_pending_meta = _set_router_observability(
+                saved_message,
+                eligible=False,
+                reason="pending",
+            )
             handover = get_active_handover(db, conversation.id)
             if handover:
                 manager_resolve(
@@ -3263,6 +3273,11 @@ async def _handle_webhook_payload(
             )
 
         if is_handover_status_question(message_text):
+            router_pending_meta = _set_router_observability(
+                saved_message,
+                eligible=False,
+                reason="pending",
+            )
             bot_response = MSG_PENDING_STATUS
             trace_payload = {
                 "stage": "pending_status",
@@ -3299,6 +3314,11 @@ async def _handle_webhook_payload(
             and now - escalated_at >= timedelta(minutes=PENDING_SLA_PING_MINUTES)
         )
         if ping_due:
+            router_pending_meta = _set_router_observability(
+                saved_message,
+                eligible=False,
+                reason="pending",
+            )
             pending_sla[PENDING_SLA_PING_SENT_KEY] = now.isoformat()
             context = _set_pending_sla(context, pending_sla)
             _set_conversation_context(conversation, context)
@@ -3327,39 +3347,6 @@ async def _handle_webhook_payload(
                 conversation_id=conversation.id,
                 bot_response=bot_response,
             )
-
-        bot_response = MSG_PENDING_WAIT
-        pending_handover = get_active_handover(db, conversation.id)
-        trigger_value = pending_handover.trigger_value if pending_handover else None
-        if isinstance(trigger_value, str) and trigger_value.strip().casefold() == "reschedule":
-            bot_response = MSG_PENDING_WAIT_RESCHEDULE
-        else:
-            normalized_message = _normalize_text(message_text)
-            if normalized_message and _contains_any(normalized_message, PENDING_RESCHEDULE_KEYWORDS):
-                bot_response = MSG_PENDING_WAIT_RESCHEDULE
-        trace_payload = {
-            "stage": "routing",
-            "decision": "pending_wait",
-            "state": conversation.state,
-        }
-        trace_payload.update(router_pending_meta)
-        _record_decision_trace(conversation, trace_payload)
-        _record_message_decision_meta(
-            saved_message,
-            action="pending_wait",
-            intent=None,
-            source="pending",
-            fast_intent=False,
-        )
-        bot_response, sent = _send_and_save(bot_response)
-        result_message = "Pending wait response sent" if sent else "Pending wait response failed"
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message=result_message,
-            conversation_id=conversation.id,
-            bot_response=bot_response,
-        )
 
     if has_media:
         if not media_info:
