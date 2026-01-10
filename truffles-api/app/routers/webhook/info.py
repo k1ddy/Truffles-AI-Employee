@@ -251,13 +251,15 @@ def _build_info_intent_reply(
             include_guest=guest_signal,
         )
         return reply, meta or None
-    if (
-        intent in {"pricing", "duration"}
-        and not service_query
-        and message_text
-        and client_slug == "demo_salon"
-    ):
-        service_query = get_demo_salon_service_hint(message_text)
+    clarify_meta: dict[str, Any] = {}
+    if intent in {"pricing", "duration"}:
+        if not service_query and message_text and client_slug == "demo_salon":
+            service_query = get_demo_salon_service_hint(message_text)
+        if not service_query:
+            clarify_meta = {
+                "expected_reply_type": legacy.EXPECTED_REPLY_SERVICE,
+                "clarify_reason": "duration_or_price_clarify",
+            }
     if intent == "pricing":
         question = f"Сколько стоит {service_query}?" if service_query else "Сколько стоит?"
     elif intent == "duration":
@@ -276,6 +278,8 @@ def _build_info_intent_reply(
         meta = decision.meta if isinstance(decision.meta, dict) else {}
         if info_meta:
             meta = {**info_meta, **meta}
+        if clarify_meta:
+            meta = {**meta, **clarify_meta}
         reply_text = decision.response
         if info_prefix:
             reply_text = f"{info_prefix} {reply_text}".strip()
@@ -283,8 +287,12 @@ def _build_info_intent_reply(
     fallback = format_reply_from_truth("duration_or_price_clarify")
     if info_prefix:
         fallback = f"{info_prefix} {fallback}".strip() if fallback else info_prefix
-    meta = info_meta or None
-    return fallback, meta
+    meta: dict[str, Any] = {}
+    if info_meta:
+        meta.update(info_meta)
+    if clarify_meta:
+        meta.update(clarify_meta)
+    return fallback, meta or None
 
 
 def _extract_truth_gate_info_intents(

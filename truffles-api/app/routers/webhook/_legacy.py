@@ -6569,6 +6569,30 @@ async def _handle_webhook_payload(
                     message_count=message_count,
                     reason="class_router",
                 )
+                expected_reply_type = None
+                clarify_reason = None
+                if isinstance(info_meta_combined, dict):
+                    expected_reply_type = info_meta_combined.get("expected_reply_type")
+                    clarify_reason = info_meta_combined.get("clarify_reason")
+                if expected_reply_type == EXPECTED_REPLY_SERVICE:
+                    if not isinstance(clarify_reason, str) or not clarify_reason.strip():
+                        clarify_reason = "service_clarify"
+                    _register_clarify_attempt(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        intent=current_goal or "info",
+                        now=now,
+                        reason=clarify_reason,
+                    )
+                    context = _get_conversation_context(conversation)
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=expected_reply_type,
+                        reason=clarify_reason,
+                        now=now,
+                    )
                 if consult_return_pending:
                     bot_response = _apply_consult_return(
                         conversation=conversation,
