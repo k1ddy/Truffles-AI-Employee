@@ -2200,7 +2200,10 @@ def get_demo_salon_decision(
     if policy_intent == "policy_reschedule":
         return DemoSalonDecision(
             action="escalate",
-            response="Перенос записи подтверждает администратор. Передам ваш запрос.",
+            response=(
+                "Перенос записи подтверждает администратор. "
+                "Передам ваш запрос — администратор подключится."
+            ),
             intent="reschedule",
         )
     if policy_intent == "policy_cancel":
