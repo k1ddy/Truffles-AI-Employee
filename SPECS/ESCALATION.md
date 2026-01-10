@@ -99,7 +99,7 @@
 
 **Факт реализации (опорные места):**
 - подтверждение: `MSG_ESCALATED` в `truffles-api/app/routers/webhook/_legacy.py`.
-- pending‑статусы: `MSG_PENDING_STATUS`, `MSG_PENDING_WAIT`, `MSG_PENDING_ACK`, `MSG_PENDING_SLA_PING`.
+- pending‑статусы: `MSG_PENDING_STATUS`, `MSG_PENDING_ACK`, `MSG_PENDING_SLA_PING` (MSG_PENDING_WAIT — legacy).
 - auto‑close: `MSG_PENDING_AUTO_CLOSE` в `truffles-api/app/services/reminder_service.py`.
 
 ### 4.3 Manager Card Contract
@@ -148,8 +148,8 @@
 - `escalation_service.escalate_conversation()` создаёт handover + отправляет Telegram.
 
 ### 6.2 Pending (ожидание менеджера)
-- Бот **не отвечает по сути** — только статусные сообщения.
-- Команды пользователя: `pending_ack`, `pending_close`, `status`.
+- Бот не молчит: работает обычный ответный пайплайн (policy/truth/LLM), но без booking‑flow и без новых handover.
+- Команды пользователя: `pending_ack`, `pending_close`, `status` (приоритет).
 - Snapshot контекста сохраняется и может быть восстановлен на `pending_ack`.
 
 **Факт реализации:**

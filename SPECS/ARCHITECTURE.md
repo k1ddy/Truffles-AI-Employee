@@ -135,7 +135,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 ```
 State Gate → Risk Gate → Expected Reply → Semantic → Data → Action → Response → Update
 ```
-- **State Gate:** pending/manager_active/opt‑out → статус/молчание и стоп.
+- **State Gate:** manager_active/opt‑out → статус/молчание; pending → статусные команды + обычный ответный пайплайн (без booking и новых handover).
 - **Risk Gate:** Hard‑LAW/policy/complaint/reschedule/payment → эскалация и стоп.
 - **Expected Reply:** если активен expected_reply_type, сначала интерпретируем ответ в слот.
 - **Semantic:** LLM определяет intent/goal/slots/язык/эмоцию, без фактов.
@@ -221,7 +221,7 @@ State Gate → Risk Gate → Expected Reply → Semantic → Data → Action →
 - Формула ответа: эмпатия → компетентность → факт → шаг.
 - 2–3 предложения, без воды; если нужен список — короткий и по делу.
 - Факты только из Data Contract; если факта нет → уточнение или эскалация.
-- В pending/manager_active — статус и ожидание, без обещаний решений.
+- В manager_active — статус/ожидание и тишина; в pending — статусные команды + обычный ответный пайплайн (без booking и новых handover).
 
 ### Pack Compiler и онбординг (offline‑pipeline)
 - Источники: CRM/Calendar/Excel/Sheets/сайт → единый формат.

@@ -216,7 +216,7 @@
 Вход -> State Gate -> Risk Gate -> Expected Reply -> Semantic -> Data -> Action -> Response -> Update
 ```
 
-- State Gate: если pending/manager_active/opt_out, бот не "думает".
+- State Gate: pending → статусные команды + обычный ответный пайплайн (без booking и новых handover); manager_active/opt_out → бот не "думает".
 - Risk Gate: Hard‑LAW и policy‑gates -> немедленная эскалация.
 - Expected Reply: если ждется конкретный слот, считаем ответом.
 - Semantic: определяем intent/slots/язык/эмоцию.
@@ -232,7 +232,7 @@
 ### 7.1 Состояния
 - NEW: начало или re-entry после долгой паузы.
 - ACTIVE: бот ведет диалог.
-- PENDING: передано менеджеру, бот информирует и ждет.
+- PENDING: передано менеджеру, бот информирует и может отвечать по обычному пайплайну (без booking и новых handover).
 - MANAGER_ACTIVE: менеджер общается, бот молчит.
 - RESOLVED: завершено, фиксируем результат.
 
