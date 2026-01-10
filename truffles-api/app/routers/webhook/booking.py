@@ -134,14 +134,14 @@ def _validate_name_slot(
         return None
     from . import _legacy as legacy
 
-    if legacy._extract_service_hint(message_text, client_slug) or legacy._extract_datetime(message_text):
-        return None
     name_match = legacy.NAME_PATTERN.search(message_text)
     if name_match:
         candidate = name_match.group(1)
-    elif not allow_freeform:
-        return None
     else:
+        if legacy._extract_service_hint(message_text, client_slug) or legacy._extract_datetime(message_text):
+            return None
+        if not allow_freeform:
+            return None
         candidate = message_text
     cleaned = _clean_name_candidate(candidate)
     if not cleaned:
