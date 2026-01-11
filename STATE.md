@@ -531,6 +531,18 @@
 - CI main: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20895474177 (core/long/asr/lint/unit/secret-scan зелёные)
 - CI PR: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20895399334 (core/long/asr/lint/unit/secret-scan зелёные)
 
+### 2026-01-11 — A7 Live-budget gate (SQL fallback)
+
+**Что сделали:**
+- Временно включили `client.config.llm_budget.daily_max_calls=1` для demo_salon, отправили 2 LLM‑сообщения, зафиксировали budget_gate trace + llm_degradation_reason, восстановили config из backup.
+
+**Evidence:**
+- conv_id: `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+- trace: `conversations.context.decision_trace` содержит `stage=budget_gate` и `llm_degradation_reason=budget_exceeded` (rag_rewrite/response).
+- meta: `messages.metadata.decision_meta` для `live-budget-1768137927-2` и `live-budget-1768138285-3` содержит `llm_degradation_reason=budget_exceeded` и `router_error=budget_exceeded`.
+- /admin/version: `{"version":"main","git_commit":"9af211db046328a2f3914b2e97ce80c13573a1cb","build_time":"2026-01-11T13:25:43Z"}`
+- backup: `/tmp/demo_salon_config_backup.json`
+
 ### 2026-01-03 — Канон: class‑router + info‑bundle инварианты
 
 **Что сделали:**
