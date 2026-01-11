@@ -36,3 +36,55 @@ class WebhookResponse(BaseModel):
     message: str
     conversation_id: Optional[UUID] = None
     bot_response: Optional[str] = None
+
+
+# Decision Graph contracts
+class IntentContract(BaseModel):
+    intent: Optional[str] = None
+    slots: Optional[dict[str, Any]] = None
+    language: Optional[str] = None
+    emotion: Optional[str] = None
+    confidence: Optional[float] = None
+    risk_signals: Optional[list[str]] = None
+
+
+class ContextContract(BaseModel):
+    tenant_id: Optional[str] = None
+    branch_id: Optional[str] = None
+    state: Optional[str] = None
+    timezone: Optional[str] = None
+    mode: Optional[str] = None
+
+
+class FactContract(BaseModel):
+    facts: Optional[dict[str, Any]] = None
+    sources: Optional[list[str]] = None
+    policy_flags: Optional[list[str]] = None
+
+
+class ActionContract(BaseModel):
+    action_type: Optional[str] = None
+    required_next_slots: Optional[list[str]] = None
+    escalation_reason: Optional[str] = None
+
+
+class ResponseContract(BaseModel):
+    tone: Optional[str] = None
+    must_include: Optional[list[str]] = None
+    must_not_include: Optional[list[str]] = None
+    language: Optional[str] = None
+
+
+class MemoryContract(BaseModel):
+    mode: Optional[str] = None
+    slots: Optional[dict[str, Any]] = None
+    summary: Optional[str] = None
+    last_updated: Optional[str] = None
+    ttl: Optional[int] = None
+
+
+class TraceContract(BaseModel):
+    stage: Optional[str] = None
+    decision: Optional[str] = None
+    reason: Optional[str] = None
+    meta: Optional[dict[str, Any]] = None
