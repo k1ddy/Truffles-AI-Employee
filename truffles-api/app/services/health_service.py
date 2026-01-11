@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.logging_config import get_logger
 from app.models import Conversation, Handover, User
 from app.services.state_machine import ConversationState
+from app.services.state_service import force_state
 
 logger = get_logger("health_service")
 
@@ -45,7 +46,7 @@ def check_and_heal_conversations(db: Session) -> dict:
             continue
 
         old_state = conv.state
-        conv.state = ConversationState.BOT_ACTIVE.value
+        force_state(conv, ConversationState.BOT_ACTIVE, reason="heal_no_topic")
         conv.retry_offered_at = None
 
         open_handovers = (
@@ -92,7 +93,7 @@ def check_and_heal_conversations(db: Session) -> dict:
 
         if not active_handover:
             old_state = conv.state
-            conv.state = ConversationState.BOT_ACTIVE.value
+            force_state(conv, ConversationState.BOT_ACTIVE, reason="heal_no_handover")
             conv.retry_offered_at = None
             healed.append(
                 {
