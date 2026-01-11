@@ -81,6 +81,13 @@ class MemoryContract(BaseModel):
     summary: Optional[str] = None
     last_updated: Optional[str] = None
     ttl: Optional[int] = None
+    last_updated_at: Optional[str] = None
+    ttl_hours: Optional[int] = None
+    active_goal: Optional[str] = None
+    last_question_type: Optional[str] = None
+    goal_stack: Optional[list[str]] = None
+    pending_slots: Optional[dict[str, str]] = None
+    unanswered_questions: Optional[list[str]] = None
 
 
 class TraceContract(BaseModel):

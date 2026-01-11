@@ -72,6 +72,7 @@ from app.routers.webhook.context_manager import (
     _increment_context_message_count,
     _is_asr_confirmation_active,
     _is_handover_confirmation_active,
+    _is_re_entry_required,
     _is_reengage_confirmation_active,
     _maybe_store_class_carryover,
     _maybe_store_service_carryover,
@@ -90,6 +91,7 @@ from app.routers.webhook.context_manager import (
     _set_expected_reply_type,
     _set_handover_confirmation,
     _set_low_confidence_retry_count,
+    _set_re_entry_required,
     _set_reengage_confirmation,
     _set_service_carryover,
     _update_compact_summary,
@@ -197,6 +199,7 @@ from app.routers.webhook.session_memory import (
     _get_session_memory,
     _is_session_memory_expired,
     _is_session_reset_only_message,
+    _normalize_session_memory,
     _parse_session_memory_time,
     _record_session_memory_update,
     _reset_session_memory,
@@ -754,6 +757,7 @@ MSG_BOOKING_CTA = "Хотите записаться?"
 
 SERVICE_HINT_KEY = "last_service_hint"
 SERVICE_HINT_AT_KEY = "last_service_hint_at"
+RE_ENTRY_REQUIRED_KEY = "re_entry_required"
 REENGAGE_CONFIRM_KEY = "reengage_confirmation"
 ASR_CONFIRM_KEY = "asr_confirm_pending"
 DECISION_TRACE_KEY = "decision_trace"
@@ -2254,6 +2258,32 @@ async def _handle_webhook_payload(
     context = _get_conversation_context(conversation)
     context_manager = _get_context_manager(context)
     session_memory = _get_session_memory(context)
+    session_memory, memory_contract_error = _normalize_session_memory(session_memory)
+    if memory_contract_error:
+        memory_snapshot = _session_memory_snapshot(session_memory)
+        memory_snapshot["memory_keys"] = sorted(
+            key for key in session_memory.keys() if isinstance(key, str)
+        )
+        context = _set_session_memory(context, None)
+        _set_conversation_context(conversation, context)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "session_memory",
+                "decision": "contract_error",
+                "reason": memory_contract_error,
+                **memory_snapshot,
+            },
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {"session_memory_contract_error": memory_contract_error},
+            )
+        session_memory = {}
+    else:
+        context = _set_session_memory(context, session_memory or None)
+        _set_conversation_context(conversation, context)
     session_memory_reset_reason = None
     if session_memory and _is_session_memory_expired(session_memory, now):
         session_memory_reset_reason = "expired"
@@ -2265,12 +2295,23 @@ async def _handle_webhook_payload(
     ]:
         session_memory_reset_reason = "handover"
     if session_memory_reset_reason:
-        context, context_manager, reset_snapshot = _reset_session_memory(
+        reset_snapshot = _session_memory_snapshot(session_memory)
+        reset_snapshot["memory_keys"] = sorted(
+            key for key in session_memory.keys() if isinstance(key, str)
+        )
+        context, context_manager, _reset_snapshot = _reset_session_memory(
             context=context,
             context_manager=context_manager,
             reason=session_memory_reset_reason,
             now=now,
         )
+        re_entry_required = session_memory_reset_reason in {"expired", "handover"}
+        if re_entry_required:
+            context = _set_re_entry_required(
+                context,
+                reason=session_memory_reset_reason,
+                now=now,
+            )
         _set_conversation_context(conversation, context)
         _record_decision_trace(
             conversation,
@@ -2281,6 +2322,15 @@ async def _handle_webhook_payload(
                 **reset_snapshot,
             },
         )
+        if re_entry_required:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "re_entry",
+                    "decision": "required",
+                    "reason": session_memory_reset_reason,
+                },
+            )
         if saved_message:
             _update_message_decision_metadata(
                 saved_message, {"session_memory_reset": session_memory_reset_reason}
@@ -2385,8 +2435,14 @@ async def _handle_webhook_payload(
     expected_reply_type = _get_expected_reply_type(context)
     intent_queue = _get_intent_queue(context)
     session_memory = _get_session_memory(context)
+    re_entry_required = _is_re_entry_required(context)
     memory_expected_reply_type = None
-    if not expected_reply_type and session_memory and not _is_session_memory_expired(session_memory, now):
+    if (
+        not expected_reply_type
+        and session_memory
+        and not re_entry_required
+        and not _is_session_memory_expired(session_memory, now)
+    ):
         memory_active_goal = session_memory.get("active_goal")
         last_question_type = session_memory.get("last_question_type")
         if isinstance(last_question_type, str):
@@ -3284,6 +3340,11 @@ async def _handle_webhook_payload(
                     pending_resume=pending_resume,
                     now=now,
                 )
+                restored_context = _set_re_entry_required(
+                    restored_context,
+                    reason="pending_resume",
+                    now=now,
+                )
                 _set_conversation_context(conversation, restored_context)
                 _record_decision_trace(
                     conversation,
@@ -3291,6 +3352,14 @@ async def _handle_webhook_payload(
                         "stage": "pending_resume",
                         "decision": "restore",
                         "reason": "pending_ack",
+                    },
+                )
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "re_entry",
+                        "decision": "required",
+                        "reason": "pending_resume",
                     },
                 )
             trace_payload = {

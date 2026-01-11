@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from pydantic import ValidationError
+
 from app.models import Conversation, Message
 from app.routers.webhook.trace import _record_decision_trace, _update_message_decision_metadata
+from app.schemas.webhook import MemoryContract
 from app.services.ai_service import normalize_for_matching
 
 
@@ -16,6 +19,107 @@ def _get_session_memory(context: dict) -> dict:
     if isinstance(payload, dict):
         return dict(payload)
     return {}
+
+
+def _normalize_session_memory(memory: dict | None) -> tuple[dict, str | None]:
+    if not isinstance(memory, dict):
+        return {}, "invalid_type"
+    normalized = dict(memory)
+    errors: list[str] = []
+
+    def mark_error(reason: str) -> None:
+        if reason not in errors:
+            errors.append(reason)
+
+    def normalize_string(key: str) -> None:
+        value = normalized.get(key)
+        if value is None:
+            return
+        if not isinstance(value, str):
+            normalized.pop(key, None)
+            mark_error(f"{key}_type")
+            return
+        value = value.strip()
+        if value:
+            normalized[key] = value
+        else:
+            normalized.pop(key, None)
+
+    def normalize_int(key: str) -> None:
+        value = normalized.get(key)
+        if value is None:
+            return
+        try:
+            normalized[key] = int(value)
+        except (TypeError, ValueError):
+            normalized.pop(key, None)
+            mark_error(f"{key}_type")
+
+    def normalize_list(key: str, *, limit: int | None = None) -> None:
+        value = normalized.get(key)
+        if value is None:
+            return
+        if not isinstance(value, list):
+            normalized.pop(key, None)
+            mark_error(f"{key}_type")
+            return
+        cleaned: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            cleaned_item = item.strip()
+            if cleaned_item:
+                cleaned.append(cleaned_item)
+        if limit:
+            cleaned = cleaned[-limit:]
+        normalized[key] = cleaned
+
+    def normalize_dict(key: str, *, values_as_str: bool) -> None:
+        value = normalized.get(key)
+        if value is None:
+            return
+        if not isinstance(value, dict):
+            normalized.pop(key, None)
+            mark_error(f"{key}_type")
+            return
+        cleaned: dict[str, object] = {}
+        for raw_key, raw_value in value.items():
+            if not isinstance(raw_key, str):
+                continue
+            cleaned_key = raw_key.strip()
+            if not cleaned_key:
+                continue
+            if values_as_str:
+                if not isinstance(raw_value, str):
+                    continue
+                cleaned_value = raw_value.strip()
+                if not cleaned_value:
+                    continue
+                cleaned[cleaned_key] = cleaned_value
+            else:
+                cleaned[cleaned_key] = raw_value
+        normalized[key] = cleaned
+
+    normalize_string("mode")
+    normalize_string("summary")
+    normalize_string("last_updated")
+    normalize_string("last_updated_at")
+    normalize_string("active_goal")
+    normalize_string("last_question_type")
+    normalize_int("ttl")
+    normalize_int("ttl_hours")
+    normalize_list("goal_stack", limit=3)
+    normalize_list("unanswered_questions")
+    normalize_dict("slots", values_as_str=False)
+    normalize_dict("pending_slots", values_as_str=True)
+
+    try:
+        MemoryContract(**normalized)
+    except ValidationError as exc:
+        return normalized, str(exc)
+    if errors:
+        return normalized, ",".join(errors)
+    return normalized, None
 
 
 def _set_session_memory(context: dict, memory: dict | None) -> dict:

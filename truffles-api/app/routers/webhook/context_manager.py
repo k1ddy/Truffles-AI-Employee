@@ -46,6 +46,46 @@ def _set_expected_reply_type(context: dict, expected_reply_type: str | None) -> 
     return context
 
 
+def _get_re_entry_required(context: dict) -> dict | None:
+    from . import _legacy as legacy
+
+    payload = context.get(legacy.RE_ENTRY_REQUIRED_KEY) if isinstance(context, dict) else None
+    if isinstance(payload, dict):
+        return dict(payload)
+    return None
+
+
+def _is_re_entry_required(context: dict) -> bool:
+    payload = _get_re_entry_required(context)
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("required") is True
+
+
+def _set_re_entry_required(context: dict, *, reason: str, now: datetime) -> dict:
+    from . import _legacy as legacy
+
+    context = dict(context)
+    context[legacy.RE_ENTRY_REQUIRED_KEY] = {
+        "required": True,
+        "reason": reason,
+        "set_at": now.isoformat(),
+    }
+    return context
+
+
+def _clear_re_entry_required(context: dict, *, reason: str, now: datetime) -> dict:
+    from . import _legacy as legacy
+
+    context = dict(context)
+    context[legacy.RE_ENTRY_REQUIRED_KEY] = {
+        "required": False,
+        "reason": reason,
+        "cleared_at": now.isoformat(),
+    }
+    return context
+
+
 def _set_expected_reply_context(
     *,
     conversation: Conversation,
@@ -56,7 +96,21 @@ def _set_expected_reply_context(
     now: datetime,
 ) -> dict:
     context = _set_expected_reply_type(context, expected_reply_type)
+    re_entry_cleared = False
+    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
+        if _is_re_entry_required(context):
+            context = _clear_re_entry_required(context, reason=reason, now=now)
+            re_entry_cleared = True
     _set_conversation_context(conversation, context)
+    if re_entry_cleared:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "re_entry",
+                "decision": "cleared",
+                "reason": reason,
+            },
+        )
     _record_decision_trace(
         conversation,
         {
@@ -803,11 +857,13 @@ __all__ = [
     "_get_expected_reply_type",
     "_get_handover_confirmation",
     "_get_low_confidence_retry_count",
+    "_get_re_entry_required",
     "_get_reengage_confirmation",
     "_get_service_carryover",
     "_increment_context_message_count",
     "_is_asr_confirmation_active",
     "_is_handover_confirmation_active",
+    "_is_re_entry_required",
     "_is_reengage_confirmation_active",
     "_maybe_store_class_carryover",
     "_maybe_store_service_carryover",
@@ -822,6 +878,8 @@ __all__ = [
     "_set_consult_context",
     "_set_context_manager",
     "_set_conversation_context",
+    "_set_re_entry_required",
+    "_clear_re_entry_required",
     "_set_expected_reply_context",
     "_set_expected_reply_type",
     "_set_handover_confirmation",
