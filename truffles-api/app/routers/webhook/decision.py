@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from app.services.demo_salon_knowledge import DemoSalonDecision
 from app.services.intent_service import Intent
 
-DECISION_GRAPH_STAGES = (
+DecisionStage = str
+
+DECISION_GRAPH_STAGES: tuple[DecisionStage, ...] = (
     "state",
     "risk",
     "expected",
@@ -21,29 +24,31 @@ DECISION_GRAPH_STAGES = (
 
 
 @dataclass(frozen=True)
-class DecisionStage:
-    name: str
-
-
-@dataclass(frozen=True)
 class DecisionPlan:
     stages: tuple[DecisionStage, ...]
     state: str
     routing: dict[str, bool]
     client_slug: str | None
+    plan_id: str
 
     def to_trace(self) -> dict[str, Any]:
         return {
-            "stages": [stage.name for stage in self.stages],
             "state": self.state,
             "routing": self.routing,
             "client_slug": self.client_slug,
+            "plan_id": self.plan_id,
+            "stages": list(self.stages),
         }
 
 
 def build_decision_plan(*, state: str, routing: dict[str, bool], client_slug: str | None) -> DecisionPlan:
-    stages = tuple(DecisionStage(name=stage) for stage in DECISION_GRAPH_STAGES)
-    return DecisionPlan(stages=stages, state=state, routing=dict(routing), client_slug=client_slug)
+    return DecisionPlan(
+        stages=DECISION_GRAPH_STAGES,
+        state=state,
+        routing=dict(routing),
+        client_slug=client_slug,
+        plan_id=str(uuid4()),
+    )
 
 
 @dataclass(frozen=True)
