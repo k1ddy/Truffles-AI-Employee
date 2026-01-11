@@ -13,6 +13,8 @@ from app.logging_config import get_logger
 from app.services.ai_service import (
     FAST_MODEL,
     INTENT_TIMEOUT_SECONDS,
+    _append_llm_budget_event,
+    consume_llm_budget,
     get_llm_provider,
     normalize_for_matching,
 )
@@ -505,6 +507,9 @@ def route_dialogue_controller(
     *,
     carryover: dict | None = None,
     expected_reply_type: str | None = None,
+    client_slug: str | None = None,
+    client_config: dict | None = None,
+    timing_context: dict | None = None,
 ) -> dict:
     result: dict[str, Any] = {"ok": False, "payload": None, "error": None, "raw": None}
     carryover_input = _build_controller_carryover(carryover)
@@ -580,6 +585,21 @@ def route_dialogue_controller(
     }
     if isinstance(expected_reply_type, str) and expected_reply_type.strip():
         controller_input["expected_reply_type"] = expected_reply_type.strip()
+
+    budget_meta = consume_llm_budget(
+        client_slug=client_slug or "unknown",
+        client_config=client_config,
+        scope="router",
+    )
+    _append_llm_budget_event(timing_context, budget_meta)
+    if not budget_meta.get("allowed", True):
+        result["error"] = "budget_exceeded"
+        result["payload"] = _build_payload(
+            controller_error="budget_exceeded",
+            controller_llm_ms=0.0,
+            controller_retry_flag=False,
+        )
+        return result
 
     llm = get_llm_provider()
     messages = [

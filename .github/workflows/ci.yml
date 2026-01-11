@@ -110,6 +110,30 @@ jobs:
       - name: Tests (long)
         run: pytest -q tests/test_demo_salon_eval.py -o EVAL_TIER=long
 
+  asr-eval:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: truffles-api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: truffles-api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov ruff
+
+      - name: Tests (asr)
+        run: pytest -q tests/test_demo_salon_eval.py -o EVAL_TIER=asr
+
   secret-scan:
     runs-on: ubuntu-latest
     steps:
@@ -125,7 +149,7 @@ jobs:
 
   build-push:
     if: github.ref == 'refs/heads/main'
-    needs: [lint, unit-tests, core-eval, long-eval, secret-scan]
+    needs: [lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

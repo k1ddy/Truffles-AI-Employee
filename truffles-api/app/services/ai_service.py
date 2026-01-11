@@ -3,6 +3,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 from uuid import UUID
 
@@ -10,7 +11,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.models import Message, Prompt
+from app.models import Client, Message, Prompt
 from app.services.alert_service import alert_error
 from app.services.knowledge_service import format_knowledge_context, search_knowledge
 from app.services.llm import OpenAIProvider
@@ -220,11 +221,15 @@ LLM_CACHE_PREFIX = "truffles:llm_cache"
 LLM_CACHE_SOCKET_TIMEOUT_SECONDS = float(os.environ.get("LLM_CACHE_SOCKET_TIMEOUT_SECONDS", "0.3"))
 REDIS_URL = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
 POLICY_VERSION = os.environ.get("POLICY_VERSION", "v1")
+LLM_BUDGET_PREFIX = "truffles:llm_budget"
+LLM_BUDGET_SOCKET_TIMEOUT_SECONDS = float(os.environ.get("LLM_BUDGET_SOCKET_TIMEOUT_SECONDS", "0.3"))
 
 # Global LLM provider instance
 _llm_provider = None
 _llm_cache_client = None
 _llm_cache_url = None
+_llm_budget_client = None
+_llm_budget_url = None
 
 
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
@@ -275,6 +280,130 @@ def _get_llm_cache_client():
             socket_connect_timeout=LLM_CACHE_SOCKET_TIMEOUT_SECONDS,
         )
     return _llm_cache_client
+
+
+def _get_llm_budget_client():
+    global _llm_budget_client, _llm_budget_url
+    if redis is None:
+        return None
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    if _llm_budget_client is None or _llm_budget_url != REDIS_URL:
+        _llm_budget_url = REDIS_URL
+        _llm_budget_client = redis.Redis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_timeout=LLM_BUDGET_SOCKET_TIMEOUT_SECONDS,
+            socket_connect_timeout=LLM_BUDGET_SOCKET_TIMEOUT_SECONDS,
+        )
+    return _llm_budget_client
+
+
+def _coerce_positive_int(value: object) -> int | None:
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _get_llm_budget_config(client_config: dict | None) -> dict:
+    if not isinstance(client_config, dict):
+        return {}
+    budget = client_config.get("llm_budget")
+    return budget if isinstance(budget, dict) else {}
+
+
+def _seconds_until_utc_day_end(now: datetime) -> int:
+    next_day = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    seconds = int((next_day - now).total_seconds())
+    return max(seconds, 60)
+
+
+def _append_llm_budget_event(timing_context: dict | None, budget_meta: dict) -> None:
+    if timing_context is None or not isinstance(budget_meta, dict):
+        return
+    active = bool(budget_meta.get("active"))
+    allowed = bool(budget_meta.get("allowed", True))
+    if not active and allowed:
+        return
+    timing_context.setdefault("llm_budget_events", []).append(budget_meta)
+
+
+def _resolve_client_config(db: Session, client_id: UUID, timing_context: dict | None) -> dict | None:
+    if timing_context and isinstance(timing_context.get("client_config"), dict):
+        return timing_context.get("client_config")
+    try:
+        client = db.query(Client).filter(Client.id == client_id).first()
+    except Exception as exc:
+        logger.warning(f"LLM budget client lookup failed: {exc}")
+        return None
+    if client and isinstance(client.config, dict):
+        return client.config
+    return None
+
+
+def consume_llm_budget(
+    *,
+    client_slug: str,
+    client_config: dict | None,
+    scope: str,
+    now: datetime | None = None,
+) -> dict:
+    budget = _get_llm_budget_config(client_config)
+    daily_max_calls = _coerce_positive_int(budget.get("daily_max_calls"))
+    if daily_max_calls is None:
+        return {
+            "allowed": True,
+            "reason": "unlimited",
+            "limit": None,
+            "count": None,
+            "window": "daily",
+            "scope": scope,
+            "active": False,
+        }
+
+    cache = _get_llm_budget_client()
+    if not cache:
+        return {
+            "allowed": True,
+            "reason": "redis_unavailable",
+            "limit": daily_max_calls,
+            "count": None,
+            "window": "daily",
+            "scope": scope,
+            "active": True,
+        }
+
+    now = now or datetime.now(timezone.utc)
+    day_key = now.strftime("%Y%m%d")
+    key = f"{LLM_BUDGET_PREFIX}:{client_slug}:{day_key}"
+    try:
+        count = cache.incr(key)
+        if count == 1:
+            cache.expire(key, _seconds_until_utc_day_end(now))
+    except Exception as exc:
+        logger.warning(f"LLM budget counter failed: {exc}")
+        return {
+            "allowed": True,
+            "reason": "redis_error",
+            "limit": daily_max_calls,
+            "count": None,
+            "window": "daily",
+            "scope": scope,
+            "active": True,
+        }
+
+    allowed = count <= daily_max_calls
+    return {
+        "allowed": allowed,
+        "reason": "allow" if allowed else "budget_exceeded",
+        "limit": daily_max_calls,
+        "count": int(count),
+        "window": "daily",
+        "scope": scope,
+        "active": True,
+    }
 
 
 def _build_llm_cache_key(text: str, client_slug: str, policy_version: str) -> str:
@@ -650,12 +779,27 @@ def normalize_for_matching(text: str) -> str:
     return normalized
 
 
-def rewrite_for_service_match(text: str, client_slug: str) -> str | None:
+def rewrite_for_service_match(
+    text: str,
+    client_slug: str,
+    *,
+    client_config: dict | None = None,
+    timing_context: dict | None = None,
+) -> str | None:
     normalized = normalize_for_matching(text)
     if not normalized or len(normalized) < 3:
         return None
     if not OPENAI_API_KEY:
         logger.warning("Service rewrite skipped: OPENAI_API_KEY missing")
+        return None
+
+    budget_meta = consume_llm_budget(
+        client_slug=client_slug,
+        client_config=client_config,
+        scope="service_rewrite",
+    )
+    _append_llm_budget_event(timing_context, budget_meta)
+    if not budget_meta.get("allowed", True):
         return None
 
     system_prompt = (
@@ -742,13 +886,28 @@ def rewrite_for_service_match(text: str, client_slug: str) -> str | None:
     return query
 
 
-def rewrite_query_for_retrieval(text: str, client_slug: str | None = None) -> dict:
+def rewrite_query_for_retrieval(
+    text: str,
+    client_slug: str | None = None,
+    *,
+    client_config: dict | None = None,
+    timing_context: dict | None = None,
+) -> dict:
     normalized = normalize_for_matching(text)
     if not normalized or len(normalized) < 3:
         return {"rewrite_used": False, "rewrite_text": "", "reason": "too_short"}
     if not OPENAI_API_KEY:
         logger.warning("RAG rewrite skipped: OPENAI_API_KEY missing")
         return {"rewrite_used": False, "rewrite_text": "", "reason": "missing_api_key"}
+
+    budget_meta = consume_llm_budget(
+        client_slug=client_slug or "unknown",
+        client_config=client_config,
+        scope="rag_rewrite",
+    )
+    _append_llm_budget_event(timing_context, budget_meta)
+    if not budget_meta.get("allowed", True):
+        return {"rewrite_used": False, "rewrite_text": "", "reason": "budget_exceeded"}
 
     system_prompt = (
         "Ты переписываешь запрос клиента для поиска по базе знаний. "
@@ -1655,6 +1814,8 @@ def generate_ai_response(
                 f"Low confidence (max_score={max_score:.3f}, threshold={MID_CONFIDENCE_THRESHOLD}), whitelisted={whitelisted}"
             )
             if not whitelisted:
+                if timing_context is not None:
+                    timing_context["llm_degradation_reason"] = "llm_skip"
                 return Result.success((None, "low_confidence"))
             confidence_level = "medium"
 
@@ -1670,6 +1831,18 @@ def generate_ai_response(
                 extra={"cache": "hit"},
             )
             return Result.success((cached_response, cached_confidence or confidence_level))
+
+        budget_config = _resolve_client_config(db, client_id, timing_context)
+        budget_meta = consume_llm_budget(
+            client_slug=client_slug,
+            client_config=budget_config,
+            scope="response",
+        )
+        _append_llm_budget_event(timing_context, budget_meta)
+        if not budget_meta.get("allowed", True):
+            if timing_context is not None:
+                timing_context["llm_degradation_reason"] = "budget_exceeded"
+            return Result.success((None, "low_confidence"))
 
         model_name, model_tier = _select_generation_model(user_message, max_score)
 
@@ -1711,6 +1884,7 @@ def generate_ai_response(
         except httpx.TimeoutException as exc:
             if timing_context is not None:
                 timing_context["llm_timeout"] = True
+                timing_context["llm_degradation_reason"] = "llm_timeout"
             _log_timing(
                 "llm_ms",
                 (time.monotonic() - llm_start) * 1000,
@@ -1747,6 +1921,8 @@ def generate_ai_response(
         return Result.success((response.content, confidence_level))
 
     except Exception as e:
+        if timing_context is not None:
+            timing_context["llm_degradation_reason"] = "llm_skip"
         logger.error(f"AI generation error: {e}", exc_info=True)
         alert_error("AI generation failed", {"client_id": str(client_id), "error": str(e)})
         return Result.failure(str(e), "ai_error")
