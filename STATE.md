@@ -18,6 +18,7 @@
 - DONE: A2 Decision Graph contract schemas (PR #119 https://github.com/k1ddy/Truffles-AI-Employee/pull/119; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20890983862).
 - DONE: TraceContract validation for decision trace payloads (PR #120 https://github.com/k1ddy/Truffles-AI-Employee/pull/120; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20891043940).
 - DONE: Context/intent contract validation in trace (PR #121 https://github.com/k1ddy/Truffles-AI-Employee/pull/121; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20891209266).
+- DONE: Fact/action/response contract validation in trace (PR #122 https://github.com/k1ddy/Truffles-AI-Employee/pull/122; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20891463080).
 - NEXT: ASR/long‑chaos gate → Monitoring/observability.
 - BLOCKERS: нет.
 
