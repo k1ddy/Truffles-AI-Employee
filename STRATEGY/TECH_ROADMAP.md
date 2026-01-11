@@ -367,6 +367,7 @@
 1) Прочитать: `AGENTS.md` → `STATE.md` → `docs/NORTHSTAR.md` → `SPECS/ARCHITECTURE.md` → `SPECS/ESCALATION.md`.
 2) Открыть текущий этап A0–A7 в этом roadmap и проверить зависимости.
 3) Сформировать Session Card (Goal/Stage/Blocker/Evidence/Scope/DoD/Tests/Risks/Owner).
+4) Для передачи Hands обязателен Task Package по шаблону в `AGENTS.md` (Scope/Out of scope/Files/Steps/DoD/Tests/Evidence/Dependencies/Risks).
 4) Работать строго по Stage Card выбранного этапа (один issue).
 5) Любая правка — с фиксацией “почему/что/как” и trace‑evidence; передать Brain в формате handoff.
 
