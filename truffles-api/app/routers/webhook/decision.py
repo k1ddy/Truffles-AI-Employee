@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
+from pydantic import ValidationError
+
+from app.models import ClientSettings, Conversation
+from app.schemas.webhook import ContextContract, IntentContract, WebhookRequest
 from app.services.demo_salon_knowledge import DemoSalonDecision
 from app.services.intent_service import Intent
 
@@ -49,6 +53,44 @@ def build_decision_plan(*, state: str, routing: dict[str, bool], client_slug: st
         client_slug=client_slug,
         plan_id=str(uuid4()),
     )
+
+
+def build_context_contract(
+    conversation: Conversation,
+    payload: WebhookRequest,
+    settings: ClientSettings | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    contract_payload = {
+        "tenant_id": payload.client_slug,
+        "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
+        "state": conversation.state,
+        "timezone": None,
+        "mode": settings.branch_resolution_mode if settings and settings.branch_resolution_mode else None,
+    }
+    try:
+        contract = ContextContract(**contract_payload)
+    except ValidationError as exc:
+        return None, str(exc)
+    return contract.model_dump(exclude_none=True), None
+
+
+def build_intent_contract(
+    signals: DecisionSignals,
+    intent_decomp_payload: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    contract_payload = {
+        "intent": signals.intent.value if signals and signals.intent else None,
+        "slots": dict(intent_decomp_payload) if isinstance(intent_decomp_payload, dict) else None,
+        "language": None,
+        "emotion": None,
+        "confidence": None,
+        "risk_signals": None,
+    }
+    try:
+        contract = IntentContract(**contract_payload)
+    except ValidationError as exc:
+        return None, str(exc)
+    return contract.model_dump(exclude_none=True), None
 
 
 @dataclass(frozen=True)

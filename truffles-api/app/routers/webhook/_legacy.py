@@ -101,7 +101,9 @@ from app.routers.webhook.decision import (
     _detect_intent_signals,
     _normalize_message_text,
     _resolve_action,
+    build_context_contract,
     build_decision_plan,
+    build_intent_contract,
     is_handover_status_question,
 )
 from app.routers.webhook.dedup import (
@@ -2046,6 +2048,17 @@ async def _handle_webhook_payload(
             return WebhookResponse(success=True, message="Accepted", conversation_id=conversation.id, bot_response=None)
 
     routing = _get_routing_policy(conversation.state)
+    context_contract, context_error = build_context_contract(conversation, payload, settings)
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "contract",
+            "decision": "context",
+            "contract_ok": context_error is None,
+            "contract_error": context_error,
+            "contract": context_contract,
+        },
+    )
     decision_plan = build_decision_plan(
         state=conversation.state,
         routing=routing,
@@ -7100,6 +7113,17 @@ async def _handle_webhook_payload(
     is_ack = signals.is_ack
     is_low_signal = signals.is_low_signal
     is_status_question = signals.is_status_question
+    intent_contract, intent_error = build_intent_contract(signals, intent_decomp_payload)
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "contract",
+            "decision": "intent",
+            "contract_ok": intent_error is None,
+            "contract_error": intent_error,
+            "contract": intent_contract,
+        },
+    )
 
     domain_intent = DomainIntent.UNKNOWN
     domain_in_score = 0.0
