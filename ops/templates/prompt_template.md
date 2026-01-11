@@ -97,4 +97,4 @@ WHERE client_id = (SELECT id FROM clients WHERE name = 'CLIENT_SLUG')
   AND name = 'system';
 ```
 
-Или через onboard_client.py при создании нового заказчика.
+Или вручную по чек‑листу `SPECS/MULTI_TENANT.md` (авто‑скрипт on‑boarding пока отсутствует).

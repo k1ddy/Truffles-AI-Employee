@@ -11,7 +11,7 @@
 | Правило | Статус |
 |---------|--------|
 | 1. Нет значит нет | ✅ РЕАЛИЗОВАНО |
-| 2. Анти-амнезия | ⚠️ ЧАСТИЧНО (история + структурный контекст для записи) |
+| 2. Анти-амнезия | ⚠️ ЧАСТИЧНО (session memory + re-entry; time‑awareness pending) |
 | 3. Долгосрочная память | 📋 ПЛАН (P2-P3) |
 | 4. Умные продажи | 📋 ПЛАН (P3) |
 | 5. Терпение к странностям | ✅ В ПРОМПТЕ |
@@ -21,6 +21,17 @@
 | 9. Только текст | ✅ РЕАЛИЗОВАНО (media‑mode план) |
 | 10. Раскрытие статуса бота | ✅ В ПРОМПТЕ (Закон РК об ИИ) |
 | 11. Филиал перед ценами | 📋 ПЛАН (config) |
+
+---
+
+## СВЯЗЬ С АРХИТЕКТУРОЙ И ДОКАЗАТЕЛЬСТВА
+
+- **Decision Graph:** `truffles-api/app/routers/webhook/decision.py` + trace `stage=decision_graph`.
+- **State Machine:** `truffles-api/app/services/state_service.py` + trace `stage=state_transition`.
+- **Fact Resolver (truth‑first):** `truffles-api/app/services/demo_salon_knowledge.py` + trace `stage=truth_gate/service_matcher/multi_truth`.
+- **Policy‑gate:** `demo_salon_knowledge.py` + trace `stage=policy_gate`.
+- **Memory/Re‑entry:** `truffles-api/app/routers/webhook/session_memory.py` + `context_manager.py` + trace `stage=session_memory/re_entry`.
+- **Escalation:** `app/services/escalation_service.py` + `telegram_webhook.py` + trace `stage=escalation/pending_sla`.
 
 ---
 
@@ -118,16 +129,17 @@
 
 ## LLM как смысловой контроллер + язык с жёсткими правилами [P0]
 
-- **LLM‑контроллер** выбирает класс/цель/слоты (structured JSON) — это **единственный арбитр смысла**.
-- Детерминизм — только безопасность и факты; он **не меняет** смысл, заданный контроллером.
+- **LLM‑контроллер** выбирает класс/цель/слоты (structured JSON) — арбитр смысла.
+- **Enforcement‑гейты** (state/policy/LAW) могут перекрывать решение смысла ради безопасности.
 - Router — **единственный источник класса**; fast/anchor/heuristic — только fallback при низкой уверенности/ошибке.
 - LLM не меняет решение класса и не создаёт факты.
-- LLM отвечает **только по RAG**; нет фактов → уточняющий вопрос (1–2 варианта: услуги/цены или запись/адрес).
+- LLM отвечает **только по RAG**; факты приходят из data packs (truth/service matcher). Нет фактов → уточнение/эскалация.
 - Валидатор ответа:
   - оплата (подтверждение/проверка/возвраты)/медицинка/жалобы/переносы → **override на эскалацию**;
   - скидки/способы оплаты → **только** если policy‑gate разрешён и правило совпало, иначе эскалация.
 - Truth gate и fast-intent — только fallback, если LLM low-confidence/timeout/без знаний.
 - Fast-intent оставляем только для greeting/thanks/ok, чтобы не тратить LLM.
+- Decision Graph порядок: State → Risk → Expected → Semantic → Data → Action → Response → Update.
 
 ## Правило 1: Нет значит нет [РЕАЛИЗОВАНО]
 
@@ -178,6 +190,7 @@ if is_rejection(intent):
 - Краткий контекст диалога: `conversations.context` (слоты записи + последний вопрос)
 - Session Memory v1.1: `last_question_type`, `pending_slots`, `active_goal`, `goal_stack` (до 3 целей)
   + pending‑resume при `pending_ack` (возврат к цели после ожидания менеджера)
+ - Re‑entry: после TTL/hand‑over старые слоты не используются без нового вопроса (trace `stage=re_entry`)
  - **Context Manager (P0):**
    - `context_manager.current_goal` = info|consult|booking (ставится по intent_decomp)
    - `context_manager.refusal_flags` (name/phone) — только явные отказы, TTL 10 сообщений или до явной инициативы

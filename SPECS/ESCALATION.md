@@ -26,6 +26,16 @@
 
 ---
 
+## СВЯЗЬ С АРХИТЕКТУРОЙ (что где реализовано)
+
+- **State Machine:** `truffles-api/app/services/state_service.py` + `state_machine.py` (все переходы `bot_active/pending/manager_active`).
+- **Escalation flow:** `truffles-api/app/services/escalation_service.py` (handover + Telegram notify).
+- **Telegram UI:** `truffles-api/app/routers/telegram_webhook.py`, `truffles-api/app/services/manager_message_service.py`.
+- **Pending‑SLA:** `truffles-api/app/services/reminder_service.py` + pending‑ветка в `truffles-api/app/routers/webhook/_legacy.py`.
+- **Trace‑evidence:** `truffles-api/app/routers/webhook/trace.py` (stages: `escalation`, `pending_sla`, `pending_status`, `pending_resume`, `re_entry`, `state_transition`).
+
+---
+
 ## ЗАЧЕМ ЭТОТ ДОКУМЕНТ
 
 Эскалация — это **продукт внутри продукта**:
@@ -95,7 +105,7 @@
 | Состояние | Кто отвечает | Бот делает | Триггер выхода |
 |-----------|--------------|------------|----------------|
 | `bot_active` | Бот | Отвечает на всё | — |
-| `pending` | Ждём менеджера | Помогает пока ждёт | Менеджер [Беру] или клиент отменил |
+| `pending` | Ждём менеджера | Только статус/подтверждение, не принимает новые решения | Менеджер [Беру] или клиент отменил |
 | `manager_active` | Менеджер | **МОЛЧИТ** | Менеджер [Решено] |
 
 **Реализация:** `truffles-api/app/models/conversation.py` — поле `state`
@@ -114,16 +124,17 @@
 - Бот УЖЕ ответил клиенту ("Передал менеджеру")
 - Создан handover в БД
 - Уведомление в Telegram с кнопками [Беру] [Вернуть боту] [Не могу]
-- Бот продолжает помогать если клиент пишет
+- Бот отвечает только статусными/подтверждающими сообщениями (pending_ack/pending_close/status)
+- После `pending_ack` — восстановление контекста + **re‑entry** (старые слоты требуют подтверждения)
 
 **Реализация:** `truffles-api/app/services/state_service.py` (`escalate_to_pending`) + `truffles-api/app/services/escalation_service.py` (`send_telegram_notification`)
 
 ### Pending‑SLA lifecycle (ожидание менеджера)
 - **SLA ping** клиенту через **15 минут** в `pending` без ответа менеджера: просим подтвердить актуальность.
 - Ответ клиента:
-  - `pending_ack` → закрываем handover, `state=bot_active`, короткое подтверждение.
+  - `pending_ack` → закрываем handover, `state=bot_active`, короткое подтверждение + re‑entry.
   - `pending_close` → закрываем handover, `state=bot_active`, бот замьючен, короткое подтверждение.
-- Классификация `pending_ack/pending_close`: **LLM‑router first**, при ошибке/низкой уверенности — **детерминированный fallback** (фразы подтверждения/закрытия).
+- Классификация `pending_ack/pending_close`: **детерминированные фразы** подтверждения/закрытия.
 - **Auto‑close:** через **4 часа** ожидания без подтверждения — системное закрытие (handover → resolved, state → bot_active).
 
 ### Когда `manager_active`:

@@ -2,8 +2,8 @@
 
 **Дата:** 2025-12-08
 **Обновлено:** 2025-12-24
-**Статус:** Решение (P0) + частичная реализация
-**Зависимости:** Эскалация ✅ готова; роли/идентичности — план
+**Статус:** Решение (P2) + частичная реализация
+**Зависимости:** Эскалация ✅; роли/идентичности — план; A4–A7 до полного обучения
 
 ---
 
@@ -13,10 +13,17 @@
 |-----------|--------|
 | Сохранение ответа менеджера | ✅ РЕАЛИЗОВАНО (заполняется в `manager_message_service.py`) |
 | Роли/идентичности (agents) | 📋 ПЛАН |
-| Очередь обучения (learned_responses) | 📋 ПЛАН |
+| Очередь обучения (learned_responses) | ⚠️ PARTIAL (таблица есть, wiring pending) |
 | Модерация | 📋 ПЛАН |
 | Добавление в Qdrant | ⚠️ ЧАСТИЧНО (owner ответ → авто-upsert в Qdrant; очередь/approval flow — план) |
 | Свой классификатор | 📋 ПЛАН (P3) |
+
+---
+
+## ПРИОРИТЕТ И ЭТАП
+
+- Этап: P2 после завершения A4–A7 (`STRATEGY/TECH_ROADMAP.md`).
+- Причина: сначала стабильность фактов/policy/observability, затем обучение.
 
 ---
 
@@ -104,6 +111,8 @@ resolved_at         TIMESTAMP -- когда ✅
 
 **Принцип:** не усложнять `handovers`. Модерация и обучение живут в отдельной очереди.
 
+**GAP:** auto_approve_roles конфиг есть (client_settings), но логика approval ещё не подключена к learned_responses.
+
 ### Очередь обучения: `learned_responses` (pending/approved/rejected)
 
 ```sql
@@ -169,8 +178,8 @@ manager_message_service.process_manager_message():
   - Найти активный handover (pending/active) для этого user
   - Отправить ответ в WhatsApp
   - ✅ Сохранить manager_response в handover
-  - Создать learned_responses(status=pending)
-  - Если роль owner → auto-approve → add_to_knowledge()
+  - [ПЛАН] Создать learned_responses(status=pending)
+  - ✅ Если роль owner → auto-approve → add_to_knowledge()
     ↓
 Ответ доставлен клиенту
 ```
