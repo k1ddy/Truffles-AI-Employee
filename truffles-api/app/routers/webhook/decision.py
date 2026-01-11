@@ -9,7 +9,14 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from app.models import ClientSettings, Conversation
-from app.schemas.webhook import ContextContract, IntentContract, WebhookRequest
+from app.schemas.webhook import (
+    ActionContract,
+    ContextContract,
+    FactContract,
+    IntentContract,
+    ResponseContract,
+    WebhookRequest,
+)
 from app.services.demo_salon_knowledge import DemoSalonDecision
 from app.services.intent_service import Intent
 
@@ -88,6 +95,62 @@ def build_intent_contract(
     }
     try:
         contract = IntentContract(**contract_payload)
+    except ValidationError as exc:
+        return None, str(exc)
+    return contract.model_dump(exclude_none=True), None
+
+
+def build_fact_contract(
+    *,
+    facts: dict[str, Any] | None,
+    sources: list[str] | None,
+    policy_flags: list[str] | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    contract_payload = {
+        "facts": dict(facts) if isinstance(facts, dict) else None,
+        "sources": list(sources) if isinstance(sources, list) else None,
+        "policy_flags": list(policy_flags) if isinstance(policy_flags, list) else None,
+    }
+    try:
+        contract = FactContract(**contract_payload)
+    except ValidationError as exc:
+        return None, str(exc)
+    return contract.model_dump(exclude_none=True), None
+
+
+def build_action_contract(
+    *,
+    action_type: str | None,
+    required_next_slots: list[str] | None,
+    escalation_reason: str | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    contract_payload = {
+        "action_type": action_type if isinstance(action_type, str) else None,
+        "required_next_slots": list(required_next_slots) if isinstance(required_next_slots, list) else None,
+        "escalation_reason": escalation_reason if isinstance(escalation_reason, str) else None,
+    }
+    try:
+        contract = ActionContract(**contract_payload)
+    except ValidationError as exc:
+        return None, str(exc)
+    return contract.model_dump(exclude_none=True), None
+
+
+def build_response_contract(
+    *,
+    tone: str | None,
+    must_include: list[str] | None,
+    must_not_include: list[str] | None,
+    language: str | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    contract_payload = {
+        "tone": tone if isinstance(tone, str) else None,
+        "must_include": list(must_include) if isinstance(must_include, list) else None,
+        "must_not_include": list(must_not_include) if isinstance(must_not_include, list) else None,
+        "language": language if isinstance(language, str) else None,
+    }
+    try:
+        contract = ResponseContract(**contract_payload)
     except ValidationError as exc:
         return None, str(exc)
     return contract.model_dump(exclude_none=True), None
