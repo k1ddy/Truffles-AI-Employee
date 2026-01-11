@@ -5,7 +5,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from pydantic import ValidationError
+
+from app.logging_config import get_logger
 from app.models import Conversation, Message
+from app.schemas.webhook import TraceContract
+
+logger = get_logger("webhook")
 
 DECISION_TRACE_KEY = "decision_trace"
 
@@ -49,6 +55,20 @@ def _record_decision_trace(conversation: Conversation, trace: dict[str, Any]) ->
     context = legacy._get_conversation_context(conversation)
     payload = dict(trace)
     payload["recorded_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        TraceContract(**payload)
+    except ValidationError as exc:
+        payload["trace_contract_error"] = str(exc)
+        logger.warning(
+            "Decision trace contract validation failed",
+            extra={
+                "context": {
+                    "error": str(exc),
+                    "stage": payload.get("stage"),
+                    "decision": payload.get("decision"),
+                }
+            },
+        )
     existing = context.get(DECISION_TRACE_KEY)
     if isinstance(existing, list):
         trace_list = [item for item in existing if isinstance(item, dict)]
