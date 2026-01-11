@@ -20,10 +20,11 @@
 
 1) **Safety/Policy выше смысла.** Любой риск → эскалация.
 2) **LLM = смысл.** Факты и решения — детерминированные.
-3) **Truth‑first.** Факты только из data packs; иначе уточнение → эскалация.
-4) **Один Decision Graph.** Решения идут по фиксированной цепочке, без “долгих размышлений”.
-5) **Память явная.** Старые факты требуют подтверждения.
-6) **Trace/meta на всё.** Иначе решение считается “не существующим”.
+3) **Гибрид обязателен.** Семантика — LLM, слоты/факты — resolver‑слой (offline‑first).
+4) **Truth‑first.** Факты только из data packs; иначе уточнение → эскалация.
+5) **Один Decision Graph.** Решения идут по фиксированной цепочке, без “долгих размышлений”.
+6) **Память явная.** Старые факты требуют подтверждения.
+7) **Trace/meta на всё.** Иначе решение считается “не существующим”.
 
 ---
 
@@ -89,38 +90,57 @@
 
 **Важно:** статус “сделано/не сделано” фиксируется в `STATE.md` с evidence. Здесь только карта опорных модулей.
 
-### 2.1 Вход + оркестрация
+### 4.1 Вход + оркестрация
 - Единый вход: `truffles-api/app/routers/webhook/_legacy.py`.
 - Решения пишут trace/meta: `truffles-api/app/routers/webhook/trace.py`.
 
-### 2.2 Состояния диалога
+### 4.2 Состояния диалога
 - Состояния: `Conversation.state` (`bot_active/pending/manager_active`) в `truffles-api/app/models/conversation.py`.
 - Переходы: `truffles-api/app/services/state_service.py`.
 
-### 2.3 Эскалация + Telegram
+### 4.3 Эскалация + Telegram
 - Handover + уведомления: `truffles-api/app/services/escalation_service.py`.
 - Карточка + кнопки: `truffles-api/app/services/telegram_service.py`.
 - TAKE/RESOLVE/RETURN: `truffles-api/app/routers/telegram_webhook.py`.
 - Ответ менеджера → клиент: `truffles-api/app/services/manager_message_service.py`.
 
-### 2.4 Session memory (v1.1)
+### 4.4 Session memory (v1.1)
 - Память + TTL: `truffles-api/app/routers/webhook/session_memory.py`.
 - Summary: `truffles-api/app/routers/webhook/context_manager.py`.
 
-### 2.5 Семантика и данные
+### 4.5 Семантика и данные
 - Intent‑классификация: `truffles-api/app/services/intent_service.py`.
 - RAG/knowledge: `truffles-api/app/services/knowledge_service.py`.
 
-### 2.6 Pending‑SLA
+### 4.6 Pending‑SLA
 - Ping + auto‑close: `truffles-api/app/services/reminder_service.py`.
 - Pending‑ветка: `truffles-api/app/routers/webhook/_legacy.py`.
 
-### 2.7 Готовые разрывы (GAP)
+### 4.7 Готовые разрывы (GAP)
 - Контракты между слоями не зафиксированы в коде (нет schema‑валидации).
 - Decision Graph размазан в `_legacy.py`.
 - Карточка менеджера не содержит summary/next step.
 - Budget/Rate Control отсутствует как системный слой.
 - Learning backlog не выделен как процесс (есть частичное добавление в knowledge).
+
+### 4.8 Сравнение текущего и целевого (по слоям)
+
+- Decision Graph: сейчас логика размазана по `_legacy.py` → цель: единый оркестратор `decision.py` → этап A1.
+- Контракты: сейчас implicit dict‑ы → цель: Pydantic‑контракты Intent/Fact/Action/Response → этап A2.
+- Resolver‑слой (slots): сейчас эвристики/regex → цель: единый offline‑resolver RU/KZ → этап A4.
+- Policy Gate: сейчас смешан с логикой → цель: rules‑as‑data (policy pack) → этап A6.
+- State Machine: сейчас ручные переходы → цель: явная FSM и инварианты → этап A3.
+- Memory/Lifecycle: сейчас TTL разрознен → цель: единый контракт памяти + re‑entry → этап A5.
+- Observability/Budget: сейчас trace есть, лимитов нет → цель: метрики/бюджеты/деградации → этап A7.
+
+### 4.9 Готовые инструменты (обязательный список, без велосипедов)
+
+- FSM/State Machine: `python-statemachine` (A3).
+- Контракты/валидация: `pydantic` (A2), опционально `jsonschema` для data packs.
+- Policy rules‑as‑data: `jsonlogic` (A6).
+- Time/Date resolver: `dateparser` (Python) для RU/KZ (A4).
+- Service/name matching: `rapidfuzz` для alias‑matching поверх data pack (A4).
+- Observability: `prometheus_client` + `sentry-sdk` (A7).
 
 ---
 
@@ -303,3 +323,14 @@
 3) Сформировать Session Card (Goal/Stage/Blocker/Evidence/Scope/DoD/Tests/Risks/Owner).
 4) Работать строго по Stage Card выбранного этапа (один issue).
 5) Любая правка — с фиксацией “почему/что/как” и trace‑evidence; передать Brain в формате handoff.
+
+---
+
+## 10) Уроки (подтвержденные фактами)
+
+- Offline‑путь должен быть first‑class: CI без LLM выявляет пробелы resolver‑слоя (E553/E556).
+- Контракт expected_reply обязателен для любого уточнения: отсутствие ломает trace и ветвление (E554).
+- Trace‑retention должен покрывать long‑диалоги: иначе теряются критичные записи (E554).
+- TTL consult‑контекста должен соответствовать длине long‑eval (E564).
+- YAML‑turns с `:` требуют кавычек, иначе тест валится на parsing (E564).
+- Явная фраза “меня зовут …” должна побеждать шум сервис/время (E563).
