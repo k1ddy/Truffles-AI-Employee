@@ -19,12 +19,12 @@
 - DONE: TraceContract validation for decision trace payloads (PR #120 https://github.com/k1ddy/Truffles-AI-Employee/pull/120; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20891043940).
 - DONE: Context/intent contract validation in trace (PR #121 https://github.com/k1ddy/Truffles-AI-Employee/pull/121; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20891209266).
 - DONE: Fact/action/response contract validation in trace (PR #122 https://github.com/k1ddy/Truffles-AI-Employee/pull/122; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20891463080).
-- NEXT: ASR/long‑chaos gate → Monitoring/observability.
+- DONE: A7 observability + budget gate + ASR tier (PR #133 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20895474177).
 - BLOCKERS: нет.
 
 - **Фокус:** ASR/long‑chaos gate + monitoring; дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
-- **Следующий шаг:** ASR/long‑chaos gate (12–15 ходов) как блокирующий gate в CI.
+- **Следующий шаг:** определить новый приоритет после A7.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
 - **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
 - **Последняя диагностика:** 2026-01-08T15:46:51Z (ops/diagnose.py: outbox FAILED 12 / SENT 1235; `OUTBOX_WORKER_ENABLED=MISSING`; `/admin/version` `487a6ff9...`).
@@ -518,6 +518,16 @@
 ---
 
 ## ИСТОРИЯ СЕССИЙ
+
+### 2026-01-11 — A7: observability + budget gate + ASR tier
+
+**Что сделали:**
+- Влили PR #133 с бюджетным gate, trace/meta деградаций и ASR tier в CI.
+
+**Evidence:**
+- PR #133: https://github.com/k1ddy/Truffles-AI-Employee/pull/133
+- CI main: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20895474177 (core/long/asr/lint/unit/secret-scan зелёные)
+- CI PR: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20895399334 (core/long/asr/lint/unit/secret-scan зелёные)
 
 ### 2026-01-03 — Канон: class‑router + info‑bundle инварианты
 
