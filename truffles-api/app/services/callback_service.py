@@ -10,6 +10,7 @@ from app.services.state_machine import (
     manager_resolve,
     manager_take,
 )
+from app.services.state_service import transition_state
 
 
 class CallbackError(Exception):
@@ -26,7 +27,7 @@ def handle_take(db: Session, conversation: Conversation, manager_id: str, manage
         raise CallbackError(f"Cannot take conversation in state '{old_state}'. Expected 'pending'.")
 
     new_state = manager_take(ConversationState(old_state))
-    conversation.state = new_state.value
+    transition_state(conversation, new_state, allow_same=True, enforce=False)
     conversation.human_operator_id = manager_id
 
     # Update handover if exists
@@ -53,7 +54,7 @@ def handle_resolve(
         raise CallbackError(f"Cannot resolve conversation in state '{old_state}'. Expected 'manager_active'.")
 
     new_state = manager_resolve(ConversationState(old_state))
-    conversation.state = new_state.value
+    transition_state(conversation, new_state, allow_same=True, enforce=False)
     conversation.human_operator_id = None
 
     # Update handover if exists
@@ -102,7 +103,7 @@ def handle_return(
         raise CallbackError(f"Cannot return conversation in state '{old_state}'. Expected 'manager_active'.")
 
     new_state = manager_resolve(ConversationState(old_state))  # Same transition as resolve
-    conversation.state = new_state.value
+    transition_state(conversation, new_state, allow_same=True, enforce=False)
     conversation.human_operator_id = None
 
     # Update handover if exists
