@@ -4,11 +4,19 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.models import Conversation, Handover, User
-from app.routers.webhook.trace import _record_decision_trace
 from app.services.state_machine import ConversationState
 from app.services.state_service import force_state
 
 logger = get_logger("health_service")
+
+
+def _append_decision_trace(context: dict, payload: dict) -> dict:
+    trace = context.get("decision_trace")
+    trace_list = trace if isinstance(trace, list) else []
+    trace_list.append(payload)
+    context["decision_trace"] = trace_list
+    return context
+
 
 def is_probably_whatsapp_jid(value: str | None) -> bool:
     if not value:
@@ -71,8 +79,9 @@ def check_and_heal_conversations(db: Session) -> dict:
                 "action": "reset_to_bot_active",
             }
         )
-        _record_decision_trace(
-            conv,
+        context = conv.context if isinstance(conv.context, dict) else {}
+        context = _append_decision_trace(
+            context,
             {
                 "stage": "state_transition",
                 "decision": "forced",
@@ -82,8 +91,10 @@ def check_and_heal_conversations(db: Session) -> dict:
                     "to": transition["to_state"],
                     "violations": transition["violations"],
                 },
+                "recorded_at": datetime.now(timezone.utc).isoformat(),
             },
         )
+        conv.context = context
         logger.warning(f"Healed conversation {conv.id}: {old_state} without topic")
 
     # Инвариант 2: pending/manager_active без активного handover → сбросить
@@ -116,8 +127,9 @@ def check_and_heal_conversations(db: Session) -> dict:
                     "action": "reset_to_bot_active",
                 }
             )
-            _record_decision_trace(
-                conv,
+            context = conv.context if isinstance(conv.context, dict) else {}
+            context = _append_decision_trace(
+                context,
                 {
                     "stage": "state_transition",
                     "decision": "forced",
@@ -127,8 +139,10 @@ def check_and_heal_conversations(db: Session) -> dict:
                         "to": transition["to_state"],
                         "violations": transition["violations"],
                     },
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
                 },
             )
+            conv.context = context
             logger.warning(f"Healed conversation {conv.id}: {old_state} without active handover")
 
     # Инвариант 3: pending/active handovers должны указывать на того же WhatsApp пользователя,

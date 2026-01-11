@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.models import ClientSettings, Conversation, Handover, Message, User
-from app.routers.webhook.trace import _record_decision_trace
 from app.schemas.reminder import ReminderItem
 from app.services.alert_service import alert_warning
 from app.services.chatflow_service import send_bot_response
@@ -197,8 +196,9 @@ def auto_close_stale_handovers(db: Session) -> dict:
             conversation.no_count = 0
             conversation.retry_offered_at = None
             conversation.context = {}
-            _record_decision_trace(
-                conversation,
+            context = conversation.context if isinstance(conversation.context, dict) else {}
+            context = _append_decision_trace(
+                context,
                 {
                     "stage": "state_transition",
                     "decision": "forced",
@@ -208,8 +208,10 @@ def auto_close_stale_handovers(db: Session) -> dict:
                         "to": transition["to_state"],
                         "violations": transition["violations"],
                     },
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
                 },
             )
+            conversation.context = context
 
         closed.append(
             {
