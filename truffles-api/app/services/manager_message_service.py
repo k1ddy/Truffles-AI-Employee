@@ -19,6 +19,8 @@ from app.services.chatflow_service import (
 )
 from app.services.learning_service import add_to_knowledge, get_client_slug, is_owner_response
 from app.services.message_service import save_message
+from app.services.state_machine import ConversationState
+from app.services.state_service import transition_state
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("manager_message_service")
@@ -200,7 +202,13 @@ def _prepare_handover_for_manager(
         if manager_name and manager_name != "Unknown":
             handover.assigned_to_name = manager_name
         took_handover = True
-        conversation.state = "manager_active"
+        transition_state(
+            conversation,
+            ConversationState.MANAGER_ACTIVE,
+            allow_same=True,
+            enforce=False,
+            handover=handover,
+        )
 
     return conversation, handover, took_handover, ""
 
