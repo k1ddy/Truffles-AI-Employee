@@ -19,12 +19,14 @@
 - DONE: TraceContract validation for decision trace payloads (PR #120 https://github.com/k1ddy/Truffles-AI-Employee/pull/120; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20891043940).
 - DONE: Context/intent contract validation in trace (PR #121 https://github.com/k1ddy/Truffles-AI-Employee/pull/121; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20891209266).
 - DONE: Fact/action/response contract validation in trace (PR #122 https://github.com/k1ddy/Truffles-AI-Employee/pull/122; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20891463080).
+- DONE: A6 policy rules‑as‑data (PR #131 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20894731972; live‑check conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, trace policy_gate=discounts + risk_level=low).
 - DONE: A7 observability + budget gate + ASR tier (PR #133 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20895474177).
+- PENDING: A7 live‑budget verification in prod (SQL fallback on demo_salon; llm_budget.daily_max_calls=1) — evidence pending.
 - BLOCKERS: нет.
 
 - **Фокус:** ASR/long‑chaos gate + monitoring; дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
-- **Следующий шаг:** определить новый приоритет после A7.
+- **Следующий шаг:** завершить live‑budget E2E (SQL fallback) и зафиксировать evidence в `STATE.md`.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
 - **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
 - **Последняя диагностика:** 2026-01-08T15:46:51Z (ops/diagnose.py: outbox FAILED 12 / SENT 1235; `OUTBOX_WORKER_ENABLED=MISSING`; `/admin/version` `487a6ff9...`).

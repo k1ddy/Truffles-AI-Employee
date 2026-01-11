@@ -2,6 +2,14 @@
 
 ⚠️ Этот handover требует проверки. Пункты ниже — ориентир, но их нужно подтвердить по API/DB/логам.
 
+Session handover (2026-01-11)
+- Цель: закрыть A6/A7 и зафиксировать E2E‑доказательства в проде (CI → deploy → live‑trace).
+- A6 Policy rules‑as‑data: policy перенесён в `client_pack.policy`, policy_gate пишет `risk_level`; E544/E545 добавили `risk_level=low`. PR #131; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20894731972; prod `/admin/version` commit `8e1d70160d74f82e41dee956decc7673de573c2d`; live‑check conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48` с trace `policy_gate=discounts` и `risk_level=low`.
+- A7 Observability+Budget: бюджет LLM по tenant (Redis, `client.config.llm_budget.daily_max_calls`), деградации пишутся в trace/meta; ASR‑tier добавлен в CI. PR #133; CI PR https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20895399334; main CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20895474177 и https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20895559316.
+- Процесс: шаблон Task Package обязателен в `AGENTS.md` и `STRATEGY/TECH_ROADMAP.md` (PR #132).
+- Текущий статус: ждём live‑budget в проде через SQL‑fallback (demo_salon), evidence ещё нет.
+- Следующий шаг (OPS/Hands): backup `clients.config` → временно поставить `llm_budget.daily_max_calls=1` → 2 LLM‑сообщения → trace `stage=budget_gate` + `llm_degradation_reason=budget_exceeded` → rollback → Brain фиксирует evidence в `STATE.md`.
+
 Принципы «мозгов» бота (быстрый контекст)
 - Истина только из Truth-слоя (`SALON_TRUTH.yaml`) + строгое соблюдение LAW.
 - Policy-gate до RAG/LLM: оплаты/перенос/medical/жалобы → всегда эскалация.
