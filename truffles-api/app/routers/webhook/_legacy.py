@@ -1633,13 +1633,26 @@ def _reuse_active_handover(
 
     if conversation.state == ConversationState.BOT_ACTIVE.value:
         target_state = ConversationState.MANAGER_ACTIVE if handover.status == "active" else ConversationState.PENDING
-        transition_state(
+        transition_result = transition_state(
             conversation,
             target_state,
             allow_same=True,
             enforce=False,
             handover=handover,
         )
+        if transition_result["invalid_transition"]:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "state_transition",
+                    "decision": "invalid",
+                    "meta": {
+                        "from": transition_result["from_state"],
+                        "to": transition_result["to_state"],
+                        "violations": transition_result["violations"],
+                    },
+                },
+            )
         conversation.escalated_at = conversation.escalated_at or datetime.now(timezone.utc)
 
     telegram_sent = send_telegram_notification(
