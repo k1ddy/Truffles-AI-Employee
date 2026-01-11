@@ -101,6 +101,7 @@ from app.routers.webhook.decision import (
     _detect_intent_signals,
     _normalize_message_text,
     _resolve_action,
+    build_decision_plan,
     is_handover_status_question,
 )
 from app.routers.webhook.dedup import (
@@ -2045,6 +2046,19 @@ async def _handle_webhook_payload(
             return WebhookResponse(success=True, message="Accepted", conversation_id=conversation.id, bot_response=None)
 
     routing = _get_routing_policy(conversation.state)
+    decision_plan = build_decision_plan(
+        state=conversation.state,
+        routing=routing,
+        client_slug=payload.client_slug,
+    )
+    decision_trace = decision_plan.to_trace()
+    decision_trace.update(
+        {
+            "stage": "decision_graph",
+            "version": "a1-shadow",
+        }
+    )
+    _record_decision_trace(conversation, decision_trace)
 
     transcript = None
     asr_meta = None
