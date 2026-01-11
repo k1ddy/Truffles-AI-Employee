@@ -45,6 +45,7 @@ def _record_message_decision_meta(
             "llm_used": False,
             "llm_timeout": False,
             "llm_cache_hit": False,
+            "llm_degradation_reason": None,
         },
     )
 

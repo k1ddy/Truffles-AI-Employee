@@ -617,6 +617,7 @@ metadata = {
 
 ## 12.1 Router SLA + Debug Visibility (P0)
 - В decision_trace/meta всегда пишем: `router_llm_ms`, `router_error`, `router_retry`, `router_fallback_reason`.
+- В decision_trace/meta всегда пишем: `budget_gate` и `llm_degradation_reason` (budget_exceeded/llm_timeout/llm_skip) при деградации LLM.
 - SLO: `router_fallback_rate < 10%`, `timeout_rate < 2%`.
 - Нужен минимальный trace‑viewer: фильтры по router_error/fallback/LAW/clarify, топ‑кейсы из knowledge_backlog.
 
@@ -641,6 +642,7 @@ metadata = {
 
 ### 13.2 ASR-noise eval battery
 - Набор: транскрипты с опечатками, шумом, склейкой фраз (ASR-noise).
+- CI gate: отдельный tier `EVAL_TIER=asr`.
 - Уровни шума:
   - **L1 (легкий):** опечатки/омофоны/пунктуация, смысл читается.
   - **L2 (средний):** пропуски служебных слов, перестановки, смешение intents.

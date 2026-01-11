@@ -652,7 +652,8 @@ def detect_stuck(db, conversation_id) -> bool:
 
 ## Качество и тестирование (trace-first)
 - **CI = trace/meta gate:** проверяем `class_router`, `info_sections`, `policy_gate`, `expected_reply_type`; текст ответа не сравниваем.
-- **ASR-noise eval:** набор шумных транскриптов (L1/L2/L3); интерпретация по trace/meta, pass = корректный класс/уточнение/эскалация без выдумок.
+- **ASR-noise eval:** набор шумных транскриптов (L1/L2/L3); интерпретация по trace/meta, pass = корректный класс/уточнение/эскалация без выдумок (CI tier `EVAL_TIER=asr`).
+- **LLM деградации:** в trace/meta фиксируем `budget_gate` и `llm_degradation_reason` (budget_exceeded/llm_timeout/llm_skip).
 - **Nightly/manual:** human-quality (эмпатия/тон/продажа) по реальным диалогам, отдельно от CI.
 
 ---

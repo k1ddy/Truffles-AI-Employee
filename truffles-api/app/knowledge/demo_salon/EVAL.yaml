@@ -7616,7 +7616,7 @@ eval_cases:
     - 2–3
     - зона ожидания
 - id: E712
-  tier: long
+  tier: [long, asr]
   user: А с подругой можно прийти?
   expected:
     action: reply
@@ -7627,7 +7627,7 @@ eval_cases:
     - 2-3
     - одного
 - id: E713
-  tier: long
+  tier: [long, asr]
   user: а с подругои можно прийти
   expected:
     action: reply
@@ -7638,7 +7638,7 @@ eval_cases:
     - 2-3
     - одного
 - id: E714
-  tier: long
+  tier: [long, asr]
   user: Здравствуйте, я вас узнал. Вы маникюр делаете, да? С подругой хотел прийти. Вечером, если место есть, скажите, пожалуйста.
   expected:
     action: reply
@@ -7649,7 +7649,7 @@ eval_cases:
     - 2-3
     - одного
 - id: E715
-  tier: long
+  tier: [long, asr]
   user: здравствуйте я вас узнал вы маникюр делаете да с подругой хотел прийти вечером если место есть скажите пожалуйста
   expected:
     action: reply
@@ -7660,7 +7660,7 @@ eval_cases:
     - 2-3
     - одного
 - id: E716
-  tier: long
+  tier: [long, asr]
   user: А с подругой можно прийти?
   expected:
     action: reply
@@ -7671,7 +7671,7 @@ eval_cases:
     - 2-3
     - одного
 - id: E717
-  tier: long
+  tier: [long, asr]
   user: а с падругой можно прийти?
   expected:
     action: reply
@@ -7682,7 +7682,7 @@ eval_cases:
     - 2-3
     - одного
 - id: E718
-  tier: long
+  tier: [long, asr]
   user: Здравствуйте, я вас узнал. Вы маникюр делаете, да? С подругой хотел прийти. Вечером, если место есть, скажите, пожалуйста.
   expected:
     action: reply
@@ -7693,7 +7693,7 @@ eval_cases:
     - 2-3
     - одного
 - id: E719
-  tier: long
+  tier: [long, asr]
   user: здраствуйте я вас узнал вы маникюр делаите да с подругои хотел прийти вечером если место есть скажите пожалуста
   expected:
     action: reply
@@ -7704,7 +7704,7 @@ eval_cases:
     - 2-3
     - одного
 - id: E720
-  tier: long
+  tier: [long, asr]
   user: Здравствуйте, сегодня я хотел прийти, работаете, да? Маникюр хочу сделать.
   expected:
     action: reply
@@ -7714,7 +7714,7 @@ eval_cases:
     - '21:00'
     - ежедневно
 - id: E721
-  tier: long
+  tier: [long, asr]
   user: здравствуйте сегодня я хотел прийти работаете да маникюр хочу зделать
   expected:
     action: reply
@@ -7724,7 +7724,7 @@ eval_cases:
     - '21:00'
     - ежедневно
 - id: E722
-  tier: long
+  tier: [long, asr]
   user: А педикюр делаете, да? Хотел с подругой прийти.
   expected:
     action: reply
@@ -7735,7 +7735,7 @@ eval_cases:
     - 2-3
     - одного
 - id: E723
-  tier: long
+  tier: [long, asr]
   user: а пидикюр делаете да хотел с подругой прийти
   expected:
     action: reply
@@ -7746,7 +7746,7 @@ eval_cases:
     - 2-3
     - одного
 - id: E724
-  tier: long
+  tier: [long, asr]
   user: Здравствуйте! Вы сегодня работаете? Хотел маникюр сделать.
   expected:
     action: reply
@@ -7756,7 +7756,7 @@ eval_cases:
     - '21:00'
     - ежедневно
 - id: E725
-  tier: long
+  tier: [long, asr]
   user: здраствуйте вы сегодня работайте хотел маникюр сделать
   expected:
     action: reply
@@ -7766,7 +7766,7 @@ eval_cases:
     - '21:00'
     - ежедневно
 - id: E726
-  tier: long
+  tier: [long, asr]
   user: Здравствуйте, а вы где находитесь? Сегодня работаете?
   expected:
     action: reply
@@ -7774,7 +7774,7 @@ eval_cases:
     must_include:
     - Абая 150
 - id: E727
-  tier: long
+  tier: [long, asr]
   user: здравствуйте а вы где находитесь сегодня работаете
   expected:
     action: reply
@@ -7782,7 +7782,7 @@ eval_cases:
     must_include:
     - Абая 150
 - id: E728
-  tier: long
+  tier: [long, asr]
   user: Трусы хотел свои помыть. Поможете?
   expected:
     action: reply
@@ -7793,7 +7793,7 @@ eval_cases:
     - запись
     - цены
 - id: E729
-  tier: long
+  tier: [long, asr]
   user: трусы хотел свои помыть поможете
   expected:
     action: reply
@@ -7804,7 +7804,7 @@ eval_cases:
     - запись
     - цены
 - id: E730
-  tier: long
+  tier: [long, asr]
   user: Здравствуйте, а вы чем занимаетесь?
   expected:
     action: reply
@@ -7813,7 +7813,7 @@ eval_cases:
     - маникюр
     - парикмахер
 - id: E731
-  tier: long
+  tier: [long, asr]
   user: здравствуйте а вы чем занемаетесь
   expected:
     action: reply

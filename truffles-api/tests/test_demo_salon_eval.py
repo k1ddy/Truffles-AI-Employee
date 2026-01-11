@@ -919,11 +919,31 @@ def _collect_trace_expectations(expected: dict, trace_expectations: list[dict]) 
         trace_expectations.extend(items)
 
 
+def _extract_tiers(case: dict) -> list[str]:
+    raw_tier = case.get("tier")
+    if isinstance(raw_tier, str):
+        cleaned = raw_tier.strip().lower()
+        return [cleaned] if cleaned else []
+    if isinstance(raw_tier, list):
+        tiers: list[str] = []
+        for item in raw_tier:
+            if isinstance(item, str):
+                cleaned = item.strip().lower()
+                if cleaned:
+                    tiers.append(cleaned)
+        return tiers
+    return []
+
+
 def _filter_cases(cases: list[dict]) -> list[dict]:
     if EVAL_TIER in {"all", "full"}:
         return cases
+    if EVAL_TIER == "asr":
+        asr_cases = [case for case in cases if "asr" in _extract_tiers(case)]
+        assert asr_cases, "ASR eval set is empty"
+        return asr_cases
     if EVAL_TIER == "long":
-        long_cases = [case for case in cases if str(case.get("tier", "")).strip().lower() == "long"]
+        long_cases = [case for case in cases if "long" in _extract_tiers(case)]
         assert long_cases, "Long eval set is empty"
         return long_cases
     if EVAL_TIER in {"core", "ci"} or (not EVAL_TIER and os.environ.get("CI")):

@@ -1239,6 +1239,7 @@ def _ensure_controller_output_meta(controller_output: dict, *, error: str | None
 CONTROLLER_FALLBACK_REASON_MAP = {
     "timeout": "timeout",
     "invalid_json": "invalid_json",
+    "budget_exceeded": "budget_exceeded",
 }
 CONTROLLER_FALLBACK_ERROR_VALUES = {
     "controller_failed",
@@ -1775,6 +1776,8 @@ async def _handle_webhook_payload(
     )
 
     timing_context: dict = {"client_slug": payload.client_slug, "remote_jid": remote_jid}
+    if client and isinstance(client.config, dict):
+        timing_context["client_config"] = client.config
     if outbox_ids:
         timing_context["outbox_ids"] = list(outbox_ids)
         timing_context["outbox_id"] = outbox_ids[0] if len(outbox_ids) == 1 else outbox_ids[0]
@@ -1803,6 +1806,64 @@ async def _handle_webhook_payload(
         context["elapsed_ms"] = round(elapsed_ms, 2)
         logger.info("Timing", extra={"context": context})
 
+    def _record_llm_budget_trace() -> None:
+        events = timing_context.get("llm_budget_events") if isinstance(timing_context, dict) else None
+        if not isinstance(events, list) or not events:
+            return
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            allowed = bool(event.get("allowed", True))
+            active = bool(event.get("active"))
+            if not active and allowed:
+                continue
+            scope = event.get("scope") or "unknown"
+            trace_payload = {
+                "stage": "budget_gate",
+                "decision": "allow" if allowed else "deny",
+                "llm_scope": scope,
+            }
+            reason = event.get("reason")
+            if isinstance(reason, str) and reason:
+                trace_payload["reason"] = reason
+            limit = event.get("limit")
+            count = event.get("count")
+            if isinstance(limit, int):
+                trace_payload["budget_limit"] = limit
+            if isinstance(count, int):
+                trace_payload["budget_count"] = count
+            if not allowed:
+                trace_payload["llm_degradation_reason"] = "budget_exceeded"
+            _record_decision_trace(conversation, trace_payload)
+        timing_context["llm_budget_events"] = []
+
+    def _record_llm_degradation() -> None:
+        reason = timing_context.get("llm_degradation_reason") if isinstance(timing_context, dict) else None
+        if not isinstance(reason, str) or not reason:
+            return
+        if saved_message:
+            metadata = (
+                saved_message.message_metadata
+                if isinstance(saved_message.message_metadata, dict)
+                else {}
+            )
+            decision_meta = metadata.get("decision_meta") if isinstance(metadata, dict) else None
+            existing_reason = decision_meta.get("llm_degradation_reason") if isinstance(decision_meta, dict) else None
+            if not existing_reason:
+                _update_message_decision_metadata(
+                    saved_message, {"llm_degradation_reason": reason}
+                )
+        if reason != "budget_exceeded":
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "llm_degradation",
+                    "decision": "fallback",
+                    "llm_degradation_reason": reason,
+                },
+            )
+        timing_context["llm_degradation_reason"] = None
+
     def _send_response(text: str) -> bool:
         send_start = time.monotonic()
         sent = send_bot_response(
@@ -1819,7 +1880,13 @@ async def _handle_webhook_payload(
     def _ensure_rag_rewrite() -> None:
         if timing_context.get("rag_rewrite_logged"):
             return
-        rag_rewrite_meta = rewrite_query_for_retrieval(message_text, client_slug=payload.client_slug)
+        rag_rewrite_meta = rewrite_query_for_retrieval(
+            message_text,
+            client_slug=payload.client_slug,
+            client_config=client.config if client else None,
+            timing_context=timing_context,
+        )
+        _record_llm_budget_trace()
         if not isinstance(rag_rewrite_meta, dict):
             return
         timing_context["rag_rewrite"] = rag_rewrite_meta
@@ -1843,6 +1910,8 @@ async def _handle_webhook_payload(
             )
 
     def _record_rag_meta() -> None:
+        _record_llm_budget_trace()
+        _record_llm_degradation()
         rag_trace = timing_context.get("rag_trace") if isinstance(timing_context, dict) else None
         if isinstance(rag_trace, list) and rag_trace:
             for entry in rag_trace:
@@ -4691,6 +4760,9 @@ async def _handle_webhook_payload(
             message_text,
             carryover=class_carryover,
             expected_reply_type=expected_reply_type,
+            client_slug=payload.client_slug,
+            client_config=client.config if client else None,
+            timing_context=timing_context,
         )
         if isinstance(controller_result, dict) and controller_result.get("ok") is True:
             controller_output = controller_result.get("payload")
@@ -4734,6 +4806,7 @@ async def _handle_webhook_payload(
             else:
                 controller_state["output"] = _build_controller_meta_output(error=controller_state["error"])
 
+    _record_llm_budget_trace()
     if isinstance(controller_state, dict):
         controller_output = controller_state.get("output")
         if isinstance(controller_output, dict):
@@ -8314,7 +8387,13 @@ async def _handle_webhook_payload(
                             )
                         semantic_result = semantic_service_match(message_text, payload.client_slug)
                         if not semantic_result:
-                            rewrite_query = rewrite_for_service_match(message_text, payload.client_slug)
+                            rewrite_query = rewrite_for_service_match(
+                                message_text,
+                                payload.client_slug,
+                                client_config=client.config if client else None,
+                                timing_context=timing_context,
+                            )
+                            _record_llm_budget_trace()
                             if rewrite_query:
                                 semantic_result = semantic_service_match(rewrite_query, payload.client_slug)
                     if semantic_result:
