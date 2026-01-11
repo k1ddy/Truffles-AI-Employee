@@ -101,9 +101,12 @@ from app.routers.webhook.decision import (
     _detect_intent_signals,
     _normalize_message_text,
     _resolve_action,
+    build_action_contract,
     build_context_contract,
     build_decision_plan,
+    build_fact_contract,
     build_intent_contract,
+    build_response_contract,
     is_handover_status_question,
 )
 from app.routers.webhook.dedup import (
@@ -2136,8 +2139,96 @@ async def _handle_webhook_payload(
             return text
         return _apply_quiet_hours_notice(text, quiet_hours_notice)
 
+    def _extract_fact_payload(decision_meta: dict[str, Any]) -> dict[str, Any] | None:
+        fact_keys = (
+            "info_sections",
+            "info_combined",
+            "question_type",
+            "question_type_score",
+            "service_query",
+            "service_query_source",
+            "service_query_score",
+            "info_signals",
+            "anchor_intents",
+            "anchor_hits",
+            "anchor_boost",
+        )
+        facts = {key: decision_meta.get(key) for key in fact_keys if key in decision_meta}
+        return facts or None
+
+    def _record_contract_traces(*, action_type: str | None = None) -> None:
+        decision_meta: dict[str, Any] = {}
+        if saved_message and isinstance(saved_message.message_metadata, dict):
+            raw_meta = saved_message.message_metadata.get("decision_meta")
+            if isinstance(raw_meta, dict):
+                decision_meta = raw_meta
+
+        action_value = action_type
+        if not action_value:
+            meta_action = decision_meta.get("action")
+            if isinstance(meta_action, str) and meta_action:
+                action_value = meta_action
+        if not action_value:
+            action_value = "reply"
+
+        source = decision_meta.get("source")
+        sources = [source] if isinstance(source, str) and source else None
+        policy_gate = decision_meta.get("policy_gate")
+        policy_flags = [policy_gate] if isinstance(policy_gate, str) and policy_gate else None
+        facts = _extract_fact_payload(decision_meta)
+
+        fact_contract, fact_error = build_fact_contract(
+            facts=facts,
+            sources=sources,
+            policy_flags=policy_flags,
+        )
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "contract",
+                "decision": "fact",
+                "contract_ok": fact_error is None,
+                "contract_error": fact_error,
+                "contract": fact_contract,
+            },
+        )
+
+        action_contract, action_error = build_action_contract(
+            action_type=action_value,
+            required_next_slots=None,
+            escalation_reason=None,
+        )
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "contract",
+                "decision": "action",
+                "contract_ok": action_error is None,
+                "contract_error": action_error,
+                "contract": action_contract,
+            },
+        )
+
+        response_contract, response_error = build_response_contract(
+            tone=None,
+            must_include=None,
+            must_not_include=None,
+            language=None,
+        )
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "contract",
+                "decision": "response",
+                "contract_ok": response_error is None,
+                "contract_error": response_error,
+                "contract": response_contract,
+            },
+        )
+
     def _send_and_save(text: str, *, allow_quiet_hours: bool = True) -> tuple[str, bool]:
         final_text = _finalize_bot_response(text, allow_quiet_hours=allow_quiet_hours)
+        _record_contract_traces()
         save_message(db, conversation.id, client.id, role="assistant", content=final_text)
         sent = _send_response(final_text)
         return final_text, sent
