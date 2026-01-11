@@ -8,7 +8,6 @@ from app.logging_config import get_logger
 from app.models import ClientSettings, Conversation, Handover, User
 from app.services.alert_service import alert_error
 from app.services.state_machine import ConversationState
-from app.services.state_service import transition_state
 from app.services.telegram_service import TelegramService, build_handover_buttons, format_handover_message
 
 logger = get_logger("escalation_service")
@@ -204,6 +203,8 @@ def escalate_conversation(
 
     Returns: (handover, telegram_sent)
     """
+    from app.services.state_service import transition_state
+
     existing_handover = get_active_handover(db, conversation.id)
     if existing_handover:
         if conversation.state == ConversationState.BOT_ACTIVE.value:
