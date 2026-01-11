@@ -13,6 +13,7 @@
 - DONE: PR #109 (diagnose + smalltalk) и PR #111 (docs sync) merged; CI main зелёный.
 - DONE: P0 offline устойчивость без `OPENAI_API_KEY` (offline controller fixed + test; PR #112 merged; CI main зелёный).
 - DONE: Session Memory v1.1 reset на pending/manager (PR #114 merged; CI main зелёный).
+- DONE: A1 shadow Decision Graph plan + roadmap hybrid/tools pinned (PR #117 https://github.com/k1ddy/Truffles-AI-Employee/pull/117; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20890721660).
 - NEXT: ASR/long‑chaos gate → Monitoring/observability.
 - BLOCKERS: нет.
 
