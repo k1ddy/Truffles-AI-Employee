@@ -6,7 +6,7 @@ from app.logging_config import get_logger
 from app.models import Conversation, Handover, User
 from app.services.escalation_service import get_or_create_topic, get_telegram_credentials
 from app.services.result import Result
-from app.services.state_machine import ConversationState
+from app.services.state_machine import ConversationState, is_transition_allowed
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("state_service")
@@ -88,7 +88,13 @@ def escalate_to_pending(
         )
         db.add(handover)
 
-        conversation.state = ConversationState.PENDING.value
+        transition_state(
+            conversation,
+            ConversationState.PENDING,
+            allow_same=False,
+            enforce=True,
+            handover=handover,
+        )
         conversation.telegram_topic_id = topic_id
         conversation.escalated_at = now
         conversation.retry_offered_at = None
@@ -121,7 +127,13 @@ def manager_take(
     try:
         now = datetime.now(timezone.utc)
 
-        conversation.state = ConversationState.MANAGER_ACTIVE.value
+        transition_state(
+            conversation,
+            ConversationState.MANAGER_ACTIVE,
+            allow_same=False,
+            enforce=True,
+            handover=handover,
+        )
         handover.status = "active"
         handover.assigned_to = manager_id
         handover.assigned_to_name = manager_name
@@ -154,7 +166,13 @@ def manager_resolve(
     try:
         now = datetime.now(timezone.utc)
 
-        conversation.state = ConversationState.BOT_ACTIVE.value
+        transition_state(
+            conversation,
+            ConversationState.BOT_ACTIVE,
+            allow_same=False,
+            enforce=True,
+            handover=handover,
+        )
         conversation.bot_muted_until = None
         conversation.no_count = 0
         conversation.retry_offered_at = None
@@ -198,3 +216,78 @@ def check_invariants(conversation: Conversation, handover: Handover = None) -> l
             violations.append("no_active_handover")
 
     return violations
+
+
+def _coerce_state(value: str | ConversationState | None) -> ConversationState | None:
+    if isinstance(value, ConversationState):
+        return value
+    if value is None:
+        return None
+    try:
+        return ConversationState(value)
+    except ValueError:
+        return None
+
+
+def transition_state(
+    conversation: Conversation,
+    to_state: ConversationState,
+    *,
+    allow_same: bool = False,
+    enforce: bool = True,
+    handover: Handover = None,
+) -> dict:
+    """Централизованный переход состояния с проверкой инвариантов."""
+    from_state_value = conversation.state
+    to_state_value = to_state.value
+    from_state = _coerce_state(from_state_value)
+
+    invalid_transition = False
+    if from_state is None:
+        invalid_transition = True
+    else:
+        invalid_transition = not is_transition_allowed(from_state, to_state, allow_same=allow_same)
+
+    if not invalid_transition or not enforce:
+        conversation.state = to_state_value
+
+    violations = check_invariants(conversation, handover)
+
+    return {
+        "from_state": from_state_value,
+        "to_state": to_state_value,
+        "invalid_transition": invalid_transition,
+        "violations": violations,
+    }
+
+
+def force_state(
+    conversation: Conversation,
+    to_state: ConversationState,
+    *,
+    reason: str | None = None,
+    handover: Handover = None,
+) -> dict:
+    """Принудительный переход состояния (heal/cron)."""
+    from_state_value = conversation.state
+    to_state_value = to_state.value
+    conversation.state = to_state_value
+
+    violations = check_invariants(conversation, handover)
+    logger.warning(
+        "Forced state transition",
+        extra={
+            "from_state": from_state_value,
+            "to_state": to_state_value,
+            "reason": reason,
+            "violations": violations,
+        },
+    )
+
+    return {
+        "from_state": from_state_value,
+        "to_state": to_state_value,
+        "invalid_transition": False,
+        "violations": violations,
+        "forced": True,
+    }
