@@ -97,13 +97,13 @@ from app.routers.webhook.context_manager import (
 from app.routers.webhook.decision import (
     DecisionOutcome,
     DecisionSignals,
-    build_context_contract,
-    build_intent_contract,
     _detect_fast_intent,
     _detect_intent_signals,
     _normalize_message_text,
     _resolve_action,
+    build_context_contract,
     build_decision_plan,
+    build_intent_contract,
     is_handover_status_question,
 )
 from app.routers.webhook.dedup import (
