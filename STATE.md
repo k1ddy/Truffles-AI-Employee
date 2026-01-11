@@ -15,6 +15,7 @@
 - DONE: Session Memory v1.1 reset на pending/manager (PR #114 merged; CI main зелёный).
 - DONE: A1 shadow Decision Graph plan + roadmap hybrid/tools pinned (PR #117 https://github.com/k1ddy/Truffles-AI-Employee/pull/117; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20890721660).
 - DONE: Decision Graph stage trace skeleton (PR #118 https://github.com/k1ddy/Truffles-AI-Employee/pull/118; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20890910843).
+- DONE: A2 Decision Graph contract schemas (PR #119 https://github.com/k1ddy/Truffles-AI-Employee/pull/119; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20890983862).
 - NEXT: ASR/long‑chaos gate → Monitoring/observability.
 - BLOCKERS: нет.
 
