@@ -287,7 +287,7 @@ from app.services.intent_service import (
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
 from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.state_machine import ConversationState
-from app.services.state_service import escalate_to_pending, manager_resolve
+from app.services.state_service import escalate_to_pending, manager_resolve, transition_state
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("webhook")
@@ -1632,10 +1632,14 @@ def _reuse_active_handover(
         return None, False, False
 
     if conversation.state == ConversationState.BOT_ACTIVE.value:
-        if handover.status == "active":
-            conversation.state = ConversationState.MANAGER_ACTIVE.value
-        else:
-            conversation.state = ConversationState.PENDING.value
+        target_state = ConversationState.MANAGER_ACTIVE if handover.status == "active" else ConversationState.PENDING
+        transition_state(
+            conversation,
+            target_state,
+            allow_same=True,
+            enforce=False,
+            handover=handover,
+        )
         conversation.escalated_at = conversation.escalated_at or datetime.now(timezone.utc)
 
     telegram_sent = send_telegram_notification(

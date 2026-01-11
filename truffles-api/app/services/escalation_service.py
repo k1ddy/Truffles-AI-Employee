@@ -203,13 +203,23 @@ def escalate_conversation(
 
     Returns: (handover, telegram_sent)
     """
+    from app.services.state_service import transition_state
+
     existing_handover = get_active_handover(db, conversation.id)
     if existing_handover:
         if conversation.state == ConversationState.BOT_ACTIVE.value:
-            if existing_handover.status == "active":
-                conversation.state = ConversationState.MANAGER_ACTIVE.value
-            else:
-                conversation.state = ConversationState.PENDING.value
+            target_state = (
+                ConversationState.MANAGER_ACTIVE
+                if existing_handover.status == "active"
+                else ConversationState.PENDING
+            )
+            transition_state(
+                conversation,
+                target_state,
+                allow_same=True,
+                enforce=False,
+                handover=existing_handover,
+            )
             conversation.escalated_at = datetime.now(timezone.utc)
         telegram_sent = send_telegram_notification(
             db=db,
