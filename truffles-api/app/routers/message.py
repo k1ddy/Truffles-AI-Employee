@@ -19,6 +19,7 @@ from app.services.message_service import (
     select_handover_user_message,
 )
 from app.services.state_machine import ConversationState, escalate
+from app.services.state_service import transition_state
 
 router = APIRouter()
 
@@ -103,7 +104,7 @@ def handle_message(request: MessageRequest, db: Session = Depends(get_db)):
 
         # Escalate to pending + create handover + notify Telegram
         new_state = escalate(ConversationState(conversation.state))
-        conversation.state = new_state.value
+        transition_state(conversation, new_state, allow_same=True, enforce=False)
         conversation.escalated_at = now
 
         # Create handover and send to Telegram
@@ -163,7 +164,7 @@ def handle_message(request: MessageRequest, db: Session = Depends(get_db)):
             if confidence == "low_confidence":
                 # Low RAG confidence — escalate
                 new_state = escalate(ConversationState(conversation.state))
-                conversation.state = new_state.value
+                transition_state(conversation, new_state, allow_same=True, enforce=False)
                 conversation.escalated_at = now
 
                 handover, telegram_sent = escalate_conversation(
