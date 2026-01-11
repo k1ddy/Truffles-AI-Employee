@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Conversation, User
 from app.services.state_machine import ConversationState
+from app.services.state_service import transition_state
 
 
 def get_or_create_user(db: Session, client_id: UUID, remote_jid: str) -> User:
@@ -44,6 +45,6 @@ def get_or_create_conversation(db: Session, client_id: UUID, user_id: UUID, chan
 
 def update_conversation_state(db: Session, conversation: Conversation, new_state: ConversationState):
     """Update conversation state."""
-    conversation.state = new_state.value
+    transition_state(conversation, new_state, allow_same=True, enforce=False)
     conversation.last_message_at = datetime.now(timezone.utc)
     db.flush()
