@@ -18,6 +18,53 @@
 
 ---
 
+## ПРАВИЛА РАЗРАБОТКИ (без велосипедов)
+
+1. **Сначала ищем готовое решение.** Новая логика = сначала стандартные библиотеки/инструменты/контейнеры, потом код.
+2. **Запрещены костыли и “под кейсы”.** Исправляем причину, не симптомы.
+3. **Любая реализация привязана к ценности.** Для каждого компонента фиксируем: цель → реализация → доказательство.
+4. **Никаких “старых методологий”.** Используем актуальные и поддерживаемые инструменты, документируем выбор.
+5. **One‑issue flow.** Одна проблема → одна правка → одна проверка → evidence.
+
+---
+
+## ПРОФЕССИОНАЛЬНЫЙ ПЛАН РАЗВИТИЯ (что/почему/как)
+
+### Фаза 1 — A4→A6→A7 (ядро фактов, политики, наблюдаемость)
+**Почему:** это базовая надежность и безопасность; без неё любой “быстрый” масштаб превращается в костыли.
+**Что делаем:**
+1. **A4 Data Resolver + Fact Gate** — факты только из data packs; все ответы имеют FactContract.
+2. **A6 Policy rules‑as‑data** — LAW/риски и скидки живут в policy‑pack, без LLM‑обходов.
+3. **A7 Observability + Budget** — метрики/trace/лимиты, причины деградации фиксируются.
+**Как проверяем:** CI core/long + trace/meta + `/admin/metrics`.
+
+### Фаза 2 — Быстрый онбординг (операционный стандарт)
+**Почему:** масштабируемость без ручного хаоса.
+**Что делаем:**
+1. **Официальный “ручной” чек‑лист** остаётся единственным источником истины до автоматизации
+   (`SPECS/MULTI_TENANT.md`).
+2. **Автоматизация**: либо реально появляется `onboard_client.py`, либо удаляем упоминания из структуры.
+3. **Валидация packs** через `ops/sync_client.py --validate` (без генерации новых файлов).
+**Как проверяем:** синк в Qdrant, smoke‑check в WhatsApp, `/admin/version`.
+
+### Фаза 3 — UX для админов (Telegram‑first, затем Web)
+**Почему:** операционная эффективность и контроль SLA.
+**Что делаем:**
+1. **Telegram как официальный UI**: статусы pending/active/resolved, карточка заявки, SLA‑сообщения.
+2. **Минимальный web‑админ** через `/admin/*` API (monitoring/knowledge‑backlog).
+3. **Dashboard** (P2/P3) после стабилизации ядра.
+**Как проверяем:** trace pending‑SLA, `/admin/health`, ручной smoke.
+
+### Фаза 4 — Auto‑Learning (после реальных данных)
+**Почему:** снижение эскалаций и затрат.
+**Что делаем:**
+1. **Очередь learned_responses** + модерация (owner auto‑approve, остальные pending).
+2. **Upsert в Qdrant** только после approval.
+3. **Метрика эффекта**: снижение escalation rate.
+**Как проверяем:** записи в learned_responses + Qdrant payload + `/admin/metrics`.
+
+---
+
 ## ПРИОРИТЕТЫ
 
 ### P0 — Детерминизм и релизная стабильность
@@ -123,6 +170,23 @@
 - Time/Date resolver: `dateparser` (Python) для RU/KZ (A4).
 - Service/name matching: `rapidfuzz` для alias‑matching поверх data pack (A4).
 - Observability: `prometheus_client` + `sentry-sdk` (A7).
+
+---
+
+## 4.10 КАРТА КОМПОНЕНТОВ (ценность → реализация → доказательство)
+
+| Компонент | Ценность | Реализация (код) | Данные | Доказательство |
+|---|---|---|---|---|
+| Ingress + Outbox | Ответ 24/7 без потерь | `app/routers/webhook/_legacy.py`, `app/services/outbox_service.py` | outbox DB | `/admin/health`, `/admin/metrics` |
+| Decision Graph + Trace | Объяснимые решения | `app/routers/webhook/decision.py`, `app/routers/webhook/trace.py` | decision_trace/meta | CI core/long |
+| State Machine | SLA и корректная эскалация | `app/services/state_service.py` | conversations.state | CI core/long |
+| Memory + Re‑entry | Длинные диалоги без дрейфа | `app/routers/webhook/session_memory.py`, `context_manager.py` | context/session_memory | trace `session_memory` |
+| Fact Resolver | “Не выдумывает” | `app/services/demo_salon_knowledge.py` + truth‑gate | client_pack/YAML | FactContract trace |
+| Policy Gate | LAW‑безопасность | policy‑pack + `demo_salon_knowledge.py` | policy data | trace policy_gate |
+| Booking | Конверсия в запись | `app/routers/webhook/booking.py` | booking context | EVAL booking |
+| Escalation UX | Ответ человека вовремя | `app/services/escalation_service.py`, `telegram_webhook.py` | handovers | pending‑SLA trace |
+| Onboarding | Быстрый запуск клиента | `ops/sync_client.py`, `SPECS/MULTI_TENANT.md` | client_pack | smoke‑check |
+| Active Learning | Снижение эскалаций | `app/services/learning_service.py` (partial) | learned_responses | `/admin/metrics` |
 
 ---
 

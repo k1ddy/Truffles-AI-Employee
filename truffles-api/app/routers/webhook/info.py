@@ -165,6 +165,7 @@ def _build_info_intent_reply(
     include_info_bundle: bool = True,
 ) -> tuple[str | None, dict | None]:
     from app.services.demo_salon_knowledge import (
+        _build_fact_meta,
         build_info_combined_reply,
         format_reply_from_truth,
         get_demo_salon_decision,
@@ -205,11 +206,21 @@ def _build_info_intent_reply(
             include_parking=parking_signal,
             include_guest=guest_signal,
         )
+        meta = _build_fact_meta(
+            meta=meta,
+            fact_source="truth",
+            fact_intents=[intent],
+        )
         return reply, meta or None
     if intent == "location":
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=guest_signal,
+        )
+        meta = _build_fact_meta(
+            meta=meta,
+            fact_source="truth",
+            fact_intents=[intent],
         )
         return reply, meta or None
     if (
@@ -240,12 +251,21 @@ def _build_info_intent_reply(
         reply_text = decision.response
         if info_prefix:
             reply_text = f"{info_prefix} {reply_text}".strip()
+        meta = _build_fact_meta(
+            meta=meta,
+            fact_source="truth",
+            fact_intents=[intent],
+        )
         return reply_text, meta or None
     fallback = format_reply_from_truth("duration_or_price_clarify")
     if info_prefix:
         fallback = f"{info_prefix} {fallback}".strip() if fallback else info_prefix
-    meta = info_meta or None
-    return fallback, meta
+    meta = _build_fact_meta(
+        meta=info_meta,
+        fact_source="truth",
+        fact_intents=[intent],
+    )
+    return fallback, meta or None
 
 
 def _extract_truth_gate_info_intents(

@@ -1,8 +1,8 @@
 # ACTIVE LEARNING — План реализации
 
 **Дата:** 2025-12-08
-**Статус:** Готов к реализации
-**Зависимости:** Multi-tenant ✅ готов
+**Статус:** План (P2). Реализация частичная — см. `SPECS/ACTIVE_LEARNING.md`.
+**Зависимости:** Эскалация ✅; роли/идентичности — план; A4–A7 до полного обучения.
 
 ---
 
@@ -13,13 +13,12 @@
 - `prompts` — промпты по клиентам
 - RAG фильтрация по `client_slug`
 - Динамический instance_id в Send нодах
-- Онбординг скрипты (`onboard_client.py`, `sync_client.py`)
+- Онбординг: `ops/sync_client.py` (валидация/синк). `onboard_client.py` в репозитории отсутствует (GAP).
 
 ### Эскалация (базовая):
 - `needs_escalation = true` → отправка в Telegram/WhatsApp менеджеру
-- Нет трекинга решения
-- Нет сохранения ответа менеджера
-- Бот НЕ учится
+- Handover хранит статус/решение; ответ менеджера сохраняется
+- Бот учится только от owner‑ответов (частично)
 
 ### Классификатор:
 - Сейчас: LLM (GPT) определяет intent
@@ -46,7 +45,10 @@
 
 ## АРХИТЕКТУРА ACTIVE LEARNING
 
-### Таблица `escalations`:
+**Важно:** этот раздел — legacy‑план. Текущая схема и статус реализации — в
+`SPECS/ACTIVE_LEARNING.md` и `truffles-api/app/models/learned_response.py`.
+
+### Таблица `escalations` (LEGACY, не используется)
 
 ```sql
 CREATE TABLE escalations (
@@ -89,7 +91,7 @@ CREATE INDEX idx_escalations_client ON escalations(client_id);
 CREATE INDEX idx_escalations_status ON escalations(status);
 ```
 
-### Таблица `learned_responses`:
+### Таблица `learned_responses` (LEGACY, заменена текущей схемой)
 
 ```sql
 CREATE TABLE learned_responses (
@@ -139,9 +141,9 @@ Generate Response: needs_escalation = true
 ### Шаг 2: Менеджер отвечает
 
 ```
-Менеджер пишет ответ
+Менеджер пишет ответ в Telegram топик
     ↓
-Система ловит ответ (webhook от WhatsApp Business)
+Система ловит ответ (webhook от Telegram)
     ↓
 UPDATE escalations:
   - manager_response = ответ

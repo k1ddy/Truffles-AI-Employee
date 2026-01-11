@@ -207,10 +207,11 @@ truffles-api/
 |------|------------|
 | `monitor.sh` | Мониторинг сервера |
 | `health_check.py` | Проверка здоровья системы |
-| `onboard_client.py` | Онбординг нового заказчика |
+| `onboard_client.py` | План (файла нет). Реальный онбординг: `sync_client.py` + `SPECS/MULTI_TENANT.md` |
 | `update_prompt.py` | Обновление промпта через API |
 | `metrics_daily_snapshot.sql` | Снимок дневных метрик (SLA/LLM/эскалации) |
 | `knowledge_backlog_top.sql` | Топ‑вопросы knowledge backlog (последние 7 дней) |
+| `sync_client.py` | Синк/валидация client_pack в Qdrant |
 | `migrations/` | SQL миграции |
 | `templates/` | Шаблоны (промпты, FAQ) |
 | `LESSONS_LEARNED.md` | Уроки из отладки |
@@ -339,7 +340,8 @@ ops/*.sh              # Кроме monitor.sh — одноразовое
 **Сохранить из ops/:**
 - `monitor.sh`
 - `health_check.py`
-- `onboard_client.py`
+- `sync_client.py`
+- `manual_sync_demo.py`
 - `migrations/`
 - `templates/`
 - `LESSONS_LEARNED.md`

@@ -773,6 +773,11 @@ EXPECTED_REPLY_INTENT_CHOICE = "intent_choice"
 CLARIFY_MAX_ATTEMPTS = 2
 REFUSAL_TTL_MESSAGES = 10
 SUMMARY_MESSAGE_THRESHOLD = 12
+FACT_GUARD_ENABLED = False
+FACT_GUARD_INTENT = "fact_guard"
+FACT_GUARD_SKIP_INTENTS = {"service_clarify", "duration_or_price_clarify"}
+FACT_GUARD_MAX_ATTEMPTS = 1
+MSG_FACT_GUARD_CLARIFY = "Подскажите, пожалуйста, что именно вас интересует?"
 
 ROUTING_MATRIX = {
     ConversationState.BOT_ACTIVE.value: {
@@ -2162,6 +2167,8 @@ async def _handle_webhook_payload(
 
     def _extract_fact_payload(decision_meta: dict[str, Any]) -> dict[str, Any] | None:
         fact_keys = (
+            "fact_source",
+            "fact_intents",
             "info_sections",
             "info_combined",
             "question_type",
@@ -2169,6 +2176,8 @@ async def _handle_webhook_payload(
             "service_query",
             "service_query_source",
             "service_query_score",
+            "price_item",
+            "duration_item",
             "info_signals",
             "anchor_intents",
             "anchor_hits",
@@ -2176,6 +2185,109 @@ async def _handle_webhook_payload(
         )
         facts = {key: decision_meta.get(key) for key in fact_keys if key in decision_meta}
         return facts or None
+
+    def _maybe_apply_fact_guard(
+        *,
+        decision_meta: dict[str, Any] | None,
+        intent: str | None,
+        source: str,
+        allow_handover: bool,
+    ) -> WebhookResponse | None:
+        if not FACT_GUARD_ENABLED:
+            return None
+        if not isinstance(decision_meta, dict):
+            return None
+        if intent in FACT_GUARD_SKIP_INTENTS:
+            return None
+        fact_source = decision_meta.get("fact_source")
+        if not isinstance(fact_source, str) or not fact_source:
+            return None
+        fact_payload = {
+            "info_sections": decision_meta.get("info_sections"),
+            "service_query": decision_meta.get("service_query"),
+            "price_item": decision_meta.get("price_item"),
+            "duration_item": decision_meta.get("duration_item"),
+        }
+        has_facts = any(
+            (
+                isinstance(value, str) and value.strip()
+            )
+            or (
+                isinstance(value, list) and value
+            )
+            or (
+                isinstance(value, dict) and value
+            )
+            for value in fact_payload.values()
+        )
+        if has_facts:
+            return None
+        context = _get_conversation_context(conversation)
+        context_manager = _get_context_manager(context)
+        clarify_count, _ = _get_clarify_attempt_state(context_manager, FACT_GUARD_INTENT)
+        if clarify_count >= FACT_GUARD_MAX_ATTEMPTS:
+            _record_context_manager_decision(
+                conversation,
+                saved_message,
+                decision="clarify_limit",
+                updates={
+                    "clarify_attempt": {"intent": FACT_GUARD_INTENT, "count": clarify_count},
+                    "clarify_reason": "fact_guard",
+                    "clarify_limit": True,
+                },
+            )
+            return _handle_clarify_limit_escalation(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message_text=message_text,
+                saved_message=saved_message,
+                source="fact_guard",
+                allow_handover=allow_handover,
+                send_response=_send_response,
+                finalize_response=_finalize_bot_response,
+            )
+        _register_clarify_attempt(
+            conversation=conversation,
+            saved_message=saved_message,
+            intent=FACT_GUARD_INTENT,
+            now=now,
+            reason="fact_guard",
+        )
+        _reset_low_confidence_retry(conversation)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "fact_guard",
+                "decision": "clarify",
+                "state": conversation.state,
+                "fact_source": fact_source,
+                "source": source,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="reply",
+            intent="fact_guard",
+            source="fact_guard",
+            fast_intent=False,
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "clarify_reason": "fact_guard",
+                    "fact_guard": True,
+                },
+            )
+        bot_response, sent = _send_and_save(MSG_FACT_GUARD_CLARIFY)
+        result_message = "Fact guard clarify sent" if sent else "Fact guard clarify failed"
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
 
     def _record_contract_traces(*, action_type: str | None = None) -> None:
         decision_meta: dict[str, Any] = {}
@@ -2192,11 +2304,46 @@ async def _handle_webhook_payload(
         if not action_value:
             action_value = "reply"
 
+        fact_source = decision_meta.get("fact_source")
         source = decision_meta.get("source")
-        sources = [source] if isinstance(source, str) and source else None
+        if isinstance(fact_source, str) and fact_source:
+            sources = [fact_source]
+        elif isinstance(source, str) and source:
+            sources = [source]
+        else:
+            sources = None
         policy_gate = decision_meta.get("policy_gate")
         policy_flags = [policy_gate] if isinstance(policy_gate, str) and policy_gate else None
         facts = _extract_fact_payload(decision_meta)
+
+        fact_payload = {
+            "info_sections": decision_meta.get("info_sections"),
+            "service_query": decision_meta.get("service_query"),
+            "price_item": decision_meta.get("price_item"),
+            "duration_item": decision_meta.get("duration_item"),
+        }
+        has_fact_payload = any(
+            (
+                isinstance(value, str) and value.strip()
+            )
+            or (
+                isinstance(value, list) and value
+            )
+            or (
+                isinstance(value, dict) and value
+            )
+            for value in fact_payload.values()
+        )
+        if facts or (isinstance(fact_source, str) and fact_source):
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "fact_resolver",
+                    "decision": "resolved" if has_fact_payload else "missing",
+                    "fact_source": fact_source if isinstance(fact_source, str) else None,
+                    "facts": facts,
+                },
+            )
 
         fact_contract, fact_error = build_fact_contract(
             facts=facts,
@@ -5019,6 +5166,15 @@ async def _handle_webhook_payload(
         )
         info_reply = info_reply.strip() if isinstance(info_reply, str) else None
         if info_reply:
+            guard_response = _maybe_apply_fact_guard(
+                decision_meta=info_meta if isinstance(info_meta, dict) else None,
+                intent=intent_queue_choice,
+                source="intent_queue",
+                allow_handover=routing.get("allow_handover_create", False),
+            )
+            if guard_response:
+                db.commit()
+                return guard_response
             remaining_queue = (
                 pending_intent_queue
                 if pending_intent_queue is not None
@@ -5258,6 +5414,15 @@ async def _handle_webhook_payload(
                     info_meta.update(meta)
                     service_meta = dict(info_meta)
             if replies:
+                guard_response = _maybe_apply_fact_guard(
+                    decision_meta=info_meta if info_meta else None,
+                    intent="multi_intent_info",
+                    source="intent_queue",
+                    allow_handover=routing.get("allow_handover_create", False),
+                )
+                if guard_response:
+                    db.commit()
+                    return guard_response
                 answered_set = set(answered_intents)
                 remaining_queue = [
                     intent for intent in combined_intents if intent not in answered_set
@@ -5737,6 +5902,15 @@ async def _handle_webhook_payload(
             if info_decision and info_decision.action == "reply":
                 info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}
                 info_meta = dict(info_meta)
+                guard_response = _maybe_apply_fact_guard(
+                    decision_meta=info_meta,
+                    intent=info_decision.intent,
+                    source=info_source or "booking_interrupt",
+                    allow_handover=routing.get("allow_handover_create", False),
+                )
+                if guard_response:
+                    db.commit()
+                    return guard_response
                 booking_time_service_interrupt = bool(
                     booking_time_service_candidate and _is_booking_time_service_decision(info_decision)
                 )
@@ -6348,6 +6522,15 @@ async def _handle_webhook_payload(
                 )
                 if multi_result:
                     multi_reply, multi_meta = multi_result
+                    guard_response = _maybe_apply_fact_guard(
+                        decision_meta=multi_meta if isinstance(multi_meta, dict) else None,
+                        intent="multi_truth",
+                        source="multi_truth",
+                        allow_handover=routing.get("allow_handover_create", False),
+                    )
+                    if guard_response:
+                        db.commit()
+                        return guard_response
                     bot_response = multi_reply
                     bot_response = _maybe_append_booking_cta(
                         bot_response,
@@ -6651,6 +6834,15 @@ async def _handle_webhook_payload(
             if force_hours_followup:
                 info_meta_combined["question_type"] = "hours"
             if replies:
+                guard_response = _maybe_apply_fact_guard(
+                    decision_meta=info_meta_combined if info_meta_combined else None,
+                    intent="info_bundle",
+                    source="class_router",
+                    allow_handover=routing.get("allow_handover_create", False),
+                )
+                if guard_response:
+                    db.commit()
+                    return guard_response
                 bot_response = "\n\n".join(replies)
                 bot_response = _maybe_append_booking_cta(
                     bot_response,
@@ -6724,6 +6916,15 @@ async def _handle_webhook_payload(
             if base_bundle_meta:
                 info_class_intents_for_reply.add("guest_policy")
             if isinstance(base_bundle_reply, str) and base_bundle_reply.strip():
+                guard_response = _maybe_apply_fact_guard(
+                    decision_meta=base_bundle_meta if isinstance(base_bundle_meta, dict) else None,
+                    intent="guest_policy",
+                    source="class_router",
+                    allow_handover=routing.get("allow_handover_create", False),
+                )
+                if guard_response:
+                    db.commit()
+                    return guard_response
                 bot_response = base_bundle_reply.strip()
                 bot_response = _maybe_append_booking_cta(
                     bot_response,
@@ -6800,6 +7001,16 @@ async def _handle_webhook_payload(
             else None
         )
         if service_decision:
+            if service_decision.action == "reply":
+                guard_response = _maybe_apply_fact_guard(
+                    decision_meta=service_decision.meta if isinstance(service_decision.meta, dict) else None,
+                    intent=service_decision.intent,
+                    source="service_matcher",
+                    allow_handover=routing.get("allow_handover_create", False),
+                )
+                if guard_response:
+                    db.commit()
+                    return guard_response
             bot_response = service_decision.response
             bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
             if (
@@ -7145,6 +7356,16 @@ async def _handle_webhook_payload(
                     reason=decision.intent,
                     now=now,
                 )
+            if decision.action == "reply":
+                guard_response = _maybe_apply_fact_guard(
+                    decision_meta=decision.meta if isinstance(decision.meta, dict) else None,
+                    intent=decision.intent,
+                    source="truth_gate",
+                    allow_handover=routing.get("allow_handover_create", False),
+                )
+                if guard_response:
+                    db.commit()
+                    return guard_response
             bot_response = decision.response
             if consult_return_pending:
                 bot_response = _apply_consult_return(
@@ -7481,6 +7702,15 @@ async def _handle_webhook_payload(
             info_meta_combined: dict[str, Any] = {}
             if isinstance(base_bundle_meta, dict) and base_bundle_meta:
                 info_meta_combined.update(base_bundle_meta)
+            guard_response = _maybe_apply_fact_guard(
+                decision_meta=info_meta_combined if info_meta_combined else None,
+                intent="info_bundle",
+                source="class_router",
+                allow_handover=routing.get("allow_handover_create", False),
+            )
+            if guard_response:
+                db.commit()
+                return guard_response
             bot_response = base_bundle_reply.strip()
             bot_response = _maybe_append_booking_cta(
                 bot_response,

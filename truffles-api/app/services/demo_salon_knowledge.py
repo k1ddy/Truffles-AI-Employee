@@ -59,6 +59,125 @@ class SemanticQuestionType:
     second_score: float
 
 
+FACT_META_KEYS = (
+    "fact_source",
+    "fact_intents",
+    "service_query",
+    "service_query_source",
+    "price_item",
+    "duration_item",
+    "info_sections",
+)
+
+INFO_SECTION_INTENT_MAP = {
+    "address": "location",
+    "hours": "hours",
+    "parking": "parking",
+    "guest_policy": "guest_policy",
+}
+
+
+def _normalize_fact_intents(
+    fact_intents: list[str] | None,
+    info_sections: list[str] | None,
+) -> list[str] | None:
+    intents: list[str] = []
+    if isinstance(fact_intents, list):
+        for item in fact_intents:
+            if not isinstance(item, str):
+                continue
+            cleaned = item.strip()
+            if cleaned and cleaned not in intents:
+                intents.append(cleaned)
+    if isinstance(info_sections, list):
+        for section in info_sections:
+            if not isinstance(section, str):
+                continue
+            key = section.strip().casefold()
+            if not key:
+                continue
+            intent = INFO_SECTION_INTENT_MAP.get(key, key)
+            if intent and intent not in intents:
+                intents.append(intent)
+    return intents or None
+
+
+def _build_fact_meta(
+    *,
+    fact_source: str,
+    fact_intents: list[str] | None = None,
+    meta: dict[str, Any] | None = None,
+    service_query_meta: dict[str, Any] | None = None,
+    info_sections: list[str] | None = None,
+    price_item: dict[str, Any] | None = None,
+    duration_item: str | None = None,
+) -> dict[str, Any]:
+    combined: dict[str, Any] = {}
+    if isinstance(meta, dict):
+        combined.update(meta)
+    existing_intents = (
+        combined.get("fact_intents") if isinstance(combined.get("fact_intents"), list) else []
+    )
+    merged_intents: list[str] = []
+    if isinstance(existing_intents, list):
+        merged_intents.extend(existing_intents)
+    if isinstance(fact_intents, list):
+        merged_intents.extend(fact_intents)
+    if isinstance(service_query_meta, dict):
+        for key in ("service_query", "service_query_source", "service_query_score"):
+            if key in service_query_meta and combined.get(key) is None:
+                combined[key] = service_query_meta.get(key)
+    if info_sections is None and isinstance(combined.get("info_sections"), list):
+        info_sections = combined.get("info_sections")
+    if info_sections is not None:
+        combined["info_sections"] = [item for item in info_sections if isinstance(item, str)]
+    combined["fact_source"] = fact_source
+    combined["fact_intents"] = _normalize_fact_intents(
+        merged_intents,
+        combined.get("info_sections") if isinstance(combined.get("info_sections"), list) else None,
+    )
+    if price_item is not None:
+        combined["price_item"] = price_item
+    if duration_item is not None:
+        combined["duration_item"] = duration_item
+    for key in FACT_META_KEYS:
+        if key not in combined:
+            combined[key] = None
+    return combined
+
+
+def _build_truth_decision(
+    *,
+    response: str,
+    intent: str,
+    meta: dict[str, Any] | None = None,
+    service_query_meta: dict[str, Any] | None = None,
+    price_item: dict[str, Any] | None = None,
+    duration_item: str | None = None,
+) -> DemoSalonDecision:
+    fact_meta = _build_fact_meta(
+        meta=meta,
+        fact_source="truth",
+        fact_intents=[intent],
+        service_query_meta=service_query_meta,
+        price_item=price_item,
+        duration_item=duration_item,
+    )
+    return DemoSalonDecision(
+        action="reply",
+        response=response,
+        intent=intent,
+        meta=fact_meta,
+    )
+
+
+def _price_item_payload(price_item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(price_item, dict):
+        return None
+    item = price_item.get("item")
+    return item if isinstance(item, dict) else None
+
+
 def _normalize_text(text: str) -> str:
     if not text:
         return ""
@@ -281,7 +400,11 @@ def build_info_combined_reply(
     if not parts:
         return None, {}
     reply = " ".join(parts)
-    meta = {"info_combined": True, "info_sections": sections}
+    meta = _build_fact_meta(
+        meta={"info_combined": True, "info_sections": sections},
+        fact_source="truth",
+        info_sections=sections,
+    )
     return reply, meta
 
 
@@ -1453,6 +1576,7 @@ def compose_multi_truth_reply(
         return None
     replies: list[str] = []
     seen: set[str] = set()
+    resolved_intents: list[str] = []
     truth = load_yaml_truth()
     intent_kinds, service_query = _extract_intent_decomp(intent_decomp)
     intent_kinds = {kind for kind in intent_kinds if kind in {"hours", "pricing", "duration"}}
@@ -1541,6 +1665,10 @@ def compose_multi_truth_reply(
         if kinds:
             info_detected = True
 
+        def _mark_intent(intent_name: str) -> None:
+            if intent_name not in resolved_intents:
+                resolved_intents.append(intent_name)
+
         def _add_reply(text: str | None) -> None:
             if not text:
                 return
@@ -1552,6 +1680,7 @@ def compose_multi_truth_reply(
 
         if "hours" in kinds:
             _add_reply(format_reply_from_truth("hours"))
+            _mark_intent("hours")
         if len(replies) >= 2:
             break
         if "pricing" in kinds:
@@ -1567,6 +1696,7 @@ def compose_multi_truth_reply(
                     _add_reply(fallback_reply)
                 else:
                     _add_reply(format_reply_from_truth("service_clarify"))
+            _mark_intent("pricing")
         if len(replies) >= 2:
             break
         if "duration" in kinds:
@@ -1580,6 +1710,7 @@ def compose_multi_truth_reply(
                         service_label=service_query,
                     )
                 )
+            _mark_intent("duration")
         if len(replies) >= 2:
             break
         if (
@@ -1598,7 +1729,19 @@ def compose_multi_truth_reply(
         return None
     reply = "\n\n".join(replies[:2])
     if return_meta:
-        return reply, service_query_meta
+        info_sections = [
+            intent
+            for intent in resolved_intents
+            if intent in {"address", "hours", "parking", "guest_policy"}
+        ]
+        meta = _build_fact_meta(
+            meta=service_query_meta,
+            fact_source="multi_truth",
+            fact_intents=resolved_intents,
+            service_query_meta=service_query_meta,
+            info_sections=info_sections,
+        )
+        return reply, meta
     return reply
 
 
@@ -2111,20 +2254,32 @@ def get_demo_salon_service_decision(
     if service:
         reply = _format_service_reply(service, truth)
         if reply:
+            meta = _build_fact_meta(
+                meta=service_query_meta,
+                fact_source="service_matcher",
+                fact_intents=["service_match"],
+                service_query_meta=service_query_meta,
+            )
             return DemoSalonDecision(
                 action="reply",
                 response=reply,
                 intent="service_match",
-                meta=service_query_meta,
+                meta=meta,
             )
 
     reply = _format_service_not_found_reply()
     if reply:
+        meta = _build_fact_meta(
+            meta=service_query_meta,
+            fact_source="service_matcher",
+            fact_intents=["service_not_found"],
+            service_query_meta=service_query_meta,
+        )
         return DemoSalonDecision(
             action="reply",
             response=reply,
             intent="service_not_found",
-            meta=service_query_meta,
+            meta=meta,
         )
     return None
 
@@ -2145,10 +2300,11 @@ def get_demo_salon_decision(
     price_signal = _has_price_signal(normalized, message)
     duration_signal = _has_duration_signal(normalized, message)
     price_item = _find_best_price_item(message)
+    price_item_payload = _price_item_payload(price_item)
     if "отмен" in normalized and "за сколько" in normalized:
         reply = format_reply_from_truth("cancel_policy")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="cancel_policy")
+            return _build_truth_decision(response=reply, intent="cancel_policy")
 
     policy_intent = _detect_policy_intent(normalized, phrase_intents)
 
@@ -2218,27 +2374,27 @@ def get_demo_salon_decision(
     if "скидки сумм" in normalized or "скидк" in normalized and "сумм" in normalized:
         reply = format_reply_from_truth("promotions_rules")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="promotions_rules")
+            return _build_truth_decision(response=reply, intent="promotions_rules")
 
     promotion_intent = _detect_promotion_intent(normalized)
     if promotion_intent:
         reply = format_reply_from_truth("promotions", {"promotion_intent": promotion_intent})
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="promotions")
+            return _build_truth_decision(response=reply, intent="promotions")
 
     if policy_intent == "policy_discount":
         reply = _format_promotions(load_yaml_truth())
-        return DemoSalonDecision(action="reply", response=reply, intent="discount_haggle")
+        return _build_truth_decision(response=reply, intent="discount_haggle")
 
     if "почему" in normalized and "от" in normalized and ("цена" in normalized or "стоим" in normalized):
         reply = format_reply_from_truth("why_price_from")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="why_price_from")
+            return _build_truth_decision(response=reply, intent="why_price_from")
 
     if "дороже" in normalized or ("дорог" in normalized and "скид" not in normalized):
         reply = format_reply_from_truth("objection_price")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="objection_price")
+            return _build_truth_decision(response=reply, intent="objection_price")
 
     if location_signal and not guest_signal and (not price_signal or (price_signal and not price_item)):
         reply, meta = build_info_combined_reply(
@@ -2252,22 +2408,17 @@ def get_demo_salon_decision(
                 reply = f"{reply} {clarify}".strip() if reply else clarify
             intent_name = "duration_or_price_clarify"
         if reply:
-            return DemoSalonDecision(
-                action="reply",
-                response=reply,
-                intent=intent_name,
-                meta=meta,
-            )
+            return _build_truth_decision(response=reply, intent=intent_name, meta=meta)
 
     if "остановк" in normalized or "как пройти" in normalized or "как добрат" in normalized or "как доехать" in normalized:
         reply = format_reply_from_truth("location_directions")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="location_directions")
+            return _build_truth_decision(response=reply, intent="location_directions")
 
     if "вывеск" in normalized:
         reply = format_reply_from_truth("location_signage")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="location_signage")
+            return _build_truth_decision(response=reply, intent="location_signage")
 
     if parking_signal:
         reply, meta = build_info_combined_reply(
@@ -2275,17 +2426,12 @@ def get_demo_salon_decision(
             include_guest=guest_signal,
         )
         if reply:
-            return DemoSalonDecision(
-                action="reply",
-                response=reply,
-                intent="parking",
-                meta=meta,
-            )
+            return _build_truth_decision(response=reply, intent="parking", meta=meta)
 
     if "последняя запись" in normalized or "до какого времени можно запис" in normalized:
         reply = format_reply_from_truth("last_appointment")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="last_appointment")
+            return _build_truth_decision(response=reply, intent="last_appointment")
 
     multi_result = compose_multi_truth_reply(
         message,
@@ -2317,7 +2463,7 @@ def get_demo_salon_decision(
             )
         reply = format_reply_from_truth("lateness_ok")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="lateness_ok")
+            return _build_truth_decision(response=reply, intent="lateness_ok")
 
     hours_like = _looks_like_hours_question(normalized) or _contains_any(
         normalized,
@@ -2329,12 +2475,7 @@ def get_demo_salon_decision(
             include_guest=guest_signal,
         )
         if reply:
-            return DemoSalonDecision(
-                action="reply",
-                response=reply,
-                intent="hours",
-                meta=meta,
-            )
+            return _build_truth_decision(response=reply, intent="hours", meta=meta)
 
     if "services_overview" in phrase_intents or _contains_any(
         normalized,
@@ -2350,7 +2491,7 @@ def get_demo_salon_decision(
     ):
         reply = format_reply_from_truth("services_overview")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="services_overview")
+            return _build_truth_decision(response=reply, intent="services_overview")
 
     if "aftercare_gel_lac" in phrase_intents or (
         "гель лак" in normalized
@@ -2358,14 +2499,14 @@ def get_demo_salon_decision(
     ):
         reply = format_reply_from_truth("aftercare_gel_lac")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="aftercare_gel_lac")
+            return _build_truth_decision(response=reply, intent="aftercare_gel_lac")
 
     if "prep_brows_lashes" in phrase_intents or (
         "подготов" in normalized and _contains_any(normalized, ["бров", "ресниц"])
     ):
         reply = format_reply_from_truth("prep_brows_lashes")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="prep_brows_lashes")
+            return _build_truth_decision(response=reply, intent="prep_brows_lashes")
 
     if "procedure_combo" in phrase_intents or (
         _contains_any(normalized, ["совмещ", "в один день"]) and _contains_any(normalized, ["чистк", "пилинг"])
@@ -2377,17 +2518,17 @@ def get_demo_salon_decision(
     if "style_reference" in phrase_intents:
         reply = format_reply_from_truth("style_reference")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="style_reference")
+            return _build_truth_decision(response=reply, intent="style_reference")
 
     if "system_error" in phrase_intents or "ошибка вызова вебхука" in normalized:
         reply = format_reply_from_truth("system_error")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="system_error")
+            return _build_truth_decision(response=reply, intent="system_error")
 
     if "service_clarify" in phrase_intents or ("классическ" in normalized and "интерес" in normalized):
         reply = format_reply_from_truth("service_clarify")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="service_clarify")
+            return _build_truth_decision(response=reply, intent="service_clarify")
 
     if guest_signal:
         reply, meta = build_info_combined_reply(
@@ -2395,17 +2536,12 @@ def get_demo_salon_decision(
             include_guest=True,
         )
         if reply:
-            return DemoSalonDecision(
-                action="reply",
-                response=reply,
-                intent="guest_policy",
-                meta=meta,
-            )
+            return _build_truth_decision(response=reply, intent="guest_policy", meta=meta)
 
     if _contains_any(normalized, ["собак", "животн", "питом"]):
         reply = format_reply_from_truth("guest_animals")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="guest_policy")
+            return _build_truth_decision(response=reply, intent="guest_policy")
 
     question_type = semantic_question_type(message)
     question_meta: dict[str, Any] | None = None
@@ -2432,11 +2568,13 @@ def get_demo_salon_decision(
             message=message,
             service_label=service_query_meta.get("service_query"),
         )
-        return DemoSalonDecision(
-            action="reply",
+        duration_item = service_query_meta.get("service_query")
+        meta = {**duration_meta, **service_query_meta} if duration_meta else service_query_meta
+        return _build_truth_decision(
             response=reply,
             intent="service_duration",
-            meta={**duration_meta, **service_query_meta} if duration_meta else service_query_meta,
+            meta=meta,
+            duration_item=duration_item if isinstance(duration_item, str) else None,
         )
 
     if not price_item and isinstance(intent_decomp, dict):
@@ -2449,6 +2587,7 @@ def get_demo_salon_decision(
         service_query = price_service_meta.get("service_query") if isinstance(price_service_meta, dict) else None
         if isinstance(service_query, str) and service_query.strip():
             price_item = _find_best_price_item(service_query)
+            price_item_payload = _price_item_payload(price_item)
     if question_type is None and price_signal and not price_item:
         if not location_signal and not parking_signal and not guest_signal:
             service_query_meta = _resolve_service_query_meta(
@@ -2464,24 +2603,25 @@ def get_demo_salon_decision(
                     truth = load_yaml_truth()
                     service_reply = _format_service_reply(service, truth)
                     if service_reply:
-                        return DemoSalonDecision(
-                            action="reply",
+                        return _build_truth_decision(
                             response=service_reply,
                             intent="price_query",
                             meta=service_query_meta,
+                            price_item=price_item_payload,
                         )
                 price_item = _find_best_price_item(service_query_value)
+                price_item_payload = _price_item_payload(price_item)
                 if price_item:
                     reply = format_reply_from_truth(
                         "price_query",
                         {"price_item": price_item["item"]},
                     )
                     if reply:
-                        return DemoSalonDecision(
-                            action="reply",
+                        return _build_truth_decision(
                             response=reply,
                             intent="price_query",
                             meta=service_query_meta,
+                            price_item=price_item_payload,
                         )
         info_reply: str | None = None
         info_meta: dict[str, Any] = {}
@@ -2493,13 +2633,12 @@ def get_demo_salon_decision(
         if _is_offtopic_message(normalized):
             reply = format_reply_from_truth("off_topic")
             if reply:
-                return DemoSalonDecision(action="reply", response=reply, intent="off_topic")
+                return _build_truth_decision(response=reply, intent="off_topic")
         clarify_reply = format_reply_from_truth("duration_or_price_clarify")
         reply_parts = [part for part in [info_reply, clarify_reply] if part]
         reply_text = " ".join(reply_parts) if reply_parts else clarify_reply
         if reply_text:
-            return DemoSalonDecision(
-                action="reply",
+            return _build_truth_decision(
                 response=reply_text,
                 intent="duration_or_price_clarify",
                 meta=info_meta or None,
@@ -2519,52 +2658,52 @@ def get_demo_salon_decision(
             reply = format_reply_from_truth("price_manicure")
             if reply:
                 meta = {**question_meta_for_price, **service_query_meta} if question_meta_for_price else service_query_meta
-                return DemoSalonDecision(
-                    action="reply",
+                return _build_truth_decision(
                     response=reply,
                     intent="price_manicure",
                     meta=meta,
+                    price_item=price_item_payload,
                 )
 
     if _contains_any(normalized, ["стерилиз", "инструмент", "обрабатываете", "дез", "сухожар"]):
         reply = format_reply_from_truth("hygiene")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="hygiene")
+            return _build_truth_decision(response=reply, intent="hygiene")
 
     if _contains_any(normalized, ["сухожар"]):
         reply = format_reply_from_truth("hygiene_dry_heat")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="hygiene")
+            return _build_truth_decision(response=reply, intent="hygiene")
 
     if _contains_any(normalized, ["пилк", "однораз"]):
         reply = format_reply_from_truth("hygiene_disposables")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="hygiene")
+            return _build_truth_decision(response=reply, intent="hygiene")
 
     if _contains_any(normalized, ["какой космет", "материал", "бренд", "марки"]):
         reply = format_reply_from_truth("brands")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="brands")
+            return _build_truth_decision(response=reply, intent="brands")
 
     if _contains_any(normalized, ["wifi", "вайфай", "вай фай", "wi fi"]):
         reply = format_reply_from_truth("amenities_wifi")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="amenities")
+            return _build_truth_decision(response=reply, intent="amenities")
 
     if _contains_any(normalized, ["кофе", "чай"]):
         reply = format_reply_from_truth("amenities_drinks")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="amenities")
+            return _build_truth_decision(response=reply, intent="amenities")
 
     if _contains_any(normalized, ["туалет", "санузел"]):
         reply = format_reply_from_truth("amenities_toilet")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="amenities")
+            return _build_truth_decision(response=reply, intent="amenities")
 
     if "сертификат" in normalized:
         reply = format_reply_from_truth("gift_certificate")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="gift_certificate")
+            return _build_truth_decision(response=reply, intent="gift_certificate")
 
     if (
         "order_booking" in phrase_intents
@@ -2572,7 +2711,7 @@ def get_demo_salon_decision(
     ):
         reply = format_reply_from_truth("booking_intake")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="booking_intake")
+            return _build_truth_decision(response=reply, intent="booking_intake")
 
     service_decision = get_demo_salon_service_decision(
         message,
@@ -2585,7 +2724,7 @@ def get_demo_salon_decision(
     if _is_offtopic_message(normalized):
         reply = format_reply_from_truth("off_topic")
         if reply:
-            return DemoSalonDecision(action="reply", response=reply, intent="off_topic")
+            return _build_truth_decision(response=reply, intent="off_topic")
 
     if price_item or price_signal:
         service_query_meta = _resolve_service_query_meta(
@@ -2598,8 +2737,7 @@ def get_demo_salon_decision(
         if not service_query_value:
             reply = format_reply_from_truth("service_clarify")
             if reply:
-                return DemoSalonDecision(
-                    action="reply",
+                return _build_truth_decision(
                     response=reply,
                     intent="service_clarify",
                     meta=service_query_meta,
@@ -2615,20 +2753,20 @@ def get_demo_salon_decision(
                         if question_meta_for_price
                         else service_query_meta
                     )
-                    return DemoSalonDecision(
-                        action="reply",
+                    return _build_truth_decision(
                         response=service_reply,
                         intent="price_query",
                         meta=meta,
+                        price_item=price_item_payload,
                     )
         reply = format_reply_from_truth("price_query", {"price_item": price_item["item"]} if price_item else {})
         if reply:
             meta = {**question_meta_for_price, **service_query_meta} if question_meta_for_price else service_query_meta
-            return DemoSalonDecision(
-                action="reply",
+            return _build_truth_decision(
                 response=reply,
                 intent="price_query",
                 meta=meta,
+                price_item=price_item_payload,
             )
 
     return None

@@ -170,6 +170,27 @@
 - Boundary: нет отдельного CI‑кейса на carryover follow‑up.
 - Fix plan: добавить eval‑кейс в core/long.
 
+---
+
+## G) Онбординг и обучение
+
+### Быстрый онбординг
+- Status: PARTIAL
+- Evidence: `SPECS/MULTI_TENANT.md`, `ops/sync_client.py`, `STRUCTURE.md`
+- Факт: онбординг сейчас ручной (SQL + pack + sync); `onboard_client.py` отсутствует в репозитории.
+- Boundary: нет self‑serve/авто‑конвейера.
+- Fix plan: автоматизация после A4–A7 (см. `STRATEGY/TECH_ROADMAP.md`), иначе риск масштабирования хаоса.
+- Go‑to‑market impact: не обещать “быстрый self‑serve”, только ассистированный онбординг.
+
+### Auto‑learning
+- Status: PARTIAL
+- Evidence: `truffles-api/app/services/manager_message_service.py`, `truffles-api/app/services/learning_service.py`,
+  `truffles-api/app/models/learned_response.py`, `truffles-api/app/routers/webhook/_legacy.py`
+- Факт: owner‑ответы могут автоматически попадать в Qdrant; очередь learned_responses и модерация не wired.
+- Boundary: автообучение не полное, нет гарантии “становится умнее” без участия владельца.
+- Fix plan: очередь learned_responses + модерация (P2), см. `SPECS/ACTIVE_LEARNING.md`.
+- Go‑to‑market impact: обещаем только owner‑approved learning.
+
 ## Phase‑0 Definition of Done (перед первым платным клиентом)
 - LAW‑темы всегда эскалируются (тесты + live‑check).
 - Truth‑first по топ‑вопросам (часы, адрес, услуги, цены, запись).
