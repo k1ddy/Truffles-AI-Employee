@@ -2150,6 +2150,7 @@ async def _handle_webhook_payload(
     now = datetime.now(timezone.utc)
     policy_handler = _get_policy_handler(client)
     policy_type = policy_handler.get("policy_type") if policy_handler else None
+    policy_pack = policy_handler.get("policy_pack") if policy_handler else None
     quiet_hours_notice: str | None = None
     if conversation.state == ConversationState.BOT_ACTIVE.value and policy_type == "demo_salon":
         quiet_hours_notice = build_quiet_hours_notice(now_utc=now)
@@ -2599,7 +2600,11 @@ async def _handle_webhook_payload(
             and last_question_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
             and _is_short_reply(message_text)
             and not _looks_like_info_query(message_text)
-            and not _looks_like_policy_topic(message_text)
+            and not _looks_like_policy_topic(
+                message_text,
+                policy_type=policy_type,
+                policy_pack=policy_pack,
+            )
         ):
             expected_reply_type = last_question_type
             memory_expected_reply_type = last_question_type
@@ -4507,13 +4512,33 @@ async def _handle_webhook_payload(
         decision = escalation_gate(booking_messages) if escalation_gate else None
         if decision and decision.intent == "complaint":
             normalized_text = _normalize_text(message_text)
-            complaint_signal = bool(
-                normalized_text and _contains_any(normalized_text, COMPLAINT_EXPLICIT_KEYWORDS)
+            complaint_policy = policy_pack.get("complaint") if isinstance(policy_pack, dict) else None
+            explicit_keywords = (
+                complaint_policy.get("explicit_keywords") if isinstance(complaint_policy, dict) else None
             )
+            consult_override_keywords = (
+                complaint_policy.get("consult_override_keywords") if isinstance(complaint_policy, dict) else None
+            )
+            allow_keyword_fallback = (
+                bool(policy_pack.get("allow_keyword_fallback")) if isinstance(policy_pack, dict) else False
+            )
+            if not isinstance(explicit_keywords, list):
+                explicit_keywords = []
+            if not isinstance(consult_override_keywords, list):
+                consult_override_keywords = []
+            explicit_keywords = [str(item).strip() for item in explicit_keywords if str(item).strip()]
+            consult_override_keywords = [
+                str(item).strip() for item in consult_override_keywords if str(item).strip()
+            ]
+            if not explicit_keywords and allow_keyword_fallback:
+                explicit_keywords = COMPLAINT_EXPLICIT_KEYWORDS
+            if not consult_override_keywords and allow_keyword_fallback:
+                consult_override_keywords = COMPLAINT_CONSULT_OVERRIDE_KEYWORDS
+            complaint_signal = bool(normalized_text and _contains_any(normalized_text, explicit_keywords))
             consult_override = bool(
                 (consult_intent or current_goal == "consult")
                 and normalized_text
-                and _contains_any(normalized_text, COMPLAINT_CONSULT_OVERRIDE_KEYWORDS)
+                and _contains_any(normalized_text, consult_override_keywords)
             )
             if saved_message:
                 _update_message_decision_metadata(
@@ -4577,7 +4602,13 @@ async def _handle_webhook_payload(
                     result_message = "Policy escalation skipped (already pending)"
 
             router_skip_reason = (
-                "law_gate" if _is_hard_law_intent(decision.intent) else "policy_gate"
+                "law_gate"
+                if _is_hard_law_intent(
+                    decision.intent,
+                    policy_type=policy_type,
+                    policy_pack=policy_pack,
+                )
+                else "policy_gate"
             )
             router_gate_meta = _set_router_observability(
                 saved_message,
@@ -4592,6 +4623,13 @@ async def _handle_webhook_payload(
                 "booking_wants_flow": booking_wants_flow,
                 "policy_type": policy_type,
             }
+            if isinstance(decision.meta, dict):
+                policy_gate = decision.meta.get("policy_gate")
+                risk_level = decision.meta.get("risk_level")
+                if isinstance(policy_gate, str) and policy_gate:
+                    trace_payload["policy_gate"] = policy_gate
+                if isinstance(risk_level, str) and risk_level:
+                    trace_payload["risk_level"] = risk_level
             trace_payload.update(router_gate_meta)
             _record_decision_trace(conversation, trace_payload)
             _record_message_decision_meta(
@@ -4945,7 +4983,11 @@ async def _handle_webhook_payload(
         raw_class = router_output.get("class")
         if isinstance(raw_class, str):
             promotions_router_class = _normalize_class_name(raw_class)
-    discount_signal = _looks_like_promotions_request(message_text)
+    discount_signal = _looks_like_promotions_request(
+        message_text,
+        policy_type=policy_type,
+        policy_pack=policy_pack,
+    )
     promotions_trigger = False
     if router_used and promotions_router_class in {"promotions", "discounts"}:
         promotions_trigger = True
@@ -5087,6 +5129,10 @@ async def _handle_webhook_payload(
             "policy_gate": "discounts",
             "class_router": class_router_result,
         }
+        discounts_policy = policy_pack.get("discounts") if isinstance(policy_pack, dict) else None
+        risk_level = discounts_policy.get("risk_level") if isinstance(discounts_policy, dict) else None
+        if isinstance(risk_level, str) and risk_level:
+            trace_payload["risk_level"] = risk_level
         trace_payload.update(router_gate_meta)
         if followup_intents:
             trace_payload["followup_intents"] = followup_intents
@@ -7156,7 +7202,11 @@ async def _handle_webhook_payload(
                 llm_primary_failed = True
                 llm_primary_reason = "bot_inactive"
             elif response_text and confidence != "low_confidence":
-                blocked_topics = _detect_llm_guard_topics(response_text)
+                blocked_topics = _detect_llm_guard_topics(
+                    response_text,
+                    policy_type=policy_type,
+                    policy_pack=policy_pack,
+                )
                 if blocked_topics:
                     bot_response = MSG_ESCALATED
                     _reset_low_confidence_retry(conversation)

@@ -229,6 +229,13 @@ def load_yaml_truth() -> dict:
     return _load_yaml(_TRUTH_PATH)
 
 
+def load_policy_pack() -> dict:
+    truth = load_yaml_truth()
+    client_pack = truth.get("client_pack") if isinstance(truth, dict) else None
+    policy = client_pack.get("policy") if isinstance(client_pack, dict) else None
+    return policy if isinstance(policy, dict) else {}
+
+
 _TIME_PATTERN = re.compile(r"^(\d{1,2})[:.](\d{2})$")
 
 
@@ -2074,153 +2081,182 @@ def _is_self_resolve_payment(normalized: str) -> bool:
     return any(pattern.search(normalized) for pattern in _SELF_RESOLVE_PAYMENT_PATTERNS)
 
 
-def _detect_policy_intent(normalized: str, phrase_intents: set[str]) -> str | None:
-    def _contains_keyword(keyword: str) -> bool:
+def _policy_str_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    cleaned: list[str] = []
+    for item in values:
+        if not isinstance(item, str):
+            item = str(item)
+        item = item.strip()
+        if item:
+            cleaned.append(item)
+    return cleaned
+
+
+def _get_policy_section(policy_pack: dict | None, key: str) -> dict[str, Any] | None:
+    if not isinstance(policy_pack, dict):
+        return None
+    section = policy_pack.get(key)
+    return section if isinstance(section, dict) else None
+
+
+def _matches_policy_keywords(normalized: str, keywords: list[str]) -> bool:
+    for keyword in keywords:
         if not keyword:
-            return False
+            continue
         if len(keyword) <= 3:
-            return re.search(rf"\b{re.escape(keyword)}\b", normalized) is not None
-        return keyword in normalized
+            if re.search(rf"\b{re.escape(keyword)}\b", normalized):
+                return True
+            continue
+        if keyword in normalized:
+            return True
+    return False
+
+
+def _matches_policy_section(normalized: str, phrase_intents: set[str], section: dict | None) -> bool:
+    if not section:
+        return False
+    phrase_keys = _policy_str_list(section.get("phrase_intents"))
+    if phrase_keys and phrase_intents.intersection(phrase_keys):
+        return True
+    keywords = _policy_str_list(section.get("keywords"))
+    if keywords and _matches_policy_keywords(normalized, keywords):
+        return True
+    return False
+
+
+def _build_policy_meta(section_key: str, section: dict | None) -> dict[str, Any]:
+    meta: dict[str, Any] = {"policy_gate": section_key}
+    if section:
+        risk_level = section.get("risk_level")
+        if isinstance(risk_level, str) and risk_level.strip():
+            meta["risk_level"] = risk_level.strip()
+    return meta
+
+
+def _build_policy_decision(
+    policy_pack: dict | None,
+    section_key: str,
+    *,
+    default_intent: str,
+    default_response: str,
+    default_action: str = "escalate",
+    default_collect: list[str] | None = None,
+) -> DemoSalonDecision:
+    section = _get_policy_section(policy_pack, section_key)
+    action = section.get("action") if isinstance(section, dict) else None
+    if not isinstance(action, str) or not action.strip():
+        action = default_action
+    response = section.get("response") if isinstance(section, dict) else None
+    if not isinstance(response, str) or not response.strip():
+        response = default_response
+    intent = section.get("intent") if isinstance(section, dict) else None
+    if not isinstance(intent, str) or not intent.strip():
+        intent = default_intent
+    collect = _policy_str_list(section.get("collect") if isinstance(section, dict) else None)
+    if not collect and default_collect:
+        collect = list(default_collect)
+    meta = _build_policy_meta(section_key, section)
+    return DemoSalonDecision(
+        action=action,
+        response=response,
+        intent=intent,
+        collect=collect or None,
+        meta=meta,
+    )
+
+
+def _build_payment_info_decision(policy_pack: dict | None) -> DemoSalonDecision:
+    default_response = "По оплате уточню у администратора — передам администратору ваш вопрос."
+    section = _get_policy_section(policy_pack, "payment_info")
+    allow = bool(section.get("allow")) if isinstance(section, dict) else False
+    allowed_phrases = _policy_str_list(section.get("allowed_phrases") if isinstance(section, dict) else None)
+    response = None
+    action = section.get("action") if isinstance(section, dict) else None
+    if allow and allowed_phrases:
+        response = allowed_phrases[0]
+        action = "reply"
+    if not isinstance(response, str) or not response.strip():
+        response = section.get("response") if isinstance(section, dict) else None
+    if not isinstance(response, str) or not response.strip():
+        response = default_response
+    if not isinstance(action, str) or not action.strip():
+        action = "escalate"
+    intent = section.get("intent") if isinstance(section, dict) else None
+    if not isinstance(intent, str) or not intent.strip():
+        intent = "payment"
+    meta = _build_policy_meta("payment_info", section)
+    return DemoSalonDecision(
+        action=action,
+        response=response,
+        intent=intent,
+        meta=meta,
+    )
+
+
+def _detect_policy_intent(
+    normalized: str,
+    phrase_intents: set[str],
+    *,
+    policy_pack: dict | None = None,
+) -> str | None:
+    policy_pack = policy_pack if isinstance(policy_pack, dict) else load_policy_pack()
+    if not policy_pack:
+        return None
 
     skip_payment = _is_self_resolve_payment(normalized)
-    payment_keywords = [
-        "kaspi",
-        "каспи",
-        "red",
-        "ред",
-        "рассроч",
-        "долям",
-        "pay",
-        "оплат",
-        "предоплат",
-        "перевод",
-        "перечис",
-        "квитанц",
-        "qr",
-        "карт",
-        "терминал",
-        "эквайр",
-        "касса",
-        "счет",
-        "счёт",
-        "реквизит",
-        "iban",
-        "swift",
-        "налич",
-        "безнал",
-        "чек",
-    ]
-    if not skip_payment and ("payment" in phrase_intents or any(_contains_keyword(keyword) for keyword in payment_keywords)):
+    if not skip_payment and _matches_policy_section(
+        normalized,
+        phrase_intents,
+        _get_policy_section(policy_pack, "payment_info"),
+    ):
         return "policy_payment"
 
-    reschedule_keywords = [
-        "перенес",
-        "перенести",
-        "перенос",
-        "переносит",
-        "переносить",
-        "перезапис",
-        "перезапиш",
-        "перепис",
-        "сдвин",
-        "передвин",
-        "перемест",
-        "изменить запись",
-        "поменять время",
-        "поменять дату",
-        "изменить дату",
-        "на другое время",
-        "на другой день",
-        "на другую дату",
-    ]
-    if _contains_any(normalized, reschedule_keywords):
+    if _matches_policy_section(
+        normalized,
+        phrase_intents,
+        _get_policy_section(policy_pack, "reschedule"),
+    ):
         return "policy_reschedule"
 
-    cancel_keywords = ["отмен", "отмена", "откаж", "не приду"]
-    if _contains_any(normalized, cancel_keywords):
+    if _matches_policy_section(
+        normalized,
+        phrase_intents,
+        _get_policy_section(policy_pack, "cancel"),
+    ):
         return "policy_cancel"
 
-    medical_keywords = [
-        "беремен",
-        "аллерг",
-        "противопоказ",
-        "кормл",
-        "лактац",
-        "ожог",
-        "ожг",
-        "жжет",
-        "жжёт",
-        "печет",
-        "печёт",
-        "болит",
-        "больно",
-        "кров",
-        "воспал",
-        "покрасн",
-        "сып",
-        "реакц",
-        "раздраж",
-        "анестез",
-        "обезбол",
-        "кож",
-        "дермат",
-        "болезн",
-        "лиценз",
-        "медобраз",
-    ]
-    if _contains_any(normalized, medical_keywords):
+    if _matches_policy_section(
+        normalized,
+        phrase_intents,
+        _get_policy_section(policy_pack, "medical"),
+    ):
         return "policy_medical"
 
-    legal_keywords = [
-        "договор",
-        "оферт",
-        "юрид",
-        "юрист",
-        "закон",
-        "суд",
-        "иск",
-        "ответствен",
-        "компенсац",
-        "штраф",
-        "прав потреб",
-    ]
-    if _contains_any(normalized, legal_keywords):
+    if _matches_policy_section(
+        normalized,
+        phrase_intents,
+        _get_policy_section(policy_pack, "legal"),
+    ):
         return "policy_legal"
 
     hours_like = _looks_like_hours_question(normalized)
-    complaint_keywords = [
-        "не понрав",
-        "жалоб",
-        "претенз",
-        "разочар",
-        "плохо",
-        "недовол",
-        "ужас",
-        "кошмар",
-        "хам",
-        "грубо",
-        "брак",
-        "треснул",
-        "отпал",
-        "слезл",
-        "сломал",
-        "испор",
-        "задерж",
-        "жду уже",
-        "не приш",
-        "сожг",
-        "обожг",
-        "порез",
-        "кров",
-        "не слыш",
-        "одно и то же",
-        "одно и тоже",
-    ]
-    if ("complaint" in phrase_intents or _contains_any(normalized, complaint_keywords)) and not hours_like:
+    if (
+        _matches_policy_section(
+            normalized,
+            phrase_intents,
+            _get_policy_section(policy_pack, "complaint"),
+        )
+        and not hours_like
+    ):
         return "policy_complaint"
 
-    discount_keywords = ["скидк", "скидоч", "скидос", "дешевл", "подешевле", "купон", "акци", "промо", "промокод", "торг", "уступ"]
-    if _contains_any(normalized, discount_keywords):
+    if _matches_policy_section(
+        normalized,
+        phrase_intents,
+        _get_policy_section(policy_pack, "discounts"),
+    ):
         return "policy_discount"
 
     return None
@@ -2294,6 +2330,7 @@ def get_demo_salon_decision(
         return None
 
     phrase_intents = phrase_match_intent(message)
+    policy_pack = load_policy_pack()
     parking_signal = _has_parking_signal(normalized)
     guest_signal = _has_guest_waiting_signal(normalized)
     location_signal = _contains_any(normalized, ["адрес", "где вы", "где наход"])
@@ -2306,50 +2343,55 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="cancel_policy")
 
-    policy_intent = _detect_policy_intent(normalized, phrase_intents)
+    policy_intent = _detect_policy_intent(
+        normalized,
+        phrase_intents,
+        policy_pack=policy_pack,
+    )
 
     if policy_intent == "policy_payment":
-        return DemoSalonDecision(
-            action="escalate",
-            response="По оплате уточню у администратора — передам администратору ваш вопрос.",
-            intent="payment",
-        )
+        return _build_payment_info_decision(policy_pack)
     if policy_intent == "policy_reschedule":
-        return DemoSalonDecision(
-            action="escalate",
-            response="Перенос записи подтверждает администратор. Передам ваш запрос.",
-            intent="reschedule",
+        return _build_policy_decision(
+            policy_pack,
+            "reschedule",
+            default_intent="reschedule",
+            default_response="Перенос записи подтверждает администратор. Передам ваш запрос.",
         )
     if policy_intent == "policy_cancel":
-        return DemoSalonDecision(
-            action="escalate",
-            response=(
+        return _build_policy_decision(
+            policy_pack,
+            "cancel",
+            default_intent="cancel_request",
+            default_response=(
                 "Администратор подтвердит отмену. "
                 "Напишите, пожалуйста: имя, услуга, контактный номер."
             ),
-            intent="cancel_request",
-            collect=["имя", "услуга", "контактный номер"],
+            default_collect=["имя", "услуга", "контактный номер"],
         )
     if policy_intent == "policy_medical":
-        return DemoSalonDecision(
-            action="escalate",
-            response=(
+        return _build_policy_decision(
+            policy_pack,
+            "medical",
+            default_intent="medical",
+            default_response=(
                 "По таким вопросам нужна консультация мастера или администратора — "
                 "передам ваш вопрос."
             ),
-            intent="medical",
         )
     if policy_intent == "policy_legal":
-        return DemoSalonDecision(
-            action="escalate",
-            response="По юридическим вопросам подключу администратора — передам ваш запрос.",
-            intent="legal",
+        return _build_policy_decision(
+            policy_pack,
+            "legal",
+            default_intent="legal",
+            default_response="По юридическим вопросам подключу администратора — передам ваш запрос.",
         )
     if policy_intent == "policy_complaint":
-        return DemoSalonDecision(
-            action="escalate",
-            response="Жаль, что так вышло. Передам администратору, чтобы разобрались.",
-            intent="complaint",
+        return _build_policy_decision(
+            policy_pack,
+            "complaint",
+            default_intent="complaint",
+            default_response="Жаль, что так вышло. Передам администратору, чтобы разобрались.",
         )
 
     if "сегодня" in normalized or "прямо сейчас" in normalized:
@@ -2384,7 +2426,15 @@ def get_demo_salon_decision(
 
     if policy_intent == "policy_discount":
         reply = _format_promotions(load_yaml_truth())
-        return _build_truth_decision(response=reply, intent="discount_haggle")
+        policy_meta = _build_policy_meta(
+            "discounts",
+            _get_policy_section(policy_pack, "discounts"),
+        )
+        return _build_truth_decision(
+            response=reply,
+            intent="discount_haggle",
+            meta=policy_meta,
+        )
 
     if "почему" in normalized and "от" in normalized and ("цена" in normalized or "стоим" in normalized):
         reply = format_reply_from_truth("why_price_from")

@@ -222,7 +222,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 
 ### Policy‑gates (конфиг per client)
 - Hard‑LAW всегда эскалирует (оплата: подтверждение/проверка/возвраты, медицинка, жалобы, переносы).
-- Policy‑gates (скидки/оплата info) исполняются детерминированно по `client_pack.discounts` и `client_pack.payment`.
+- Policy‑gates (скидки/оплата info) исполняются детерминированно по `client_pack.policy.discounts` и `client_pack.policy.payment_info`.
 - Если правило отсутствует/не совпало — эскалация (без попытки торга).
 
 ### Booking mode (с/без CRM)

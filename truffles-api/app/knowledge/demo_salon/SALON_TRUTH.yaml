@@ -267,6 +267,281 @@ promotions: &promotions
     discount_percent: 10
     eligibility: по будням 11:00–16:00
     requirements: при документе
+policy: &policy
+  allow_keyword_fallback: false
+  hard_law:
+    action: escalate
+    risk_level: high
+    intents:
+      - cancel_request
+      - complaint
+      - legal
+      - medical
+      - payment
+      - refund
+      - reschedule
+    labels:
+      - hard_law
+  payment_info:
+    allow: false
+    action: escalate
+    risk_level: medium
+    intent: payment
+    response: "По оплате уточню у администратора — передам администратору ваш вопрос."
+    keywords: &policy_payment_keywords
+      - kaspi
+      - каспи
+      - red
+      - ред
+      - рассроч
+      - долям
+      - pay
+      - оплат
+      - предоплат
+      - перевод
+      - перечис
+      - квитанц
+      - qr
+      - карт
+      - терминал
+      - эквайр
+      - касса
+      - счет
+      - счёт
+      - реквизит
+      - iban
+      - swift
+      - налич
+      - безнал
+      - чек
+    phrase_intents:
+      - payment
+    allowed_phrases: []
+    rules:
+      - "Способы оплаты подтверждает администратор."
+  reschedule:
+    action: escalate
+    risk_level: high
+    intent: reschedule
+    response: "Перенос записи подтверждает администратор. Передам ваш запрос."
+    keywords: &policy_reschedule_keywords
+      - перенес
+      - перенести
+      - перенос
+      - переносит
+      - переносить
+      - перезапис
+      - перезапиш
+      - перепис
+      - сдвин
+      - передвин
+      - перемест
+      - изменить запись
+      - поменять время
+      - поменять дату
+      - изменить дату
+      - на другое время
+      - на другой день
+      - на другую дату
+    rules:
+      - "Перенос записи бот не делает."
+    hints:
+      - "Передать запрос администратору."
+  cancel:
+    action: escalate
+    risk_level: high
+    intent: cancel_request
+    response: "Администратор подтвердит отмену. Напишите, пожалуйста: имя, услуга, контактный номер."
+    keywords: &policy_cancel_keywords
+      - отмен
+      - отмена
+      - откаж
+      - не приду
+    collect:
+      - имя
+      - услуга
+      - контактный номер
+    rules:
+      - "Отмену записи подтверждает администратор."
+    hints:
+      - "Передать запрос администратору."
+  medical:
+    action: escalate
+    risk_level: high
+    intent: medical
+    response: "По таким вопросам нужна консультация мастера или администратора — передам ваш вопрос."
+    keywords: &policy_medical_keywords
+      - беремен
+      - аллерг
+      - противопоказ
+      - кормл
+      - лактац
+      - ожог
+      - ожг
+      - жжет
+      - жжёт
+      - печет
+      - печёт
+      - болит
+      - больно
+      - кров
+      - воспал
+      - покрасн
+      - сып
+      - реакц
+      - раздраж
+      - анестез
+      - обезбол
+      - кож
+      - дермат
+      - болезн
+      - лиценз
+      - медобраз
+    rules:
+      - "Бот не даёт медицинских рекомендаций."
+    hints:
+      - "Передать вопрос администратору."
+  legal:
+    action: escalate
+    risk_level: high
+    intent: legal
+    response: "По юридическим вопросам подключу администратора — передам ваш запрос."
+    keywords: &policy_legal_keywords
+      - договор
+      - оферт
+      - юрид
+      - юрист
+      - закон
+      - суд
+      - иск
+      - ответствен
+      - компенсац
+      - штраф
+      - прав потреб
+    rules:
+      - "Юридические вопросы решает администратор."
+    hints:
+      - "Передать запрос администратору."
+  complaint:
+    action: escalate
+    risk_level: high
+    intent: complaint
+    response: "Жаль, что так вышло. Передам администратору, чтобы разобрались."
+    keywords: &policy_complaint_keywords
+      - не понрав
+      - жалоб
+      - претенз
+      - разочар
+      - плохо
+      - недовол
+      - ужас
+      - кошмар
+      - хам
+      - грубо
+      - брак
+      - треснул
+      - отпал
+      - слезл
+      - сломал
+      - испор
+      - задерж
+      - жду уже
+      - не приш
+      - сожг
+      - обожг
+      - порез
+      - кров
+      - не слыш
+      - одно и то же
+      - одно и тоже
+    phrase_intents:
+      - complaint
+    rules:
+      - "Жалобы разбирает администратор."
+    hints:
+      - "Передать жалобу администратору."
+    explicit_keywords: &policy_complaint_explicit_keywords
+      - жалоб
+      - претенз
+      - плохо сдел
+      - испорт
+      - верни
+      - вернем
+      - вернём
+      - недоволен
+      - недовольн
+      - хамств
+    consult_override_keywords: &policy_complaint_override_keywords
+      - боюс
+      - страшн
+      - пережива
+      - опасаюс
+      - сомнева
+  discounts:
+    <<: *promotions
+    action: reply
+    risk_level: low
+    intent: discount_haggle
+    keywords: &policy_discount_keywords
+      - скидк
+      - скидоч
+      - скидос
+      - дешевл
+      - подешевл
+      - подешевле
+      - купон
+      - акци
+      - промо
+      - промокод
+      - торг
+      - уступ
+    rules:
+      - "Скидки действуют только по официальным акциям."
+    notes: "Акции, сертификаты и промокоды не комбинируем — за визит действует одно предложение."
+    birthday_window:
+      phrase: "до после"
+      day_words:
+        - дней
+        - дня
+        - день
+  guard_topics:
+    payment: *policy_payment_keywords
+    medical:
+      - беремен
+      - аллерг
+      - противопоказ
+      - медицин
+      - кормл
+      - лактац
+      - ожог
+      - ожг
+      - жжет
+      - жжёт
+      - печет
+      - печёт
+      - болит
+      - больно
+      - кров
+      - воспал
+      - покрасн
+      - сып
+      - реакц
+      - раздраж
+      - анестез
+      - обезбол
+      - кож
+      - дермат
+      - болезн
+      - лиценз
+      - медобраз
+    complaint: *policy_complaint_keywords
+    discount: *policy_discount_keywords
+    refund:
+      - возврат
+      - верну
+      - вернем
+      - вернём
+      - refund
 booking: &booking
   bot_can_confirm: false
   collect_fields:
@@ -951,6 +1226,7 @@ client_pack:
   services_catalog: *services_catalog
   promotions: *promotions
   discounts: *promotions
+  policy: *policy
   booking: *booking
   guest_policy: *guest_policy
   service_duration_estimates: *service_duration_estimates

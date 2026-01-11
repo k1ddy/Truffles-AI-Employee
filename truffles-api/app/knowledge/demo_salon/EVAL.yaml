@@ -5927,6 +5927,7 @@ eval_cases:
     trace_contains:
     - stage: policy_gate
       policy_gate: discounts
+      risk_level: low
 - id: E545
   user: Есть скидки, хочу записаться и адрес, пожалуйста.
   expected:
@@ -5944,6 +5945,7 @@ eval_cases:
     trace_contains:
     - stage: policy_gate
       policy_gate: discounts
+      risk_level: low
 - id: E546
   tier: long
   turns:
