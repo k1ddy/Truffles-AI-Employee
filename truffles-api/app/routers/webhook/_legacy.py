@@ -2051,14 +2051,16 @@ async def _handle_webhook_payload(
         routing=routing,
         client_slug=payload.client_slug,
     )
-    decision_trace = decision_plan.to_trace()
-    decision_trace.update(
-        {
-            "stage": "decision_graph",
-            "version": "a1-shadow",
-        }
-    )
-    _record_decision_trace(conversation, decision_trace)
+    plan_id = decision_plan.plan_id
+    for stage in decision_plan.stages:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "decision_graph",
+                "decision": stage,
+                "plan_id": plan_id,
+            },
+        )
 
     transcript = None
     asr_meta = None
