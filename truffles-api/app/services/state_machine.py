@@ -27,6 +27,15 @@ def can_transition(from_state: ConversationState, to_state: ConversationState) -
     return to_state in allowed
 
 
+def is_transition_allowed(
+    from_state: ConversationState, to_state: ConversationState, *, allow_same: bool = False
+) -> bool:
+    """Check if transition is valid, optionally allowing same-state."""
+    if allow_same and from_state == to_state:
+        return True
+    return can_transition(from_state, to_state)
+
+
 def transition(from_state: ConversationState, to_state: ConversationState) -> ConversationState:
     """Perform state transition. Raises InvalidTransitionError if not allowed."""
     if not can_transition(from_state, to_state):
