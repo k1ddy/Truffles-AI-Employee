@@ -12,7 +12,7 @@ from app.services.alert_service import alert_warning
 from app.services.chatflow_service import send_bot_response
 from app.services.message_service import save_message
 from app.services.state_machine import ConversationState
-from app.services.state_service import manager_resolve
+from app.services.state_service import force_state, manager_resolve
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("reminder_service")
@@ -191,11 +191,27 @@ def auto_close_stale_handovers(db: Session) -> dict:
 
         conversation = handover.conversation
         if conversation:
-            conversation.state = ConversationState.BOT_ACTIVE.value
+            transition = force_state(conversation, ConversationState.BOT_ACTIVE, reason="auto_close")
             conversation.bot_muted_until = None
             conversation.no_count = 0
             conversation.retry_offered_at = None
             conversation.context = {}
+            context = conversation.context if isinstance(conversation.context, dict) else {}
+            context = _append_decision_trace(
+                context,
+                {
+                    "stage": "state_transition",
+                    "decision": "forced",
+                    "reason": "auto_close",
+                    "meta": {
+                        "from": transition["from_state"],
+                        "to": transition["to_state"],
+                        "violations": transition["violations"],
+                    },
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            conversation.context = context
 
         closed.append(
             {
