@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.models import Conversation, Handover, User
+from app.routers.webhook.trace import _record_decision_trace
 from app.services.state_machine import ConversationState
 from app.services.state_service import force_state
 
@@ -46,7 +47,7 @@ def check_and_heal_conversations(db: Session) -> dict:
             continue
 
         old_state = conv.state
-        force_state(conv, ConversationState.BOT_ACTIVE, reason="heal_no_topic")
+        transition = force_state(conv, ConversationState.BOT_ACTIVE, reason="heal_no_topic")
         conv.retry_offered_at = None
 
         open_handovers = (
@@ -69,6 +70,19 @@ def check_and_heal_conversations(db: Session) -> dict:
                 "issue": f"{old_state}_no_topic",
                 "action": "reset_to_bot_active",
             }
+        )
+        _record_decision_trace(
+            conv,
+            {
+                "stage": "state_transition",
+                "decision": "forced",
+                "reason": "heal_no_topic",
+                "meta": {
+                    "from": transition["from_state"],
+                    "to": transition["to_state"],
+                    "violations": transition["violations"],
+                },
+            },
         )
         logger.warning(f"Healed conversation {conv.id}: {old_state} without topic")
 
@@ -93,7 +107,7 @@ def check_and_heal_conversations(db: Session) -> dict:
 
         if not active_handover:
             old_state = conv.state
-            force_state(conv, ConversationState.BOT_ACTIVE, reason="heal_no_handover")
+            transition = force_state(conv, ConversationState.BOT_ACTIVE, reason="heal_no_handover")
             conv.retry_offered_at = None
             healed.append(
                 {
@@ -101,6 +115,19 @@ def check_and_heal_conversations(db: Session) -> dict:
                     "issue": f"{old_state}_no_handover",
                     "action": "reset_to_bot_active",
                 }
+            )
+            _record_decision_trace(
+                conv,
+                {
+                    "stage": "state_transition",
+                    "decision": "forced",
+                    "reason": "heal_no_handover",
+                    "meta": {
+                        "from": transition["from_state"],
+                        "to": transition["to_state"],
+                        "violations": transition["violations"],
+                    },
+                },
             )
             logger.warning(f"Healed conversation {conv.id}: {old_state} without active handover")
 

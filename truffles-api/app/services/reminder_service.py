@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.models import ClientSettings, Conversation, Handover, Message, User
+from app.routers.webhook.trace import _record_decision_trace
 from app.schemas.reminder import ReminderItem
 from app.services.alert_service import alert_warning
 from app.services.chatflow_service import send_bot_response
@@ -191,11 +192,24 @@ def auto_close_stale_handovers(db: Session) -> dict:
 
         conversation = handover.conversation
         if conversation:
-            force_state(conversation, ConversationState.BOT_ACTIVE, reason="auto_close")
+            transition = force_state(conversation, ConversationState.BOT_ACTIVE, reason="auto_close")
             conversation.bot_muted_until = None
             conversation.no_count = 0
             conversation.retry_offered_at = None
             conversation.context = {}
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "state_transition",
+                    "decision": "forced",
+                    "reason": "auto_close",
+                    "meta": {
+                        "from": transition["from_state"],
+                        "to": transition["to_state"],
+                        "violations": transition["violations"],
+                    },
+                },
+            )
 
         closed.append(
             {
