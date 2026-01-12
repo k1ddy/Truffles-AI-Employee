@@ -545,6 +545,18 @@
 - вывод: **eviction** (trace заполнен другими стадиями, критичные выпали)
 - backup/restore: `/tmp/a5_rca_b8c559d1_context.b64`
 
+### 2026-01-12 — A5 expiry live‑check PASS (post‑fix)
+
+**Что сделали:**
+- Повторили expiry‑проверку после фикса trace‑merge; trace теперь содержит `session_memory` и `re_entry`.
+
+**Evidence:**
+- conv_id: `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+- message_id: `live-a5-expiry-postfix-1768203247` (row `ff33241f-dcc1-4e8c-bf7d-a2827a952db0`, created_at `2026-01-12T07:34:08.238979+00:00`)
+- trace: `{"stage":"re_entry","decision":"required","reason":"expired"}` и `{"stage":"session_memory","decision":"reset","reason":"expired",...}`
+- decision_meta: `session_memory_reset=expired`
+- backup/restore: `/tmp/a5_expiry_postfix_b8c559d1-f8cd-4173-ae70-0a9683833e48.b64`
+
 ### 2026-01-12 — ChatFlow inbound instanceId verification (prod)
 
 **Что сделали:**

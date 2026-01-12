@@ -92,6 +92,7 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - Реальный inbound = WA‑сообщение клиента → ChatFlow → `/webhook/{client_slug}`; `send-text` — outbound и не создаёт inbound.
 - POST на `/webhook` без WA‑клиента = симуляция (использовать только если DoD это допускает).
 - В БД поле называется `messages.metadata` (JSONB), не `message_metadata`.
+- `instanceId` в webhook — это routing‑token, который мы задаём в URL/metadata; provider‑ID ChatFlow не используем.
 
 ### Переменные окружения (API)
 - `NO_RESPONSE_ALERT_MINUTES` — порог минут для алерта “вход есть — ответа нет” (default: 3).

@@ -55,6 +55,7 @@ Stop-the-line (strict):
 - Hands never update `STATE.md` (Brain updates last).
 - Live-check: если нет WA‑доступа/allowlist → статус BLOCKED; не просить Жанбола слать сообщения. Live-check делают Hands/OPS, evidence = conv_id + decision_trace/meta.
 - ChatFlow inbound: "real inbound" = WA‑сообщение → ChatFlow → /webhook; `send-text` это outbound и не создаёт inbound. POST на `/webhook` считается симуляцией и допускается только если DoD явно разрешает (в evidence пометка "simulated").
+- instanceId: webhook instanceId = routing‑token (наш), provider instanceId ChatFlow не используется; держим один canonical.
 
 One-issue flow:
 - 1 problem -> 1 fix -> 1 verification -> 1 STATE.md update.
