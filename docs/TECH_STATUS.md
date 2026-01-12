@@ -170,7 +170,7 @@
 - Evidence: `truffles-api/app/routers/webhook/_legacy.py`
 - Факт: распознаёт `HH:MM`/`HH.MM`, “в 6/к 3”, `01.02`, “10 января” + базовые ключевые слова.
 - Boundary: “после 7”, “в конце недели” остаются слабо покрыты.
-- Fix plan: расширить эвристики или полагаться на Answer‑Interpreter.
+- Fix plan: заменить эвристики на resolver‑слой (data‑lexicon RU/KZ + `dateparser`/`rapidfuzz`), минимальные EVAL‑варианты как доказательство.
 
 ### Carryover follow‑up (pricing)
 - Status: OK
