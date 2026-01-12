@@ -1991,6 +1991,30 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 
 ---
 
+### 2026-01-12 — P1-2 Router SLA: normalize low_confidence fallback
+
+**Что сделали:**
+- Нормализовали controller fallback: low_confidence больше не записывается как `controller_fallback_reason`, флаги `controller_*` стабилизированы в decision_meta.
+- PR смержен, CI main build/push/deploy выполнен, версия на проде обновлена.
+
+**Evidence:**
+- PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/145
+- Merge commit: https://github.com/k1ddy/Truffles-AI-Employee/commit/1a16fbea8421c792bdd8c8369141771c2aed24ad
+- CI PR core/long: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20921140704 (success)
+- CI main build/push/deploy: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20921181882 (success)
+- Deploy time (CI run updatedAt): `2026-01-12T13:33:14Z`
+- Prod `/admin/version`: `{"version":"main","git_commit":"1a16fbea8421c792bdd8c8369141771c2aed24ad","build_time":"2026-01-12T13:31:55Z"}`
+- SQL (post-deploy window, created_at >= `2026-01-12T13:33:14Z`):
+  - low_confidence not counted as fallback
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT COUNT(*) FILTER (WHERE (metadata->'decision_meta'->>'controller_attempted')::boolean) AS attempts, COUNT(*) FILTER (WHERE (metadata->'decision_meta'->>'controller_low_confidence')::boolean) AS low_confidence, COUNT(*) FILTER (WHERE (metadata->'decision_meta'->>'controller_low_confidence')::boolean AND (metadata->'decision_meta'->>'controller_fallback_reason') IS NOT NULL) AS bad_low_confidence_fallbacks FROM messages WHERE created_at >= '2026-01-12T13:33:14Z' AND metadata ? 'decision_meta';"`
+    - output: attempts=0 low_confidence=0 bad_low_confidence_fallbacks=0
+  - fallback_reason breakdown
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT metadata->'decision_meta'->>'controller_fallback_reason' AS reason, COUNT(*) AS count FROM messages WHERE created_at >= '2026-01-12T13:33:14Z' AND (metadata->'decision_meta'->>'controller_fallback_reason') IS NOT NULL GROUP BY reason ORDER BY count DESC;"`
+    - output: (no rows)
+- Note: post-deploy window contains only `pending_sla_ping` meta; no controller_attempted rows yet (needs real inbound to validate low_confidence).
+
+---
+
 ### 2026-01-12 — P1 working agreement (resolver-first, no regex growth)
 
 **Что решили:**
