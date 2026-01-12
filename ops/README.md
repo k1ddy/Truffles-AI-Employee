@@ -110,6 +110,7 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s \"https://ap
 - ChatFlow `send-text` — outbound и не создаёт inbound.
 - POST на `/webhook` — симуляция (использовать только если DoD разрешает).
 - В БД поле называется `messages.metadata` (JSONB), не `message_metadata`.
+- instanceId в webhook — это routing‑token (наш), provider instanceId ChatFlow не используется.
 
 Шаги:
 1) Проверить в ChatFlow URL (UI), что `instanceId=<CANONICAL>`:

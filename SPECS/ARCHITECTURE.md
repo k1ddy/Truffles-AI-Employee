@@ -317,6 +317,10 @@ if role=owner → auto-approve → add_to_knowledge()
 - **ask_user:** если один номер на все филиалы → спросить филиал у клиента
 - **hybrid:** если instance_id известен → branch_id, иначе спросить
 
+**InstanceId (канон):**
+- `instanceId` во входящем webhook — routing‑token, который мы задаём и используем для `branches.instance_id`.
+- Отдельный provider‑ID ChatFlow не храним и не используем; в системе должен быть один canonical instanceId на филиал.
+
 **Хранение:**
 - `conversation.branch_id`
 - `conversation.context.branch_id` (быстрый доступ)
