@@ -6551,9 +6551,14 @@ async def _handle_webhook_payload(
                         result_message = f"Booking escalation, telegram={'sent' if telegram_sent else 'failed'}"
                         trace_decision = "escalated"
                     else:
-                        bot_response = MSG_AI_ERROR
-                        result_message = f"Booking escalation failed: {result.error}"
-                        trace_decision = "escalation_failed"
+                        if result.error_code == "no_telegram":
+                            bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
+                            result_message = "Booking captured without telegram"
+                            trace_decision = "captured_pending"
+                        else:
+                            bot_response = MSG_AI_ERROR
+                            result_message = f"Booking escalation failed: {result.error}"
+                            trace_decision = "escalation_failed"
             else:
                 bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
                 result_message = "Booking captured while pending"
