@@ -1967,6 +1967,7 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - Исправили сохранение `pending_sla.ping_sent_at` (контекст копируется, чтобы JSONB фиксировался).
 - Добавили регресс‑тест: два запуска `process_pending_sla` → один пинг.
 - PR #147 merged → deploy main.
+- Баг pending SLA ping spam закрыт.
 
 **Evidence:**
 - PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/147
