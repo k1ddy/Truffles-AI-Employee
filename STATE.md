@@ -301,6 +301,8 @@
 - Формат задачи для Brain (6 строк): Goal / Scope / Steps / Evidence / Tests / Stop.
 - Формат отчёта Hands (7 строк): GOAL / FILES / TESTS / LIVE-CHECK / EVIDENCE / COMMIT / RISKS.
 - One-issue flow: 1 проблема → 1 правка → 1 проверка → запись в `STATE.md`.
+- RCA-first: сначала причина + evidence (код/trace/SQL/CI), потом решение; без доказательств — стоп.
+- Offline-resolver: масштаб через data-lexicon + готовые библиотеки; regex/словари в коде — только временный fallback.
 
 ### Канон (North Star / DoD / Epics / порядок)
 
@@ -570,6 +572,19 @@
 - branch_id: `b7f75692-951e-421a-aae6-f5db97394799`
 - instanceId: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
 - DoD: `messages.metadata.instanceId` заполнен; `conversations.branch_id` не NULL; `branches.instance_id` совпадает; `outbox_messages.payload_json` содержит тот же `instanceId`.
+
+### 2026-01-12 — RU/KZ datetime resolver + escalation live-check (simulated inbound)
+
+**Что сделали:**
+- Live-check на allowlist JID через simulated inbound `/webhook` (waiver от Жанбола).
+- RU/KZ datetime resolver: “сенбі кешке” → запрос имени.
+- Эскалация: “жалоба” → pending/handover, без “AI error”.
+
+**Evidence:**
+- CI PR #143: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20917324127
+- RU/KZ resolver: conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, msg `live-dt-1768218583-10`, trace `stage=question_contract` `decision=matched` `answer_slot=datetime` `expected_reply_type=time`; bot reply “Как вас зовут?”
+- Escalation: conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, msg `live-esc-1768218660-5`, trace `stage=policy_gate` `intent=complaint` `risk_level=high`, handover `d306c4b5-9c80-48f2-9edf-6c32f0a4ba06` `pending`; bot reply “Жаль, что так вышло. Передам администратору…”
+- TODO: Real WA inbound live-check (ChatFlow) — pending.
 
 ### 2026-01-11 — A7: observability + budget gate + ASR tier
 
@@ -1961,6 +1976,18 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
   - missed time: conv_id `1f2e004f-6695-4087-8da0-36163045f0ee` recorded_at `2026-01-06T10:22:26.975811+00:00`
   - matched service_choice: conv_id `94c3797f-bbb7-4fc0-8bb1-61080553cc89` recorded_at `2026-01-06T09:30:59.304500+00:00`
 - CI long-eval (long-chaos): run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20912389895, job https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20912389895/job/60077823041, conclusion=success.
+
+---
+
+### 2026-01-12 — P1 working agreement (resolver-first, no regex growth)
+
+**Что решили:**
+- RU/KZ вариативность закрываем resolver-слоем (data-lexicon + ready libs), а не расширением regex/словников.
+- EVAL — доказательство, а не источник логики; минимальные варианты для RU/KZ mix вместо “миллион кейсов”.
+- Любой fix начинается с RCA и evidence; задачи без доказательств не выполняются.
+
+**Почему:**
+- Иначе CI превращается в бесконечный цикл “кейсы → хардкод”, что противоречит `STRATEGY/REQUIREMENTS.md`.
 
 ---
 
