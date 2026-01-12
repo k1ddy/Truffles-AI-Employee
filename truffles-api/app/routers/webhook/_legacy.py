@@ -37,6 +37,7 @@ from app.routers.webhook.booking import (
     _set_service_hint,
     _update_booking_from_message,
     _update_booking_from_messages,
+    _resolve_datetime_offline,
     _validate_name_slot,
 )
 from app.routers.webhook.branch_selection import (
@@ -963,6 +964,11 @@ def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
 def _extract_datetime(text: str) -> str | None:
     if not text:
         return None
+    resolved = _resolve_datetime_offline(text)
+    if isinstance(resolved, dict):
+        value = resolved.get("value")
+        if isinstance(value, str) and value.strip():
+            return value
     time_match = TIME_PATTERN.search(text)
     if time_match:
         return time_match.group(0)

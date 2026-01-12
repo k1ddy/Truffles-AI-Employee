@@ -4047,6 +4047,64 @@ eval_cases:
       expected_reply_type: name
       answer_interpreter_used: true
       answer_slot: name
+- id: E361c
+  messages:
+  - хочу записаться на маникюр
+  - в субб веч
+  expected:
+    action: reply
+    must_include:
+    - как вас зовут
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: time
+      answer_interpreter_used: true
+      answer_slot: datetime
+- id: E361d
+  messages:
+  - хочу записаться на маникюр
+  - сенбі кешке
+  expected:
+    action: reply
+    must_include:
+    - как вас зовут
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: time
+      answer_interpreter_used: true
+      answer_slot: datetime
+- id: E361e
+  tier: long
+  messages:
+  - хочу записаться на маникюр
+  - жұма вечером
+  expected:
+    action: reply
+    must_include:
+    - как вас зовут
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: time
+      answer_interpreter_used: true
+      answer_slot: datetime
+- id: E361f
+  tier: asr
+  messages:
+  - хочу записаться на маникюр
+  - сенбі кешке 19:00
+  expected:
+    action: reply
+    must_include:
+    - как вас зовут
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: time
+      answer_interpreter_used: true
+      answer_slot: datetime
 - id: E362
   messages:
   - привет
