@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from app.models import Conversation, Message
 from app.routers.webhook.booking import _get_booking_context
@@ -10,7 +11,12 @@ from app.routers.webhook.session_memory import (
     _record_session_memory_update,
     _update_session_memory_on_question,
 )
-from app.routers.webhook.trace import _record_decision_trace, _update_message_decision_metadata
+from app.routers.webhook.trace import (
+    DECISION_TRACE_KEY,
+    _record_decision_trace,
+    _retain_decision_trace,
+    _update_message_decision_metadata,
+)
 
 
 def _get_conversation_context(conversation: Conversation) -> dict:
@@ -20,7 +26,51 @@ def _get_conversation_context(conversation: Conversation) -> dict:
     return {}
 
 
+def _trace_list(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        return [value]
+    return []
+
+
+def _trace_key(item: dict[str, Any]) -> tuple[Any, Any, Any]:
+    return (item.get("stage"), item.get("decision"), item.get("recorded_at"))
+
+
+def _merge_decision_trace(existing: Any, incoming: Any) -> list[dict[str, Any]] | None:
+    existing_list = _trace_list(existing)
+    incoming_list = _trace_list(incoming)
+    if not existing_list and not incoming_list:
+        return None
+    if not existing_list:
+        return _retain_decision_trace(incoming_list)
+    if not incoming_list:
+        return _retain_decision_trace(existing_list)
+
+    merged = list(existing_list)
+    seen = {_trace_key(item) for item in existing_list}
+    for item in incoming_list:
+        key = _trace_key(item)
+        if key != (None, None, None) and key in seen:
+            continue
+        merged.append(item)
+        seen.add(key)
+    return _retain_decision_trace(merged)
+
+
 def _set_conversation_context(conversation: Conversation, context: dict) -> None:
+    if not isinstance(context, dict):
+        conversation.context = context
+        return
+    existing_context = conversation.context if isinstance(conversation.context, dict) else {}
+    merged_trace = _merge_decision_trace(
+        existing_context.get(DECISION_TRACE_KEY),
+        context.get(DECISION_TRACE_KEY),
+    )
+    if merged_trace is not None:
+        context = dict(context)
+        context[DECISION_TRACE_KEY] = merged_trace
     conversation.context = context
 
 

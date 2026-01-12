@@ -88,6 +88,11 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 **WhatsApp Webhook URL (ChatFlow):**
 `https://api.truffles.kz/webhook/{client_slug}?webhook_secret=<SECRET>`
 
+**Inbound verification (ChatFlow):**
+- Реальный inbound = WA‑сообщение клиента → ChatFlow → `/webhook/{client_slug}`; `send-text` — outbound и не создаёт inbound.
+- POST на `/webhook` без WA‑клиента = симуляция (использовать только если DoD это допускает).
+- В БД поле называется `messages.metadata` (JSONB), не `message_metadata`.
+
 ### Переменные окружения (API)
 - `NO_RESPONSE_ALERT_MINUTES` — порог минут для алерта “вход есть — ответа нет” (default: 3).
 - `OUTBOX_COALESCE_SECONDS` — тишина перед склейкой сообщений в outbox (default: 8).
