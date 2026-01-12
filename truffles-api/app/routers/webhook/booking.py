@@ -224,6 +224,15 @@ def _resolve_datetime_offline(message_text: str) -> dict[str, Any]:
     if not parsed and normalized != message_text:
         parsed = dateparser.parse(normalized, languages=["ru"], settings=settings)
     if not parsed:
+        if matches:
+            value = message_text.strip() if any(char.isdigit() for char in message_text) else normalized
+            result["value"] = value
+            result["confidence"] = 0.4
+            result["evidence"] = {
+                "normalized_text": normalized,
+                "lexicon_matches": matches,
+                "parser": "lexicon",
+            }
         return result
 
     value = message_text.strip() if any(char.isdigit() for char in message_text) else normalized

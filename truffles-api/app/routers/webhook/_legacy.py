@@ -31,13 +31,13 @@ from app.routers.webhook.booking import (
     _is_booking_time_service_decision,
     _match_expected_reply,
     _next_booking_prompt,
+    _resolve_datetime_offline,
     _select_expected_reply_message,
     _select_last_non_booking_message,
     _set_booking_context,
     _set_service_hint,
     _update_booking_from_message,
     _update_booking_from_messages,
-    _resolve_datetime_offline,
     _validate_name_slot,
 )
 from app.routers.webhook.branch_selection import (

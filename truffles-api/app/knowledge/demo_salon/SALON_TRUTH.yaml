@@ -955,7 +955,7 @@ domain_pack:
           - сейсенбі
           - сей
       wednesday:
-        canonical_ru: среда
+        canonical_ru: среду
         ru:
           - среда
           - ср
@@ -971,7 +971,7 @@ domain_pack:
           - бейсенбі
           - бей
       friday:
-        canonical_ru: пятница
+        canonical_ru: пятницу
         ru:
           - пятница
           - пт
@@ -979,7 +979,7 @@ domain_pack:
           - жұма
           - жұм
       saturday:
-        canonical_ru: суббота
+        canonical_ru: субботу
         ru:
           - суббота
           - суб
