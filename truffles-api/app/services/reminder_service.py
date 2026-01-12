@@ -255,16 +255,6 @@ def check_no_response_alerts(db: Session) -> dict:
         if minutes_waiting < threshold_minutes:
             continue
 
-        context = conversation.context if isinstance(conversation.context, dict) else {}
-        alerts = context.get("alerts") if isinstance(context.get("alerts"), dict) else {}
-        if alerts.get("no_response_for") == str(last_user.id):
-            continue
-
-        alerts["no_response_for"] = str(last_user.id)
-        alerts["no_response_at"] = now.isoformat()
-        context["alerts"] = alerts
-        conversation.context = context
-
         decision_meta = {}
         if last_user and isinstance(last_user.message_metadata, dict):
             decision_meta = last_user.message_metadata.get("decision_meta") or {}
@@ -276,8 +266,33 @@ def check_no_response_alerts(db: Session) -> dict:
                 last_action = f"{action}:{intent}"
             else:
                 last_action = action or intent
+        context = conversation.context if isinstance(conversation.context, dict) else {}
         trace = context.get("decision_trace")
         last_trace = trace[-1] if isinstance(trace, list) and trace else None
+        if (isinstance(decision_meta, dict) and decision_meta.get("action") == "shield_drop") or (
+            isinstance(last_trace, dict)
+            and last_trace.get("stage") == "shield"
+            and last_trace.get("decision") == "drop"
+        ):
+            logger.info(
+                "Suppressed no_response alert due to shield_drop",
+                extra={
+                    "context": {
+                        "conversation_id": str(conversation.id),
+                        "message_id": str(last_user.id),
+                    }
+                },
+            )
+            continue
+
+        alerts = context.get("alerts") if isinstance(context.get("alerts"), dict) else {}
+        if alerts.get("no_response_for") == str(last_user.id):
+            continue
+
+        alerts["no_response_for"] = str(last_user.id)
+        alerts["no_response_at"] = now.isoformat()
+        context["alerts"] = alerts
+        conversation.context = context
 
         alert_warning(
             "No bot response for user message",

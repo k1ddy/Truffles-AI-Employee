@@ -116,3 +116,38 @@ class TestPendingSlaPing:
 
                 reminder_service.process_pending_sla(db)
                 assert send_mock.call_count == 1
+
+
+class TestNoResponseAlerts:
+    def test_suppressed_on_shield_drop(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.BOT_ACTIVE.value
+        conversation.bot_status = "active"
+        conversation.bot_muted_until = None
+        conversation.context = {}
+        conversation.id = uuid4()
+        conversation.client_id = uuid4()
+
+        last_user = Mock()
+        last_user.id = uuid4()
+        last_user.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+        last_user.content = "spam"
+        last_user.message_metadata = {"decision_meta": {"action": "shield_drop"}}
+
+        def last_message(db_handle, conversation_id, role):
+            if role == "user":
+                return last_user
+            return None
+
+        db.query.return_value.filter.return_value.all.return_value = [conversation]
+
+        with patch("app.services.reminder_service._get_last_message", side_effect=last_message), patch(
+            "app.services.reminder_service.alert_warning"
+        ) as alert_mock:
+            result = reminder_service.check_no_response_alerts(db)
+
+        assert result["alerted"] == 0
+        assert result["items"] == []
+        alert_mock.assert_not_called()
+        assert conversation.context == {}
