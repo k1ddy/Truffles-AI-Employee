@@ -22,6 +22,7 @@
 - DONE: A6 policy rules‑as‑data (PR #131 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20894731972; live‑check conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, trace policy_gate=discounts + risk_level=low).
 - DONE: A7 observability + budget gate + ASR tier (PR #133 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20895474177).
 - DONE: A7 live‑budget verification in prod (SQL fallback on demo_salon; llm_budget.daily_max_calls=1) — evidence в истории 2026‑01‑11.
+- DONE: Pending SLA ping spam fix (PR #147 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20922178070).
 - BLOCKERS: нет.
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
@@ -1959,6 +1960,28 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - [ ] Эскалация — добить
 
 ---
+
+### 2026-01-12 — Fix: pending SLA ping spam
+
+**Что сделали:**
+- Исправили сохранение `pending_sla.ping_sent_at` (контекст копируется, чтобы JSONB фиксировался).
+- Добавили регресс‑тест: два запуска `process_pending_sla` → один пинг.
+- PR #147 merged → deploy main.
+
+**Evidence:**
+- PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/147
+- CI PR: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20922142372
+- CI main (build/push/deploy): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20922178070
+- Prod `/admin/version`: `{"version":"main","git_commit":"6175fab86439492be5c440cd1666882ea93687ea","build_time":"2026-01-12T14:05:21Z"}`
+- /reminders/process: pinged=1 (first), pinged=0 (second) — curl outputs сохранены в истории сессии.
+- Note: `conversations.escalated_at` временно выставлен `NOW() - INTERVAL '20 minutes'` для пинга и восстановлен на `2026-01-12 13:59:09.002251+00`.
+- SQL (conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, run_at=2026-01-12T14:08:20Z):
+  - pending_sla saved
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT context->'pending_sla' AS pending_sla FROM conversations WHERE id = 'b8c559d1-f8cd-4173-ae70-0a9683833e48';"`
+    - output: `{"ping_sent_at": "2026-01-12T14:08:12.990209+00:00"}`
+  - reminders (last 10)
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT id, created_at, content FROM messages WHERE conversation_id = 'b8c559d1-f8cd-4173-ae70-0a9683833e48' AND content ILIKE 'Напоминаю: менеджер ещё не подключился%' ORDER BY created_at DESC LIMIT 10;"`
+    - output: last row `03b56844-dc1e-4693-adc7-eb1f47c921a7 | 2026-01-12 14:08:13.872299+00 | Напоминаю: менеджер ещё не подключился. Я на связи — напишите, что нужно уточнить.`
 
 ### 2026-01-12 — P1-0 baseline metrics (decision_trace/meta + long-eval)
 
