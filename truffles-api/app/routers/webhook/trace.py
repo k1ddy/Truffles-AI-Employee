@@ -93,19 +93,30 @@ def _record_message_decision_meta(
 ) -> None:
     if not message:
         return
+    metadata = dict(message.message_metadata or {})
+    decision_meta = dict(metadata.get("decision_meta") or {})
+    defaults = {
+        "controller_attempted": False,
+        "controller_fallback_reason": None,
+        "controller_low_confidence": False,
+    }
+    updates = {
+        "action": action,
+        "intent": intent,
+        "source": source,
+        "fast_intent": fast_intent,
+        "llm_primary_used": False,
+        "llm_used": False,
+        "llm_timeout": False,
+        "llm_cache_hit": False,
+        "llm_degradation_reason": None,
+    }
+    for key, value in defaults.items():
+        if key not in decision_meta:
+            updates[key] = value
     _update_message_decision_metadata(
         message,
-        {
-            "action": action,
-            "intent": intent,
-            "source": source,
-            "fast_intent": fast_intent,
-            "llm_primary_used": False,
-            "llm_used": False,
-            "llm_timeout": False,
-            "llm_cache_hit": False,
-            "llm_degradation_reason": None,
-        },
+        updates,
     )
 
 
