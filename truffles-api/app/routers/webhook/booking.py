@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from functools import lru_cache
+from typing import TYPE_CHECKING, Any
+
+import dateparser
+from rapidfuzz import fuzz, process
 
 if TYPE_CHECKING:
     from app.services.demo_salon_knowledge import DemoSalonDecision
@@ -88,6 +92,164 @@ def _clean_name_candidate(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-zА-Яа-яЁё\s-]", " ", value or "")
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
+
+
+@lru_cache(maxsize=1)
+def _load_datetime_lexicon() -> dict:
+    from app.services.demo_salon_knowledge import load_yaml_truth
+
+    truth = load_yaml_truth()
+    domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
+    lexicon = domain_pack.get("datetime_lexicon") if isinstance(domain_pack, dict) else None
+    return lexicon if isinstance(lexicon, dict) else {}
+
+
+@lru_cache(maxsize=1)
+def _build_datetime_variant_index() -> tuple[
+    dict[str, str],
+    set[str],
+    list[tuple[tuple[str, ...], str, str]],
+]:
+    from . import _legacy as legacy
+
+    lexicon = _load_datetime_lexicon()
+    variant_map: dict[str, str] = {}
+    canonical_set: set[str] = set()
+    entries: list[tuple[tuple[str, ...], str, str]] = []
+
+    for group_name in ("days", "dayparts"):
+        group = lexicon.get(group_name)
+        if not isinstance(group, dict):
+            continue
+        for payload in group.values():
+            if not isinstance(payload, dict):
+                continue
+            canonical_raw = payload.get("canonical_ru")
+            if not isinstance(canonical_raw, str):
+                continue
+            canonical = legacy._normalize_text(canonical_raw)
+            if not canonical:
+                continue
+            canonical_set.add(canonical)
+            variant_map.setdefault(canonical, canonical)
+            entries.append((tuple(canonical.split()), canonical, canonical))
+            for lang_key in ("ru", "kk"):
+                variants = payload.get(lang_key)
+                if not isinstance(variants, list):
+                    continue
+                for variant in variants:
+                    if not isinstance(variant, str):
+                        continue
+                    normalized = legacy._normalize_text(variant)
+                    if not normalized:
+                        continue
+                    variant_map[normalized] = canonical
+                    entries.append((tuple(normalized.split()), canonical, normalized))
+
+    entries.sort(key=lambda item: len(item[0]), reverse=True)
+    return variant_map, canonical_set, entries
+
+
+def _canonicalize_datetime_text(message_text: str) -> tuple[str, list[dict[str, Any]]]:
+    from . import _legacy as legacy
+
+    normalized = legacy._normalize_text(message_text)
+    if not normalized:
+        return "", []
+
+    variant_map, canonical_set, entries = _build_datetime_variant_index()
+    if not variant_map:
+        return normalized, []
+
+    tokens = normalized.split()
+    matches: list[dict[str, Any]] = []
+    replaced_tokens: list[str] = []
+    idx = 0
+    while idx < len(tokens):
+        matched = False
+        for variant_tokens, canonical, variant in entries:
+            if not variant_tokens:
+                continue
+            size = len(variant_tokens)
+            if idx + size <= len(tokens) and tuple(tokens[idx : idx + size]) == variant_tokens:
+                replaced_tokens.append(canonical)
+                matches.append({"variant": variant, "canonical": canonical, "method": "direct"})
+                idx += size
+                matched = True
+                break
+        if not matched:
+            replaced_tokens.append(tokens[idx])
+            idx += 1
+
+    variants = list(variant_map.keys())
+    for token_index, token in enumerate(replaced_tokens):
+        if token in canonical_set or len(token) < 2:
+            continue
+        if any(char.isdigit() for char in token):
+            continue
+        match = process.extractOne(token, variants, scorer=fuzz.ratio)
+        if not match:
+            continue
+        variant, score, _ = match
+        threshold = 92 if len(token) <= 4 else 88
+        if score < threshold:
+            continue
+        canonical = variant_map.get(variant)
+        if not canonical or canonical == token:
+            continue
+        replaced_tokens[token_index] = canonical
+        matches.append(
+            {
+                "variant": variant,
+                "canonical": canonical,
+                "method": "fuzzy",
+                "score": score,
+            }
+        )
+
+    return " ".join(replaced_tokens), matches
+
+
+def _resolve_datetime_offline(message_text: str) -> dict[str, Any]:
+    result: dict[str, Any] = {"value": None, "confidence": 0.0, "evidence": {}}
+    if not message_text:
+        return result
+
+    normalized, matches = _canonicalize_datetime_text(message_text)
+    if not normalized:
+        return result
+
+    settings = {"PREFER_DATES_FROM": "future"}
+    parsed = dateparser.parse(message_text, languages=["ru"], settings=settings)
+    if not parsed and normalized != message_text:
+        parsed = dateparser.parse(normalized, languages=["ru"], settings=settings)
+    if not parsed:
+        if matches:
+            value = message_text.strip() if any(char.isdigit() for char in message_text) else normalized
+            result["value"] = value
+            result["confidence"] = 0.4
+            result["evidence"] = {
+                "normalized_text": normalized,
+                "lexicon_matches": matches,
+                "parser": "lexicon",
+            }
+        return result
+
+    value = message_text.strip() if any(char.isdigit() for char in message_text) else normalized
+    confidence = 0.6
+    if matches:
+        confidence += 0.2
+    if normalized != message_text:
+        confidence += 0.1
+
+    result["value"] = value
+    result["confidence"] = min(confidence, 1.0)
+    result["evidence"] = {
+        "normalized_text": normalized,
+        "lexicon_matches": matches,
+        "parser": "dateparser",
+    }
+    return result
 
 
 def _validate_service_slot(
@@ -410,6 +572,7 @@ __all__ = [
     "_is_noise_slot_message",
     "_match_expected_reply",
     "_next_booking_prompt",
+    "_resolve_datetime_offline",
     "_select_expected_reply_message",
     "_select_last_non_booking_message",
     "_set_booking_context",

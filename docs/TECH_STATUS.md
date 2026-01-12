@@ -156,6 +156,15 @@
 - Boundary: нет отдельного eval‑контракта на expected_reply.
 - Fix plan: добавить eval‑кейсы для expected_reply.
 
+### Router fallback_reason (SLA)
+- Status: OK
+- Evidence: `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/app/routers/webhook/trace.py`
+- Факт: fallback_reason enum = timeout/invalid_json/budget_exceeded/no_api_key/prompt_missing/empty_message/empty_response/invalid_class/unsupported_temperature/error.
+- Факт: низкая уверенность фиксируется отдельно (`controller_low_confidence`), не как fallback_reason.
+- Факт: при отсутствии `OPENAI_API_KEY` controller_attempted=false (router не пытается).
+- Metric: fallback_rate = count(controller_attempted=true AND controller_fallback_reason IS NOT NULL) / count(controller_attempted=true).
+- Fix plan: держать fallback_rate <10% в core/long (SQL + CI).
+
 ### Datetime fallback
 - Status: PARTIAL
 - Evidence: `truffles-api/app/routers/webhook/_legacy.py`
