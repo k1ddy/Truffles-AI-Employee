@@ -101,6 +101,53 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s \"https://ap
 ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s \"https://api.telegram.org/botTOKEN/getWebhookInfo\""
 ```
 
+### 5. Чек-лист instanceId (канонизация)
+Канонический instanceId (demo_salon, подтверждён real inbound):
+`eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+
+Важно:
+- Реальный inbound = WA‑сообщение от клиента → ChatFlow → `/webhook/{client_slug}`.
+- ChatFlow `send-text` — outbound и не создаёт inbound.
+- POST на `/webhook` — симуляция (использовать только если DoD разрешает).
+- В БД поле называется `messages.metadata` (JSONB), не `message_metadata`.
+
+Шаги:
+1) Проверить в ChatFlow URL (UI), что `instanceId=<CANONICAL>`:
+   `https://api.truffles.kz/webhook/demo_salon?webhook_secret=...&instanceId=<CANONICAL>`
+2) DB: `branches.instance_id` = canonical.
+3) DB: inbound message metadata (после реального inbound от test JID).
+4) DB: outbox payload по `message_id` из шага 3.
+
+DoD: instanceId во всех источниках совпадает с canonical.
+
+```sql
+-- 2) branch_id -> instance_id
+SELECT b.id AS branch_id, b.instance_id
+FROM branches b
+WHERE b.id = 'b7f75692-951e-421a-aae6-f5db97394799';
+
+-- 3) Последнее входящее сообщение по test JID (real inbound)
+SELECT m.id, m.created_at,
+       m.metadata->>'messageId' AS message_id,
+       m.metadata->>'instanceId' AS instance_id,
+       m.metadata->>'remoteJid' AS remote_jid,
+       c.id AS conversation_id,
+       c.branch_id
+FROM messages m
+JOIN conversations c ON c.id = m.conversation_id
+WHERE m.metadata->>'remoteJid' = '77015705555@s.whatsapp.net'
+ORDER BY m.created_at DESC
+LIMIT 1;
+
+-- 4) outbox payload for this message_id
+SELECT o.id, o.created_at,
+       o.payload_json->'body'->'metadata'->>'instanceId' AS instance_id,
+       o.payload_json->'body'->'metadata'->>'messageId' AS message_id
+FROM outbox_messages o
+WHERE o.payload_json->'body'->'metadata'->>'messageId' = '<message_id_from_step_3>'
+LIMIT 1;
+```
+
 ---
 
 ## МИГРАЦИИ
@@ -164,6 +211,7 @@ handovers
 | Ошибка | Причина | Решение |
 |--------|---------|---------|
 | `column X does not exist` | Не выполнена миграция | Выполнить нужную миграцию |
+| `column message_metadata does not exist` | В схеме используется `messages.metadata` | Использовать `m.metadata->>'...'` |
 | `Bad request` в Telegram | Неправильный chat_id или token | Проверить БД client_settings |
 | Webhook execution пустой | Webhook не активен | Проверить входящий webhook в ChatFlow |
 | Windows escaping errors | PowerShell не понимает кавычки | Использовать файлы вместо inline |
