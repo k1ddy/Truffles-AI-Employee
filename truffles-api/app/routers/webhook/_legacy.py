@@ -4482,11 +4482,16 @@ async def _handle_webhook_payload(
                     "booking_blocked_reason": "info_question",
                     "question_intents": sorted(intent_decomp_info),
                 }
-            else:
+            elif intent_decomp_used and intent_decomp_set and intent_decomp_set != {"other"}:
                 booking_block_meta = {
-                    "booking_blocked_reason": "intent_decomp_missing" if not intent_decomp_used else "intent_decomp_no_booking",
+                    "booking_blocked_reason": "intent_decomp_no_booking",
                 }
-        booking_signal = False
+            elif not intent_decomp_used:
+                booking_block_meta = {
+                    "booking_blocked_reason": "intent_decomp_missing",
+                }
+        if booking_block_meta:
+            booking_signal = False
 
     booking_wants_flow = (
         _should_run_booking_flow(
