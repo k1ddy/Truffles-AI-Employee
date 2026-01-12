@@ -26,8 +26,10 @@
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
-- **Следующий шаг:** DONE: P0 Ops hygiene (instanceId inbound + deploy latest CI image), evidence уже в истории.
+- **Следующий шаг:** P1 Router SLA <10% (PR + CI + SQL evidence) — in progress.
 - **OPEN:** Outbox latency (P0 tail) — в конце.
+- **PENDING:** Docs PR (commit f86543f) — открыть/смёржить в main.
+- **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
 - **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
 - **Последняя диагностика:** 2026-01-08T15:46:51Z (ops/diagnose.py: outbox FAILED 12 / SENT 1235; `OUTBOX_WORKER_ENABLED=MISSING`; `/admin/version` `487a6ff9...`).
@@ -585,6 +587,16 @@
 - RU/KZ resolver: conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, msg `live-dt-1768218583-10`, trace `stage=question_contract` `decision=matched` `answer_slot=datetime` `expected_reply_type=time`; bot reply “Как вас зовут?”
 - Escalation: conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, msg `live-esc-1768218660-5`, trace `stage=policy_gate` `intent=complaint` `risk_level=high`, handover `d306c4b5-9c80-48f2-9edf-6c32f0a4ba06` `pending`; bot reply “Жаль, что так вышло. Передам администратору…”
 - TODO: Real WA inbound live-check (ChatFlow) — pending.
+
+### 2026-01-12 — Docs sync (ritual + RCA-first + resolver-first + gaps)
+
+**Что сделали:**
+- Зафиксировали session-start ritual, RCA-first и resolver-first в `docs/SESSION_START_PROMPT.txt`.
+- Добавили RU/KZ resolver в P1 roadmap и обновили fix plan в `docs/TECH_STATUS.md`.
+- Расширили `docs/IMPERIUM_GAPS.yaml` (GAP-014..019: LAW/policy, /message bypass, branch isolation, LLM facts, ops/Qdrant).
+
+**Evidence:**
+- PR #144: https://github.com/k1ddy/Truffles-AI-Employee/pull/144 (docs-only, CI не требуется).
 
 ### 2026-01-11 — A7: observability + budget gate + ASR tier
 
