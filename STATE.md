@@ -531,6 +531,20 @@
 - A4 fact_meta в info: `truffles-api/app/routers/webhook/info.py:209`, `truffles-api/app/routers/webhook/info.py:220`, `truffles-api/app/routers/webhook/info.py:254`, `truffles-api/app/routers/webhook/info.py:263`; trace `fact_resolver`: `truffles-api/app/routers/webhook/_legacy.py:2411`; fact_guard off: `truffles-api/app/routers/webhook/_legacy.py:776`. Live‑check: message_id `db18df09-7fc0-42b4-922c-84af36033693`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, decision_meta `fact_source=service_matcher`, trace содержит `stage=fact_resolver`.
 - A5 MemoryContract: `truffles-api/app/schemas/webhook.py:78-90`; нормализация: `truffles-api/app/routers/webhook/session_memory.py:24`, вызов: `truffles-api/app/routers/webhook/_legacy.py:2478`, trace contract_error: `truffles-api/app/routers/webhook/_legacy.py:2486-2493`. Live‑check reset: message_id `1e8894ff-59ed-46ed-b1ff-c8b5136fb9fe`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, decision_meta `session_memory_reset=explicit_reset`, trace `stage=session_memory` (reset/reset_ack). Опциональный expiry/re‑entry не запускали.
 
+### 2026-01-12 — A5 RCA (expiry/re-entry trace eviction)
+
+**Что сделали:**
+- Провели RCA: очистили `decision_trace`, форсировали expiry, отправили сообщение, проверили trace‑стадии.
+
+**Evidence:**
+- conv_id: `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+- message_id: `live-a5-rca-1768200205` (row `9d871f4c-02c8-4f1e-83c1-9543354ac313`, created_at `2026-01-12T06:43:25.813984+00:00`)
+- decision_trace очищен перед проверкой (`[]`)
+- expiry forced: `session_memory.last_updated_at = 2026-01-10 06:42:06.166608+00`
+- после сообщения: `trace_len = 12`, стадии: rewrite, llm_degradation, rag_retrieve (x2), class_router, intent, service_semantic_matcher, fact_resolver, contract (intent/fact/action/response); **нет** `stage=session_memory` и `stage=re_entry`
+- вывод: **eviction** (trace заполнен другими стадиями, критичные выпали)
+- backup/restore: `/tmp/a5_rca_b8c559d1_context.b64`
+
 ### 2026-01-11 — A7: observability + budget gate + ASR tier
 
 **Что сделали:**
