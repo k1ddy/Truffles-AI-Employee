@@ -50,9 +50,10 @@ def _get_last_message(db: Session, conversation_id, role: str) -> Message | None
 
 
 def _get_pending_sla_context(conversation: Conversation) -> tuple[dict, dict]:
-    context = conversation.context if isinstance(conversation.context, dict) else {}
-    payload = context.get(PENDING_SLA_CONTEXT_KEY)
-    pending_sla = payload if isinstance(payload, dict) else {}
+    raw_context = conversation.context if isinstance(conversation.context, dict) else {}
+    context = dict(raw_context)
+    payload = raw_context.get(PENDING_SLA_CONTEXT_KEY)
+    pending_sla = dict(payload) if isinstance(payload, dict) else {}
     return context, pending_sla
 
 

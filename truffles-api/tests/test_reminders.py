@@ -1,9 +1,12 @@
 from datetime import datetime, timedelta, timezone
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 import pytest
 
 from app.schemas.reminder import ReminderItem, ReminderSentRequest, RemindersResponse
+from app.services import reminder_service
+from app.services.state_machine import ConversationState
 
 
 class MockHandover:
@@ -85,3 +88,31 @@ class TestReminderLogic:
 
         assert handover.reminder_1_sent_at is not None
         assert handover.reminder_2_sent_at is not None
+
+
+class TestPendingSlaPing:
+    def test_ping_sent_once(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.PENDING.value
+        conversation.escalated_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+        conversation.context = {"foo": "bar"}
+
+        handover = Mock()
+        handover.status = "pending"
+        handover.created_at = conversation.escalated_at
+        handover.conversation = conversation
+
+        db.query.return_value.filter.return_value.all.return_value = [handover]
+
+        with patch("app.services.reminder_service._send_pending_user_message", return_value=True) as send_mock:
+            with patch("app.services.reminder_service.PENDING_SLA_PING_MINUTES", 1), patch(
+                "app.services.reminder_service.PENDING_AUTO_CLOSE_HOURS", 999
+            ):
+                reminder_service.process_pending_sla(db)
+                assert conversation.context["foo"] == "bar"
+                assert "pending_sla" in conversation.context
+                assert "ping_sent_at" in conversation.context["pending_sla"]
+
+                reminder_service.process_pending_sla(db)
+                assert send_mock.call_count == 1
