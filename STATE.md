@@ -552,6 +552,7 @@
 
 **Evidence:**
 - message_id: `3EB01C2DA80C15E49107DE` (created_at `2026-01-12T06:54:53.495473+00:00`)
+- re-verified canonical instanceId: message_id `3EB04512C9026FF2E5F8AD` (created_at `2026-01-12T07:20:28.918488+00:00`), outbox_id `f84ae22e-ff9e-4a14-af37-7e5cc8324768`
 - conv_id: `b8c559d1-f8cd-4173-ae70-0a9683833e48`
 - branch_id: `b7f75692-951e-421a-aae6-f5db97394799`
 - instanceId: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
