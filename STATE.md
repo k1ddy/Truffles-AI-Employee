@@ -545,6 +545,18 @@
 - вывод: **eviction** (trace заполнен другими стадиями, критичные выпали)
 - backup/restore: `/tmp/a5_rca_b8c559d1_context.b64`
 
+### 2026-01-12 — ChatFlow inbound instanceId verification (prod)
+
+**Что сделали:**
+- Подтвердили, что реальный ChatFlow inbound включает `instanceId`, ветка ставится, и outbox сохраняет тот же `instanceId`.
+
+**Evidence:**
+- message_id: `3EB01C2DA80C15E49107DE` (created_at `2026-01-12T06:54:53.495473+00:00`)
+- conv_id: `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+- branch_id: `b7f75692-951e-421a-aae6-f5db97394799`
+- instanceId: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- DoD: `messages.metadata.instanceId` заполнен; `conversations.branch_id` не NULL; `branches.instance_id` совпадает; `outbox_messages.payload_json` содержит тот же `instanceId`.
+
 ### 2026-01-11 — A7: observability + budget gate + ASR tier
 
 **Что сделали:**
