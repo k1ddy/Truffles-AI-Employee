@@ -521,6 +521,16 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2026-01-12 — A3/A4/A5 verification (evidence-only)
+
+**Что сделали:**
+- Подтвердили A3 (state machine инварианты), A4 (fact resolver/gate), A5 (memory contract/reset) через статик‑чек + live‑check, без изменения кода.
+
+**Evidence:**
+- A3 direct assignment только в `truffles-api/app/services/state_service.py:252` и `truffles-api/app/services/state_service.py:274`; `transition_state` используется в live/escalation/manager/background: `truffles-api/app/routers/webhook/_legacy.py:1646`, `truffles-api/app/services/escalation_service.py:216`, `truffles-api/app/services/manager_message_service.py:205`, `truffles-api/app/services/reminder_service.py:123`, `truffles-api/app/services/health_service.py:58`, `truffles-api/app/services/reminder_service.py:194`; инварианты: `truffles-api/app/services/state_service.py:202`, вызов внутри `transition_state` — `truffles-api/app/services/state_service.py:254`.
+- A4 fact_meta в info: `truffles-api/app/routers/webhook/info.py:209`, `truffles-api/app/routers/webhook/info.py:220`, `truffles-api/app/routers/webhook/info.py:254`, `truffles-api/app/routers/webhook/info.py:263`; trace `fact_resolver`: `truffles-api/app/routers/webhook/_legacy.py:2411`; fact_guard off: `truffles-api/app/routers/webhook/_legacy.py:776`. Live‑check: message_id `db18df09-7fc0-42b4-922c-84af36033693`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, decision_meta `fact_source=service_matcher`, trace содержит `stage=fact_resolver`.
+- A5 MemoryContract: `truffles-api/app/schemas/webhook.py:78-90`; нормализация: `truffles-api/app/routers/webhook/session_memory.py:24`, вызов: `truffles-api/app/routers/webhook/_legacy.py:2478`, trace contract_error: `truffles-api/app/routers/webhook/_legacy.py:2486-2493`. Live‑check reset: message_id `1e8894ff-59ed-46ed-b1ff-c8b5136fb9fe`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, decision_meta `session_memory_reset=explicit_reset`, trace `stage=session_memory` (reset/reset_ack). Опциональный expiry/re‑entry не запускали.
+
 ### 2026-01-11 — A7: observability + budget gate + ASR tier
 
 **Что сделали:**
