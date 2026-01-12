@@ -1236,26 +1236,28 @@ def _ensure_controller_output_meta(controller_output: dict, *, error: str | None
     return controller_output
 
 
+CONTROLLER_FALLBACK_IGNORE_VALUES = {"none", "skipped", "ok"}
 CONTROLLER_FALLBACK_REASON_MAP = {
     "timeout": "timeout",
     "invalid_json": "invalid_json",
     "budget_exceeded": "budget_exceeded",
+    "no_api_key": "no_api_key",
+    "prompt_missing": "prompt_missing",
+    "empty_message": "empty_message",
+    "empty_response": "empty_response",
+    "invalid_class": "invalid_class",
+    "unsupported_temperature": "unsupported_temperature",
 }
-CONTROLLER_FALLBACK_ERROR_VALUES = {
-    "controller_failed",
-    "error",
-    "unsupported_temperature",
-    "invalid_class",
-    "empty_response",
-    "empty_message",
-    "prompt_missing",
-}
+CONTROLLER_FALLBACK_ERROR_VALUES = {"controller_failed", "error"}
+CONTROLLER_FALLBACK_REASONS = set(CONTROLLER_FALLBACK_REASON_MAP.values()) | {"error"}
 
 
 def _normalize_controller_fallback_reason(*, error: str | None) -> str | None:
     if not error:
         return None
     normalized = error.strip().casefold()
+    if not normalized or normalized in CONTROLLER_FALLBACK_IGNORE_VALUES:
+        return None
     mapped = CONTROLLER_FALLBACK_REASON_MAP.get(normalized)
     if mapped:
         return mapped
@@ -1378,6 +1380,8 @@ def _resolve_class_router_result(
     controller_used = router_state.get("used") if isinstance(router_state, dict) else False
     controller_error = router_state.get("error") if isinstance(router_state, dict) else None
     controller_fallback = router_state.get("fallback_reason") if isinstance(router_state, dict) else None
+    controller_attempted = router_state.get("attempted") if isinstance(router_state, dict) else None
+    controller_fallback_flag = router_state.get("fallback") if isinstance(router_state, dict) else None
     controller_confidence = router_state.get("confidence") if isinstance(router_state, dict) else None
     controller_sla = router_state.get("sla") if isinstance(router_state, dict) else None
     controller_signal_class = router_state.get("signal_class") if isinstance(router_state, dict) else None
@@ -1404,7 +1408,8 @@ def _resolve_class_router_result(
 
     controller_confidence_value = controller_confidence
     controller_low_confidence = bool(
-        isinstance(controller_confidence_value, (int, float))
+        controller_used
+        and isinstance(controller_confidence_value, (int, float))
         and controller_confidence_value < CONTROLLER_CONFIDENCE_THRESHOLD
     )
 
@@ -1424,18 +1429,16 @@ def _resolve_class_router_result(
             result["intents"] = sorted(info_controller_intents)
         controller_fallback_reason = None
     elif controller_used and controller_class and controller_low_confidence:
-        # Low confidence: keep deterministic class_router result, but mark fallback_reason for observability.
+        # Low confidence: keep deterministic class_router result, but track low confidence explicitly.
         controller_used_reason = "low_confidence"
-        controller_fallback_reason = "low_confidence"
         controller_used = True
     elif not controller_used and isinstance(controller_fallback, str) and controller_fallback != "skipped":
         controller_fallback_reason = controller_fallback_reason or controller_fallback
 
-    if controller_fallback_reason and not controller_low_confidence:
-        controller_low_confidence = True
-
     result["controller"] = {
         "used": bool(controller_used),
+        "attempted": controller_attempted,
+        "fallback": controller_fallback_flag,
         "confidence": controller_confidence,
         "reason": controller_reason,
         "fallback_reason": controller_fallback_reason if not controller_used else None,
@@ -2699,7 +2702,8 @@ async def _handle_webhook_payload(
         )
         or message_text
     )
-    if expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME} and expected_reply_text:
+    if expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
+        expected_reply_text = expected_reply_text or ""
         answer_confidence = 0.0
         answer_slot = ""
         answer_value = ""
@@ -4751,6 +4755,7 @@ async def _handle_webhook_payload(
         and message_text
         and not booking_wants_flow
         and not expected_reply_shortcircuit
+        and os.environ.get("OPENAI_API_KEY")
     )
     if controller_should_attempt:
         controller_state["attempted"] = True
@@ -7737,6 +7742,10 @@ async def _handle_webhook_payload(
         "router": class_router_result.get("router"),
         "controller": controller_meta,
         "controller_used": controller_meta.get("used") if isinstance(controller_meta, dict) else None,
+        "controller_attempted": controller_meta.get("attempted") if isinstance(controller_meta, dict) else None,
+        "controller_fallback": controller_meta.get("fallback") if isinstance(controller_meta, dict) else None,
+        "controller_low_confidence": controller_meta.get("low_confidence") if isinstance(controller_meta, dict) else None,
+        "controller_used_reason": controller_meta.get("used_reason") if isinstance(controller_meta, dict) else None,
         "controller_confidence": controller_meta.get("confidence") if isinstance(controller_meta, dict) else None,
         "controller_error": controller_meta.get("error") if isinstance(controller_meta, dict) else None,
         "controller_goal": controller_meta.get("goal") if isinstance(controller_meta, dict) else None,
@@ -7751,6 +7760,10 @@ async def _handle_webhook_payload(
                 "carryover_class": class_router_result.get("carryover_class"),
                 "router_fallback_reason": class_router_result.get("router_fallback_reason"),
                 "controller_used": controller_meta.get("used") if isinstance(controller_meta, dict) else None,
+                "controller_attempted": controller_meta.get("attempted") if isinstance(controller_meta, dict) else None,
+                "controller_fallback": controller_meta.get("fallback") if isinstance(controller_meta, dict) else None,
+                "controller_low_confidence": controller_meta.get("low_confidence") if isinstance(controller_meta, dict) else None,
+                "controller_used_reason": controller_meta.get("used_reason") if isinstance(controller_meta, dict) else None,
                 "controller_confidence": controller_meta.get("confidence") if isinstance(controller_meta, dict) else None,
                 "controller_error": controller_meta.get("error") if isinstance(controller_meta, dict) else None,
                 "controller_goal": controller_meta.get("goal") if isinstance(controller_meta, dict) else None,

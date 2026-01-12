@@ -806,8 +806,13 @@ def interpret_expected_reply(
     question_context: dict | None = None,
 ) -> dict:
     result: dict[str, Any] = {"ok": False, "payload": None, "error": None, "raw": None}
+    expected_reply_type_cleaned = (
+        expected_reply_type.strip().lower()
+        if isinstance(expected_reply_type, str)
+        else None
+    )
     expected_slot = ANSWER_INTERPRETER_SLOT_BY_REPLY_TYPE.get(
-        expected_reply_type or ""
+        expected_reply_type_cleaned or ""
     )
     payload = {
         "slot": expected_slot or "",
@@ -833,7 +838,7 @@ def interpret_expected_reply(
     interpreter_input = {
         "task": "answer_interpreter",
         "message": message,
-        "expected_reply_type": expected_reply_type,
+        "expected_reply_type": expected_reply_type_cleaned,
         "carryover": carryover_input,
         "question_context": question_context if isinstance(question_context, dict) else {},
     }

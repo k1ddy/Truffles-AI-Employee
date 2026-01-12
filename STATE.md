@@ -1933,6 +1933,37 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 
 ---
 
+### 2026-01-12 — P1-0 baseline metrics (decision_trace/meta + long-eval)
+
+**Что сделали:**
+- Сняли baseline по decision_meta/decision_trace (demo_salon, last 7 days) перед изменениями.
+- Зафиксировали fallback_rate, expected_reply match-rate, question_contract matched/missed.
+- Проверили long-eval (long-chaos) статус по CI.
+
+**Evidence:**
+- SQL (demo_salon, last 7 days, run_at=2026-01-12T08:30:15Z):
+  - fallback_rate
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "WITH base AS (SELECT metadata->'decision_meta' AS meta FROM messages WHERE role='user' AND client_id='c839d5dd-65be-4733-a5d2-72c9f70707f0' AND created_at >= NOW() - INTERVAL '7 days' AND metadata ? 'decision_meta') SELECT COUNT(*) AS total_msgs, COUNT(*) FILTER (WHERE meta->>'router_fallback_reason' IS NOT NULL AND meta->>'router_fallback_reason' <> '') AS fallback_msgs, ROUND(COUNT(*) FILTER (WHERE meta->>'router_fallback_reason' IS NOT NULL AND meta->>'router_fallback_reason' <> '')::numeric / NULLIF(COUNT(*),0), 4) AS fallback_rate FROM base;"`
+    - output: total_msgs=302 fallback_msgs=19 fallback_rate=0.0629
+  - fallback_reason breakdown
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "WITH base AS (SELECT metadata->'decision_meta' AS meta FROM messages WHERE role='user' AND client_id='c839d5dd-65be-4733-a5d2-72c9f70707f0' AND created_at >= NOW() - INTERVAL '7 days' AND metadata ? 'decision_meta') SELECT meta->>'router_fallback_reason' AS fallback_reason, COUNT(*) AS total FROM base WHERE meta->>'router_fallback_reason' IS NOT NULL AND meta->>'router_fallback_reason' <> '' GROUP BY 1 ORDER BY total DESC;"`
+    - output: low_confidence=16, budget_exceeded=2, timeout=1
+  - expected_reply match-rate
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "WITH base AS (SELECT metadata->'decision_meta' AS meta FROM messages WHERE role='user' AND client_id='c839d5dd-65be-4733-a5d2-72c9f70707f0' AND created_at >= NOW() - INTERVAL '7 days' AND metadata ? 'decision_meta') SELECT COUNT(*) AS expected_reply_msgs, COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' = 'true') AS matched, COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' = 'false') AS missed, COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' IS NULL OR meta->>'expected_reply_matched' NOT IN ('true','false')) AS missing_flag, ROUND(COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' = 'true')::numeric / NULLIF(COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' IN ('true','false')), 0), 4) AS match_rate FROM base WHERE meta->>'expected_reply_type' IS NOT NULL AND meta->>'expected_reply_type' <> '';"`
+    - output: expected_reply_msgs=104 matched=37 missed=31 missing_flag=36 match_rate=0.5441
+  - expected_reply_type breakdown
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "WITH base AS (SELECT metadata->'decision_meta' AS meta FROM messages WHERE role='user' AND client_id='c839d5dd-65be-4733-a5d2-72c9f70707f0' AND created_at >= NOW() - INTERVAL '7 days' AND metadata ? 'decision_meta') SELECT meta->>'expected_reply_type' AS expected_reply_type, COUNT(*) AS total, COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' = 'true') AS matched, COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' = 'false') AS missed, COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' IS NULL OR meta->>'expected_reply_matched' NOT IN ('true','false')) AS missing_flag, ROUND(COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' = 'true')::numeric / NULLIF(COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' IN ('true','false')), 0), 4) AS match_rate FROM base WHERE meta->>'expected_reply_type' IS NOT NULL AND meta->>'expected_reply_type' <> '' GROUP BY 1 ORDER BY total DESC;"`
+    - output: time total=56 matched=21 missed=23 missing_flag=12 match_rate=0.4773; service_choice total=25 matched=3 missed=0 missing_flag=22 match_rate=1.0000; name total=21 matched=12 missed=8 missing_flag=1 match_rate=0.6000; intent_choice total=2 matched=1 missed=0 missing_flag=1 match_rate=1.0000
+  - question_contract matched/missed (decision_trace)
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "WITH traces AS (SELECT (trace->>'recorded_at')::timestamptz AS recorded_at, trace->>'decision' AS decision FROM conversations c JOIN LATERAL jsonb_array_elements(c.context->'decision_trace') AS trace ON true WHERE c.client_id='c839d5dd-65be-4733-a5d2-72c9f70707f0' AND c.context ? 'decision_trace' AND trace->>'stage'='question_contract' AND (trace->>'recorded_at')::timestamptz >= NOW() - INTERVAL '7 days') SELECT decision, COUNT(*) AS total FROM traces WHERE decision IN ('matched','missed') GROUP BY decision ORDER BY total DESC;"`
+    - output: matched=4 missed=3
+- question_contract trace samples (decision_trace):
+  - missed time: conv_id `1f2e004f-6695-4087-8da0-36163045f0ee` recorded_at `2026-01-06T10:22:26.975811+00:00`
+  - matched service_choice: conv_id `94c3797f-bbb7-4fc0-8bb1-61080553cc89` recorded_at `2026-01-06T09:30:59.304500+00:00`
+- CI long-eval (long-chaos): run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20912389895, job https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20912389895/job/60077823041, conclusion=success.
+
+---
+
 ### 2026-01-02 — Fix: booking+info под coalesce (multi-intent)
 
 **Что сделали:**

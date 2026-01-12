@@ -4009,6 +4009,8 @@ eval_cases:
     - stage: question_contract
       decision: matched
       expected_reply_type: service_choice
+      answer_interpreter_used: true
+      answer_slot: service
     - stage: service_carryover
       decision: set
       service_query: маникюр
@@ -4016,6 +4018,35 @@ eval_cases:
       decision: used
       service_query: маникюр
       service_query_source: context
+- id: E361a
+  messages:
+  - хочу записаться на маникюр
+  - в субботу вечером
+  expected:
+    action: reply
+    must_include:
+    - как вас зовут
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: time
+      answer_interpreter_used: true
+      answer_slot: datetime
+- id: E361b
+  messages:
+  - хочу записаться на маникюр в субботу вечером
+  - Алия
+  expected:
+    action: reply
+    must_include_any:
+    - передал менеджеру
+    - менеджеру
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: name
+      answer_interpreter_used: true
+      answer_slot: name
 - id: E362
   messages:
   - привет
@@ -5774,6 +5805,7 @@ eval_cases:
     - зависит от услуги
 - id: E538
   tier: long
+  tags: [long_chaos]
   turns:
   - Здравствуйте
   - Очень боюсь инфекций после маникюра
@@ -5799,6 +5831,7 @@ eval_cases:
     - одноразовые
 - id: E539
   tier: long
+  tags: [long_chaos]
   turns:
   - Привет
   - Хочу записаться на окрашивание
@@ -5821,6 +5854,7 @@ eval_cases:
     - не комбинируем
 - id: E540
   tier: long
+  tags: [long_chaos]
   turns:
   - Здравствуйте
   - Хочу ламинирование бровей
@@ -5845,6 +5879,7 @@ eval_cases:
     - ежедневно
 - id: E541
   tier: long
+  tags: [long_chaos]
   turns:
   - Привет
   - Маникюр
@@ -5869,6 +5904,7 @@ eval_cases:
     - время
 - id: E542
   tier: long
+  tags: [long_chaos]
   turns:
   - Здравствуйте
   - Хочу чистку лица
@@ -5891,6 +5927,7 @@ eval_cases:
     - пилинг
 - id: E543
   tier: long
+  tags: [long_chaos]
   turns:
   - Здравствуйте
   - Хочу маникюр с гель-лаком

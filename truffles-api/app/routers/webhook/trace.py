@@ -14,11 +14,14 @@ from app.schemas.webhook import TraceContract
 logger = get_logger("webhook")
 
 DECISION_TRACE_KEY = "decision_trace"
-DECISION_TRACE_MAX = 20
+DECISION_TRACE_MAX = 40
 DECISION_TRACE_CRITICAL_STAGES = {
+    "booking",
+    "consult_return",
     "contract_error",
     "escalation",
     "policy_gate",
+    "question_contract",
     "re_entry",
     "session_memory",
     "state_transition",
@@ -28,6 +31,8 @@ DECISION_TRACE_CRITICAL_STAGES = {
 def _is_critical_trace(payload: dict[str, Any]) -> bool:
     stage = payload.get("stage")
     if stage in DECISION_TRACE_CRITICAL_STAGES:
+        return True
+    if stage == "question_contract" and payload.get("decision") in {"matched", "missed"}:
         return True
     if payload.get("contract_error") or payload.get("trace_contract_error"):
         return True
