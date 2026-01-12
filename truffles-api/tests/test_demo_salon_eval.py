@@ -14,6 +14,7 @@ import app.services.demo_salon_knowledge as demo_knowledge
 import app.services.reminder_service as reminder_service
 from app.models import Client, ClientSettings, Conversation, Handover, User
 from app.routers import webhook as webhook_router
+from app.routers.webhook import trace as webhook_trace
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
 from app.services.demo_salon_knowledge import get_demo_salon_decision, get_salon_timezone
 from app.services.state_machine import ConversationState
@@ -466,7 +467,7 @@ def _build_service_carryover_patch() -> tuple[list[patch], list[dict]]:
                     "recorded_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
-            context[webhook_router.DECISION_TRACE_KEY] = trace_list[-12:]
+            context[webhook_router.DECISION_TRACE_KEY] = trace_list[-webhook_trace.DECISION_TRACE_MAX:]
             webhook_router._set_conversation_context(conversation, context)
         return result
 
