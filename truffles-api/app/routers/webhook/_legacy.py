@@ -1242,7 +1242,7 @@ def _ensure_controller_output_meta(controller_output: dict, *, error: str | None
     return controller_output
 
 
-CONTROLLER_FALLBACK_IGNORE_VALUES = {"none", "skipped", "ok"}
+CONTROLLER_FALLBACK_IGNORE_VALUES = {"none", "skipped", "ok", "low_confidence"}
 CONTROLLER_FALLBACK_REASON_MAP = {
     "timeout": "timeout",
     "invalid_json": "invalid_json",
@@ -1386,8 +1386,8 @@ def _resolve_class_router_result(
     controller_used = router_state.get("used") if isinstance(router_state, dict) else False
     controller_error = router_state.get("error") if isinstance(router_state, dict) else None
     controller_fallback = router_state.get("fallback_reason") if isinstance(router_state, dict) else None
-    controller_attempted = router_state.get("attempted") if isinstance(router_state, dict) else None
-    controller_fallback_flag = router_state.get("fallback") if isinstance(router_state, dict) else None
+    controller_attempted = bool(router_state.get("attempted")) if isinstance(router_state, dict) else False
+    controller_fallback_flag = bool(router_state.get("fallback")) if isinstance(router_state, dict) else False
     controller_confidence = router_state.get("confidence") if isinstance(router_state, dict) else None
     controller_sla = router_state.get("sla") if isinstance(router_state, dict) else None
     controller_signal_class = router_state.get("signal_class") if isinstance(router_state, dict) else None
@@ -1438,8 +1438,12 @@ def _resolve_class_router_result(
         # Low confidence: keep deterministic class_router result, but track low confidence explicitly.
         controller_used_reason = "low_confidence"
         controller_used = True
-    elif not controller_used and isinstance(controller_fallback, str) and controller_fallback != "skipped":
-        controller_fallback_reason = controller_fallback_reason or controller_fallback
+        controller_fallback_reason = None
+        controller_fallback_flag = False
+    elif not controller_used and isinstance(controller_fallback, str):
+        normalized_fallback = _normalize_controller_fallback_reason(error=controller_fallback)
+        if normalized_fallback:
+            controller_fallback_reason = controller_fallback_reason or normalized_fallback
 
     result["controller"] = {
         "used": bool(controller_used),
@@ -4837,7 +4841,14 @@ async def _handle_webhook_payload(
             )
             controller_error_value = controller_state["output"].get("controller_error")
         controller_timeout = isinstance(controller_error_value, str) and controller_error_value == "timeout"
-        controller_fallback = controller_state.get("fallback_reason") not in (None, "skipped")
+        controller_fallback_reason = controller_state.get("fallback_reason")
+        if (
+            isinstance(controller_fallback_reason, str)
+            and controller_fallback_reason.strip().casefold() == "low_confidence"
+        ):
+            controller_state["fallback_reason"] = None
+            controller_fallback_reason = None
+        controller_fallback = controller_fallback_reason not in (None, "skipped")
         controller_state["timeout"] = controller_timeout
         controller_state["fallback"] = controller_fallback
         controller_state["sla"] = _update_router_sla(  # reuse SLA tracker
@@ -7741,6 +7752,20 @@ async def _handle_webhook_payload(
         reason="expected_reply_shortcircuit" if expected_reply_shortcircuit else "none",
     )
     controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
+    controller_used = bool(controller_meta.get("used")) if isinstance(controller_meta, dict) else False
+    controller_attempted = bool(controller_meta.get("attempted")) if isinstance(controller_meta, dict) else False
+    controller_fallback = bool(controller_meta.get("fallback")) if isinstance(controller_meta, dict) else False
+    controller_low_confidence = (
+        bool(controller_meta.get("low_confidence")) if isinstance(controller_meta, dict) else False
+    )
+    controller_used_reason = (
+        controller_meta.get("used_reason") if isinstance(controller_meta, dict) else None
+    )
+    controller_confidence = (
+        controller_meta.get("confidence") if isinstance(controller_meta, dict) else None
+    )
+    controller_error = controller_meta.get("error") if isinstance(controller_meta, dict) else None
+    controller_goal = controller_meta.get("goal") if isinstance(controller_meta, dict) else None
     trace_payload = {
         "stage": "class_router",
         "classes": class_router_result.get("classes"),
@@ -7757,14 +7782,14 @@ async def _handle_webhook_payload(
         "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
         "router": class_router_result.get("router"),
         "controller": controller_meta,
-        "controller_used": controller_meta.get("used") if isinstance(controller_meta, dict) else None,
-        "controller_attempted": controller_meta.get("attempted") if isinstance(controller_meta, dict) else None,
-        "controller_fallback": controller_meta.get("fallback") if isinstance(controller_meta, dict) else None,
-        "controller_low_confidence": controller_meta.get("low_confidence") if isinstance(controller_meta, dict) else None,
-        "controller_used_reason": controller_meta.get("used_reason") if isinstance(controller_meta, dict) else None,
-        "controller_confidence": controller_meta.get("confidence") if isinstance(controller_meta, dict) else None,
-        "controller_error": controller_meta.get("error") if isinstance(controller_meta, dict) else None,
-        "controller_goal": controller_meta.get("goal") if isinstance(controller_meta, dict) else None,
+        "controller_used": controller_used,
+        "controller_attempted": controller_attempted,
+        "controller_fallback": controller_fallback,
+        "controller_low_confidence": controller_low_confidence,
+        "controller_used_reason": controller_used_reason,
+        "controller_confidence": controller_confidence,
+        "controller_error": controller_error,
+        "controller_goal": controller_goal,
     }
     trace_payload.update(router_meta)
     _record_decision_trace(conversation, trace_payload)
@@ -7775,14 +7800,14 @@ async def _handle_webhook_payload(
                 "class_router": class_router_result,
                 "carryover_class": class_router_result.get("carryover_class"),
                 "router_fallback_reason": class_router_result.get("router_fallback_reason"),
-                "controller_used": controller_meta.get("used") if isinstance(controller_meta, dict) else None,
-                "controller_attempted": controller_meta.get("attempted") if isinstance(controller_meta, dict) else None,
-                "controller_fallback": controller_meta.get("fallback") if isinstance(controller_meta, dict) else None,
-                "controller_low_confidence": controller_meta.get("low_confidence") if isinstance(controller_meta, dict) else None,
-                "controller_used_reason": controller_meta.get("used_reason") if isinstance(controller_meta, dict) else None,
-                "controller_confidence": controller_meta.get("confidence") if isinstance(controller_meta, dict) else None,
-                "controller_error": controller_meta.get("error") if isinstance(controller_meta, dict) else None,
-                "controller_goal": controller_meta.get("goal") if isinstance(controller_meta, dict) else None,
+                "controller_used": controller_used,
+                "controller_attempted": controller_attempted,
+                "controller_fallback": controller_fallback,
+                "controller_low_confidence": controller_low_confidence,
+                "controller_used_reason": controller_used_reason,
+                "controller_confidence": controller_confidence,
+                "controller_error": controller_error,
+                "controller_goal": controller_goal,
                 "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
             },
         )
