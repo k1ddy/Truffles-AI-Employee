@@ -1,4 +1,4 @@
-"""LAW/policy gates and policy-pack driven detection helpers."""
+"""LAW/policy gates and policy-pack-driven detection helpers."""
 
 from __future__ import annotations
 
