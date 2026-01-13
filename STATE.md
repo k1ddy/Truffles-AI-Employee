@@ -527,6 +527,23 @@
 
 ## ИСТОРИЯ СЕССИЙ
 
+### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
+
+**Что сделали:**
+- Подтвердили consult‑clarify и short‑circuit (service known) на реальном ChatFlow inbound, без эскалации.
+
+**Evidence:**
+- PR #153: https://github.com/k1ddy/Truffles-AI-Employee/pull/153
+- CI PR: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20943384712 (core/long/asr/lint/unit зелёные)
+- Deploy: 2026-01-13T03:25:43Z (local build + restart_api; /admin/version=unknown)
+- SQL (messages, role=user, content ILIKE 'Что посоветуете%'):
+  - msg_id `3EB01D467DF68F8EA2954A`, created_at `2026-01-13T03:29:05.858671+00`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, action=reply, intent=consult_reply, expected_reply_type=service_choice, controller_low_confidence=false, controller_fallback_reason=NULL.
+  - msg_id `3EB03F40311BAB0B6DA29A`, created_at `2026-01-13T03:29:44.059528+00`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, action=booking_prompt, intent=booking, expected_reply_type=time, expected_reply_shortcircuit=true, controller_fallback_reason=NULL.
+- SQL (decision_trace, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`):
+  - consult_flow: [{"stage":"consult_flow","reason":"consult_clarify","decision":"consult_clarify","expected_reply_type":"service_choice","state":"bot_active"},{"stage":"consult_flow","reason":"service_hint","decision":"short_circuit","consult_topic":"Что посоветуете по маникюру?","service_query":"Маникюр"}]
+  - question_contract: expected_reply_type service_choice set → matched → expected_reply_type time set (booking_prompt).
+- Conversation state: bot_active (no escalation) at `2026-01-13T03:29:45.547916+00`.
+
 ### 2026-01-12 — A3/A4/A5 verification (evidence-only)
 
 **Что сделали:**

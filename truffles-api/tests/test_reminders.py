@@ -90,8 +90,6 @@ class TestReminderLogic:
         assert handover.reminder_2_sent_at is not None
 
 
-class TestNoResponseAlerts:
-    def test_alert_updates_context_copy(self):
 class TestPendingSlaPing:
     def test_ping_sent_once(self):
         db = Mock()
