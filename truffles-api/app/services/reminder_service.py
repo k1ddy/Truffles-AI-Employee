@@ -256,16 +256,6 @@ def check_no_response_alerts(db: Session) -> dict:
             continue
 
         base_context = conversation.context if isinstance(conversation.context, dict) else {}
-        context = dict(base_context)
-        raw_alerts = context.get("alerts")
-        alerts = dict(raw_alerts) if isinstance(raw_alerts, dict) else {}
-        if alerts.get("no_response_for") == str(last_user.id):
-            continue
-
-        alerts["no_response_for"] = str(last_user.id)
-        alerts["no_response_at"] = now.isoformat()
-        context["alerts"] = alerts
-        conversation.context = context
 
         decision_meta = {}
         if last_user and isinstance(last_user.message_metadata, dict):
@@ -278,8 +268,8 @@ def check_no_response_alerts(db: Session) -> dict:
                 last_action = f"{action}:{intent}"
             else:
                 last_action = action or intent
-        context = conversation.context if isinstance(conversation.context, dict) else {}
-        trace = context.get("decision_trace")
+
+        trace = base_context.get("decision_trace")
         last_trace = trace[-1] if isinstance(trace, list) and trace else None
         if (isinstance(decision_meta, dict) and decision_meta.get("action") == "shield_drop") or (
             isinstance(last_trace, dict)
@@ -297,10 +287,12 @@ def check_no_response_alerts(db: Session) -> dict:
             )
             continue
 
-        alerts = context.get("alerts") if isinstance(context.get("alerts"), dict) else {}
-        if alerts.get("no_response_for") == str(last_user.id):
+        raw_alerts = base_context.get("alerts")
+        if isinstance(raw_alerts, dict) and raw_alerts.get("no_response_for") == str(last_user.id):
             continue
 
+        context = dict(base_context)
+        alerts = dict(raw_alerts) if isinstance(raw_alerts, dict) else {}
         alerts["no_response_for"] = str(last_user.id)
         alerts["no_response_at"] = now.isoformat()
         context["alerts"] = alerts
