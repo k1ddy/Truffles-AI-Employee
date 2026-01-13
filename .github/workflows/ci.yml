@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   IMAGE_NAME: ghcr.io/k1ddy/truffles-ai-employee
@@ -142,13 +143,33 @@ jobs:
           fetch-depth: 0
 
       - name: Secret scan (gitleaks)
+        if: github.event_name != 'workflow_dispatch'
         uses: gitleaks/gitleaks-action@v2
         env:
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install gitleaks (manual)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz -o /tmp/gitleaks.tgz
+          tar -xzf /tmp/gitleaks.tgz -C /tmp
+          /tmp/gitleaks version
+
+      - name: Secret scan (gitleaks no-git)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          /tmp/gitleaks detect --no-git --redact -v --exit-code=2 --report-format=sarif --report-path=results.sarif --log-level=debug
+
+      - name: Upload gitleaks report
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-results.sarif
+          path: results.sarif
+
   build-push:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     needs: [lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
     runs-on: ubuntu-latest
     steps:
@@ -168,7 +189,8 @@ jobs:
         id: meta
         run: echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push image
+      - name: Build and push image (main)
+        if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
           context: ./truffles-api
@@ -178,7 +200,25 @@ jobs:
             ${{ env.IMAGE_NAME }}:main
             ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
           build-args: |
-            APP_VERSION=main
+            APP_VERSION=${{ github.ref_name }}
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.meta.outputs.build_time }}
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE_NAME }}:main
+            type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push image (manual)
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./truffles-api
+          file: ./truffles-api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          build-args: |
+            APP_VERSION=${{ github.ref_name }}
             GIT_COMMIT=${{ github.sha }}
             BUILD_TIME=${{ steps.meta.outputs.build_time }}
           cache-from: |
@@ -187,7 +227,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     needs: build-push
     runs-on: ubuntu-latest
     environment: production
@@ -204,4 +244,8 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             docker rm -f truffles-api >/dev/null 2>&1 || true
-            IMAGE_NAME=${{ env.IMAGE_NAME }}:main PULL_IMAGE=1 bash ~/restart_api.sh
+            IMAGE_TAG=main
+            if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+              IMAGE_TAG=sha-${{ github.sha }}
+            fi
+            IMAGE_NAME=${{ env.IMAGE_NAME }}:${IMAGE_TAG} PULL_IMAGE=1 bash ~/restart_api.sh
