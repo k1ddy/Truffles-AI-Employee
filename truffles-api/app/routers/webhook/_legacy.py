@@ -5807,7 +5807,11 @@ async def _handle_webhook_payload(
     if consult_signal:
         context = _get_conversation_context(conversation)
         context_manager = _get_context_manager(context)
-        if _should_escalate_for_clarify(context_manager, "consult"):
+        if consult_decision:
+            consult_flow_decision = (
+                "consult_escalate" if consult_decision.action == "escalate" else "consult_reply"
+            )
+        elif _should_escalate_for_clarify(context_manager, "consult"):
             clarify_count, _ = _get_clarify_attempt_state(context_manager, "consult")
             _record_context_manager_decision(
                 conversation,
@@ -5867,9 +5871,11 @@ async def _handle_webhook_payload(
             }
             if consult_flow_decision == "consult_clarify":
                 consult_flow_trace["expected_reply_type"] = EXPECTED_REPLY_SERVICE
-            consult_flow_trace["reason"] = (
-                "consult_no_service" if consult_flow_decision == "consult_escalate" else "consult_clarify"
-            )
+                consult_flow_trace["reason"] = "consult_clarify"
+            elif consult_flow_decision == "consult_escalate":
+                consult_flow_trace["reason"] = "consult_no_service"
+            else:
+                consult_flow_trace["reason"] = "consult_pack"
             consult_playbook_id = consult_meta.get("consult_playbook_id")
             if consult_playbook_id:
                 consult_flow_trace["consult_playbook_id"] = consult_playbook_id
