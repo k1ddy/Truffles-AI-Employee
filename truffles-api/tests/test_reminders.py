@@ -119,7 +119,7 @@ class TestPendingSlaPing:
 
 
 class TestNoResponseAlerts:
-    def test_suppressed_on_shield_drop(self):
+    def test_alert_updates_context_copy(self):
         db = Mock()
         conversation = Mock()
         conversation.state = ConversationState.BOT_ACTIVE.value
@@ -136,6 +136,30 @@ class TestNoResponseAlerts:
         last_user.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
         last_user.content = "Hello"
         last_user.message_metadata = {"decision_meta": {"action": "reply"}}
+
+        def last_message(db_handle, conversation_id, role):
+            if role == "user":
+                return last_user
+            return None
+
+        db.query.return_value.filter.return_value.all.return_value = [conversation]
+
+        with patch("app.services.reminder_service._get_last_message", side_effect=last_message), patch(
+            "app.services.reminder_service.alert_warning"
+        ) as alert_mock:
+            result = reminder_service.check_no_response_alerts(db)
+
+        assert result["alerted"] == 1
+        assert conversation.context is not original_context
+        assert conversation.context["alerts"]["no_response_for"] == str(last_user.id)
+        alert_mock.assert_called_once()
+
+    def test_suppressed_on_shield_drop(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.BOT_ACTIVE.value
+        conversation.bot_status = "active"
+        conversation.bot_muted_until = None
         conversation.context = {}
         conversation.id = uuid4()
         conversation.client_id = uuid4()
@@ -158,10 +182,6 @@ class TestNoResponseAlerts:
         ) as alert_mock:
             result = reminder_service.check_no_response_alerts(db)
 
-        assert result["alerted"] == 1
-        assert conversation.context is not original_context
-        assert conversation.context["alerts"]["no_response_for"] == str(last_user.id)
-        alert_mock.assert_called_once()
         assert result["alerted"] == 0
         assert result["items"] == []
         alert_mock.assert_not_called()
