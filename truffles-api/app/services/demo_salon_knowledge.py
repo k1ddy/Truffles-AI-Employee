@@ -30,6 +30,7 @@ _QUESTION_TYPE_THRESHOLD = float(os.environ.get("QUESTION_TYPE_SEMANTIC_THRESHOL
 _QUESTION_TYPE_MARGIN = float(os.environ.get("QUESTION_TYPE_SEMANTIC_MARGIN", "0.08"))
 _QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
 _QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
+CONSULT_CLARIFY_TEXT = "Я могу помочь по услугам салона. Какая услуга интересует?"
 
 logger = get_logger("demo_salon_knowledge")
 
@@ -2425,7 +2426,24 @@ def get_demo_salon_decision(
         intent_decomp=intent_decomp,
     )
     if consult_decision:
-        return consult_decision
+        service_decision = get_demo_salon_service_decision(
+            message,
+            client_slug=client_slug,
+            intent_decomp=intent_decomp,
+        )
+        if service_decision and service_decision.intent == "service_match":
+            return service_decision
+        consult_meta = consult_decision.meta if isinstance(consult_decision.meta, dict) else None
+        if consult_meta is not None:
+            consult_meta = dict(consult_meta)
+            consult_meta.pop("consult_options", None)
+            consult_meta["consult_questions"] = [CONSULT_CLARIFY_TEXT]
+        return DemoSalonDecision(
+            action="reply",
+            response=CONSULT_CLARIFY_TEXT,
+            intent="consult_reply",
+            meta=consult_meta,
+        )
 
     if "скидки сумм" in normalized or "скидк" in normalized and "сумм" in normalized:
         reply = format_reply_from_truth("promotions_rules")
