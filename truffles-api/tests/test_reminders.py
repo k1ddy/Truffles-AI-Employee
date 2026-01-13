@@ -119,7 +119,7 @@ class TestPendingSlaPing:
 
 
 class TestNoResponseAlerts:
-    def test_alert_updates_context_copy(self):
+    def test_alert_sets_dedup_and_skips_repeat(self):
         db = Mock()
         conversation = Mock()
         conversation.state = ConversationState.BOT_ACTIVE.value
@@ -127,15 +127,17 @@ class TestNoResponseAlerts:
         conversation.bot_muted_until = None
         conversation.id = uuid4()
         conversation.client_id = uuid4()
-
-        original_context = {"alerts": {"no_response_for": str(uuid4())}}
-        conversation.context = original_context
+        conversation.context = {}
 
         last_user = Mock()
         last_user.id = uuid4()
         last_user.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
         last_user.content = "Hello"
-        last_user.message_metadata = {"decision_meta": {"action": "reply"}}
+        last_user.message_metadata = {
+            "messageId": "msg-1",
+            "remoteJid": "77015705555@s.whatsapp.net",
+            "decision_meta": {"action": "reply"},
+        }
 
         def last_message(db_handle, conversation_id, role):
             if role == "user":
@@ -144,12 +146,21 @@ class TestNoResponseAlerts:
 
         db.query.return_value.filter.return_value.all.return_value = [conversation]
 
-        with patch("app.services.reminder_service._get_last_message", side_effect=last_message), patch(
+        with patch(
+            "app.services.reminder_service._get_last_message", side_effect=last_message
+        ), patch(
+            "app.services.reminder_service._get_no_response_threshold_minutes", return_value=1
+        ), patch(
+            "app.services.reminder_service._get_no_response_max_age_days", return_value=30
+        ), patch(
             "app.services.reminder_service.alert_warning"
         ) as alert_mock:
-            result = reminder_service.check_no_response_alerts(db)
+            original_context = conversation.context
+            result_first = reminder_service.check_no_response_alerts(db)
+            result_second = reminder_service.check_no_response_alerts(db)
 
-        assert result["alerted"] == 1
+        assert result_first["alerted"] == 1
+        assert result_second["alerted"] == 0
         assert conversation.context is not original_context
         assert conversation.context["alerts"]["no_response_for"] == str(last_user.id)
         alert_mock.assert_called_once()
@@ -168,7 +179,11 @@ class TestNoResponseAlerts:
         last_user.id = uuid4()
         last_user.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
         last_user.content = "spam"
-        last_user.message_metadata = {"decision_meta": {"action": "shield_drop"}}
+        last_user.message_metadata = {
+            "messageId": "msg-2",
+            "remoteJid": "77015705555@s.whatsapp.net",
+            "decision_meta": {"action": "shield_drop"},
+        }
 
         def last_message(db_handle, conversation_id, role):
             if role == "user":
@@ -177,12 +192,97 @@ class TestNoResponseAlerts:
 
         db.query.return_value.filter.return_value.all.return_value = [conversation]
 
-        with patch("app.services.reminder_service._get_last_message", side_effect=last_message), patch(
+        with patch(
+            "app.services.reminder_service._get_last_message", side_effect=last_message
+        ), patch(
+            "app.services.reminder_service._get_no_response_threshold_minutes", return_value=1
+        ), patch(
+            "app.services.reminder_service._get_no_response_max_age_days", return_value=30
+        ), patch(
             "app.services.reminder_service.alert_warning"
         ) as alert_mock:
             result = reminder_service.check_no_response_alerts(db)
 
         assert result["alerted"] == 0
-        assert result["items"] == []
-        alert_mock.assert_not_called()
         assert conversation.context == {}
+        alert_mock.assert_not_called()
+
+    def test_skip_missing_metadata(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.BOT_ACTIVE.value
+        conversation.bot_status = "active"
+        conversation.bot_muted_until = None
+        conversation.context = {}
+        conversation.id = uuid4()
+        conversation.client_id = uuid4()
+
+        last_user = Mock()
+        last_user.id = uuid4()
+        last_user.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+        last_user.content = "hello"
+        last_user.message_metadata = {"decision_meta": {"action": "reply"}}
+
+        def last_message(db_handle, conversation_id, role):
+            if role == "user":
+                return last_user
+            return None
+
+        db.query.return_value.filter.return_value.all.return_value = [conversation]
+
+        with patch(
+            "app.services.reminder_service._get_last_message", side_effect=last_message
+        ), patch(
+            "app.services.reminder_service._get_no_response_threshold_minutes", return_value=1
+        ), patch(
+            "app.services.reminder_service._get_no_response_max_age_days", return_value=30
+        ), patch(
+            "app.services.reminder_service.alert_warning"
+        ) as alert_mock:
+            result = reminder_service.check_no_response_alerts(db)
+
+        assert result["alerted"] == 0
+        assert conversation.context == {}
+        alert_mock.assert_not_called()
+
+    def test_skip_stale_message(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.BOT_ACTIVE.value
+        conversation.bot_status = "active"
+        conversation.bot_muted_until = None
+        conversation.context = {}
+        conversation.id = uuid4()
+        conversation.client_id = uuid4()
+
+        last_user = Mock()
+        last_user.id = uuid4()
+        last_user.created_at = datetime.now(timezone.utc) - timedelta(days=31)
+        last_user.content = "legacy"
+        last_user.message_metadata = {
+            "messageId": "msg-3",
+            "remoteJid": "77015705555@s.whatsapp.net",
+            "decision_meta": {"action": "reply"},
+        }
+
+        def last_message(db_handle, conversation_id, role):
+            if role == "user":
+                return last_user
+            return None
+
+        db.query.return_value.filter.return_value.all.return_value = [conversation]
+
+        with patch(
+            "app.services.reminder_service._get_last_message", side_effect=last_message
+        ), patch(
+            "app.services.reminder_service._get_no_response_threshold_minutes", return_value=1
+        ), patch(
+            "app.services.reminder_service._get_no_response_max_age_days", return_value=30
+        ), patch(
+            "app.services.reminder_service.alert_warning"
+        ) as alert_mock:
+            result = reminder_service.check_no_response_alerts(db)
+
+        assert result["alerted"] == 0
+        assert conversation.context == {}
+        alert_mock.assert_not_called()
