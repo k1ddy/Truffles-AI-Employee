@@ -565,6 +565,28 @@
   - question_contract: expected_reply_type service_choice set → matched → expected_reply_type time set (booking_prompt).
 - Conversation state: bot_active (no escalation) at `2026-01-13T03:29:45.547916+00`.
 
+### 2026-01-13 — TP-LAW-02 /message gate (Hard-LAW meta)
+
+**Что сделали:**
+- /message routed through webhook pipeline; hard-law policy gate stamp in decision_meta/trace for hard-law intents.
+
+**Evidence:**
+- PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/161
+- CI PR: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20950600154
+  - core-eval: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20950600154/job/60202805761
+  - long-eval: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20950600154/job/60202805750
+- Prod `/admin/version`: `{"version":"tp-law-02-message-gate","git_commit":"0707e033b8a877a5f79055d8f359782c2d764143","build_time":"2026-01-13T08:56:20Z"}`
+- Live-check /message (Hard-LAW, timestamp window >= `2026-01-13T08:57:43Z`)
+  - request: “Хочу оплатить картой” → conv_id `4f9026c2-9c94-4b38-8248-b5aacf635cdf`
+  - decision_meta: policy_gate=hard_law, policy_section=payment_info, llm_used=false
+  - decision_trace: policy_gate=hard_law, policy_section=payment_info
+  - SQL (decision_meta)
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT id, created_at, metadata->'decision_meta'->>'policy_gate' AS policy_gate, metadata->'decision_meta'->>'policy_section' AS policy_section, metadata->'decision_meta'->>'llm_used' AS llm_used, metadata->'decision_meta'->>'action' AS action, metadata->'decision_meta'->>'intent' AS intent, metadata->>'messageId' AS message_id, conversation_id FROM messages WHERE conversation_id = '4f9026c2-9c94-4b38-8248-b5aacf635cdf' AND role = 'user' ORDER BY created_at DESC LIMIT 5;"`
+    - output: `9f6b92c9-513a-496c-b52b-84d34b472ce3 | 2026-01-13 08:57:49.759848+00 | hard_law | payment_info | false | escalate | payment | message-d01fd716-4c85-45fb-8f51-32a66979baa1 | 4f9026c2-9c94-4b38-8248-b5aacf635cdf`
+  - SQL (decision_trace)
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT trace->>'policy_gate' AS policy_gate, trace->>'policy_section' AS policy_section, trace->>'decision' AS decision, trace->>'intent' AS intent, trace->>'recorded_at' AS recorded_at FROM conversations c, LATERAL jsonb_array_elements(c.context->'decision_trace') AS trace WHERE c.id = '4f9026c2-9c94-4b38-8248-b5aacf635cdf' AND trace->>'stage' = 'policy_gate' ORDER BY trace->>'recorded_at' DESC LIMIT 5;"`
+    - output: `hard_law | payment_info | escalate | payment | 2026-01-13T08:58:01.905485+00:00`
+
 ### 2026-01-13 — P1 Task A/B evidence (consult pack‑only + pending_wait + policy_gate)
 
 **Что сделали:**
