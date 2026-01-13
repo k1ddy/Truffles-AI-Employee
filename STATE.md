@@ -572,9 +572,9 @@
 
 **Evidence:**
 - PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/161
-- CI PR: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20950600154
-  - core-eval: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20950600154/job/60202805761
-  - long-eval: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20950600154/job/60202805750
+- CI PR: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20950759387
+  - core-eval: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20950759387/job/60203324555
+  - long-eval: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20950759387/job/60203324529
 - Prod `/admin/version`: `{"version":"tp-law-02-message-gate","git_commit":"0707e033b8a877a5f79055d8f359782c2d764143","build_time":"2026-01-13T08:56:20Z"}`
 - Live-check /message (Hard-LAW, timestamp window >= `2026-01-13T08:57:43Z`)
   - request: “Хочу оплатить картой” → conv_id `4f9026c2-9c94-4b38-8248-b5aacf635cdf`
