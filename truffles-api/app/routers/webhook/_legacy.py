@@ -179,15 +179,22 @@ from app.routers.webhook.pending import (
 from app.routers.webhook.policy import (
     _demo_salon_escalation_gate,
     _demo_salon_price_sidecar,
+    _detect_booking_cancel,
+    _detect_hard_law_match,
     _detect_llm_guard_topics,
+    _detect_policy_gate_section,
     _format_discounts_policy_reply,
+    _get_policy_pack,
     _get_policy_handler,
     _get_policy_type,
     _get_routing_policy,
     _has_discount_policy_rules,
-    _is_hard_law_intent,
     _looks_like_policy_topic,
     _looks_like_promotions_request,
+    _resolve_complaint_guard,
+    _resolve_hard_law_sections,
+    _resolve_policy_intent,
+    _resolve_policy_risk_level,
     _should_escalate_to_pending,
     _should_run_booking_flow,
     _should_run_demo_truth_gate,
@@ -639,116 +646,6 @@ PENDING_CLOSE_PHRASES = {
     "спасибо всё",
 }
 
-LLM_GUARD_TOPICS = {
-    "payment": [
-        "оплат",
-        "предоплат",
-        "kaspi",
-        "каспи",
-        "перевод",
-        "карт",
-        "карта",
-        "qr",
-        "счет",
-        "счёт",
-        "реквизит",
-        "iban",
-        "swift",
-        "терминал",
-        "эквайр",
-        "касса",
-        "налич",
-        "безнал",
-    ],
-    "medical": [
-        "беремен",
-        "аллерг",
-        "противопоказ",
-        "медицин",
-        "кормл",
-        "лактац",
-        "ожог",
-        "жжет",
-        "жжёт",
-        "болит",
-        "больно",
-        "кров",
-        "воспал",
-        "сып",
-        "реакц",
-        "анестез",
-        "обезбол",
-        "дермат",
-    ],
-    "complaint": [
-        "жалоб",
-        "претенз",
-        "разочар",
-        "недовол",
-        "плохо",
-        "ужас",
-        "кошмар",
-        "хам",
-        "грубо",
-        "брак",
-        "отпал",
-        "слезл",
-        "сломал",
-        "испор",
-    ],
-    "discount": [
-        "скидк",
-        "скидоч",
-        "скидос",
-        "дешевл",
-        "подешевл",
-        "купон",
-        "акци",
-        "промо",
-        "промокод",
-        "торг",
-        "уступ",
-    ],
-    "refund": [
-        "возврат",
-        "верну",
-        "вернем",
-        "вернём",
-        "refund",
-    ],
-}
-
-HARD_LAW_INTENTS = {
-    "cancel_request",
-    "complaint",
-    "legal",
-    "medical",
-    "payment",
-    "refund",
-    "reschedule",
-}
-
-COMPLAINT_EXPLICIT_KEYWORDS = [
-    "жалоб",
-    "претенз",
-    "плохо сдел",
-    "испорт",
-    "верни",
-    "вернем",
-    "вернём",
-    "недоволен",
-    "недовольн",
-    "хамств",
-]
-
-COMPLAINT_CONSULT_OVERRIDE_KEYWORDS = [
-    "боюс",
-    "страшн",
-    "пережива",
-    "опасаюс",
-    "сомнева",
-]
-
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
 MSG_BOOKING_ASK_NAME = "Как вас зовут?"
@@ -835,15 +732,6 @@ BOOKING_REQUEST_KEYWORDS = [
     "бронь",
     "окошк",
     "свободн",
-]
-
-BOOKING_CANCEL_KEYWORDS = [
-    "не надо запис",
-    "не хочу запис",
-    "передумал",
-    "передумала",
-    "не буду запис",
-    "отмена записи",
 ]
 
 SERVICE_KEYWORDS = [
@@ -938,11 +826,8 @@ def _is_booking_request(text: str) -> bool:
     return _contains_any(normalized, BOOKING_REQUEST_KEYWORDS)
 
 
-def _is_booking_cancel(text: str) -> bool:
-    normalized = _normalize_text(text)
-    if not normalized:
-        return False
-    return _contains_any(normalized, BOOKING_CANCEL_KEYWORDS)
+def _is_booking_cancel(text: str, *, policy_pack: dict | None) -> bool:
+    return _detect_booking_cancel(text, policy_pack=policy_pack)
 
 
 def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
@@ -2230,9 +2115,13 @@ async def _handle_webhook_payload(
 
     # 4. Update last_message_at (keep previous for session timeout check)
     now = datetime.now(timezone.utc)
+    policy_type = _get_policy_type(client)
+    policy_pack = _get_policy_pack(client)
+    policy_source = (
+        "policy_pack" if isinstance(policy_pack, dict) and policy_pack else "policy_gate"
+    )
     policy_handler = _get_policy_handler(client)
-    policy_type = policy_handler.get("policy_type") if policy_handler else None
-    policy_pack = policy_handler.get("policy_pack") if policy_handler else None
+    hard_law_sections = set(_resolve_hard_law_sections(policy_pack))
     quiet_hours_notice: str | None = None
     if conversation.state == ConversationState.BOT_ACTIVE.value and policy_type == "demo_salon":
         quiet_hours_notice = build_quiet_hours_notice(now_utc=now)
@@ -3102,6 +2991,115 @@ async def _handle_webhook_payload(
         bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
         if not sent:
             result_message = f"{result_message}; response_send=failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    def _apply_policy_decision(
+        decision: DemoSalonDecision,
+        *,
+        policy_gate: str,
+        policy_section: str | None,
+        risk_level: str | None,
+        sidecar: str | None,
+        policy_t0: float | None,
+        gate_label: str,
+        booking_wants_flow: bool | None,
+    ) -> WebhookResponse:
+        bot_response = decision.response or MSG_ESCALATED
+        if sidecar:
+            bot_response = _combine_sidecar(bot_response, sidecar)
+        _reset_low_confidence_retry(conversation)
+
+        result_message = "Policy reply sent"
+        if decision.action == "escalate":
+            _, reused, telegram_sent = _reuse_active_handover(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message=message_text,
+                source=policy_source,
+                intent=decision.intent,
+            )
+            if reused:
+                result_message = f"Policy reuse, telegram={'sent' if telegram_sent else 'failed'}"
+            elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get("allow_handover_create", False):
+                result = escalate_to_pending(
+                    db=db,
+                    conversation=conversation,
+                    user_message=message_text,
+                    trigger_type="intent",
+                    trigger_value=decision.intent or "policy",
+                )
+                if result.ok:
+                    handover = result.value
+                    telegram_sent = send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=message_text,
+                    )
+                    result_message = f"Policy escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                else:
+                    result_message = f"Policy escalation failed: {result.error}"
+            else:
+                result_message = "Policy escalation skipped (already pending)"
+
+        router_skip_reason = "law_gate" if policy_gate == "hard_law" else "policy_gate"
+        router_gate_meta = _set_router_observability(
+            saved_message,
+            eligible=False,
+            reason=router_skip_reason,
+        )
+        trace_payload = {
+            "stage": "policy_gate",
+            "decision": decision.action,
+            "intent": decision.intent,
+            "state": conversation.state,
+            "policy_type": policy_type,
+            "policy_gate": policy_gate,
+            "source": policy_source,
+        }
+        if policy_section:
+            trace_payload["policy_section"] = policy_section
+        if isinstance(risk_level, str) and risk_level:
+            trace_payload["risk_level"] = risk_level
+        if booking_wants_flow is not None:
+            trace_payload["booking_wants_flow"] = booking_wants_flow
+        trace_payload.update(router_gate_meta)
+        _record_decision_trace(conversation, trace_payload)
+        _record_message_decision_meta(
+            saved_message,
+            action=decision.action,
+            intent=decision.intent,
+            source=policy_source,
+            fast_intent=False,
+        )
+        if saved_message:
+            meta_updates = {"policy_gate": policy_gate, "source": policy_source}
+            if policy_section:
+                meta_updates["policy_section"] = policy_section
+            if isinstance(risk_level, str) and risk_level:
+                meta_updates["risk_level"] = risk_level
+            _update_message_decision_metadata(saved_message, meta_updates)
+        bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
+        if not sent:
+            result_message = f"{result_message}; response_send=failed"
+        if policy_t0 is not None:
+            _log_timing(
+                "policy_gate_ms",
+                (time.monotonic() - policy_t0) * 1000,
+                {
+                    "policy_type": policy_type,
+                    "booking_wants_flow": booking_wants_flow,
+                    "gate": gate_label,
+                },
+            )
         db.commit()
         return WebhookResponse(
             success=True,
@@ -4171,6 +4169,31 @@ async def _handle_webhook_payload(
         )
     else:
         booking_signal = False
+
+    # 6.95 Hard-LAW pre-LLM gate (policy-pack driven).
+    if not bypass_domain_flows and routing["allow_truth_gate_reply"] and message_text:
+        hard_law_t0 = time.monotonic()
+        hard_law_match = _detect_hard_law_match(message_text, policy_pack=policy_pack)
+        if hard_law_match:
+            section_key, section = hard_law_match
+            risk_level = _resolve_policy_risk_level(section) or "high"
+            intent = _resolve_policy_intent(section_key, section)
+            response = section.get("response") if isinstance(section, dict) else None
+            decision = DemoSalonDecision(
+                action="escalate",
+                response=response or MSG_ESCALATED,
+                intent=intent,
+            )
+            return _apply_policy_decision(
+                decision,
+                policy_gate="hard_law",
+                policy_section=section_key,
+                risk_level=risk_level,
+                sidecar=None,
+                policy_t0=hard_law_t0,
+                gate_label="hard_law",
+                booking_wants_flow=None,
+            )
     intent_decomp_payload = None
     intent_decomp_intents: list[str] = []
     intent_decomp_primary = None
@@ -4600,165 +4623,99 @@ async def _handle_webhook_payload(
             bot_response=bot_response,
         )
 
-    # 9.03 Policy escalation gate (hard signals).
-    if not bypass_domain_flows and policy_handler and routing["allow_truth_gate_reply"]:
+    # 9.03 Policy escalation gate (policy-pack keywords + intent fallback).
+    if not bypass_domain_flows and routing["allow_truth_gate_reply"] and message_text:
         policy_t0 = time.monotonic()
-        escalation_gate = policy_handler.get("escalation_gate")
-        decision = escalation_gate(booking_messages) if escalation_gate else None
-        if decision and decision.intent == "complaint":
-            normalized_text = _normalize_text(message_text)
-            complaint_policy = policy_pack.get("complaint") if isinstance(policy_pack, dict) else None
-            explicit_keywords = (
-                complaint_policy.get("explicit_keywords") if isinstance(complaint_policy, dict) else None
+        hard_law_match = _detect_hard_law_match(
+            message_text,
+            policy_pack=policy_pack,
+            intent_hints=intent_decomp_intents or None,
+        )
+        if hard_law_match:
+            section_key, section = hard_law_match
+            risk_level = _resolve_policy_risk_level(section) or "high"
+            intent = _resolve_policy_intent(section_key, section)
+            response = section.get("response") if isinstance(section, dict) else None
+            decision = DemoSalonDecision(
+                action="escalate",
+                response=response or MSG_ESCALATED,
+                intent=intent,
             )
-            consult_override_keywords = (
-                complaint_policy.get("consult_override_keywords") if isinstance(complaint_policy, dict) else None
+            return _apply_policy_decision(
+                decision,
+                policy_gate="hard_law",
+                policy_section=section_key,
+                risk_level=risk_level,
+                sidecar=None,
+                policy_t0=policy_t0,
+                gate_label="hard_law",
+                booking_wants_flow=booking_wants_flow,
             )
-            allow_keyword_fallback = (
-                bool(policy_pack.get("allow_keyword_fallback")) if isinstance(policy_pack, dict) else False
-            )
-            if not isinstance(explicit_keywords, list):
-                explicit_keywords = []
-            if not isinstance(consult_override_keywords, list):
-                consult_override_keywords = []
-            explicit_keywords = [str(item).strip() for item in explicit_keywords if str(item).strip()]
-            consult_override_keywords = [
-                str(item).strip() for item in consult_override_keywords if str(item).strip()
-            ]
-            if not explicit_keywords and allow_keyword_fallback:
-                explicit_keywords = COMPLAINT_EXPLICIT_KEYWORDS
-            if not consult_override_keywords and allow_keyword_fallback:
-                consult_override_keywords = COMPLAINT_CONSULT_OVERRIDE_KEYWORDS
-            complaint_signal = bool(normalized_text and _contains_any(normalized_text, explicit_keywords))
-            consult_override = bool(
-                (consult_intent or current_goal == "consult")
-                and normalized_text
-                and _contains_any(normalized_text, consult_override_keywords)
-            )
-            if saved_message:
-                _update_message_decision_metadata(
-                    saved_message,
+
+        policy_match = _detect_policy_gate_section(
+            message_text,
+            policy_pack=policy_pack,
+            hard_law_sections=hard_law_sections | {"discounts"},
+        )
+        if policy_match:
+            section_key, section = policy_match
+            if section_key == "complaint":
+                normalized_text = _normalize_text(message_text)
+                explicit_keywords, consult_override_keywords = _resolve_complaint_guard(policy_pack)
+                complaint_signal = bool(
+                    normalized_text and explicit_keywords and _contains_any(normalized_text, explicit_keywords)
+                )
+                consult_override = bool(
+                    (consult_intent or current_goal == "consult")
+                    and normalized_text
+                    and consult_override_keywords
+                    and _contains_any(normalized_text, consult_override_keywords)
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "complaint_signal": complaint_signal,
+                            "consult_override": consult_override,
+                        },
+                    )
+                _record_decision_trace(
+                    conversation,
                     {
+                        "stage": "complaint_guard",
+                        "decision": "suppressed"
+                        if (consult_override or not complaint_signal)
+                        else "accepted",
                         "complaint_signal": complaint_signal,
                         "consult_override": consult_override,
                     },
                 )
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "complaint_guard",
-                    "decision": "suppressed"
-                    if (consult_override or not complaint_signal)
-                    else "accepted",
-                    "complaint_signal": complaint_signal,
-                    "consult_override": consult_override,
-                },
-            )
-            if consult_override or not complaint_signal:
-                decision = None
-        if decision:
-            bot_response = decision.response
-            bot_response = _combine_sidecar(bot_response, multi_intent_other_followup)
-            _reset_low_confidence_retry(conversation)
+                if consult_override or not complaint_signal:
+                    section_key = ""
 
-            result_message = "Policy reply sent"
-            if decision.action == "escalate":
-                _, reused, telegram_sent = _reuse_active_handover(
-                    db=db,
-                    conversation=conversation,
-                    user=user,
-                    message=message_text,
-                    source="policy_gate",
-                    intent=decision.intent,
+            if section_key:
+                action = section.get("action") if isinstance(section, dict) else None
+                if not isinstance(action, str) or not action.strip():
+                    action = "escalate"
+                response = section.get("response") if isinstance(section, dict) else None
+                intent = _resolve_policy_intent(section_key, section)
+                risk_level = _resolve_policy_risk_level(section)
+                decision = DemoSalonDecision(
+                    action=action,
+                    response=response or MSG_ESCALATED,
+                    intent=intent,
                 )
-                if reused:
-                    result_message = f"Policy reuse, telegram={'sent' if telegram_sent else 'failed'}"
-                elif conversation.state == ConversationState.BOT_ACTIVE.value:
-                    result = escalate_to_pending(
-                        db=db,
-                        conversation=conversation,
-                        user_message=message_text,
-                        trigger_type="intent",
-                        trigger_value=decision.intent or "policy",
-                    )
-                    if result.ok:
-                        handover = result.value
-                        telegram_sent = send_telegram_notification(
-                            db=db,
-                            handover=handover,
-                            conversation=conversation,
-                            user=user,
-                            message=message_text,
-                        )
-                        result_message = f"Policy escalation, telegram={'sent' if telegram_sent else 'failed'}"
-                    else:
-                        result_message = f"Policy escalation failed: {result.error}"
-                else:
-                    result_message = "Policy escalation skipped (already pending)"
+                return _apply_policy_decision(
+                    decision,
+                    policy_gate=section_key,
+                    policy_section=section_key,
+                    risk_level=risk_level,
+                    sidecar=multi_intent_other_followup,
+                    policy_t0=policy_t0,
+                    gate_label="policy_gate",
+                    booking_wants_flow=booking_wants_flow,
+                )
 
-            is_hard_law = _is_hard_law_intent(
-                decision.intent,
-                policy_type=policy_type,
-                policy_pack=policy_pack,
-            )
-            router_skip_reason = "law_gate" if is_hard_law else "policy_gate"
-            router_gate_meta = _set_router_observability(
-                saved_message,
-                eligible=False,
-                reason=router_skip_reason,
-            )
-            trace_payload = {
-                "stage": "policy_gate",
-                "decision": decision.action,
-                "intent": decision.intent,
-                "state": conversation.state,
-                "booking_wants_flow": booking_wants_flow,
-                "policy_type": policy_type,
-            }
-            policy_section = None
-            risk_level = None
-            if isinstance(decision.meta, dict):
-                policy_section = decision.meta.get("policy_gate")
-                risk_level = decision.meta.get("risk_level")
-            if is_hard_law:
-                trace_payload["policy_gate"] = "hard_law"
-                if isinstance(policy_section, str) and policy_section:
-                    trace_payload["policy_section"] = policy_section
-            elif isinstance(policy_section, str) and policy_section:
-                trace_payload["policy_gate"] = policy_section
-            if isinstance(risk_level, str) and risk_level:
-                trace_payload["risk_level"] = risk_level
-            trace_payload.update(router_gate_meta)
-            _record_decision_trace(conversation, trace_payload)
-            _record_message_decision_meta(
-                saved_message,
-                action=decision.action,
-                intent=decision.intent,
-                source="policy_gate",
-                fast_intent=False,
-            )
-            if is_hard_law and saved_message:
-                updates = {"policy_gate": "hard_law"}
-                if isinstance(policy_section, str) and policy_section:
-                    updates["policy_section"] = policy_section
-                if isinstance(risk_level, str) and risk_level:
-                    updates["risk_level"] = risk_level
-                _update_message_decision_metadata(saved_message, updates)
-            bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
-            if not sent:
-                result_message = f"{result_message}; response_send=failed"
-            _log_timing(
-                "policy_gate_ms",
-                (time.monotonic() - policy_t0) * 1000,
-                {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow, "gate": "escalation"},
-            )
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message=result_message,
-                conversation_id=conversation.id,
-                bot_response=bot_response,
-            )
         _log_timing(
             "policy_gate_ms",
             (time.monotonic() - policy_t0) * 1000,
@@ -5139,7 +5096,6 @@ async def _handle_webhook_payload(
         promotions_trigger
         and routing["allow_bot_reply"]
         and not bypass_domain_flows
-        and policy_handler
         and message_text
     ):
         class_router_result = _resolve_class_router_result(
@@ -5178,9 +5134,15 @@ async def _handle_webhook_payload(
                 intent="promotions",
             )
         else:
-            discounts_available = _has_discount_policy_rules(policy_type=policy_type)
+            discounts_available = _has_discount_policy_rules(
+                policy_pack=policy_pack,
+                policy_type=policy_type,
+            )
             discounts_reply = (
-                _format_discounts_policy_reply(policy_type=policy_type)
+                _format_discounts_policy_reply(
+                    policy_pack=policy_pack,
+                    policy_type=policy_type,
+                )
                 if discounts_available
                 else None
             )
@@ -5228,7 +5190,7 @@ async def _handle_webhook_payload(
                 conversation=conversation,
                 user=user,
                 message=message_text,
-                source="policy_gate",
+                source=policy_source,
                 intent=decision.intent,
             )
             if reused:
@@ -5268,6 +5230,7 @@ async def _handle_webhook_payload(
             "state": conversation.state,
             "policy_type": policy_type,
             "policy_gate": "discounts",
+            "source": policy_source,
             "class_router": class_router_result,
         }
         discounts_policy = policy_pack.get("discounts") if isinstance(policy_pack, dict) else None
@@ -5282,11 +5245,13 @@ async def _handle_webhook_payload(
             saved_message,
             action=decision.action,
             intent=decision.intent,
-            source="policy_gate",
+            source=policy_source,
             fast_intent=False,
         )
         if saved_message:
-            meta_updates = {"class_router": class_router_result, "policy_gate": "discounts"}
+            meta_updates = {"class_router": class_router_result, "policy_gate": "discounts", "source": policy_source}
+            if isinstance(risk_level, str) and risk_level:
+                meta_updates["risk_level"] = risk_level
             if queue_set:
                 meta_updates["intent_queue"] = followup_intents
                 meta_updates["expected_reply_type"] = EXPECTED_REPLY_INTENT_CHOICE
@@ -6484,7 +6449,7 @@ async def _handle_webhook_payload(
         booking_state = booking if isinstance(booking, dict) else _get_booking_context(context)
         booking_active = bool(booking_state.get("active"))
 
-        if booking_active and _is_booking_cancel(message_text):
+        if booking_active and _is_booking_cancel(message_text, policy_pack=policy_pack):
             booking_state = {"active": False}
             context = _set_booking_context(context, booking_state)
             _set_conversation_context(conversation, context)
