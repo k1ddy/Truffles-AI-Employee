@@ -31,6 +31,7 @@ from app.routers.webhook.booking import (
     _is_booking_time_service_decision,
     _match_expected_reply,
     _next_booking_prompt,
+    _resolve_datetime_offline,
     _select_expected_reply_message,
     _select_last_non_booking_message,
     _set_booking_context,
@@ -963,6 +964,11 @@ def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
 def _extract_datetime(text: str) -> str | None:
     if not text:
         return None
+    resolved = _resolve_datetime_offline(text)
+    if isinstance(resolved, dict):
+        value = resolved.get("value")
+        if isinstance(value, str) and value.strip():
+            return value
     time_match = TIME_PATTERN.search(text)
     if time_match:
         return time_match.group(0)
@@ -1236,26 +1242,28 @@ def _ensure_controller_output_meta(controller_output: dict, *, error: str | None
     return controller_output
 
 
+CONTROLLER_FALLBACK_IGNORE_VALUES = {"none", "skipped", "ok", "low_confidence"}
 CONTROLLER_FALLBACK_REASON_MAP = {
     "timeout": "timeout",
     "invalid_json": "invalid_json",
     "budget_exceeded": "budget_exceeded",
+    "no_api_key": "no_api_key",
+    "prompt_missing": "prompt_missing",
+    "empty_message": "empty_message",
+    "empty_response": "empty_response",
+    "invalid_class": "invalid_class",
+    "unsupported_temperature": "unsupported_temperature",
 }
-CONTROLLER_FALLBACK_ERROR_VALUES = {
-    "controller_failed",
-    "error",
-    "unsupported_temperature",
-    "invalid_class",
-    "empty_response",
-    "empty_message",
-    "prompt_missing",
-}
+CONTROLLER_FALLBACK_ERROR_VALUES = {"controller_failed", "error"}
+CONTROLLER_FALLBACK_REASONS = set(CONTROLLER_FALLBACK_REASON_MAP.values()) | {"error"}
 
 
 def _normalize_controller_fallback_reason(*, error: str | None) -> str | None:
     if not error:
         return None
     normalized = error.strip().casefold()
+    if not normalized or normalized in CONTROLLER_FALLBACK_IGNORE_VALUES:
+        return None
     mapped = CONTROLLER_FALLBACK_REASON_MAP.get(normalized)
     if mapped:
         return mapped
@@ -1378,6 +1386,8 @@ def _resolve_class_router_result(
     controller_used = router_state.get("used") if isinstance(router_state, dict) else False
     controller_error = router_state.get("error") if isinstance(router_state, dict) else None
     controller_fallback = router_state.get("fallback_reason") if isinstance(router_state, dict) else None
+    controller_attempted = bool(router_state.get("attempted")) if isinstance(router_state, dict) else False
+    controller_fallback_flag = bool(router_state.get("fallback")) if isinstance(router_state, dict) else False
     controller_confidence = router_state.get("confidence") if isinstance(router_state, dict) else None
     controller_sla = router_state.get("sla") if isinstance(router_state, dict) else None
     controller_signal_class = router_state.get("signal_class") if isinstance(router_state, dict) else None
@@ -1404,7 +1414,8 @@ def _resolve_class_router_result(
 
     controller_confidence_value = controller_confidence
     controller_low_confidence = bool(
-        isinstance(controller_confidence_value, (int, float))
+        controller_used
+        and isinstance(controller_confidence_value, (int, float))
         and controller_confidence_value < CONTROLLER_CONFIDENCE_THRESHOLD
     )
 
@@ -1424,18 +1435,20 @@ def _resolve_class_router_result(
             result["intents"] = sorted(info_controller_intents)
         controller_fallback_reason = None
     elif controller_used and controller_class and controller_low_confidence:
-        # Low confidence: keep deterministic class_router result, but mark fallback_reason for observability.
+        # Low confidence: keep deterministic class_router result, but track low confidence explicitly.
         controller_used_reason = "low_confidence"
-        controller_fallback_reason = "low_confidence"
         controller_used = True
-    elif not controller_used and isinstance(controller_fallback, str) and controller_fallback != "skipped":
-        controller_fallback_reason = controller_fallback_reason or controller_fallback
-
-    if controller_fallback_reason and not controller_low_confidence:
-        controller_low_confidence = True
+        controller_fallback_reason = None
+        controller_fallback_flag = False
+    elif not controller_used and isinstance(controller_fallback, str):
+        normalized_fallback = _normalize_controller_fallback_reason(error=controller_fallback)
+        if normalized_fallback:
+            controller_fallback_reason = controller_fallback_reason or normalized_fallback
 
     result["controller"] = {
         "used": bool(controller_used),
+        "attempted": controller_attempted,
+        "fallback": controller_fallback_flag,
         "confidence": controller_confidence,
         "reason": controller_reason,
         "fallback_reason": controller_fallback_reason if not controller_used else None,
@@ -2699,7 +2712,8 @@ async def _handle_webhook_payload(
         )
         or message_text
     )
-    if expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME} and expected_reply_text:
+    if expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
+        expected_reply_text = expected_reply_text or ""
         answer_confidence = 0.0
         answer_slot = ""
         answer_value = ""
@@ -4478,11 +4492,16 @@ async def _handle_webhook_payload(
                     "booking_blocked_reason": "info_question",
                     "question_intents": sorted(intent_decomp_info),
                 }
-            else:
+            elif intent_decomp_used and intent_decomp_set and intent_decomp_set != {"other"}:
                 booking_block_meta = {
-                    "booking_blocked_reason": "intent_decomp_missing" if not intent_decomp_used else "intent_decomp_no_booking",
+                    "booking_blocked_reason": "intent_decomp_no_booking",
                 }
-        booking_signal = False
+            elif not intent_decomp_used:
+                booking_block_meta = {
+                    "booking_blocked_reason": "intent_decomp_missing",
+                }
+        if booking_block_meta:
+            booking_signal = False
 
     booking_wants_flow = (
         _should_run_booking_flow(
@@ -4751,6 +4770,7 @@ async def _handle_webhook_payload(
         and message_text
         and not booking_wants_flow
         and not expected_reply_shortcircuit
+        and os.environ.get("OPENAI_API_KEY")
     )
     if controller_should_attempt:
         controller_state["attempted"] = True
@@ -4821,7 +4841,14 @@ async def _handle_webhook_payload(
             )
             controller_error_value = controller_state["output"].get("controller_error")
         controller_timeout = isinstance(controller_error_value, str) and controller_error_value == "timeout"
-        controller_fallback = controller_state.get("fallback_reason") not in (None, "skipped")
+        controller_fallback_reason = controller_state.get("fallback_reason")
+        if (
+            isinstance(controller_fallback_reason, str)
+            and controller_fallback_reason.strip().casefold() == "low_confidence"
+        ):
+            controller_state["fallback_reason"] = None
+            controller_fallback_reason = None
+        controller_fallback = controller_fallback_reason not in (None, "skipped")
         controller_state["timeout"] = controller_timeout
         controller_state["fallback"] = controller_fallback
         controller_state["sla"] = _update_router_sla(  # reuse SLA tracker
@@ -6535,9 +6562,14 @@ async def _handle_webhook_payload(
                         result_message = f"Booking escalation, telegram={'sent' if telegram_sent else 'failed'}"
                         trace_decision = "escalated"
                     else:
-                        bot_response = MSG_AI_ERROR
-                        result_message = f"Booking escalation failed: {result.error}"
-                        trace_decision = "escalation_failed"
+                        if result.error_code == "no_telegram":
+                            bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
+                            result_message = "Booking captured without telegram"
+                            trace_decision = "captured_pending"
+                        else:
+                            bot_response = MSG_AI_ERROR
+                            result_message = f"Booking escalation failed: {result.error}"
+                            trace_decision = "escalation_failed"
             else:
                 bot_response = _combine_sidecar(MSG_ESCALATED, policy_price_sidecar)
                 result_message = "Booking captured while pending"
@@ -7720,6 +7752,20 @@ async def _handle_webhook_payload(
         reason="expected_reply_shortcircuit" if expected_reply_shortcircuit else "none",
     )
     controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
+    controller_used = bool(controller_meta.get("used")) if isinstance(controller_meta, dict) else False
+    controller_attempted = bool(controller_meta.get("attempted")) if isinstance(controller_meta, dict) else False
+    controller_fallback = bool(controller_meta.get("fallback")) if isinstance(controller_meta, dict) else False
+    controller_low_confidence = (
+        bool(controller_meta.get("low_confidence")) if isinstance(controller_meta, dict) else False
+    )
+    controller_used_reason = (
+        controller_meta.get("used_reason") if isinstance(controller_meta, dict) else None
+    )
+    controller_confidence = (
+        controller_meta.get("confidence") if isinstance(controller_meta, dict) else None
+    )
+    controller_error = controller_meta.get("error") if isinstance(controller_meta, dict) else None
+    controller_goal = controller_meta.get("goal") if isinstance(controller_meta, dict) else None
     trace_payload = {
         "stage": "class_router",
         "classes": class_router_result.get("classes"),
@@ -7736,10 +7782,14 @@ async def _handle_webhook_payload(
         "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
         "router": class_router_result.get("router"),
         "controller": controller_meta,
-        "controller_used": controller_meta.get("used") if isinstance(controller_meta, dict) else None,
-        "controller_confidence": controller_meta.get("confidence") if isinstance(controller_meta, dict) else None,
-        "controller_error": controller_meta.get("error") if isinstance(controller_meta, dict) else None,
-        "controller_goal": controller_meta.get("goal") if isinstance(controller_meta, dict) else None,
+        "controller_used": controller_used,
+        "controller_attempted": controller_attempted,
+        "controller_fallback": controller_fallback,
+        "controller_low_confidence": controller_low_confidence,
+        "controller_used_reason": controller_used_reason,
+        "controller_confidence": controller_confidence,
+        "controller_error": controller_error,
+        "controller_goal": controller_goal,
     }
     trace_payload.update(router_meta)
     _record_decision_trace(conversation, trace_payload)
@@ -7750,10 +7800,14 @@ async def _handle_webhook_payload(
                 "class_router": class_router_result,
                 "carryover_class": class_router_result.get("carryover_class"),
                 "router_fallback_reason": class_router_result.get("router_fallback_reason"),
-                "controller_used": controller_meta.get("used") if isinstance(controller_meta, dict) else None,
-                "controller_confidence": controller_meta.get("confidence") if isinstance(controller_meta, dict) else None,
-                "controller_error": controller_meta.get("error") if isinstance(controller_meta, dict) else None,
-                "controller_goal": controller_meta.get("goal") if isinstance(controller_meta, dict) else None,
+                "controller_used": controller_used,
+                "controller_attempted": controller_attempted,
+                "controller_fallback": controller_fallback,
+                "controller_low_confidence": controller_low_confidence,
+                "controller_used_reason": controller_used_reason,
+                "controller_confidence": controller_confidence,
+                "controller_error": controller_error,
+                "controller_goal": controller_goal,
                 "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
             },
         )

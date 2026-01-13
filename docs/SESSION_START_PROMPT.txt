@@ -25,6 +25,21 @@ Roles & ownership (who updates what):
 Process (always):
 Architect -> Brain -> Hands. One writer at a time unless using worktrees.
 
+Session start ritual (5 minutes, mandatory):
+1) Read `AGENTS.md` + `STATE.md` (NOW) before anything else.
+2) Confirm ONE current priority + success criteria; if missing, ask Zhanbol.
+3) Gather evidence for the priority (CI/trace/SQL/logs) or open an RCA-only task.
+4) Write a Task Package (Goal/Scope/Steps/DoD/Tests/Evidence/Stop). No task without it.
+5) Run one-issue flow: 1 problem -> 1 fix -> 1 verification -> STATE.md update.
+
+RCA-first (non-negotiable):
+- No fixes without verified cause (code/trace/SQL/CI). If cause unknown -> RCA task only.
+- EVAL is evidence, not the source of logic; do not "pad" tests.
+
+Resolver-first (offline + RU/KZ):
+- Variations (RU/KZ mix, abbreviations, order) are handled by data-lexicon + ready libs.
+- Do NOT grow regex/keyword lists in code; use data packs + resolvers (e.g., dateparser/rapidfuzz).
+
 Multi-terminal protocol (mandatory):
 - Terminal 1: Architect (sets course; no code changes unless explicitly asked).
 - Terminal 2: Brain (defines tasks, accepts results, sole authority to commit/push).

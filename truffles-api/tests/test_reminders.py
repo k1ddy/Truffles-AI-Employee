@@ -92,6 +92,36 @@ class TestReminderLogic:
 
 class TestNoResponseAlerts:
     def test_alert_updates_context_copy(self):
+class TestPendingSlaPing:
+    def test_ping_sent_once(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.PENDING.value
+        conversation.escalated_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+        conversation.context = {"foo": "bar"}
+
+        handover = Mock()
+        handover.status = "pending"
+        handover.created_at = conversation.escalated_at
+        handover.conversation = conversation
+
+        db.query.return_value.filter.return_value.all.return_value = [handover]
+
+        with patch("app.services.reminder_service._send_pending_user_message", return_value=True) as send_mock:
+            with patch("app.services.reminder_service.PENDING_SLA_PING_MINUTES", 1), patch(
+                "app.services.reminder_service.PENDING_AUTO_CLOSE_HOURS", 999
+            ):
+                reminder_service.process_pending_sla(db)
+                assert conversation.context["foo"] == "bar"
+                assert "pending_sla" in conversation.context
+                assert "ping_sent_at" in conversation.context["pending_sla"]
+
+                reminder_service.process_pending_sla(db)
+                assert send_mock.call_count == 1
+
+
+class TestNoResponseAlerts:
+    def test_suppressed_on_shield_drop(self):
         db = Mock()
         conversation = Mock()
         conversation.state = ConversationState.BOT_ACTIVE.value
@@ -108,6 +138,15 @@ class TestNoResponseAlerts:
         last_user.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
         last_user.content = "Hello"
         last_user.message_metadata = {"decision_meta": {"action": "reply"}}
+        conversation.context = {}
+        conversation.id = uuid4()
+        conversation.client_id = uuid4()
+
+        last_user = Mock()
+        last_user.id = uuid4()
+        last_user.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+        last_user.content = "spam"
+        last_user.message_metadata = {"decision_meta": {"action": "shield_drop"}}
 
         def last_message(db_handle, conversation_id, role):
             if role == "user":
@@ -125,3 +164,7 @@ class TestNoResponseAlerts:
         assert conversation.context is not original_context
         assert conversation.context["alerts"]["no_response_for"] == str(last_user.id)
         alert_mock.assert_called_once()
+        assert result["alerted"] == 0
+        assert result["items"] == []
+        alert_mock.assert_not_called()
+        assert conversation.context == {}

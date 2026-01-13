@@ -935,6 +935,108 @@ domain_pack:
         - зарарсыздандыру
         - құрал өңдеу
         - қауіпсіздік
+  datetime_lexicon:
+    days:
+      monday:
+        canonical_ru: понедельник
+        ru:
+          - понедельник
+          - пон
+          - пн
+        kk:
+          - дүйсенбі
+          - дүй
+      tuesday:
+        canonical_ru: вторник
+        ru:
+          - вторник
+          - вт
+        kk:
+          - сейсенбі
+          - сей
+      wednesday:
+        canonical_ru: среду
+        ru:
+          - среда
+          - ср
+        kk:
+          - сәрсенбі
+          - сәр
+      thursday:
+        canonical_ru: четверг
+        ru:
+          - четверг
+          - чт
+        kk:
+          - бейсенбі
+          - бей
+      friday:
+        canonical_ru: пятницу
+        ru:
+          - пятница
+          - пт
+        kk:
+          - жұма
+          - жұм
+      saturday:
+        canonical_ru: субботу
+        ru:
+          - суббота
+          - суб
+          - субб
+          - сб
+        kk:
+          - сенбі
+      sunday:
+        canonical_ru: воскресенье
+        ru:
+          - воскресенье
+          - воскрес
+          - вс
+        kk:
+          - жексенбі
+          - жек
+    dayparts:
+      morning:
+        canonical_ru: утром
+        ru:
+          - утром
+          - утро
+          - с утра
+          - утр
+        kk:
+          - таңертең
+          - таң
+      afternoon:
+        canonical_ru: днем
+        ru:
+          - днем
+          - днём
+          - день
+          - после обеда
+        kk:
+          - күндіз
+          - түсте
+          - түскі
+      evening:
+        canonical_ru: вечером
+        ru:
+          - вечером
+          - вечер
+          - к вечеру
+          - веч
+        kk:
+          - кешке
+          - кеш
+      night:
+        canonical_ru: ночью
+        ru:
+          - ночью
+          - ночь
+          - поздно
+        kk:
+          - түнде
+          - түн
   consult_playbooks:
     - id: hair_aftercolor
       topic: hair_aftercolor

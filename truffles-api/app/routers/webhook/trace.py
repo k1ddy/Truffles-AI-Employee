@@ -14,11 +14,14 @@ from app.schemas.webhook import TraceContract
 logger = get_logger("webhook")
 
 DECISION_TRACE_KEY = "decision_trace"
-DECISION_TRACE_MAX = 20
+DECISION_TRACE_MAX = 40
 DECISION_TRACE_CRITICAL_STAGES = {
+    "booking",
+    "consult_return",
     "contract_error",
     "escalation",
     "policy_gate",
+    "question_contract",
     "re_entry",
     "session_memory",
     "state_transition",
@@ -28,6 +31,8 @@ DECISION_TRACE_CRITICAL_STAGES = {
 def _is_critical_trace(payload: dict[str, Any]) -> bool:
     stage = payload.get("stage")
     if stage in DECISION_TRACE_CRITICAL_STAGES:
+        return True
+    if stage == "question_contract" and payload.get("decision") in {"matched", "missed"}:
         return True
     if payload.get("contract_error") or payload.get("trace_contract_error"):
         return True
@@ -88,19 +93,30 @@ def _record_message_decision_meta(
 ) -> None:
     if not message:
         return
+    metadata = dict(message.message_metadata or {})
+    decision_meta = dict(metadata.get("decision_meta") or {})
+    defaults = {
+        "controller_attempted": False,
+        "controller_fallback_reason": None,
+        "controller_low_confidence": False,
+    }
+    updates = {
+        "action": action,
+        "intent": intent,
+        "source": source,
+        "fast_intent": fast_intent,
+        "llm_primary_used": False,
+        "llm_used": False,
+        "llm_timeout": False,
+        "llm_cache_hit": False,
+        "llm_degradation_reason": None,
+    }
+    for key, value in defaults.items():
+        if key not in decision_meta:
+            updates[key] = value
     _update_message_decision_metadata(
         message,
-        {
-            "action": action,
-            "intent": intent,
-            "source": source,
-            "fast_intent": fast_intent,
-            "llm_primary_used": False,
-            "llm_used": False,
-            "llm_timeout": False,
-            "llm_cache_hit": False,
-            "llm_degradation_reason": None,
-        },
+        updates,
     )
 
 
