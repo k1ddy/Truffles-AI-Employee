@@ -254,8 +254,10 @@ def check_no_response_alerts(db: Session) -> dict:
         if minutes_waiting < threshold_minutes:
             continue
 
-        context = conversation.context if isinstance(conversation.context, dict) else {}
-        alerts = context.get("alerts") if isinstance(context.get("alerts"), dict) else {}
+        base_context = conversation.context if isinstance(conversation.context, dict) else {}
+        context = dict(base_context)
+        raw_alerts = context.get("alerts")
+        alerts = dict(raw_alerts) if isinstance(raw_alerts, dict) else {}
         if alerts.get("no_response_for") == str(last_user.id):
             continue
 
