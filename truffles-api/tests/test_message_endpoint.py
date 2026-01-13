@@ -2482,6 +2482,105 @@ def test_hard_law_gate_pre_llm_uses_policy_pack():
     assert meta.get("source") == "policy_pack"
 
 
+def test_hard_law_gate_pre_llm_fallback_pack():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="truffles", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="hybrid",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="truffles",
+        body=WebhookBody(
+            message="Хочу вернуть деньги.",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000002@s.whatsapp.net",
+                messageId="msg-hard-law-fallback",
+                timestamp=1234567892,
+            ),
+        ),
+    )
+
+    with patch(
+        "app.routers.webhook._legacy.detect_multi_intent",
+        side_effect=AssertionError("detect_multi_intent called"),
+    ), patch(
+        "app.routers.webhook._legacy._reuse_active_handover",
+        return_value=(None, False, False),
+    ), patch(
+        "app.routers.webhook._legacy.escalate_to_pending",
+        return_value=SimpleNamespace(ok=True, value=SimpleNamespace()),
+    ), patch(
+        "app.routers.webhook._legacy.send_telegram_notification",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id",
+        return_value=saved_message,
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response == webhook_router.MSG_ESCALATED
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("policy_gate") == "hard_law"
+    assert meta.get("source") == "policy_pack"
+    assert meta.get("policy_pack_missing") is True
+
+
 def test_audio_transcription_failure_returns_prompt():
     saved_message = Mock()
     saved_message.message_metadata = {}
