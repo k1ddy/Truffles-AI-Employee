@@ -184,7 +184,6 @@ from app.routers.webhook.policy import (
     _detect_llm_guard_topics,
     _detect_policy_gate_section,
     _format_discounts_policy_reply,
-    _get_policy_gate_pack,
     _get_policy_handler,
     _get_policy_pack,
     _get_policy_type,
@@ -2118,10 +2117,10 @@ async def _handle_webhook_payload(
     now = datetime.now(timezone.utc)
     policy_type = _get_policy_type(client)
     policy_pack = _get_policy_pack(client)
-    policy_gate_pack, policy_pack_missing = _get_policy_gate_pack(policy_pack)
+    policy_pack_missing = not isinstance(policy_pack, dict)
     policy_source = "policy_pack" if not policy_pack_missing else "policy_gate"
     policy_handler = _get_policy_handler(client)
-    hard_law_sections = set(_resolve_hard_law_sections(policy_gate_pack))
+    hard_law_sections = set(_resolve_hard_law_sections(policy_pack))
     quiet_hours_notice: str | None = None
     if conversation.state == ConversationState.BOT_ACTIVE.value and policy_type == "demo_salon":
         quiet_hours_notice = build_quiet_hours_notice(now_utc=now)
@@ -2574,7 +2573,7 @@ async def _handle_webhook_payload(
             and not _looks_like_policy_topic(
                 message_text,
                 policy_type=policy_type,
-                policy_pack=policy_gate_pack,
+                policy_pack=policy_pack,
             )
         ):
             expected_reply_type = last_question_type
@@ -3065,8 +3064,6 @@ async def _handle_webhook_payload(
             "policy_gate": policy_gate,
             "source": policy_source,
         }
-        if policy_pack_missing:
-            trace_payload["policy_pack_missing"] = True
         if policy_section:
             trace_payload["policy_section"] = policy_section
         if isinstance(risk_level, str) and risk_level:
@@ -4175,9 +4172,9 @@ async def _handle_webhook_payload(
         booking_signal = False
 
     # 6.95 Hard-LAW pre-LLM gate (policy-pack driven).
-    if not bypass_domain_flows and routing["allow_truth_gate_reply"] and message_text:
+    if policy_pack and not bypass_domain_flows and routing["allow_truth_gate_reply"] and message_text:
         hard_law_t0 = time.monotonic()
-        hard_law_match = _detect_hard_law_match(message_text, policy_pack=policy_gate_pack)
+        hard_law_match = _detect_hard_law_match(message_text, policy_pack=policy_pack)
         if hard_law_match:
             section_key, section = hard_law_match
             risk_level = _resolve_policy_risk_level(section) or "high"
@@ -4630,10 +4627,11 @@ async def _handle_webhook_payload(
     # 9.03 Policy escalation gate (policy-pack keywords + intent fallback).
     if not bypass_domain_flows and routing["allow_truth_gate_reply"] and message_text:
         policy_t0 = time.monotonic()
+        intent_hints = intent_decomp_intents if policy_pack else None
         hard_law_match = _detect_hard_law_match(
             message_text,
-            policy_pack=policy_gate_pack,
-            intent_hints=intent_decomp_intents or None,
+            policy_pack=policy_pack,
+            intent_hints=intent_hints or None,
         )
         if hard_law_match:
             section_key, section = hard_law_match
@@ -4658,14 +4656,14 @@ async def _handle_webhook_payload(
 
         policy_match = _detect_policy_gate_section(
             message_text,
-            policy_pack=policy_gate_pack,
+            policy_pack=policy_pack,
             hard_law_sections=hard_law_sections | {"discounts"},
         )
         if policy_match:
             section_key, section = policy_match
             if section_key == "complaint":
                 normalized_text = _normalize_text(message_text)
-                explicit_keywords, consult_override_keywords = _resolve_complaint_guard(policy_gate_pack)
+                explicit_keywords, consult_override_keywords = _resolve_complaint_guard(policy_pack)
                 complaint_signal = bool(
                     normalized_text and explicit_keywords and _contains_any(normalized_text, explicit_keywords)
                 )
@@ -5088,7 +5086,7 @@ async def _handle_webhook_payload(
     discount_signal = _looks_like_promotions_request(
         message_text,
         policy_type=policy_type,
-        policy_pack=policy_gate_pack,
+        policy_pack=policy_pack,
     )
     promotions_trigger = False
     if router_used and promotions_router_class in {"promotions", "discounts"}:
@@ -5139,12 +5137,12 @@ async def _handle_webhook_payload(
             )
         else:
             discounts_available = _has_discount_policy_rules(
-                policy_pack=policy_gate_pack,
+                policy_pack=policy_pack,
                 policy_type=policy_type,
             )
             discounts_reply = (
                 _format_discounts_policy_reply(
-                    policy_pack=policy_gate_pack,
+                    policy_pack=policy_pack,
                     policy_type=policy_type,
                 )
                 if discounts_available
@@ -5237,9 +5235,7 @@ async def _handle_webhook_payload(
             "source": policy_source,
             "class_router": class_router_result,
         }
-        if policy_pack_missing:
-            trace_payload["policy_pack_missing"] = True
-        discounts_policy = policy_gate_pack.get("discounts") if isinstance(policy_gate_pack, dict) else None
+        discounts_policy = policy_pack.get("discounts") if isinstance(policy_pack, dict) else None
         risk_level = discounts_policy.get("risk_level") if isinstance(discounts_policy, dict) else None
         if isinstance(risk_level, str) and risk_level:
             trace_payload["risk_level"] = risk_level
