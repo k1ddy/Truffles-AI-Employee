@@ -4696,15 +4696,12 @@ async def _handle_webhook_payload(
                 else:
                     result_message = "Policy escalation skipped (already pending)"
 
-            router_skip_reason = (
-                "law_gate"
-                if _is_hard_law_intent(
-                    decision.intent,
-                    policy_type=policy_type,
-                    policy_pack=policy_pack,
-                )
-                else "policy_gate"
+            is_hard_law = _is_hard_law_intent(
+                decision.intent,
+                policy_type=policy_type,
+                policy_pack=policy_pack,
             )
+            router_skip_reason = "law_gate" if is_hard_law else "policy_gate"
             router_gate_meta = _set_router_observability(
                 saved_message,
                 eligible=False,
@@ -4718,13 +4715,19 @@ async def _handle_webhook_payload(
                 "booking_wants_flow": booking_wants_flow,
                 "policy_type": policy_type,
             }
+            policy_section = None
+            risk_level = None
             if isinstance(decision.meta, dict):
-                policy_gate = decision.meta.get("policy_gate")
+                policy_section = decision.meta.get("policy_gate")
                 risk_level = decision.meta.get("risk_level")
-                if isinstance(policy_gate, str) and policy_gate:
-                    trace_payload["policy_gate"] = policy_gate
-                if isinstance(risk_level, str) and risk_level:
-                    trace_payload["risk_level"] = risk_level
+            if is_hard_law:
+                trace_payload["policy_gate"] = "hard_law"
+                if isinstance(policy_section, str) and policy_section:
+                    trace_payload["policy_section"] = policy_section
+            elif isinstance(policy_section, str) and policy_section:
+                trace_payload["policy_gate"] = policy_section
+            if isinstance(risk_level, str) and risk_level:
+                trace_payload["risk_level"] = risk_level
             trace_payload.update(router_gate_meta)
             _record_decision_trace(conversation, trace_payload)
             _record_message_decision_meta(
@@ -4734,6 +4737,13 @@ async def _handle_webhook_payload(
                 source="policy_gate",
                 fast_intent=False,
             )
+            if is_hard_law and saved_message:
+                updates = {"policy_gate": "hard_law"}
+                if isinstance(policy_section, str) and policy_section:
+                    updates["policy_section"] = policy_section
+                if isinstance(risk_level, str) and risk_level:
+                    updates["risk_level"] = risk_level
+                _update_message_decision_metadata(saved_message, updates)
             bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
             if not sent:
                 result_message = f"{result_message}; response_send=failed"
