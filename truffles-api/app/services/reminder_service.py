@@ -255,6 +255,18 @@ def check_no_response_alerts(db: Session) -> dict:
         if minutes_waiting < threshold_minutes:
             continue
 
+        base_context = conversation.context if isinstance(conversation.context, dict) else {}
+        context = dict(base_context)
+        raw_alerts = context.get("alerts")
+        alerts = dict(raw_alerts) if isinstance(raw_alerts, dict) else {}
+        if alerts.get("no_response_for") == str(last_user.id):
+            continue
+
+        alerts["no_response_for"] = str(last_user.id)
+        alerts["no_response_at"] = now.isoformat()
+        context["alerts"] = alerts
+        conversation.context = context
+
         decision_meta = {}
         if last_user and isinstance(last_user.message_metadata, dict):
             decision_meta = last_user.message_metadata.get("decision_meta") or {}

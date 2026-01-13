@@ -90,6 +90,8 @@ class TestReminderLogic:
         assert handover.reminder_2_sent_at is not None
 
 
+class TestNoResponseAlerts:
+    def test_alert_updates_context_copy(self):
 class TestPendingSlaPing:
     def test_ping_sent_once(self):
         db = Mock()
@@ -125,6 +127,17 @@ class TestNoResponseAlerts:
         conversation.state = ConversationState.BOT_ACTIVE.value
         conversation.bot_status = "active"
         conversation.bot_muted_until = None
+        conversation.id = uuid4()
+        conversation.client_id = uuid4()
+
+        original_context = {"alerts": {"no_response_for": str(uuid4())}}
+        conversation.context = original_context
+
+        last_user = Mock()
+        last_user.id = uuid4()
+        last_user.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+        last_user.content = "Hello"
+        last_user.message_metadata = {"decision_meta": {"action": "reply"}}
         conversation.context = {}
         conversation.id = uuid4()
         conversation.client_id = uuid4()
@@ -147,6 +160,10 @@ class TestNoResponseAlerts:
         ) as alert_mock:
             result = reminder_service.check_no_response_alerts(db)
 
+        assert result["alerted"] == 1
+        assert conversation.context is not original_context
+        assert conversation.context["alerts"]["no_response_for"] == str(last_user.id)
+        alert_mock.assert_called_once()
         assert result["alerted"] == 0
         assert result["items"] == []
         alert_mock.assert_not_called()
