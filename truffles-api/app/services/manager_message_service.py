@@ -102,6 +102,35 @@ def find_conversation_by_telegram(
         logger.warning(f"Manager message missing topic_id: chat_id={chat_id}")
         return None
 
+    # Topics are reused across conversations; prefer active handover in this topic.
+    handover = (
+        db.query(Handover)
+        .join(Conversation, Conversation.id == Handover.conversation_id)
+        .filter(
+            Conversation.client_id == settings.client_id,
+            Conversation.telegram_topic_id == message_thread_id,
+            Handover.status.in_(["pending", "active"]),
+        )
+        .order_by(Handover.created_at.desc())
+        .first()
+    )
+    if handover:
+        conversation = handover.conversation
+        if not conversation:
+            logger.warning(f"Conversation not found for handover {handover.id}")
+            return None
+        user = db.query(User).filter(User.id == conversation.user_id).first()
+        if not user:
+            logger.warning(f"Conversation {conversation.id} has no user")
+            return None
+        if user.telegram_topic_id != message_thread_id:
+            user.telegram_topic_id = message_thread_id
+            db.flush()
+        if conversation.telegram_topic_id != message_thread_id:
+            conversation.telegram_topic_id = message_thread_id
+            db.flush()
+        return conversation, handover
+
     conversation = (
         db.query(Conversation)
         .filter(
