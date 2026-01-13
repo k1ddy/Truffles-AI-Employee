@@ -2276,15 +2276,29 @@ def get_demo_salon_service_decision(
     has_duration_signal = any(_has_duration_signal(_normalize_text(segment), segment) for segment in segments)
     if has_hours_signal and (has_price_signal or has_duration_signal):
         return None
-    if not _looks_like_service_question(normalized, message):
+    consult_intent = False
+    service_query_meta = None
+    if isinstance(intent_decomp, dict):
+        consult_intent = intent_decomp.get("consult_intent") is True
+    allow_consult_short_circuit = False
+    if consult_intent:
+        service_query_meta = _resolve_service_query_meta(
+            message,
+            client_slug,
+            intent_decomp,
+            require_query=True,
+        )
+        allow_consult_short_circuit = bool(service_query_meta.get("service_query"))
+    if not _looks_like_service_question(normalized, message) and not allow_consult_short_circuit:
         return None
 
-    service_query_meta = _resolve_service_query_meta(
-        message,
-        client_slug,
-        intent_decomp,
-        require_query=True,
-    )
+    if service_query_meta is None:
+        service_query_meta = _resolve_service_query_meta(
+            message,
+            client_slug,
+            intent_decomp,
+            require_query=True,
+        )
     service = _match_service(normalized)
     truth = load_yaml_truth()
     if service:

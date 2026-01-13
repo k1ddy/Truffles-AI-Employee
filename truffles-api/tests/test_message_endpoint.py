@@ -649,7 +649,7 @@ def test_truth_gate_sets_decision_meta():
     assert truth_updates["llm_timeout"] is False
 
 
-def test_consult_reply_writes_decision_meta():
+def test_consult_short_circuit_writes_decision_meta():
     saved_message = Mock()
     saved_message.message_metadata = {}
 
@@ -709,14 +709,22 @@ def test_consult_reply_writes_decision_meta():
         "primary_intent": "other",
         "secondary_intents": [],
         "intents": ["other"],
-        "service_query": "",
+        "service_query": "окрашивание",
         "consult_intent": True,
         "consult_topic": "hair_aftercolor",
         "consult_question": "уход после окрашивания",
     }
+    service_decision = DemoSalonDecision(
+        action="reply",
+        response="SERVICE MATCH",
+        intent="service_match",
+        meta={"service_query": "окрашивание"},
+    )
+    service_matcher = Mock(return_value=service_decision)
+    policy_handler = {"policy_type": "demo_salon", "service_matcher": service_matcher}
 
     with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+        "app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler
     ), patch(
         "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
@@ -741,16 +749,21 @@ def test_consult_reply_writes_decision_meta():
 
     assert response.success is True
     assert response.bot_response is not None
-    assert "окрашив" in response.bot_response.casefold()
+    assert "SERVICE MATCH" in response.bot_response
     assert webhook_router.MSG_BOOKING_ASK_SERVICE not in response.bot_response
+    service_matcher.assert_called_once()
 
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("consult_intent") is True
     assert meta.get("consult_topic") == "hair_aftercolor"
-    assert meta.get("consult_questions")
+    assert meta.get("expected_reply_type") != webhook_router.EXPECTED_REPLY_SERVICE
 
     trace = conversation.context.get("decision_trace", [])
-    assert any(entry.get("stage") == "consult" for entry in trace if isinstance(entry, dict))
+    assert any(
+        entry.get("stage") == "consult_flow" and entry.get("decision") == "short_circuit"
+        for entry in trace
+        if isinstance(entry, dict)
+    )
     mock_llm.assert_not_called()
 
 
@@ -799,7 +812,7 @@ def test_consult_precedence_over_booking_flow():
     payload = WebhookRequest(
         client_slug="demo_salon",
         body=WebhookBody(
-            message="А если маникюр сделать ничего страшного?",
+            message="Что посоветуете?",
             messageType="text",
             metadata=WebhookMetadata(
                 remoteJid="77000000000@s.whatsapp.net",
@@ -817,7 +830,7 @@ def test_consult_precedence_over_booking_flow():
         "service_query": "",
         "consult_intent": True,
         "consult_topic": "general",
-        "consult_question": "маникюр сделать ничего страшного",
+        "consult_question": "что посоветуете",
     }
     consult_decision = DemoSalonDecision(
         action="reply",
@@ -854,11 +867,12 @@ def test_consult_precedence_over_booking_flow():
         )
 
     assert response.success is True
-    assert response.bot_response == "CONSULT ANSWER"
+    assert response.bot_response == webhook_router.MSG_EXPECTED_SERVICE_OFF_TOPIC
     assert webhook_router.MSG_BOOKING_ASK_SERVICE not in response.bot_response
 
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("consult_intent") is True
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
     mock_llm.assert_not_called()
 
 

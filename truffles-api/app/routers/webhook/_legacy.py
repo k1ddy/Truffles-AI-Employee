@@ -4957,13 +4957,14 @@ async def _handle_webhook_payload(
             context_manager = _get_context_manager(context)
             if _should_escalate_for_clarify(context_manager, clarify_intent):
                 clarify_count, _ = _get_clarify_attempt_state(context_manager, clarify_intent)
+                clarify_reason = "consult_no_service" if clarify_intent == "consult" else "invalid_choice"
                 _record_context_manager_decision(
                     conversation,
                     saved_message,
                     decision="clarify_limit",
                     updates={
                         "clarify_attempt": {"intent": clarify_intent, "count": clarify_count},
-                        "clarify_reason": "invalid_choice",
+                        "clarify_reason": clarify_reason,
                         "clarify_limit": True,
                     },
                 )
@@ -4975,6 +4976,29 @@ async def _handle_webhook_payload(
                             "expected_reply_matched": False,
                             "expected_reply_reason": "invalid_choice",
                         },
+                    )
+                if clarify_intent == "consult":
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "consult_flow",
+                            "decision": "consult_escalate",
+                            "reason": "consult_no_service",
+                            "state": conversation.state,
+                            "expected_reply_type": expected_reply_type,
+                        },
+                    )
+                    return _handle_clarify_limit_escalation(
+                        db=db,
+                        conversation=conversation,
+                        user=user,
+                        message_text=message_text,
+                        saved_message=saved_message,
+                        source="consult",
+                        allow_handover=routing.get("allow_handover_create", False),
+                        escalation_intent="consult_no_service",
+                        send_response=_send_response,
+                        finalize_response=_finalize_bot_response,
                     )
                 return _handle_clarify_limit_escalation(
                     db=db,
@@ -5693,54 +5717,141 @@ async def _handle_webhook_payload(
                 )
 
     consult_decision = None
+    consult_meta: dict[str, Any] = {}
+    consult_signal = False
+    consult_flow_decision = None
+    consult_short_circuit = False
+    consult_short_circuit_reason = None
+    consult_short_circuit_service = None
     if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
         consult_blocked = bool(booking_wants_flow or booking_active or booking_signal)
         if consult_intent:
             consult_blocked = False
         elif intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}:
             consult_blocked = True
+        consult_candidate = None
         if not consult_blocked:
-            consult_decision = build_consult_reply(
+            consult_candidate = build_consult_reply(
                 message_text,
                 client_slug=payload.client_slug,
                 intent_decomp=intent_decomp_payload,
             )
+        if consult_candidate and not consult_intent and isinstance(intent_decomp_payload, dict):
+            consult_intent = True
+            intent_decomp_payload = dict(intent_decomp_payload)
+            intent_decomp_payload["consult_intent"] = True
+            candidate_meta = consult_candidate.meta if isinstance(consult_candidate.meta, dict) else {}
+            candidate_topic = candidate_meta.get("consult_topic")
+            candidate_question = candidate_meta.get("consult_question")
+            if candidate_topic and not consult_topic:
+                consult_topic = candidate_topic
+                intent_decomp_payload["consult_topic"] = candidate_topic
+            if candidate_question and not consult_question:
+                consult_question = candidate_question
+                intent_decomp_payload["consult_question"] = candidate_question
+        consult_intent_signal = bool(consult_intent or consult_candidate)
+        if consult_intent_signal:
+            consult_short_circuit_service = intent_decomp_service_query
+            if not consult_short_circuit_service and payload.client_slug == "demo_salon":
+                consult_short_circuit_service = get_demo_salon_service_hint(message_text)
+                if consult_short_circuit_service:
+                    consult_short_circuit_reason = "service_hint"
+            if consult_short_circuit_service:
+                consult_short_circuit = True
+                if not consult_short_circuit_reason:
+                    consult_short_circuit_reason = "service_known"
+                consult_flow_trace = {
+                    "stage": "consult_flow",
+                    "decision": "short_circuit",
+                    "state": conversation.state,
+                    "reason": consult_short_circuit_reason,
+                }
+                consult_flow_trace["service_query"] = consult_short_circuit_service
+                if consult_topic:
+                    consult_flow_trace["consult_topic"] = consult_topic
+                if consult_question:
+                    consult_flow_trace["consult_question"] = consult_question
+                _record_decision_trace(conversation, consult_flow_trace)
+        consult_decision = None if consult_short_circuit else consult_candidate
+        if consult_decision:
+            consult_meta = consult_decision.meta if isinstance(consult_decision.meta, dict) else {}
+            consult_meta = dict(consult_meta)
+            consult_signal = True
+        if consult_intent and not consult_short_circuit:
+            consult_signal = True
+            consult_meta["consult_intent"] = True
+            if consult_topic:
+                consult_meta["consult_topic"] = consult_topic
+            if consult_question:
+                consult_meta["consult_question"] = consult_question
+    if consult_signal:
+        consult_meta.pop("consult_options", None)
+        context = _get_conversation_context(conversation)
+        context_manager = _get_context_manager(context)
+        if _should_escalate_for_clarify(context_manager, "consult"):
+            clarify_count, _ = _get_clarify_attempt_state(context_manager, "consult")
+            _record_context_manager_decision(
+                conversation,
+                saved_message,
+                decision="clarify_limit",
+                updates={
+                    "clarify_attempt": {"intent": "consult", "count": clarify_count},
+                    "clarify_reason": "consult_no_service",
+                    "clarify_limit": True,
+                },
+            )
+            consult_meta["clarify_limit"] = True
+            consult_meta["clarify_reason"] = "consult_no_service"
+            consult_meta["clarify_attempt"] = {"intent": "consult", "count": clarify_count}
+            consult_decision = DemoSalonDecision(
+                action="escalate",
+                response=MSG_ESCALATED,
+                intent="consult_no_service",
+                meta=consult_meta,
+            )
+            consult_flow_decision = "consult_escalate"
+        else:
+            clarify_count = _register_clarify_attempt(
+                conversation=conversation,
+                saved_message=saved_message,
+                intent="consult",
+                now=now,
+                reason="consult",
+            )
+            context = _get_conversation_context(conversation)
+            context = _set_expected_reply_context(
+                conversation=conversation,
+                saved_message=saved_message,
+                context=context,
+                expected_reply_type=EXPECTED_REPLY_SERVICE,
+                reason="consult_clarify",
+                now=now,
+            )
+            consult_meta["consult_questions"] = [MSG_EXPECTED_SERVICE_OFF_TOPIC]
+            consult_meta["clarify_attempt"] = {"intent": "consult", "count": clarify_count}
+            consult_meta["clarify_reason"] = "consult"
+            consult_meta["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+            consult_decision = DemoSalonDecision(
+                action="reply",
+                response=MSG_EXPECTED_SERVICE_OFF_TOPIC,
+                intent="consult_reply",
+                meta=consult_meta,
+            )
+            consult_flow_decision = "consult_clarify"
 
     if consult_decision:
-        consult_meta = consult_decision.meta if isinstance(consult_decision.meta, dict) else {}
-        consult_meta = dict(consult_meta)
-        if consult_decision.action == "reply":
-            consult_questions = consult_meta.get("consult_questions")
-            if isinstance(consult_questions, list) and consult_questions:
-                context = _get_conversation_context(conversation)
-                context_manager = _get_context_manager(context)
-                if _should_escalate_for_clarify(context_manager, "consult"):
-                    clarify_count, _ = _get_clarify_attempt_state(context_manager, "consult")
-                    _record_context_manager_decision(
-                        conversation,
-                        saved_message,
-                        decision="clarify_limit",
-                        updates={
-                            "clarify_attempt": {"intent": "consult", "count": clarify_count},
-                            "clarify_reason": "consult",
-                            "clarify_limit": True,
-                        },
-                    )
-                    consult_meta["clarify_limit"] = True
-                    consult_decision = DemoSalonDecision(
-                        action="escalate",
-                        response=MSG_ESCALATED,
-                        intent="clarify_limit",
-                        meta=consult_meta,
-                    )
-                else:
-                    _register_clarify_attempt(
-                        conversation=conversation,
-                        saved_message=saved_message,
-                        intent="consult",
-                        now=now,
-                        reason="consult",
-                    )
+        if consult_flow_decision:
+            consult_flow_trace = {
+                "stage": "consult_flow",
+                "decision": consult_flow_decision,
+                "state": conversation.state,
+            }
+            if consult_flow_decision == "consult_clarify":
+                consult_flow_trace["expected_reply_type"] = EXPECTED_REPLY_SERVICE
+            consult_flow_trace["reason"] = (
+                "consult_no_service" if consult_flow_decision == "consult_escalate" else "consult_clarify"
+            )
+            _record_decision_trace(conversation, consult_flow_trace)
         if consult_decision.action == "reply":
             context = _get_conversation_context(conversation)
             context_manager = _get_context_manager(context)

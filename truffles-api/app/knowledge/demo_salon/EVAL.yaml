@@ -134,8 +134,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекомендац
-    - уход
+    - какая услуга
+    - услугам салона
 - id: E003l
   user: Сколько стоит маникюр?
   expected:
@@ -1332,8 +1332,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - окрашив
-    - тип волос
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1344,16 +1344,12 @@ eval_cases:
   user: Какой цвет волос мне подойдёт?
   expected:
     action: reply
-    intent: consult_reply
+    intent: service_match
+    must_include:
+    - Хотите записаться
     must_include_any:
-    - подбор цвета
-    - натуральный цвет
-    must_not:
-    - ₸
-    - адрес
-    - мастер
-    - запис
-    - свободн
+    - 8 000
+    - 12 000
 - id: E098
   user: Нужен договор и юридическая ответственность
   expected:
@@ -1652,8 +1648,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекомендац
-    - окрашив
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1666,8 +1662,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - уход
-    - окрашив
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1680,8 +1676,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - цвет
-    - окрашив
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1694,8 +1690,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - уход
-    - окрашив
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1708,8 +1704,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекомендац
-    - окрашив
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1722,8 +1718,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекомендац
-    - окрашив
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1736,8 +1732,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - оттен
-    - окрашив
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1750,8 +1746,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - уход
-    - окрашив
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1764,8 +1760,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - уход
-    - рекомендац
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1778,8 +1774,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - уход
-    - окрашив
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1790,24 +1786,20 @@ eval_cases:
   user: Какой цвет волос мне подойдёт?
   expected:
     action: reply
-    intent: consult_reply
+    intent: service_match
+    must_include:
+    - Хотите записаться
     must_include_any:
-    - подбор
-    - цвет
-    must_not:
-    - ₸
-    - адрес
-    - мастер
-    - запис
-    - свободн
+    - 8 000
+    - 12 000
 - id: E151
   user: Какой цвет мне подойдет?
   expected:
     action: reply
     intent: consult_reply
     must_include_any:
-    - подбор
-    - цвет
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1820,8 +1812,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - подбор
-    - оттен
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1834,8 +1826,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - подбор
-    - оттен
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1848,8 +1840,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - подбор
-    - оттен
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1860,16 +1852,12 @@ eval_cases:
   user: Подойдет цвет волос тёплый или холодный?
   expected:
     action: reply
-    intent: consult_reply
+    intent: service_match
+    must_include:
+    - Хотите записаться
     must_include_any:
-    - подбор
-    - цвет
-    must_not:
-    - ₸
-    - адрес
-    - мастер
-    - запис
-    - свободн
+    - 8 000
+    - 12 000
 - id: E156
   user: Подойдёт цвет под тон кожи?
   expected:
@@ -1885,8 +1873,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - подбор
-    - оттен
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -1897,24 +1885,20 @@ eval_cases:
   user: Какой цвет волос лучше выбрать?
   expected:
     action: reply
-    intent: consult_reply
+    intent: service_match
+    must_include:
+    - Хотите записаться
     must_include_any:
-    - подбор
-    - цвет
-    must_not:
-    - ₸
-    - адрес
-    - мастер
-    - запис
-    - свободн
+    - 8 000
+    - 12 000
 - id: E159
   user: Какой цвет мне подойдёт для карих глаз?
   expected:
     action: reply
     intent: consult_reply
     must_include_any:
-    - подбор
-    - цвет
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - адрес
@@ -2303,9 +2287,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2320,9 +2303,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2337,9 +2319,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2354,9 +2335,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2371,9 +2351,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2388,9 +2367,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2405,9 +2383,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2422,9 +2399,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2439,9 +2415,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2456,9 +2431,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2473,9 +2447,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2490,9 +2463,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2507,9 +2479,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -2524,9 +2495,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3001,9 +2971,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3018,9 +2987,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3035,9 +3003,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3052,9 +3019,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3069,9 +3035,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3086,9 +3051,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3103,9 +3067,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3120,9 +3083,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3135,62 +3097,40 @@ eval_cases:
   user: Ресницы ломаются, как ухаживать?
   expected:
     action: reply
-    intent: consult_reply
+    intent: service_match
+    must_include:
+    - Хотите записаться
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
-    must_not:
-    - ₸
-    - цена
-    - стоим
-    - налич
-    - свободн
-    - мастер
-    - адрес
+    - 2 000
+    - 4 000
 - id: E283
   user: Брови редеют, что посоветуете?
   expected:
     action: reply
-    intent: consult_reply
+    intent: service_match
+    must_include:
+    - Хотите записаться
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
-    must_not:
-    - ₸
-    - цена
-    - стоим
-    - налич
-    - свободн
-    - мастер
-    - адрес
+    - 2 000
+    - 4 000
 - id: E284
   user: У меня чувствительное лицо, что лучше по уходу?
   expected:
     action: reply
-    intent: consult_reply
+    intent: service_match
+    must_include:
+    - Хотите записаться
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
-    must_not:
-    - ₸
-    - цена
-    - стоим
-    - налич
-    - свободн
-    - мастер
-    - адрес
+    - 8 000
+    - 6 000
 - id: E285
   user: Очень чувствительно, нужен деликатный уход
   expected:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3205,9 +3145,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3222,9 +3161,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3239,9 +3177,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -3256,9 +3193,8 @@ eval_cases:
     action: reply
     intent: consult_reply
     must_include_any:
-    - рекоменда
-    - уход
-    - вариант
+    - какая услуга
+    - услугам салона
     must_not:
     - ₸
     - цена
@@ -4193,10 +4129,9 @@ eval_cases:
   expected:
     action: reply
     intent: consult_reply
-    must_include:
-    - Подбор цвета лучше
-    - натуральный цвет
-    - мягкие техники
+    must_include_any:
+    - какая услуга
+    - услугам салона
 - id: E404
   tier: long
   turns:
@@ -4253,10 +4188,9 @@ eval_cases:
   expected:
     action: reply
     intent: consult_reply
-    must_include:
-    - общий уход за ногтями
-    - регулярное увлажнение кутикулы
-    - перчатки при контакте
+    must_include_any:
+    - какая услуга
+    - услугам салона
 - id: E407
   tier: long
   turns:
@@ -4305,6 +4239,9 @@ eval_cases:
   expected:
     action: reply
     intent: consult_reply
+    must_include_any:
+    - какая услуга
+    - услугам салона
 - id: E410
   tier: long
   turns:
@@ -4321,6 +4258,9 @@ eval_cases:
   expected:
     action: reply
     intent: consult_reply
+    must_include_any:
+    - какая услуга
+    - услугам салона
 - id: E411
   tier: long
   turns:
@@ -8010,6 +7950,9 @@ eval_cases:
   expected:
     action: reply
     intent: consult_reply
+    must_include_any:
+    - какая услуга
+    - услугам салона
     trace_contains:
     - stage: class_router
       controller_used: true

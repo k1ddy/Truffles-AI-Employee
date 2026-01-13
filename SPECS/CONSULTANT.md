@@ -88,6 +88,13 @@
 - Decision trace/meta: `stage=booking_interrupt`, `booking_info_interrupt=true`, `booking_info_intents` сохраняются.
 - Если сообщение не относится к записи и нет booking‑сигнала → поставить booking на паузу до явного запроса записи.
 
+**Consult clarify (советы/подбор):**
+- Consult‑интенты → уточняем услугу/категорию, выставляем `expected_reply_type=service_choice`.
+- Если consult‑интент содержит распознанную услугу/категорию → **short‑circuit** в обычный info/booking (без уточнения).
+- До 2 уточнений; после 2 без услуги → эскалация с reason `consult_no_service`.
+- Никаких рекомендаций/советов от LLM: только уточнение → детерминированный info/booking.
+- Trace/meta: `stage=consult_flow` (`decision=consult_clarify|consult_escalate|short_circuit`), `clarify_attempt`, `expected_reply_type=service_choice`.
+
 **CTA после инфо‑ответа (standalone, вне booking):**
 - После ответа на цены/длительность/часы/адрес — добавить мягкий CTA: “Хотите записаться?”.
 - Исключения: LAW/opt‑out/OOD, `pending/manager_active`, и когда booking‑prompt уже добавлен (booking‑interrupt).
