@@ -34,6 +34,13 @@ def _get_no_response_threshold_minutes() -> int:
         return 3
 
 
+def _get_no_response_max_age_days() -> int:
+    try:
+        return int(float(os.environ.get("NO_RESPONSE_ALERT_MAX_AGE_DAYS", "30")))
+    except ValueError:
+        return 30
+
+
 def _ensure_timezone(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
@@ -232,6 +239,7 @@ def check_no_response_alerts(db: Session) -> dict:
     """Alert if user message waits too long without bot response in bot_active."""
     now = datetime.now(timezone.utc)
     threshold_minutes = _get_no_response_threshold_minutes()
+    max_age_days = _get_no_response_max_age_days()
     alerted = []
 
     conversations = db.query(Conversation).filter(Conversation.state == ConversationState.BOT_ACTIVE.value).all()
@@ -254,12 +262,17 @@ def check_no_response_alerts(db: Session) -> dict:
         minutes_waiting = int((now - last_user_at).total_seconds() / 60)
         if minutes_waiting < threshold_minutes:
             continue
+        if max_age_days > 0 and now - last_user_at > timedelta(days=max_age_days):
+            continue
+
+        message_metadata = last_user.message_metadata if isinstance(last_user.message_metadata, dict) else {}
+        inbound_message_id = message_metadata.get("messageId") or message_metadata.get("message_id")
+        remote_jid = message_metadata.get("remoteJid") or message_metadata.get("remote_jid")
+        if not inbound_message_id or not remote_jid:
+            continue
 
         base_context = conversation.context if isinstance(conversation.context, dict) else {}
-
-        decision_meta = {}
-        if last_user and isinstance(last_user.message_metadata, dict):
-            decision_meta = last_user.message_metadata.get("decision_meta") or {}
+        decision_meta = message_metadata.get("decision_meta") or {}
         last_action = None
         if isinstance(decision_meta, dict):
             action = decision_meta.get("action")
