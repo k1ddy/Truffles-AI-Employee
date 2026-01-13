@@ -111,9 +111,24 @@
 2. Авто‑обогащение aliases из ServiceSample для услуг салона.
 3. Проверить стабильность CI‑deploy (без конфликтов контейнера).
 
+## БЛИЖАЙШИЕ ЗАДАЧИ (P1)
+
+1. **Закрыть evidence для Task A/B**:
+   - pending_wait trace + pending_action meta, retention не теряет запись.
+   - consult pack meta/trace (consult_playbook_id/consult_variant_id/tips_used/source=pack).
+   - policy_gate trace на “Есть скидки?”.
+2. **Router SLA evidence**: controller_attempted/low_confidence/fallback_reason + SQL‑breakdown, зафиксировать в `STATE.md`
+   (допускается waiver для simulated `/webhook`).
+3. **Свести PR #155 по consult pack‑runtime**: merge только после live‑check evidence и записи в `STATE.md`.
+4. **Запустить блок GAP‑014/015/016** (после evidence):
+   - Hard‑LAW pre‑LLM gate для всех входов,
+   - `/message` выключить или прогнать через общий pipeline,
+   - policy_pack для всех клиентов (fail‑closed при отсутствии правил).
+5. **Outbox latency** — отложено до закрытия пунктов 1–4 (фиксируем в конце).
+
 ---
 
-*Обновлено: 2026-01-05*
+*Обновлено: 2026-01-13*
 
 ---
 ## 4) Базовая реализация (что уже есть)

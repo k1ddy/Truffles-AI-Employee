@@ -2,6 +2,8 @@
 
 **Формат:** Status (OK / PARTIAL / BROKEN), Evidence, Fix plan, Go‑to‑market impact.
 
+**План работ и приоритеты:** см. `STRATEGY/TECH_ROADMAP.md` (разделы P0/P1 и ближайшие задачи). Здесь только статус и фиксация фактов.
+
 ---
 
 ## A) WhatsApp канал и доставка
