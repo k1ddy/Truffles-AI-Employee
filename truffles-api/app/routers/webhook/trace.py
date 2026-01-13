@@ -16,6 +16,9 @@ logger = get_logger("webhook")
 DECISION_TRACE_KEY = "decision_trace"
 DECISION_TRACE_MAX = 20
 DECISION_TRACE_CRITICAL_STAGES = {
+    "booking",
+    "consult_flow",
+    "consult_return",
     "contract_error",
     "escalation",
     "policy_gate",

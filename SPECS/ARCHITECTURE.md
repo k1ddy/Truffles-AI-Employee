@@ -159,6 +159,20 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Низкая уверенность/ошибка → fallback на детерминированный парсер + короткий уточняющий вопрос.
 - Не может менять класс ответа и не влияет на Hard‑LAW/policy‑gates.
 
+### Consult clarify (no advice)
+- Consult‑интенты → уточнение услуги/категории, `expected_reply_type=service_choice`.
+- Если consult‑интент содержит распознанную услугу/категорию → short‑circuit в обычный info/booking (без уточнения).
+- До 2 уточнений; после 2 без услуги → эскалация с reason `consult_no_service`.
+- Trace: `stage=consult_flow` с `decision=consult_clarify|consult_escalate|short_circuit`.
+
+### Datetime Resolver (offline) — контракт
+- Вход: raw user text + `domain_pack.datetime_lexicon` (days/dayparts RU/KZ) + `expected_reply_type=time`.
+- Выход: `slot=datetime` → `{value, confidence, evidence}`.
+  - `value`: нормализованный RU‑слот или исходный текст (если содержит время/числа).
+  - `confidence`: 0.0–1.0.
+  - `evidence`: `{normalized_text, lexicon_matches, parser}`.
+- Использование: booking expected‑reply и booking‑signal; без LLM.
+- Ограничение: лексика только из data‑pack; в коде не добавляем regex/словари.
 ### Info‑bundle (композиция фактов)
 - Любые сочетания “где/когда/парковка/гости/ранний приход/сегодня” → единый факт‑ответ: адрес + часы + нужные секции.
 - Если запрошена цена без услуги → уточнение услуги (без цен), но адрес+часы остаются.

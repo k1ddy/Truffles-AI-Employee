@@ -228,6 +228,7 @@ def _handle_clarify_limit_escalation(
     saved_message: Message | None,
     source: str,
     allow_handover: bool,
+    escalation_intent: str = "clarify_limit",
     send_response,
     finalize_response=None,
 ) -> WebhookResponse:
@@ -243,7 +244,7 @@ def _handle_clarify_limit_escalation(
         user=user,
         message=message_text,
         source=source,
-        intent="clarify_limit",
+        intent=escalation_intent,
     )
     if reused:
         result_message = f"{source} clarify limit reuse, telegram={'sent' if telegram_sent else 'failed'}"
@@ -253,7 +254,7 @@ def _handle_clarify_limit_escalation(
             conversation=conversation,
             user_message=message_text,
             trigger_type="intent",
-            trigger_value="clarify_limit",
+            trigger_value=escalation_intent,
         )
         if result.ok:
             handover = result.value
@@ -274,15 +275,15 @@ def _handle_clarify_limit_escalation(
         conversation,
         {
             "stage": source,
-            "decision": "clarify_limit",
-            "intent": "clarify_limit",
+            "decision": escalation_intent,
+            "intent": escalation_intent,
             "state": conversation.state,
         },
     )
     legacy._record_message_decision_meta(
         saved_message,
         action="escalate",
-        intent="clarify_limit",
+        intent=escalation_intent,
         source=source,
         fast_intent=False,
     )
