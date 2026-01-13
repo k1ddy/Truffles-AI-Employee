@@ -382,6 +382,9 @@ def _dedup_preserve_order(items: list[str]) -> list[str]:
 def _load_client_config_from_truth() -> dict:
     truth = yaml.safe_load(SALON_TRUTH_PATH.read_text(encoding="utf-8"))
     domain_pack = truth.get("domain_pack", {}) if isinstance(truth, dict) else {}
+    policy_pack = truth.get("policy") if isinstance(truth, dict) else None
+    if not isinstance(policy_pack, dict):
+        policy_pack = None
     ood = domain_pack.get("ood_anchors", {}) if isinstance(domain_pack, dict) else {}
     def _collect(section: str) -> list[str]:
         result: list[str] = []
@@ -400,7 +403,9 @@ def _load_client_config_from_truth() -> dict:
             "anchors_in": anchors_in,
             "anchors_out": anchors_out,
             "anchors_in_strict": anchors_in_strict,
-        }
+        },
+        "policy_pack": policy_pack,
+        "policy_type": "demo_salon",
     }
 
 
