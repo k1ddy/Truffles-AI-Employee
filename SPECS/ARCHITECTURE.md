@@ -159,11 +159,13 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Низкая уверенность/ошибка → fallback на детерминированный парсер + короткий уточняющий вопрос.
 - Не может менять класс ответа и не влияет на Hard‑LAW/policy‑gates.
 
-### Consult clarify (no advice)
-- Consult‑интенты → уточнение услуги/категории, `expected_reply_type=service_choice`.
+### Consult clarify (pack-only, no LLM advice)
+- Consult canon: info-first only from pack playbooks; no LLM advice/facts. If service recognized → short-circuit to normal info/booking. If playbook missing and no service → 1-2 clarifications, then escalate `consult_no_service`.
+- Consult‑интенты → пытаемся матчить `client_pack.consult_playbooks`. Если playbook найден → info-first ответ только из pack (`lead`, `questions`, `options`, `next_step`).
 - Если consult‑интент содержит распознанную услугу/категорию → short‑circuit в обычный info/booking (без уточнения).
-- До 2 уточнений; после 2 без услуги → эскалация с reason `consult_no_service`.
-- Trace: `stage=consult_flow` с `decision=consult_clarify|consult_escalate|short_circuit`.
+- Если playbook не найден и услуги нет → 1-2 уточнения; после 2 без услуги → эскалация с reason `consult_no_service`.
+- Hard‑LAW/Policy/opt‑out/human гейты срабатывают раньше consult.
+- Trace: `stage=consult_flow` с `decision=consult_clarify|consult_escalate|short_circuit`, `consult_playbook_id`, `consult_variant_id`, `tips_used`, `source=pack`.
 
 ### Datetime Resolver (offline) — контракт
 - Вход: raw user text + `domain_pack.datetime_lexicon` (days/dayparts RU/KZ) + `expected_reply_type=time`.

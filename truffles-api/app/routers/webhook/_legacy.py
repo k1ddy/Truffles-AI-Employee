@@ -3691,7 +3691,7 @@ async def _handle_webhook_payload(
 
         bot_response = MSG_PENDING_WAIT
         trace_payload = {
-            "stage": "routing",
+            "stage": "pending_wait",
             "decision": "pending_wait",
             "state": conversation.state,
         }
@@ -3704,6 +3704,13 @@ async def _handle_webhook_payload(
             source="pending",
             fast_intent=False,
         )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "pending_action": "pending_wait",
+                },
+            )
         bot_response, sent = _send_and_save(bot_response)
         result_message = "Pending wait response sent" if sent else "Pending wait response failed"
         db.commit()
@@ -5735,6 +5742,7 @@ async def _handle_webhook_payload(
                 message_text,
                 client_slug=payload.client_slug,
                 intent_decomp=intent_decomp_payload,
+                conversation_id=str(conversation.id),
             )
         if consult_candidate and not consult_intent and isinstance(intent_decomp_payload, dict):
             consult_intent = True
@@ -5750,6 +5758,11 @@ async def _handle_webhook_payload(
                 consult_question = candidate_question
                 intent_decomp_payload["consult_question"] = candidate_question
         consult_intent_signal = bool(consult_intent or consult_candidate)
+        consult_candidate_meta = (
+            consult_candidate.meta
+            if consult_candidate and isinstance(consult_candidate.meta, dict)
+            else None
+        )
         if consult_intent_signal:
             consult_short_circuit_service = intent_decomp_service_query
             if not consult_short_circuit_service and payload.client_slug == "demo_salon":
@@ -5771,6 +5784,13 @@ async def _handle_webhook_payload(
                     consult_flow_trace["consult_topic"] = consult_topic
                 if consult_question:
                     consult_flow_trace["consult_question"] = consult_question
+                if consult_candidate_meta:
+                    consult_playbook_id = consult_candidate_meta.get("consult_playbook_id")
+                    if consult_playbook_id:
+                        consult_flow_trace["consult_playbook_id"] = consult_playbook_id
+                    consult_variant_id = consult_candidate_meta.get("consult_variant_id")
+                    if consult_variant_id:
+                        consult_flow_trace["consult_variant_id"] = consult_variant_id
                 _record_decision_trace(conversation, consult_flow_trace)
         consult_decision = None if consult_short_circuit else consult_candidate
         if consult_decision:
@@ -5785,10 +5805,13 @@ async def _handle_webhook_payload(
             if consult_question:
                 consult_meta["consult_question"] = consult_question
     if consult_signal:
-        consult_meta.pop("consult_options", None)
         context = _get_conversation_context(conversation)
         context_manager = _get_context_manager(context)
-        if _should_escalate_for_clarify(context_manager, "consult"):
+        if consult_decision:
+            consult_flow_decision = (
+                "consult_escalate" if consult_decision.action == "escalate" else "consult_reply"
+            )
+        elif _should_escalate_for_clarify(context_manager, "consult"):
             clarify_count, _ = _get_clarify_attempt_state(context_manager, "consult")
             _record_context_manager_decision(
                 conversation,
@@ -5848,9 +5871,17 @@ async def _handle_webhook_payload(
             }
             if consult_flow_decision == "consult_clarify":
                 consult_flow_trace["expected_reply_type"] = EXPECTED_REPLY_SERVICE
-            consult_flow_trace["reason"] = (
-                "consult_no_service" if consult_flow_decision == "consult_escalate" else "consult_clarify"
-            )
+                consult_flow_trace["reason"] = "consult_clarify"
+            elif consult_flow_decision == "consult_escalate":
+                consult_flow_trace["reason"] = "consult_no_service"
+            else:
+                consult_flow_trace["reason"] = "consult_pack"
+            consult_playbook_id = consult_meta.get("consult_playbook_id")
+            if consult_playbook_id:
+                consult_flow_trace["consult_playbook_id"] = consult_playbook_id
+            consult_variant_id = consult_meta.get("consult_variant_id")
+            if consult_variant_id:
+                consult_flow_trace["consult_variant_id"] = consult_variant_id
             _record_decision_trace(conversation, consult_flow_trace)
         if consult_decision.action == "reply":
             context = _get_conversation_context(conversation)
