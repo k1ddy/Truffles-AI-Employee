@@ -25,14 +25,16 @@
 - DONE: Pending SLA ping spam fix (PR #147 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20922178070).
 - DONE: No-response alert dedup cleanup + shield_drop suppression order (PR #154 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20944545548; live-check conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, msg_id 88173fb2-20f7-4c25-93dc-fd050a2ed248 shield_drop too_long; /reminders/process alerted=0).
 - DONE: Consult clarify/short‑circuit (PR #153 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20943384712; live‑check evidence in истории 2026‑01‑13).
+- DONE: PR #155 consult pack‑only + pending_wait trace merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20945722911; live‑check evidence в истории 2026‑01‑13.
+- DONE: Telegram→WhatsApp topic handover routing fix (PR #157 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20948893145; live‑check в истории 2026‑01‑13).
 - BLOCKERS: нет.
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
-- **Следующий шаг:** P1 Router SLA <10% (PR + CI + SQL evidence) — in progress.
-- **IN PROGRESS:** P1 Task A/B — pending_wait trace + consult pack‑only runtime (PR/CI/evidence pending).
+- **Следующий шаг:** P1 Router SLA <10% (PR + CI + SQL evidence) — pending.
+- **IN PROGRESS:** Router SLA evidence (controller_attempted) — pending.
 - **OPEN:** Outbox latency (P0 tail) — в конце.
-- **PENDING:** Docs PR (commit f86543f) — открыть/смёржить в main.
+- **PENDING:** Docs PR #158 (roadmap + tech status) — pending merge.
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
 - **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
@@ -542,11 +544,10 @@
 - Simulated inbound — только по явному waiver; иначе live‑check = BLOCKED.
 
 **Открыто:**
-- P1 Task A/B: pending_wait trace + consult pack‑only runtime (PR/CI/evidence pending).
 - Router SLA evidence (controller_attempted) — pending.
-- Policy‑gate trace coverage на “Есть скидки?” — pending.
 - No-response pipeline hardening (OpenAI 400 temp, WebhookResponse None) — pending.
 - P0 outbox latency — tail.
+- Docs PR #158 (roadmap + tech status) — pending merge.
 
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
@@ -564,6 +565,45 @@
   - consult_flow: [{"stage":"consult_flow","reason":"consult_clarify","decision":"consult_clarify","expected_reply_type":"service_choice","state":"bot_active"},{"stage":"consult_flow","reason":"service_hint","decision":"short_circuit","consult_topic":"Что посоветуете по маникюру?","service_query":"Маникюр"}]
   - question_contract: expected_reply_type service_choice set → matched → expected_reply_type time set (booking_prompt).
 - Conversation state: bot_active (no escalation) at `2026-01-13T03:29:45.547916+00`.
+
+### 2026-01-13 — P1 Task A/B evidence (consult pack‑only + pending_wait + policy_gate)
+
+**Что сделали:**
+- Live‑check real WA inbound для consult pack‑only, pending_wait и policy_gate.
+- Смёржили PR #155 (consult pack‑only + pending_wait trace).
+
+**Evidence:**
+- PR #155: https://github.com/k1ddy/Truffles-AI-Employee/pull/155
+- CI PR (core/long/asr/lint/unit): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20945722911
+- Merge commit: `863dab8dd706b0842eb2a8a1245d5f92e25153af` (merged_at 2026-01-13T07:42:20Z)
+- consult pack‑only (messages.decision_meta):
+  - msg_id `75278778-dad6-4224-a8aa-1f8703a79e6f`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+  - consult_playbook_id `hair_aftercolor`, consult_variant_id `f2b3e084`, tips_used (3 пункта), source `pack`
+- consult trace (decision_trace):
+  - {"stage":"consult_flow","state":"bot_active","reason":"consult_pack","decision":"consult_reply","recorded_at":"2026-01-13T06:44:59.940363+00:00","consult_variant_id":"f2b3e084","consult_playbook_id":"hair_aftercolor"}
+  - NOTE: decision_trace живёт в conversation.context и очищается при manager_resolve; запись была зафиксирована до reset.
+- pending_wait (messages.decision_meta):
+  - msg_id `317c573a-b1a2-467f-920f-91eca4b3ea21`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, pending_action `pending_wait`
+- pending_wait trace (decision_trace):
+  - {"stage":"pending_wait","state":"pending","decision":"pending_wait","recorded_at":"2026-01-13T07:08:42.052369+00:00","router_eligible":false,"controller_eligible":false}
+- policy_gate (messages.decision_meta):
+  - msg_id `43b8cd43-5789-41ea-adb2-97f31e90a49b`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, source `policy_gate`, policy_gate `discounts`
+- policy_gate trace (decision_trace):
+  - {"stage":"policy_gate","state":"bot_active","intent":"discounts","decision":"reply","risk_level":"low","policy_gate":"discounts","policy_type":"demo_salon","recorded_at":"2026-01-13T07:24:53.451704+00:00"}
+
+### 2026-01-13 — Fix: Telegram topic handover routing (manager replies → WhatsApp)
+
+**Что сделали:**
+- `find_conversation_by_telegram` теперь приоритетно ищет active handover по `topic_id`, чтобы не падать на закрытую conversation.
+- Live‑check: сообщение менеджера из Telegram топика дошло до WhatsApp.
+
+**Evidence:**
+- PR #157: https://github.com/k1ddy/Truffles-AI-Employee/pull/157
+- CI PR (core/long/asr/lint/unit): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20948893145
+- Merge commit: `16ed46dd01481d47475696a34e5d6327f24d6ee7` (merged_at 2026-01-13T07:54:07Z)
+- DB (messages role=manager): msg_id `e0559543-2985-4e0e-850d-3c6b3a717a24`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, content `еткст`.
+- Handover: `1015928a-4b82-42a0-abad-9c83597879e7`, manager_response `еткст`, resolved_by `Zh`.
+- Note: оператор увидел WARNING “Learning success” с point_id `f0f1e359-b1c8-49a1-ae2a-6a6c566b6ce9` на этом ответе; решение — оставляем как есть.
 
 ### 2026-01-12 — A3/A4/A5 verification (evidence-only)
 
