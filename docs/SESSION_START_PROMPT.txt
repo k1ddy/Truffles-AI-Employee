@@ -7,7 +7,7 @@ SESSION CANON (read every session)
 4) OOD: soft refusal + return to salon topic; no “smart” off‑topic answers.
 5) LLM is for language; business decisions are deterministic.
 5a) Intent lattice: class-based routing + info-bundle; anchors are boost only, order of words must not change class.
-6) Consult mode: advice within salon scope, no prices/availability/masters, 1–2 questions, 2–3 options.
+6) Consult canon: info-first only from pack playbooks; no LLM advice/facts. If service recognized → short-circuit to normal info/booking. If playbook missing and no service → 1-2 clarifications, then escalate `consult_no_service`.
 7) Context Manager: current_goal + refusal_flags + clarify_limit + compact_summary.
 8) Core‑50 EVAL blocks CI; Extended‑250 runs nightly/manual only.
 9) Fix loop: one failing case at a time → choose data‑fix/logic‑fix/manual.

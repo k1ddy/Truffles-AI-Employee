@@ -88,12 +88,14 @@
 - Decision trace/meta: `stage=booking_interrupt`, `booking_info_interrupt=true`, `booking_info_intents` сохраняются.
 - Если сообщение не относится к записи и нет booking‑сигнала → поставить booking на паузу до явного запроса записи.
 
-**Consult clarify (советы/подбор):**
-- Consult‑интенты → уточняем услугу/категорию, выставляем `expected_reply_type=service_choice`.
+**Consult clarify (pack-only, no LLM advice):**
+- Consult canon: info-first only from pack playbooks; no LLM advice/facts. If service recognized → short-circuit to normal info/booking. If playbook missing and no service → 1-2 clarifications, then escalate `consult_no_service`.
+- Consult‑интенты → пытаемся матчить `client_pack.consult_playbooks` (topic/aliases). Если playbook найден → info-first ответ только из pack (`lead`, `questions`, `options`, `next_step`), без LLM-советов/фактов.
 - Если consult‑интент содержит распознанную услугу/категорию → **short‑circuit** в обычный info/booking (без уточнения).
-- До 2 уточнений; после 2 без услуги → эскалация с reason `consult_no_service`.
-- Никаких рекомендаций/советов от LLM: только уточнение → детерминированный info/booking.
-- Trace/meta: `stage=consult_flow` (`decision=consult_clarify|consult_escalate|short_circuit`), `clarify_attempt`, `expected_reply_type=service_choice`.
+- Если playbook не найден и услуги нет → 1-2 уточнения, `expected_reply_type=service_choice`; после 2 без услуги → эскалация с reason `consult_no_service`.
+- Hard‑LAW/Policy/opt‑out/human выше consult: если сработало — consult‑playbook не применяется.
+- Вариант ответа выбирается детерминированно (hash от `conversation_id + playbook_id`) — без дрейфа.
+- Trace/meta: `stage=consult_flow` (`decision=consult_clarify|consult_escalate|short_circuit`), `clarify_attempt`, `expected_reply_type=service_choice`, `consult_playbook_id`, `consult_variant_id`, `tips_used` (из `options`), `source=pack`.
 
 **CTA после инфо‑ответа (standalone, вне booking):**
 - После ответа на цены/длительность/часы/адрес — добавить мягкий CTA: “Хотите записаться?”.

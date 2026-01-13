@@ -758,8 +758,12 @@ def _ensure_question_mark(text: str) -> str:
     return f"{cleaned}?"
 
 
-def _format_consult_reply(playbook: dict[str, Any]) -> tuple[str, list[str], list[str]]:
+def _format_consult_reply(
+    playbook: dict[str, Any],
+    variant_seed: int | None = None,
+) -> tuple[str, list[str], list[str]]:
     lead = str(playbook.get("lead") or "").strip()
+    next_step = str(playbook.get("next_step") or "").strip()
     questions_raw = playbook.get("questions")
     options_raw = playbook.get("options")
 
@@ -777,8 +781,18 @@ def _format_consult_reply(playbook: dict[str, Any]) -> tuple[str, list[str], lis
         if isinstance(item, str) and item.strip()
     ]
 
-    selected_questions = [q for q in questions if q][:2]
-    selected_options = [opt for opt in options if opt][:3]
+    def _select_variants(items: list[str], limit: int, seed: int | None, offset: int = 0) -> list[str]:
+        if not items or limit <= 0:
+            return []
+        if len(items) <= limit:
+            return list(items)
+        if seed is None:
+            return items[:limit]
+        start = (seed + offset) % len(items)
+        return [items[(start + idx) % len(items)] for idx in range(limit)]
+
+    selected_questions = _select_variants(questions, 2, variant_seed, offset=0)
+    selected_options = _select_variants(options, 3, variant_seed, offset=7)
 
     lines: list[str] = []
     if lead:
@@ -786,8 +800,9 @@ def _format_consult_reply(playbook: dict[str, Any]) -> tuple[str, list[str], lis
     if selected_questions:
         lines.append(" ".join(selected_questions))
     if selected_options:
-        lines.append("Можно рассмотреть варианты:")
         lines.extend([f"- {option}" for option in selected_options])
+    if next_step:
+        lines.append(next_step)
 
     reply = "\n".join(line for line in lines if line)
     return reply, selected_questions, selected_options
@@ -1821,6 +1836,7 @@ def build_consult_reply(
     *,
     client_slug: str | None = "demo_salon",
     intent_decomp: dict | None = None,
+    conversation_id: str | None = None,
 ) -> DemoSalonDecision | None:
     normalized = _normalize_text(message)
     if not normalized or _should_skip_consult(normalized, message):
@@ -1862,10 +1878,19 @@ def build_consult_reply(
     playbook_id = str(playbook.get("id") or playbook.get("topic") or "general").strip()
     consult_question_final = consult_question or _clean_consult_value(message, 12) or ""
 
+    variant_key = f"{conversation_id}:{playbook_id}" if conversation_id else playbook_id
+    variant_key = variant_key or "consult"
+    variant_hash = hashlib.sha256(variant_key.encode("utf-8")).hexdigest()
+    variant_id = variant_hash[:8]
+    variant_seed = int(variant_id, 16)
+
     meta: dict[str, Any] = {
         "consult_intent": True,
         "consult_topic": playbook_id or "general",
         "consult_question": consult_question_final,
+        "consult_playbook_id": playbook_id,
+        "consult_variant_id": variant_id,
+        "source": "pack",
     }
 
     if action == "escalate":
@@ -1877,11 +1902,15 @@ def build_consult_reply(
             meta=meta,
         )
 
-    reply, consult_questions, consult_options = _format_consult_reply(playbook)
+    reply, consult_questions, consult_options = _format_consult_reply(
+        playbook,
+        variant_seed=variant_seed,
+    )
     if not reply:
         return None
     meta["consult_questions"] = consult_questions
     meta["consult_options"] = consult_options
+    meta["tips_used"] = consult_options
     return DemoSalonDecision(
         action="reply",
         response=reply,
@@ -2433,17 +2462,7 @@ def get_demo_salon_decision(
         )
         if service_decision and service_decision.intent == "service_match":
             return service_decision
-        consult_meta = consult_decision.meta if isinstance(consult_decision.meta, dict) else None
-        if consult_meta is not None:
-            consult_meta = dict(consult_meta)
-            consult_meta.pop("consult_options", None)
-            consult_meta["consult_questions"] = [CONSULT_CLARIFY_TEXT]
-        return DemoSalonDecision(
-            action="reply",
-            response=CONSULT_CLARIFY_TEXT,
-            intent="consult_reply",
-            meta=consult_meta,
-        )
+        return consult_decision
 
     if "скидки сумм" in normalized or "скидк" in normalized and "сумм" in normalized:
         reply = format_reply_from_truth("promotions_rules")

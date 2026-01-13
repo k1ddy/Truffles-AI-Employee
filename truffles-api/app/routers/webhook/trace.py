@@ -21,6 +21,7 @@ DECISION_TRACE_CRITICAL_STAGES = {
     "consult_return",
     "contract_error",
     "escalation",
+    "pending_wait",
     "policy_gate",
     "question_contract",
     "re_entry",
