@@ -23,11 +23,14 @@
 - DONE: A7 observability + budget gate + ASR tier (PR #133 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20895474177).
 - DONE: A7 live‑budget verification in prod (SQL fallback on demo_salon; llm_budget.daily_max_calls=1) — evidence в истории 2026‑01‑11.
 - DONE: Pending SLA ping spam fix (PR #147 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20922178070).
+- DONE: No-response alert dedup cleanup + shield_drop suppression order (PR #154 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20944545548; live-check conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, msg_id 88173fb2-20f7-4c25-93dc-fd050a2ed248 shield_drop too_long; /reminders/process alerted=0).
+- DONE: Consult clarify/short‑circuit (PR #153 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20943384712; live‑check evidence in истории 2026‑01‑13).
 - BLOCKERS: нет.
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
 - **Следующий шаг:** P1 Router SLA <10% (PR + CI + SQL evidence) — in progress.
+- **IN PROGRESS:** P1 Task A/B — pending_wait trace + consult pack‑only runtime (PR/CI/evidence pending).
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **PENDING:** Docs PR (commit f86543f) — открыть/смёржить в main.
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
@@ -526,6 +529,24 @@
 ---
 
 ## ИСТОРИЯ СЕССИЙ
+
+### 2026-01-13 — Сессия: статус и уроки (канон/trace)
+
+**Что закрепили:**
+- Consult clarify/short‑circuit подтверждён (см. запись 2026‑01‑13 ниже).
+- No-response dedup + shield_drop suppression и pending SLA ping spam исправлены (см. записи 2026‑01‑13 и 2026‑01‑12 ниже).
+
+**Уроки/инварианты:**
+- JSONB `conversation.context`: in-place не сохраняется → только copy/assign или `flag_modified`.
+- decision_trace/meta обязательны на каждый user‑msg; pending/policy gaps = stop‑line.
+- Simulated inbound — только по явному waiver; иначе live‑check = BLOCKED.
+
+**Открыто:**
+- P1 Task A/B: pending_wait trace + consult pack‑only runtime (PR/CI/evidence pending).
+- Router SLA evidence (controller_attempted) — pending.
+- Policy‑gate trace coverage на “Есть скидки?” — pending.
+- No-response pipeline hardening (OpenAI 400 temp, WebhookResponse None) — pending.
+- P0 outbox latency — tail.
 
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
@@ -1977,6 +1998,31 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - [ ] Эскалация — добить
 
 ---
+
+### 2026-01-13 — Fix: no_response dedup + shield_drop suppression
+
+**Что сделали:**
+- Очистили `check_no_response_alerts`: guard `shield_drop` до записи алерта, один dedup write, JSONB context сохраняется через копию.
+- Восстановили тесты no_response (dedup + shield_drop).
+- PR #154 merged → deploy main.
+
+**Evidence:**
+- PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/154
+- CI main (build/push/deploy): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20944545548
+- Prod `/admin/version`: `{"version":"main","git_commit":"959ffa5ab6fb38b74be5417a542da9181ad9af6e","build_time":"2026-01-13T04:20:47Z"}`
+- Live-check (real inbound, test JID 77015705555@s.whatsapp.net, 09:57 local):
+  - decision_meta (shield_drop):
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT m.id, m.created_at, m.metadata->>'messageId' AS message_id, m.metadata->'decision_meta' AS decision_meta, c.id AS conversation_id FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.metadata->>'remoteJid' = '77015705555@s.whatsapp.net' ORDER BY m.created_at DESC LIMIT 1;"`
+    - output: `id=88173fb2-20f7-4c25-93dc-fd050a2ed248; message_id=3EB09CCE4B9B1409FC04F9; conversation_id=b8c559d1-f8cd-4173-ae70-0a9683833e48; decision_meta.action=shield_drop; shield_reason=too_long`
+  - decision_trace (last):
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT context->'decision_trace'->(jsonb_array_length(context->'decision_trace')-1) AS last_trace FROM conversations WHERE id = 'b8c559d1-f8cd-4173-ae70-0a9683833e48';"`
+    - output: `{"stage":"shield","decision":"drop","reason":"too_long","message_length":1278,...}`
+  - /reminders/process (after 3+ min):
+    - cmd: `curl -s -X POST http://localhost:8000/reminders/process`
+    - output: `{"no_response_alerts":{"alerted":0,"items":[]},...}`
+  - dedup not created:
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT context->'alerts' AS alerts FROM conversations WHERE id = 'b8c559d1-f8cd-4173-ae70-0a9683833e48';"`
+    - output: `NULL`
 
 ### 2026-01-12 — Fix: pending SLA ping spam
 
