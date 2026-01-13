@@ -25,13 +25,11 @@
 - DONE: Pending SLA ping spam fix (PR #147 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20922178070).
 - DONE: No-response alert dedup cleanup + shield_drop suppression order (PR #154 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20944545548; live-check conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, msg_id 88173fb2-20f7-4c25-93dc-fd050a2ed248 shield_drop too_long; /reminders/process alerted=0).
 - DONE: Consult clarify/short‑circuit (PR #153 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20943384712; live‑check evidence in истории 2026‑01‑13).
-- DONE: No-response hardening (stale/legacy guard + dedup persist; PR #156 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20946166329).
-- DONE: Router SLA evidence (controller_attempted; waiver: simulated inbound /webhook; details в истории 2026‑01‑13).
 - BLOCKERS: нет.
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
-- **Следующий шаг:** Policy‑gate trace coverage на “Есть скидки?” — pending.
+- **Следующий шаг:** P1 Router SLA <10% (PR + CI + SQL evidence) — in progress.
 - **IN PROGRESS:** P1 Task A/B — pending_wait trace + consult pack‑only runtime (PR/CI/evidence pending).
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **PENDING:** Docs PR (commit f86543f) — открыть/смёржить в main.
@@ -537,7 +535,6 @@
 **Что закрепили:**
 - Consult clarify/short‑circuit подтверждён (см. запись 2026‑01‑13 ниже).
 - No-response dedup + shield_drop suppression и pending SLA ping spam исправлены (см. записи 2026‑01‑13 и 2026‑01‑12 ниже).
-- Router SLA evidence (controller_attempted) закрыто (waiver: simulated inbound /webhook) — см. запись 2026‑01‑13 ниже.
 
 **Уроки/инварианты:**
 - JSONB `conversation.context`: in-place не сохраняется → только copy/assign или `flag_modified`.
@@ -546,6 +543,7 @@
 
 **Открыто:**
 - P1 Task A/B: pending_wait trace + consult pack‑only runtime (PR/CI/evidence pending).
+- Router SLA evidence (controller_attempted) — pending.
 - Policy‑gate trace coverage на “Есть скидки?” — pending.
 - No-response pipeline hardening (OpenAI 400 temp, WebhookResponse None) — pending.
 - P0 outbox latency — tail.
@@ -566,24 +564,6 @@
   - consult_flow: [{"stage":"consult_flow","reason":"consult_clarify","decision":"consult_clarify","expected_reply_type":"service_choice","state":"bot_active"},{"stage":"consult_flow","reason":"service_hint","decision":"short_circuit","consult_topic":"Что посоветуете по маникюру?","service_query":"Маникюр"}]
   - question_contract: expected_reply_type service_choice set → matched → expected_reply_type time set (booking_prompt).
 - Conversation state: bot_active (no escalation) at `2026-01-13T03:29:45.547916+00`.
-
-### 2026-01-13 — P1 Router SLA evidence (simulated inbound /webhook)
-
-**Что сделали:**
-- Simulated inbound через `/webhook` (waiver: simulated inbound /webhook) для клиента `truffles`.
-- Отправили 3 сообщения с JID `7015705555@s.whatsapp.net`; диалог не pending (conv_id `2a331f8a-a6b2-4dcd-b9ca-1e49a1da774a`).
-- Зафиксировали decision_meta: `controller_attempted=true`, `controller_low_confidence=true`, `controller_fallback_reason=NULL`; router_sla `fallback_rate=0.0`.
-
-**Evidence:**
-- Conversation state:
-  - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT id, state, bot_status FROM conversations WHERE id = '2a331f8a-a6b2-4dcd-b9ca-1e49a1da774a';"`
-  - output: `id=2a331f8a-a6b2-4dcd-b9ca-1e49a1da774a; state=bot_active; bot_status=active`
-- SQL (decision_meta/router_sla, message_id sim-sla-truffles-1768284364-1/2/3):
-  - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT id, conversation_id, created_at, metadata->>'messageId' AS message_id, metadata->'decision_meta'->>'controller_attempted' AS controller_attempted, metadata->'decision_meta'->>'controller_fallback_reason' AS controller_fallback_reason, metadata->'decision_meta'->>'controller_low_confidence' AS controller_low_confidence, metadata->'decision_meta'->'class_router'->'router'->'sla' AS router_sla FROM messages WHERE metadata->>'messageId' IN ('sim-sla-truffles-1768284364-1','sim-sla-truffles-1768284364-2','sim-sla-truffles-1768284364-3') ORDER BY created_at;"`
-  - output:
-    - `ec48c42d-2b8a-4542-a1c7-0c150ae8b83e | 2a331f8a-a6b2-4dcd-b9ca-1e49a1da774a | 2026-01-13 06:06:04.502838+00 | sim-sla-truffles-1768284364-1 | true | NULL | true | {"attempts": 6, "timeouts": 0, "fallbacks": 0, "timeout_rate": 0.0, "fallback_rate": 0.0, "fallback_rate_flag": false}`
-    - `500d3232-787a-49dd-91d1-f69ca17f8c4f | 2a331f8a-a6b2-4dcd-b9ca-1e49a1da774a | 2026-01-13 06:06:15.128742+00 | sim-sla-truffles-1768284364-2 | true | NULL | true | {"attempts": 7, "timeouts": 0, "fallbacks": 0, "timeout_rate": 0.0, "fallback_rate": 0.0, "fallback_rate_flag": false}`
-    - `32e52c28-00b1-4826-9261-75749f1026f6 | 2a331f8a-a6b2-4dcd-b9ca-1e49a1da774a | 2026-01-13 06:06:25.393044+00 | sim-sla-truffles-1768284364-3 | true | NULL | true | {"attempts": 8, "timeouts": 0, "fallbacks": 0, "timeout_rate": 0.0, "fallback_rate": 0.0, "fallback_rate_flag": false}`
 
 ### 2026-01-12 — A3/A4/A5 verification (evidence-only)
 
@@ -2043,18 +2023,6 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
   - dedup not created:
     - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT context->'alerts' AS alerts FROM conversations WHERE id = 'b8c559d1-f8cd-4173-ae70-0a9683833e48';"`
     - output: `NULL`
-
-### 2026-01-13 — Fix: no_response hardening (stale/legacy guard + dedup persist)
-
-**Что сделали:**
-- `check_no_response_alerts`: пропускаем сообщения без `messageId`/`remoteJid`, и старше `NO_RESPONSE_ALERT_MAX_AGE_DAYS` (default=30).
-- Закрепили dedup через copy/assign `conversation.context` (alerts.no_response_for сохраняется в JSONB).
-- Добавили тесты: skip missing metadata, skip stale, dedup repeat, shield_drop suppression (`truffles-api/tests/test_reminders.py`).
-
-**Evidence:**
-- PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/156
-- CI PR (core/long): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20946166329
-- Merge: https://github.com/k1ddy/Truffles-AI-Employee/commit/542e038bf602dc4040983fe8bebc87f045210f7b
 
 ### 2026-01-12 — Fix: pending SLA ping spam
 
