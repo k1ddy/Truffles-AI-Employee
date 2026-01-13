@@ -27,6 +27,7 @@
 - DONE: Consult clarify/short‑circuit (PR #153 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20943384712; live‑check evidence in истории 2026‑01‑13).
 - DONE: PR #155 consult pack‑only + pending_wait trace merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20945722911; live‑check evidence в истории 2026‑01‑13.
 - DONE: Telegram→WhatsApp topic handover routing fix (PR #157 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20948893145; live‑check в истории 2026‑01‑13).
+- DONE: Docs PR #158 (roadmap + tech status) merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20949202225.
 - BLOCKERS: нет.
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
@@ -34,7 +35,6 @@
 - **Следующий шаг:** P1 Router SLA <10% (PR + CI + SQL evidence) — pending.
 - **IN PROGRESS:** Router SLA evidence (controller_attempted) — pending.
 - **OPEN:** Outbox latency (P0 tail) — в конце.
-- **PENDING:** Docs PR #158 (roadmap + tech status) — pending merge.
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
 - **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
@@ -547,7 +547,6 @@
 - Router SLA evidence (controller_attempted) — pending.
 - No-response pipeline hardening (OpenAI 400 temp, WebhookResponse None) — pending.
 - P0 outbox latency — tail.
-- Docs PR #158 (roadmap + tech status) — pending merge.
 
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
