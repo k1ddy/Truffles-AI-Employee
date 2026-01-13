@@ -173,6 +173,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
   - `evidence`: `{normalized_text, lexicon_matches, parser}`.
 - Использование: booking expected‑reply и booking‑signal; без LLM.
 - Ограничение: лексика только из data‑pack; в коде не добавляем regex/словари.
+
 ### Info‑bundle (композиция фактов)
 - Любые сочетания “где/когда/парковка/гости/ранний приход/сегодня” → единый факт‑ответ: адрес + часы + нужные секции.
 - Если запрошена цена без услуги → уточнение услуги (без цен), но адрес+часы остаются.

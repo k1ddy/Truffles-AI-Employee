@@ -50,9 +50,10 @@ def _get_last_message(db: Session, conversation_id, role: str) -> Message | None
 
 
 def _get_pending_sla_context(conversation: Conversation) -> tuple[dict, dict]:
-    context = conversation.context if isinstance(conversation.context, dict) else {}
-    payload = context.get(PENDING_SLA_CONTEXT_KEY)
-    pending_sla = payload if isinstance(payload, dict) else {}
+    raw_context = conversation.context if isinstance(conversation.context, dict) else {}
+    context = dict(raw_context)
+    payload = raw_context.get(PENDING_SLA_CONTEXT_KEY)
+    pending_sla = dict(payload) if isinstance(payload, dict) else {}
     return context, pending_sla
 
 
@@ -254,8 +255,10 @@ def check_no_response_alerts(db: Session) -> dict:
         if minutes_waiting < threshold_minutes:
             continue
 
-        context = conversation.context if isinstance(conversation.context, dict) else {}
-        alerts = context.get("alerts") if isinstance(context.get("alerts"), dict) else {}
+        base_context = conversation.context if isinstance(conversation.context, dict) else {}
+        context = dict(base_context)
+        raw_alerts = context.get("alerts")
+        alerts = dict(raw_alerts) if isinstance(raw_alerts, dict) else {}
         if alerts.get("no_response_for") == str(last_user.id):
             continue
 
@@ -275,8 +278,33 @@ def check_no_response_alerts(db: Session) -> dict:
                 last_action = f"{action}:{intent}"
             else:
                 last_action = action or intent
+        context = conversation.context if isinstance(conversation.context, dict) else {}
         trace = context.get("decision_trace")
         last_trace = trace[-1] if isinstance(trace, list) and trace else None
+        if (isinstance(decision_meta, dict) and decision_meta.get("action") == "shield_drop") or (
+            isinstance(last_trace, dict)
+            and last_trace.get("stage") == "shield"
+            and last_trace.get("decision") == "drop"
+        ):
+            logger.info(
+                "Suppressed no_response alert due to shield_drop",
+                extra={
+                    "context": {
+                        "conversation_id": str(conversation.id),
+                        "message_id": str(last_user.id),
+                    }
+                },
+            )
+            continue
+
+        alerts = context.get("alerts") if isinstance(context.get("alerts"), dict) else {}
+        if alerts.get("no_response_for") == str(last_user.id):
+            continue
+
+        alerts["no_response_for"] = str(last_user.id)
+        alerts["no_response_at"] = now.isoformat()
+        context["alerts"] = alerts
+        conversation.context = context
 
         alert_warning(
             "No bot response for user message",

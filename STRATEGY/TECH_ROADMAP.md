@@ -76,6 +76,7 @@
 ### P1 — “Разумный хост”
 - Goal‑stack и consult‑return при перебивках.
 - Answer‑Interpreter: устойчивое понимание ответов клиента на вопрос бота.
+- RU/KZ resolver слотов (datetime/name/service): data‑lexicon + `dateparser`/`rapidfuzz`, без расширения regex/словников.
 - Router SLA <10% fallback с прозрачным `fallback_reason`.
 - Long‑хаос 12–15 ходов в `EVAL_TIER=long`.
 

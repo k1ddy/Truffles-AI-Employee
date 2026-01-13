@@ -156,12 +156,21 @@
 - Boundary: нет отдельного eval‑контракта на expected_reply.
 - Fix plan: добавить eval‑кейсы для expected_reply.
 
+### Router fallback_reason (SLA)
+- Status: OK
+- Evidence: `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/app/routers/webhook/trace.py`
+- Факт: fallback_reason enum = timeout/invalid_json/budget_exceeded/no_api_key/prompt_missing/empty_message/empty_response/invalid_class/unsupported_temperature/error.
+- Факт: низкая уверенность фиксируется отдельно (`controller_low_confidence`), не как fallback_reason.
+- Факт: при отсутствии `OPENAI_API_KEY` controller_attempted=false (router не пытается).
+- Metric: fallback_rate = count(controller_attempted=true AND controller_fallback_reason IS NOT NULL) / count(controller_attempted=true).
+- Fix plan: держать fallback_rate <10% в core/long (SQL + CI).
+
 ### Datetime fallback
 - Status: PARTIAL
 - Evidence: `truffles-api/app/routers/webhook/_legacy.py`
 - Факт: распознаёт `HH:MM`/`HH.MM`, “в 6/к 3”, `01.02`, “10 января” + базовые ключевые слова.
 - Boundary: “после 7”, “в конце недели” остаются слабо покрыты.
-- Fix plan: расширить эвристики или полагаться на Answer‑Interpreter.
+- Fix plan: заменить эвристики на resolver‑слой (data‑lexicon RU/KZ + `dateparser`/`rapidfuzz`), минимальные EVAL‑варианты как доказательство.
 
 ### Carryover follow‑up (pricing)
 - Status: OK

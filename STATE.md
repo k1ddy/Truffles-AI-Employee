@@ -22,12 +22,15 @@
 - DONE: A6 policy rules‑as‑data (PR #131 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20894731972; live‑check conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, trace policy_gate=discounts + risk_level=low).
 - DONE: A7 observability + budget gate + ASR tier (PR #133 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20895474177).
 - DONE: A7 live‑budget verification in prod (SQL fallback on demo_salon; llm_budget.daily_max_calls=1) — evidence в истории 2026‑01‑11.
+- DONE: Pending SLA ping spam fix (PR #147 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20922178070).
 - BLOCKERS: нет.
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
-- **Следующий шаг:** DONE: P0 Ops hygiene (instanceId inbound + deploy latest CI image), evidence уже в истории.
+- **Следующий шаг:** P1 Router SLA <10% (PR + CI + SQL evidence) — in progress.
 - **OPEN:** Outbox latency (P0 tail) — в конце.
+- **PENDING:** Docs PR (commit f86543f) — открыть/смёржить в main.
+- **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
 - **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
 - **Последняя диагностика:** 2026-01-08T15:46:51Z (ops/diagnose.py: outbox FAILED 12 / SENT 1235; `OUTBOX_WORKER_ENABLED=MISSING`; `/admin/version` `487a6ff9...`).
@@ -301,6 +304,8 @@
 - Формат задачи для Brain (6 строк): Goal / Scope / Steps / Evidence / Tests / Stop.
 - Формат отчёта Hands (7 строк): GOAL / FILES / TESTS / LIVE-CHECK / EVIDENCE / COMMIT / RISKS.
 - One-issue flow: 1 проблема → 1 правка → 1 проверка → запись в `STATE.md`.
+- RCA-first: сначала причина + evidence (код/trace/SQL/CI), потом решение; без доказательств — стоп.
+- Offline-resolver: масштаб через data-lexicon + готовые библиотеки; regex/словари в коде — только временный fallback.
 
 ### Канон (North Star / DoD / Epics / порядок)
 
@@ -570,6 +575,29 @@
 - branch_id: `b7f75692-951e-421a-aae6-f5db97394799`
 - instanceId: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
 - DoD: `messages.metadata.instanceId` заполнен; `conversations.branch_id` не NULL; `branches.instance_id` совпадает; `outbox_messages.payload_json` содержит тот же `instanceId`.
+
+### 2026-01-12 — RU/KZ datetime resolver + escalation live-check (simulated inbound)
+
+**Что сделали:**
+- Live-check на allowlist JID через simulated inbound `/webhook` (waiver от Жанбола).
+- RU/KZ datetime resolver: “сенбі кешке” → запрос имени.
+- Эскалация: “жалоба” → pending/handover, без “AI error”.
+
+**Evidence:**
+- CI PR #143: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20917324127
+- RU/KZ resolver: conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, msg `live-dt-1768218583-10`, trace `stage=question_contract` `decision=matched` `answer_slot=datetime` `expected_reply_type=time`; bot reply “Как вас зовут?”
+- Escalation: conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, msg `live-esc-1768218660-5`, trace `stage=policy_gate` `intent=complaint` `risk_level=high`, handover `d306c4b5-9c80-48f2-9edf-6c32f0a4ba06` `pending`; bot reply “Жаль, что так вышло. Передам администратору…”
+- TODO: Real WA inbound live-check (ChatFlow) — pending.
+
+### 2026-01-12 — Docs sync (ritual + RCA-first + resolver-first + gaps)
+
+**Что сделали:**
+- Зафиксировали session-start ritual, RCA-first и resolver-first в `docs/SESSION_START_PROMPT.txt`.
+- Добавили RU/KZ resolver в P1 roadmap и обновили fix plan в `docs/TECH_STATUS.md`.
+- Расширили `docs/IMPERIUM_GAPS.yaml` (GAP-014..019: LAW/policy, /message bypass, branch isolation, LLM facts, ops/Qdrant).
+
+**Evidence:**
+- PR #144: https://github.com/k1ddy/Truffles-AI-Employee/pull/144 (docs-only, CI не требуется).
 
 ### 2026-01-11 — A7: observability + budget gate + ASR tier
 
@@ -1930,6 +1958,96 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 - [ ] Тестировать что бот не обещает лишнего
 - [ ] Confidence threshold (не выдумывать если RAG пустой)
 - [ ] Эскалация — добить
+
+---
+
+### 2026-01-12 — Fix: pending SLA ping spam
+
+**Что сделали:**
+- Исправили сохранение `pending_sla.ping_sent_at` (контекст копируется, чтобы JSONB фиксировался).
+- Добавили регресс‑тест: два запуска `process_pending_sla` → один пинг.
+- PR #147 merged → deploy main.
+- Баг pending SLA ping spam закрыт.
+
+**Evidence:**
+- PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/147
+- CI PR: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20922142372
+- CI main (build/push/deploy): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20922178070
+- Prod `/admin/version`: `{"version":"main","git_commit":"6175fab86439492be5c440cd1666882ea93687ea","build_time":"2026-01-12T14:05:21Z"}`
+- /reminders/process: pinged=1 (first), pinged=0 (second) — curl outputs сохранены в истории сессии.
+- Note: `conversations.escalated_at` временно выставлен `NOW() - INTERVAL '20 minutes'` для пинга и восстановлен на `2026-01-12 13:59:09.002251+00`.
+- SQL (conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, run_at=2026-01-12T14:08:20Z):
+  - pending_sla saved
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT context->'pending_sla' AS pending_sla FROM conversations WHERE id = 'b8c559d1-f8cd-4173-ae70-0a9683833e48';"`
+    - output: `{"ping_sent_at": "2026-01-12T14:08:12.990209+00:00"}`
+  - reminders (last 10)
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT id, created_at, content FROM messages WHERE conversation_id = 'b8c559d1-f8cd-4173-ae70-0a9683833e48' AND content ILIKE 'Напоминаю: менеджер ещё не подключился%' ORDER BY created_at DESC LIMIT 10;"`
+    - output: last row `03b56844-dc1e-4693-adc7-eb1f47c921a7 | 2026-01-12 14:08:13.872299+00 | Напоминаю: менеджер ещё не подключился. Я на связи — напишите, что нужно уточнить.`
+
+### 2026-01-12 — P1-0 baseline metrics (decision_trace/meta + long-eval)
+
+**Что сделали:**
+- Сняли baseline по decision_meta/decision_trace (demo_salon, last 7 days) перед изменениями.
+- Зафиксировали fallback_rate, expected_reply match-rate, question_contract matched/missed.
+- Проверили long-eval (long-chaos) статус по CI.
+
+**Evidence:**
+- SQL (demo_salon, last 7 days, run_at=2026-01-12T08:30:15Z):
+  - fallback_rate
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "WITH base AS (SELECT metadata->'decision_meta' AS meta FROM messages WHERE role='user' AND client_id='c839d5dd-65be-4733-a5d2-72c9f70707f0' AND created_at >= NOW() - INTERVAL '7 days' AND metadata ? 'decision_meta') SELECT COUNT(*) AS total_msgs, COUNT(*) FILTER (WHERE meta->>'router_fallback_reason' IS NOT NULL AND meta->>'router_fallback_reason' <> '') AS fallback_msgs, ROUND(COUNT(*) FILTER (WHERE meta->>'router_fallback_reason' IS NOT NULL AND meta->>'router_fallback_reason' <> '')::numeric / NULLIF(COUNT(*),0), 4) AS fallback_rate FROM base;"`
+    - output: total_msgs=302 fallback_msgs=19 fallback_rate=0.0629
+  - fallback_reason breakdown
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "WITH base AS (SELECT metadata->'decision_meta' AS meta FROM messages WHERE role='user' AND client_id='c839d5dd-65be-4733-a5d2-72c9f70707f0' AND created_at >= NOW() - INTERVAL '7 days' AND metadata ? 'decision_meta') SELECT meta->>'router_fallback_reason' AS fallback_reason, COUNT(*) AS total FROM base WHERE meta->>'router_fallback_reason' IS NOT NULL AND meta->>'router_fallback_reason' <> '' GROUP BY 1 ORDER BY total DESC;"`
+    - output: low_confidence=16, budget_exceeded=2, timeout=1
+  - expected_reply match-rate
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "WITH base AS (SELECT metadata->'decision_meta' AS meta FROM messages WHERE role='user' AND client_id='c839d5dd-65be-4733-a5d2-72c9f70707f0' AND created_at >= NOW() - INTERVAL '7 days' AND metadata ? 'decision_meta') SELECT COUNT(*) AS expected_reply_msgs, COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' = 'true') AS matched, COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' = 'false') AS missed, COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' IS NULL OR meta->>'expected_reply_matched' NOT IN ('true','false')) AS missing_flag, ROUND(COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' = 'true')::numeric / NULLIF(COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' IN ('true','false')), 0), 4) AS match_rate FROM base WHERE meta->>'expected_reply_type' IS NOT NULL AND meta->>'expected_reply_type' <> '';"`
+    - output: expected_reply_msgs=104 matched=37 missed=31 missing_flag=36 match_rate=0.5441
+  - expected_reply_type breakdown
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "WITH base AS (SELECT metadata->'decision_meta' AS meta FROM messages WHERE role='user' AND client_id='c839d5dd-65be-4733-a5d2-72c9f70707f0' AND created_at >= NOW() - INTERVAL '7 days' AND metadata ? 'decision_meta') SELECT meta->>'expected_reply_type' AS expected_reply_type, COUNT(*) AS total, COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' = 'true') AS matched, COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' = 'false') AS missed, COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' IS NULL OR meta->>'expected_reply_matched' NOT IN ('true','false')) AS missing_flag, ROUND(COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' = 'true')::numeric / NULLIF(COUNT(*) FILTER (WHERE meta->>'expected_reply_matched' IN ('true','false')), 0), 4) AS match_rate FROM base WHERE meta->>'expected_reply_type' IS NOT NULL AND meta->>'expected_reply_type' <> '' GROUP BY 1 ORDER BY total DESC;"`
+    - output: time total=56 matched=21 missed=23 missing_flag=12 match_rate=0.4773; service_choice total=25 matched=3 missed=0 missing_flag=22 match_rate=1.0000; name total=21 matched=12 missed=8 missing_flag=1 match_rate=0.6000; intent_choice total=2 matched=1 missed=0 missing_flag=1 match_rate=1.0000
+  - question_contract matched/missed (decision_trace)
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "WITH traces AS (SELECT (trace->>'recorded_at')::timestamptz AS recorded_at, trace->>'decision' AS decision FROM conversations c JOIN LATERAL jsonb_array_elements(c.context->'decision_trace') AS trace ON true WHERE c.client_id='c839d5dd-65be-4733-a5d2-72c9f70707f0' AND c.context ? 'decision_trace' AND trace->>'stage'='question_contract' AND (trace->>'recorded_at')::timestamptz >= NOW() - INTERVAL '7 days') SELECT decision, COUNT(*) AS total FROM traces WHERE decision IN ('matched','missed') GROUP BY decision ORDER BY total DESC;"`
+    - output: matched=4 missed=3
+- question_contract trace samples (decision_trace):
+  - missed time: conv_id `1f2e004f-6695-4087-8da0-36163045f0ee` recorded_at `2026-01-06T10:22:26.975811+00:00`
+  - matched service_choice: conv_id `94c3797f-bbb7-4fc0-8bb1-61080553cc89` recorded_at `2026-01-06T09:30:59.304500+00:00`
+- CI long-eval (long-chaos): run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20912389895, job https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20912389895/job/60077823041, conclusion=success.
+
+---
+
+### 2026-01-12 — P1-2 Router SLA: normalize low_confidence fallback
+
+**Что сделали:**
+- Нормализовали controller fallback: low_confidence больше не записывается как `controller_fallback_reason`, флаги `controller_*` стабилизированы в decision_meta.
+- PR смержен, CI main build/push/deploy выполнен, версия на проде обновлена.
+
+**Evidence:**
+- PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/145
+- Merge commit: https://github.com/k1ddy/Truffles-AI-Employee/commit/1a16fbea8421c792bdd8c8369141771c2aed24ad
+- CI PR core/long: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20921140704 (success)
+- CI main build/push/deploy: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20921181882 (success)
+- Deploy time (CI run updatedAt): `2026-01-12T13:33:14Z`
+- Prod `/admin/version`: `{"version":"main","git_commit":"1a16fbea8421c792bdd8c8369141771c2aed24ad","build_time":"2026-01-12T13:31:55Z"}`
+- SQL (post-deploy window, created_at >= `2026-01-12T13:33:14Z`):
+  - low_confidence not counted as fallback
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT COUNT(*) FILTER (WHERE (metadata->'decision_meta'->>'controller_attempted')::boolean) AS attempts, COUNT(*) FILTER (WHERE (metadata->'decision_meta'->>'controller_low_confidence')::boolean) AS low_confidence, COUNT(*) FILTER (WHERE (metadata->'decision_meta'->>'controller_low_confidence')::boolean AND (metadata->'decision_meta'->>'controller_fallback_reason') IS NOT NULL) AS bad_low_confidence_fallbacks FROM messages WHERE created_at >= '2026-01-12T13:33:14Z' AND metadata ? 'decision_meta';"`
+    - output: attempts=0 low_confidence=0 bad_low_confidence_fallbacks=0
+  - fallback_reason breakdown
+    - cmd: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "SELECT metadata->'decision_meta'->>'controller_fallback_reason' AS reason, COUNT(*) AS count FROM messages WHERE created_at >= '2026-01-12T13:33:14Z' AND (metadata->'decision_meta'->>'controller_fallback_reason') IS NOT NULL GROUP BY reason ORDER BY count DESC;"`
+    - output: (no rows)
+- Note: post-deploy window contains only `pending_sla_ping` meta; no controller_attempted rows yet (needs real inbound to validate low_confidence).
+
+---
+
+### 2026-01-12 — P1 working agreement (resolver-first, no regex growth)
+
+**Что решили:**
+- RU/KZ вариативность закрываем resolver-слоем (data-lexicon + ready libs), а не расширением regex/словников.
+- EVAL — доказательство, а не источник логики; минимальные варианты для RU/KZ mix вместо “миллион кейсов”.
+- Любой fix начинается с RCA и evidence; задачи без доказательств не выполняются.
+
+**Почему:**
+- Иначе CI превращается в бесконечный цикл “кейсы → хардкод”, что противоречит `STRATEGY/REQUIREMENTS.md`.
 
 ---
 
