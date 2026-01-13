@@ -1,9 +1,77 @@
-"""LAW/policy gates and policy-topic detection helpers."""
+"""LAW/policy gates and policy-pack-driven detection helpers."""
 
 from __future__ import annotations
 
+import re
+
 from app.models import Client
 from app.services.intent_service import Intent
+
+_POLICY_SECTIONS = (
+    "payment_info",
+    "reschedule",
+    "cancel",
+    "medical",
+    "legal",
+    "complaint",
+    "discounts",
+    "refund",
+)
+
+_HARD_LAW_INTENT_MAP = {
+    "payment": "payment_info",
+    "reschedule": "reschedule",
+    "cancel_request": "cancel",
+    "cancel": "cancel",
+    "medical": "medical",
+    "legal": "legal",
+    "complaint": "complaint",
+    "refund": "refund",
+}
+
+_SECTION_GUARD_TOPIC = {
+    "payment_info": "payment",
+    "medical": "medical",
+    "complaint": "complaint",
+    "discounts": "discount",
+    "refund": "refund",
+}
+
+_SECTION_DEFAULT_INTENT = {
+    "payment_info": "payment",
+    "reschedule": "reschedule",
+    "cancel": "cancel_request",
+    "medical": "medical",
+    "legal": "legal",
+    "complaint": "complaint",
+    "discounts": "discounts",
+    "refund": "refund",
+}
+
+
+def _looks_like_policy_pack(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if value.get("hard_law") or value.get("guard_topics"):
+        return True
+    return any(key in value for key in _POLICY_SECTIONS)
+
+
+def _extract_policy_pack_from_config(config: dict | None) -> dict | None:
+    if not isinstance(config, dict):
+        return None
+    direct = config.get("policy_pack")
+    if _looks_like_policy_pack(direct):
+        return dict(direct)
+    client_pack = config.get("client_pack")
+    if isinstance(client_pack, dict):
+        policy = client_pack.get("policy")
+        if _looks_like_policy_pack(policy):
+            return dict(policy)
+    legacy = config.get("policy")
+    if _looks_like_policy_pack(legacy):
+        return dict(legacy)
+    return None
 
 
 def _get_routing_policy(state: str) -> dict[str, bool]:
@@ -52,10 +120,18 @@ def _load_policy_pack(*, policy_type: str | None) -> dict | None:
     return policy_pack if isinstance(policy_pack, dict) and policy_pack else None
 
 
-def _policy_allows_keyword_fallback(policy_pack: dict | None) -> bool:
-    if not isinstance(policy_pack, dict):
-        return False
-    return bool(policy_pack.get("allow_keyword_fallback"))
+def _get_policy_pack(client: Client | None) -> dict | None:
+    if not client or not isinstance(client.config, dict):
+        return None
+    policy_pack = _extract_policy_pack_from_config(client.config)
+    if policy_pack:
+        return policy_pack
+    policy_type = _get_policy_type(client)
+    if policy_type:
+        return _load_policy_pack(policy_type=policy_type)
+    return None
+
+
 
 
 def _policy_str_list(values: object) -> list[str]:
@@ -83,6 +159,148 @@ def _get_guard_topics(policy_pack: dict | None) -> dict[str, list[str]]:
     return topics
 
 
+def _matches_policy_keywords(normalized: str, keywords: list[str]) -> bool:
+    for keyword in keywords:
+        if not keyword:
+            continue
+        if len(keyword) <= 3:
+            if re.search(rf"\\b{re.escape(keyword)}\\b", normalized):
+                return True
+            continue
+        if keyword in normalized:
+            return True
+    return False
+
+
+def _matches_policy_section(normalized: str, section: dict | None) -> bool:
+    if not section:
+        return False
+    keywords = _policy_str_list(section.get("keywords") if isinstance(section, dict) else None)
+    if keywords and _matches_policy_keywords(normalized, keywords):
+        return True
+    return False
+
+
+def _resolve_policy_intent(section_key: str, section: dict | None) -> str | None:
+    if section:
+        intent = section.get("intent")
+        if isinstance(intent, str) and intent.strip():
+            return intent.strip()
+    return _SECTION_DEFAULT_INTENT.get(section_key)
+
+
+def _resolve_policy_risk_level(section: dict | None) -> str | None:
+    if not section:
+        return None
+    risk_level = section.get("risk_level")
+    if isinstance(risk_level, str) and risk_level.strip():
+        return risk_level.strip()
+    return None
+
+
+def _resolve_hard_law_sections(policy_pack: dict | None) -> list[str]:
+    hard_law = _get_policy_section(policy_pack, "hard_law")
+    sections = _policy_str_list(hard_law.get("sections") if isinstance(hard_law, dict) else None)
+    if sections:
+        return [section for section in sections if section in _POLICY_SECTIONS]
+    intents = _policy_str_list(hard_law.get("intents") if isinstance(hard_law, dict) else None)
+    resolved: list[str] = []
+    for intent in intents:
+        mapped = _HARD_LAW_INTENT_MAP.get(intent.casefold())
+        if mapped and mapped not in resolved:
+            resolved.append(mapped)
+    if resolved:
+        return resolved
+    return list(dict.fromkeys(_HARD_LAW_INTENT_MAP.values()))
+
+
+def _detect_policy_section(
+    message_text: str | None,
+    *,
+    policy_pack: dict | None,
+    sections: list[str],
+) -> tuple[str, dict | None] | None:
+    from . import _legacy as legacy
+
+    normalized = legacy._normalize_text(message_text)
+    if not normalized or not sections:
+        return None
+    for section_key in sections:
+        section = _get_policy_section(policy_pack, section_key)
+        if _matches_policy_section(normalized, section):
+            return section_key, section
+        guard_topic = _SECTION_GUARD_TOPIC.get(section_key)
+        if guard_topic:
+            guard_keywords = _get_guard_topics(policy_pack).get(guard_topic)
+            if guard_keywords and _matches_policy_keywords(normalized, guard_keywords):
+                return section_key, section
+    return None
+
+
+def _detect_hard_law_match(
+    message_text: str | None,
+    *,
+    policy_pack: dict | None,
+    intent_hints: list[str] | None = None,
+) -> tuple[str, dict | None] | None:
+    hard_law_sections = _resolve_hard_law_sections(policy_pack)
+    match = _detect_policy_section(
+        message_text,
+        policy_pack=policy_pack,
+        sections=hard_law_sections,
+    )
+    if match:
+        return match
+    if not intent_hints:
+        return None
+    intent_set = {intent.strip().casefold() for intent in intent_hints if isinstance(intent, str)}
+    if not intent_set:
+        return None
+    for intent in intent_set:
+        mapped = _HARD_LAW_INTENT_MAP.get(intent)
+        if mapped and mapped in hard_law_sections:
+            return mapped, _get_policy_section(policy_pack, mapped)
+    return None
+
+
+def _detect_policy_gate_section(
+    message_text: str | None,
+    *,
+    policy_pack: dict | None,
+    hard_law_sections: set[str] | None = None,
+) -> tuple[str, dict | None] | None:
+    sections = [section for section in _POLICY_SECTIONS if section not in (hard_law_sections or set())]
+    return _detect_policy_section(
+        message_text,
+        policy_pack=policy_pack,
+        sections=sections,
+    )
+
+
+def _resolve_complaint_guard(policy_pack: dict | None) -> tuple[list[str], list[str]]:
+    complaint = _get_policy_section(policy_pack, "complaint")
+    explicit_keywords = _policy_str_list(
+        complaint.get("explicit_keywords") if isinstance(complaint, dict) else None
+    )
+    consult_override = _policy_str_list(
+        complaint.get("consult_override_keywords") if isinstance(complaint, dict) else None
+    )
+    return explicit_keywords, consult_override
+
+
+def _detect_booking_cancel(message_text: str | None, *, policy_pack: dict | None) -> bool:
+    from . import _legacy as legacy
+
+    normalized = legacy._normalize_text(message_text)
+    if not normalized:
+        return False
+    section = _get_policy_section(policy_pack, "cancel")
+    keywords = _policy_str_list(section.get("keywords") if isinstance(section, dict) else None)
+    if not keywords:
+        return False
+    return _matches_policy_keywords(normalized, keywords)
+
+
 def _is_hard_law_intent(
     intent: str | None,
     *,
@@ -99,12 +317,9 @@ def _is_hard_law_intent(
     )
     hard_law = _get_policy_section(policy_pack, "hard_law")
     intents = _policy_str_list(hard_law.get("intents") if isinstance(hard_law, dict) else None)
-    if intents:
-        return normalized in {value.casefold() for value in intents}
-
-    from . import _legacy as legacy
-
-    return normalized in legacy.HARD_LAW_INTENTS
+    if not intents:
+        return False
+    return normalized in {value.casefold() for value in intents}
 
 
 def _looks_like_policy_topic(
@@ -113,28 +328,19 @@ def _looks_like_policy_topic(
     policy_type: str | None = None,
     policy_pack: dict | None = None,
 ) -> bool:
-    from . import _legacy as legacy
-
-    normalized = legacy._normalize_text(message_text)
-    if not normalized:
-        return False
     policy_pack = (
         policy_pack
         if isinstance(policy_pack, dict)
         else _load_policy_pack(policy_type=policy_type)
     )
-    for section_key in ("payment_info", "medical", "complaint", "discounts"):
-        section = _get_policy_section(policy_pack, section_key)
-        keywords = _policy_str_list(section.get("keywords") if isinstance(section, dict) else None)
-        if any(keyword in normalized for keyword in keywords):
-            return True
-    if not policy_pack or not _policy_allows_keyword_fallback(policy_pack):
-        return False
-    for topic in ("payment", "medical", "complaint", "discount"):
-        keywords = legacy.LLM_GUARD_TOPICS.get(topic) or []
-        if any(keyword in normalized for keyword in keywords):
-            return True
-    return False
+    hard_law_sections = set(_resolve_hard_law_sections(policy_pack))
+    return bool(
+        _detect_policy_gate_section(
+            message_text,
+            policy_pack=policy_pack,
+            hard_law_sections=hard_law_sections,
+        )
+    )
 
 
 def _detect_llm_guard_topics(
@@ -155,14 +361,9 @@ def _detect_llm_guard_topics(
     )
     guard_topics = _get_guard_topics(policy_pack)
     hits: list[str] = []
-    if guard_topics:
-        for topic, keywords in guard_topics.items():
-            if any(keyword in normalized for keyword in keywords):
-                hits.append(topic)
+    if not guard_topics:
         return hits
-    if not policy_pack or not _policy_allows_keyword_fallback(policy_pack):
-        return []
-    for topic, keywords in legacy.LLM_GUARD_TOPICS.items():
+    for topic, keywords in guard_topics.items():
         if any(keyword in normalized for keyword in keywords):
             hits.append(topic)
     return hits
@@ -197,18 +398,19 @@ def _looks_like_promotions_request(
         if isinstance(phrase, str) and phrase.strip():
             if phrase in normalized and legacy._contains_any(normalized, day_words):
                 return True
-    if not policy_pack or not _policy_allows_keyword_fallback(policy_pack):
-        return False
-    keywords = legacy.LLM_GUARD_TOPICS.get("discount") or []
-    if legacy._contains_any(normalized, keywords):
-        return True
-    if "до после" in normalized and legacy._contains_any(normalized, ["дней", "дня", "день"]):
-        return True
     return False
 
 
-def _load_discount_policy_payload(*, policy_type: str | None) -> dict | None:
-    policy_pack = _load_policy_pack(policy_type=policy_type)
+def _load_discount_policy_payload(
+    *,
+    policy_pack: dict | None = None,
+    policy_type: str | None = None,
+) -> dict | None:
+    policy_pack = (
+        policy_pack
+        if isinstance(policy_pack, dict)
+        else _load_policy_pack(policy_type=policy_type)
+    )
     if not isinstance(policy_pack, dict):
         return None
     discounts = policy_pack.get("discounts")
@@ -219,8 +421,12 @@ def _load_discount_policy_payload(*, policy_type: str | None) -> dict | None:
     return discounts
 
 
-def _has_discount_policy_rules(*, policy_type: str | None) -> bool:
-    discounts = _load_discount_policy_payload(policy_type=policy_type)
+def _has_discount_policy_rules(
+    *,
+    policy_pack: dict | None = None,
+    policy_type: str | None = None,
+) -> bool:
+    discounts = _load_discount_policy_payload(policy_pack=policy_pack, policy_type=policy_type)
     if not discounts:
         return False
     rules = discounts.get("rules")
@@ -238,8 +444,12 @@ def _has_discount_policy_rules(*, policy_type: str | None) -> bool:
     return False
 
 
-def _format_discounts_policy_reply(*, policy_type: str | None) -> str | None:
-    discounts = _load_discount_policy_payload(policy_type=policy_type)
+def _format_discounts_policy_reply(
+    *,
+    policy_pack: dict | None = None,
+    policy_type: str | None = None,
+) -> str | None:
+    discounts = _load_discount_policy_payload(policy_pack=policy_pack, policy_type=policy_type)
     if not discounts:
         return None
     items = discounts.get("items")
@@ -309,9 +519,6 @@ def _get_policy_type(client: Client | None) -> str | None:
     legacy = client.config.get("policy_type")
     if isinstance(legacy, str) and legacy.strip():
         return legacy.strip()
-    # Legacy fallback to preserve behavior until policy config is set.
-    if client.name == "demo_salon":
-        return "demo_salon"
     return None
 
 
@@ -324,7 +531,7 @@ def _get_policy_handler(client: Client | None) -> dict | None:
     handler = legacy._POLICY_HANDLERS.get(policy_type)
     if not handler:
         return None
-    policy_pack = _load_policy_pack(policy_type=policy_type)
+    policy_pack = _get_policy_pack(client)
     payload = dict(handler)
     payload["policy_pack"] = policy_pack
     return payload
