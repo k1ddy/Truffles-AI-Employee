@@ -590,6 +590,23 @@
 - policy_gate trace (decision_trace):
   - {"stage":"policy_gate","state":"bot_active","intent":"discounts","decision":"reply","risk_level":"low","policy_gate":"discounts","policy_type":"demo_salon","recorded_at":"2026-01-13T07:24:53.451704+00:00"}
 
+### 2026-01-13 — TP-LAW-02 /message hard-law gate live-check (CI deploy)
+
+**Что сделали:**
+- CI workflow_dispatch deploy PR #161 (tp-law-02-message-gate) и live-check /message для Hard-LAW.
+
+**Evidence:**
+- PR #161: https://github.com/k1ddy/Truffles-AI-Employee/pull/161
+- CI (workflow_dispatch + deploy): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20953644071
+- CI main (post-merge #161): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20953969528
+- Note: workflow_dispatch gitleaks uses `--no-git` (working tree only); push/PR keep full history scan.
+- Prod `/admin/version`: `{"version":"tp-law-02-message-gate","git_commit":"7bf83d57222f31d955b631f6a51839f6dfd3ba18","build_time":"2026-01-13T10:39:59Z"}`
+- Live-check /message (Hard-LAW text "Хочу оплатить картой"): response `По оплате уточню у администратора — передам администратору ваш вопрос.`
+- SQL (messages.decision_meta, conv_id `4f9026c2-9c94-4b38-8248-b5aacf635cdf`):
+  - msg_id `message-273a4147-7fe5-4a7d-9e51-793e3a14c253`, created_at `2026-01-13 10:42:46.006241+00`, policy_gate=hard_law, policy_section=payment_info, llm_used=false.
+- SQL (decision_trace, conv_id `4f9026c2-9c94-4b38-8248-b5aacf635cdf`):
+  - {"stage":"policy_gate","policy_gate":"hard_law","policy_section":"payment_info","decision":"escalate","recorded_at":"2026-01-13T10:42:57.824276+00:00","router_skipped_reason":"law_gate","controller_skipped_reason":"law_gate"}
+
 ### 2026-01-13 — Fix: Telegram topic handover routing (manager replies → WhatsApp)
 
 **Что сделали:**
