@@ -615,9 +615,17 @@
 - Ops: синхронизировали instance_id для truffles (clients/branches), временно включали policy_pack для live-check и восстановили.
 
 **Evidence:**
-- PR #163: https://github.com/k1ddy/Truffles-AI-Employee/pull/163
+- PR #163 (code): https://github.com/k1ddy/Truffles-AI-Employee/pull/163
 - CI PR (core/long/asr/lint/unit): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20957054441
-- CI workflow_dispatch + deploy: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20960699106 (deploy завершён 2026-01-13T14:39:55Z)
+- Deploy (workflow_dispatch): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20960699106, deployed_at 2026-01-13T14:39:55Z
+- demo_salon real inbound:
+  - msg_id 3EB079A3A91F8B6CE456B5, conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48
+  - decision_meta: policy_gate=discounts, source=policy_pack, llm_used=false, risk_level=low
+  - decision_trace: stage=policy_gate, policy_gate=discounts, risk_level=low
+- non-demo truffles (temporary policy_pack):
+  - msg_id 3EB0419E97F90CADB430AA, conv_id d868cc92-837e-463e-b8e1-ea39a1baccea
+  - decision_meta: policy_gate=hard_law, policy_section=refund, source=policy_pack, llm_used=false, risk_level=high
+  - decision_trace: stage=policy_gate, policy_gate=hard_law, policy_section=refund, risk_level=high
 - SQL (messages, role=user, content in ["Есть скидки?", "Хочу вернуть деньги"]):
   - demo_salon: msg_id `3EB079A3A91F8B6CE456B5`, created_at `2026-01-13 14:42:45.360258+00`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, decision_meta policy_gate=discounts, source=policy_pack, llm_used=false, risk_level=low, action=reply.
   - truffles: msg_id `3EB0419E97F90CADB430AA`, created_at `2026-01-13 14:43:00.892848+00`, conv_id `d868cc92-837e-463e-b8e1-ea39a1baccea`, decision_meta policy_gate=hard_law, policy_section=refund, source=policy_pack, llm_used=false, risk_level=high, action=escalate.
@@ -625,7 +633,7 @@
   - conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`: policy_gate=discounts, source=policy_pack, decision=reply, risk_level=low, recorded_at `2026-01-13T14:42:59.001386+00:00`.
   - conv_id `d868cc92-837e-463e-b8e1-ea39a1baccea`: policy_gate=hard_law, policy_section=refund, source=policy_pack, decision=escalate, risk_level=high, recorded_at `2026-01-13T14:43:04.123589+00:00`.
 - Live-check: user confirmed receiving `Передал менеджеру. Могу чем-то помочь пока ждёте?` после refund.
-- Config restore: `cat /tmp/truffles_restore_truffles_voVWxl.sql | docker exec -i truffles_postgres_1 psql -U n8n -d chatbot`.
+- Restore: /tmp/truffles_restore_truffles_voVWxl.sql applied (`cat /tmp/truffles_restore_truffles_voVWxl.sql | docker exec -i truffles_postgres_1 psql -U n8n -d chatbot`).
 
 ### 2026-01-13 — Fix: Telegram topic handover routing (manager replies → WhatsApp)
 
