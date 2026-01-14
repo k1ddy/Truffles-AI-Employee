@@ -106,9 +106,9 @@ DERIVED: status/evidence only; does not define product scope.
 ### Изоляция tenant
 - Status: PARTIAL
 - Evidence: `truffles-api/app/services/knowledge_service.py`, `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/app/services/escalation_service.py`, `SPECS/MULTI_TENANT.md`
-- Факт: routing/эскалации идут по branch_id (manager_scope=branch); RAG использует branch‑filter при наличии и пишет `branch_filter_empty` при fallback.
+- Факт: routing/эскалации идут по branch_id (manager_scope=branch); RAG использует strict branch‑filter и пишет `branch_filter_empty` при пустом результате (fallback отключён).
 - Boundary: в Qdrant нет branch_id/knowledge_tag → strict‑изоляция невозможна без backfill.
-- Fix plan: backfill Qdrant с branch_id/knowledge_tag + отключить fallback; добавить тест‑контракт “tenant isolation”.
+- Fix plan: backfill Qdrant с branch_id/knowledge_tag + тест‑контракт “tenant isolation”.
 
 ### Секреты и токены
 - Status: PARTIAL

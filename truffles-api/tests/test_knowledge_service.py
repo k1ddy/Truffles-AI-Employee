@@ -132,7 +132,7 @@ class TestSearchKnowledge:
 
     @patch("app.services.knowledge_service.get_embedding")
     @patch("app.services.knowledge_service.httpx.Client")
-    def test_branch_filter_falls_back_to_client_scope(self, mock_client_class, mock_embedding):
+    def test_branch_filter_empty_returns_no_results(self, mock_client_class, mock_embedding):
         mock_embedding.return_value = [0.1, 0.2, 0.3]
 
         mock_client = MagicMock()
@@ -142,20 +142,7 @@ class TestSearchKnowledge:
         empty_response.status_code = 200
         empty_response.json.return_value = {"result": []}
 
-        ok_response = Mock()
-        ok_response.status_code = 200
-        ok_response.json.return_value = {
-            "result": [
-                {
-                    "score": 0.6,
-                    "payload": {
-                        "content": "Fallback content",
-                        "metadata": {"doc_name": "fallback.md", "client_slug": "test"},
-                    },
-                }
-            ]
-        }
-        mock_client.post.side_effect = [empty_response, ok_response]
+        mock_client.post.return_value = empty_response
 
         trace_context = {}
         result = search_knowledge(
@@ -165,7 +152,6 @@ class TestSearchKnowledge:
             trace_context=trace_context,
         )
 
-        assert len(result) == 1
-        assert result[0]["text"] == "Fallback content"
-        assert trace_context["rag_filter"]["filter_mode"] == "client_fallback"
+        assert result == []
+        assert trace_context["rag_filter"]["filter_mode"] == "branch"
         assert trace_context["rag_filter"]["filter_reason"] == "branch_filter_empty"
