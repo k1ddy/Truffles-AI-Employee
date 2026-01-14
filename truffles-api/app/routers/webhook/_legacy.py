@@ -1353,6 +1353,25 @@ def _resolve_class_router_result(
     return result
 
 
+def _controller_meta_updates_from_class_router(class_router_result: dict | None) -> dict[str, Any]:
+    if not isinstance(class_router_result, dict):
+        return {}
+    controller_meta = class_router_result.get("controller")
+    if not isinstance(controller_meta, dict):
+        return {}
+    return {
+        "controller_used": bool(controller_meta.get("used")),
+        "controller_attempted": bool(controller_meta.get("attempted")),
+        "controller_fallback": bool(controller_meta.get("fallback")),
+        "controller_low_confidence": bool(controller_meta.get("low_confidence")),
+        "controller_used_reason": controller_meta.get("used_reason"),
+        "controller_confidence": controller_meta.get("confidence"),
+        "controller_error": controller_meta.get("error"),
+        "controller_goal": controller_meta.get("goal"),
+        "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
+    }
+
+
 def _is_refusal_flag_active(refusal_flags: dict | None, field: str) -> bool:
     if not isinstance(refusal_flags, dict):
         return False
@@ -5263,23 +5282,7 @@ async def _handle_webhook_payload(
             if queue_set:
                 meta_updates["intent_queue"] = followup_intents
                 meta_updates["expected_reply_type"] = EXPECTED_REPLY_INTENT_CHOICE
-            controller_meta = (
-                class_router_result.get("controller") if isinstance(class_router_result, dict) else None
-            )
-            if isinstance(controller_meta, dict):
-                meta_updates.update(
-                    {
-                        "controller_used": bool(controller_meta.get("used")),
-                        "controller_attempted": bool(controller_meta.get("attempted")),
-                        "controller_fallback": bool(controller_meta.get("fallback")),
-                        "controller_low_confidence": bool(controller_meta.get("low_confidence")),
-                        "controller_used_reason": controller_meta.get("used_reason"),
-                        "controller_confidence": controller_meta.get("confidence"),
-                        "controller_error": controller_meta.get("error"),
-                        "controller_goal": controller_meta.get("goal"),
-                        "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
-                    }
-                )
+            meta_updates.update(_controller_meta_updates_from_class_router(class_router_result))
             _update_message_decision_metadata(saved_message, meta_updates)
 
         bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
@@ -7165,6 +7168,7 @@ async def _handle_webhook_payload(
                     meta_updates = {"class_router": class_router_result}
                     if info_meta_combined:
                         meta_updates.update(info_meta_combined)
+                    meta_updates.update(_controller_meta_updates_from_class_router(class_router_result))
                     _update_message_decision_metadata(saved_message, meta_updates)
                 _maybe_store_class_carryover(
                     conversation=conversation,
@@ -7248,6 +7252,7 @@ async def _handle_webhook_payload(
                     meta_updates = {"class_router": class_router_result}
                     if isinstance(base_bundle_meta, dict) and base_bundle_meta:
                         meta_updates.update(base_bundle_meta)
+                    meta_updates.update(_controller_meta_updates_from_class_router(class_router_result))
                     _update_message_decision_metadata(saved_message, meta_updates)
                 _maybe_store_class_carryover(
                     conversation=conversation,
@@ -8060,6 +8065,7 @@ async def _handle_webhook_payload(
                 meta_updates = {"class_router": class_router_result}
                 if info_meta_combined:
                     meta_updates.update(info_meta_combined)
+                meta_updates.update(_controller_meta_updates_from_class_router(class_router_result))
                 _update_message_decision_metadata(saved_message, meta_updates)
             _maybe_store_class_carryover(
                 conversation=conversation,
