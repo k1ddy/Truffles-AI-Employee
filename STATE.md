@@ -35,6 +35,7 @@
 - **Следующий шаг:** P1 follow-up — router_eligible sync с controller_attempted (CI + real inbound + SQL) — in progress.
 - **DONE:** P1 Router SLA <10% + controller_attempted evidence (post-deploy real inbound) — см. запись 2026-01-14.
 - **DONE:** P1 Category vs Service (services_overview guard) — см. запись 2026-01-14.
+- **DONE:** GAP-017 Branch isolation evidence (branch_routing + RAG fallback + policy_gate + demo handover/Telegram) — см. запись 2026-01-14.
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
@@ -582,6 +583,36 @@
   - msg_id `7820c3f3-e469-4cf5-804d-6b646872859f` (messageId `3EB00D604467F28D634348`) — intent=services_overview, source=truth_gate, service_semantic_score=NULL.
   - msg_id `3b41ca5c-ea4a-42af-94b1-7783eeb06290` (messageId `3EB096B413ADC6E015AA77`) — intent=services_overview, source=truth_gate, service_semantic_score=NULL.
 - Trace (decision_trace, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, recorded_at >= `2026-01-14T06:51:26Z`): service_semantic_matcher rows=0.
+
+### 2026-01-14 — GAP-017 Branch Isolation (RAG + Escalation)
+
+**Что сделали:**
+- Подтвердили branch_routing + decision_meta.branch_id на demo_salon и truffles (две instanceId).
+- Подтвердили RAG fallback на client-level при `branch_filter_empty`.
+- Подтвердили policy_gate hard_law (refund) на demo_salon и truffles; demo_salon создал handover + Telegram notification.
+
+**Evidence:**
+- PR #172: https://github.com/k1ddy/Truffles-AI-Employee/pull/172
+- CI PR: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20993762935
+- Deploy: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20993826140
+- /admin/version: `{"version":"main","git_commit":"682943b3e78bce6c5d6391a59519284444465fbe","build_time":"2026-01-14T12:19:41Z"}`
+- truffles inbound (policy_gate):
+  - msg_id `9aac1bd2-81f7-4ceb-8807-3d7a512cf540` (messageId `3EB01EC14C05FDE0BE7002`), conv_id `d868cc92-837e-463e-b8e1-ea39a1baccea` — intent=refund, source=policy_pack, action=escalate, policy_gate=hard_law, branch_id `cf86bee7-e38f-4c8c-a087-aa4961911e0b`, routing_source=conversation, router_eligible=false, controller_eligible=false.
+  - policy_gate trace: `{"stage": "policy_gate", "state": "bot_active", "intent": "refund", "source": "policy_pack", "decision": "escalate", "risk_level": "high", "policy_gate": "hard_law", "policy_type": "demo_salon", "recorded_at": "2026-01-14T13:24:42.091625+00:00", "policy_section": "refund", "router_eligible": false, "controller_eligible": false, "router_skipped_reason": "law_gate", "controller_skipped_reason": "law_gate"}`
+- demo_salon inbound (policy_gate):
+  - msg_id `5e946f31-6b93-4327-bc51-1946374fd419` (messageId `3EB0FE6008D22620692E98`), conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48` — intent=refund, source=policy_pack, action=escalate, policy_gate=hard_law, branch_id `b7f75692-951e-421a-aae6-f5db97394799`, routing_source=conversation, router_eligible=false, controller_eligible=false.
+  - policy_gate trace: `{"stage": "policy_gate", "state": "pending", "intent": "refund", "source": "policy_pack", "decision": "escalate", "risk_level": "high", "policy_gate": "hard_law", "policy_type": "demo_salon", "recorded_at": "2026-01-14T13:39:40.293881+00:00", "policy_section": "refund", "router_eligible": false, "controller_eligible": false, "router_skipped_reason": "law_gate", "controller_skipped_reason": "law_gate"}`
+- branch_routing trace:
+  - truffles: `{"stage":"branch_routing","decision":"resolved","branch_id":"cf86bee7-e38f-4c8c-a087-aa4961911e0b","recorded_at":"2026-01-14T13:14:26.813156+00:00","knowledge_tag":null,"routing_source":"conversation"}`
+  - demo_salon: `{"stage":"branch_routing","decision":"resolved","branch_id":"b7f75692-951e-421a-aae6-f5db97394799","recorded_at":"2026-01-14T13:17:13.433005+00:00","knowledge_tag":null,"routing_source":"conversation"}`
+- RAG branch_filter_empty (bm25_filter):
+  - messageId `3EB077B8FDA58B3D33D970` (demo_salon): `{"branch_id": null, "client_slug": "demo_salon", "filter_mode": "client_fallback", "filter_reason": "branch_filter_empty", "knowledge_tag": null}`
+  - messageId `3EB0A5CD36A9DA5C38768E` (truffles): `{"branch_id": null, "client_slug": "truffles", "filter_mode": "client_fallback", "filter_reason": "branch_filter_empty", "knowledge_tag": null}`
+- demo_salon handover + Telegram:
+  - handover `75ce7362-bb94-4b12-9129-4a86d01b9bbd` status=pending, telegram_message_id=1191, notified_at `2026-01-14T13:39:39.968019+00:00`
+  - conversation state=pending, telegram_topic_id=625
+  - branch telegram_chat_id `-1003412216010`, client_settings manager_scope=branch
+- Note: truffles policy_pack was enabled via `policy_type=demo_salon` at `2026-01-14T13:24:12Z` and cleared at `2026-01-14T13:25:52Z` for hard_law verification.
 
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
