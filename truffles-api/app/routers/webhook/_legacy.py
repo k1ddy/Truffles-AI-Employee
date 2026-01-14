@@ -463,9 +463,9 @@ def _ensure_rag_meta_defaults(message: Message | None) -> None:
     if "rag_reason" not in decision_meta:
         updates["rag_reason"] = "overridden_by_gate"
     if "router_eligible" not in decision_meta:
-        updates["router_eligible"] = True
+        updates["router_eligible"] = False
     if "router_skipped_reason" not in decision_meta:
-        updates["router_skipped_reason"] = "none"
+        updates["router_skipped_reason"] = "not_run"
     _update_message_decision_metadata(message, updates)
 
 
@@ -5263,6 +5263,23 @@ async def _handle_webhook_payload(
             if queue_set:
                 meta_updates["intent_queue"] = followup_intents
                 meta_updates["expected_reply_type"] = EXPECTED_REPLY_INTENT_CHOICE
+            controller_meta = (
+                class_router_result.get("controller") if isinstance(class_router_result, dict) else None
+            )
+            if isinstance(controller_meta, dict):
+                meta_updates.update(
+                    {
+                        "controller_used": bool(controller_meta.get("used")),
+                        "controller_attempted": bool(controller_meta.get("attempted")),
+                        "controller_fallback": bool(controller_meta.get("fallback")),
+                        "controller_low_confidence": bool(controller_meta.get("low_confidence")),
+                        "controller_used_reason": controller_meta.get("used_reason"),
+                        "controller_confidence": controller_meta.get("confidence"),
+                        "controller_error": controller_meta.get("error"),
+                        "controller_goal": controller_meta.get("goal"),
+                        "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
+                    }
+                )
             _update_message_decision_metadata(saved_message, meta_updates)
 
         bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
