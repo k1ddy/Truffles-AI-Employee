@@ -30,9 +30,9 @@ def resolve_telegram_routing(
     client_id: UUID,
 ) -> dict:
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == client_id).first()
-    manager_scope = settings.manager_scope if settings and settings.manager_scope else "branch"
-    bot_token = settings.telegram_bot_token if settings else None
-    chat_id = settings.telegram_chat_id if settings else None
+    manager_scope = getattr(settings, "manager_scope", None) or "branch"
+    bot_token = getattr(settings, "telegram_bot_token", None)
+    chat_id = getattr(settings, "telegram_chat_id", None)
     routing_source = "client"
     branch_chat_id = None
     branch_id = conversation.branch_id if conversation else None
