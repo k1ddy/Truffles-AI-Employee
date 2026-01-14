@@ -7333,6 +7333,72 @@ async def _handle_webhook_payload(
                     bot_response=bot_response,
                 )
 
+        if payload.client_slug == "demo_salon" and message_text:
+            services_overview_decision = get_demo_salon_decision(
+                message_text,
+                client_slug=payload.client_slug,
+                intent_decomp=intent_decomp_payload,
+            )
+            if (
+                services_overview_decision
+                and services_overview_decision.intent == "services_overview"
+                and services_overview_decision.action == "reply"
+            ):
+                guard_response = _maybe_apply_fact_guard(
+                    decision_meta=services_overview_decision.meta
+                    if isinstance(services_overview_decision.meta, dict)
+                    else None,
+                    intent="services_overview",
+                    source="truth_gate",
+                    allow_handover=routing.get("allow_handover_create", False),
+                )
+                if guard_response:
+                    db.commit()
+                    return guard_response
+                bot_response = services_overview_decision.response
+                if consult_return_pending:
+                    bot_response = _apply_consult_return(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        bot_response=bot_response,
+                        consult_return_prompt=consult_return_prompt,
+                        consult_context=consult_context,
+                        reason=consult_return_reason or "truth_gate",
+                    )
+                _reset_low_confidence_retry(conversation)
+                trace_payload = {
+                    "stage": "truth_gate",
+                    "decision": "reply",
+                    "intent": "services_overview",
+                    "state": conversation.state,
+                    "policy_type": policy_type,
+                }
+                if isinstance(getattr(services_overview_decision, "meta", None), dict):
+                    trace_payload.update(services_overview_decision.meta)
+                _record_decision_trace(conversation, trace_payload)
+                _record_message_decision_meta(
+                    saved_message,
+                    action="reply",
+                    intent="services_overview",
+                    source="truth_gate",
+                    fast_intent=False,
+                )
+                if saved_message and isinstance(getattr(services_overview_decision, "meta", None), dict):
+                    _update_message_decision_metadata(saved_message, services_overview_decision.meta)
+                bot_response, sent = _send_and_save(bot_response)
+                result_message = (
+                    "Services overview reply sent"
+                    if sent
+                    else "Services overview reply failed"
+                )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+
         service_matcher = policy_handler.get("service_matcher")
         service_decision = (
             service_matcher(

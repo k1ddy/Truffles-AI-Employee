@@ -7999,3 +7999,19 @@ eval_cases:
     must_include:
     - парикмахер
     - маникюр
+- id: E751
+  user: Какие процедуры по лицу есть?
+  expected:
+    action: reply
+    intent: services_overview
+    must_include:
+    - парикмахер
+    - маникюр
+- id: E752
+  user: Бетке қандай процедуралар бар?
+  expected:
+    action: reply
+    intent: services_overview
+    must_include:
+    - парикмахер
+    - маникюр

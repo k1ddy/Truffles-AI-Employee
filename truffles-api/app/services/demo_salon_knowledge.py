@@ -682,6 +682,26 @@ def _contains_any(normalized: str, keywords: list[str]) -> bool:
     return any(keyword in normalized for keyword in keywords)
 
 
+def _has_services_overview_signal(normalized: str, truth: dict | None) -> bool:
+    if not normalized or not isinstance(truth, dict):
+        return False
+    domain_pack = truth.get("domain_pack")
+    lexicon = domain_pack.get("services_overview_lexicon") if isinstance(domain_pack, dict) else None
+    if not isinstance(lexicon, dict):
+        return False
+    for lang_key in ("ru", "kk"):
+        phrases = lexicon.get(lang_key)
+        if not isinstance(phrases, list):
+            continue
+        for phrase in phrases:
+            if not isinstance(phrase, str):
+                continue
+            candidate = _normalize_text(phrase)
+            if candidate and candidate in normalized:
+                return True
+    return False
+
+
 def _contains_word(normalized: str, word: str) -> bool:
     return re.search(rf"\b{re.escape(word)}\b", normalized) is not None
 
@@ -2373,6 +2393,7 @@ def get_demo_salon_decision(
     if not normalized:
         return None
 
+    truth = load_yaml_truth()
     phrase_intents = phrase_match_intent(message)
     policy_pack = load_policy_pack()
     parking_signal = _has_parking_signal(normalized)
@@ -2589,7 +2610,7 @@ def get_demo_salon_decision(
             "какие процедуры",
             "что можно сделать",
         ],
-    ):
+    ) or _has_services_overview_signal(normalized, truth):
         reply = format_reply_from_truth("services_overview")
         if reply:
             return _build_truth_decision(response=reply, intent="services_overview")
