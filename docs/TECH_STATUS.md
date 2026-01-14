@@ -1,4 +1,5 @@
 # TECH_STATUS — ЧТО МОЖНО ЧЕСТНО ПРОДАВАТЬ
+DERIVED: status/evidence only; does not define product scope.
 
 **Формат:** Status (OK / PARTIAL / BROKEN), Evidence, Fix plan, Go‑to‑market impact.
 
@@ -104,10 +105,10 @@
 
 ### Изоляция tenant
 - Status: PARTIAL
-- Evidence: `truffles-api/app/services/knowledge_service.py`, `truffles-api/app/routers/webhook/_legacy.py`, `SPECS/MULTI_TENANT.md`
-- Факт: фильтрация по client_slug/client_id в RAG и routing.
-- Boundary: нет формального теста на cross‑tenant leakage.
-- Fix plan: добавить тест‑контракт “tenant isolation”.
+- Evidence: `truffles-api/app/services/knowledge_service.py`, `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/app/services/escalation_service.py`, `SPECS/MULTI_TENANT.md`
+- Факт: routing/эскалации идут по branch_id (manager_scope=branch); RAG использует branch‑filter при наличии и пишет `branch_filter_empty` при fallback.
+- Boundary: в Qdrant нет branch_id/knowledge_tag → strict‑изоляция невозможна без backfill.
+- Fix plan: backfill Qdrant с branch_id/knowledge_tag + отключить fallback; добавить тест‑контракт “tenant isolation”.
 
 ### Секреты и токены
 - Status: PARTIAL

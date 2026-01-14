@@ -119,16 +119,17 @@
    - policy_gate trace на “Есть скидки?”.
 2. **Router SLA evidence**: controller_attempted/low_confidence/fallback_reason + SQL‑breakdown, зафиксировать в `STATE.md`
    (допускается waiver для simulated `/webhook`).
-3. **Свести PR #155 по consult pack‑runtime**: merge только после live‑check evidence и записи в `STATE.md`.
+3. **Подтвердить consult pack‑runtime (post‑merge)**: live‑check evidence + запись в `STATE.md`.
 4. **Запустить блок GAP‑014/015/016** (после evidence):
    - Hard‑LAW pre‑LLM gate для всех входов,
    - `/message` выключить или прогнать через общий pipeline,
    - policy_pack для всех клиентов (fail‑closed при отсутствии правил).
 5. **Outbox latency** — отложено до закрытия пунктов 1–4 (фиксируем в конце).
+6. **GAP‑017 (branch isolation)** — backfill Qdrant с `branch_id/knowledge_tag` и включить strict branch‑filter (без fallback).
 
 ---
 
-*Обновлено: 2026-01-13*
+*Обновлено: 2026-01-14*
 
 ---
 ## 4) Базовая реализация (что уже есть)
@@ -162,21 +163,21 @@
 - Pending‑ветка: `truffles-api/app/routers/webhook/_legacy.py`.
 
 ### 4.7 Готовые разрывы (GAP)
-- Контракты между слоями не зафиксированы в коде (нет schema‑валидации).
+- Контракты между слоями частично зафиксированы (Pydantic schemas + trace validation есть), но enforcement в legacy не полный.
 - Decision Graph размазан в `_legacy.py`.
 - Карточка менеджера не содержит summary/next step.
-- Budget/Rate Control отсутствует как системный слой.
+- Budget/Rate Control частично: LLM budget gate есть, per‑tenant rate limits отсутствуют.
 - Learning backlog не выделен как процесс (есть частичное добавление в knowledge).
 
 ### 4.8 Сравнение текущего и целевого (по слоям)
 
 - Decision Graph: сейчас логика размазана по `_legacy.py` → цель: единый оркестратор `decision.py` → этап A1.
-- Контракты: сейчас implicit dict‑ы → цель: Pydantic‑контракты Intent/Fact/Action/Response → этап A2.
+- Контракты: Pydantic контракты Intent/Fact/Action/Response/Trace есть (`decision.py`/`trace.py`), цель — полное покрытие legacy → этап A2.
 - Resolver‑слой (slots): сейчас эвристики/regex → цель: единый offline‑resolver RU/KZ → этап A4.
 - Policy Gate: сейчас смешан с логикой → цель: rules‑as‑data (policy pack) → этап A6.
 - State Machine: сейчас ручные переходы → цель: явная FSM и инварианты → этап A3.
 - Memory/Lifecycle: сейчас TTL разрознен → цель: единый контракт памяти + re‑entry → этап A5.
-- Observability/Budget: сейчас trace есть, лимитов нет → цель: метрики/бюджеты/деградации → этап A7.
+- Observability/Budget: trace + бюджет есть, метрики/алерты частично → цель: полный A7.
 
 ### 4.9 Готовые инструменты (обязательный список, без велосипедов)
 
