@@ -7963,3 +7963,39 @@ eval_cases:
     - услугам
     - записи
     - ценам
+- id: E746
+  user: Можно ли прийти вдвоем?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
+- id: E747
+  user: Можно прийти вместе с подругой?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
+- id: E748
+  user: Екеу болып келуге бола ма?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
+- id: E749
+  user: Баламен келуге бола ма?
+  expected:
+    action: reply
+    intent: guest_policy
+    must_include:
+    - зона ожидания
+- id: E750
+  user: Какие процедуры для лица есть?
+  expected:
+    action: reply
+    intent: services_overview
+    must_include:
+    - парикмахер
+    - маникюр

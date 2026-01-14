@@ -819,6 +819,30 @@ def _contains_any(normalized: str, keywords: list[str]) -> bool:
     return any(keyword in normalized for keyword in keywords)
 
 
+def _matches_guest_policy_lexicon(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    truth = load_yaml_truth()
+    domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
+    lexicon = domain_pack.get("guest_policy_lexicon") if isinstance(domain_pack, dict) else None
+    if not isinstance(lexicon, dict):
+        return False
+    for lang_key in ("ru", "kk"):
+        phrases = lexicon.get(lang_key)
+        if not isinstance(phrases, list):
+            continue
+        for phrase in phrases:
+            if not isinstance(phrase, str):
+                continue
+            candidate = normalize_for_matching(phrase)
+            if candidate and candidate in normalized:
+                return True
+    return False
+
+
 def _is_booking_request(text: str) -> bool:
     normalized = _normalize_text(text)
     if not normalized:
@@ -4384,6 +4408,14 @@ async def _handle_webhook_payload(
             message_text,
             intent_decomp_set=intent_decomp_set,
         )
+        if payload.client_slug == "demo_salon" and _matches_guest_policy_lexicon(message_text):
+            if not isinstance(info_class_meta, dict):
+                info_class_meta = {}
+            info_signals = info_class_meta.get("info_signals")
+            if not isinstance(info_signals, dict):
+                info_signals = {}
+            info_signals["guest"] = True
+            info_class_meta["info_signals"] = info_signals
     info_signals = (
         info_class_meta.get("info_signals")
         if isinstance(info_class_meta, dict)
@@ -8543,24 +8575,11 @@ async def _handle_webhook_payload(
                             explicit_service_hint = _extract_service_hint(
                                 message_text, payload.client_slug
                             )
-                        intent_decomp_explicit_query = None
-                        if isinstance(intent_decomp_payload, dict):
-                            raw_source = intent_decomp_payload.get("service_query_source")
-                            raw_query = intent_decomp_payload.get("service_query")
-                            if (
-                                isinstance(raw_query, str)
-                                and raw_query.strip()
-                                and raw_source != "context"
-                            ):
-                                intent_decomp_explicit_query = raw_query.strip()
-                        in_signals = class_router_result.get("in_signals") or []
                         anchors_in_hits = int(class_router_result.get("anchors_in_hits") or 0)
                         service_semantic_allowed = bool(
                             explicit_service_hint
-                            or intent_decomp_explicit_query
                             or booking_signal
                             or info_intent_hint
-                            or in_signals
                             or anchors_in_hits > 0
                         )
                         if not service_semantic_allowed:
