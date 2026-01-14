@@ -343,6 +343,10 @@ if role=owner → auto-approve → add_to_knowledge()
 - `conversation.context.branch_id` (быстрый доступ)
 - `user.metadata.branch_id` (если включено `remember_branch_preference`)
 
+**Trace/meta:**
+- `decision_trace` stage `branch_routing` (branch_id, knowledge_tag, routing_source)
+- `messages.metadata.decision_meta`: branch_id, knowledge_tag, branch_routing_source
+
 **Гейт:** если `require_branch_for_pricing=true`, без `branch_id` бот не озвучивает цены/скидки/расписание.
 
 ---
@@ -353,7 +357,7 @@ if role=owner → auto-approve → add_to_knowledge()
 ```sql
 id                  UUID PRIMARY KEY
 client_id           UUID
-branch_id           UUID  -- TODO: добавить для маршрутизации на филиал
+branch_id           UUID  -- ветка/филиал для маршрутизации
 user_id             UUID REFERENCES users
 channel             TEXT  -- whatsapp, telegram, instagram
 state               TEXT  -- bot_active, pending, manager_active
@@ -427,14 +431,17 @@ qdrant_point_id TEXT
 ```sql
 id                  UUID PRIMARY KEY
 client_id           UUID
+instance_id         TEXT  -- routing token (ChatFlow)
 telegram_chat_id    TEXT  -- Telegram-группа филиала
+knowledge_tag       TEXT  -- фильтр для RAG
 ```
 
 ### client_settings (legacy)
 ```sql
 client_id           UUID PRIMARY KEY
 telegram_bot_token  TEXT
-telegram_chat_id    TEXT  -- LEGACY: переносим на branches.telegram_chat_id
+telegram_chat_id    TEXT  -- fallback (клиентский чат)
+manager_scope       TEXT  -- branch/global
 owner_telegram_id   TEXT  -- LEGACY: заменяется agents/agent_identities
 ```
 

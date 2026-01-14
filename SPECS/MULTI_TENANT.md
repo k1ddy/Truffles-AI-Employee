@@ -15,9 +15,9 @@
 | Таблица branches | ⚠️ СУЩЕСТВУЕТ, ПОДКЛЮЧЕНА ЧАСТИЧНО (branch selection в webhook) |
 | Таблица client_settings | ✅ РАБОТАЕТ |
 | Промпты из БД | ✅ РАБОТАЕТ |
-| RAG фильтрация по client_slug | ✅ РАБОТАЕТ |
-| Telegram группы на заказчика | ✅ РАБОТАЕТ |
-| Роутинг через branch_id | ⚠️ ЧАСТИЧНО: branch_id выбирается/сохраняется, Telegram/RAG ещё по client |
+| RAG фильтрация по branch (knowledge_tag/branch_id) | ✅ РАБОТАЕТ (fallback на client) |
+| Telegram группы на филиал | ✅ РАБОТАЕТ (manager_scope=branch → Branch.telegram_chat_id) |
+| Роутинг через branch_id | ✅ РАБОТАЕТ (branch_id сохраняется + trace/meta) |
 | Онбординг скрипт | ⚠️ РУЧНОЙ (onboard_client.py отсутствует; sync_client.py только для KB) |
 | Счётчик сообщений | 📋 ПЛАН |
 | Dashboard для заказчика | 📋 ПЛАН |
@@ -75,10 +75,10 @@ Company
 
 | Что | Сейчас | Конечное |
 |-----|--------|----------|
-| Роутинг | branch_id (выбор в webhook), Telegram/RAG ещё по client | branch_id везде |
-| Telegram credentials | client_settings | Branch |
-| Knowledge | client_slug | Branch.knowledge_tag |
-| Conversation привязан к | branch_id (сохраняется, не используется повсеместно) | branch_id |
+| Роутинг | branch_id (выбор в webhook), Telegram/RAG branch-aware (fallback → client) | branch_id везде |
+| Telegram credentials | client_settings + Branch.telegram_chat_id (manager_scope=branch) | Branch |
+| Knowledge | client_slug + branch filter (knowledge_tag/branch_id) | Branch.knowledge_tag |
+| Conversation привязан к | branch_id (сохраняется + используется в routing) | branch_id |
 | Каналы (WhatsApp/Instagram) | 1 на client | через Channel (backlog) |
 
 ---
@@ -128,9 +128,9 @@ Python API:
 | Данные | Где хранится | Как разделяется |
 |--------|--------------|-----------------|
 | Промпт | prompts | WHERE client_id |
-| База знаний | Qdrant | filter: metadata.client_slug (knowledge_tag не используется) |
+| База знаний | Qdrant | filter: metadata.client_slug + branch (knowledge_tag/branch_id; fallback → client) |
 | Настройки эскалации | client_settings | WHERE client_id |
-| Telegram группа | client_settings.telegram_chat_id | Одна группа на клиента (branch не используется) |
+| Telegram группа | Branch.telegram_chat_id (manager_scope=branch) | Иначе client_settings.telegram_chat_id |
 | Пользователи | users | WHERE client_id |
 | Диалоги | conversations | WHERE client_id |
 | Сообщения | messages | через conversation → client_id |
@@ -666,7 +666,7 @@ except Exception as e:
 - [x] Conversation.branch_id сохраняется (webhook)
 - [x] Роутинг по instance_id → branch (by_instance/ask_user/hybrid) реализован в webhook
 - [ ] Эскалация из Branch.telegram_chat_id
-- [ ] RAG фильтр по Branch.knowledge_tag
+- [x] RAG фильтр по Branch.knowledge_tag (fallback → client)
 - [ ] Сохранение выбранного филиала у пользователя (optional)
 
 **Статус:** В ТЕКУЩЕМ ПЛАНЕ (STATE.md).

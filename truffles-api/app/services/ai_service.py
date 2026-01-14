@@ -1468,6 +1468,20 @@ def _resolve_rag_query(user_message: str, timing_context: dict | None) -> str:
     return _sanitize_query_for_rag(query)
 
 
+def _extract_branch_filter(timing_context: dict | None) -> tuple[str | None, str | None]:
+    if not isinstance(timing_context, dict):
+        return None, None
+    branch_id = timing_context.get("branch_id")
+    knowledge_tag = timing_context.get("knowledge_tag")
+    if branch_id:
+        branch_id = str(branch_id)
+    if knowledge_tag:
+        knowledge_tag = str(knowledge_tag)
+    if not branch_id and not knowledge_tag:
+        return None, None
+    return branch_id, knowledge_tag
+
+
 def _record_rag_trace(
     *,
     timing_context: dict | None,
@@ -1487,6 +1501,9 @@ def _record_rag_trace(
         "query": query,
         "results": len(results),
     }
+    rag_filter = timing_context.get("rag_filter") if isinstance(timing_context, dict) else None
+    if isinstance(rag_filter, dict):
+        trace_payload["rag_filter"] = dict(rag_filter)
     if isinstance(rag_scores, dict):
         trace_payload["rag_scores"] = rag_scores
     timing_context.setdefault("rag_trace", []).append(trace_payload)
@@ -1568,9 +1585,17 @@ def get_rag_confidence(
     results: list[dict] = []
 
     query_for_rag = _resolve_rag_query(user_message, timing_context)
+    branch_id, knowledge_tag = _extract_branch_filter(timing_context)
     try:
         rag_start = time.monotonic()
-        vector_results = search_knowledge(query_for_rag, client_slug, limit=3)
+        vector_results = search_knowledge(
+            query_for_rag,
+            client_slug,
+            limit=3,
+            branch_id=branch_id,
+            knowledge_tag=knowledge_tag,
+            trace_context=timing_context,
+        )
         from app.services.intent_service import hybrid_retrieve_knowledge
 
         results, rag_scores = hybrid_retrieve_knowledge(
@@ -1578,6 +1603,8 @@ def get_rag_confidence(
             client_slug=client_slug,
             vector_results=vector_results,
             limit=3,
+            branch_id=branch_id,
+            knowledge_tag=knowledge_tag,
         )
         _log_timing(
             "rag_ms",
@@ -1611,7 +1638,14 @@ def get_rag_confidence(
                 contextual_query = _sanitize_query_for_rag(contextual_query)
                 try:
                     rag_start = time.monotonic()
-                    vector_results = search_knowledge(contextual_query, client_slug, limit=3)
+                    vector_results = search_knowledge(
+                        contextual_query,
+                        client_slug,
+                        limit=3,
+                        branch_id=branch_id,
+                        knowledge_tag=knowledge_tag,
+                        trace_context=timing_context,
+                    )
                     from app.services.intent_service import hybrid_retrieve_knowledge
 
                     retry_results, rag_scores = hybrid_retrieve_knowledge(
@@ -1619,6 +1653,8 @@ def get_rag_confidence(
                         client_slug=client_slug,
                         vector_results=vector_results,
                         limit=3,
+                        branch_id=branch_id,
+                        knowledge_tag=knowledge_tag,
                     )
                     _log_timing(
                         "rag_ms",
@@ -1708,10 +1744,18 @@ def generate_ai_response(
         knowledge_results = []
         max_score = 0.0
         query_for_rag = _resolve_rag_query(user_message, timing_context)
+        branch_id, knowledge_tag = _extract_branch_filter(timing_context)
 
         try:
             rag_start = time.monotonic()
-            vector_results = search_knowledge(query_for_rag, client_slug, limit=3)
+            vector_results = search_knowledge(
+                query_for_rag,
+                client_slug,
+                limit=3,
+                branch_id=branch_id,
+                knowledge_tag=knowledge_tag,
+                trace_context=timing_context,
+            )
             from app.services.intent_service import hybrid_retrieve_knowledge
 
             knowledge_results, rag_scores = hybrid_retrieve_knowledge(
@@ -1719,6 +1763,8 @@ def generate_ai_response(
                 client_slug=client_slug,
                 vector_results=vector_results,
                 limit=3,
+                branch_id=branch_id,
+                knowledge_tag=knowledge_tag,
             )
             _log_timing(
                 "rag_ms",
@@ -1758,7 +1804,14 @@ def generate_ai_response(
                     contextual_query = _sanitize_query_for_rag(contextual_query)
                     try:
                         rag_start = time.monotonic()
-                        vector_results = search_knowledge(contextual_query, client_slug, limit=3)
+                        vector_results = search_knowledge(
+                            contextual_query,
+                            client_slug,
+                            limit=3,
+                            branch_id=branch_id,
+                            knowledge_tag=knowledge_tag,
+                            trace_context=timing_context,
+                        )
                         from app.services.intent_service import hybrid_retrieve_knowledge
 
                         retry_results, rag_scores = hybrid_retrieve_knowledge(
@@ -1766,6 +1819,8 @@ def generate_ai_response(
                             client_slug=client_slug,
                             vector_results=vector_results,
                             limit=3,
+                            branch_id=branch_id,
+                            knowledge_tag=knowledge_tag,
                         )
                         _log_timing(
                             "rag_ms",
