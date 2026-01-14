@@ -9,7 +9,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.logging_config import get_logger
+from app.logging_config import get_logger, record_outbox_latency
 from app.schemas.webhook import WebhookRequest
 from app.services.outbox_service import mark_outbox_status
 
@@ -111,6 +111,8 @@ async def _process_outbox_rows(
             wait_ms = (picked_at_info - created_at).total_seconds() * 1000
         if isinstance(picked_at_info, datetime):
             process_ms = (done_at - picked_at_info).total_seconds() * 1000
+        if wait_ms is not None:
+            record_outbox_latency(info.get("client_slug"), wait_ms)
         context = {
             "outbox_id": outbox_id,
             "conversation_id": str(info.get("conversation_id")) if info.get("conversation_id") else None,

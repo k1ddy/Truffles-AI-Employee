@@ -15,7 +15,13 @@ from fastapi import HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.logging_config import get_logger
+from app.logging_config import (
+    get_logger,
+    get_trace_id,
+    record_escalation_count,
+    record_inbound_count,
+    record_policy_count,
+)
 from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
 from app.routers.webhook.booking import (
     BOOKING_SLOT_ORDER,
@@ -281,7 +287,7 @@ from app.services.demo_salon_knowledge import (
 from app.services.demo_salon_knowledge import (
     _normalize_text as _normalize_service_text,
 )
-from app.services.escalation_service import resolve_telegram_routing, send_telegram_notification
+from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
     DomainIntent,
     Intent,
@@ -1580,30 +1586,6 @@ def get_active_handover(db: Session, conversation_id) -> Handover | None:
     )
 
 
-def _send_telegram_with_routing(
-    *,
-    db: Session,
-    handover: Handover,
-    conversation: Conversation,
-    user: User,
-    message: str,
-) -> tuple[bool, dict]:
-    routing_meta = resolve_telegram_routing(
-        db,
-        conversation=conversation,
-        client_id=handover.client_id,
-    )
-    telegram_sent = send_telegram_notification(
-        db=db,
-        handover=handover,
-        conversation=conversation,
-        user=user,
-        message=message,
-        routing_meta=routing_meta,
-    )
-    return telegram_sent, routing_meta
-
-
 def _reuse_active_handover(
     *,
     db: Session,
@@ -1641,7 +1623,7 @@ def _reuse_active_handover(
             )
         conversation.escalated_at = conversation.escalated_at or datetime.now(timezone.utc)
 
-    telegram_sent, routing_meta = _send_telegram_with_routing(
+    telegram_sent = send_telegram_notification(
         db=db,
         handover=handover,
         conversation=conversation,
@@ -1658,10 +1640,6 @@ def _reuse_active_handover(
             "source": source,
             "handover_id": str(handover.id),
             "telegram_sent": telegram_sent,
-            "telegram_chat_id": routing_meta.get("chat_id"),
-            "telegram_routing_source": routing_meta.get("routing_source"),
-            "telegram_manager_scope": routing_meta.get("manager_scope"),
-            "branch_id": routing_meta.get("branch_id"),
         },
     )
     return handover, True, telegram_sent
@@ -1748,6 +1726,9 @@ async def _handle_webhook_payload(
         media_label = message_type.lower() if message_type else "media"
         message_text = f"[{media_label}]"
 
+    if not skip_persist:
+        record_inbound_count(payload.client_slug)
+
     batch_messages_provided = batch_messages is not None
     batch_messages = _coerce_batch_messages(message_text, batch_messages)
     batch_non_booking_message = _select_last_non_booking_message(
@@ -1756,6 +1737,9 @@ async def _handle_webhook_payload(
     )
 
     timing_context: dict = {"client_slug": payload.client_slug, "remote_jid": remote_jid}
+    trace_id = get_trace_id()
+    if trace_id:
+        timing_context["trace_id"] = trace_id
     if client and isinstance(client.config, dict):
         timing_context["client_config"] = client.config
     if outbox_ids:
@@ -1785,6 +1769,9 @@ async def _handle_webhook_payload(
         context["stage"] = stage
         context["elapsed_ms"] = round(elapsed_ms, 2)
         logger.info("Timing", extra={"context": context})
+
+    def _record_escalation_metric(trigger: str) -> None:
+        record_escalation_count(payload.client_slug, trigger)
 
     def _record_llm_budget_trace() -> None:
         events = timing_context.get("llm_budget_events") if isinstance(timing_context, dict) else None
@@ -2013,19 +2000,15 @@ async def _handle_webhook_payload(
             message_metadata=message_metadata,
         )
         _ensure_rag_meta_defaults(saved_message)
+        if trace_id and saved_message:
+            _update_message_decision_metadata(saved_message, {"trace_id": trace_id})
 
         if enqueue_only:
             if (
                 conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]
                 and conversation.telegram_topic_id
             ):
-                routing_meta = resolve_telegram_routing(
-                    db,
-                    conversation=conversation,
-                    client_id=client.id,
-                )
-                bot_token = routing_meta.get("bot_token")
-                chat_id = routing_meta.get("chat_id")
+                bot_token, chat_id = get_telegram_credentials(db, client.id)
                 if bot_token and chat_id:
                     already_forwarded = bool(metadata and metadata.forwarded_to_telegram)
                     if not already_forwarded:
@@ -2721,6 +2704,7 @@ async def _handle_webhook_payload(
             expected_reply_type=expected_reply_type,
             carryover=class_carryover,
             question_context=question_context,
+            client_slug=payload.client_slug,
         )
         answer_payload = answer_result.get("payload") if isinstance(answer_result, dict) else None
         if isinstance(answer_result, dict):
@@ -2857,48 +2841,6 @@ async def _handle_webhook_payload(
         expected_reply_type = _get_expected_reply_type(context)
         intent_queue = _get_intent_queue(context)
 
-    def _record_branch_routing(
-        *,
-        decision: str,
-        routing_source: str,
-        reason: str | None,
-        branch: Branch | None,
-    ) -> None:
-        resolved_branch = branch
-        if not resolved_branch and conversation.branch_id:
-            resolved_branch = (
-                db.query(Branch)
-                .filter(Branch.id == conversation.branch_id, Branch.client_id == client.id)
-                .first()
-            )
-        branch_id_value = str(conversation.branch_id) if conversation.branch_id else None
-        knowledge_tag = resolved_branch.knowledge_tag if resolved_branch else None
-        trace_payload = {
-            "stage": "branch_routing",
-            "decision": decision,
-            "routing_source": routing_source,
-            "branch_id": branch_id_value,
-            "knowledge_tag": knowledge_tag,
-        }
-        if reason:
-            trace_payload["reason"] = reason
-        _record_decision_trace(conversation, trace_payload)
-        if saved_message:
-            _update_message_decision_metadata(
-                saved_message,
-                {
-                    "branch_id": branch_id_value,
-                    "knowledge_tag": knowledge_tag,
-                    "routing_source": routing_source,
-                },
-            )
-        if isinstance(timing_context, dict):
-            timing_context["branch_id"] = branch_id_value
-            timing_context["knowledge_tag"] = knowledge_tag
-            timing_context["branch_routing_source"] = routing_source
-            if reason:
-                timing_context["branch_routing_reason"] = reason
-
     # 4.5 Branch routing (instance_id -> branch, or ask user)
     branch_mode = (
         settings.branch_resolution_mode if settings and settings.branch_resolution_mode else "hybrid"
@@ -2910,18 +2852,8 @@ async def _handle_webhook_payload(
     )
     context = _get_conversation_context(conversation)
     branch_id = conversation.branch_id or _coerce_uuid(context.get(BRANCH_CONTEXT_KEY))
-    branch = None
-    routing_source = None
-    routing_reason = None
-    decision = "unresolved"
-    if conversation.branch_id:
-        routing_source = "conversation"
-    elif context.get(BRANCH_CONTEXT_KEY):
-        routing_source = "context"
     if not branch_id and remember_branch:
         branch_id = _get_user_branch_preference(user)
-        if branch_id:
-            routing_source = "user_preference"
 
     if branch_id:
         if conversation.branch_id != branch_id:
@@ -2931,7 +2863,6 @@ async def _handle_webhook_payload(
             _set_conversation_context(conversation, context)
         if remember_branch and _get_user_branch_preference(user) != branch_id:
             _set_user_branch_preference(user, branch_id)
-        decision = "resolved"
     else:
         instance_id = metadata.instanceId if metadata else None
         if branch_mode in {"by_instance", "hybrid"} and instance_id:
@@ -2952,10 +2883,6 @@ async def _handle_webhook_payload(
                     context=context,
                     remember_branch=remember_branch,
                 )
-                routing_source = "instance_id"
-                decision = "resolved"
-            else:
-                routing_reason = "instance_unmatched"
 
         if not conversation.branch_id and branch_mode in {"ask_user", "hybrid"}:
             branches = _get_active_branches(db, client.id)
@@ -2967,9 +2894,6 @@ async def _handle_webhook_payload(
                     context=context,
                     remember_branch=remember_branch,
                 )
-                branch = branches[0]
-                routing_source = "single_branch"
-                decision = "resolved"
             elif len(branches) > 1 and conversation.state == ConversationState.BOT_ACTIVE.value:
                 selection = _get_branch_selection(context)
                 if selection:
@@ -2984,16 +2908,7 @@ async def _handle_webhook_payload(
                             context=context,
                             remember_branch=remember_branch,
                         )
-                        branch = matched_branch
-                        routing_source = "user_choice"
-                        decision = "resolved"
                         if _is_branch_only_message(message_text, matched_branch, selected_by_index):
-                            _record_branch_routing(
-                                decision=decision,
-                                routing_source=routing_source or "user_choice",
-                                reason=routing_reason,
-                                branch=branch,
-                            )
                             bot_response = MSG_BRANCH_SELECTED.format(
                                 branch_name=matched_branch.name
                                 or matched_branch.slug
@@ -3022,12 +2937,6 @@ async def _handle_webhook_payload(
                             if sent
                             else "Branch selection prompt failed"
                         )
-                        _record_branch_routing(
-                            decision="prompted",
-                            routing_source="prompt_retry",
-                            reason="branch_selection_retry",
-                            branch=None,
-                        )
                         db.commit()
                         return WebhookResponse(
                             success=True,
@@ -3043,12 +2952,6 @@ async def _handle_webhook_payload(
                     result_message = (
                         "Branch selection requested" if sent else "Branch selection prompt failed"
                     )
-                    _record_branch_routing(
-                        decision="prompted",
-                        routing_source="prompt",
-                        reason="branch_selection_required",
-                        branch=None,
-                    )
                     db.commit()
                     return WebhookResponse(
                         success=True,
@@ -3056,17 +2959,6 @@ async def _handle_webhook_payload(
                         conversation_id=conversation.id,
                         bot_response=prompt,
                     )
-
-    if decision == "unresolved" and not routing_source:
-        routing_source = "unresolved"
-        if branch_mode == "disabled":
-            routing_reason = routing_reason or "mode_disabled"
-    _record_branch_routing(
-        decision=decision,
-        routing_source=routing_source or "unresolved",
-        reason=routing_reason,
-        branch=branch,
-    )
 
     # 4.9 Behavioral shield (pre-LAW/policy).
     context = _get_conversation_context(conversation)
@@ -3148,6 +3040,7 @@ async def _handle_webhook_payload(
         bot_response = MSG_ESCALATED
         result_message = "Shield escalation"
         if not skip_persist and conversation.state == ConversationState.BOT_ACTIVE.value:
+            _record_escalation_metric("shield")
             esc_result = escalate_to_pending(
                 db=db,
                 conversation=conversation,
@@ -3193,6 +3086,9 @@ async def _handle_webhook_payload(
         if sidecar:
             bot_response = _combine_sidecar(bot_response, sidecar)
         _reset_low_confidence_retry(conversation)
+        record_policy_count(payload.client_slug, policy_gate)
+        if decision.action == "escalate":
+            _record_escalation_metric(policy_gate)
 
         result_message = "Policy reply sent"
         if decision.action == "escalate":
@@ -3319,13 +3215,7 @@ async def _handle_webhook_payload(
     # 7. Forward to topic if pending/manager_active (always, even if muted)
     if conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value] and not forwarded_to_telegram:
         if conversation.telegram_topic_id:
-            routing_meta = resolve_telegram_routing(
-                db,
-                conversation=conversation,
-                client_id=client.id,
-            )
-            bot_token = routing_meta.get("bot_token")
-            chat_id = routing_meta.get("chat_id")
+            bot_token, chat_id = get_telegram_credentials(db, client.id)
             if bot_token and chat_id:
                 telegram = TelegramService(bot_token)
                 forward_result = None
@@ -3385,13 +3275,7 @@ async def _handle_webhook_payload(
             media_meta = saved_message.message_metadata.get("media") or {}
             already_forwarded = bool(media_meta.get("transcript_forwarded"))
         if not already_forwarded:
-            routing_meta = resolve_telegram_routing(
-                db,
-                conversation=conversation,
-                client_id=client.id,
-            )
-            bot_token = routing_meta.get("bot_token")
-            chat_id = routing_meta.get("chat_id")
+            bot_token, chat_id = get_telegram_credentials(db, client.id)
             if bot_token and chat_id:
                 telegram = TelegramService(bot_token)
                 forward_result = telegram.send_message(
@@ -4028,6 +3912,7 @@ async def _handle_webhook_payload(
                     media_escalated = True
                     media_response = MSG_MEDIA_STYLE_REFERENCE
                 else:
+                    _record_escalation_metric("media")
                     result = escalate_to_pending(
                         db=db,
                         conversation=conversation,
@@ -4084,13 +3969,7 @@ async def _handle_webhook_payload(
             and not (metadata and metadata.forwarded_to_telegram)
             and (media_policy or {}).get("forward_to_telegram")
         ):
-            routing_meta = resolve_telegram_routing(
-                db,
-                conversation=conversation,
-                client_id=client.id,
-            )
-            bot_token = routing_meta.get("bot_token")
-            chat_id = routing_meta.get("chat_id")
+            bot_token, chat_id = get_telegram_credentials(db, client.id)
             if bot_token and chat_id:
                 telegram = TelegramService(bot_token)
                 caption = _build_media_caption(message_text, media_info)
@@ -4286,6 +4165,7 @@ async def _handle_webhook_payload(
                             f"Handover confirmed (reused), telegram={'sent' if telegram_sent else 'failed'}"
                         )
                     else:
+                        _record_escalation_metric("intent")
                         esc_result = escalate_to_pending(
                             db=db,
                             conversation=conversation,
@@ -5390,6 +5270,7 @@ async def _handle_webhook_payload(
             bot_response = _combine_sidecar(bot_response, followup_prompt)
 
         _reset_low_confidence_retry(conversation)
+        record_policy_count(payload.client_slug, "discounts")
 
         result_message = "Policy discounts reply sent"
         if decision.action == "escalate":
@@ -5404,6 +5285,7 @@ async def _handle_webhook_payload(
             if reused:
                 result_message = f"Policy discounts reuse, telegram={'sent' if telegram_sent else 'failed'}"
             elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get("allow_handover_create", False):
+                _record_escalation_metric("intent")
                 result = escalate_to_pending(
                     db=db,
                     conversation=conversation,
@@ -5948,6 +5830,21 @@ async def _handle_webhook_payload(
                 consult_question = candidate_question
                 intent_decomp_payload["consult_question"] = candidate_question
         consult_intent_signal = bool(consult_intent or consult_candidate)
+        normalized_message = normalize_for_matching(message_text) if message_text else ""
+        explicit_info_signal = bool(
+            booking_signal
+            or _has_price_signal(normalized_message, message_text)
+            or _has_duration_signal(normalized_message, message_text)
+            or (_looks_like_info_query(message_text) and not consult_intent_signal)
+        )
+        explicit_info_intent = bool(
+            explicit_info_signal
+            or (
+                intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}
+                and not consult_intent_signal
+            )
+            or (info_class_intents & {"location", "hours"} and not consult_intent_signal)
+        )
         consult_candidate_meta = (
             consult_candidate.meta
             if consult_candidate and isinstance(consult_candidate.meta, dict)
@@ -5959,16 +5856,17 @@ async def _handle_webhook_payload(
                 consult_short_circuit_service = get_demo_salon_service_hint(message_text)
                 if consult_short_circuit_service:
                     consult_short_circuit_reason = "service_hint"
-            if consult_short_circuit_service:
+            if consult_short_circuit_service and explicit_info_intent:
                 consult_short_circuit = True
                 if not consult_short_circuit_reason:
-                    consult_short_circuit_reason = "service_known"
+                    consult_short_circuit_reason = "explicit_info"
                 consult_flow_trace = {
                     "stage": "consult_flow",
                     "decision": "short_circuit",
                     "state": conversation.state,
                     "reason": consult_short_circuit_reason,
                 }
+                consult_flow_trace["explicit_info"] = True
                 consult_flow_trace["service_query"] = consult_short_circuit_service
                 if consult_topic:
                     consult_flow_trace["consult_topic"] = consult_topic
@@ -6140,6 +6038,7 @@ async def _handle_webhook_payload(
             if reused:
                 result_message = f"Consult reuse, telegram={'sent' if telegram_sent else 'failed'}"
             elif conversation.state == ConversationState.BOT_ACTIVE.value and routing["allow_handover_create"]:
+                _record_escalation_metric("intent")
                 result = escalate_to_pending(
                     db=db,
                     conversation=conversation,
@@ -6873,6 +6772,7 @@ async def _handle_webhook_payload(
                     result_message = f"Booking reuse, telegram={'sent' if telegram_sent else 'failed'}"
                     trace_decision = "reuse_handover"
                 else:
+                    _record_escalation_metric("intent")
                     result = escalate_to_pending(
                         db=db,
                         conversation=conversation,
@@ -6940,6 +6840,8 @@ async def _handle_webhook_payload(
     llm_primary_result = None
     llm_primary_failed = False
     llm_primary_reason = None
+    skip_llm_primary = False
+    force_truth_gate = False
 
     # 9.06 Fast intent (smalltalk) before LLM to avoid extra calls.
     fast_decision = None
@@ -7477,82 +7379,21 @@ async def _handle_webhook_payload(
                     bot_response=bot_response,
                 )
 
-        if payload.client_slug == "demo_salon" and message_text:
-            services_overview_decision = get_demo_salon_decision(
-                message_text,
-                client_slug=payload.client_slug,
-                intent_decomp=intent_decomp_payload,
+        if message_text:
+            normalized_message = normalize_for_matching(message_text)
+            force_truth_gate = bool(
+                info_class_intents & {"pricing", "duration"}
+                or _has_price_signal(normalized_message, message_text)
+                or _has_duration_signal(normalized_message, message_text)
             )
-            if (
-                services_overview_decision
-                and services_overview_decision.intent == "services_overview"
-                and services_overview_decision.action == "reply"
-            ):
-                guard_response = _maybe_apply_fact_guard(
-                    decision_meta=services_overview_decision.meta
-                    if isinstance(services_overview_decision.meta, dict)
-                    else None,
-                    intent="services_overview",
-                    source="truth_gate",
-                    allow_handover=routing.get("allow_handover_create", False),
-                )
-                if guard_response:
-                    db.commit()
-                    return guard_response
-                bot_response = services_overview_decision.response
-                if consult_return_pending:
-                    bot_response = _apply_consult_return(
-                        conversation=conversation,
-                        saved_message=saved_message,
-                        bot_response=bot_response,
-                        consult_return_prompt=consult_return_prompt,
-                        consult_context=consult_context,
-                        reason=consult_return_reason or "truth_gate",
-                    )
-                _reset_low_confidence_retry(conversation)
-                trace_payload = {
-                    "stage": "truth_gate",
-                    "decision": "reply",
-                    "intent": "services_overview",
-                    "state": conversation.state,
-                    "policy_type": policy_type,
-                }
-                if isinstance(getattr(services_overview_decision, "meta", None), dict):
-                    trace_payload.update(services_overview_decision.meta)
-                _record_decision_trace(conversation, trace_payload)
-                _record_message_decision_meta(
-                    saved_message,
-                    action="reply",
-                    intent="services_overview",
-                    source="truth_gate",
-                    fast_intent=False,
-                )
-                if saved_message and isinstance(getattr(services_overview_decision, "meta", None), dict):
-                    _update_message_decision_metadata(saved_message, services_overview_decision.meta)
-                bot_response, sent = _send_and_save(bot_response)
-                result_message = (
-                    "Services overview reply sent"
-                    if sent
-                    else "Services overview reply failed"
-                )
-                db.commit()
-                return WebhookResponse(
-                    success=True,
-                    message=result_message,
-                    conversation_id=conversation.id,
-                    bot_response=bot_response,
-                )
-
         service_matcher = policy_handler.get("service_matcher")
-        service_decision = (
-            service_matcher(
+        service_decision = None
+        if service_matcher and not force_truth_gate:
+            service_decision = service_matcher(
                 message_text,
                 client_slug=payload.client_slug,
                 intent_decomp=intent_decomp_payload,
             )
-            if service_matcher
-            else None
-        )
         if service_decision:
             if service_decision.action == "reply":
                 guard_response = _maybe_apply_fact_guard(
@@ -7688,7 +7529,12 @@ async def _handle_webhook_payload(
                 bot_response=bot_response,
             )
 
-    if routing["allow_bot_reply"]:
+    if force_truth_gate:
+        skip_llm_primary = True
+        llm_primary_failed = True
+        llm_primary_reason = "forced_truth_gate"
+
+    if routing["allow_bot_reply"] and not skip_llm_primary:
         _ensure_rag_rewrite()
         llm_primary_result = generate_bot_response(
             db,
@@ -7730,6 +7576,7 @@ async def _handle_webhook_payload(
                     if reused:
                         result_message = f"LLM guard reuse, telegram={'sent' if telegram_sent else 'failed'}"
                     elif conversation.state == ConversationState.BOT_ACTIVE.value and routing["allow_handover_create"]:
+                        _record_escalation_metric("intent")
                         result = escalate_to_pending(
                             db=db,
                             conversation=conversation,
@@ -7948,6 +7795,7 @@ async def _handle_webhook_payload(
                 if reused:
                     result_message = f"Truth gate reuse, telegram={'sent' if telegram_sent else 'failed'}"
                 elif conversation.state == ConversationState.BOT_ACTIVE.value:
+                    _record_escalation_metric("intent")
                     result = escalate_to_pending(
                         db=db,
                         conversation=conversation,
@@ -8494,6 +8342,7 @@ async def _handle_webhook_payload(
             )
         else:
             # Escalate using state_service (atomic transition)
+            _record_escalation_metric("intent")
             result = escalate_to_pending(
                 db=db,
                 conversation=conversation,
@@ -8505,7 +8354,7 @@ async def _handle_webhook_payload(
             if result.ok:
                 handover = result.value
                 # Send notification to Telegram
-                telegram_sent, routing_meta = _send_telegram_with_routing(
+                telegram_sent = send_telegram_notification(
                     db=db,
                     handover=handover,
                     conversation=conversation,
@@ -8521,10 +8370,6 @@ async def _handle_webhook_payload(
                         "state": conversation.state,
                         "intent": intent.value,
                         "telegram_sent": telegram_sent,
-                        "telegram_chat_id": routing_meta.get("chat_id"),
-                        "telegram_routing_source": routing_meta.get("routing_source"),
-                        "telegram_manager_scope": routing_meta.get("manager_scope"),
-                        "branch_id": routing_meta.get("branch_id"),
                     },
                 )
                 bot_response, sent = _send_and_save(bot_response)
@@ -8789,11 +8634,24 @@ async def _handle_webhook_payload(
                             explicit_service_hint = _extract_service_hint(
                                 message_text, payload.client_slug
                             )
+                        intent_decomp_explicit_query = None
+                        if isinstance(intent_decomp_payload, dict):
+                            raw_source = intent_decomp_payload.get("service_query_source")
+                            raw_query = intent_decomp_payload.get("service_query")
+                            if (
+                                isinstance(raw_query, str)
+                                and raw_query.strip()
+                                and raw_source != "context"
+                            ):
+                                intent_decomp_explicit_query = raw_query.strip()
+                        in_signals = class_router_result.get("in_signals") or []
                         anchors_in_hits = int(class_router_result.get("anchors_in_hits") or 0)
                         service_semantic_allowed = bool(
                             explicit_service_hint
+                            or intent_decomp_explicit_query
                             or booking_signal
                             or info_intent_hint
+                            or in_signals
                             or anchors_in_hits > 0
                         )
                         if not service_semantic_allowed:

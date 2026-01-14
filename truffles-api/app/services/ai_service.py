@@ -10,7 +10,7 @@ from uuid import UUID
 import httpx
 from sqlalchemy.orm import Session
 
-from app.logging_config import get_logger
+from app.logging_config import get_logger, record_llm_time, record_rag_time
 from app.models import Client, Message, Prompt
 from app.services.alert_service import alert_error
 from app.services.knowledge_service import format_knowledge_context, search_knowledge
@@ -252,6 +252,12 @@ def _log_timing(
         context.update(extra)
     context["stage"] = stage
     context["elapsed_ms"] = round(elapsed_ms, 2)
+    stage_key = stage.strip().lower()
+    client_slug = context.get("client_slug")
+    if stage_key.endswith("llm_ms"):
+        record_llm_time(client_slug, stage_key, elapsed_ms)
+    elif stage_key == "rag_ms":
+        record_rag_time(client_slug, elapsed_ms)
     logger.info("Timing", extra={"context": context})
 
 
@@ -1473,10 +1479,6 @@ def _extract_branch_filter(timing_context: dict | None) -> tuple[str | None, str
         return None, None
     branch_id = timing_context.get("branch_id")
     knowledge_tag = timing_context.get("knowledge_tag")
-    if branch_id:
-        branch_id = str(branch_id)
-    if knowledge_tag:
-        knowledge_tag = str(knowledge_tag)
     if not branch_id and not knowledge_tag:
         return None, None
     return branch_id, knowledge_tag

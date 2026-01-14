@@ -1,9 +1,10 @@
 import os
+import time
 from typing import List
 
 import httpx
 
-from app.logging_config import get_logger
+from app.logging_config import get_logger, record_bge_time
 from app.services.alert_service import alert_warning
 
 logger = get_logger("knowledge_service")
@@ -14,18 +15,23 @@ QDRANT_COLLECTION = "truffles_knowledge"
 BGE_M3_URL = os.environ.get("BGE_M3_URL", "http://bge-m3:80/embed")
 
 
-def get_embedding(text: str) -> List[float]:
+def get_embedding(text: str, *, client_slug: str | None = None) -> List[float]:
     """Get embedding from BGE-M3 service."""
+    start = time.monotonic()
     with httpx.Client(timeout=30.0) as client:
         response = client.post(BGE_M3_URL, json={"inputs": text})
         if response.status_code != 200:
+            record_bge_time(client_slug, (time.monotonic() - start) * 1000)
             raise Exception(f"BGE-M3 error: {response.status_code} - {response.text}")
 
         data = response.json()
         # Handle different response formats
         if isinstance(data, list) and len(data) > 0:
-            return data[0] if isinstance(data[0], list) else data
-        return data.get("embedding") or data.get("embeddings") or data
+            embedding = data[0] if isinstance(data[0], list) else data
+        else:
+            embedding = data.get("embedding") or data.get("embeddings") or data
+        record_bge_time(client_slug, (time.monotonic() - start) * 1000)
+        return embedding
 
 
 def _build_qdrant_filter(
@@ -73,7 +79,7 @@ def search_knowledge(
     """Search knowledge base in Qdrant."""
 
     # Get embedding for query
-    embedding = get_embedding(query)
+    embedding = get_embedding(query, client_slug=client_slug)
 
     # Search in Qdrant
     headers = {"api-key": QDRANT_API_KEY} if QDRANT_API_KEY else None
