@@ -26,6 +26,7 @@
 - DONE: No-response alert dedup cleanup + shield_drop suppression order (PR #154 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20944545548; live-check conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, msg_id 88173fb2-20f7-4c25-93dc-fd050a2ed248 shield_drop too_long; /reminders/process alerted=0).
 - DONE: Consult clarify/short‑circuit (PR #153 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20943384712; live‑check evidence in истории 2026‑01‑13).
 - DONE: PR #155 consult pack‑only + pending_wait trace merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20945722911; live‑check evidence в истории 2026‑01‑13.
+- DONE: truth_gate trace retention for pricing/duration/location (PR #180 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21013363387; live‑check conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, msg_id c921d20c-57d2-4778-aa83-b66c458f0b90 pricing, msg_id debe8959-cdc2-4716-ba86-5ae6431d7400 duration, msg_id 6847ad45-774a-4662-b20a-d6b6ebed16b3 location).
 - DONE: Telegram→WhatsApp topic handover routing fix (PR #157 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20948893145; live‑check в истории 2026‑01‑13).
 - DONE: Docs PR #158 (roadmap + tech status) merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20949202225.
 - BLOCKERS: нет.
