@@ -34,6 +34,7 @@
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
 - **Следующий шаг:** P1 follow-up — router_eligible sync с controller_attempted (CI + real inbound + SQL) — in progress.
 - **DONE:** P1 Router SLA <10% + controller_attempted evidence (post-deploy real inbound) — см. запись 2026-01-14.
+- **DONE:** P1 Category vs Service (services_overview guard) — см. запись 2026-01-14.
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
@@ -565,6 +566,22 @@
   - baseline 7d: avg_fallback_rate=0.0582, max=1.0000
   - post-deploy: avg_fallback_rate=0.0000, max=0.0000
 - low_confidence check: attempts=2, low_confidence=2, bad_low_confidence_fallbacks=0.
+
+### 2026-01-14 — P1 Category vs Service: services_overview guard
+
+**Что сделали:**
+- Добавили guard для services_overview перед service_matcher + RU/KZ services_overview lexicon, подтвердили на real inbound post-deploy.
+
+**Evidence:**
+- PR #170: https://github.com/k1ddy/Truffles-AI-Employee/pull/170
+- CI PR: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20985182973
+- Deploy: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20985204021
+- /admin/version: `{"version":"main","git_commit":"f8d73928ae9e7886881ebba0c513e4e01abb644d","build_time":"2026-01-14T06:51:26Z"}`
+- Real inbound post-deploy (conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`):
+  - msg_id `5ad1313c-47f1-4774-8174-c0097a689622` (messageId `3EB00B785919F1F301CDA7`) — intent=services_overview, source=truth_gate, service_semantic_score=NULL.
+  - msg_id `7820c3f3-e469-4cf5-804d-6b646872859f` (messageId `3EB00D604467F28D634348`) — intent=services_overview, source=truth_gate, service_semantic_score=NULL.
+  - msg_id `3b41ca5c-ea4a-42af-94b1-7783eeb06290` (messageId `3EB096B413ADC6E015AA77`) — intent=services_overview, source=truth_gate, service_semantic_score=NULL.
+- Trace (decision_trace, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, recorded_at >= `2026-01-14T06:51:26Z`): service_semantic_matcher rows=0.
 
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
