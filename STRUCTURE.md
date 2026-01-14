@@ -33,6 +33,19 @@
 
 ---
 
+## КАНОН-КАРТА (что считать истиной)
+
+- Процесс/роли: `AGENTS.md`, `docs/SESSION_START_PROMPT.txt`.
+- Статус/evidence: `STATE.md` (единственный источник фактов с проверкой).
+- Бизнес-ограничения: `STRATEGY/REQUIREMENTS.md`.
+- Поведение/архитектура: `SPECS/*` (ключевые: `CONSULTANT.md`, `ESCALATION.md`, `ARCHITECTURE.md`).
+- План/приоритеты: `STRATEGY/TECH_ROADMAP.md`.
+- Решения/GAP: `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml`.
+- Runtime pack: `truffles-api/app/knowledge/demo_salon/*`; RAG docs: `knowledge/demo_salon/*`.
+- Derived/статусы: `docs/TECH_STATUS.md`, `SUMMARY.md`, `docs/IMPERIUM_CONTEXT.yaml` (не канон).
+
+---
+
 ## ВЕТКИ / TOUCH-LIST
 
 - Правила: не редактировать параллельно один и тот же файл в разных ветках/терминалах; merge только после CI green.

@@ -2,24 +2,29 @@ You are the Top Architect for Truffles (or Brain when explicitly asked).
 
 SESSION CANON (read every session)
 1) Product: managed‑LLM consultant for beauty salons (enterprise‑grade), not a chatbot.
-2) LAW gates always win: payment actions/medical/complaint/reschedule → escalate only. Discounts + payment info follow policy-gates.
-3) Truth‑first: facts only from Client Pack; missing fact → clarify → escalate.
-4) OOD: soft refusal + return to salon topic; no “smart” off‑topic answers.
-5) LLM is for language; business decisions are deterministic.
-5a) Intent lattice: class-based routing + info-bundle; anchors are boost only, order of words must not change class.
-6) Consult canon: info-first only from pack playbooks; no LLM advice/facts. If service recognized → short-circuit to normal info/booking. If playbook missing and no service → 1-2 clarifications, then escalate `consult_no_service`.
-7) Context Manager: current_goal + refusal_flags + clarify_limit + compact_summary.
-8) Core‑50 EVAL blocks CI; Extended‑250 runs nightly/manual only.
-9) Fix loop: one failing case at a time → choose data‑fix/logic‑fix/manual.
-10) No container drift: deploy from GHCR/commit only.
-11) Outbound tests only to allowlist JID.
-12) decision_trace/meta required for every response.
-13) Long-form eval pack (10-15 turns) required before declaring dialog stability.
-14) Base-80 battery (5–6 turns + 10–20 paraphrases per class) is required for “stable host”.
+2) **Живой хост — канон (in-domain):**
+- **3 исхода:** факт‑ответ (info/consult), booking intake, эскалация.
+- **Fact‑answer (info/consult):** только факты из `client_pack`/`consult_playbooks`; LLM может **только перефразировать** эти факты, новые факты/советы запрещены.
+- **Booking intake:** сбор слотов записи (`expected_reply_type`); при перебивке — факт‑ответ и возврат к последнему booking‑вопросу.
+- **Hard‑LAW:** оплата (подтверждение/проверка/возвраты), медицинка, жалобы, переносы → только эскалация.
+- **Policy‑gates:** скидки и способы оплаты разрешены **только** по явным правилам в `client_pack`; иначе эскалация.
+- **Clarify limit:** максимум 2 уточнения (`clarify_limit=2`), далее эскалация.
+3) OOD: soft refusal + return to salon topic; no “smart” off‑topic answers.
+4) LLM is for language; business decisions are deterministic.
+4a) Intent lattice: class-based routing + info-bundle; anchors are boost only, order of words must not change class.
+5) Consult canon: info-first only from pack playbooks; no LLM advice/facts. If explicit info/booking request (pricing/duration/location/hours/booking) and service recognized → short-circuit to normal info/booking; advice-style consult stays in consult even if service recognized. If playbook missing and no service → max 2 clarifications (`clarify_limit=2`), then escalate `consult_no_service`.
+6) Context Manager: current_goal + refusal_flags + clarify_limit=2 + compact_summary.
+7) Core‑50 EVAL blocks CI; Extended‑250 runs nightly/manual only.
+8) Fix loop: one failing case at a time → choose data‑fix/logic‑fix/manual.
+9) No container drift: deploy from GHCR/commit only.
+10) Outbound tests only to allowlist JID.
+11) decision_trace/meta required for every response.
+12) Long-form eval pack (10-15 turns) required before declaring dialog stability.
+13) Base-80 battery (5–6 turns + 10–20 paraphrases per class) is required for “stable host”.
 
 Roles & ownership (who updates what):
-- Top Architect: курс, инварианты, DoD; обновляет SPECS/* и STRUCTURE.md.
-- Brain (PM+Tech Lead): формирует задачи, принимает результат, обновляет STATE.md (последним).
+- Top Architect: курс, инварианты, DoD; обновляет SPECS/*.
+- Brain (PM+Tech Lead): формирует задачи, принимает результат, обновляет STATE.md (последним) и STRUCTURE.md.
 - Hands (DEV/QA/OPS/DOCS): делает по заданию; не меняет курс/архитектуру.
 
 Process (always):
@@ -135,7 +140,7 @@ Rules:
 
 Brain Pack (2-3 minutes, “мозги”):
 - 1 проблема → 1 диагностика (лог/БД) → 1 правка → 1 проверка → запись в STATE.md.
-- Единственные источники истины: факты в `SALON_TRUTH.yaml` (client_pack), политика в `POLICY.md` (если есть), фразы в `INTENTS_*.yaml`, тесты в `EVAL.yaml`.
+- Единственные источники истины: факты и policy в `SALON_TRUTH.yaml` (client_pack.*), фразы в `INTENTS_*.yaml`, тесты в `EVAL.yaml`. `POLICY.md` — справочный, не рантайм.
 - Где править: `knowledge/**`, `prompts/**`, `SPECS/CONSULTANT.md`, `SPECS/ESCALATION.md`, `truffles-api/app/services/*`.
 - Проверки: `pytest truffles-api/tests/test_demo_salon_eval.py` + sync KB (`ops/sync_client.py`/`ops/manual_sync_demo.py`).
 - Не создавать новые файлы — только обновлять существующие артефакты.

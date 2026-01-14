@@ -3,18 +3,21 @@ meta:
   generated_by: "Codex"
   repo_root: "/home/zhan/truffles-main"
   repo_commit: "2b16a72e81b56e8a1ccaea1c6bbdca265d235fac"
+  status: "DERIVED"
+  notes: "Derived context; not canonical."
   evidence:
     - "git rev-parse HEAD (command)"
     - "date +%Y-%m-%d (command)"
 
 project:
   name: "Truffles"
-  description: "WhatsApp auto-responder for business"
+  description: "Managed consultant in WhatsApp for business"
   value_to_client: "Reply late at night without waiting until morning"
   value_to_business: "No 24/7 manager; bot handles ~80% of questions"
-  positioning: "Auto-responder + payment checks, not AI"
+  positioning: "Consultant + booking + escalation, not AI"
   evidence:
     - "AGENTS.md:9-15"
+    - "STRATEGY/PRODUCT.md:20-32"
 
 runtime:
   server:

@@ -1,4 +1,5 @@
 # ACTIVE LEARNING — План реализации
+DERIVED/LEGACY: archival plan; current truth is in SPECS/ACTIVE_LEARNING.md.
 
 **Дата:** 2025-12-08
 **Статус:** План (P2). Реализация частичная — см. `SPECS/ACTIVE_LEARNING.md`.
