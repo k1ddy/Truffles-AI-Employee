@@ -12,12 +12,12 @@
 |-----------|--------|
 | Таблица companies | ✅ СУЩЕСТВУЕТ (не используется) |
 | Таблица clients | ✅ РАБОТАЕТ |
-| Таблица branches | ⚠️ СУЩЕСТВУЕТ, ПОДКЛЮЧЕНА ЧАСТИЧНО (branch selection в webhook) |
+| Таблица branches | ⚠️ ПОДКЛЮЧЕНА: routing/Telegram по branch есть; RAG branch‑filter с fallback до backfill |
 | Таблица client_settings | ✅ РАБОТАЕТ |
 | Промпты из БД | ✅ РАБОТАЕТ |
-| RAG фильтрация по client_slug | ✅ РАБОТАЕТ |
-| Telegram группы на заказчика | ✅ РАБОТАЕТ |
-| Роутинг через branch_id | ⚠️ ЧАСТИЧНО: branch_id выбирается/сохраняется, Telegram/RAG ещё по client |
+| RAG фильтрация по client_slug | ✅ РАБОТАЕТ (branch‑filter есть, fallback при `branch_filter_empty`) |
+| Telegram группы на заказчика | ✅ РАБОТАЕТ (branch‑aware при `manager_scope=branch`) |
+| Роутинг через branch_id | ✅ routing/Telegram по branch; RAG branch‑filter с fallback до backfill |
 | Онбординг скрипт | ⚠️ РУЧНОЙ (onboard_client.py отсутствует; sync_client.py только для KB) |
 | Счётчик сообщений | 📋 ПЛАН |
 | Dashboard для заказчика | 📋 ПЛАН |
@@ -75,9 +75,9 @@ Company
 
 | Что | Сейчас | Конечное |
 |-----|--------|----------|
-| Роутинг | branch_id (выбор в webhook), Telegram/RAG ещё по client | branch_id везде |
-| Telegram credentials | client_settings | Branch |
-| Knowledge | client_slug | Branch.knowledge_tag |
+| Роутинг | branch_id в webhook + Telegram per branch; RAG branch‑filter с fallback | branch_id везде |
+| Telegram credentials | Branch (manager_scope=branch), fallback: client_settings | Branch |
+| Knowledge | Branch.knowledge_tag (если есть), fallback: client_slug | Branch.knowledge_tag |
 | Conversation привязан к | branch_id (сохраняется, не используется повсеместно) | branch_id |
 | Каналы (WhatsApp/Instagram) | 1 на client | через Channel (backlog) |
 
@@ -117,8 +117,8 @@ POST /webhook/{client_slug} { body.message, body.metadata.remoteJid, ... }
         ↓
 Python API:
   1. Загружает prompt WHERE client_id
-  2. Ищет в Qdrant WHERE client_slug
-  3. Отправляет в Telegram WHERE telegram_chat_id
+  2. Ищет в Qdrant WHERE client_slug + branch‑filter (если есть)
+  3. Отправляет в Telegram WHERE branch.telegram_chat_id (fallback: client_settings.telegram_chat_id)
         ↓
 Ответ клиенту через WhatsApp
 ```
@@ -128,9 +128,9 @@ Python API:
 | Данные | Где хранится | Как разделяется |
 |--------|--------------|-----------------|
 | Промпт | prompts | WHERE client_id |
-| База знаний | Qdrant | filter: metadata.client_slug (knowledge_tag не используется) |
+| База знаний | Qdrant | filter: metadata.client_slug + branch_id/knowledge_tag (fallback при `branch_filter_empty`) |
 | Настройки эскалации | client_settings | WHERE client_id |
-| Telegram группа | client_settings.telegram_chat_id | Одна группа на клиента (branch не используется) |
+| Telegram группа | branches.telegram_chat_id (manager_scope=branch) | fallback: client_settings.telegram_chat_id |
 | Пользователи | users | WHERE client_id |
 | Диалоги | conversations | WHERE client_id |
 | Сообщения | messages | через conversation → client_id |
@@ -554,7 +554,7 @@ API извлекает slug → ищет клиента по `Client.name` (slug
 
 ### 2. База знаний — как разделять?
 
-**Решение:** Одна коллекция Qdrant, фильтр по `metadata.client_slug`.
+**Решение:** Одна коллекция Qdrant, фильтр по `metadata.client_slug` + branch_id/knowledge_tag; fallback по client_slug фиксируется в trace как `branch_filter_empty`.
 
 ```python
 filter={"must": [
@@ -666,7 +666,7 @@ except Exception as e:
 - [x] Conversation.branch_id сохраняется (webhook)
 - [x] Роутинг по instance_id → branch (by_instance/ask_user/hybrid) реализован в webhook
 - [ ] Эскалация из Branch.telegram_chat_id
-- [ ] RAG фильтр по Branch.knowledge_tag
+- [x] RAG фильтр по Branch.knowledge_tag (fallback при `branch_filter_empty`; backfill Qdrant обязателен для strict)
 - [ ] Сохранение выбранного филиала у пользователя (optional)
 
 **Статус:** В ТЕКУЩЕМ ПЛАНЕ (STATE.md).
