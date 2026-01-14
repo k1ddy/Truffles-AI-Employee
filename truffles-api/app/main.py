@@ -3,10 +3,18 @@ import os
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal, get_db
-from app.logging_config import get_logger, setup_logging
+from app.database import SessionLocal, engine, get_db
+from app.logging_config import (
+    CONTENT_TYPE_LATEST,
+    generate_latest_metrics,
+    get_logger,
+    set_outbox_backlog,
+    setup_logging,
+)
 from app.models import Conversation, Handover, Message, User
 from app.routers import admin, alerts, callback, message, reminders, telegram_webhook, webhook
 from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
@@ -18,6 +26,8 @@ app = FastAPI(
     description="Backend service for Truffles chatbot",
     version="0.1.0",
 )
+
+otel_logger = get_logger("otel")
 
 cors_env = os.environ.get("CORS_ALLOW_ORIGINS", "*")
 cors_origins = [origin.strip() for origin in cors_env.split(",") if origin.strip()]
@@ -144,6 +154,68 @@ async def stop_outbox_worker() -> None:
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+def _setup_otel(app_instance: FastAPI) -> None:
+    if not _is_env_enabled(os.environ.get("OTEL_ENABLED"), default=False):
+        return
+    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if not endpoint:
+        otel_logger.warning("OTEL_ENABLED set but OTEL_EXPORTER_OTLP_ENDPOINT missing")
+        return
+    try:
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+        from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except Exception as exc:  # pragma: no cover
+        otel_logger.warning(
+            "OTel setup failed",
+            extra={"context": {"error": str(exc)}},
+        )
+        return
+
+    service_name = os.environ.get("OTEL_SERVICE_NAME", "truffles-api")
+    resource = Resource.create({"service.name": service_name})
+    provider = TracerProvider(resource=resource)
+    exporter = OTLPSpanExporter(endpoint=endpoint)
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+
+    FastAPIInstrumentor.instrument_app(app_instance)
+    HTTPXClientInstrumentor().instrument()
+    SQLAlchemyInstrumentor().instrument(engine=engine)
+    otel_logger.info("OTel enabled", extra={"context": {"endpoint": endpoint, "service": service_name}})
+
+
+_setup_otel(app)
+
+
+@app.get("/metrics")
+def metrics(db: Session = Depends(get_db)):
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT c.name AS client_slug, COUNT(*) AS backlog
+                FROM outbox_messages o
+                JOIN clients c ON c.id = o.client_id
+                WHERE o.status = 'PENDING'
+                GROUP BY c.name
+                """
+            )
+        )
+        .mappings()
+        .all()
+    )
+    backlog_counts = {row["client_slug"]: int(row.get("backlog") or 0) for row in rows}
+    set_outbox_backlog(backlog_counts)
+    payload = generate_latest_metrics()
+    return Response(content=payload, media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/db-check")

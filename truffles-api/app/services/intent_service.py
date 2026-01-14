@@ -9,7 +9,7 @@ from typing import Any, Iterable, Tuple
 
 import httpx
 
-from app.logging_config import get_logger
+from app.logging_config import get_logger, record_llm_time
 from app.services.ai_service import (
     FAST_MODEL,
     INTENT_TIMEOUT_SECONDS,
@@ -473,6 +473,7 @@ def classify_intent(message: str) -> Intent:
                     }
                 },
             )
+            record_llm_time(None, "intent_llm_ms", (time.monotonic() - llm_start) * 1000)
             logger.warning(f"Intent LLM timeout after {INTENT_TIMEOUT_SECONDS}s: {exc}")
             return Intent.OTHER
 
@@ -488,6 +489,7 @@ def classify_intent(message: str) -> Intent:
                 }
             },
         )
+        record_llm_time(None, "intent_llm_ms", (time.monotonic() - llm_start) * 1000)
         result = response.content.strip().lower()
 
         # Parse response
@@ -644,6 +646,7 @@ def route_dialogue_controller(
                     }
                 },
             )
+            record_llm_time(client_slug, "controller_llm_ms", elapsed_ms)
             logger.warning(f"Dialogue controller LLM timeout after {CONTROLLER_TIMEOUT_SECONDS}s: {exc}")
             return None, elapsed_ms, "timeout"
         except Exception as exc:
@@ -667,6 +670,7 @@ def route_dialogue_controller(
                     }
                 },
             )
+            record_llm_time(client_slug, "controller_llm_ms", elapsed_ms)
             logger.warning(f"Dialogue controller LLM failed: {exc}")
             return None, elapsed_ms, error_code
 
@@ -685,6 +689,7 @@ def route_dialogue_controller(
                 }
             },
         )
+        record_llm_time(client_slug, "controller_llm_ms", elapsed_ms)
         return response, elapsed_ms, None
 
     response, elapsed_ms, error = _call_controller_llm(
@@ -804,6 +809,7 @@ def interpret_expected_reply(
     expected_reply_type: str | None,
     carryover: dict | None = None,
     question_context: dict | None = None,
+    client_slug: str | None = None,
 ) -> dict:
     result: dict[str, Any] = {"ok": False, "payload": None, "error": None, "raw": None}
     expected_reply_type_cleaned = (
@@ -875,6 +881,7 @@ def interpret_expected_reply(
                 }
             },
         )
+        record_llm_time(client_slug, "answer_interpreter_llm_ms", elapsed_ms)
         logger.warning(
             f"Answer interpreter timeout after {ANSWER_INTERPRETER_TIMEOUT_SECONDS}s: {exc}"
         )
@@ -897,6 +904,7 @@ def interpret_expected_reply(
                 }
             },
         )
+        record_llm_time(client_slug, "answer_interpreter_llm_ms", elapsed_ms)
         logger.warning(f"Answer interpreter failed: {exc}")
         result["error"] = "error"
         return result
@@ -916,6 +924,7 @@ def interpret_expected_reply(
             }
         },
     )
+    record_llm_time(client_slug, "answer_interpreter_llm_ms", elapsed_ms)
 
     content = (response.content or "").strip()
     result["raw"] = content
