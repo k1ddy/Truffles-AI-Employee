@@ -1,4 +1,5 @@
 # ACTIVE LEARNING — План реализации
+SOURCE OF TRUTH: canonical active learning spec and status.
 
 **Дата:** 2025-12-08
 **Обновлено:** 2025-12-24

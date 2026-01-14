@@ -63,8 +63,8 @@
 Это правило сильнее любых локальных эвристик.
 
 **Приоритеты (сильнее → слабее):**
-1. **Hard‑LAW** (оплата: подтверждение/проверка/возвраты, медицинка, жалобы, переносы, тех. сбои) → только эскалация.
-2. **Policy‑gates (скидки)** → ответ **только** по правилам из client_pack; если правил нет — эскалация.
+1. **Hard‑LAW** (оплата: подтверждение/проверка/возвраты, медицинка, жалобы, переносы) → только эскалация.
+2. **Policy‑gates (скидки/способы оплаты)** → ответ **только** по правилам из client_pack; если правил нет — эскалация.
 3. **Opt-out / rejection** → мьют. Если в сообщении есть запись/цена/адрес/время — запросить re-engage и не выполнять действие до ответа.
 4. **Human request / frustration** → эскалация.
 5. **Booking flow** → сбор слотов записи (важнее цены/общих вопросов).
@@ -83,16 +83,24 @@
 - `frustration + question` → эскалация.
 - `booking + price` → слот-флоу; цену даём только если нет блоков (филиал/правила).
 
+**Живой хост — канон (in-domain):**
+- **3 исхода:** факт‑ответ (info/consult), booking intake, эскалация.
+- **Fact‑answer (info/consult):** только факты из `client_pack`/`consult_playbooks`; LLM может **только перефразировать** эти факты, новые факты/советы запрещены.
+- **Booking intake:** сбор слотов записи (`expected_reply_type`); при перебивке — факт‑ответ и возврат к последнему booking‑вопросу.
+- **Hard‑LAW:** оплата (подтверждение/проверка/возвраты), медицинка, жалобы, переносы → только эскалация.
+- **Policy‑gates:** скидки и способы оплаты разрешены **только** по явным правилам в `client_pack`; иначе эскалация.
+- **Clarify limit:** максимум 2 уточнения (`clarify_limit=2`), далее эскалация.
+
 **Booking interrupt (expected_reply_type активен):**
 - Если идёт сбор слота записи и приходит in-domain вопрос (цены/длительность/адрес/часы) → ответить по фактам **и в том же сообщении** вернуть booking‑prompt (продолжить запись).
 - Decision trace/meta: `stage=booking_interrupt`, `booking_info_interrupt=true`, `booking_info_intents` сохраняются.
 - Если сообщение не относится к записи и нет booking‑сигнала → поставить booking на паузу до явного запроса записи.
 
 **Consult clarify (pack-only, no LLM advice):**
-- Consult canon: info-first only from pack playbooks; no LLM advice/facts. If service recognized → short-circuit to normal info/booking. If playbook missing and no service → 1-2 clarifications, then escalate `consult_no_service`.
+- Consult canon: info-first only from pack playbooks; no LLM advice/facts. If explicit info/booking request (pricing/duration/location/hours/booking) and service recognized → short-circuit to normal info/booking; advice-style consult stays in consult even if service recognized. If playbook missing and no service → max 2 clarifications (`clarify_limit=2`), then escalate `consult_no_service`.
 - Consult‑интенты → пытаемся матчить `client_pack.consult_playbooks` (topic/aliases). Если playbook найден → info-first ответ только из pack (`lead`, `questions`, `options`, `next_step`), без LLM-советов/фактов.
 - Если consult‑интент содержит распознанную услугу/категорию → **short‑circuit** в обычный info/booking (без уточнения).
-- Если playbook не найден и услуги нет → 1-2 уточнения, `expected_reply_type=service_choice`; после 2 без услуги → эскалация с reason `consult_no_service`.
+- Если playbook не найден и услуги нет → максимум 2 уточнения (`clarify_limit=2`), `expected_reply_type=service_choice`; после лимита без услуги → эскалация с reason `consult_no_service`.
 - Hard‑LAW/Policy/opt‑out/human выше consult: если сработало — consult‑playbook не применяется.
 - Вариант ответа выбирается детерминированно (hash от `conversation_id + playbook_id`) — без дрейфа.
 - Trace/meta: `stage=consult_flow` (`decision=consult_clarify|consult_escalate|short_circuit`), `clarify_attempt`, `expected_reply_type=service_choice`, `consult_playbook_id`, `consult_variant_id`, `tips_used` (из `options`), `source=pack`.
@@ -142,7 +150,7 @@
 - **Enforcement‑гейты** (state/policy/LAW) могут перекрывать решение смысла ради безопасности.
 - Router — **единственный источник класса**; fast/anchor/heuristic — только fallback при низкой уверенности/ошибке.
 - LLM не меняет решение класса и не создаёт факты.
-- LLM отвечает **только по RAG**; факты приходят из data packs (truth/service matcher). Нет фактов → уточнение/эскалация.
+- LLM формулирует ответ (RAG) **только** на фактах из `client_pack` (truth/service matcher) и может лишь перефразировать их. Нет факта → максимум 2 уточнения (`clarify_limit=2`) → эскалация.
 - Валидатор ответа:
   - оплата (подтверждение/проверка/возвраты)/медицинка/жалобы/переносы → **override на эскалацию**;
   - скидки/способы оплаты → **только** если policy‑gate разрешён и правило совпало, иначе эскалация.
@@ -203,7 +211,7 @@ if is_rejection(intent):
  - **Context Manager (P0):**
    - `context_manager.current_goal` = info|consult|booking (ставится по intent_decomp)
    - `context_manager.refusal_flags` (name/phone) — только явные отказы, TTL 10 сообщений или до явной инициативы
-   - `context_manager.clarify_attempts` — счётчик уточнений по intent; после 2 уточнений → эскалация
+   - `context_manager.clarify_attempts` — счётчик уточнений по intent; `clarify_limit=2`, после лимита → эскалация
    - `context_manager.compact_summary` — детерминированное резюме фактов (услуга/время/имя/язык/отказы)
    - Все обновления пишутся в `decision_meta` и `decision_trace`
 

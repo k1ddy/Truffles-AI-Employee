@@ -1,7 +1,8 @@
 # SYSTEM REFERENCE — Техническая справка Truffles
 
 **Читай это перед любыми изменениями.**
-**Обновлено:** 2025-12-13
+**Обновлено:** 2026-01-14
+**Scope:** техсправка и операционные детали; поведение бота см. `SPECS/ARCHITECTURE.md` и `SPECS/CONSULTANT.md`.
 
 ---
 
@@ -11,7 +12,7 @@
 |----------|----------|
 | Репозиторий | `github.com/k1ddy/Truffles-AI-Employee` (один) |
 | Главная ветка | `main` |
-| Политика PR | Не формализована. Коммиты напрямую в main. |
+| Политика PR | По умолчанию через PR + CI; прямые коммиты в main — исключение. |
 | CI | `.github/workflows/ci.yml` — ruff + pytest |
 
 ---
@@ -23,10 +24,10 @@
 | Backend API | Python 3.11 + FastAPI |
 | База данных | PostgreSQL 15 |
 | Векторная БД | Qdrant (self-hosted) |
-| Embeddings | BGE-M3 (self-hosted, HTTP `http://bge-m3:8080/embed`) |
-| LLM | OpenAI API (по умолчанию `gpt-5-mini`) |
+| Embeddings | BGE-M3 (self-hosted, default `http://bge-m3:80/embed`, override `BGE_M3_URL`) |
+| LLM | OpenAI-compatible API (default `FAST_MODEL=gpt-5-mini`; router uses `ROUTER_MODEL` or `gpt-4o-mini` when FAST_MODEL starts with gpt-5) |
 | Кэш/очереди | Redis |
-| Оркестрация | Docker + Docker Compose |
+| Оркестрация | Docker (API через `restart_api.sh`), compose — для инфры/локально |
 | Reverse proxy | Traefik |
 | WhatsApp | ChatFlow API (`app.chatflow.kz`) |
 | Telegram | Bot API (webhook) |
@@ -42,7 +43,7 @@
 |----|-----|
 | `/home/zhan/truffles-main/truffles-api/.env` | Основные секреты (OPENAI_API_KEY, DATABASE_URL, QDRANT_*) |
 | БД `client_settings` | telegram_bot_token, owner_telegram_id |
-| Код `chatflow_service.py` | CHATFLOW_TOKEN (хардкод — плохо) |
+| Код `chatflow_service.py` | `CHATFLOW_TOKEN` берётся из env (в .env), хардкода нет |
 
 ---
 
@@ -107,7 +108,7 @@ ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/health"
 
 ## 5. Архитектура — потоки данных
 
-### WhatsApp → Бот
+### WhatsApp → Бот (факт)
 ```
 WhatsApp клиент
     ↓
@@ -115,13 +116,11 @@ ChatFlow (app.chatflow.kz)
     ↓
 POST /webhook/{client_slug} (legacy wrapper: /webhook)
     ↓
-intent_service.classify_intent()
+ACK-first: outbox enqueue
     ↓
-ai_service.generate_ai_response()
+outbox worker/cron → _handle_webhook_payload
     ↓
-knowledge_service → Qdrant RAG
-    ↓
-LLM (OpenAI)
+decision graph (state/LAW/policy/booking/info/consult)
     ↓
 chatflow_service → WhatsApp
 ```
@@ -263,7 +262,7 @@ def is_owner_response(db, client_id, manager_telegram_id):
 |----------|----------|
 | Тип группы | Супергруппа с темами (forum) |
 | Webhook URL | `https://api.truffles.kz/telegram-webhook` |
-| Кнопки | Inline buttons: `take_{handover_id}`, `resolve_{handover_id}` |
+| Кнопки | Inline buttons: `take_{handover_id}`, `return_{handover_id}`, `skip_{handover_id}`; после take заменяются на `resolve_{handover_id}` |
 | Owner detection | `client_settings.owner_telegram_id` == `from_user.id` |
 | Manager | Любой кто пишет в топике при активной заявке |
 
@@ -312,7 +311,8 @@ GET https://app.chatflow.kz/api/v1/send-text
 | Параметр | Значение | Файл |
 |----------|----------|------|
 | Qdrant score_threshold | 0.5 | knowledge_service.py |
-| KNOWLEDGE_CONFIDENCE_THRESHOLD | 0.7 | ai_service.py |
+| MID_CONFIDENCE_THRESHOLD | 0.5 | ai_service.py |
+| HIGH_CONFIDENCE_THRESHOLD | 0.85 | ai_service.py |
 
 ### Intents
 | Всегда эскалируются | `HUMAN_REQUEST`, `FRUSTRATION` |
@@ -394,7 +394,9 @@ pytest tests/ -v
 
 ---
 
-## 15. Известные проблемы
+## 15. Известные проблемы (legacy)
+
+Актуальные GAP/риски ведём в `docs/IMPERIUM_GAPS.yaml` и `STATE.md`. Этот список — исторический, требует проверки.
 
 ### Критичные
 1. **Manager reply не работает** — `find_conversation_by_telegram` возвращает None

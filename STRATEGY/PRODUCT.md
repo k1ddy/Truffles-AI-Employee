@@ -1,4 +1,5 @@
 # ПРОДУКТ TRUFFLES
+SOURCE OF TRUTH: pricing and feature scope.
 
 **Единственный источник правды по тарифам и функционалу.**
 **Обновлено:** 2025-12-10
