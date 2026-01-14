@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.models import ClientSettings, Conversation, Handover, User
+from app.models import Branch, ClientSettings, Conversation, Handover, User
 from app.services.alert_service import alert_error
 from app.services.state_machine import ConversationState
 from app.services.telegram_service import TelegramService, build_handover_buttons, format_handover_message
@@ -21,6 +21,43 @@ def get_telegram_credentials(db: Session, client_id: UUID) -> Tuple[Optional[str
         return settings.telegram_bot_token, settings.telegram_chat_id
 
     return None, None
+
+
+def resolve_telegram_routing(
+    db: Session,
+    *,
+    conversation: Conversation,
+    client_id: UUID,
+) -> dict:
+    settings = db.query(ClientSettings).filter(ClientSettings.client_id == client_id).first()
+    manager_scope = getattr(settings, "manager_scope", None) or "branch"
+    bot_token = getattr(settings, "telegram_bot_token", None)
+    chat_id = getattr(settings, "telegram_chat_id", None)
+    routing_source = "client"
+    branch_chat_id = None
+    branch_id = conversation.branch_id if conversation else None
+
+    if manager_scope == "branch" and branch_id:
+        branch = (
+            db.query(Branch)
+            .filter(Branch.id == branch_id, Branch.client_id == client_id)
+            .first()
+        )
+        if branch and branch.telegram_chat_id:
+            branch_chat_id = branch.telegram_chat_id
+            chat_id = branch_chat_id
+            routing_source = "branch"
+        else:
+            routing_source = "branch_fallback"
+
+    return {
+        "bot_token": bot_token,
+        "chat_id": chat_id,
+        "routing_source": routing_source,
+        "manager_scope": manager_scope,
+        "branch_id": str(branch_id) if branch_id else None,
+        "branch_chat_id": branch_chat_id,
+    }
 
 
 def create_handover(
@@ -113,9 +150,16 @@ def send_telegram_notification(
     conversation: Conversation,
     user: User,
     message: str,
+    routing_meta: dict | None = None,
 ) -> bool:
     """Send handover notification to Telegram topic with buttons and pin."""
-    bot_token, chat_id = get_telegram_credentials(db, handover.client_id)
+    routing_meta = routing_meta or resolve_telegram_routing(
+        db,
+        conversation=conversation,
+        client_id=handover.client_id,
+    )
+    bot_token = routing_meta.get("bot_token")
+    chat_id = routing_meta.get("chat_id")
 
     if not bot_token or not chat_id:
         logger.warning(f"No Telegram credentials for client {handover.client_id}")

@@ -1214,55 +1214,121 @@ def _tokenize_for_bm25(text: str) -> list[str]:
     return [token for token in tokens if len(token) > 1]
 
 
-def _fetch_bm25_corpus(client_slug: str, *, max_docs: int) -> list[dict]:
+def _build_rag_filter(
+    *,
+    client_slug: str,
+    branch_id: str | None,
+    knowledge_tag: str | None,
+) -> tuple[dict, dict]:
+    filter_payload = {"must": [{"key": "metadata.client_slug", "match": {"value": client_slug}}]}
+    filter_meta = {
+        "client_slug": client_slug,
+        "branch_id": branch_id,
+        "knowledge_tag": knowledge_tag,
+    }
+    if knowledge_tag:
+        filter_payload["must"].append(
+            {"key": "metadata.knowledge_tag", "match": {"value": knowledge_tag}}
+        )
+        filter_meta.update({"filter_mode": "branch", "filter_reason": "knowledge_tag"})
+    elif branch_id:
+        filter_payload["must"].append(
+            {"key": "metadata.branch_id", "match": {"value": branch_id}}
+        )
+        filter_meta.update({"filter_mode": "branch", "filter_reason": "branch_id"})
+    else:
+        filter_meta.update({"filter_mode": "client", "filter_reason": "branch_missing"})
+    return filter_payload, filter_meta
+
+
+def _fetch_bm25_corpus(
+    client_slug: str,
+    *,
+    max_docs: int,
+    branch_id: str | None = None,
+    knowledge_tag: str | None = None,
+) -> tuple[list[dict], dict]:
     if not client_slug or max_docs <= 0:
-        return []
+        return [], {"filter_mode": "client", "filter_reason": "missing_client_slug"}
     headers = {"api-key": QDRANT_API_KEY} if QDRANT_API_KEY else None
-    points: list[dict] = []
-    offset = None
-    limit = min(100, max_docs)
-    with httpx.Client(timeout=RAG_BM25_TIMEOUT_SECONDS) as client:
-        while len(points) < max_docs:
-            payload = {
-                "limit": limit,
-                "with_payload": True,
-                "with_vectors": False,
-                "filter": {"must": [{"key": "metadata.client_slug", "match": {"value": client_slug}}]},
-            }
-            if offset is not None:
-                payload["offset"] = offset
-            response = client.post(
-                f"{QDRANT_HOST}/collections/{QDRANT_COLLECTION}/points/scroll",
-                headers=headers,
-                json=payload,
-            )
-            if response.status_code != 200:
-                logger.warning(
-                    "BM25 scroll failed",
-                    extra={"context": {"status": response.status_code, "client_slug": client_slug}},
+    filter_payload, filter_meta = _build_rag_filter(
+        client_slug=client_slug,
+        branch_id=branch_id,
+        knowledge_tag=knowledge_tag,
+    )
+
+    def _scroll_points(payload: dict) -> list[dict]:
+        points: list[dict] = []
+        offset = None
+        limit = min(100, max_docs)
+        with httpx.Client(timeout=RAG_BM25_TIMEOUT_SECONDS) as client:
+            while len(points) < max_docs:
+                request_payload = dict(payload)
+                request_payload.update(
+                    {
+                        "limit": limit,
+                        "with_payload": True,
+                        "with_vectors": False,
+                    }
                 )
-                break
-            data = response.json().get("result") or {}
-            batch = data.get("points") or []
-            points.extend(batch)
-            offset = data.get("next_page_offset")
-            if not offset or not batch:
-                break
-            limit = min(100, max_docs - len(points))
-    return points[:max_docs]
+                if offset is not None:
+                    request_payload["offset"] = offset
+                response = client.post(
+                    f"{QDRANT_HOST}/collections/{QDRANT_COLLECTION}/points/scroll",
+                    headers=headers,
+                    json=request_payload,
+                )
+                if response.status_code != 200:
+                    logger.warning(
+                        "BM25 scroll failed",
+                        extra={"context": {"status": response.status_code, "client_slug": client_slug}},
+                    )
+                    break
+                data = response.json().get("result") or {}
+                batch = data.get("points") or []
+                points.extend(batch)
+                offset = data.get("next_page_offset")
+                if not offset or not batch:
+                    break
+                limit = min(100, max_docs - len(points))
+        return points[:max_docs]
+
+    points = _scroll_points({"filter": filter_payload})
+    if points or filter_meta.get("filter_mode") != "branch":
+        return points, filter_meta
+
+    fallback_payload, fallback_meta = _build_rag_filter(
+        client_slug=client_slug,
+        branch_id=None,
+        knowledge_tag=None,
+    )
+    fallback_meta.update({"filter_mode": "client_fallback", "filter_reason": "branch_filter_empty"})
+    points = _scroll_points({"filter": fallback_payload})
+    return points, fallback_meta
 
 
-def _bm25_search(query: str, client_slug: str) -> list[dict]:
+def _bm25_search(
+    query: str,
+    client_slug: str,
+    *,
+    branch_id: str | None = None,
+    knowledge_tag: str | None = None,
+) -> tuple[list[dict], dict | None]:
     query_tokens = _tokenize_for_bm25(query)
     if not query_tokens:
-        return []
+        return [], None
     try:
-        corpus = _fetch_bm25_corpus(client_slug, max_docs=RAG_BM25_MAX_DOCS)
+        corpus, filter_meta = _fetch_bm25_corpus(
+            client_slug,
+            max_docs=RAG_BM25_MAX_DOCS,
+            branch_id=branch_id,
+            knowledge_tag=knowledge_tag,
+        )
     except Exception as exc:
         logger.warning(f"BM25 corpus fetch failed: {exc}")
-        return []
+        return [], None
     if not corpus:
-        return []
+        return [], filter_meta
 
     doc_tokens: list[list[str]] = []
     doc_meta: list[dict] = []
@@ -1283,7 +1349,7 @@ def _bm25_search(query: str, client_slug: str) -> list[dict]:
         )
 
     if not doc_tokens:
-        return []
+        return [], filter_meta
 
     doc_count = len(doc_tokens)
     avg_len = sum(len(tokens) for tokens in doc_tokens) / max(doc_count, 1)
@@ -1315,7 +1381,7 @@ def _bm25_search(query: str, client_slug: str) -> list[dict]:
             scores.append((idx, score))
 
     if not scores:
-        return []
+        return [], filter_meta
     scores.sort(key=lambda item: item[1], reverse=True)
     top = scores[: max(RAG_BM25_LIMIT, 1)]
     results: list[dict] = []
@@ -1323,7 +1389,7 @@ def _bm25_search(query: str, client_slug: str) -> list[dict]:
         meta = dict(doc_meta[idx])
         meta["bm25_score"] = score
         results.append(meta)
-    return results
+    return results, filter_meta
 
 
 def hybrid_retrieve_knowledge(
@@ -1332,14 +1398,22 @@ def hybrid_retrieve_knowledge(
     client_slug: str,
     vector_results: list[dict],
     limit: int = 5,
+    branch_id: str | None = None,
+    knowledge_tag: str | None = None,
 ) -> tuple[list[dict], dict]:
     bm25_enabled = _is_env_enabled(os.environ.get("RAG_BM25_ENABLED"), default=True)
     if not QDRANT_API_KEY or os.environ.get("PYTEST_CURRENT_TEST"):
         bm25_enabled = False
     bm25_results: list[dict] = []
+    bm25_filter_meta: dict | None = None
     if bm25_enabled:
         try:
-            bm25_results = _bm25_search(query, client_slug)
+            bm25_results, bm25_filter_meta = _bm25_search(
+                query,
+                client_slug,
+                branch_id=branch_id,
+                knowledge_tag=knowledge_tag,
+            )
         except Exception as exc:
             logger.warning(f"BM25 search failed: {exc}")
 
@@ -1404,4 +1478,6 @@ def hybrid_retrieve_knowledge(
         "bm25_weight": bm25_weight,
         "bm25_enabled": bm25_enabled,
     }
+    if isinstance(bm25_filter_meta, dict):
+        rag_scores["bm25_filter"] = bm25_filter_meta
     return merged_results, rag_scores

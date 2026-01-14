@@ -22,9 +22,9 @@ from app.services.state_service import (
 
 class TestEscalateToPending:
     @patch("app.services.state_service.TelegramService")
-    @patch("app.services.state_service.get_telegram_credentials")
-    def test_success_from_bot_active(self, mock_creds, mock_telegram_class):
-        mock_creds.return_value = ("token", "chat_id")
+    @patch("app.services.state_service.resolve_telegram_routing")
+    def test_success_from_bot_active(self, mock_routing, mock_telegram_class):
+        mock_routing.return_value = {"bot_token": "token", "chat_id": "chat_id"}
         mock_telegram = Mock()
         mock_telegram.create_forum_topic.return_value = 12345
         mock_telegram_class.return_value = mock_telegram
@@ -60,9 +60,9 @@ class TestEscalateToPending:
         assert result.ok is False
         assert result.error_code == "invalid_state"
 
-    @patch("app.services.state_service.get_telegram_credentials")
-    def test_fails_without_telegram_credentials(self, mock_creds):
-        mock_creds.return_value = (None, None)
+    @patch("app.services.state_service.resolve_telegram_routing")
+    def test_fails_without_telegram_credentials(self, mock_routing):
+        mock_routing.return_value = {"bot_token": None, "chat_id": None}
 
         db = Mock()
         conversation = Mock()
