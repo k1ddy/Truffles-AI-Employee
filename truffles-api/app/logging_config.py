@@ -7,6 +7,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 try:  # Optional at runtime; required in requirements.txt
+    from opentelemetry import trace
+except Exception:  # pragma: no cover
+    trace = None
+
+try:  # Optional at runtime; required in requirements.txt
     from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, REGISTRY, generate_latest
 except Exception:  # pragma: no cover
     CONTENT_TYPE_LATEST = "text/plain; version=0.0.4"
@@ -15,11 +20,6 @@ except Exception:  # pragma: no cover
     Histogram = None
     REGISTRY = None
     generate_latest = None
-
-try:  # Optional at runtime; required in requirements.txt
-    from opentelemetry import trace
-except Exception:  # pragma: no cover
-    trace = None
 
 
 class JSONFormatter(logging.Formatter):
