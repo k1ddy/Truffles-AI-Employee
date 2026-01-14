@@ -319,6 +319,11 @@ CORE_EVAL_IDS = {
     "E711",
     "E744",
     "E745",
+    "E746",
+    "E747",
+    "E748",
+    "E749",
+    "E750",
 }
 TURNS_EXAMPLE_CASE = {
     "id": "EX_TURNS_001",
