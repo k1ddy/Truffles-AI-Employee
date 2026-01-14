@@ -1,4 +1,5 @@
-﻿# Салон "Мира" — Частые вопросы
+# Салон "Мира" — Частые вопросы
+LEGACY/ARCHIVE: outdated copy of knowledge/demo_salon/faq.md; do not edit.
 
 > Демо-версия. При изменениях обновить документ и пересинхронизировать KB.
 

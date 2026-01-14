@@ -1,4 +1,5 @@
 # Частые вопросы
+TEMPLATE: use to create knowledge/<client_slug>/faq.md; not runtime.
 
 ## Запись
 

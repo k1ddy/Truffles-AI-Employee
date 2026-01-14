@@ -1,4 +1,5 @@
 # Работа с возражениями
+TEMPLATE: use to create knowledge/<client_slug>/objections.md; not runtime.
 
 ## Дорого
 
