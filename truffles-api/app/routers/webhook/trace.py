@@ -27,6 +27,7 @@ DECISION_TRACE_CRITICAL_STAGES = {
     "re_entry",
     "session_memory",
     "state_transition",
+    "truth_gate",
 }
 
 
