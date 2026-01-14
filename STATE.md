@@ -584,6 +584,18 @@
   - msg_id `3b41ca5c-ea4a-42af-94b1-7783eeb06290` (messageId `3EB096B413ADC6E015AA77`) — intent=services_overview, source=truth_gate, service_semantic_score=NULL.
 - Trace (decision_trace, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, recorded_at >= `2026-01-14T06:51:26Z`): service_semantic_matcher rows=0.
 
+### 2026-01-14 — Guest policy + consult pack (post-merge PR #179)
+
+**Что сделали:**
+- Подтвердили guest_policy (pack‑lexicon) и consult pack‑reply на реальном inbound после мержа PR #179.
+
+**Evidence:**
+- /admin/version: `{"version":"main","git_commit":"df258b353a4c84ee61e2c3b2ca49736898a72695","build_time":"2026-01-14T23:11:50Z"}`
+- Live inbound (allowlist JID 77015705555):
+  - guest_policy: msg `dec06e10-1412-4eda-a9b6-ec5ddb17522c` (messageId `3EB07BDB44C820A0BBE8FF`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`) decision_meta `intent=info_bundle`, `info_sections=["address","hours","guest_policy"]`, `source=class_router`; assistant reply `acda6da0-6cfe-4ad0-a431-cd1c7cca1ea9` содержит “зона ожидания”.
+  - consult pack: msg `9a83a6a3-5838-44be-92d6-67800346a953` (messageId `3EB080517E51CCA1ECA027`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`) decision_meta `intent=consult_reply`, `source=pack`, `consult_playbook_id=general_consult`, `consult_variant_id=3eca06b5`, `tips_used` (3 пункта).
+- consult_flow trace: `{"stage":"consult_flow","state":"bot_active","reason":"consult_pack","decision":"consult_reply","recorded_at":"2026-01-14T23:16:34.513798+00:00","consult_variant_id":"3eca06b5","consult_playbook_id":"general_consult"}`.
+
 ### 2026-01-14 — GAP-017 Branch Isolation (RAG + Escalation)
 
 **Что сделали:**
