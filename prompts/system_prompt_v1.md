@@ -1,4 +1,5 @@
 # System Prompt v1 — AI-Сотрудник Truffles
+DERIVED/TEMPLATE: sales/marketing template, not runtime bot prompt.
 
 **Версия:** 1.0
 **Дата:** 2025-12-02
