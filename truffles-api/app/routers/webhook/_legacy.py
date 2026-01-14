@@ -1372,6 +1372,17 @@ def _controller_meta_updates_from_class_router(class_router_result: dict | None)
     }
 
 
+def _router_observability_updates_from_class_router(class_router_result: dict | None) -> dict[str, Any]:
+    if not isinstance(class_router_result, dict):
+        return {}
+    controller_meta = class_router_result.get("controller")
+    if not isinstance(controller_meta, dict):
+        return {}
+    attempted = bool(controller_meta.get("attempted"))
+    reason = "none" if attempted else "not_run"
+    return _router_observability_meta(eligible=attempted, reason=reason)
+
+
 def _is_refusal_flag_active(refusal_flags: dict | None, field: str) -> bool:
     if not isinstance(refusal_flags, dict):
         return False
@@ -7169,6 +7180,7 @@ async def _handle_webhook_payload(
                     if info_meta_combined:
                         meta_updates.update(info_meta_combined)
                     meta_updates.update(_controller_meta_updates_from_class_router(class_router_result))
+                    meta_updates.update(_router_observability_updates_from_class_router(class_router_result))
                     _update_message_decision_metadata(saved_message, meta_updates)
                 _maybe_store_class_carryover(
                     conversation=conversation,
@@ -7253,6 +7265,7 @@ async def _handle_webhook_payload(
                     if isinstance(base_bundle_meta, dict) and base_bundle_meta:
                         meta_updates.update(base_bundle_meta)
                     meta_updates.update(_controller_meta_updates_from_class_router(class_router_result))
+                    meta_updates.update(_router_observability_updates_from_class_router(class_router_result))
                     _update_message_decision_metadata(saved_message, meta_updates)
                 _maybe_store_class_carryover(
                     conversation=conversation,
@@ -8066,6 +8079,7 @@ async def _handle_webhook_payload(
                 if info_meta_combined:
                     meta_updates.update(info_meta_combined)
                 meta_updates.update(_controller_meta_updates_from_class_router(class_router_result))
+                meta_updates.update(_router_observability_updates_from_class_router(class_router_result))
                 _update_message_decision_metadata(saved_message, meta_updates)
             _maybe_store_class_carryover(
                 conversation=conversation,
