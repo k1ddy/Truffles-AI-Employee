@@ -9,6 +9,8 @@ import requests
 from pathlib import Path
 
 CLIENT_SLUG = "demo_salon"
+BRANCH_ID = os.environ.get("BRANCH_ID")
+KNOWLEDGE_TAG = os.environ.get("KNOWLEDGE_TAG")
 
 def _resolve_docker_ip(container_name: str) -> str | None:
     try:
@@ -69,15 +71,20 @@ def split_into_chunks(text, doc_name, doc_id):
         lines = section.split('\n')
         title = lines[0].replace('#', '').strip() if lines else f"Section {i}"
         
+        metadata = {
+            "client_slug": CLIENT_SLUG,
+            "doc_id": doc_id,
+            "doc_name": doc_name,
+            "section_title": title,
+            "section_index": i,
+        }
+        if BRANCH_ID:
+            metadata["branch_id"] = BRANCH_ID
+        if KNOWLEDGE_TAG:
+            metadata["knowledge_tag"] = KNOWLEDGE_TAG
         chunks.append({
             "content": section,
-            "metadata": {
-                "client_slug": CLIENT_SLUG,
-                "doc_id": doc_id,
-                "doc_name": doc_name,
-                "section_title": title,
-                "section_index": i
-            }
+            "metadata": metadata,
         })
     
     return chunks

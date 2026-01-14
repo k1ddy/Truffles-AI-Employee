@@ -3,7 +3,7 @@
 Синхронизация базы знаний одного клиента.
 
 Использование:
-  python3 sync_client.py <client_slug> [docs_folder] [--validate] [--validate-only]
+  python3 sync_client.py <client_slug> [docs_folder] [--branch-id UUID] [--knowledge-tag TAG] [--validate] [--validate-only]
 
 Примеры:
   python3 sync_client.py demo_salon
@@ -333,19 +333,18 @@ def sync_services_index(client_slug: str) -> int:
     return len(points)
 
 
-def delete_client_docs(client_slug):
-    """Удалить все документы клиента из Qdrant"""
+def delete_client_docs(client_slug, *, branch_id: str | None = None, knowledge_tag: str | None = None):
+    """Удалить документы клиента из Qdrant (опционально только для ветки)."""
     print(f"Удаляю старые документы {client_slug}...")
+    must = [{"key": "metadata.client_slug", "match": {"value": client_slug}}]
+    if knowledge_tag:
+        must.append({"key": "metadata.knowledge_tag", "match": {"value": knowledge_tag}})
+    if branch_id:
+        must.append({"key": "metadata.branch_id", "match": {"value": branch_id}})
     resp = requests.post(
         f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}/points/delete",
         headers={"api-key": QDRANT_API_KEY, "Content-Type": "application/json"},
-        json={
-            "filter": {
-                "must": [
-                    {"key": "metadata.client_slug", "match": {"value": client_slug}}
-                ]
-            }
-        },
+        json={"filter": {"must": must}},
         timeout=30
     )
     result = resp.json()
@@ -363,7 +362,15 @@ def upsert_to_qdrant(points):
     )
     return resp.json()
 
-def split_into_chunks(text, doc_name, doc_id, client_slug):
+def split_into_chunks(
+    text,
+    doc_name,
+    doc_id,
+    client_slug,
+    *,
+    branch_id: str | None = None,
+    knowledge_tag: str | None = None,
+):
     """Разбить текст на chunks по заголовкам"""
     chunks = []
     sections = re.split(r'\n(?=##?\s)', text)
@@ -376,20 +383,25 @@ def split_into_chunks(text, doc_name, doc_id, client_slug):
         lines = section.split('\n')
         title = lines[0].replace('#', '').strip() if lines else f"Section {i}"
         
+        metadata = {
+            "client_slug": client_slug,
+            "doc_id": doc_id,
+            "doc_name": doc_name,
+            "section_title": title,
+            "section_index": i,
+        }
+        if branch_id:
+            metadata["branch_id"] = branch_id
+        if knowledge_tag:
+            metadata["knowledge_tag"] = knowledge_tag
         chunks.append({
             "content": section,
-            "metadata": {
-                "client_slug": client_slug,
-                "doc_id": doc_id,
-                "doc_name": doc_name,
-                "section_title": title,
-                "section_index": i
-            }
+            "metadata": metadata,
         })
     
     return chunks
 
-def sync_folder(client_slug, docs_dir):
+def sync_folder(client_slug, docs_dir, *, branch_id: str | None = None, knowledge_tag: str | None = None):
     """Синхронизировать папку с документами"""
     if not os.path.exists(docs_dir):
         print(f"❌ Папка не найдена: {docs_dir}")
@@ -404,7 +416,7 @@ def sync_folder(client_slug, docs_dir):
     print(f"Найдено файлов: {len(files)}")
     
     # Удаляем старые документы клиента
-    delete_client_docs(client_slug)
+    delete_client_docs(client_slug, branch_id=branch_id, knowledge_tag=knowledge_tag)
     
     # Обрабатываем каждый файл
     all_points = []
@@ -416,7 +428,14 @@ def sync_folder(client_slug, docs_dir):
             content = f.read()
         
         doc_id = hashlib.md5(filepath.encode()).hexdigest()[:12]
-        chunks = split_into_chunks(content, filename, doc_id, client_slug)
+        chunks = split_into_chunks(
+            content,
+            filename,
+            doc_id,
+            client_slug,
+            branch_id=branch_id,
+            knowledge_tag=knowledge_tag,
+        )
         print(f"  {filename}: {len(chunks)} chunks")
         
         for chunk in chunks:
@@ -443,6 +462,8 @@ def main():
     parser = argparse.ArgumentParser(description="Синхронизация базы знаний одного клиента.")
     parser.add_argument("client_slug", help="Slug клиента, например demo_salon")
     parser.add_argument("docs_folder", nargs="?", help="Папка с .md файлами (по умолчанию knowledge/<slug>)")
+    parser.add_argument("--branch-id", help="UUID филиала для branch-level синхронизации")
+    parser.add_argument("--knowledge-tag", help="knowledge_tag для branch-level синхронизации")
     parser.add_argument(
         "--validate",
         action="store_true",
@@ -456,6 +477,8 @@ def main():
     args = parser.parse_args()
 
     client_slug = args.client_slug
+    branch_id = args.branch_id
+    knowledge_tag = args.knowledge_tag
 
     # Папка с документами
     if args.docs_folder:
@@ -476,7 +499,7 @@ def main():
     print(f"Папка: {docs_dir}")
     print(f"=" * 50)
 
-    total = sync_folder(client_slug, docs_dir)
+    total = sync_folder(client_slug, docs_dir, branch_id=branch_id, knowledge_tag=knowledge_tag)
     services_total = sync_services_index(client_slug)
 
     print(f"\n{'=' * 50}")
