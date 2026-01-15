@@ -3,18 +3,36 @@ meta:
   generated_by: "Codex"
   repo_root: "/home/zhan/truffles-main"
   repo_commit: "2b16a72e81b56e8a1ccaea1c6bbdca265d235fac"
+  status: "DERIVED"
+  notes: "Derived context; not canonical."
   evidence:
     - "git rev-parse HEAD (command)"
     - "date +%Y-%m-%d (command)"
 
 project:
   name: "Truffles"
-  description: "WhatsApp auto-responder for business"
+  description: "Managed consultant in WhatsApp for business"
   value_to_client: "Reply late at night without waiting until morning"
   value_to_business: "No 24/7 manager; bot handles ~80% of questions"
-  positioning: "Auto-responder + payment checks, not AI"
+  positioning: "Consultant + booking + escalation, not AI"
   evidence:
     - "AGENTS.md:9-15"
+    - "STRATEGY/PRODUCT.md:20-32"
+
+session_context:
+  last_update: "2026-01-15"
+  intent: "Stabilize canon -> runtime alignment with evidence-first workflow"
+  pain_points:
+    - "Behavior drift between SPECS and runtime pack undermines trust"
+    - "Expected_reply/consult carryover can override explicit pricing/duration questions"
+    - "Missing decision_trace on some paths blocks verification"
+    - "Legacy god-handler makes invariants hard to enforce"
+  decisions:
+    - "Consult is pack-only; LLM cannot add facts"
+    - "No payment verification; payment info only from client_pack"
+    - "One-issue flow with evidence for every fix"
+  evidence:
+    - "Session notes (2026-01-15)"
 
 runtime:
   server:

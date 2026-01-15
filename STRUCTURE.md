@@ -11,11 +11,9 @@
 | `STATE.md` | Состояние, план, backlog, история | Архитектор (каждую сессию) |
 | `AGENTS.md` | Принципы работы, роли, ошибки | Архитектор (каждую сессию) |
 | `STRUCTURE.md` | Этот файл — карта проекта | Оба (каждую сессию) |
-| `HOW_TO_WORK.md` | Инструкция для Жанбола | Жанбол |
 | `TECH.md` | Доступы, команды, данные сервера | Кодер |
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
-| `CHATGPT_QUESTIONS_ANSWERS.md` | Ответы на анкету (архитектура/операции) | Архитектор |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 
@@ -26,10 +24,53 @@
 | Артефакт | Ответственный |
 |----------|----------------|
 | `STATE.md` | Brain (последний шаг каждой сессии) |
-| `SPECS/*` | Top Architect |
+| `SPECS/*` (кроме `SPECS/ACTIVE_LEARNING_PLAN.md`) | Top Architect |
 | `docs/TECH_STATUS.md` | QA/OPS (после прогонов) |
 | `docs/SELLING_TRUTHS.md` | Top Architect / Brain |
 | `STRUCTURE.md` | Brain |
+
+---
+
+## КАНОН-КАРТА (что считать истиной)
+
+- Процесс/роли: `AGENTS.md`, `docs/SESSION_START_PROMPT.txt`.
+- Статус/evidence: `STATE.md` (единственный источник фактов с проверкой).
+- Бизнес-ограничения: `STRATEGY/REQUIREMENTS.md`.
+- Тарифы/обещания: `STRATEGY/PRODUCT.md` + `docs/SELLING_TRUTHS.md` (claim/proof/boundary).
+- Поведение/архитектура: `SPECS/*` (кроме `SPECS/ACTIVE_LEARNING_PLAN.md`; ключевые: `CONSULTANT.md`, `ESCALATION.md`, `ARCHITECTURE.md`).
+- План/приоритеты: `STRATEGY/TECH_ROADMAP.md`.
+- Операционные SOP: `SPECS/SYSTEM_REFERENCE.md` (deploy/knowledge update) + `TECH.md`.
+- Решения/GAP: `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml`.
+- Runtime pack: `truffles-api/app/knowledge/demo_salon/*`; RAG docs: `knowledge/demo_salon/*`.
+- Derived/статусы: `docs/TECH_STATUS.md`, `SUMMARY.md`, `docs/IMPERIUM_CONTEXT.yaml` (не канон).
+
+---
+
+## ДОК-СТАТУСЫ (CANON / DERIVED / ARCHIVE)
+
+**CANON (истина, спорить нельзя):**
+- `STATE.md` — доказательства и текущий статус.
+- `STRATEGY/VISION.md` — ДНК/принципы/зачем.
+- `STRATEGY/REQUIREMENTS.md` — бизнес‑ограничения.
+- `STRATEGY/PRODUCT.md` + `docs/SELLING_TRUTHS.md` — тарифы и внешние обещания.
+- `STRATEGY/TECH_ROADMAP.md` — приоритеты и фазы.
+- `SPECS/*` (кроме `SPECS/ACTIVE_LEARNING_PLAN.md`) — поведение/архитектура (норматив).
+- `docs/SESSION_START_PROMPT.txt` — протокол старта.
+- `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml` — решения и GAP.
+- `truffles-api/app/knowledge/<client_slug>/*` — runtime pack (truth/policy/eval).
+- `knowledge/<client_slug>/*` — канон RAG‑контента клиента.
+
+**DERIVED (рабочие копии/сводки; не источник истины):**
+- `SUMMARY.md`, `docs/IMPERIUM_CONTEXT.yaml`, `docs/TECH_STATUS.md`.
+- `Business/*` — бизнес‑документы (sales/legal/onboarding); внешние обещания — только из `STRATEGY/PRODUCT.md` и `docs/SELLING_TRUTHS.md`.
+- `prompts/*`, `context/intents/*` — реализации, должны соответствовать `SPECS/*`.
+
+**TEMPLATE/ARCHIVE (не канон, не редактировать как истину):**
+- `knowledge/*.md` (в корне) — шаблоны, не участвуют в рантайме.
+- `SPECS/ACTIVE_LEARNING_PLAN.md` — архивный план, не канон.
+- `ops/templates/*` — шаблоны для заполнения.
+- `ops/demo_salon/*` — legacy копии.
+- `ops/demo_salon_docs/*` — derived копии для синка/фоллбэка.
 
 ---
 
@@ -76,8 +117,6 @@
 | `INFRASTRUCTURE.md` | Инфраструктура, безопасность, CI/CD, тесты | DevOps, качество |
 | `MULTI_TENANT.md` | Мультитенантность, онбординг | Новый заказчик |
 | `SYSTEM_REFERENCE.md` | Системные референсы (интеграции/точки правды) | При аудите/интеграциях |
-| `WEEK2_CODER_TASKS.md` | Задачи Недели 2 для кодера | Архив |
-| `WEEK3_CODER_TASKS.md` | Задачи Недели 3 для кодера | Кодер: текущая неделя |
 
 **Архитектор:** Читать перед проектированием.
 **Кодер:** Читать раздел по задаче.
@@ -168,7 +207,7 @@ truffles-api/
 | `objections.md` | Возражения и ответы |
 | `cases.md` | Кейсы успеха |
 | `examples.md` | Примеры диалогов (как отвечать) |
-| `slang.md` | Сленг СНГ (Kaspi, "ноготочки") |
+| `slang.md` | Сленг СНГ (оплата, "ноготочки") |
 | `README.md` | Описание формата |
 | `demo_salon/` | Канон KB для Qdrant (demo salon docs) |
 
