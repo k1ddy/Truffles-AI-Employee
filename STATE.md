@@ -614,6 +614,26 @@
   - branch telegram_chat_id `-1003412216010`, client_settings manager_scope=branch
 - Note: truffles policy_pack was enabled via `policy_type=demo_salon` at `2026-01-14T13:24:12Z` and cleared at `2026-01-14T13:25:52Z` for hard_law verification.
 
+### 2026-01-15 — GAP-017 Strict branch filter (RAG uses branch_id/knowledge_tag)
+
+**Что сделали:**
+- Передали branch_id/knowledge_tag в timing_context после branch routing, чтобы RAG/BM25 строго фильтровал по branch.
+- Убрали client-level fallback: `branch_filter_empty` возвращает 0 результатов без подмены фильтра.
+
+**Evidence:**
+- PR #185: https://github.com/k1ddy/Truffles-AI-Employee/pull/185
+- CI (PR workflow_dispatch): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21014440864
+- CI main + deploy: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21014503341
+- /admin/version: `{"version":"main","git_commit":"7473358ac50435c2b85a00125e758f9d5fe98220","build_time":"2026-01-15T00:09:47Z"}`
+- demo_salon inbound (branch filter applied):
+  - msg_id `03bbec13-6cad-4914-948e-c64da1964a0c` (messageId `sim-branch-demo-1768435920`), conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+  - decision_meta.rag_scores.bm25_filter: `{"branch_id":"b7f75692-951e-421a-aae6-f5db97394799","client_slug":"demo_salon","filter_mode":"branch","filter_reason":"branch_id","knowledge_tag":null}`
+  - decision_trace (rag_retrieve): `{"filter_mode":"branch","filter_reason":"branch_id","branch_id":"b7f75692-951e-421a-aae6-f5db97394799"}`
+- truffles inbound (strict empty result, no fallback):
+  - msg_id `2acc8edb-cc97-4424-8c8d-b1265cc9aca7` (messageId `sim-branch-truffles-1768435932`), conv_id `d868cc92-837e-463e-b8e1-ea39a1baccea`
+  - decision_meta.rag_scores.bm25_filter: `{"branch_id":"cf86bee7-e38f-4c8c-a087-aa4961911e0b","client_slug":"truffles","filter_mode":"branch","filter_reason":"branch_filter_empty","knowledge_tag":null}`
+  - decision_trace (rag_retrieve): `{"filter_mode":"branch","filter_reason":"branch_filter_empty","branch_id":"cf86bee7-e38f-4c8c-a087-aa4961911e0b"}`
+
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**
