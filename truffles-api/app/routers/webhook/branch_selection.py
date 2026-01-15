@@ -174,7 +174,7 @@ def _handle_branch_selection_gate(
     context = _get_conversation_context(conversation)
     branch_id = conversation.branch_id or _coerce_uuid(context.get(BRANCH_CONTEXT_KEY))
     if not branch_id and remember_branch:
-        branch_id = _get_user_branch_preference(user)
+        branch_id = legacy._get_user_branch_preference(user)
 
     if branch_id:
         if conversation.branch_id != branch_id:
@@ -182,8 +182,8 @@ def _handle_branch_selection_gate(
         if context.get(BRANCH_CONTEXT_KEY) != str(branch_id):
             context[BRANCH_CONTEXT_KEY] = str(branch_id)
             _set_conversation_context(conversation, context)
-        if remember_branch and _get_user_branch_preference(user) != branch_id:
-            _set_user_branch_preference(user, branch_id)
+        if remember_branch and legacy._get_user_branch_preference(user) != branch_id:
+            legacy._set_user_branch_preference(user, branch_id)
         return None
 
     instance_id = metadata.instanceId if metadata else None
