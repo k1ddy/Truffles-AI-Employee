@@ -130,10 +130,12 @@ from app.routers.webhook.guards import (
     _format_intent_queue_prompt,
     _format_multi_intent_followup,
     _get_clarify_attempt_state,
+    _get_intent_queue,  # noqa: F401
     _handle_clarify_limit_escalation,
     _handle_opt_out_mute_gate,
     _handle_reengage_and_mute_gate,
     _register_clarify_attempt,
+    _select_intent_from_queue,  # noqa: F401
     _set_clarify_attempt,
     _set_intent_queue,
     _should_escalate_for_clarify,
