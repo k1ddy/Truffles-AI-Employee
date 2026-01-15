@@ -1706,9 +1706,79 @@ async def _handle_webhook_payload(
     """Shared webhook processing for inbound ChatFlow payloads."""
     logger.info(f"Webhook received: client_slug={payload.client_slug}")
 
+    def _resolve_trace_conversation(
+        *,
+        trace_client: Client | None,
+        trace_conversation_id: UUID | None,
+        trace_message_id: str | None,
+        trace_remote_jid: str | None,
+    ) -> Conversation | None:
+        if trace_conversation_id:
+            conversation = (
+                db.query(Conversation)
+                .filter(Conversation.id == trace_conversation_id)
+                .first()
+            )
+            if conversation:
+                return conversation
+        if trace_client and trace_message_id:
+            saved_message = _find_message_by_message_id(db, trace_client.id, trace_message_id)
+            if saved_message:
+                return (
+                    db.query(Conversation)
+                    .filter(Conversation.id == saved_message.conversation_id)
+                    .first()
+                )
+        if trace_client and trace_remote_jid:
+            user = (
+                db.query(User)
+                .filter(User.client_id == trace_client.id, User.remote_jid == trace_remote_jid)
+                .first()
+            )
+            if user:
+                return (
+                    db.query(Conversation)
+                    .filter(
+                        Conversation.client_id == trace_client.id,
+                        Conversation.user_id == user.id,
+                        Conversation.status == "active",
+                    )
+                    .first()
+                )
+        return None
+
+    def _record_early_trace(
+        trace_conversation: Conversation | None,
+        *,
+        stage: str,
+        decision: str,
+        reason: str,
+        meta: dict[str, Any] | None = None,
+    ) -> bool:
+        if not trace_conversation:
+            return False
+        trace_payload = {"stage": stage, "decision": decision, "reason": reason}
+        if meta:
+            trace_payload.update(meta)
+        _record_decision_trace(trace_conversation, trace_payload)
+        return True
+
     # Get client by slug
     client = db.query(Client).filter(Client.name == payload.client_slug).first()
     if not client:
+        trace_conversation = _resolve_trace_conversation(
+            trace_client=None,
+            trace_conversation_id=conversation_id,
+            trace_message_id=None,
+            trace_remote_jid=None,
+        )
+        if _record_early_trace(
+            trace_conversation,
+            stage="preflight",
+            decision="reject",
+            reason="client_missing",
+        ):
+            db.commit()
         return WebhookResponse(success=False, message=f"Client '{payload.client_slug}' not found")
 
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
@@ -1722,8 +1792,22 @@ async def _handle_webhook_payload(
 
     body = payload.body
     metadata = body.metadata
+    message_id = metadata.messageId if metadata else None
 
     if not metadata or not metadata.remoteJid:
+        trace_conversation = _resolve_trace_conversation(
+            trace_client=client,
+            trace_conversation_id=conversation_id,
+            trace_message_id=message_id,
+            trace_remote_jid=None,
+        )
+        if _record_early_trace(
+            trace_conversation,
+            stage="preflight",
+            decision="reject",
+            reason="missing_remote_jid",
+        ):
+            db.commit()
         return WebhookResponse(success=False, message="Missing metadata.remoteJid")
 
     remote_jid = metadata.remoteJid
@@ -1734,9 +1818,20 @@ async def _handle_webhook_payload(
     message_type = (body.messageType or "").strip()
     has_media = bool(body.mediaData) or (message_type and message_type.lower() != "text")
     is_media_without_text = has_media and not message_text.strip()
-    message_id = metadata.messageId
-
     if not message_text and not is_media_without_text:
+        trace_conversation = _resolve_trace_conversation(
+            trace_client=client,
+            trace_conversation_id=conversation_id,
+            trace_message_id=message_id,
+            trace_remote_jid=remote_jid,
+        )
+        if _record_early_trace(
+            trace_conversation,
+            stage="preflight",
+            decision="reject",
+            reason="empty_message",
+        ):
+            db.commit()
         return WebhookResponse(success=False, message="Empty message")
     if is_media_without_text:
         media_label = message_type.lower() if message_type else "media"
@@ -1920,12 +2015,48 @@ async def _handle_webhook_payload(
 
     if skip_persist:
         if not conversation_id:
+            trace_conversation = _resolve_trace_conversation(
+                trace_client=client,
+                trace_conversation_id=None,
+                trace_message_id=message_id,
+                trace_remote_jid=remote_jid,
+            )
+            if _record_early_trace(
+                trace_conversation,
+                stage="skip_persist",
+                decision="reject",
+                reason="missing_conversation_id",
+            ):
+                db.commit()
             return WebhookResponse(success=False, message="Missing conversation_id")
         conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
         if not conversation:
+            trace_conversation = _resolve_trace_conversation(
+                trace_client=client,
+                trace_conversation_id=None,
+                trace_message_id=message_id,
+                trace_remote_jid=remote_jid,
+            )
+            if _record_early_trace(
+                trace_conversation,
+                stage="skip_persist",
+                decision="reject",
+                reason="conversation_not_found",
+            ):
+                db.commit()
             return WebhookResponse(success=False, message="Conversation not found")
         user = db.query(User).filter(User.id == conversation.user_id).first()
         if not user:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "skip_persist",
+                    "decision": "reject",
+                    "reason": "user_not_found",
+                    "state": conversation.state,
+                },
+            )
+            db.commit()
             return WebhookResponse(success=False, message="User not found")
         timing_context["conversation_id"] = str(conversation.id)
         if message_id:
@@ -1955,6 +2086,19 @@ async def _handle_webhook_payload(
     else:
         if await is_duplicate_message_id(db=db, client_id=client.id, message_id=message_id):
             logger.info(f"Duplicate message_id skipped: {message_id}")
+            trace_conversation = _resolve_trace_conversation(
+                trace_client=client,
+                trace_conversation_id=conversation_id,
+                trace_message_id=message_id,
+                trace_remote_jid=remote_jid,
+            )
+            if _record_early_trace(
+                trace_conversation,
+                stage="dedupe",
+                decision="skip",
+                reason="duplicate_message_id",
+            ):
+                db.commit()
             return WebhookResponse(success=True, message="Duplicate message_id", conversation_id=None, bot_response=None)
         if not message_id:
             message_id = build_inbound_message_id(
@@ -2127,6 +2271,15 @@ async def _handle_webhook_payload(
                         }
                     },
                 )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "outbox",
+                    "decision": "enqueue_only",
+                    "reason": "enqueued" if enqueued else "duplicate",
+                    "state": conversation.state,
+                },
+            )
             db.commit()
             return WebhookResponse(success=True, message="Accepted", conversation_id=conversation.id, bot_response=None)
 
@@ -2982,6 +3135,15 @@ async def _handle_webhook_payload(
                                 or matched_branch.slug
                                 or "филиал"
                             )
+                            _record_decision_trace(
+                                conversation,
+                                {
+                                    "stage": "branch_selection",
+                                    "decision": "selected",
+                                    "reason": "branch_only_message",
+                                    "branch_id": str(matched_branch.id),
+                                },
+                            )
                             bot_response, sent = _send_and_save(bot_response)
                             result_message = (
                                 "Branch selected (prompted)" if sent else "Branch selection response failed"
@@ -2999,6 +3161,15 @@ async def _handle_webhook_payload(
                             context, _build_branch_selection(branches, now)
                         )
                         _set_conversation_context(conversation, context)
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "branch_selection",
+                                "decision": "prompt",
+                                "reason": "retry",
+                                "branches_count": len(branches),
+                            },
+                        )
                         prompt, sent = _send_and_save(prompt)
                         result_message = (
                             "Branch selection requested (retry)"
@@ -3016,6 +3187,15 @@ async def _handle_webhook_payload(
                     prompt = _build_branch_prompt(branches)
                     context = _set_branch_selection(context, _build_branch_selection(branches, now))
                     _set_conversation_context(conversation, context)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "branch_selection",
+                            "decision": "prompt",
+                            "reason": "initial",
+                            "branches_count": len(branches),
+                        },
+                    )
                     prompt, sent = _send_and_save(prompt)
                     result_message = (
                         "Branch selection requested" if sent else "Branch selection prompt failed"
@@ -3441,7 +3621,9 @@ async def _handle_webhook_payload(
                     _record_decision_trace(
                         conversation,
                         {
+                            "stage": "routing",
                             "decision": "reengage_confirmed",
+                            "reason": "confirmation_yes",
                             "state": conversation.state,
                             "booking_signal": booking_signal,
                             "opt_out_in_batch": opt_out_in_batch,
@@ -3460,7 +3642,9 @@ async def _handle_webhook_payload(
                     _record_decision_trace(
                         conversation,
                         {
+                            "stage": "routing",
                             "decision": "reengage_declined",
+                            "reason": "confirmation_no",
                             "state": conversation.state,
                             "booking_signal": booking_signal,
                             "opt_out_in_batch": opt_out_in_batch,
@@ -3483,7 +3667,9 @@ async def _handle_webhook_payload(
                     _record_decision_trace(
                         conversation,
                         {
+                            "stage": "routing",
                             "decision": "reengage_confirmation_repeat",
+                            "reason": "confirmation_repeat",
                             "state": conversation.state,
                             "booking_signal": booking_signal,
                             "opt_out_in_batch": opt_out_in_batch,
@@ -3513,7 +3699,9 @@ async def _handle_webhook_payload(
         _record_decision_trace(
             conversation,
             {
+                "stage": "routing",
                 "decision": "reengage_confirmation_requested",
+                "reason": "opt_out_booking_signal",
                 "state": conversation.state,
                 "booking_signal": booking_signal,
                 "opt_out_in_batch": opt_out_in_batch,
@@ -3541,7 +3729,9 @@ async def _handle_webhook_payload(
             _record_decision_trace(
                 conversation,
                 {
+                    "stage": "routing",
                     "decision": "mute_cleared_for_booking",
+                    "reason": "booking_signal",
                     "state": conversation.state,
                     "booking_signal": booking_signal,
                     "booking_active": booking_active,
@@ -3552,7 +3742,9 @@ async def _handle_webhook_payload(
             _record_decision_trace(
                 conversation,
                 {
+                    "stage": "routing",
                     "decision": "muted_skip",
+                    "reason": "muted",
                     "state": conversation.state,
                     "booking_signal": booking_signal,
                     "booking_active": booking_active,
@@ -3592,6 +3784,15 @@ async def _handle_webhook_payload(
                             batch_messages = _coerce_batch_messages(message_text, None)
                     else:
                         bot_response = MSG_ASR_CONFIRM_DECLINED
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "media",
+                                "decision": "asr_confirm_missing_transcript",
+                                "reason": "empty_transcript",
+                                "state": conversation.state,
+                            },
+                        )
                         bot_response, sent = _send_and_save(bot_response)
                         result_message = (
                             "ASR confirm missing transcript" if sent else "ASR confirm response failed"
@@ -3607,6 +3808,15 @@ async def _handle_webhook_payload(
                     context = _set_asr_confirmation(context, None)
                     _set_conversation_context(conversation, context)
                     bot_response = MSG_ASR_CONFIRM_DECLINED
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "media",
+                            "decision": "asr_confirm_declined",
+                            "reason": "user_declined",
+                            "state": conversation.state,
+                        },
+                    )
                     bot_response, sent = _send_and_save(bot_response)
                     result_message = "ASR confirm declined" if sent else "ASR confirm decline failed"
                     db.commit()
@@ -3635,6 +3845,16 @@ async def _handle_webhook_payload(
                     saved_message,
                     {"asr_confirm_requested": True, "asr_low_confidence": True},
                 )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "media",
+                    "decision": "asr_confirm_requested",
+                    "reason": "low_confidence",
+                    "state": conversation.state,
+                    "attempt": attempt,
+                },
+            )
             bot_response, sent = _send_and_save(bot_response)
             result_message = "ASR confirmation requested" if sent else "ASR confirmation send failed"
             db.commit()
@@ -4132,6 +4352,16 @@ async def _handle_webhook_payload(
                 "Debounced intermediate message",
                 extra={"context": {"remote_jid": remote_jid, "message_id": message_id}},
             )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "debounce",
+                    "decision": "skip",
+                    "reason": "intermediate_message",
+                    "state": conversation.state,
+                },
+            )
+            db.commit()
             return WebhookResponse(
                 success=True,
                 message="Debounced: skipped intermediate message",
@@ -4165,6 +4395,16 @@ async def _handle_webhook_payload(
         db.refresh(conversation)
         now = datetime.now(timezone.utc)
         if conversation.state == ConversationState.MANAGER_ACTIVE.value:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "debounce",
+                    "decision": "manager_active",
+                    "reason": "state_changed",
+                    "state": conversation.state,
+                },
+            )
+            db.commit()
             return WebhookResponse(
                 success=True,
                 message="Manager active (after debounce), message forwarded",
@@ -4268,6 +4508,16 @@ async def _handle_webhook_payload(
                             bot_response = MSG_AI_ERROR
                             result_message = f"Handover confirm escalation failed: {esc_result.error}"
 
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "handover_confirmation",
+                            "decision": "confirmed",
+                            "reason": "user_confirmed",
+                            "state": conversation.state,
+                            "reused": reused,
+                        },
+                    )
                     bot_response, sent = _send_and_save(bot_response)
                     if not sent:
                         result_message = f"{result_message}; response_send=failed"
@@ -4285,6 +4535,15 @@ async def _handle_webhook_payload(
                     _reset_low_confidence_retry(conversation)
 
                     bot_response = MSG_HANDOVER_DECLINED
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "handover_confirmation",
+                            "decision": "declined",
+                            "reason": "user_declined",
+                            "state": conversation.state,
+                        },
+                    )
                     bot_response, sent = _send_and_save(bot_response)
                     result_message = "Handover declined, asked for salon details" if sent else "Handover decline send failed"
                     db.commit()
