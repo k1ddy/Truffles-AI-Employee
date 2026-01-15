@@ -1,4 +1,5 @@
 # Правила работы бота
+TEMPLATE: use to create knowledge/<client_slug>/rules.md; not runtime.
 
 ## Что делать
 

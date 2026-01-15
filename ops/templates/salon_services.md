@@ -1,4 +1,5 @@
 # Услуги и цены
+TEMPLATE: use to create knowledge/<client_slug>/services.md; not runtime.
 
 ## Стрижки
 - Женская стрижка — от 5,000 ₸
