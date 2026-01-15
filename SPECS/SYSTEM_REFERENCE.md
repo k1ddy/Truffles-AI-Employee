@@ -1,9 +1,13 @@
 # SYSTEM REFERENCE — Техническая справка Truffles
 
-**Читай это перед любыми изменениями.**
-**Обновлено:** 2026-01-14
-**Scope:** техсправка и операционные детали; поведение бота см. `SPECS/ARCHITECTURE.md` и `SPECS/CONSULTANT.md`.
+**Статус:** CANON  
+**Owner:** Top Architect  
+**Обновлено:** 2026-01-15  
+**Scope:** техсправка и операционные детали; поведение бота см. `SPECS/ARCHITECTURE.md` и `SPECS/CONSULTANT.md`.  
+**Out of scope:** продуктовые обещания, SLA продаж.  
+**Links:** `SPECS/ARCHITECTURE.md`, `SPECS/INFRASTRUCTURE.md`, `TECH.md`, `STATE.md`.
 
+**Читай это перед любыми изменениями.**
 ---
 
 ## 1. Репозиторий и процесс
@@ -103,6 +107,43 @@ ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/version"
 ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/health"
 ```
 ⚠️ `/admin/version` возвращает `unknown`, если не переданы build-метаданные (APP_VERSION/GIT_COMMIT/BUILD_TIME) в контейнер.
+
+---
+
+## 4.1 Knowledge update SOP (client_pack → runtime)
+
+**Цель:** избежать рассинхрона `SALON_TRUTH.yaml` ↔ Qdrant ↔ runtime контейнера.
+
+1) **Обновить pack**: `truffles-api/app/knowledge/<client_slug>/SALON_TRUTH.yaml` (+ при необходимости `knowledge/<client_slug>/*.md`).
+2) **Валидировать pack** (только python3):
+   ```bash
+   python3 ops/sync_client.py <client_slug> --validate
+   ```
+3) **Синхронизировать Qdrant**:
+   ```bash
+   python3 ops/sync_client.py <client_slug>
+   ```
+4) **Собрать и перезапустить API** (см. раздел 4). Без `docker cp`/`docker run -v`.
+5) **Live-check** (реальный inbound): 1–2 запроса на новые услуги/правила + SQL evidence (`messages.metadata.decision_meta`, `conversations.context.decision_trace`).
+
+**Замечания:**
+- `ops/sync_client.py` использует `QDRANT_API_KEY`/`QDRANT__SERVICE__API_KEY` из окружения и `BGE_M3_URL`.
+- Онбординг клиента подробно: `SPECS/MULTI_TENANT.md`.
+
+---
+
+## 4.2 Release SOP (code changes)
+
+**Цель:** релиз без дрейфа и без “магии”.
+
+1) **Task Package** содержит DoD/Tests/Live-check/Evidence (иначе STOP).
+2) **CI зелёный** (core/long по задаче) — ссылка на run обязательна.
+3) **Деплой** по разделу 4 (GHCR → `PULL_IMAGE=1`; fallback build допустим).
+4) **Проверка версии**: `/admin/version` + `/admin/health` (если version unknown → STOP).
+5) **Live-check** (если указан в DoD): реальный inbound → conv_id + decision_trace/meta.
+6) **STATE.md** обновляет Brain последним шагом, с evidence.
+
+**Запрещено:** `docker cp`, `docker run -v`, “локальные” фиксы без CI/перезапуска.
 
 ---
 

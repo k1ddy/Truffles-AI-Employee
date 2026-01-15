@@ -1,8 +1,13 @@
 # ARCHITECTURE — Техническая архитектура Truffles
 
-**Читай это перед любыми изменениями.**
-**Обновлено:** 2026-01-14
+**Статус:** CANON  
+**Owner:** Top Architect  
+**Обновлено:** 2026-01-15  
+**Scope:** архитектура рантайма, decision graph, компоненты и потоки.  
+**Out of scope:** тарифы/продажи, evidence/CI.  
+**Links:** `SPECS/CONSULTANT.md`, `SPECS/INFRASTRUCTURE.md`, `STATE.md`.
 
+**Читай это перед любыми изменениями.**
 ---
 
 ## 1. Репозиторий и процесс

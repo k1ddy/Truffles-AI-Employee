@@ -35,7 +35,7 @@ LEGACY/ARCHIVE: outdated copy of knowledge/demo_salon/faq.md; do not edit.
 ### Оплата
 
 **Принимаете ли карты/переводы?**
-Да: наличные, Kaspi перевод/QR, банковские карты (Visa/Mastercard).
+Да: наличные, перевод/QR-оплата, банковские карты (Visa/Mastercard).
 
 **Можно ли оплатить частями (долями)?**
 Нет, только полная оплата.

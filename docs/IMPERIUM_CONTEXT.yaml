@@ -18,6 +18,20 @@ project:
   evidence:
     - "AGENTS.md:9-15"
     - "STRATEGY/PRODUCT.md:20-32"
+session_context:
+  last_update: "2026-01-15"
+  intent: "Stabilize canon -> runtime alignment with evidence-first workflow"
+  pain_points:
+    - "Behavior drift between SPECS and runtime pack undermines trust"
+    - "Expected_reply/consult carryover can override explicit pricing/duration questions"
+    - "Missing decision_trace on some paths blocks verification"
+    - "Legacy god-handler makes invariants hard to enforce"
+  decisions:
+    - "Consult is pack-only; LLM cannot add facts"
+    - "No payment verification; payment info only from client_pack"
+    - "One-issue flow with evidence for every fix"
+  evidence:
+    - "Session notes (2026-01-15)"
 
 runtime:
   server:

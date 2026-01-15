@@ -465,7 +465,6 @@
 | **Implementation Brain (внедрения/поддержка)** | Быстрее запускать клиентов, фиксировать паттерны и ошибки | P1 | стратегия |
 | Алерт "бот пронёс хуйню" | Критичные ошибки сразу владельцу | P1 | my_notes |
 | Dashboard для заказчика | Видеть статистику | P2 | REQUIREMENTS |
-| Kaspi Pay проверка | Автопроверка оплат | P2 | REQUIREMENTS |
 | Telegram чат для владельца | Модерация, обсуждение, быстрая связь | P2 | my_notes |
 | Ежедневный отчёт владельцу | Сколько диалогов, эскалаций, проблем | P2 | my_notes |
 | Аргументы для сбора данных | В договор — почему выгодно делиться | P2 | my_notes |
@@ -646,7 +645,6 @@
   - msg_id `2acc8edb-cc97-4424-8c8d-b1265cc9aca7` (messageId `sim-branch-truffles-1768435932`), conv_id `d868cc92-837e-463e-b8e1-ea39a1baccea`
   - decision_meta.rag_scores.bm25_filter: `{"branch_id":"cf86bee7-e38f-4c8c-a087-aa4961911e0b","client_slug":"truffles","filter_mode":"branch","filter_reason":"branch_filter_empty","knowledge_tag":null}`
   - decision_trace (rag_retrieve): `{"filter_mode":"branch","filter_reason":"branch_filter_empty","branch_id":"cf86bee7-e38f-4c8c-a087-aa4961911e0b"}`
-
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**

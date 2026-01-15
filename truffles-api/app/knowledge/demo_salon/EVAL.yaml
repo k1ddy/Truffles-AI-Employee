@@ -7923,6 +7923,30 @@ eval_cases:
       controller_goal: booking
       classes:
       - booking
+
+- id: E742
+  user: Делаете депиляцию?
+  expected:
+    action: reply
+    intent: service_matcher
+    must_include_any:
+    - депиляция
+
+- id: E743
+  user: Сколько стоит депиляция?
+  expected:
+    action: reply
+    intent: pricing
+    must_include_any:
+    - депиляция
+
+- id: E744
+  user: Сколько длится депиляция?
+  expected:
+    action: reply
+    intent: duration
+    must_include_any:
+    - минут
 - id: E742
   user: Сколько стоит биткоин?
   expected:

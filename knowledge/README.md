@@ -2,6 +2,8 @@
 
 Здесь хранится контент для RAG.
 
+DERIVED: корневые файлы — шаблоны. Канон для клиента живёт только в `knowledge/<client_slug>/`.
+
 ## Канон
 
 - Для конкретного клиента канон RAG = `knowledge/<client_slug>/` (например, `knowledge/demo_salon/`).

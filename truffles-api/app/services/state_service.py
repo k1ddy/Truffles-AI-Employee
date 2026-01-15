@@ -12,6 +12,7 @@ from app.services.telegram_service import TelegramService
 logger = get_logger("state_service")
 
 PENDING_RESUME_KEY = "pending_resume"
+DECISION_TRACE_KEY = "decision_trace"
 PENDING_RESUME_SNAPSHOT_KEYS = {
     "context_manager",
     "expected_reply_type",
@@ -30,6 +31,14 @@ PENDING_RESUME_CLEAR_KEYS = {
     "last_service_hint",
     "last_service_hint_at",
 }
+
+
+def _reset_context_preserving_trace(conversation: Conversation) -> None:
+    existing = conversation.context if isinstance(conversation.context, dict) else {}
+    if DECISION_TRACE_KEY in existing:
+        conversation.context = {DECISION_TRACE_KEY: existing.get(DECISION_TRACE_KEY)}
+    else:
+        conversation.context = {}
 
 
 def _capture_pending_resume_context(context: dict | None) -> dict:
@@ -183,7 +192,7 @@ def manager_resolve(
         conversation.no_count = 0
         conversation.retry_offered_at = None
         if not preserve_context:
-            conversation.context = {}
+            _reset_context_preserving_trace(conversation)
         elif not isinstance(conversation.context, dict):
             conversation.context = {}
 

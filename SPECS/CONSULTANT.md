@@ -1,8 +1,14 @@
 # СПЕЦИФИКАЦИЯ КОНСУЛЬТАНТА TRUFFLES
 
-**Источник правды по поведению бота.**
+**Статус:** CANON  
+**Owner:** Top Architect  
+**Обновлено:** 2026-01-15  
+**Scope:** поведение бота (info/consult/booking), LAW/policy/clarify, формат ответа.  
+**Out of scope:** реализация, evidence/CI.  
+**Links:** `SPECS/ARCHITECTURE.md`, `SPECS/ESCALATION.md`, `docs/SESSION_START_PROMPT.txt`, `STATE.md`.
+
+**Источник правды по поведению бота.**  
 **Создано:** 2025-12-06
-**Обновлено:** 2025-12-24
 
 ---
 
@@ -110,13 +116,17 @@
 - Исключения: LAW/opt‑out/OOD, `pending/manager_active`, и когда booking‑prompt уже добавлен (booking‑interrupt).
 
 **Policy‑gates: скидки**
-- Скидки — **не Hard‑LAW**. Отвечаем **только** по явным правилам в `client_pack.discounts`.
+- Скидки — **не Hard‑LAW**. Отвечаем **только** по явным правилам в `client_pack.policy.discounts`.
 - Если правил нет/не совпали — эскалация (без попытки торга/обещаний).
 
 **Policy‑gates: способы оплаты (info)**
-- Перечисление способов оплаты разрешено **только** при `client_pack.payment.allow_payment_info=true`.
+- Перечисление способов оплаты разрешено **только** при `client_pack.policy.payment_info.allow=true`.
 - Если правила/списка нет — эскалация (без “оплатите вот так”).
 - Подтверждение оплаты/возвраты/проверка транзакции — всегда Hard‑LAW.
+
+**Consult vs medical (граница):**
+- Общие вопросы “чувствительность/уход” → consult‑playbook, если нет явных мед‑триггеров.
+- Явные мед‑триггеры (аллергия/противопоказания/сыпь/боль/кровь/ожог) → Hard‑LAW эскалация, без советов.
 
 **Behavioral Shield (реализовано)**
 - Спам/машинная скорость: silent‑drop по burst/повторам/коротким сообщениям.
