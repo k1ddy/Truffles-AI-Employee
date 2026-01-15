@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import text
@@ -11,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.models import Message
+from app.schemas.webhook import WebhookResponse
+from app.services.state_machine import ConversationState
 
 logger = get_logger("webhook")
 
@@ -210,6 +213,219 @@ async def is_duplicate_message_id(
     return duplicate is not None
 
 
+async def _handle_dedup_gate(
+    *,
+    db: Session,
+    client,
+    message_id: str | None,
+    remote_jid: str,
+    metadata,
+    message_text: str,
+    conversation_id,
+    resolve_trace_conversation,
+    record_early_trace,
+) -> tuple[WebhookResponse | None, str | None]:
+    if await is_duplicate_message_id(db=db, client_id=client.id, message_id=message_id):
+        logger.info(f"Duplicate message_id skipped: {message_id}")
+        trace_conversation = resolve_trace_conversation(
+            trace_client=client,
+            trace_conversation_id=conversation_id,
+            trace_message_id=message_id,
+            trace_remote_jid=remote_jid,
+        )
+        if record_early_trace(
+            trace_conversation,
+            stage="dedupe",
+            decision="skip",
+            reason="duplicate_message_id",
+        ):
+            db.commit()
+        return (
+            WebhookResponse(
+                success=True,
+                message="Duplicate message_id",
+                conversation_id=None,
+                bot_response=None,
+            ),
+            message_id,
+        )
+    if not message_id:
+        from app.services.outbox_service import build_inbound_message_id
+
+        message_id = build_inbound_message_id(
+            None,
+            remote_jid,
+            metadata.timestamp if metadata else None,
+            message_text,
+        )
+        if metadata:
+            metadata.messageId = message_id
+    return None, message_id
+
+
+async def _handle_debounce_gate(
+    *,
+    db: Session,
+    client,
+    conversation,
+    message_text: str,
+    message_id: str | None,
+    remote_jid: str,
+    batch_messages: list[str] | None,
+    batch_messages_provided: bool,
+    payload_client_slug: str,
+    now: datetime,
+) -> tuple[WebhookResponse | None, str, list[str] | None, bool, datetime]:
+    append_user_message = True
+    if conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value] and not batch_messages_provided:
+        from . import _legacy as legacy
+
+        db.commit()
+
+        debounce_enabled, _, ttl_seconds, redis_url, socket_timeout_seconds = _get_debounce_settings()
+        buffer_enabled, max_buffer_messages = _get_message_buffer_settings()
+        redis_client = _get_debounce_redis(redis_url, socket_timeout_seconds)
+
+        if debounce_enabled and buffer_enabled and redis_client:
+            await _buffer_user_message(
+                redis_client=redis_client,
+                client_id=str(client.id),
+                remote_jid=remote_jid,
+                message_text=message_text,
+                ttl_seconds=ttl_seconds,
+                max_messages=max_buffer_messages,
+            )
+
+        should_process = await should_process_debounced_message(
+            client_id=str(client.id),
+            remote_jid=remote_jid,
+            message_id=message_id,
+            redis_client=redis_client,
+        )
+        if not should_process:
+            logger.info(
+                "Debounced intermediate message",
+                extra={"context": {"remote_jid": remote_jid, "message_id": message_id}},
+            )
+            legacy._record_decision_trace(
+                conversation,
+                {
+                    "stage": "debounce",
+                    "decision": "skip",
+                    "reason": "intermediate_message",
+                    "state": conversation.state,
+                },
+            )
+            db.commit()
+            return (
+                WebhookResponse(
+                    success=True,
+                    message="Debounced: skipped intermediate message",
+                    conversation_id=conversation.id,
+                    bot_response=None,
+                ),
+                message_text,
+                batch_messages,
+                append_user_message,
+                now,
+            )
+
+        if debounce_enabled and buffer_enabled and redis_client:
+            buffered_messages = await _drain_buffered_messages(
+                redis_client=redis_client,
+                client_id=str(client.id),
+                remote_jid=remote_jid,
+            )
+            if buffered_messages:
+                logger.info(
+                    "Debounce buffer drained",
+                    extra={
+                        "context": {
+                            "remote_jid": remote_jid,
+                            "message_id": message_id,
+                            "buffered_count": len(buffered_messages),
+                        }
+                    },
+                )
+                message_text = " ".join(buffered_messages)
+                if not batch_messages_provided:
+                    batch_messages = legacy._coerce_batch_messages(message_text, buffered_messages)
+                append_user_message = False
+
+        db.refresh(conversation)
+        now = datetime.now(timezone.utc)
+        if conversation.state == ConversationState.MANAGER_ACTIVE.value:
+            legacy._record_decision_trace(
+                conversation,
+                {
+                    "stage": "debounce",
+                    "decision": "manager_active",
+                    "reason": "state_changed",
+                    "state": conversation.state,
+                },
+            )
+            db.commit()
+            return (
+                WebhookResponse(
+                    success=True,
+                    message="Manager active (after debounce), message forwarded",
+                    conversation_id=conversation.id,
+                    bot_response=None,
+                ),
+                message_text,
+                batch_messages,
+                append_user_message,
+                now,
+            )
+        if conversation.bot_status == "muted" or (conversation.bot_muted_until and conversation.bot_muted_until > now):
+            signal_messages = legacy._coerce_batch_messages(message_text, batch_messages)
+            opt_out_in_batch = any(legacy.is_opt_out_message(msg) for msg in signal_messages)
+            booking_signal, booking_block_meta = legacy._evaluate_booking_signal(
+                signal_messages,
+                client_slug=payload_client_slug,
+                message_text=message_text,
+            )
+            context = legacy._get_conversation_context(conversation)
+            booking_active = bool(legacy._get_booking_context(context).get("active"))
+            reengage_confirmation = legacy._get_reengage_confirmation(context)
+            if reengage_confirmation and legacy._is_reengage_confirmation_active(reengage_confirmation, now):
+                conversation.bot_status = "active"
+                conversation.bot_muted_until = None
+                conversation.no_count = 0
+            elif (booking_signal or booking_active) and not opt_out_in_batch:
+                conversation.bot_status = "active"
+                conversation.bot_muted_until = None
+                conversation.no_count = 0
+            else:
+                legacy._record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "routing",
+                        "decision": "muted_skip_after_debounce",
+                        "state": conversation.state,
+                        "booking_signal": booking_signal,
+                        "booking_active": booking_active,
+                        "opt_out_in_batch": opt_out_in_batch,
+                    },
+                )
+                return (
+                    WebhookResponse(
+                        success=True,
+                        message="Bot muted (after debounce), forwarded to topic"
+                        if conversation.telegram_topic_id
+                        else "Bot muted (after debounce)",
+                        conversation_id=conversation.id,
+                        bot_response=None,
+                    ),
+                    message_text,
+                    batch_messages,
+                    append_user_message,
+                    now,
+                )
+
+    return None, message_text, batch_messages, append_user_message, now
+
+
 __all__ = [
     "_buffer_user_message",
     "_drain_buffered_messages",
@@ -217,6 +433,8 @@ __all__ = [
     "_get_debounce_settings",
     "_get_dedup_settings",
     "_get_message_buffer_settings",
+    "_handle_debounce_gate",
+    "_handle_dedup_gate",
     "is_duplicate_message_id",
     "should_process_debounced_message",
 ]

@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from sqlalchemy.orm import Session
+
+from app.models import Conversation, User
+from app.schemas.webhook import WebhookResponse
+from app.services.state_machine import ConversationState
+
 
 def _normalize_pending_text(text: str) -> str:
     from . import _legacy as legacy
@@ -128,3 +134,136 @@ def _restore_pending_resume(
     else:
         context = legacy._clear_service_hint(context)
     return context
+
+
+def _handle_handover_confirmation_gate(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    message_text: str,
+    now: datetime,
+    send_and_save,
+    record_escalation_metric,
+) -> WebhookResponse | None:
+    from app.routers.webhook.context_manager import (
+        _get_conversation_context,
+        _get_handover_confirmation,
+        _is_handover_confirmation_active,
+        _reset_low_confidence_retry,
+        _set_conversation_context,
+        _set_handover_confirmation,
+    )
+    from app.services.ai_service import classify_confirmation
+    from . import _legacy as legacy
+
+    if conversation.state != ConversationState.BOT_ACTIVE.value:
+        return None
+
+    context = _get_conversation_context(conversation)
+    confirmation = _get_handover_confirmation(context)
+    if not confirmation:
+        return None
+
+    if not _is_handover_confirmation_active(confirmation, now):
+        context = _set_handover_confirmation(context, None)
+        _set_conversation_context(conversation, context)
+        return None
+
+    decision = classify_confirmation(message_text)
+    if decision == "yes":
+        context = _set_handover_confirmation(context, None)
+        _set_conversation_context(conversation, context)
+        _reset_low_confidence_retry(conversation)
+
+        escalation_message = confirmation.get("user_message") or message_text
+        _, reused, telegram_sent = legacy._reuse_active_handover(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message=escalation_message,
+            source="handover_confirmation",
+            intent="low_confidence",
+        )
+
+        if reused:
+            bot_response = legacy.MSG_ESCALATED
+            result_message = (
+                f"Handover confirmed (reused), telegram={'sent' if telegram_sent else 'failed'}"
+            )
+        else:
+            record_escalation_metric("intent")
+            esc_result = legacy.escalate_to_pending(
+                db=db,
+                conversation=conversation,
+                user_message=escalation_message,
+                trigger_type="intent",
+                trigger_value="low_confidence",
+            )
+
+            if esc_result.ok:
+                handover = esc_result.value
+                telegram_sent = legacy.send_telegram_notification(
+                    db=db,
+                    handover=handover,
+                    conversation=conversation,
+                    user=user,
+                    message=escalation_message,
+                )
+                bot_response = legacy.MSG_ESCALATED
+                result_message = f"Handover confirmed, telegram={'sent' if telegram_sent else 'failed'}"
+            else:
+                bot_response = legacy.MSG_AI_ERROR
+                result_message = f"Handover confirm escalation failed: {esc_result.error}"
+
+        legacy._record_decision_trace(
+            conversation,
+            {
+                "stage": "handover_confirmation",
+                "decision": "confirmed",
+                "reason": "user_confirmed",
+                "state": conversation.state,
+                "reused": reused,
+            },
+        )
+        bot_response, sent = send_and_save(bot_response)
+        if not sent:
+            result_message = f"{result_message}; response_send=failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    if decision == "no":
+        context = _set_handover_confirmation(context, None)
+        _set_conversation_context(conversation, context)
+        _reset_low_confidence_retry(conversation)
+
+        bot_response = legacy.MSG_HANDOVER_DECLINED
+        legacy._record_decision_trace(
+            conversation,
+            {
+                "stage": "handover_confirmation",
+                "decision": "declined",
+                "reason": "user_declined",
+                "state": conversation.state,
+            },
+        )
+        bot_response, sent = send_and_save(bot_response)
+        result_message = (
+            "Handover declined, asked for salon details" if sent else "Handover decline send failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    context = _set_handover_confirmation(context, None)
+    _set_conversation_context(conversation, context)
+    return None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.logging_config import get_logger
 from app.models import Client, ClientSettings
+from app.routers.webhook.media import _extract_media_info
 from app.routers.webhook.parsing import _parse_webhook_request
 from app.routers.webhook.secrets import _get_client_webhook_secret, _get_request_webhook_secret
 from app.schemas.webhook import WebhookRequest, WebhookResponse
@@ -22,6 +24,106 @@ from . import _legacy as legacy
 
 logger = get_logger("webhook")
 router = APIRouter()
+
+
+def _run_preflight(
+    payload: WebhookRequest,
+    db: Session,
+    *,
+    provided_secret: str | None,
+    enforce_secret: bool,
+    conversation_id: UUID | None,
+    resolve_trace_conversation,
+    record_early_trace,
+) -> tuple[WebhookResponse | None, dict]:
+    client = db.query(Client).filter(Client.name == payload.client_slug).first()
+    if not client:
+        trace_conversation = resolve_trace_conversation(
+            trace_client=None,
+            trace_conversation_id=conversation_id,
+            trace_message_id=None,
+            trace_remote_jid=None,
+        )
+        if record_early_trace(
+            trace_conversation,
+            stage="preflight",
+            decision="reject",
+            reason="client_missing",
+        ):
+            db.commit()
+        return WebhookResponse(success=False, message=f"Client '{payload.client_slug}' not found"), {}
+
+    settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
+    if enforce_secret:
+        expected_secret = _get_client_webhook_secret(settings)
+        if expected_secret:
+            if not provided_secret or provided_secret != expected_secret:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
+        elif not provided_secret:
+            alert_warning("Webhook secret missing", {"client_slug": payload.client_slug})
+
+    body = payload.body
+    metadata = body.metadata
+    message_id = metadata.messageId if metadata else None
+    if not metadata or not metadata.remoteJid:
+        trace_conversation = resolve_trace_conversation(
+            trace_client=client,
+            trace_conversation_id=conversation_id,
+            trace_message_id=message_id,
+            trace_remote_jid=None,
+        )
+        if record_early_trace(
+            trace_conversation,
+            stage="preflight",
+            decision="reject",
+            reason="missing_remote_jid",
+        ):
+            db.commit()
+        return WebhookResponse(success=False, message="Missing metadata.remoteJid"), {}
+
+    remote_jid = metadata.remoteJid
+    message_text = body.message or ""
+    media_info = _extract_media_info(body)
+    if not message_text.strip() and media_info and media_info.caption:
+        message_text = media_info.caption
+    message_type = (body.messageType or "").strip()
+    has_media = bool(body.mediaData) or (message_type and message_type.lower() != "text")
+    is_media_without_text = has_media and not message_text.strip()
+    if not message_text and not is_media_without_text:
+        trace_conversation = resolve_trace_conversation(
+            trace_client=client,
+            trace_conversation_id=conversation_id,
+            trace_message_id=message_id,
+            trace_remote_jid=remote_jid,
+        )
+        if record_early_trace(
+            trace_conversation,
+            stage="preflight",
+            decision="reject",
+            reason="empty_message",
+        ):
+            db.commit()
+        return WebhookResponse(success=False, message="Empty message"), {}
+    if is_media_without_text:
+        media_label = message_type.lower() if message_type else "media"
+        message_text = f"[{media_label}]"
+
+    return (
+        None,
+        {
+            "client": client,
+            "settings": settings,
+            "body": body,
+            "metadata": metadata,
+            "message_id": message_id,
+            "remote_jid": remote_jid,
+            "message_text": message_text,
+            "message_type": message_type,
+            "has_media": has_media,
+            "is_media_without_text": is_media_without_text,
+            "media_info": media_info,
+        },
+    )
 
 
 @router.get("/media/{media_path:path}")

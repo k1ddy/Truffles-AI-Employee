@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -46,22 +45,7 @@ from app.routers.webhook.booking import (
     _update_booking_from_messages,
     _validate_name_slot,
 )
-from app.routers.webhook.branch_selection import (
-    BRANCH_CONTEXT_KEY,
-    BRANCH_SELECTION_KEY,
-    MSG_BRANCH_SELECTED,
-    _apply_branch_selection,
-    _build_branch_prompt,
-    _build_branch_selection,
-    _coerce_uuid,
-    _get_active_branches,
-    _get_branch_selection,
-    _get_user_branch_preference,
-    _is_branch_only_message,
-    _match_branch_choice,
-    _set_branch_selection,
-    _set_user_branch_preference,
-)
+from app.routers.webhook.branch_selection import _handle_branch_selection_gate
 from app.routers.webhook.context_manager import (
     _apply_consult_return,
     _build_compact_summary_text,
@@ -72,13 +56,11 @@ from app.routers.webhook.context_manager import (
     _get_context_manager,
     _get_conversation_context,
     _get_expected_reply_type,
-    _get_handover_confirmation,
     _get_low_confidence_retry_count,
     _get_reengage_confirmation,
     _get_service_carryover,
     _increment_context_message_count,
     _is_asr_confirmation_active,
-    _is_handover_confirmation_active,
     _is_re_entry_required,
     _is_reengage_confirmation_active,
     _maybe_store_class_carryover,
@@ -118,15 +100,7 @@ from app.routers.webhook.decision import (
     build_response_contract,
     is_handover_status_question,
 )
-from app.routers.webhook.dedup import (
-    _buffer_user_message,
-    _drain_buffered_messages,
-    _get_debounce_redis,
-    _get_debounce_settings,
-    _get_message_buffer_settings,
-    is_duplicate_message_id,
-    should_process_debounced_message,
-)
+from app.routers.webhook.dedup import _get_debounce_redis, _handle_debounce_gate, _handle_dedup_gate
 from app.routers.webhook.guards import (
     _booking_clarify_guard_reason,
     _format_intent_queue_prompt,
@@ -171,8 +145,10 @@ from app.routers.webhook.media import (
     _update_message_asr_metadata,
     _update_message_media_metadata,
 )
+from app.routers.webhook.outbox import _handle_enqueue_only_accept, _prepare_skip_persist
 from app.routers.webhook.pending import (
     _build_pending_resume_snapshot,
+    _handle_handover_confirmation_gate,
     _get_pending_resume,
     _get_pending_sla,
     _is_pending_ack,
@@ -208,7 +184,6 @@ from app.routers.webhook.policy import (
 )
 from app.routers.webhook.response import _apply_quiet_hours_notice, _maybe_append_booking_cta
 from app.routers.webhook.router_sla import _update_router_sla
-from app.routers.webhook.secrets import _get_client_webhook_secret
 from app.routers.webhook.session_memory import (
     _get_session_memory,
     _is_session_memory_expired,
@@ -258,7 +233,6 @@ from app.services.ai_service import (
     rewrite_query_for_retrieval,
     transcribe_audio_with_fallback,
 )
-from app.services.alert_service import alert_warning
 from app.services.chatflow_service import send_bot_response
 from app.services.conversation_service import (
     get_or_create_conversation,
@@ -302,7 +276,7 @@ from app.services.intent_service import (
     should_escalate,
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
-from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
+from app.services.outbox_service import build_inbound_message_id
 from app.services.state_machine import ConversationState
 from app.services.state_service import escalate_to_pending, manager_resolve, transition_state
 from app.services.telegram_service import TelegramService
@@ -1763,79 +1737,31 @@ async def _handle_webhook_payload(
         _record_decision_trace(trace_conversation, trace_payload)
         return True
 
-    # Get client by slug
-    client = db.query(Client).filter(Client.name == payload.client_slug).first()
-    if not client:
-        trace_conversation = _resolve_trace_conversation(
-            trace_client=None,
-            trace_conversation_id=conversation_id,
-            trace_message_id=None,
-            trace_remote_jid=None,
-        )
-        if _record_early_trace(
-            trace_conversation,
-            stage="preflight",
-            decision="reject",
-            reason="client_missing",
-        ):
-            db.commit()
-        return WebhookResponse(success=False, message=f"Client '{payload.client_slug}' not found")
+    from . import http as http_helpers
 
-    settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
-    if enforce_secret:
-        expected_secret = _get_client_webhook_secret(settings)
-        if expected_secret:
-            if not provided_secret or provided_secret != expected_secret:
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
-        elif not provided_secret:
-            alert_warning("Webhook secret missing", {"client_slug": payload.client_slug})
+    preflight_response, preflight_payload = http_helpers._run_preflight(
+        payload,
+        db,
+        provided_secret=provided_secret,
+        enforce_secret=enforce_secret,
+        conversation_id=conversation_id,
+        resolve_trace_conversation=_resolve_trace_conversation,
+        record_early_trace=_record_early_trace,
+    )
+    if preflight_response:
+        return preflight_response
 
-    body = payload.body
-    metadata = body.metadata
-    message_id = metadata.messageId if metadata else None
-
-    if not metadata or not metadata.remoteJid:
-        trace_conversation = _resolve_trace_conversation(
-            trace_client=client,
-            trace_conversation_id=conversation_id,
-            trace_message_id=message_id,
-            trace_remote_jid=None,
-        )
-        if _record_early_trace(
-            trace_conversation,
-            stage="preflight",
-            decision="reject",
-            reason="missing_remote_jid",
-        ):
-            db.commit()
-        return WebhookResponse(success=False, message="Missing metadata.remoteJid")
-
-    remote_jid = metadata.remoteJid
-    message_text = body.message or ""
-    media_info = _extract_media_info(body)
-    if not message_text.strip() and media_info and media_info.caption:
-        message_text = media_info.caption
-    message_type = (body.messageType or "").strip()
-    has_media = bool(body.mediaData) or (message_type and message_type.lower() != "text")
-    is_media_without_text = has_media and not message_text.strip()
-    if not message_text and not is_media_without_text:
-        trace_conversation = _resolve_trace_conversation(
-            trace_client=client,
-            trace_conversation_id=conversation_id,
-            trace_message_id=message_id,
-            trace_remote_jid=remote_jid,
-        )
-        if _record_early_trace(
-            trace_conversation,
-            stage="preflight",
-            decision="reject",
-            reason="empty_message",
-        ):
-            db.commit()
-        return WebhookResponse(success=False, message="Empty message")
-    if is_media_without_text:
-        media_label = message_type.lower() if message_type else "media"
-        message_text = f"[{media_label}]"
+    client = preflight_payload["client"]
+    settings = preflight_payload["settings"]
+    body = preflight_payload["body"]
+    metadata = preflight_payload["metadata"]
+    message_id = preflight_payload["message_id"]
+    remote_jid = preflight_payload["remote_jid"]
+    message_text = preflight_payload["message_text"]
+    message_type = preflight_payload["message_type"]
+    has_media = preflight_payload["has_media"]
+    is_media_without_text = preflight_payload["is_media_without_text"]
+    media_info = preflight_payload["media_info"]
 
     if not skip_persist:
         record_inbound_count(payload.client_slug)
@@ -2014,101 +1940,44 @@ async def _handle_webhook_payload(
             )
 
     if skip_persist:
-        if not conversation_id:
-            trace_conversation = _resolve_trace_conversation(
-                trace_client=client,
-                trace_conversation_id=None,
-                trace_message_id=message_id,
-                trace_remote_jid=remote_jid,
-            )
-            if _record_early_trace(
-                trace_conversation,
-                stage="skip_persist",
-                decision="reject",
-                reason="missing_conversation_id",
-            ):
-                db.commit()
-            return WebhookResponse(success=False, message="Missing conversation_id")
-        conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
-        if not conversation:
-            trace_conversation = _resolve_trace_conversation(
-                trace_client=client,
-                trace_conversation_id=None,
-                trace_message_id=message_id,
-                trace_remote_jid=remote_jid,
-            )
-            if _record_early_trace(
-                trace_conversation,
-                stage="skip_persist",
-                decision="reject",
-                reason="conversation_not_found",
-            ):
-                db.commit()
-            return WebhookResponse(success=False, message="Conversation not found")
-        user = db.query(User).filter(User.id == conversation.user_id).first()
-        if not user:
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "skip_persist",
-                    "decision": "reject",
-                    "reason": "user_not_found",
-                    "state": conversation.state,
-                },
-            )
-            db.commit()
-            return WebhookResponse(success=False, message="User not found")
-        timing_context["conversation_id"] = str(conversation.id)
-        if message_id:
-            saved_message = _find_message_by_message_id(db, client.id, message_id)
-        if not saved_message and outbox_created_at:
-            saved_message = _find_message_by_conversation_created_at(
-                db,
-                conversation.id,
-                outbox_created_at,
-                message_text=message_text,
-            )
-        _ensure_rag_meta_defaults(saved_message)
-        if media_info and saved_message:
-            saved_media = saved_message.message_metadata.get("media") if isinstance(saved_message.message_metadata, dict) else None
-            media_decision = _deserialize_media_decision(
-                saved_media.get("decision") if isinstance(saved_media, dict) else None
-            )
-        if media_info and media_decision is None and media_policy:
-            media_decision = await _evaluate_media_decision(
-                media=media_info,
-                client_id=client.id,
-                remote_jid=remote_jid,
-                policy=media_policy,
-                redis_client=media_redis_client,
-                count_rate_limit=count_rate_limit,
-            )
+        (
+            skip_response,
+            conversation,
+            user,
+            saved_message,
+            media_decision,
+        ) = await _prepare_skip_persist(
+            db=db,
+            client=client,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            remote_jid=remote_jid,
+            message_text=message_text,
+            media_info=media_info,
+            media_policy=media_policy,
+            media_redis_client=media_redis_client,
+            count_rate_limit=count_rate_limit,
+            outbox_created_at=outbox_created_at,
+            timing_context=timing_context,
+            resolve_trace_conversation=_resolve_trace_conversation,
+            record_early_trace=_record_early_trace,
+        )
+        if skip_response:
+            return skip_response
     else:
-        if await is_duplicate_message_id(db=db, client_id=client.id, message_id=message_id):
-            logger.info(f"Duplicate message_id skipped: {message_id}")
-            trace_conversation = _resolve_trace_conversation(
-                trace_client=client,
-                trace_conversation_id=conversation_id,
-                trace_message_id=message_id,
-                trace_remote_jid=remote_jid,
-            )
-            if _record_early_trace(
-                trace_conversation,
-                stage="dedupe",
-                decision="skip",
-                reason="duplicate_message_id",
-            ):
-                db.commit()
-            return WebhookResponse(success=True, message="Duplicate message_id", conversation_id=None, bot_response=None)
-        if not message_id:
-            message_id = build_inbound_message_id(
-                None,
-                remote_jid,
-                metadata.timestamp if metadata else None,
-                message_text,
-            )
-            if metadata:
-                metadata.messageId = message_id
+        dedupe_response, message_id = await _handle_dedup_gate(
+            db=db,
+            client=client,
+            message_id=message_id,
+            remote_jid=remote_jid,
+            metadata=metadata,
+            message_text=message_text,
+            conversation_id=conversation_id,
+            resolve_trace_conversation=_resolve_trace_conversation,
+            record_early_trace=_record_early_trace,
+        )
+        if dedupe_response:
+            return dedupe_response
 
         # 1. Get or create user
         user = get_or_create_user(db, client.id, remote_jid)
@@ -2164,124 +2033,20 @@ async def _handle_webhook_payload(
             _update_message_decision_metadata(saved_message, {"trace_id": trace_id})
 
         if enqueue_only:
-            if (
-                conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]
-                and conversation.telegram_topic_id
-            ):
-                bot_token, chat_id = get_telegram_credentials(db, client.id)
-                if bot_token and chat_id:
-                    already_forwarded = bool(metadata and metadata.forwarded_to_telegram)
-                    if not already_forwarded:
-                        telegram = TelegramService(bot_token)
-                        forward_result = None
-                        if media_info and media_decision and media_decision.allowed and (media_policy or {}).get("forward_to_telegram"):
-                            storage_path = None
-                            if media_policy and media_policy.get("store_media"):
-                                if saved_message and isinstance(saved_message.message_metadata, dict):
-                                    storage_path = (saved_message.message_metadata.get("media") or {}).get("storage_path")
-                                if not storage_path:
-                                    storage_result = await _store_media_locally(
-                                        media=media_info,
-                                        policy=media_policy,
-                                        client_slug=client.name,
-                                        conversation_id=conversation.id,
-                                        message_id=message_id,
-                                    )
-                                    if storage_result.get("stored"):
-                                        storage_path = storage_result.get("path")
-                                    if saved_message:
-                                        update_payload = {
-                                            "storage_path": storage_result.get("path"),
-                                            "stored": bool(storage_result.get("stored")),
-                                            "storage_error": storage_result.get("error"),
-                                            "size_bytes": storage_result.get("size_bytes") or media_info.size_bytes,
-                                            "sha256": storage_result.get("sha256"),
-                                        }
-                                        _update_message_media_metadata(saved_message, update_payload)
-                            caption = _build_media_caption(message_text, media_info)
-                            forward_result = _send_telegram_media(
-                                telegram=telegram,
-                                chat_id=chat_id,
-                                topic_id=conversation.telegram_topic_id,
-                                media=media_info,
-                                caption=caption,
-                                stored_path=storage_path,
-                            )
-                        else:
-                            forward_result = telegram.send_message(
-                                chat_id=chat_id,
-                                text=f"👤 <b>Клиент:</b> {message_text}",
-                                message_thread_id=conversation.telegram_topic_id,
-                            )
-                        if forward_result and forward_result.get("ok"):
-                            if metadata:
-                                metadata.forwarded_to_telegram = True
-                            logger.info(
-                                "Fast-forwarded inbound message to Telegram",
-                                extra={
-                                    "context": {
-                                        "conversation_id": str(conversation.id),
-                                        "state": conversation.state,
-                                        "telegram_topic_id": conversation.telegram_topic_id,
-                                    }
-                                },
-                            )
-                        else:
-                            logger.warning(
-                                "Fast-forward to Telegram failed",
-                                extra={
-                                    "context": {
-                                        "conversation_id": str(conversation.id),
-                                        "state": conversation.state,
-                                        "telegram_topic_id": conversation.telegram_topic_id,
-                                        "error": forward_result.get("description") if forward_result else None,
-                                    }
-                                },
-                            )
-            inbound_message_id = build_inbound_message_id(
-                message_id, remote_jid, metadata.timestamp if metadata else None, message_text
+            return await _handle_enqueue_only_accept(
+                db=db,
+                client=client,
+                conversation=conversation,
+                payload=payload,
+                remote_jid=remote_jid,
+                message_id=message_id,
+                message_text=message_text,
+                metadata=metadata,
+                saved_message=saved_message,
+                media_info=media_info,
+                media_policy=media_policy,
+                media_decision=media_decision,
             )
-            payload_json = payload.model_dump(exclude_none=True)
-            enqueued = enqueue_outbox_message(
-                db,
-                client_id=client.id,
-                conversation_id=conversation.id,
-                inbound_message_id=inbound_message_id,
-                payload_json=payload_json,
-            )
-            if enqueued:
-                logger.info(
-                    "Outbox enqueued",
-                    extra={
-                        "context": {
-                            "client_slug": payload.client_slug,
-                            "conversation_id": str(conversation.id),
-                            "inbound_message_id": inbound_message_id,
-                        }
-                    },
-                )
-            else:
-                logger.info(
-                    "Outbox duplicate skipped",
-                    extra={
-                        "context": {
-                            "client_slug": payload.client_slug,
-                            "conversation_id": str(conversation.id),
-                            "inbound_message_id": inbound_message_id,
-                        }
-                    },
-                )
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "outbox",
-                    "decision": "enqueue_only",
-                    "reason": "enqueued" if enqueued else "duplicate",
-                    "state": conversation.state,
-                },
-            )
-            db.commit()
-            return WebhookResponse(success=True, message="Accepted", conversation_id=conversation.id, bot_response=None)
 
     routing = _get_routing_policy(conversation.state)
     context_contract, context_error = build_context_contract(conversation, payload, settings)
@@ -3063,150 +2828,19 @@ async def _handle_webhook_payload(
         intent_queue = _get_intent_queue(context)
 
     # 4.5 Branch routing (instance_id -> branch, or ask user)
-    branch_mode = (
-        settings.branch_resolution_mode if settings and settings.branch_resolution_mode else "hybrid"
+    branch_response = _handle_branch_selection_gate(
+        db=db,
+        client_id=client.id,
+        settings=settings,
+        conversation=conversation,
+        user=user,
+        metadata=metadata,
+        message_text=message_text,
+        now=now,
+        send_and_save=_send_and_save,
     )
-    remember_branch = (
-        settings.remember_branch_preference
-        if settings and settings.remember_branch_preference is not None
-        else True
-    )
-    context = _get_conversation_context(conversation)
-    branch_id = conversation.branch_id or _coerce_uuid(context.get(BRANCH_CONTEXT_KEY))
-    if not branch_id and remember_branch:
-        branch_id = _get_user_branch_preference(user)
-
-    if branch_id:
-        if conversation.branch_id != branch_id:
-            conversation.branch_id = branch_id
-        if context.get(BRANCH_CONTEXT_KEY) != str(branch_id):
-            context[BRANCH_CONTEXT_KEY] = str(branch_id)
-            _set_conversation_context(conversation, context)
-        if remember_branch and _get_user_branch_preference(user) != branch_id:
-            _set_user_branch_preference(user, branch_id)
-    else:
-        instance_id = metadata.instanceId if metadata else None
-        if branch_mode in {"by_instance", "hybrid"} and instance_id:
-            branch = (
-                db.query(Branch)
-                .filter(
-                    Branch.client_id == client.id,
-                    Branch.instance_id == instance_id,
-                    Branch.is_active == True,
-                )
-                .first()
-            )
-            if branch:
-                _apply_branch_selection(
-                    conversation=conversation,
-                    user=user,
-                    branch=branch,
-                    context=context,
-                    remember_branch=remember_branch,
-                )
-
-        if not conversation.branch_id and branch_mode in {"ask_user", "hybrid"}:
-            branches = _get_active_branches(db, client.id)
-            if len(branches) == 1:
-                _apply_branch_selection(
-                    conversation=conversation,
-                    user=user,
-                    branch=branches[0],
-                    context=context,
-                    remember_branch=remember_branch,
-                )
-            elif len(branches) > 1 and conversation.state == ConversationState.BOT_ACTIVE.value:
-                selection = _get_branch_selection(context)
-                if selection:
-                    matched_branch, selected_by_index = _match_branch_choice(
-                        message_text, branches, selection
-                    )
-                    if matched_branch:
-                        _apply_branch_selection(
-                            conversation=conversation,
-                            user=user,
-                            branch=matched_branch,
-                            context=context,
-                            remember_branch=remember_branch,
-                        )
-                        if _is_branch_only_message(message_text, matched_branch, selected_by_index):
-                            bot_response = MSG_BRANCH_SELECTED.format(
-                                branch_name=matched_branch.name
-                                or matched_branch.slug
-                                or "филиал"
-                            )
-                            _record_decision_trace(
-                                conversation,
-                                {
-                                    "stage": "branch_selection",
-                                    "decision": "selected",
-                                    "reason": "branch_only_message",
-                                    "branch_id": str(matched_branch.id),
-                                },
-                            )
-                            bot_response, sent = _send_and_save(bot_response)
-                            result_message = (
-                                "Branch selected (prompted)" if sent else "Branch selection response failed"
-                            )
-                            db.commit()
-                            return WebhookResponse(
-                                success=True,
-                                message=result_message,
-                                conversation_id=conversation.id,
-                                bot_response=bot_response,
-                            )
-                    else:
-                        prompt = _build_branch_prompt(branches)
-                        context = _set_branch_selection(
-                            context, _build_branch_selection(branches, now)
-                        )
-                        _set_conversation_context(conversation, context)
-                        _record_decision_trace(
-                            conversation,
-                            {
-                                "stage": "branch_selection",
-                                "decision": "prompt",
-                                "reason": "retry",
-                                "branches_count": len(branches),
-                            },
-                        )
-                        prompt, sent = _send_and_save(prompt)
-                        result_message = (
-                            "Branch selection requested (retry)"
-                            if sent
-                            else "Branch selection prompt failed"
-                        )
-                        db.commit()
-                        return WebhookResponse(
-                            success=True,
-                            message=result_message,
-                            conversation_id=conversation.id,
-                            bot_response=prompt,
-                        )
-                else:
-                    prompt = _build_branch_prompt(branches)
-                    context = _set_branch_selection(context, _build_branch_selection(branches, now))
-                    _set_conversation_context(conversation, context)
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "branch_selection",
-                            "decision": "prompt",
-                            "reason": "initial",
-                            "branches_count": len(branches),
-                        },
-                    )
-                    prompt, sent = _send_and_save(prompt)
-                    result_message = (
-                        "Branch selection requested" if sent else "Branch selection prompt failed"
-                    )
-                    db.commit()
-                    return WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=prompt,
-                    )
+    if branch_response:
+        return branch_response
 
     if conversation.branch_id:
         timing_context["branch_id"] = str(conversation.branch_id)
@@ -4322,240 +3956,39 @@ async def _handle_webhook_payload(
             )
 
     # 9.0 Debounce bursty inputs: only the latest message triggers bot logic.
-    append_user_message = True
-    if conversation.state in [ConversationState.BOT_ACTIVE.value, ConversationState.PENDING.value] and not batch_messages_provided:
-        # Persist user message + last_message_at before waiting.
-        db.commit()
-
-        debounce_enabled, _, ttl_seconds, redis_url, socket_timeout_seconds = _get_debounce_settings()
-        buffer_enabled, max_buffer_messages = _get_message_buffer_settings()
-        redis_client = _get_debounce_redis(redis_url, socket_timeout_seconds)
-
-        if debounce_enabled and buffer_enabled and redis_client:
-            await _buffer_user_message(
-                redis_client=redis_client,
-                client_id=str(client.id),
-                remote_jid=remote_jid,
-                message_text=message_text,
-                ttl_seconds=ttl_seconds,
-                max_messages=max_buffer_messages,
-            )
-
-        should_process = await should_process_debounced_message(
-            client_id=str(client.id),
-            remote_jid=remote_jid,
-            message_id=message_id,
-            redis_client=redis_client,
-        )
-        if not should_process:
-            logger.info(
-                "Debounced intermediate message",
-                extra={"context": {"remote_jid": remote_jid, "message_id": message_id}},
-            )
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "debounce",
-                    "decision": "skip",
-                    "reason": "intermediate_message",
-                    "state": conversation.state,
-                },
-            )
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message="Debounced: skipped intermediate message",
-                conversation_id=conversation.id,
-                bot_response=None,
-            )
-
-        if debounce_enabled and buffer_enabled and redis_client:
-            buffered_messages = await _drain_buffered_messages(
-                redis_client=redis_client,
-                client_id=str(client.id),
-                remote_jid=remote_jid,
-            )
-            if buffered_messages:
-                logger.info(
-                    "Debounce buffer drained",
-                    extra={
-                        "context": {
-                            "remote_jid": remote_jid,
-                            "message_id": message_id,
-                            "buffered_count": len(buffered_messages),
-                        }
-                    },
-                )
-                message_text = " ".join(buffered_messages)
-                if not batch_messages_provided:
-                    batch_messages = _coerce_batch_messages(message_text, buffered_messages)
-                append_user_message = False
-
-        # Re-check state after waiting: manager could take the request during debounce pause.
-        db.refresh(conversation)
-        now = datetime.now(timezone.utc)
-        if conversation.state == ConversationState.MANAGER_ACTIVE.value:
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "debounce",
-                    "decision": "manager_active",
-                    "reason": "state_changed",
-                    "state": conversation.state,
-                },
-            )
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message="Manager active (after debounce), message forwarded",
-                conversation_id=conversation.id,
-                bot_response=None,
-            )
-        if conversation.bot_status == "muted" or (conversation.bot_muted_until and conversation.bot_muted_until > now):
-            signal_messages = _coerce_batch_messages(message_text, batch_messages)
-            opt_out_in_batch = any(is_opt_out_message(msg) for msg in signal_messages)
-            booking_signal, booking_block_meta = _evaluate_booking_signal(
-                signal_messages,
-                client_slug=payload.client_slug,
-                message_text=message_text,
-            )
-            context = _get_conversation_context(conversation)
-            booking_active = bool(_get_booking_context(context).get("active"))
-            reengage_confirmation = _get_reengage_confirmation(context)
-            if reengage_confirmation and _is_reengage_confirmation_active(reengage_confirmation, now):
-                conversation.bot_status = "active"
-                conversation.bot_muted_until = None
-                conversation.no_count = 0
-            elif (booking_signal or booking_active) and not opt_out_in_batch:
-                conversation.bot_status = "active"
-                conversation.bot_muted_until = None
-                conversation.no_count = 0
-            else:
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "routing",
-                        "decision": "muted_skip_after_debounce",
-                        "state": conversation.state,
-                        "booking_signal": booking_signal,
-                        "booking_active": booking_active,
-                        "opt_out_in_batch": opt_out_in_batch,
-                    },
-                )
-                return WebhookResponse(
-                    success=True,
-                    message="Bot muted (after debounce), forwarded to topic"
-                    if conversation.telegram_topic_id
-                    else "Bot muted (after debounce)",
-                    conversation_id=conversation.id,
-                    bot_response=None,
-                )
+    (
+        debounce_response,
+        message_text,
+        batch_messages,
+        append_user_message,
+        now,
+    ) = await _handle_debounce_gate(
+        db=db,
+        client=client,
+        conversation=conversation,
+        message_text=message_text,
+        message_id=message_id,
+        remote_jid=remote_jid,
+        batch_messages=batch_messages,
+        batch_messages_provided=batch_messages_provided,
+        payload_client_slug=payload.client_slug,
+        now=now,
+    )
+    if debounce_response:
+        return debounce_response
 
     # 9.02 Pending handover confirmation before other flows.
-    if conversation.state == ConversationState.BOT_ACTIVE.value:
-        context = _get_conversation_context(conversation)
-        confirmation = _get_handover_confirmation(context)
-        if confirmation:
-            if not _is_handover_confirmation_active(confirmation, now):
-                context = _set_handover_confirmation(context, None)
-                _set_conversation_context(conversation, context)
-            else:
-                decision = classify_confirmation(message_text)
-                if decision == "yes":
-                    context = _set_handover_confirmation(context, None)
-                    _set_conversation_context(conversation, context)
-                    _reset_low_confidence_retry(conversation)
-
-                    escalation_message = confirmation.get("user_message") or message_text
-                    _, reused, telegram_sent = _reuse_active_handover(
-                        db=db,
-                        conversation=conversation,
-                        user=user,
-                        message=escalation_message,
-                        source="handover_confirmation",
-                        intent="low_confidence",
-                    )
-
-                    if reused:
-                        bot_response = MSG_ESCALATED
-                        result_message = (
-                            f"Handover confirmed (reused), telegram={'sent' if telegram_sent else 'failed'}"
-                        )
-                    else:
-                        _record_escalation_metric("intent")
-                        esc_result = escalate_to_pending(
-                            db=db,
-                            conversation=conversation,
-                            user_message=escalation_message,
-                            trigger_type="intent",
-                            trigger_value="low_confidence",
-                        )
-
-                        if esc_result.ok:
-                            handover = esc_result.value
-                            telegram_sent = send_telegram_notification(
-                                db=db,
-                                handover=handover,
-                                conversation=conversation,
-                                user=user,
-                                message=escalation_message,
-                            )
-                            bot_response = MSG_ESCALATED
-                            result_message = (
-                                f"Handover confirmed, telegram={'sent' if telegram_sent else 'failed'}"
-                            )
-                        else:
-                            bot_response = MSG_AI_ERROR
-                            result_message = f"Handover confirm escalation failed: {esc_result.error}"
-
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "handover_confirmation",
-                            "decision": "confirmed",
-                            "reason": "user_confirmed",
-                            "state": conversation.state,
-                            "reused": reused,
-                        },
-                    )
-                    bot_response, sent = _send_and_save(bot_response)
-                    if not sent:
-                        result_message = f"{result_message}; response_send=failed"
-                    db.commit()
-                    return WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=bot_response,
-                    )
-
-                if decision == "no":
-                    context = _set_handover_confirmation(context, None)
-                    _set_conversation_context(conversation, context)
-                    _reset_low_confidence_retry(conversation)
-
-                    bot_response = MSG_HANDOVER_DECLINED
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "handover_confirmation",
-                            "decision": "declined",
-                            "reason": "user_declined",
-                            "state": conversation.state,
-                        },
-                    )
-                    bot_response, sent = _send_and_save(bot_response)
-                    result_message = "Handover declined, asked for salon details" if sent else "Handover decline send failed"
-                    db.commit()
-                    return WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=bot_response,
-                    )
-
-                context = _set_handover_confirmation(context, None)
-                _set_conversation_context(conversation, context)
+    handover_response = _handle_handover_confirmation_gate(
+        db=db,
+        conversation=conversation,
+        user=user,
+        message_text=message_text,
+        now=now,
+        send_and_save=_send_and_save,
+        record_escalation_metric=_record_escalation_metric,
+    )
+    if handover_response:
+        return handover_response
 
     batch_messages = _coerce_batch_messages(message_text, batch_messages)
     booking_messages = batch_messages

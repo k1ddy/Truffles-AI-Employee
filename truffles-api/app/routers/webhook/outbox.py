@@ -10,8 +10,20 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger, record_outbox_latency
-from app.schemas.webhook import WebhookRequest
+from app.models import Client, Conversation, Message, User
+from app.routers.webhook.media import (
+    _build_media_caption,
+    _send_telegram_media,
+    _store_media_locally,
+    _update_message_media_metadata,
+)
+from app.routers.webhook.trace import _record_decision_trace
+from app.schemas.webhook import WebhookRequest, WebhookResponse
+from app.services.escalation_service import get_telegram_credentials
 from app.services.outbox_service import mark_outbox_status
+from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
+from app.services.state_machine import ConversationState
+from app.services.telegram_service import TelegramService
 
 logger = get_logger("webhook")
 
@@ -56,6 +68,250 @@ def _split_outbox_batches(batch_sorted: list[dict], window_seconds: float) -> li
     if current:
         groups.append(current)
     return groups
+
+
+async def _prepare_skip_persist(
+    *,
+    db: Session,
+    client: Client,
+    conversation_id: UUID | None,
+    message_id: str | None,
+    remote_jid: str,
+    message_text: str,
+    media_info,
+    media_policy: dict | None,
+    media_redis_client,
+    count_rate_limit: bool,
+    outbox_created_at: datetime | None,
+    timing_context: dict,
+    resolve_trace_conversation,
+    record_early_trace,
+) -> tuple[WebhookResponse | None, Conversation | None, User | None, Message | None, object | None]:
+    from . import _legacy as legacy
+
+    if not conversation_id:
+        trace_conversation = resolve_trace_conversation(
+            trace_client=client,
+            trace_conversation_id=None,
+            trace_message_id=message_id,
+            trace_remote_jid=remote_jid,
+        )
+        if record_early_trace(
+            trace_conversation,
+            stage="skip_persist",
+            decision="reject",
+            reason="missing_conversation_id",
+        ):
+            db.commit()
+        return WebhookResponse(success=False, message="Missing conversation_id"), None, None, None, None
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        trace_conversation = resolve_trace_conversation(
+            trace_client=client,
+            trace_conversation_id=None,
+            trace_message_id=message_id,
+            trace_remote_jid=remote_jid,
+        )
+        if record_early_trace(
+            trace_conversation,
+            stage="skip_persist",
+            decision="reject",
+            reason="conversation_not_found",
+        ):
+            db.commit()
+        return WebhookResponse(success=False, message="Conversation not found"), None, None, None, None
+    user = db.query(User).filter(User.id == conversation.user_id).first()
+    if not user:
+        legacy._record_decision_trace(
+            conversation,
+            {
+                "stage": "skip_persist",
+                "decision": "reject",
+                "reason": "user_not_found",
+                "state": conversation.state,
+            },
+        )
+        db.commit()
+        return WebhookResponse(success=False, message="User not found"), None, None, None, None
+    timing_context["conversation_id"] = str(conversation.id)
+    saved_message = None
+    if message_id:
+        saved_message = legacy._find_message_by_message_id(db, client.id, message_id)
+    if not saved_message and outbox_created_at:
+        saved_message = legacy._find_message_by_conversation_created_at(
+            db,
+            conversation.id,
+            outbox_created_at,
+            message_text=message_text,
+        )
+    legacy._ensure_rag_meta_defaults(saved_message)
+    media_decision = None
+    if media_info and saved_message:
+        saved_media = (
+            saved_message.message_metadata.get("media")
+            if isinstance(saved_message.message_metadata, dict)
+            else None
+        )
+        media_decision = legacy._deserialize_media_decision(
+            saved_media.get("decision") if isinstance(saved_media, dict) else None
+        )
+    if media_info and media_decision is None and media_policy:
+        media_decision = await legacy._evaluate_media_decision(
+            media=media_info,
+            client_id=client.id,
+            remote_jid=remote_jid,
+            policy=media_policy,
+            redis_client=media_redis_client,
+            count_rate_limit=count_rate_limit,
+        )
+    return None, conversation, user, saved_message, media_decision
+
+
+async def _handle_enqueue_only_accept(
+    *,
+    db: Session,
+    client: Client,
+    conversation: Conversation,
+    payload: WebhookRequest,
+    remote_jid: str,
+    message_id: str | None,
+    message_text: str,
+    metadata,
+    saved_message: Message | None,
+    media_info,
+    media_policy: dict | None,
+    media_decision,
+) -> WebhookResponse:
+    if (
+        conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]
+        and conversation.telegram_topic_id
+    ):
+        bot_token, chat_id = get_telegram_credentials(db, client.id)
+        if bot_token and chat_id:
+            already_forwarded = bool(metadata and metadata.forwarded_to_telegram)
+            if not already_forwarded:
+                telegram = TelegramService(bot_token)
+                forward_result = None
+                if (
+                    media_info
+                    and media_decision
+                    and media_decision.allowed
+                    and (media_policy or {}).get("forward_to_telegram")
+                ):
+                    storage_path = None
+                    if media_policy and media_policy.get("store_media"):
+                        if saved_message and isinstance(saved_message.message_metadata, dict):
+                            storage_path = (saved_message.message_metadata.get("media") or {}).get(
+                                "storage_path"
+                            )
+                        if not storage_path:
+                            storage_result = await _store_media_locally(
+                                media=media_info,
+                                policy=media_policy,
+                                client_slug=client.name,
+                                conversation_id=conversation.id,
+                                message_id=message_id,
+                            )
+                            if storage_result.get("stored"):
+                                storage_path = storage_result.get("path")
+                            if saved_message:
+                                update_payload = {
+                                    "storage_path": storage_result.get("path"),
+                                    "stored": bool(storage_result.get("stored")),
+                                    "storage_error": storage_result.get("error"),
+                                    "size_bytes": storage_result.get("size_bytes") or media_info.size_bytes,
+                                    "sha256": storage_result.get("sha256"),
+                                }
+                                _update_message_media_metadata(saved_message, update_payload)
+                    caption = _build_media_caption(message_text, media_info)
+                    forward_result = _send_telegram_media(
+                        telegram=telegram,
+                        chat_id=chat_id,
+                        topic_id=conversation.telegram_topic_id,
+                        media=media_info,
+                        caption=caption,
+                        stored_path=storage_path,
+                    )
+                else:
+                    forward_result = telegram.send_message(
+                        chat_id=chat_id,
+                        text=f"👤 <b>Клиент:</b> {message_text}",
+                        message_thread_id=conversation.telegram_topic_id,
+                    )
+                if forward_result and forward_result.get("ok"):
+                    if metadata:
+                        metadata.forwarded_to_telegram = True
+                    logger.info(
+                        "Fast-forwarded inbound message to Telegram",
+                        extra={
+                            "context": {
+                                "conversation_id": str(conversation.id),
+                                "state": conversation.state,
+                                "telegram_topic_id": conversation.telegram_topic_id,
+                            }
+                        },
+                    )
+                else:
+                    logger.warning(
+                        "Fast-forward to Telegram failed",
+                        extra={
+                            "context": {
+                                "conversation_id": str(conversation.id),
+                                "state": conversation.state,
+                                "telegram_topic_id": conversation.telegram_topic_id,
+                                "error": forward_result.get("description") if forward_result else None,
+                            }
+                        },
+                    )
+    inbound_message_id = build_inbound_message_id(
+        message_id, remote_jid, metadata.timestamp if metadata else None, message_text
+    )
+    payload_json = payload.model_dump(exclude_none=True)
+    enqueued = enqueue_outbox_message(
+        db,
+        client_id=client.id,
+        conversation_id=conversation.id,
+        inbound_message_id=inbound_message_id,
+        payload_json=payload_json,
+    )
+    if enqueued:
+        logger.info(
+            "Outbox enqueued",
+            extra={
+                "context": {
+                    "client_slug": payload.client_slug,
+                    "conversation_id": str(conversation.id),
+                    "inbound_message_id": inbound_message_id,
+                }
+            },
+        )
+    else:
+        logger.info(
+            "Outbox duplicate skipped",
+            extra={
+                "context": {
+                    "client_slug": payload.client_slug,
+                    "conversation_id": str(conversation.id),
+                    "inbound_message_id": inbound_message_id,
+                }
+            },
+        )
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "outbox",
+            "decision": "enqueue_only",
+            "reason": "enqueued" if enqueued else "duplicate",
+            "state": conversation.state,
+        },
+    )
+    db.commit()
+    return WebhookResponse(
+        success=True,
+        message="Accepted",
+        conversation_id=conversation.id,
+        bot_response=None,
+    )
 
 
 async def _process_outbox_rows(
@@ -411,6 +667,8 @@ async def _process_outbox_rows(
 __all__ = [
     "_coerce_outbox_created_at",
     "_get_outbox_window_merge_seconds",
+    "_handle_enqueue_only_accept",
+    "_prepare_skip_persist",
     "_process_outbox_rows",
     "_split_outbox_batches",
 ]
