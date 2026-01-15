@@ -37,6 +37,16 @@
 
 ---
 
+## РОЛЕВЫЕ ВХОДЫ (куда смотреть)
+
+- **Top Architect:** `STATE.md` (NOW), `STRUCTURE.md`, `STRATEGY/REQUIREMENTS.md`, `STRATEGY/TECH_ROADMAP.md`, `SPECS/ARCHITECTURE.md`, `SPECS/CONSULTANT.md`, `docs/SESSION_START_PROMPT.txt`.
+- **Brain:** `STATE.md`, `docs/SESSION_START_PROMPT.txt` (Task Package), `STRUCTURE.md`, `SPECS/*` по задаче, `TECH.md`, `SPECS/SYSTEM_REFERENCE.md`.
+- **Hands‑DEV:** Task Package + `TECH.md`, `SPECS/SYSTEM_REFERENCE.md`, профильные `SPECS/*`, код в `truffles-api/*`.
+- **Hands‑OPS/QA:** Task Package + `TECH.md`, `docs/SESSION_START_PROMPT.txt`, `SPECS/SYSTEM_REFERENCE.md`, `docs/TECH_STATUS.md`.
+- **Hands‑DOCS:** `STRUCTURE.md`, `docs/SELLING_TRUTHS.md`, `STRATEGY/*`, профильные `SPECS/*`.
+
+---
+
 ## QUESTION GATE (ОБЯЗАТЕЛЕН ДЛЯ ARCHITECT И BRAIN)
 
 1. Если данных недостаточно — **обязан** задать вопрос, а не делать “слепую” задачу.

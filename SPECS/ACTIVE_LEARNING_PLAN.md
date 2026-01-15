@@ -1,7 +1,14 @@
 # ACTIVE LEARNING — План реализации
+**Статус:** ARCHIVE  
+**Owner:** Top Architect  
+**Обновлено:** 2026-01-15  
+**Scope:** архивный план; не канон.  
+**Out of scope:** актуальные правила/решения (см. `SPECS/ACTIVE_LEARNING.md`).  
+**Links:** `SPECS/ACTIVE_LEARNING.md`, `STATE.md`.
 
-**Дата:** 2025-12-08
-**Статус:** План (P2). Реализация частичная — см. `SPECS/ACTIVE_LEARNING.md`.
+DERIVED/LEGACY: archival plan; current truth is in SPECS/ACTIVE_LEARNING.md.
+
+**Создано:** 2025-12-08  
 **Зависимости:** Эскалация ✅; роли/идентичности — план; A4–A7 до полного обучения.
 
 ---

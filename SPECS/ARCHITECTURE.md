@@ -1,7 +1,13 @@
 # ARCHITECTURE — Техническая архитектура Truffles
 
+**Статус:** CANON  
+**Owner:** Top Architect  
+**Обновлено:** 2026-01-15  
+**Scope:** архитектура рантайма, decision graph, компоненты и потоки.  
+**Out of scope:** тарифы/продажи, evidence/CI.  
+**Links:** `SPECS/CONSULTANT.md`, `SPECS/INFRASTRUCTURE.md`, `STATE.md`.
+
 **Читай это перед любыми изменениями.**
-**Обновлено:** 2025-12-25
 
 ---
 
@@ -11,7 +17,7 @@
 |----------|----------|
 | Репозиторий | `github.com/k1ddy/Truffles-AI-Employee` (один) |
 | Главная ветка | `main` |
-| Политика PR | Не формализована. Коммиты напрямую в main. |
+| Политика PR | По умолчанию через PR + CI; прямые коммиты в main — исключение. |
 | CI | GitHub Actions (`.github/workflows/ci.yml`): ruff+pytest, build+push to GHCR, optional deploy |
 
 ---
@@ -23,10 +29,10 @@
 | Backend API | Python 3.11 + FastAPI |
 | База данных | PostgreSQL 15 |
 | Векторная БД | Qdrant (self-hosted) |
-| Embeddings | BGE-M3 (self-hosted, HTTP `http://bge-m3:8080/embed`) |
-| LLM | OpenAI API (по умолчанию `gpt-5-mini`) |
+| Embeddings | BGE-M3 (self-hosted, default `http://bge-m3:80/embed`, override `BGE_M3_URL`) |
+| LLM | OpenAI-compatible API (default `FAST_MODEL=gpt-5-mini`; router uses `ROUTER_MODEL` or `gpt-4o-mini` when FAST_MODEL starts with gpt-5) |
 | Кэш/очереди | Redis |
-| Оркестрация | Docker (prod), Docker Compose (local) |
+| Оркестрация | Docker (prod через `restart_api.sh`), Docker Compose (local/infra) |
 | Reverse proxy | Traefik |
 | WhatsApp | ChatFlow API (`app.chatflow.kz`) |
 | Telegram | Bot API (webhook) |
@@ -131,6 +137,104 @@ behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → p
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
 ```
 
+### Decision Graph (legacy map, `_legacy.py`)
+Фактическая карта стадий и ранних return в `_handle_webhook_payload` (legacy pipeline). Это **не** целевой оркестратор `decision.py`, а снимок текущего поведения.
+
+#### Stage order (gates/early returns)
+1) Preflight rejects и outbox-only путь → early return без trace (GAP ниже).
+2) Контракт + план Decision Graph → `contract`, `decision_graph`.
+3) Session memory + re-entry + carryover cleanup → `session_memory`, `re_entry`, `class_carryover`, `service_carryover`, `consult_context`.
+4) Expected reply (answer interpreter) → `question_contract`.
+5) Branch selection prompt/confirm → early return без trace (GAP).
+6) Behavioral shield → `shield` (drop/escalate).
+7) Policy/Hard-LAW gate → `policy_gate`.
+8) State/pending/mute gates → `routing`, `rejection`, `pending_*` (часть mute/reengage без stage).
+9) Media-only handling → `media`.
+10) Debounce/hand‑over confirmation → early return без trace (GAP).
+11) Router + intent decomposition + carryover guard → `intent_decomposition`, `class_router`, `intent`, `carryover_guard`.
+12) Domain flows (booking/info/consult) → `booking_gate`, `complaint_guard`, `out_of_domain`, `consult_flow`, `intent_queue`, `booking`, `consult`, `clarify_guard`, `booking_interrupt`, `service_matcher`, `truth_gate`, `multi_truth`, `service_semantic_matcher`, `time_only_guard`, `info_class`.
+13) LLM response/fallback → `llm_guard`, `ai_response`, `rewrite`, `budget_gate`, `llm_degradation`.
+14) Post-response hooks (summary/consult return) → `context_manager`, `consult_return`.
+15) Escalation/state updates → `escalation`, `state_transition`.
+
+#### Legacy stage map (stage → condition → action → trace)
+| Stage | Condition | Action | Trace |
+| --- | --- | --- | --- |
+| `state_transition` | Попытка перехода состояния при handover (invalid) | Логируем нарушение перехода | decision_trace.stage=`state_transition` (`truffles-api/app/routers/webhook/_legacy.py:1574`) |
+| `escalation` | Reuse/создание handover | Фиксируем reuse + telegram_sent | decision_trace.stage=`escalation` (`truffles-api/app/routers/webhook/_legacy.py:1595`) |
+| `budget_gate` | LLM budget events | Allow/deny + budget meta | decision_trace.stage=`budget_gate` (`truffles-api/app/routers/webhook/_legacy.py:1739`) |
+| `llm_degradation` | LLM деградация (timeout/skip) | Фиксируем reason | decision_trace.stage=`llm_degradation` (`truffles-api/app/routers/webhook/_legacy.py:1777`) |
+| `rewrite` | RAG rewrite применён/пропущен | Запись rewrite_used/text | decision_trace.stage=`rewrite` (`truffles-api/app/routers/webhook/_legacy.py:1816`) |
+| `contract` | Контракты context/intent/fact/action/response | OK/error по схеме | decision_trace.stage=`contract` (`truffles-api/app/routers/webhook/_legacy.py:2070`) |
+| `decision_graph` | План Decision Graph | Запись plan_id + стадий | decision_trace.stage=`decision_graph` (`truffles-api/app/routers/webhook/_legacy.py:2087`) |
+| `fact_guard` | fact_source есть, фактов нет | Clarify или escalate | decision_trace.stage=`fact_guard` (`truffles-api/app/routers/webhook/_legacy.py:2251`) |
+| `fact_resolver` | Факты/источники собраны | Resolved/missing | decision_trace.stage=`fact_resolver` (`truffles-api/app/routers/webhook/_legacy.py:2331`) |
+| `session_memory` | Reset/contract_error/expected_reply_fallback | Обновление/сброс памяти | decision_trace.stage=`session_memory` (`truffles-api/app/routers/webhook/_legacy.py:2409`) |
+| `re_entry` | Требуется re-entry после reset/resume | Пометка re-entry | decision_trace.stage=`re_entry` (`truffles-api/app/routers/webhook/_legacy.py:2466`) |
+| `class_carryover` | Истёк class carryover | Пометка expired | decision_trace.stage=`class_carryover` (`truffles-api/app/routers/webhook/_legacy.py:2534`) |
+| `service_carryover` | Истёк service carryover | Пометка expired | decision_trace.stage=`service_carryover` (`truffles-api/app/routers/webhook/_legacy.py:2543`) |
+| `consult_context` | Истёк consult context | Пометка expired | decision_trace.stage=`consult_context` (`truffles-api/app/routers/webhook/_legacy.py:2552`) |
+| `context_manager` | Summary/goal/refusal updates | Обновление контекста | decision_trace.stage=`context_manager` (`truffles-api/app/routers/webhook/context_manager.py:753`) |
+| `question_contract` | Expected reply match/miss/invalid | Запись expected_reply_type/value | decision_trace.stage=`question_contract` (`truffles-api/app/routers/webhook/_legacy.py:2761`) |
+| `shield` | Spam/too_long/toxic/nonsense | Drop или escalate | decision_trace.stage=`shield` (`truffles-api/app/routers/webhook/_legacy.py:2937`) |
+| `policy_gate` | Hard‑LAW/discount/payment rules | Reply/escalate | decision_trace.stage=`policy_gate` (`truffles-api/app/routers/webhook/_legacy.py:3078`) |
+| `routing` | State gate (manager_active/muted) | Silent/skip reply | decision_trace.stage=`routing` (`truffles-api/app/routers/webhook/_legacy.py:3252`) |
+| `rejection` | Opt‑out в pending | Cancel handover + mute | decision_trace.stage=`rejection` (`truffles-api/app/routers/webhook/_legacy.py:3526`) |
+| `pending_sla` | pending_close/ack/ping | Обновление pending_action | decision_trace.stage=`pending_sla` (`truffles-api/app/routers/webhook/_legacy.py:3556`) |
+| `pending_resume` | pending_ack + resume snapshot | Restore context + re_entry | decision_trace.stage=`pending_resume` (`truffles-api/app/routers/webhook/_legacy.py:3605`) |
+| `pending_status` | pending status вопрос | Reply status | decision_trace.stage=`pending_status` (`truffles-api/app/routers/webhook/_legacy.py:3647`) |
+| `pending_wait` | pending default wait | Reply wait | decision_trace.stage=`pending_wait` (`truffles-api/app/routers/webhook/_legacy.py:3712`) |
+| `media` | Media‑only/ограничения | Media ответ/forward | decision_trace.stage=`media` (`truffles-api/app/routers/webhook/_legacy.py:3752`) |
+| `intent_decomposition` | Декомпозиция intents | intents/service_query | decision_trace.stage=`intent_decomposition` (`truffles-api/app/routers/webhook/_legacy.py:4302`) |
+| `carryover_guard` | Carryover ignored | Пометка ignored | decision_trace.stage=`carryover_guard` (`truffles-api/app/routers/webhook/_legacy.py:4413`) |
+| `booking_gate` | Booking blocked (info/low-signal) | Отключение booking | decision_trace.stage=`booking_gate` (`truffles-api/app/routers/webhook/_legacy.py:4569`) |
+| `complaint_guard` | Complaint signal | Suppress/accept | decision_trace.stage=`complaint_guard` (`truffles-api/app/routers/webhook/_legacy.py:4706`) |
+| `out_of_domain` | OOD guard (early/anchor/semantic) | OOD reply | decision_trace.stage=`out_of_domain` (`truffles-api/app/routers/webhook/_legacy.py:4897`) |
+| `consult_flow` | Consult clarify/escalate/short‑circuit | Выбор ветки consult | decision_trace.stage=`consult_flow` (`truffles-api/app/routers/webhook/_legacy.py:4979`) |
+| `intent_queue` | Multi-intent очередь | Enqueue/dequeue | decision_trace.stage=`intent_queue` (`truffles-api/app/routers/webhook/_legacy.py:5303`) |
+| `booking` | Booking flow | Prompt/capture/escalate | decision_trace.stage=`booking` (`truffles-api/app/routers/webhook/_legacy.py:5480`) |
+| `consult` | Consult reply | Ответ по playbook | decision_trace.stage=`consult` (`truffles-api/app/routers/webhook/_legacy.py:5923`) |
+| `consult_return` | Consult follow-up appended | Возврат к consult-вопросу | decision_trace.stage=`consult_return` (`truffles-api/app/routers/webhook/context_manager.py:656`) |
+| `clarify_guard` | Clarify limit | Escalate | decision_trace.stage=`clarify_guard` (`truffles-api/app/routers/webhook/_legacy.py:6325`) |
+| `booking_interrupt` | Info вопрос во время booking | Info + booking‑prompt | decision_trace.stage=`booking_interrupt` (`truffles-api/app/routers/webhook/_legacy.py:6364`) |
+| `service_matcher` | Deterministic service match | Match + facts | decision_trace.stage=`service_matcher` (`truffles-api/app/routers/webhook/_legacy.py:6376`) |
+| `truth_gate` | Truth‑first fact reply | Reply from pack | decision_trace.stage=`truth_gate` (`truffles-api/app/routers/webhook/_legacy.py:6384`) |
+| `multi_truth` | Multi‑section facts | Combined reply | decision_trace.stage=`multi_truth` (`truffles-api/app/routers/webhook/_legacy.py:6395`) |
+| `fast_intent` | Greeting/thanks/ack before LLM | Fast reply | decision_trace.stage=`fast_intent` (`truffles-api/app/routers/webhook/_legacy.py:6778`) |
+| `info_class` | Info bundle reply | Location/hours/etc | decision_trace.stage=`info_class` (`truffles-api/app/routers/webhook/_legacy.py:7152`) |
+| `llm_guard` | LLM blocked topics | Escalate | decision_trace.stage=`llm_guard` (`truffles-api/app/routers/webhook/_legacy.py:7503`) |
+| `ai_response` | LLM response | Send bot reply | decision_trace.stage=`ai_response` (`truffles-api/app/routers/webhook/_legacy.py:7542`) |
+| `class_router` | Router classes/signals | Record router output | decision_trace.stage=`class_router` (`truffles-api/app/routers/webhook/_legacy.py:7917`) |
+| `intent` | Итоговый intent | Record intent | decision_trace.stage=`intent` (`truffles-api/app/routers/webhook/_legacy.py:7965`) |
+| `smalltalk` | Smalltalk decision | Reply greeting/thanks | decision_trace.stage=`smalltalk` (`truffles-api/app/routers/webhook/_legacy.py:8127`) |
+| `bot_status` | Bot status запрос | Reply status | decision_trace.stage=`bot_status` (`truffles-api/app/routers/webhook/_legacy.py:8162`) |
+| `style_reference` | Style reference без медиа | Prompt media | decision_trace.stage=`style_reference` (`truffles-api/app/routers/webhook/_legacy.py:8179`) |
+| `time_only_guard` | Время без услуги | Уточнение услуги | decision_trace.stage=`time_only_guard` (`truffles-api/app/routers/webhook/_legacy.py:8499`) |
+| `service_semantic_matcher` | Семантический сервис‑match | Reply/suggestions | decision_trace.stage=`service_semantic_matcher` (`truffles-api/app/routers/webhook/_legacy.py:8608`) |
+
+#### Critical trace-stages (must-have)
+- `contract`, `decision_graph` — обязательны для аудита плана и контрактов.
+- `session_memory`, `re_entry`, `question_contract` — устойчивость expected_reply и reset.
+- `shield`, `policy_gate` — safety-гейты (spam/toxic/Hard‑LAW).
+- `routing`, `pending_sla`, `pending_resume` — состояние pending/manager и SLA.
+- `class_router`, `intent`, `intent_decomposition` — выбор смысла/класса.
+- `booking_gate`, `booking`, `booking_interrupt` — booking-first инварианты.
+- `info_class`, `service_matcher`, `truth_gate`, `multi_truth` — truth‑first факты.
+- `consult_flow`, `consult`, `clarify_guard`, `consult_return` — consult‑playbooks, follow-up, эскалация.
+- `out_of_domain` — строгий OOD guard.
+- `llm_guard`, `ai_response`, `budget_gate`, `llm_degradation`, `rewrite` — LLM path + деградации.
+- `escalation`, `state_transition` — handover + стейт‑машина.
+
+#### GAP: missing trace coverage (no stage)
+- Preflight rejects: client missing (`truffles-api/app/routers/webhook/_legacy.py:1655`), missing remoteJid (`truffles-api/app/routers/webhook/_legacy.py:1670`), empty message (`truffles-api/app/routers/webhook/_legacy.py:1683`).
+- skip_persist errors: missing conversation/user (`truffles-api/app/routers/webhook/_legacy.py:1857`, `truffles-api/app/routers/webhook/_legacy.py:1860`, `truffles-api/app/routers/webhook/_legacy.py:1863`).
+- Duplicate + enqueue-only returns: duplicate message (`truffles-api/app/routers/webhook/_legacy.py:1892`), outbox-only accept (`truffles-api/app/routers/webhook/_legacy.py:2063`).
+- Branch selection prompt/choice returns без stage (`truffles-api/app/routers/webhook/_legacy.py:2869`, `truffles-api/app/routers/webhook/_legacy.py:2888`, `truffles-api/app/routers/webhook/_legacy.py:2903`).
+- Re‑engage/mute decisions пишут trace без `stage` (`truffles-api/app/routers/webhook/_legacy.py:3307`, `truffles-api/app/routers/webhook/_legacy.py:3326`, `truffles-api/app/routers/webhook/_legacy.py:3349`, `truffles-api/app/routers/webhook/_legacy.py:3380`, `truffles-api/app/routers/webhook/_legacy.py:3407`, `truffles-api/app/routers/webhook/_legacy.py:3418`).
+- ASR confirmation returns без stage (`truffles-api/app/routers/webhook/_legacy.py:3463`, `truffles-api/app/routers/webhook/_legacy.py:3477`, `truffles-api/app/routers/webhook/_legacy.py:3505`).
+- Debounce skip + manager_active after debounce без trace (`truffles-api/app/routers/webhook/_legacy.py:4000`, `truffles-api/app/routers/webhook/_legacy.py:4033`).
+- Handover confirmation before flows без trace (`truffles-api/app/routers/webhook/_legacy.py:4139`, `truffles-api/app/routers/webhook/_legacy.py:4155`).
+
 ### Agentic orchestration = роли пайплайна (без отдельных агентов)
 Термин “agentic” — это **логические роли стадий** в одном потоке `_handle_webhook_payload`, а не отдельные рантайм‑агенты.
 
@@ -153,6 +257,14 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Multi‑intent: сильный класс отвечает первым, остальные идут в очередь (intent_queue) с возвратом к цели.
 - `info_bundle` — **отдельный класс**, не “схлопывается” в `info`.
 
+**Живой хост — канон (in-domain):**
+- **3 исхода:** факт‑ответ (info/consult), booking intake, эскалация.
+- **Fact‑answer (info/consult):** только факты из `client_pack`/`consult_playbooks`; LLM может **только перефразировать** эти факты, новые факты/советы запрещены.
+- **Booking intake:** сбор слотов записи (`expected_reply_type`); при перебивке — факт‑ответ и возврат к последнему booking‑вопросу.
+- **Hard‑LAW:** оплата (подтверждение/проверка/возвраты), медицинка, жалобы, переносы → только эскалация.
+- **Policy‑gates:** скидки и способы оплаты разрешены **только** по явным правилам в `client_pack`; иначе эскалация.
+- **Clarify limit:** максимум 2 уточнения (`clarify_limit=2`), далее эскалация.
+
 ### Answer‑Interpreter (expected_reply_type) — канон
 - Включается **только** если ожидается ответ на вопрос (`expected_reply_type` активен).
 - Делает **семантический** разбор ответа (slot/value/confidence), а не классификацию запроса.
@@ -160,10 +272,10 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Не может менять класс ответа и не влияет на Hard‑LAW/policy‑gates.
 
 ### Consult clarify (pack-only, no LLM advice)
-- Consult canon: info-first only from pack playbooks; no LLM advice/facts. If service recognized → short-circuit to normal info/booking. If playbook missing and no service → 1-2 clarifications, then escalate `consult_no_service`.
+- Consult canon: info-first only from pack playbooks; no LLM advice/facts. If explicit info/booking request (pricing/duration/location/hours/booking) and service recognized → short-circuit to normal info/booking; advice-style consult stays in consult even if service recognized. If playbook missing and no service → max 2 clarifications (`clarify_limit=2`), then escalate `consult_no_service`.
 - Consult‑интенты → пытаемся матчить `client_pack.consult_playbooks`. Если playbook найден → info-first ответ только из pack (`lead`, `questions`, `options`, `next_step`).
 - Если consult‑интент содержит распознанную услугу/категорию → short‑circuit в обычный info/booking (без уточнения).
-- Если playbook не найден и услуги нет → 1-2 уточнения; после 2 без услуги → эскалация с reason `consult_no_service`.
+- Если playbook не найден и услуги нет → максимум 2 уточнения (`clarify_limit=2`); после лимита без услуги → эскалация с reason `consult_no_service`.
 - Hard‑LAW/Policy/opt‑out/human гейты срабатывают раньше consult.
 - Trace: `stage=consult_flow` с `decision=consult_clarify|consult_escalate|short_circuit`, `consult_playbook_id`, `consult_variant_id`, `tips_used`, `source=pack`.
 

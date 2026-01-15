@@ -243,3 +243,40 @@ gaps:
     acceptance_tests:
       - "STRUCTURE.md lists backup and BGE scripts under keep"
       - "Only one Qdrant collection script defines the vector size used in prod"
+
+  - id: "GAP-020"
+    title: "decision_trace missing for service_semantic path"
+    status: "NOT_IMPLEMENTED"
+    why_it_matters: "Without trace, reasoning is unverifiable; violates trace-on-every-user-msg canon."
+    evidence:
+      - "conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, msg_id 122862cd-7e14-4cb9-8ebd-9639d5cef014 ('Делаете депиляцию?')"
+      - "messages.metadata.decision_meta.intent=service_semantic; conversation.context.decision_trace has no entries near 2026-01-15T04:03:12Z"
+    proposed_fix_mvp: "Write trace stage on service_semantic path (e.g., stage=service_semantic or class_router) for every user message."
+    acceptance_tests:
+      - "Service-semantic message produces decision_trace entry with stage=service_semantic"
+      - "SQL shows trace entry exists for the same user msg timestamp"
+
+  - id: "GAP-021"
+    title: "Consult short-circuit does not override expected_reply on explicit pricing/duration + service"
+    status: "PARTIAL"
+    why_it_matters: "User asks price/duration with a service, but system asks to уточнить услугу due to consult_return/expected_reply; violates consult canon."
+    evidence:
+      - "conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, msg_id d082c330-eac7-41fa-b094-a37c2e174c35 ('Сколько стоит депиляция?')"
+      - "decision_meta: intent=service_clarify, consult_return=true, expected_reply_type=service_choice (should be pricing reply)"
+      - "SPECS/CONSULTANT.md (consult short-circuit rule)"
+    proposed_fix_mvp: "If pricing/duration/location/hours with explicit service detected, bypass consult_return/expected_reply and route to info/booking."
+    acceptance_tests:
+      - "\"Сколько стоит депиляция?\" returns pricing answer with fact_source=truth and no service_clarify"
+      - "\"Сколько длится депиляция?\" returns duration answer without consult_return"
+
+  - id: "GAP-022"
+    title: "Service presence query returns unrelated price list"
+    status: "NOT_IMPLEMENTED"
+    why_it_matters: "Asking 'Do you do X?' must answer presence, not a different service price list; breaks trust."
+    evidence:
+      - "conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, msg_id 122862cd-7e14-4cb9-8ebd-9639d5cef014 ('Делаете депиляцию?')"
+      - "assistant replied with pedicure prices (message id 5f87d11a-122e-468c-bafe-5fd3597b490e)"
+    proposed_fix_mvp: "Use service_presence_reply when intent is service presence; do not map to unrelated price list."
+    acceptance_tests:
+      - "\"Делаете депиляцию?\" -> \"Да, делаем депиляцию.\" (service_presence_reply)"
+      - "No unrelated price items in response"

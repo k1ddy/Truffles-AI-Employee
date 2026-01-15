@@ -32,8 +32,8 @@
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
-- **Следующий шаг:** P1 Router SLA <10% (PR + CI + SQL evidence) — pending.
-- **IN PROGRESS:** Router SLA evidence (controller_attempted) — pending.
+- **Следующий шаг:** P1 follow-up — router_eligible sync с controller_attempted (CI + real inbound + SQL) — in progress.
+- **DONE:** P1 Router SLA <10% + controller_attempted evidence (post-deploy real inbound) — см. запись 2026-01-14.
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
@@ -462,7 +462,6 @@
 | **Implementation Brain (внедрения/поддержка)** | Быстрее запускать клиентов, фиксировать паттерны и ошибки | P1 | стратегия |
 | Алерт "бот пронёс хуйню" | Критичные ошибки сразу владельцу | P1 | my_notes |
 | Dashboard для заказчика | Видеть статистику | P2 | REQUIREMENTS |
-| Kaspi Pay проверка | Автопроверка оплат | P2 | REQUIREMENTS |
 | Telegram чат для владельца | Модерация, обсуждение, быстрая связь | P2 | my_notes |
 | Ежедневный отчёт владельцу | Сколько диалогов, эскалаций, проблем | P2 | my_notes |
 | Аргументы для сбора данных | В договор — почему выгодно делиться | P2 | my_notes |
@@ -544,9 +543,44 @@
 - Simulated inbound — только по явному waiver; иначе live‑check = BLOCKED.
 
 **Открыто:**
-- Router SLA evidence (controller_attempted) — pending.
 - No-response pipeline hardening (OpenAI 400 temp, WebhookResponse None) — pending.
 - P0 outbox latency — tail.
+
+### 2026-01-14 — Session stop: canon sync + legacy map + observability draft
+
+**Что сделали (docs):**
+- Док‑синхронизация канона “Живой хост” + clarify_limit=2, pack‑only факты, LLM‑перефразирование без новых фактов.
+- Legacy Decision Graph map + GAP по trace coverage.
+
+**Что сделали (code, не верифицировано):**
+- Черновая observability‑инструментация (Prometheus/OTel gated): метрики inbound/outbox/llm/rag/bge/policy/escalation, trace_id в decision_meta.
+
+**Evidence (docs/code only, CI/live‑check не запускались):**
+- Docs: `SPECS/CONSULTANT.md:83`, `SPECS/ARCHITECTURE.md:131`, `docs/SESSION_START_PROMPT.txt:5`.
+- Code touched: `truffles-api/app/logging_config.py`, `truffles-api/app/main.py`, `truffles-api/app/routers/webhook/_legacy.py`, `truffles-api/app/routers/webhook/outbox.py`, `truffles-api/app/services/ai_service.py`, `truffles-api/app/services/intent_service.py`, `truffles-api/app/services/knowledge_service.py`, `truffles-api/requirements.txt`.
+
+**STOP:**
+- Перед новыми правками нужен аудит “канон vs анализы” и явное решение по observability‑изменениям.
+- Любая observability‑инструментация без CI/live‑check не считается завершённой.
+
+### 2026-01-14 — P1-1 Router SLA + controller_attempted evidence (post-deploy real inbound)
+
+**Что сделали:**
+- Синхронизировали controller_* мета с class_router в info_class flows (PR #167) и подтвердили на real inbound post-deploy.
+
+**Evidence:**
+- PR #167: https://github.com/k1ddy/Truffles-AI-Employee/pull/167
+- CI PR: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20982624189
+- Deploy: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20982653913
+- /admin/version: `{"version":"main","git_commit":"f46944cc084a66b17604b80d5969196fe520d510","build_time":"2026-01-14T04:44:48Z"}`
+- Real inbound post-deploy (conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`):
+  - msg_id `6bc30dbc-3929-49ae-9da8-3412e66bd296` (messageId `3EB02FF2BA5FCE055E4E6F`) — controller_attempted=true, low_confidence=true, controller_fallback_reason=NULL; class_router.controller.* совпадает.
+  - msg_id `7780bb42-84b5-440d-8663-3bc141f25437` (messageId `3EB044DD426A7045DC8850`) — controller_attempted=true, low_confidence=true, controller_fallback_reason=NULL; class_router.controller.* совпадает.
+  - msg_id `4ef63a6e-2b4b-476f-98b2-0bbdc3a1f1db` (messageId `3EB0648EF05C4F5562C39E`) — truth_gate, router_eligible=false, class_router отсутствует.
+- SLA:
+  - baseline 7d: avg_fallback_rate=0.0582, max=1.0000
+  - post-deploy: avg_fallback_rate=0.0000, max=0.0000
+- low_confidence check: attempts=2, low_confidence=2, bad_low_confidence_fallbacks=0.
 
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 

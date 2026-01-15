@@ -1,4 +1,5 @@
 # SUMMARY
+DERIVED: handover only; not canonical. Verify all claims before use.
 
 ⚠️ Этот handover требует проверки. Пункты ниже — ориентир, но их нужно подтвердить по API/DB/логам.
 

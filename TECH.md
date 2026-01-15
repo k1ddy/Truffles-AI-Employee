@@ -162,6 +162,10 @@ ssh -p 222 zhan@5.188.241.234 "docker exec truffles_postgres_1 psql -U \"$DB_USE
 ssh -p 222 zhan@5.188.241.234 "curl -s -H 'api-key: ${QDRANT_API_KEY}' 'http://localhost:6333/collections'"
 ```
 
+### Knowledge update (packs)
+- SOP и шаги: `SPECS/SYSTEM_REFERENCE.md` → раздел **4.1 Knowledge update SOP**.
+- Важно: использовать `python3`, затем build+restart (без `docker cp`).
+
 ---
 
 ## Outbox (ACK-first)
