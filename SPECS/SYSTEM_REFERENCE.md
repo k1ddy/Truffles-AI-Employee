@@ -8,7 +8,6 @@
 **Links:** `SPECS/ARCHITECTURE.md`, `SPECS/INFRASTRUCTURE.md`, `TECH.md`, `STATE.md`.
 
 **Читай это перед любыми изменениями.**
-
 ---
 
 ## 1. Репозиторий и процесс

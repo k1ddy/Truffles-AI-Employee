@@ -21,9 +21,9 @@
 | Таблица branches | ⚠️ ПОДКЛЮЧЕНА: routing/Telegram по branch есть; RAG branch‑filter с fallback до backfill |
 | Таблица client_settings | ✅ РАБОТАЕТ |
 | Промпты из БД | ✅ РАБОТАЕТ |
-| RAG фильтрация по client_slug | ✅ РАБОТАЕТ (branch‑filter есть, fallback при `branch_filter_empty`) |
-| Telegram группы на заказчика | ✅ РАБОТАЕТ (branch‑aware при `manager_scope=branch`) |
-| Роутинг через branch_id | ✅ routing/Telegram по branch; RAG branch‑filter с fallback до backfill |
+| RAG фильтрация по client_slug + branch (knowledge_tag/branch_id) | ✅ РАБОТАЕТ (fallback при `branch_filter_empty`) |
+| Telegram группы на филиал | ✅ РАБОТАЕТ (manager_scope=branch → Branch.telegram_chat_id; fallback client_settings) |
+| Роутинг через branch_id | ✅ РАБОТАЕТ (branch_id сохраняется + trace/meta; RAG fallback до backfill) |
 | Онбординг скрипт | ⚠️ РУЧНОЙ (onboard_client.py отсутствует; sync_client.py только для KB) |
 | Счётчик сообщений | 📋 ПЛАН |
 | Dashboard для заказчика | 📋 ПЛАН |
@@ -83,8 +83,8 @@ Company
 |-----|--------|----------|
 | Роутинг | branch_id в webhook + Telegram per branch; RAG branch‑filter с fallback | branch_id везде |
 | Telegram credentials | Branch (manager_scope=branch), fallback: client_settings | Branch |
-| Knowledge | Branch.knowledge_tag (если есть), fallback: client_slug | Branch.knowledge_tag |
-| Conversation привязан к | branch_id (сохраняется, не используется повсеместно) | branch_id |
+| Knowledge | client_slug + branch filter (knowledge_tag/branch_id; fallback → client_slug) | Branch.knowledge_tag |
+| Conversation привязан к | branch_id (сохраняется + используется в routing) | branch_id |
 | Каналы (WhatsApp/Instagram) | 1 на client | через Channel (backlog) |
 
 ---
@@ -136,7 +136,7 @@ Python API:
 | Промпт | prompts | WHERE client_id |
 | База знаний | Qdrant | filter: metadata.client_slug + branch_id/knowledge_tag (fallback при `branch_filter_empty`) |
 | Настройки эскалации | client_settings | WHERE client_id |
-| Telegram группа | branches.telegram_chat_id (manager_scope=branch) | fallback: client_settings.telegram_chat_id |
+| Telegram группа | Branch.telegram_chat_id (manager_scope=branch) | fallback: client_settings.telegram_chat_id |
 | Пользователи | users | WHERE client_id |
 | Диалоги | conversations | WHERE client_id |
 | Сообщения | messages | через conversation → client_id |

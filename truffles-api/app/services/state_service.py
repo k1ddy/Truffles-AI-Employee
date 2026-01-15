@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.models import Conversation, Handover, User
-from app.services.escalation_service import get_or_create_topic, get_telegram_credentials
+from app.services.escalation_service import get_or_create_topic, resolve_telegram_routing
 from app.services.result import Result
 from app.services.state_machine import ConversationState, is_transition_allowed
 from app.services.telegram_service import TelegramService
@@ -70,7 +70,13 @@ def escalate_to_pending(
 
     try:
         conversation.context = _capture_pending_resume_context(conversation.context)
-        bot_token, chat_id = get_telegram_credentials(db, conversation.client_id)
+        routing_meta = resolve_telegram_routing(
+            db,
+            conversation=conversation,
+            client_id=conversation.client_id,
+        )
+        bot_token = routing_meta.get("bot_token")
+        chat_id = routing_meta.get("chat_id")
         if not bot_token or not chat_id:
             return Result.failure("No Telegram credentials", "no_telegram")
 

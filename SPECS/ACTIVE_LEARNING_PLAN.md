@@ -5,7 +5,6 @@
 **Scope:** архивный план; не канон.  
 **Out of scope:** актуальные правила/решения (см. `SPECS/ACTIVE_LEARNING.md`).  
 **Links:** `SPECS/ACTIVE_LEARNING.md`, `STATE.md`.
-
 DERIVED/LEGACY: archival plan; current truth is in SPECS/ACTIVE_LEARNING.md.
 
 **Создано:** 2025-12-08  

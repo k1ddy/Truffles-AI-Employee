@@ -1,4 +1,5 @@
 # ПРОДУКТ TRUFFLES
+SOURCE OF TRUTH: pricing and feature scope.
 
 **Статус:** CANON  
 **Owner:** Жанбол  

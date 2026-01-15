@@ -18,7 +18,6 @@ project:
   evidence:
     - "AGENTS.md:9-15"
     - "STRATEGY/PRODUCT.md:20-32"
-
 session_context:
   last_update: "2026-01-15"
   intent: "Stabilize canon -> runtime alignment with evidence-first workflow"

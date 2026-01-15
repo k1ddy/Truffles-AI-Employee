@@ -919,8 +919,14 @@ def test_consult_short_circuit_writes_decision_meta():
     assert meta.get("consult_intent") is True
     assert meta.get("consult_topic") == "hair_aftercolor"
     assert meta.get("expected_reply_type") != webhook_router.EXPECTED_REPLY_SERVICE
+    assert meta.get("branch_id") is None
 
     trace = conversation.context.get("decision_trace", [])
+    assert any(
+        entry.get("stage") == "branch_routing"
+        for entry in trace
+        if isinstance(entry, dict)
+    )
     assert any(
         entry.get("stage") == "consult_flow" and entry.get("decision") == "short_circuit"
         for entry in trace

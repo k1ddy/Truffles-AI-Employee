@@ -124,7 +124,7 @@ class TestGenerateAIResponse:
             {"role": "assistant", "content": "Уточните вид педикюра."},
         ]
 
-        def search_side_effect(query: str, client_slug: str, limit: int = 3):
+        def search_side_effect(query: str, client_slug: str, limit: int = 3, **_kwargs):
             if query == "классический интересует":
                 return [{"score": 0.1, "text": "Weak match"}]
             return [{"score": 0.8, "text": "Relevant info"}]

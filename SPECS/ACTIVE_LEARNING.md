@@ -1,4 +1,5 @@
 # ACTIVE LEARNING — План реализации
+SOURCE OF TRUTH: canonical active learning spec and status.
 
 **Статус:** CANON (P2)  
 **Owner:** Top Architect  
