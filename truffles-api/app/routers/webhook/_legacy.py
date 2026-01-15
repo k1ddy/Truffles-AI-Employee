@@ -5484,6 +5484,9 @@ async def _handle_webhook_payload(
                     }
                 )
             carryover_service_query = None
+        info_signals = (
+            info_class_meta.get("info_signals") if isinstance(info_class_meta, dict) else None
+        )
         force_hours_followup = (
             carryover_has_hours
             and _looks_like_hours_followup(message_text)
@@ -5531,11 +5534,6 @@ async def _handle_webhook_payload(
             if not answer_intents:
                 answer_intents = list(sorted(info_class_intents_for_reply))[:2]
 
-            info_signals = (
-                info_class_meta.get("info_signals")
-                if isinstance(info_class_meta, dict)
-                else None
-            )
             include_parking = (
                 bool(info_signals.get("parking")) if isinstance(info_signals, dict) else False
             )
