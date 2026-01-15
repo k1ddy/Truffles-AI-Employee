@@ -1246,7 +1246,7 @@ def _build_rag_filter(
         )
         filter_meta.update({"filter_mode": "branch", "filter_reason": "branch_id"})
     else:
-        filter_meta.update({"filter_mode": "client", "filter_reason": "branch_missing"})
+        filter_meta.update({"filter_mode": "branch", "filter_reason": "branch_missing"})
     return filter_payload, filter_meta
 
 
@@ -1259,6 +1259,8 @@ def _fetch_bm25_corpus(
 ) -> tuple[list[dict], dict]:
     if not client_slug or max_docs <= 0:
         return [], {"filter_mode": "client", "filter_reason": "missing_client_slug"}
+    if not branch_id and not knowledge_tag:
+        return [], {"filter_mode": "branch", "filter_reason": "branch_missing"}
     headers = {"api-key": QDRANT_API_KEY} if QDRANT_API_KEY else None
     filter_payload, filter_meta = _build_rag_filter(
         client_slug=client_slug,
@@ -1306,14 +1308,8 @@ def _fetch_bm25_corpus(
     if points or filter_meta.get("filter_mode") != "branch":
         return points, filter_meta
 
-    fallback_payload, fallback_meta = _build_rag_filter(
-        client_slug=client_slug,
-        branch_id=None,
-        knowledge_tag=None,
-    )
-    fallback_meta.update({"filter_mode": "client_fallback", "filter_reason": "branch_filter_empty"})
-    points = _scroll_points({"filter": fallback_payload})
-    return points, fallback_meta
+    filter_meta.update({"filter_reason": "branch_filter_empty"})
+    return points, filter_meta
 
 
 def _bm25_search(

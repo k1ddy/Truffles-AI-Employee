@@ -57,7 +57,7 @@ def _build_qdrant_filter(
         )
         filter_meta.update({"filter_mode": "branch", "filter_reason": "branch_id"})
     else:
-        filter_meta.update({"filter_mode": "client", "filter_reason": "branch_missing"})
+        filter_meta.update({"filter_mode": "branch", "filter_reason": "branch_missing"})
     return filter_payload, filter_meta
 
 
@@ -78,10 +78,7 @@ def search_knowledge(
 ) -> List[dict]:
     """Search knowledge base in Qdrant."""
 
-    # Get embedding for query
-    embedding = get_embedding(query, client_slug=client_slug)
-
-    # Search in Qdrant
+    # Enforce strict branch isolation: skip RAG if branch filter is missing.
     headers = {"api-key": QDRANT_API_KEY} if QDRANT_API_KEY else None
     filter_payload, filter_meta = _build_qdrant_filter(
         client_slug=client_slug,
@@ -89,6 +86,14 @@ def search_knowledge(
         knowledge_tag=knowledge_tag,
     )
     _set_rag_filter_trace(trace_context, filter_meta)
+    if filter_meta.get("filter_reason") == "branch_missing":
+        logger.info(f"Knowledge search skipped (branch missing) for '{query[:30]}...'")
+        return []
+
+    # Get embedding for query
+    embedding = get_embedding(query, client_slug=client_slug)
+
+    # Search in Qdrant
     with httpx.Client(timeout=30.0) as client:
         response = client.post(
             f"{QDRANT_HOST}/collections/{QDRANT_COLLECTION}/points/search",
@@ -125,41 +130,9 @@ def search_knowledge(
             logger.info(f"Knowledge search: found {len(results)} results for '{query[:30]}...'")
             return results
 
-        fallback_payload, fallback_meta = _build_qdrant_filter(
-            client_slug=client_slug,
-            branch_id=None,
-            knowledge_tag=None,
-        )
-        fallback_meta.update({"filter_mode": "client_fallback", "filter_reason": "branch_filter_empty"})
-        _set_rag_filter_trace(trace_context, fallback_meta)
-        response = client.post(
-            f"{QDRANT_HOST}/collections/{QDRANT_COLLECTION}/points/search",
-            headers=headers,
-            json={
-                "vector": embedding,
-                "limit": limit,
-                "score_threshold": score_threshold,
-                "filter": fallback_payload,
-                "with_payload": True,
-            },
-        )
-        if response.status_code != 200:
-            logger.error(f"Qdrant search error: {response.status_code} - {response.text}")
-            alert_warning("Qdrant search failed", {"status": response.status_code, "query": query[:50]})
-            return []
-        data = response.json()
-        results = []
-        for point in data.get("result", []):
-            payload = point.get("payload", {})
-            results.append(
-                {
-                    "score": point.get("score"),
-                    "text": payload.get("content"),
-                    "source": payload.get("metadata", {}).get("doc_name"),
-                    "metadata": payload.get("metadata", {}),
-                }
-            )
-        logger.info(f"Knowledge search: found {len(results)} results for '{query[:30]}...' (fallback)")
+        filter_meta.update({"filter_reason": "branch_filter_empty"})
+        _set_rag_filter_trace(trace_context, filter_meta)
+        logger.info(f"Knowledge search: found 0 results for '{query[:30]}...' (strict branch)")
         return results
 
 

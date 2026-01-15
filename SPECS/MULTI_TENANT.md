@@ -18,12 +18,12 @@
 |-----------|--------|
 | Таблица companies | ✅ СУЩЕСТВУЕТ (не используется) |
 | Таблица clients | ✅ РАБОТАЕТ |
-| Таблица branches | ⚠️ ПОДКЛЮЧЕНА: routing/Telegram по branch есть; RAG branch‑filter с fallback до backfill |
+| Таблица branches | ⚠️ ПОДКЛЮЧЕНА: routing/Telegram по branch есть; RAG strict branch‑filter (без fallback), нужен backfill |
 | Таблица client_settings | ✅ РАБОТАЕТ |
 | Промпты из БД | ✅ РАБОТАЕТ |
-| RAG фильтрация по client_slug + branch (knowledge_tag/branch_id) | ✅ РАБОТАЕТ (fallback при `branch_filter_empty`) |
+| RAG фильтрация по branch (knowledge_tag/branch_id) | ✅ РАБОТАЕТ (strict, без fallback; требует backfill Qdrant) |
 | Telegram группы на филиал | ✅ РАБОТАЕТ (manager_scope=branch → Branch.telegram_chat_id; fallback client_settings) |
-| Роутинг через branch_id | ✅ РАБОТАЕТ (branch_id сохраняется + trace/meta; RAG fallback до backfill) |
+| Роутинг через branch_id | ✅ РАБОТАЕТ (branch_id сохраняется + trace/meta; RAG strict без fallback) |
 | Онбординг скрипт | ⚠️ РУЧНОЙ (onboard_client.py отсутствует; sync_client.py только для KB) |
 | Счётчик сообщений | 📋 ПЛАН |
 | Dashboard для заказчика | 📋 ПЛАН |
@@ -81,9 +81,9 @@ Company
 
 | Что | Сейчас | Конечное |
 |-----|--------|----------|
-| Роутинг | branch_id в webhook + Telegram per branch; RAG branch‑filter с fallback | branch_id везде |
+| Роутинг | branch_id в webhook + Telegram per branch; RAG strict branch‑filter | branch_id везде |
 | Telegram credentials | Branch (manager_scope=branch), fallback: client_settings | Branch |
-| Knowledge | client_slug + branch filter (knowledge_tag/branch_id; fallback → client_slug) | Branch.knowledge_tag |
+| Knowledge | client_slug + branch filter (knowledge_tag/branch_id; без fallback) | Branch.knowledge_tag |
 | Conversation привязан к | branch_id (сохраняется + используется в routing) | branch_id |
 | Каналы (WhatsApp/Instagram) | 1 на client | через Channel (backlog) |
 
@@ -134,7 +134,7 @@ Python API:
 | Данные | Где хранится | Как разделяется |
 |--------|--------------|-----------------|
 | Промпт | prompts | WHERE client_id |
-| База знаний | Qdrant | filter: metadata.client_slug + branch_id/knowledge_tag (fallback при `branch_filter_empty`) |
+| База знаний | Qdrant | filter: metadata.client_slug + branch_id/knowledge_tag (strict, без fallback) |
 | Настройки эскалации | client_settings | WHERE client_id |
 | Telegram группа | Branch.telegram_chat_id (manager_scope=branch) | fallback: client_settings.telegram_chat_id |
 | Пользователи | users | WHERE client_id |
@@ -560,7 +560,7 @@ API извлекает slug → ищет клиента по `Client.name` (slug
 
 ### 2. База знаний — как разделять?
 
-**Решение:** Одна коллекция Qdrant, фильтр по `metadata.client_slug` + branch_id/knowledge_tag; fallback по client_slug фиксируется в trace как `branch_filter_empty`.
+**Решение:** Одна коллекция Qdrant, фильтр по `metadata.client_slug` + branch_id/knowledge_tag; fallback запрещён. Если branch‑фильтр пуст — RAG=0, trace фиксирует `branch_filter_empty`. Требуется backfill Qdrant.
 
 ```python
 filter={"must": [
@@ -672,7 +672,7 @@ except Exception as e:
 - [x] Conversation.branch_id сохраняется (webhook)
 - [x] Роутинг по instance_id → branch (by_instance/ask_user/hybrid) реализован в webhook
 - [ ] Эскалация из Branch.telegram_chat_id
-- [x] RAG фильтр по Branch.knowledge_tag (fallback при `branch_filter_empty`; backfill Qdrant обязателен для strict)
+- [x] RAG фильтр по Branch.knowledge_tag (strict, без fallback; backfill Qdrant обязателен)
 - [ ] Сохранение выбранного филиала у пользователя (optional)
 
 **Статус:** В ТЕКУЩЕМ ПЛАНЕ (STATE.md).

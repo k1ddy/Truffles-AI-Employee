@@ -3028,6 +3028,15 @@ async def _handle_webhook_payload(
                         bot_response=prompt,
                     )
 
+    if conversation.branch_id:
+        timing_context["branch_id"] = str(conversation.branch_id)
+        if "knowledge_tag" not in timing_context:
+            branch = (
+                db.query(Branch).filter(Branch.id == conversation.branch_id).first()
+            )
+            if branch and branch.knowledge_tag:
+                timing_context["knowledge_tag"] = branch.knowledge_tag
+
     # 4.9 Behavioral shield (pre-LAW/policy).
     context = _get_conversation_context(conversation)
     context, shield_state = _update_shield_context(

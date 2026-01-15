@@ -26,6 +26,7 @@
 - DONE: No-response alert dedup cleanup + shield_drop suppression order (PR #154 merged; CI main https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20944545548; live-check conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, msg_id 88173fb2-20f7-4c25-93dc-fd050a2ed248 shield_drop too_long; /reminders/process alerted=0).
 - DONE: Consult clarify/short‑circuit (PR #153 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20943384712; live‑check evidence in истории 2026‑01‑13).
 - DONE: PR #155 consult pack‑only + pending_wait trace merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20945722911; live‑check evidence в истории 2026‑01‑13.
+- DONE: truth_gate trace retention for pricing/duration/location (PR #180 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21013363387; live‑check conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, msg_id c921d20c-57d2-4778-aa83-b66c458f0b90 pricing, msg_id debe8959-cdc2-4716-ba86-5ae6431d7400 duration, msg_id 6847ad45-774a-4662-b20a-d6b6ebed16b3 location).
 - DONE: Telegram→WhatsApp topic handover routing fix (PR #157 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20948893145; live‑check в истории 2026‑01‑13).
 - DONE: Docs PR #158 (roadmap + tech status) merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20949202225.
 - BLOCKERS: нет.
@@ -583,6 +584,18 @@
   - msg_id `3b41ca5c-ea4a-42af-94b1-7783eeb06290` (messageId `3EB096B413ADC6E015AA77`) — intent=services_overview, source=truth_gate, service_semantic_score=NULL.
 - Trace (decision_trace, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, recorded_at >= `2026-01-14T06:51:26Z`): service_semantic_matcher rows=0.
 
+### 2026-01-14 — Guest policy + consult pack (post-merge PR #179)
+
+**Что сделали:**
+- Подтвердили guest_policy (pack‑lexicon) и consult pack‑reply на реальном inbound после мержа PR #179.
+
+**Evidence:**
+- /admin/version: `{"version":"main","git_commit":"df258b353a4c84ee61e2c3b2ca49736898a72695","build_time":"2026-01-14T23:11:50Z"}`
+- Live inbound (allowlist JID 77015705555):
+  - guest_policy: msg `dec06e10-1412-4eda-a9b6-ec5ddb17522c` (messageId `3EB07BDB44C820A0BBE8FF`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`) decision_meta `intent=info_bundle`, `info_sections=["address","hours","guest_policy"]`, `source=class_router`; assistant reply `acda6da0-6cfe-4ad0-a431-cd1c7cca1ea9` содержит “зона ожидания”.
+  - consult pack: msg `9a83a6a3-5838-44be-92d6-67800346a953` (messageId `3EB080517E51CCA1ECA027`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`) decision_meta `intent=consult_reply`, `source=pack`, `consult_playbook_id=general_consult`, `consult_variant_id=3eca06b5`, `tips_used` (3 пункта).
+- consult_flow trace: `{"stage":"consult_flow","state":"bot_active","reason":"consult_pack","decision":"consult_reply","recorded_at":"2026-01-14T23:16:34.513798+00:00","consult_variant_id":"3eca06b5","consult_playbook_id":"general_consult"}`.
+
 ### 2026-01-14 — GAP-017 Branch Isolation (RAG + Escalation)
 
 **Что сделали:**
@@ -612,6 +625,26 @@
   - conversation state=pending, telegram_topic_id=625
   - branch telegram_chat_id `-1003412216010`, client_settings manager_scope=branch
 - Note: truffles policy_pack was enabled via `policy_type=demo_salon` at `2026-01-14T13:24:12Z` and cleared at `2026-01-14T13:25:52Z` for hard_law verification.
+
+### 2026-01-15 — GAP-017 Strict branch filter (RAG uses branch_id/knowledge_tag)
+
+**Что сделали:**
+- Передали branch_id/knowledge_tag в timing_context после branch routing, чтобы RAG/BM25 строго фильтровал по branch.
+- Убрали client-level fallback: `branch_filter_empty` возвращает 0 результатов без подмены фильтра.
+
+**Evidence:**
+- PR #185: https://github.com/k1ddy/Truffles-AI-Employee/pull/185
+- CI (PR workflow_dispatch): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21014440864
+- CI main + deploy: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21014503341
+- /admin/version: `{"version":"main","git_commit":"7473358ac50435c2b85a00125e758f9d5fe98220","build_time":"2026-01-15T00:09:47Z"}`
+- demo_salon inbound (branch filter applied):
+  - msg_id `03bbec13-6cad-4914-948e-c64da1964a0c` (messageId `sim-branch-demo-1768435920`), conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+  - decision_meta.rag_scores.bm25_filter: `{"branch_id":"b7f75692-951e-421a-aae6-f5db97394799","client_slug":"demo_salon","filter_mode":"branch","filter_reason":"branch_id","knowledge_tag":null}`
+  - decision_trace (rag_retrieve): `{"filter_mode":"branch","filter_reason":"branch_id","branch_id":"b7f75692-951e-421a-aae6-f5db97394799"}`
+- truffles inbound (strict empty result, no fallback):
+  - msg_id `2acc8edb-cc97-4424-8c8d-b1265cc9aca7` (messageId `sim-branch-truffles-1768435932`), conv_id `d868cc92-837e-463e-b8e1-ea39a1baccea`
+  - decision_meta.rag_scores.bm25_filter: `{"branch_id":"cf86bee7-e38f-4c8c-a087-aa4961911e0b","client_slug":"truffles","filter_mode":"branch","filter_reason":"branch_filter_empty","knowledge_tag":null}`
+  - decision_trace (rag_retrieve): `{"filter_mode":"branch","filter_reason":"branch_filter_empty","branch_id":"cf86bee7-e38f-4c8c-a087-aa4961911e0b"}`
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**
