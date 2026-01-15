@@ -100,7 +100,15 @@ from app.routers.webhook.decision import (
     build_response_contract,
     is_handover_status_question,
 )
-from app.routers.webhook.dedup import _get_debounce_redis, _handle_debounce_gate, _handle_dedup_gate
+from app.routers.webhook.dedup import (
+    _buffer_user_message,
+    _drain_buffered_messages,
+    _get_debounce_redis,
+    _handle_debounce_gate,
+    _handle_dedup_gate,
+    is_duplicate_message_id,
+    should_process_debounced_message,
+)
 from app.routers.webhook.guards import (
     _booking_clarify_guard_reason,
     _format_intent_queue_prompt,
@@ -282,6 +290,12 @@ from app.services.state_service import escalate_to_pending, manager_resolve, tra
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("webhook")
+_DEDUP_EXPORTS = (
+    _buffer_user_message,
+    _drain_buffered_messages,
+    is_duplicate_message_id,
+    should_process_debounced_message,
+)
 ROUTER_SIGNAL_CONFIDENCE_BONUS = 0.1
 ROUTER_SIGNAL_CONFIDENCE_FLOOR = 0.2
 CONTROLLER_CONFIDENCE_THRESHOLD = float(

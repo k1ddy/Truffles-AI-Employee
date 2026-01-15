@@ -5,12 +5,13 @@ from __future__ import annotations
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger, record_outbox_latency
-from app.models import Client, Conversation, Message, User
+from app.models import Conversation, User
 from app.routers.webhook.media import (
     _build_media_caption,
     _send_telegram_media,
@@ -20,12 +21,18 @@ from app.routers.webhook.media import (
 from app.routers.webhook.trace import _record_decision_trace
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.escalation_service import get_telegram_credentials
-from app.services.outbox_service import mark_outbox_status
-from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
+from app.services.outbox_service import (
+    build_inbound_message_id,
+    enqueue_outbox_message,
+    mark_outbox_status,
+)
 from app.services.state_machine import ConversationState
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("webhook")
+
+if TYPE_CHECKING:
+    from app.models import Client, Message
 
 
 def _get_outbox_window_merge_seconds() -> float:
