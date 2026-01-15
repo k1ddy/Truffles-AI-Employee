@@ -1,8 +1,8 @@
 import os
+import time
 from typing import List
 
 import httpx
-import time
 
 from app.logging_config import get_logger, record_bge_time
 from app.services.alert_service import alert_warning

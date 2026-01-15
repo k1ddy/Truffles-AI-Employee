@@ -2673,6 +2673,11 @@ async def _handle_webhook_payload(
                 or _has_duration_signal(normalized_message, message_text)
             )
         expected_reply_text = expected_reply_text or ""
+        answer_result = None
+        answer_confidence = 0.0
+        answer_slot = ""
+        answer_value = ""
+        answer_error = "blocked_by_info"
         if expected_reply_blocked_by_info:
             answer_meta = {
                 "answer_interpreter_used": False,
@@ -2684,9 +2689,6 @@ async def _handle_webhook_payload(
             matched = False
             value = None
         else:
-            answer_confidence = 0.0
-            answer_slot = ""
-            answer_value = ""
             answer_error = "invalid_result"
             prompt_hint = None
             booking_context = _get_booking_context(context)
@@ -2736,9 +2738,9 @@ async def _handle_webhook_payload(
                 "answer_error": answer_error,
             }
 
-            answer_confidence_floor = 0.65
-            answer_value_ok = isinstance(answer_value, str) and answer_value.strip()
-            answer_slot_ok = isinstance(answer_slot, str) and answer_slot.strip()
+        answer_confidence_floor = 0.65
+        answer_value_ok = isinstance(answer_value, str) and answer_value.strip()
+        answer_slot_ok = isinstance(answer_slot, str) and answer_slot.strip()
         answer_result_ok = isinstance(answer_result, dict) and answer_result.get("ok") is True
         answer_valid = answer_result_ok and answer_slot_ok and answer_value_ok
         answer_confidence_ok = (
