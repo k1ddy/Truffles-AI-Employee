@@ -155,6 +155,7 @@ def _handle_handover_confirmation_gate(
         _set_handover_confirmation,
     )
     from app.services.ai_service import classify_confirmation
+
     from . import _legacy as legacy
 
     if conversation.state != ConversationState.BOT_ACTIVE.value:

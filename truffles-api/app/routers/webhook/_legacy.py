@@ -45,7 +45,23 @@ from app.routers.webhook.booking import (
     _update_booking_from_messages,
     _validate_name_slot,
 )
-from app.routers.webhook.branch_selection import _handle_branch_selection_gate
+from app.routers.webhook.branch_selection import (
+    BRANCH_CONTEXT_KEY,
+    BRANCH_SELECTION_KEY,
+    MSG_BRANCH_SELECTED,
+    _apply_branch_selection,
+    _build_branch_prompt,
+    _build_branch_selection,
+    _coerce_uuid,
+    _get_active_branches,
+    _get_branch_selection,
+    _get_user_branch_preference,
+    _handle_branch_selection_gate,
+    _is_branch_only_message,
+    _match_branch_choice,
+    _set_branch_selection,
+    _set_user_branch_preference,
+)
 from app.routers.webhook.context_manager import (
     _apply_consult_return,
     _build_compact_summary_text,
@@ -156,9 +172,9 @@ from app.routers.webhook.media import (
 from app.routers.webhook.outbox import _handle_enqueue_only_accept, _prepare_skip_persist
 from app.routers.webhook.pending import (
     _build_pending_resume_snapshot,
-    _handle_handover_confirmation_gate,
     _get_pending_resume,
     _get_pending_sla,
+    _handle_handover_confirmation_gate,
     _is_pending_ack,
     _is_pending_close,
     _normalize_pending_text,
@@ -290,6 +306,22 @@ from app.services.state_service import escalate_to_pending, manager_resolve, tra
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("webhook")
+_BRANCH_EXPORTS = (
+    BRANCH_CONTEXT_KEY,
+    BRANCH_SELECTION_KEY,
+    MSG_BRANCH_SELECTED,
+    _apply_branch_selection,
+    _build_branch_prompt,
+    _build_branch_selection,
+    _coerce_uuid,
+    _get_active_branches,
+    _get_branch_selection,
+    _get_user_branch_preference,
+    _is_branch_only_message,
+    _match_branch_choice,
+    _set_branch_selection,
+    _set_user_branch_preference,
+)
 _DEDUP_EXPORTS = (
     _buffer_user_message,
     _drain_buffered_messages,
