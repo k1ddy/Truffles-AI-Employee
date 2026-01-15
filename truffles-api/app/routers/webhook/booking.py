@@ -432,17 +432,19 @@ def _select_expected_reply_message(
 ) -> str | None:
     if not messages or not expected_reply_type:
         return None
+    last_message = None
     for message in reversed(messages or []):
-        if not message:
-            continue
-        matched, _ = _match_expected_reply(
-            expected_reply_type=expected_reply_type,
-            message_text=message,
-            client_slug=client_slug,
-        )
-        if matched:
-            return message
-    return None
+        if message:
+            last_message = message
+            break
+    if not last_message:
+        return None
+    matched, _ = _match_expected_reply(
+        expected_reply_type=expected_reply_type,
+        message_text=last_message,
+        client_slug=client_slug,
+    )
+    return last_message if matched else None
 
 
 def _apply_booking_slot(

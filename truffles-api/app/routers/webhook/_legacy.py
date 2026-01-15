@@ -15,7 +15,13 @@ from fastapi import HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.logging_config import get_logger
+from app.logging_config import (
+    get_logger,
+    get_trace_id,
+    record_escalation_count,
+    record_inbound_count,
+    record_policy_count,
+)
 from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
 from app.routers.webhook.booking import (
     BOOKING_SLOT_ORDER,
@@ -833,6 +839,16 @@ def _is_booking_cancel(text: str, *, policy_pack: dict | None) -> bool:
 def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
     if not text or not client_slug:
         return None
+    normalized_text = _normalize_text(text)
+    booking_like = _is_booking_request(text)
+    if not booking_like:
+        booking_like = bool(
+            TIME_PATTERN.search(text)
+            or TIME_HOUR_PATTERN.search(text)
+            or DATE_PATTERN.search(text)
+            or DATE_NUMERIC_PATTERN.search(text)
+            or DATE_MONTH_PATTERN.search(text)
+        )
     match = semantic_service_match(text, client_slug)
     if not match or match.action != "match":
         if client_slug == "demo_salon":
@@ -842,6 +858,12 @@ def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
         return None
     canonical_name = match.canonical_name
     if isinstance(canonical_name, str) and canonical_name.strip():
+        if booking_like and normalized_text:
+            canonical_tokens = _normalize_text(canonical_name).split()
+            message_tokens = normalized_text.split()
+            if canonical_tokens and message_tokens:
+                if not any(token in message_tokens for token in canonical_tokens):
+                    return None
         return canonical_name.strip()
     return None
 
@@ -1372,6 +1394,17 @@ def _controller_meta_updates_from_class_router(class_router_result: dict | None)
     }
 
 
+def _router_observability_updates_from_class_router(class_router_result: dict | None) -> dict[str, Any]:
+    if not isinstance(class_router_result, dict):
+        return {}
+    controller_meta = class_router_result.get("controller")
+    if not isinstance(controller_meta, dict):
+        return {}
+    attempted = bool(controller_meta.get("attempted"))
+    reason = "none" if attempted else "not_run"
+    return _router_observability_meta(eligible=attempted, reason=reason)
+
+
 def _is_refusal_flag_active(refusal_flags: dict | None, field: str) -> bool:
     if not isinstance(refusal_flags, dict):
         return False
@@ -1685,6 +1718,9 @@ async def _handle_webhook_payload(
         media_label = message_type.lower() if message_type else "media"
         message_text = f"[{media_label}]"
 
+    if not skip_persist:
+        record_inbound_count(payload.client_slug)
+
     batch_messages_provided = batch_messages is not None
     batch_messages = _coerce_batch_messages(message_text, batch_messages)
     batch_non_booking_message = _select_last_non_booking_message(
@@ -1693,6 +1729,9 @@ async def _handle_webhook_payload(
     )
 
     timing_context: dict = {"client_slug": payload.client_slug, "remote_jid": remote_jid}
+    trace_id = get_trace_id()
+    if trace_id:
+        timing_context["trace_id"] = trace_id
     if client and isinstance(client.config, dict):
         timing_context["client_config"] = client.config
     if outbox_ids:
@@ -1722,6 +1761,9 @@ async def _handle_webhook_payload(
         context["stage"] = stage
         context["elapsed_ms"] = round(elapsed_ms, 2)
         logger.info("Timing", extra={"context": context})
+
+    def _record_escalation_metric(trigger: str) -> None:
+        record_escalation_count(payload.client_slug, trigger)
 
     def _record_llm_budget_trace() -> None:
         events = timing_context.get("llm_budget_events") if isinstance(timing_context, dict) else None
@@ -1950,6 +1992,8 @@ async def _handle_webhook_payload(
             message_metadata=message_metadata,
         )
         _ensure_rag_meta_defaults(saved_message)
+        if trace_id and saved_message:
+            _update_message_decision_metadata(saved_message, {"trace_id": trace_id})
 
         if enqueue_only:
             if (
@@ -2611,6 +2655,7 @@ async def _handle_webhook_payload(
                 )
     expected_reply_matched: bool | None = None
     expected_reply_shortcircuit = False
+    expected_reply_blocked_by_info = False
     expected_reply_text = (
         _select_expected_reply_message(
             batch_messages,
@@ -2620,57 +2665,78 @@ async def _handle_webhook_payload(
         or message_text
     )
     if expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
+        if message_text:
+            normalized_message = _normalize_service_text(message_text)
+            expected_reply_blocked_by_info = (
+                _looks_like_info_query(message_text)
+                or _has_price_signal(normalized_message, message_text)
+                or _has_duration_signal(normalized_message, message_text)
+            )
         expected_reply_text = expected_reply_text or ""
+        answer_result = None
         answer_confidence = 0.0
         answer_slot = ""
         answer_value = ""
-        answer_error = "invalid_result"
-        prompt_hint = None
-        booking_context = _get_booking_context(context)
-        last_question = booking_context.get("last_question")
-        if expected_reply_type == EXPECTED_REPLY_SERVICE:
-            prompt_hint = (
-                MSG_BOOKING_ASK_SERVICE
-                if last_question == "service"
-                else MSG_EXPECTED_SERVICE_OFF_TOPIC
-            )
-        elif expected_reply_type == EXPECTED_REPLY_TIME:
-            prompt_hint = MSG_BOOKING_ASK_DATETIME
-        elif expected_reply_type == EXPECTED_REPLY_NAME:
-            prompt_hint = MSG_BOOKING_ASK_NAME
+        answer_error = "blocked_by_info"
+        if expected_reply_blocked_by_info:
+            answer_meta = {
+                "answer_interpreter_used": False,
+                "answer_confidence": 0.0,
+                "answer_slot": "",
+                "answer_value": "",
+                "answer_error": "blocked_by_info",
+            }
+            matched = False
+            value = None
+        else:
+            answer_error = "invalid_result"
+            prompt_hint = None
+            booking_context = _get_booking_context(context)
+            last_question = booking_context.get("last_question")
+            if expected_reply_type == EXPECTED_REPLY_SERVICE:
+                prompt_hint = (
+                    MSG_BOOKING_ASK_SERVICE
+                    if last_question == "service"
+                    else MSG_EXPECTED_SERVICE_OFF_TOPIC
+                )
+            elif expected_reply_type == EXPECTED_REPLY_TIME:
+                prompt_hint = MSG_BOOKING_ASK_DATETIME
+            elif expected_reply_type == EXPECTED_REPLY_NAME:
+                prompt_hint = MSG_BOOKING_ASK_NAME
 
-        question_context = {
-            "prompt_hint": prompt_hint,
-            "booking": booking_context,
-            "current_goal": current_goal,
-            "service_carryover": _get_service_carryover(
-                context_manager, message_count=message_count
-            ),
-        }
-        answer_result = interpret_expected_reply(
-            expected_reply_text,
-            expected_reply_type=expected_reply_type,
-            carryover=class_carryover,
-            question_context=question_context,
-        )
-        answer_payload = answer_result.get("payload") if isinstance(answer_result, dict) else None
-        if isinstance(answer_result, dict):
-            answer_error = answer_result.get("error") or "none"
-        if isinstance(answer_payload, dict):
-            answer_slot = answer_payload.get("slot") or ""
-            answer_value = answer_payload.get("value") or ""
-            try:
-                answer_confidence = float(answer_payload.get("confidence") or 0.0)
-            except (TypeError, ValueError):
-                answer_confidence = 0.0
-            answer_confidence = max(0.0, min(answer_confidence, 1.0))
-        answer_meta = {
-            "answer_interpreter_used": True,
-            "answer_confidence": answer_confidence,
-            "answer_slot": answer_slot,
-            "answer_value": answer_value,
-            "answer_error": answer_error,
-        }
+            question_context = {
+                "prompt_hint": prompt_hint,
+                "booking": booking_context,
+                "current_goal": current_goal,
+                "service_carryover": _get_service_carryover(
+                    context_manager, message_count=message_count
+                ),
+            }
+            answer_result = interpret_expected_reply(
+                expected_reply_text,
+                expected_reply_type=expected_reply_type,
+                carryover=class_carryover,
+                question_context=question_context,
+                client_slug=payload.client_slug,
+            )
+            answer_payload = answer_result.get("payload") if isinstance(answer_result, dict) else None
+            if isinstance(answer_result, dict):
+                answer_error = answer_result.get("error") or "none"
+            if isinstance(answer_payload, dict):
+                answer_slot = answer_payload.get("slot") or ""
+                answer_value = answer_payload.get("value") or ""
+                try:
+                    answer_confidence = float(answer_payload.get("confidence") or 0.0)
+                except (TypeError, ValueError):
+                    answer_confidence = 0.0
+                answer_confidence = max(0.0, min(answer_confidence, 1.0))
+            answer_meta = {
+                "answer_interpreter_used": True,
+                "answer_confidence": answer_confidence,
+                "answer_slot": answer_slot,
+                "answer_value": answer_value,
+                "answer_error": answer_error,
+            }
 
         answer_confidence_floor = 0.65
         answer_value_ok = isinstance(answer_value, str) and answer_value.strip()
@@ -2681,15 +2747,38 @@ async def _handle_webhook_payload(
             answer_result_ok and answer_value_ok and answer_confidence >= answer_confidence_floor
         )
         answer_used = answer_confidence_ok or answer_valid
-        if answer_used:
+        answer_value_validated = True
+        deterministic_matched, deterministic_value = _match_expected_reply(
+            expected_reply_type=expected_reply_type,
+            message_text=expected_reply_text,
+            client_slug=payload.client_slug,
+        )
+        if deterministic_matched:
+            if answer_used and isinstance(answer_value, str) and isinstance(deterministic_value, str):
+                if answer_value != deterministic_value:
+                    answer_error = "deterministic_override"
+                    answer_confidence = 0.0
+                    answer_value = deterministic_value
             matched = True
-            value = answer_value
+            value = deterministic_value
         else:
-            matched, value = _match_expected_reply(
-                expected_reply_type=expected_reply_type,
-                message_text=expected_reply_text,
-                client_slug=payload.client_slug,
-            )
+            if answer_used:
+                answer_used = False
+                answer_value_validated = False
+                answer_confidence = 0.0
+                answer_error = "deterministic_miss"
+                answer_slot = ""
+                answer_value = ""
+            matched = False
+            value = None
+        answer_meta.update(
+            {
+                "answer_confidence": answer_confidence,
+                "answer_slot": answer_slot,
+                "answer_value": answer_value,
+                "answer_error": answer_error,
+            }
+        )
         expected_reply_matched = matched
         if matched:
             expected_reply_shortcircuit = True
@@ -2765,14 +2854,18 @@ async def _handle_webhook_payload(
         }
         if expected_reply_shortcircuit:
             trace_payload["expected_reply_shortcircuit"] = True
+        if expected_reply_blocked_by_info:
+            trace_payload["expected_reply_blocked_by_info"] = True
             trace_payload.update(
                 _set_router_observability(
                     saved_message,
                     eligible=False,
-                    reason="expected_reply_shortcircuit",
+                    reason="expected_reply_deferred",
                 )
             )
         trace_payload.update(answer_meta)
+        if not answer_value_validated:
+            trace_payload["expected_reply_value_validated"] = False
         _record_decision_trace(conversation, trace_payload)
         if saved_message:
             updates = {
@@ -2782,7 +2875,11 @@ async def _handle_webhook_payload(
             }
             if expected_reply_shortcircuit:
                 updates["expected_reply_shortcircuit"] = True
+            if expected_reply_blocked_by_info:
+                updates["expected_reply_blocked_by_info"] = True
             updates.update(answer_meta)
+            if not answer_value_validated:
+                updates["expected_reply_value_validated"] = False
             _update_message_decision_metadata(saved_message, updates)
         context = _get_conversation_context(conversation)
         expected_reply_type = _get_expected_reply_type(context)
@@ -2987,6 +3084,7 @@ async def _handle_webhook_payload(
         bot_response = MSG_ESCALATED
         result_message = "Shield escalation"
         if not skip_persist and conversation.state == ConversationState.BOT_ACTIVE.value:
+            _record_escalation_metric("shield")
             esc_result = escalate_to_pending(
                 db=db,
                 conversation=conversation,
@@ -3032,6 +3130,9 @@ async def _handle_webhook_payload(
         if sidecar:
             bot_response = _combine_sidecar(bot_response, sidecar)
         _reset_low_confidence_retry(conversation)
+        record_policy_count(payload.client_slug, policy_gate)
+        if decision.action == "escalate":
+            _record_escalation_metric(policy_gate)
 
         result_message = "Policy reply sent"
         if decision.action == "escalate":
@@ -3145,7 +3246,7 @@ async def _handle_webhook_payload(
             conversation.bot_status = "active"
             conversation.bot_muted_until = None
             conversation.no_count = 0
-            conversation.context = {}
+            _set_conversation_context(conversation, {})
             logger.info(f"Session reset: {time_since_last} since last message")
 
     # 6. Check if bot is muted - but still forward to topic
@@ -3855,6 +3956,7 @@ async def _handle_webhook_payload(
                     media_escalated = True
                     media_response = MSG_MEDIA_STYLE_REFERENCE
                 else:
+                    _record_escalation_metric("media")
                     result = escalate_to_pending(
                         db=db,
                         conversation=conversation,
@@ -4107,6 +4209,7 @@ async def _handle_webhook_payload(
                             f"Handover confirmed (reused), telegram={'sent' if telegram_sent else 'failed'}"
                         )
                     else:
+                        _record_escalation_metric("intent")
                         esc_result = escalate_to_pending(
                             db=db,
                             conversation=conversation,
@@ -4885,6 +4988,7 @@ async def _handle_webhook_payload(
     expected_reply_off_topic = (
         expected_reply_type == EXPECTED_REPLY_SERVICE
         and expected_reply_matched is False
+        and not expected_reply_blocked_by_info
         and message_text
         and (early_out_of_domain or is_frustration_message(message_text))
     )
@@ -4941,6 +5045,7 @@ async def _handle_webhook_payload(
     expected_reply_invalid_choice = (
         expected_reply_type == EXPECTED_REPLY_SERVICE
         and expected_reply_matched is False
+        and not expected_reply_blocked_by_info
         and message_text
         and not in_domain_signal
     )
@@ -5203,6 +5308,7 @@ async def _handle_webhook_payload(
             bot_response = _combine_sidecar(bot_response, followup_prompt)
 
         _reset_low_confidence_retry(conversation)
+        record_policy_count(payload.client_slug, "discounts")
 
         result_message = "Policy discounts reply sent"
         if decision.action == "escalate":
@@ -5217,6 +5323,7 @@ async def _handle_webhook_payload(
             if reused:
                 result_message = f"Policy discounts reuse, telegram={'sent' if telegram_sent else 'failed'}"
             elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get("allow_handover_create", False):
+                _record_escalation_metric("intent")
                 result = escalate_to_pending(
                     db=db,
                     conversation=conversation,
@@ -5761,6 +5868,21 @@ async def _handle_webhook_payload(
                 consult_question = candidate_question
                 intent_decomp_payload["consult_question"] = candidate_question
         consult_intent_signal = bool(consult_intent or consult_candidate)
+        normalized_message = normalize_for_matching(message_text) if message_text else ""
+        explicit_info_signal = bool(
+            booking_signal
+            or _has_price_signal(normalized_message, message_text)
+            or _has_duration_signal(normalized_message, message_text)
+            or (_looks_like_info_query(message_text) and not consult_intent_signal)
+        )
+        explicit_info_intent = bool(
+            explicit_info_signal
+            or (
+                intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}
+                and not consult_intent_signal
+            )
+            or (info_class_intents & {"location", "hours"} and not consult_intent_signal)
+        )
         consult_candidate_meta = (
             consult_candidate.meta
             if consult_candidate and isinstance(consult_candidate.meta, dict)
@@ -5772,16 +5894,17 @@ async def _handle_webhook_payload(
                 consult_short_circuit_service = get_demo_salon_service_hint(message_text)
                 if consult_short_circuit_service:
                     consult_short_circuit_reason = "service_hint"
-            if consult_short_circuit_service:
+            if consult_short_circuit_service and explicit_info_intent:
                 consult_short_circuit = True
                 if not consult_short_circuit_reason:
-                    consult_short_circuit_reason = "service_known"
+                    consult_short_circuit_reason = "explicit_info"
                 consult_flow_trace = {
                     "stage": "consult_flow",
                     "decision": "short_circuit",
                     "state": conversation.state,
                     "reason": consult_short_circuit_reason,
                 }
+                consult_flow_trace["explicit_info"] = True
                 consult_flow_trace["service_query"] = consult_short_circuit_service
                 if consult_topic:
                     consult_flow_trace["consult_topic"] = consult_topic
@@ -5953,6 +6076,7 @@ async def _handle_webhook_payload(
             if reused:
                 result_message = f"Consult reuse, telegram={'sent' if telegram_sent else 'failed'}"
             elif conversation.state == ConversationState.BOT_ACTIVE.value and routing["allow_handover_create"]:
+                _record_escalation_metric("intent")
                 result = escalate_to_pending(
                     db=db,
                     conversation=conversation,
@@ -6549,12 +6673,49 @@ async def _handle_webhook_payload(
                 booking_messages,
                 client_slug=payload.client_slug,
             )
+            context_manager = _get_context_manager(context)
             if not booking_state.get("service"):
                 service_hint = _get_recent_service_hint(context, now)
                 if service_hint:
                     booking_state["service"] = service_hint
                     context = _clear_service_hint(context)
-            context_manager = _get_context_manager(context)
+                else:
+                    carryover = _get_service_carryover(
+                        context_manager, message_count=message_count
+                    )
+                    service_query = (
+                        carryover.get("service_query")
+                        if isinstance(carryover, dict)
+                        else None
+                    )
+                    if isinstance(service_query, str) and service_query.strip():
+                        booking_state["service"] = service_query.strip()
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "service_carryover",
+                                "decision": "used",
+                                "service_query": service_query.strip(),
+                                "service_query_source": carryover.get("service_query_source")
+                                if isinstance(carryover, dict)
+                                else None,
+                                "service_query_score": carryover.get("service_query_score")
+                                if isinstance(carryover, dict)
+                                else None,
+                                "reason": "booking_flow",
+                            },
+                        )
+                        if saved_message:
+                            _update_message_decision_metadata(
+                                saved_message,
+                                {
+                                    "service_query": service_query.strip(),
+                                    "service_query_source": "context",
+                                    "service_query_score": carryover.get("service_query_score")
+                                    if isinstance(carryover, dict)
+                                    else None,
+                                },
+                            )
             refusal_flags = context_manager.get("refusal_flags")
             booking_state, prompt = _next_booking_prompt(booking_state, refusal_flags=refusal_flags)
             context = _set_booking_context(context, booking_state)
@@ -6686,6 +6847,7 @@ async def _handle_webhook_payload(
                     result_message = f"Booking reuse, telegram={'sent' if telegram_sent else 'failed'}"
                     trace_decision = "reuse_handover"
                 else:
+                    _record_escalation_metric("intent")
                     result = escalate_to_pending(
                         db=db,
                         conversation=conversation,
@@ -6753,6 +6915,8 @@ async def _handle_webhook_payload(
     llm_primary_result = None
     llm_primary_failed = False
     llm_primary_reason = None
+    skip_llm_primary = False
+    force_truth_gate = False
 
     # 9.06 Fast intent (smalltalk) before LLM to avoid extra calls.
     fast_decision = None
@@ -7169,6 +7333,7 @@ async def _handle_webhook_payload(
                     if info_meta_combined:
                         meta_updates.update(info_meta_combined)
                     meta_updates.update(_controller_meta_updates_from_class_router(class_router_result))
+                    meta_updates.update(_router_observability_updates_from_class_router(class_router_result))
                     _update_message_decision_metadata(saved_message, meta_updates)
                 _maybe_store_class_carryover(
                     conversation=conversation,
@@ -7253,6 +7418,7 @@ async def _handle_webhook_payload(
                     if isinstance(base_bundle_meta, dict) and base_bundle_meta:
                         meta_updates.update(base_bundle_meta)
                     meta_updates.update(_controller_meta_updates_from_class_router(class_router_result))
+                    meta_updates.update(_router_observability_updates_from_class_router(class_router_result))
                     _update_message_decision_metadata(saved_message, meta_updates)
                 _maybe_store_class_carryover(
                     conversation=conversation,
@@ -7288,16 +7454,21 @@ async def _handle_webhook_payload(
                     bot_response=bot_response,
                 )
 
+        if message_text:
+            normalized_message = normalize_for_matching(message_text)
+            force_truth_gate = bool(
+                info_class_intents & {"pricing", "duration"}
+                or _has_price_signal(normalized_message, message_text)
+                or _has_duration_signal(normalized_message, message_text)
+            )
         service_matcher = policy_handler.get("service_matcher")
-        service_decision = (
-            service_matcher(
+        service_decision = None
+        if service_matcher and not force_truth_gate:
+            service_decision = service_matcher(
                 message_text,
                 client_slug=payload.client_slug,
                 intent_decomp=intent_decomp_payload,
             )
-            if service_matcher
-            else None
-        )
         if service_decision:
             if service_decision.action == "reply":
                 guard_response = _maybe_apply_fact_guard(
@@ -7433,7 +7604,12 @@ async def _handle_webhook_payload(
                 bot_response=bot_response,
             )
 
-    if routing["allow_bot_reply"]:
+    if force_truth_gate:
+        skip_llm_primary = True
+        llm_primary_failed = True
+        llm_primary_reason = "forced_truth_gate"
+
+    if routing["allow_bot_reply"] and not skip_llm_primary:
         _ensure_rag_rewrite()
         llm_primary_result = generate_bot_response(
             db,
@@ -7475,6 +7651,7 @@ async def _handle_webhook_payload(
                     if reused:
                         result_message = f"LLM guard reuse, telegram={'sent' if telegram_sent else 'failed'}"
                     elif conversation.state == ConversationState.BOT_ACTIVE.value and routing["allow_handover_create"]:
+                        _record_escalation_metric("intent")
                         result = escalate_to_pending(
                             db=db,
                             conversation=conversation,
@@ -7693,6 +7870,7 @@ async def _handle_webhook_payload(
                 if reused:
                     result_message = f"Truth gate reuse, telegram={'sent' if telegram_sent else 'failed'}"
                 elif conversation.state == ConversationState.BOT_ACTIVE.value:
+                    _record_escalation_metric("intent")
                     result = escalate_to_pending(
                         db=db,
                         conversation=conversation,
@@ -8066,6 +8244,7 @@ async def _handle_webhook_payload(
                 if info_meta_combined:
                     meta_updates.update(info_meta_combined)
                 meta_updates.update(_controller_meta_updates_from_class_router(class_router_result))
+                meta_updates.update(_router_observability_updates_from_class_router(class_router_result))
                 _update_message_decision_metadata(saved_message, meta_updates)
             _maybe_store_class_carryover(
                 conversation=conversation,
@@ -8238,6 +8417,7 @@ async def _handle_webhook_payload(
             )
         else:
             # Escalate using state_service (atomic transition)
+            _record_escalation_metric("intent")
             result = escalate_to_pending(
                 db=db,
                 conversation=conversation,
@@ -8539,11 +8719,31 @@ async def _handle_webhook_payload(
                                 and raw_source != "context"
                             ):
                                 intent_decomp_explicit_query = raw_query.strip()
+                        controller_service_query = None
+                        for state_key in ("router", "controller"):
+                            state = (
+                                class_router_result.get(state_key)
+                                if isinstance(class_router_result, dict)
+                                else None
+                            )
+                            if not isinstance(state, dict):
+                                continue
+                            output = state.get("output")
+                            if not isinstance(output, dict):
+                                continue
+                            slots = output.get("slots")
+                            if not isinstance(slots, dict):
+                                continue
+                            candidate = slots.get("service_query")
+                            if isinstance(candidate, str) and candidate.strip():
+                                controller_service_query = candidate.strip()
+                                break
                         in_signals = class_router_result.get("in_signals") or []
                         anchors_in_hits = int(class_router_result.get("anchors_in_hits") or 0)
                         service_semantic_allowed = bool(
                             explicit_service_hint
                             or intent_decomp_explicit_query
+                            or controller_service_query
                             or booking_signal
                             or info_intent_hint
                             or in_signals

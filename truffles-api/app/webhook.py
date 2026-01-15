@@ -614,7 +614,11 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
             conversation.bot_status = "active"
             conversation.bot_muted_until = None
             conversation.no_count = 0
-            conversation.context = {}
+            existing_context = _get_conversation_context(conversation)
+            if "decision_trace" in existing_context:
+                conversation.context = {"decision_trace": existing_context.get("decision_trace")}
+            else:
+                conversation.context = {}
             logger.info(f"Session reset: {time_since_last} since last message")
 
     # 6. Check if bot is muted - but still forward to topic
