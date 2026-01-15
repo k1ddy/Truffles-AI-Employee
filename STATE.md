@@ -27,6 +27,7 @@
 - DONE: Consult clarify/short‑circuit (PR #153 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20943384712; live‑check evidence in истории 2026‑01‑13).
 - DONE: PR #155 consult pack‑only + pending_wait trace merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20945722911; live‑check evidence в истории 2026‑01‑13.
 - DONE: truth_gate trace retention for pricing/duration/location (PR #180 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21013363387; live‑check conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48, msg_id c921d20c-57d2-4778-aa83-b66c458f0b90 pricing, msg_id debe8959-cdc2-4716-ba86-5ae6431d7400 duration, msg_id 6847ad45-774a-4662-b20a-d6b6ebed16b3 location).
+- DONE: P0 Legacy slice 2 — ранние return‑гейты вынесены в модули без изменения поведения; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21029896007; live‑check conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48 (trace/meta).
 - DONE: Telegram→WhatsApp topic handover routing fix (PR #157 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20948893145; live‑check в истории 2026‑01‑13).
 - DONE: Docs PR #158 (roadmap + tech status) merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20949202225.
 - BLOCKERS: нет.
@@ -625,6 +626,32 @@
   - conversation state=pending, telegram_topic_id=625
   - branch telegram_chat_id `-1003412216010`, client_settings manager_scope=branch
 - Note: truffles policy_pack was enabled via `policy_type=demo_salon` at `2026-01-14T13:24:12Z` and cleared at `2026-01-14T13:25:52Z` for hard_law verification.
+
+### 2026-01-15 — P0 Legacy slice 2: ранние return‑гейты в модули
+
+**Что сделали:**
+- Вынесли ранние return‑гейты (preflight/skip_persist/dedup/outbox accept/branch selection/debounce/handover confirmation) в модули; `_legacy.py` оставлен как последовательность вызовов, trace/meta без изменений.
+
+**Evidence:**
+- CI core/long: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21029896007
+- Live-check (conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`): decision_meta action=reply intent=location source=truth_gate; action=booking_prompt intent=booking expected_reply_type=time; decision_trace включает truth_gate reply + booking prompt.
+
+### 2026-01-15 — P0 Legacy slice 4: router/intent/expected_reply orchestration
+
+**Что сделали:**
+- Вынесли orchestration router/intent/expected_reply из `_legacy.py` в `decision.py` helpers; порядок вызовов сохранен, trace/meta и stage-имена без изменений.
+
+**Evidence:**
+- CI core/long: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21034242460
+- Live-check (conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`):
+  - info_bundle msg_id `379d3bc6-a30a-4566-a0c4-88260e6b064e` (messageId `3EB05A93856977B096DFCC`), action=reply, intent=location, source=truth_gate, info_sections=["address","hours"], expected_reply_type=time, expected_reply_matched=false, expected_reply_blocked_by_info=true.
+  - decision_trace: truth_gate intent=location info_combined=true (recorded_at `2026-01-15T14:19:44.613772+00:00`); question_contract decision=missed expected_reply_type=time expected_reply_blocked_by_info=true (recorded_at `2026-01-15T14:19:32.251084+00:00`).
+  - booking msg_id `82aa0720-d620-4015-b803-b167a0b474f7` (messageId `3EB0CDCE26CD876B7BCE44`), action=reply, intent=booking_intake, expected_reply_type=time, expected_reply_blocked_by_info=true.
+  - booking follow-up msg_id `62bd919f-ace0-40a1-97ea-b89ee78bba41` (messageId `3EB080B314E75D99EF52F8`), action=booking_prompt, intent=booking, expected_reply_type=name, expected_reply_shortcircuit=true, answer_slot=datetime, answer_value="в субботу вечером".
+  - decision_trace: question_contract matched expected_reply_type=time expected_reply_shortcircuit=true (recorded_at `2026-01-15T14:20:09.329196+00:00`); intent_decomposition intents=["other"] (recorded_at `2026-01-15T14:20:11.265420+00:00`).
+  - class_router/intent evidence msg_id `f5481a82-a6bb-4820-9f34-7616bdb04d82` (messageId `3EB06C32F832566CC07AF1`), action=out_of_domain, intent=out_of_domain, source=router_low_confidence, decision_meta.class_router.router.goal=out_of_domain, controller_attempted=true, controller_low_confidence=true, router_eligible=true.
+  - decision_trace: class_router recorded_at `2026-01-15T22:34:46.471275+00:00`; intent recorded_at `2026-01-15T22:34:46.471635+00:00`; intent_decomposition intents=["other"] recorded_at `2026-01-15T22:34:38.535352+00:00`.
+  - decision_trace cleanup: conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48` context.decision_trace reset to `[]` before router evidence; data affected = only `conversations.context.decision_trace` for this conv_id; reason = get clean class_router/intent trace; consequence = prior trace history for this conv_id removed, new evidence based on subsequent messages.
 
 ### 2026-01-15 — GAP-017 Strict branch filter (RAG uses branch_id/knowledge_tag)
 

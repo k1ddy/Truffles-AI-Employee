@@ -4267,6 +4267,7 @@ async def _handle_webhook_payload(
         consult_return_prompt=consult_return_prompt,
         consult_context=consult_context,
         consult_return_reason=consult_return_reason,
+        maybe_apply_fact_guard=_maybe_apply_fact_guard,
         send_and_save=_send_and_save,
         send_response=_send_response,
         finalize_response=_finalize_bot_response,
@@ -4399,6 +4400,7 @@ async def _handle_webhook_payload(
         consult_context=consult_context,
         consult_return_reason=consult_return_reason,
         multi_intent_other_followup=multi_intent_other_followup,
+        maybe_apply_fact_guard=_maybe_apply_fact_guard,
         send_and_save=_send_and_save,
         send_response=_send_response,
         finalize_response=_finalize_bot_response,
@@ -4584,6 +4586,7 @@ async def _handle_webhook_payload(
             consult_return_prompt=consult_return_prompt,
             consult_context=consult_context,
             consult_return_reason=consult_return_reason,
+            maybe_apply_fact_guard=_maybe_apply_fact_guard,
             send_and_save=_send_and_save,
             log_timing=_log_timing,
             record_escalation_metric=_record_escalation_metric,
@@ -4632,6 +4635,7 @@ async def _handle_webhook_payload(
         consult_return_prompt=consult_return_prompt,
         consult_context=consult_context,
         consult_return_reason=consult_return_reason,
+        maybe_apply_fact_guard=_maybe_apply_fact_guard,
         send_and_save=_send_and_save,
     )
     if offline_info_response:

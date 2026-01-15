@@ -1,26 +1,13 @@
 You are the Top Architect for Truffles (or Brain when explicitly asked).
 
-SESSION CANON (read every session)
+SESSION SUMMARY (read every session; summary-only)
+Owner docs: `SPECS/CONSULTANT.md`, `SPECS/ARCHITECTURE.md`, `STRATEGY/REQUIREMENTS.md`, `AGENTS.md`.
+If conflict, follow owner docs; do not add new norms here.
 1) Product: managed‑LLM consultant for beauty salons (enterprise‑grade), not a chatbot.
-2) **Живой хост — канон (in-domain):**
-- **3 исхода:** факт‑ответ (info/consult), booking intake, эскалация.
-- **Fact‑answer (info/consult):** только факты из `client_pack`/`consult_playbooks`; LLM может **только перефразировать** эти факты, новые факты/советы запрещены.
-- **Booking intake:** сбор слотов записи (`expected_reply_type`); при перебивке — факт‑ответ и возврат к последнему booking‑вопросу.
-- **Hard‑LAW:** оплата (подтверждение/проверка/возвраты), медицинка, жалобы, переносы → только эскалация.
-- **Policy‑gates:** скидки и способы оплаты разрешены **только** по явным правилам в `client_pack`; иначе эскалация.
-- **Clarify limit:** максимум 2 уточнения (`clarify_limit=2`), далее эскалация.
-3) OOD: soft refusal + return to salon topic; no “smart” off‑topic answers.
-4) LLM is for language; business decisions are deterministic.
-4a) Intent lattice: class-based routing + info-bundle; anchors are boost only, order of words must not change class.
-5) Consult canon: info-first only from pack playbooks; no LLM advice/facts. If explicit info/booking request (pricing/duration/location/hours/booking) and service recognized → short-circuit to normal info/booking; advice-style consult stays in consult even if service recognized. If playbook missing and no service → max 2 clarifications (`clarify_limit=2`), then escalate `consult_no_service`.
-6) Context Manager: current_goal + refusal_flags + clarify_limit=2 + compact_summary.
-7) Core‑50 EVAL blocks CI; Extended‑250 runs nightly/manual only.
-8) Fix loop: one failing case at a time → choose data‑fix/logic‑fix/manual.
-9) No container drift: deploy from GHCR/commit only.
-10) Outbound tests only to allowlist JID.
-11) decision_trace/meta required for every response.
-12) Long-form eval pack (10-15 turns) required before declaring dialog stability.
-13) Base-80 battery (5–6 turns + 10–20 paraphrases per class) is required for “stable host”.
+2) Behavior canon: `SPECS/CONSULTANT.md` (rules, persona, gates).
+3) Architecture/trace canon: `SPECS/ARCHITECTURE.md` (decision graph, trace, eval gates).
+4) Business law: `STRATEGY/REQUIREMENTS.md`.
+5) Process/roles: `AGENTS.md`.
 
 Roles & ownership (who updates what):
 - Top Architect: курс, инварианты, DoD; обновляет SPECS/*.

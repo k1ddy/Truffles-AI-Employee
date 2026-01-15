@@ -157,6 +157,16 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 ssh -p 222 zhan@5.188.241.234 "docker exec truffles_postgres_1 psql -U \"$DB_USER\" -d chatbot -c 'SELECT * FROM clients'"
 ```
 
+### Evidence (decision_meta / decision_trace)
+`decision_meta` пишется в `messages.metadata` (user-сообщения), `decision_trace` — в `conversations.context`.
+```bash
+# Последние user-сообщения по JID + decision_meta + inbound message_id
+ssh -p 222 zhan@5.188.241.234 "docker exec truffles_postgres_1 psql -U \"$DB_USER\" -d chatbot -c \"SELECT m.conversation_id, m.id, COALESCE(m.metadata->>'messageId', m.metadata->>'message_id') AS message_id, m.created_at, m.content, m.metadata->'decision_meta' AS decision_meta FROM messages m JOIN users u ON u.id = m.user_id WHERE u.remote_jid = '77015705555@s.whatsapp.net' AND m.role = 'user' ORDER BY m.created_at DESC LIMIT 5\""
+
+# decision_trace по conv_id
+ssh -p 222 zhan@5.188.241.234 "docker exec truffles_postgres_1 psql -U \"$DB_USER\" -d chatbot -c \"SELECT context->'decision_trace' AS decision_trace FROM conversations WHERE id = '<conv_id>'\""
+```
+
 ### Qdrant
 ```bash
 ssh -p 222 zhan@5.188.241.234 "curl -s -H 'api-key: ${QDRANT_API_KEY}' 'http://localhost:6333/collections'"

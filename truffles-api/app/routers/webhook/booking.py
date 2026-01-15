@@ -605,6 +605,7 @@ def _handle_booking_interrupt(
     consult_return_prompt: str | None,
     consult_context: dict | None,
     consult_return_reason: str | None,
+    maybe_apply_fact_guard: Callable[..., Any],
     send_and_save: Callable[..., tuple[str, bool]],
     send_response: Callable[..., Any],
     finalize_response: Callable[..., Any],
@@ -746,7 +747,7 @@ def _handle_booking_interrupt(
             if info_decision and info_decision.action == "reply":
                 info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}
                 info_meta = dict(info_meta)
-                guard_response = legacy._maybe_apply_fact_guard(
+                guard_response = maybe_apply_fact_guard(
                     decision_meta=info_meta,
                     intent=info_decision.intent,
                     source=info_source or "booking_interrupt",

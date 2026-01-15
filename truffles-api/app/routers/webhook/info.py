@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
 import re
 import time
-from datetime import datetime
-from dataclasses import dataclass
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -345,6 +345,7 @@ def _handle_info_flow(
     consult_context: dict | None,
     consult_return_reason: str | None,
     multi_intent_other_followup: str | None,
+    maybe_apply_fact_guard: Callable[..., Any],
     send_and_save: Callable[..., tuple[str, bool]],
     send_response: Callable[..., Any],
     finalize_response: Callable[..., Any],
@@ -377,7 +378,7 @@ def _handle_info_flow(
             )
             if multi_result:
                 multi_reply, multi_meta = multi_result
-                guard_response = legacy._maybe_apply_fact_guard(
+                guard_response = maybe_apply_fact_guard(
                     decision_meta=multi_meta if isinstance(multi_meta, dict) else None,
                     intent="multi_truth",
                     source="multi_truth",
@@ -692,7 +693,7 @@ def _handle_info_flow(
         if force_hours_followup:
             info_meta_combined["question_type"] = "hours"
         if replies:
-            guard_response = legacy._maybe_apply_fact_guard(
+            guard_response = maybe_apply_fact_guard(
                 decision_meta=info_meta_combined if info_meta_combined else None,
                 intent="info_bundle",
                 source="class_router",
@@ -785,7 +786,7 @@ def _handle_info_flow(
         if base_bundle_meta:
             info_class_intents_for_reply.add("guest_policy")
         if isinstance(base_bundle_reply, str) and base_bundle_reply.strip():
-            guard_response = legacy._maybe_apply_fact_guard(
+            guard_response = maybe_apply_fact_guard(
                 decision_meta=base_bundle_meta if isinstance(base_bundle_meta, dict) else None,
                 intent="guest_policy",
                 source="class_router",
@@ -885,7 +886,7 @@ def _handle_info_flow(
         )
     if service_decision:
         if service_decision.action == "reply":
-            guard_response = legacy._maybe_apply_fact_guard(
+            guard_response = maybe_apply_fact_guard(
                 decision_meta=service_decision.meta if isinstance(service_decision.meta, dict) else None,
                 intent=service_decision.intent,
                 source="service_matcher",
@@ -1050,6 +1051,7 @@ def _handle_truth_gate_fallback(
     consult_return_prompt: str | None,
     consult_context: dict | None,
     consult_return_reason: str | None,
+    maybe_apply_fact_guard: Callable[..., Any],
     send_and_save: Callable[..., tuple[str, bool]],
     log_timing: Callable[[str, float, dict | None], None],
     record_escalation_metric: Callable[[str], None],
@@ -1135,7 +1137,7 @@ def _handle_truth_gate_fallback(
                 now=now,
             )
         if decision.action == "reply":
-            guard_response = legacy._maybe_apply_fact_guard(
+            guard_response = maybe_apply_fact_guard(
                 decision_meta=decision.meta if isinstance(decision.meta, dict) else None,
                 intent=decision.intent,
                 source="truth_gate",
@@ -1299,6 +1301,7 @@ def _handle_offline_info_class(
     consult_return_prompt: str | None,
     consult_context: dict | None,
     consult_return_reason: str | None,
+    maybe_apply_fact_guard: Callable[..., Any],
     send_and_save: Callable[..., tuple[str, bool]],
 ) -> WebhookResponse | None:
     import os
@@ -1360,7 +1363,7 @@ def _handle_offline_info_class(
             info_meta_combined: dict[str, Any] = {}
             if isinstance(base_bundle_meta, dict) and base_bundle_meta:
                 info_meta_combined.update(base_bundle_meta)
-            guard_response = legacy._maybe_apply_fact_guard(
+            guard_response = maybe_apply_fact_guard(
                 decision_meta=info_meta_combined if info_meta_combined else None,
                 intent="info_bundle",
                 source="class_router",

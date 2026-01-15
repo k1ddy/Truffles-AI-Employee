@@ -130,8 +130,8 @@ outbox worker (тик 2s) или POST /admin/outbox/process (cron)
 _handle_webhook_payload(skip_persist=True)
     ↓
 behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → policy‑gates (скидки/оплата info)
-→ LLM Dialogue Controller (class+goal+slots) → answer‑interpreter (expected_reply_type) → early OOD (только при out‑signals без in‑signals)
-→ info bundle / consult / booking flow / service matcher → LLM формулировка (RAG) → truth gate fallback → low‑confidence handling
+→ answer‑interpreter (expected_reply_type) → LLM Dialogue Controller (intent+slots) → early OOD (только при out‑signals без in‑signals)
+→ info bundle / consult / booking flow / service matcher → fast intent (smalltalk) → LLM формулировка (RAG) → truth gate fallback → low‑confidence handling
     ↓
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
 ```
@@ -140,25 +140,33 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 Фактическая карта стадий и ранних return в `_handle_webhook_payload` (legacy pipeline). Это **не** целевой оркестратор `decision.py`, а снимок текущего поведения.
 
 #### Stage order (gates/early returns)
-1) Preflight rejects и outbox-only путь → early return без trace (GAP ниже).
+1) Preflight rejects и outbox-only путь → early return с `preflight`/`outbox` trace (если conversation резолвится; иначе trace не пишется).
 2) Контракт + план Decision Graph → `contract`, `decision_graph`.
 3) Session memory + re-entry + carryover cleanup → `session_memory`, `re_entry`, `class_carryover`, `service_carryover`, `consult_context`.
 4) Expected reply (answer interpreter) → `question_contract`.
-5) Branch selection prompt/confirm → early return без trace (GAP).
+5) Branch selection prompt/confirm → early return с `branch_selection` trace.
 6) Behavioral shield → `shield` (drop/escalate).
 7) Policy/Hard-LAW gate → `policy_gate`.
-8) State/pending/mute gates → `routing`, `rejection`, `pending_*` (часть mute/reengage без stage).
+8) State/pending/mute gates → `routing`, `rejection`, `pending_*`.
 9) Media-only handling → `media`.
-10) Debounce/hand‑over confirmation → early return без trace (GAP).
+10) Debounce/hand‑over confirmation → early return с `debounce`/`handover_confirmation` trace.
 11) Router + intent decomposition + carryover guard → `intent_decomposition`, `class_router`, `intent`, `carryover_guard`.
 12) Domain flows (booking/info/consult) → `booking_gate`, `complaint_guard`, `out_of_domain`, `consult_flow`, `intent_queue`, `booking`, `consult`, `clarify_guard`, `booking_interrupt`, `service_matcher`, `truth_gate`, `multi_truth`, `service_semantic_matcher`, `time_only_guard`, `info_class`.
-13) LLM response/fallback → `llm_guard`, `ai_response`, `rewrite`, `budget_gate`, `llm_degradation`.
-14) Post-response hooks (summary/consult return) → `context_manager`, `consult_return`.
-15) Escalation/state updates → `escalation`, `state_transition`.
+13) Fast intent (smalltalk) before LLM → `fast_intent`.
+14) LLM response/fallback → `llm_guard`, `ai_response`, `rewrite`, `budget_gate`, `llm_degradation`.
+15) Post-response hooks (summary/consult return) → `context_manager`, `consult_return`.
+16) Escalation/state updates → `escalation`, `state_transition`.
 
 #### Legacy stage map (stage → condition → action → trace)
 | Stage | Condition | Action | Trace |
 | --- | --- | --- | --- |
+| `preflight` | Missing client/remoteJid/empty message | Фиксируем причину reject | decision_trace.stage=`preflight` (`truffles-api/app/routers/webhook/_legacy.py:1777`) |
+| `skip_persist` | skip_persist: missing conversation/user | Фиксируем причину skip_persist | decision_trace.stage=`skip_persist` (`truffles-api/app/routers/webhook/_legacy.py:2026`) |
+| `dedupe` | Duplicate message_id | Фиксируем dedupe skip | decision_trace.stage=`dedupe` (`truffles-api/app/routers/webhook/_legacy.py:2097`) |
+| `outbox` | enqueue_only accept | Фиксируем outbox accept | decision_trace.stage=`outbox` (`truffles-api/app/routers/webhook/_legacy.py:2277`) |
+| `branch_selection` | Branch prompt/confirm | Фиксируем prompt/choice | decision_trace.stage=`branch_selection` (`truffles-api/app/routers/webhook/_legacy.py:3141`) |
+| `debounce` | Debounce skip/manager_active after debounce | Фиксируем debounce решение | decision_trace.stage=`debounce` (`truffles-api/app/routers/webhook/_legacy.py:4358`) |
+| `handover_confirmation` | Handover confirmed/declined | Фиксируем подтверждение | decision_trace.stage=`handover_confirmation` (`truffles-api/app/routers/webhook/_legacy.py:4514`) |
 | `state_transition` | Попытка перехода состояния при handover (invalid) | Логируем нарушение перехода | decision_trace.stage=`state_transition` (`truffles-api/app/routers/webhook/_legacy.py:1574`) |
 | `escalation` | Reuse/создание handover | Фиксируем reuse + telegram_sent | decision_trace.stage=`escalation` (`truffles-api/app/routers/webhook/_legacy.py:1595`) |
 | `budget_gate` | LLM budget events | Allow/deny + budget meta | decision_trace.stage=`budget_gate` (`truffles-api/app/routers/webhook/_legacy.py:1739`) |
@@ -212,6 +220,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 | `service_semantic_matcher` | Семантический сервис‑match | Reply/suggestions | decision_trace.stage=`service_semantic_matcher` (`truffles-api/app/routers/webhook/_legacy.py:8608`) |
 
 #### Critical trace-stages (must-have)
+- `preflight`, `skip_persist`, `dedupe`, `outbox`, `branch_selection`, `debounce`, `handover_confirmation` — ранние возвраты (trace при резолве conversation).
 - `contract`, `decision_graph` — обязательны для аудита плана и контрактов.
 - `session_memory`, `re_entry`, `question_contract` — устойчивость expected_reply и reset.
 - `shield`, `policy_gate` — safety-гейты (spam/toxic/Hard‑LAW).
@@ -224,15 +233,9 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - `llm_guard`, `ai_response`, `budget_gate`, `llm_degradation`, `rewrite` — LLM path + деградации.
 - `escalation`, `state_transition` — handover + стейт‑машина.
 
-#### GAP: missing trace coverage (no stage)
-- Preflight rejects: client missing (`truffles-api/app/routers/webhook/_legacy.py:1655`), missing remoteJid (`truffles-api/app/routers/webhook/_legacy.py:1670`), empty message (`truffles-api/app/routers/webhook/_legacy.py:1683`).
-- skip_persist errors: missing conversation/user (`truffles-api/app/routers/webhook/_legacy.py:1857`, `truffles-api/app/routers/webhook/_legacy.py:1860`, `truffles-api/app/routers/webhook/_legacy.py:1863`).
-- Duplicate + enqueue-only returns: duplicate message (`truffles-api/app/routers/webhook/_legacy.py:1892`), outbox-only accept (`truffles-api/app/routers/webhook/_legacy.py:2063`).
-- Branch selection prompt/choice returns без stage (`truffles-api/app/routers/webhook/_legacy.py:2869`, `truffles-api/app/routers/webhook/_legacy.py:2888`, `truffles-api/app/routers/webhook/_legacy.py:2903`).
-- Re‑engage/mute decisions пишут trace без `stage` (`truffles-api/app/routers/webhook/_legacy.py:3307`, `truffles-api/app/routers/webhook/_legacy.py:3326`, `truffles-api/app/routers/webhook/_legacy.py:3349`, `truffles-api/app/routers/webhook/_legacy.py:3380`, `truffles-api/app/routers/webhook/_legacy.py:3407`, `truffles-api/app/routers/webhook/_legacy.py:3418`).
-- ASR confirmation returns без stage (`truffles-api/app/routers/webhook/_legacy.py:3463`, `truffles-api/app/routers/webhook/_legacy.py:3477`, `truffles-api/app/routers/webhook/_legacy.py:3505`).
-- Debounce skip + manager_active after debounce без trace (`truffles-api/app/routers/webhook/_legacy.py:4000`, `truffles-api/app/routers/webhook/_legacy.py:4033`).
-- Handover confirmation before flows без trace (`truffles-api/app/routers/webhook/_legacy.py:4139`, `truffles-api/app/routers/webhook/_legacy.py:4155`).
+#### Trace coverage exceptions
+- Для `preflight`/`skip_persist`/`dedupe` trace пишется только если conversation удаётся резолвить (conversation_id/message_id/remote_jid). Placeholder conversation не создаём, поведение не меняем.
+- Требование trace/meta относится к ответам бота; при отсутствии conversation/response trace не обязателен.
 
 ### Agentic orchestration = роли пайплайна (без отдельных агентов)
 Термин “agentic” — это **логические роли стадий** в одном потоке `_handle_webhook_payload`, а не отдельные рантайм‑агенты.
@@ -243,18 +246,30 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - **OOD Guard** → early OOD (только если нет in‑signals).
 - **Booking Guard** → booking guard/flow + expected_reply_type контракт.
 - **Info/RAG Specialist** → info bundle / consult / service matcher → LLM‑формулировка (RAG) → truth gate fallback.
-- **Host Persona** → формулировка ответа (шаблоны/LLM), CTA/quiet hours.
+- **Host Persona** → формулировка ответа (шаблоны/LLM) по `SPECS/CONSULTANT.md`, CTA/quiet hours в response‑слое.
 - **Observability** → decision_trace/meta на каждом сообщении.
 
 ### LLM Dialogue Controller (single arbiter) — канон
-- Цель: **единый арбитр смысла**. Ни один другой слой не меняет класс/цель/слоты.
-- Выход (structured JSON): `class`, `goal`, `intents`, `slots`, `followups`, `confidence`, `safety_flags`, `reason`.
+- Цель: **единый арбитр смысла**. Ни один другой слой не меняет `intent`/`slots`.
+- Выход (IntentContract): `intent`, `slots`, `language`, `emotion`, `confidence`, `risk_signals`.
+- `intent` соответствует классу решения; `active_goal` вычисляется детерминированно после router.
+- Доп. поля (`goal`, `followups`, `reason`, `safety_flags`) допускаются только в trace/meta, не в контракте.
+- Контракт полей = `truffles-api/app/schemas/webhook.py`; расхождения считаются GAP.
 - Классы (по приоритету): Hard‑LAW → policy → opt‑out → human/frustration → booking → info‑bundle → consult → greeting → OOD.
 - Anchors/лексика/эвристики — **только fallback/boost**, не основной источник смысла.
 - OOD допустим **только** если есть out‑signals и **нет** in‑signals (strict‑in).
 - Если confidence ниже порога/LLM недоступен → fallback на детерминированный router; **обязательная фиксация** в trace.
 - Multi‑intent: сильный класс отвечает первым, остальные идут в очередь (intent_queue) с возвратом к цели.
 - `info_bundle` — **отдельный класс**, не “схлопывается” в `info`.
+
+### Decision Graph contracts (Pydantic, source of truth)
+- ContextContract: `tenant_id`, `branch_id`, `state`, `timezone`, `mode`.
+- IntentContract: `intent`, `slots`, `language`, `emotion`, `confidence`, `risk_signals`.
+- FactContract: `facts`, `sources`, `policy_flags`.
+- ActionContract: `action_type`, `required_next_slots`, `escalation_reason`.
+- ResponseContract: `tone`, `must_include`, `must_not_include`, `language`.
+- MemoryContract: `mode`, `slots`, `summary`, `last_updated`, `ttl`, `last_updated_at`, `ttl_hours`, `active_goal`, `last_question_type`, `goal_stack`, `pending_slots`, `unanswered_questions`.
+- TraceContract: `stage`, `decision`, `reason`, `meta`.
 
 **Живой хост — канон (in-domain):**
 - **3 исхода:** факт‑ответ (info/consult), booking intake, эскалация.
@@ -263,6 +278,15 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - **Hard‑LAW:** оплата (подтверждение/проверка/возвраты), медицинка, жалобы, переносы → только эскалация.
 - **Policy‑gates:** скидки и способы оплаты разрешены **только** по явным правилам в `client_pack`; иначе эскалация.
 - **Clarify limit:** максимум 2 уточнения (`clarify_limit=2`), далее эскалация.
+
+### Action Layer (PLAN)
+- Поток: Sense → Decide → Act → Speak.
+- Действия (пример): `leadcard_update`, `handoff_create`, `status_update`, `clarify_request`, `booking_step`.
+- Риск‑типы: low/medium/high; high‑risk действия → только handoff.
+- LLM может предложить `tool_call`, но исполняет только deterministic executor по policy.
+- Allowed‑facts validator: проверяет, что ответ использует только разрешённые факты; при нарушении → clarify/handoff.
+- ActionContract: `action_type`, `required_next_slots`, `escalation_reason` (остальное — meta).
+- Trace meta: `action_id`, `tool_used`, `policy_override`.
 
 ### Answer‑Interpreter (expected_reply_type) — канон
 - Включается **только** если ожидается ответ на вопрос (`expected_reply_type` активен).
@@ -314,18 +338,21 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 **Назначение:** удерживать краткую память о вопросах/целях без точных цитат.
 
 **Структура:**
+- `mode` — режим памяти (session/compact).
+- `slots` — подтверждённые/активные слоты (branch/service/datetime).
+- `summary` — краткая сводка без новых фактов/советов.
+- `last_updated` / `last_updated_at` — отметки обновления.
+- `ttl` / `ttl_hours` — срок жизни памяти (по умолчанию 24h).
 - `last_question_type` — последний тип вопроса (hours/pricing/duration/booking/consult/info_bundle/other).
 - `pending_slots` — какие слоты ещё нужны (service/datetime/branch/etc).
 - `active_goal` — текущая цель (info_bundle/consult/booking/other).
 - `goal_stack` — стек целей (до 3), чтобы возвращать цель после перебивок.
-- `constraints` — активные ограничения (branch_id, service_query, policy locks и т.п.).
 - `unanswered_questions` — список вопросов, на которые ещё не ответили.
-- `ttl` — истечение памяти (now + 24h по умолчанию).
 
 **Точки обновления:**
 - после `question_contract` → фиксируем `last_question_type`, пополняем `pending_slots`, обновляем `unanswered_questions`.
-- после `intent_router` → обновляем `active_goal` и `constraints`.
-- после `info/consult/booking` → чистим закрытые `pending_slots`, обновляем `active_goal`, синхронизируем `constraints`.
+- после `intent_router` → обновляем `active_goal` и `slots`.
+- после `info/consult/booking` → чистим закрытые `pending_slots`, обновляем `active_goal`, синхронизируем `slots`.
 
 **Reset rules:**
 - gap > 24h между сообщениями → полный reset памяти.
@@ -883,17 +910,55 @@ pytest tests/ -v
 
 ## 19. Refactor Plan — webhook pipeline (P1)
 
+### 19.1 Refactor Protocol — legacy de‑godification (P0)
+
+**Goal:** превратить `_legacy.py` в тонкий адаптер и вынести логику по стадиям без изменения поведения.
+
+**Non‑negotiables:**
+- Поведение не меняем. Только перенос/упорядочивание кода.
+- Порядок стадий фиксирован в разделе “Decision Graph (legacy map)”.
+- Любой early return пишет `decision_trace.stage`, если conversation резолвится; placeholder conversation не создаём.
+- Один PR = одна группа стадий. Нельзя смешивать разные классы логики.
+- CI core/long + live‑check с trace/meta обязательны перед merge.
+- Новые файлы не создаём; используем существующие модули `app/routers/webhook/*`.
+
+**Stage contract (минимум):**
+- Stage принимает единый `RequestContext`.
+- Возвращает `StageResult` с одним из исходов: `continue` / `handled` / `escalated`.
+- Побочные эффекты (DB/state/notifications) происходят внутри stage‑модуля, а не в оркестраторе.
+
+**Target end‑state:**
+- `_legacy.py` содержит только HTTP‑адаптер + вызов оркестратора (≈100–200 строк).
+- Оркестратор — `app/routers/webhook/decision.py`, порядок стадий = канон.
+- Все ранние returns покрыты trace‑стадиями при резолве conversation.
+
+### 19.2 Staged Plan — refactor slices (P0)
+
+**Order (не менять; статус фиксируется в `STATE.md`):**
+1) **S0 — Trace gaps**: early-return trace coverage (preflight/skip_persist/dedupe/outbox/branch_selection/debounce/handover_confirmation).
+2) **S1 — Early gates → modules**: preflight/outbox/dedup/branch_selection/pending из `_legacy.py` в `http.py`, `outbox.py`, `dedup.py`, `branch_selection.py`, `pending.py`.
+3) **S2 — Safety gates**: shield/policy/pending/mute в `shield.py`, `policy.py`, `pending.py`, `guards.py`.
+4) **S3 — Router/intent/expected_reply**: оркестрация в `decision.py`, `router_sla.py`, `parsing.py`.
+5) **S4 — Domain flows**: booking/info/consult в `booking.py`, `info.py`, `response.py`.
+6) **S5 — LLM/response + post-hooks**: `response.py` + `context_manager.py`, cleanup side-effects.
+7) **S6 — Adapter-only**: `_legacy.py` остаётся только HTTP‑адаптером; `/webhook` и `/message` ведут в общий оркестратор.
+
+**DoD per slice:** CI core/long зелёные + live‑check + trace/meta parity (поведение не меняется).
+
+### 19.3 Pipeline decomposition (P1)
+
 - Цель: уменьшить регрессы и стоимость изменений без смены поведения.
 - Границы: HTTP‑слой остаётся в `app/routers/webhook/_legacy.py`, логика переносится по стадиям.
 - Декомпозиция:
-  - `pipeline/guards.py` — spam/toxic/opt‑out/LAW/pending gates.
-  - `pipeline/router.py` — LLM router + fallback, intent_queue/expected_reply orchestration.
-  - `pipeline/policy.py` — policy‑gates (discount/payment).
-  - `pipeline/info_bundle.py` — info‑bundle + carryover.
-  - `pipeline/service_carryover.py` — service carryover guard + TTL.
-  - `pipeline/service_matcher.py` — pricing/duration/service matcher.
-  - `pipeline/booking.py` — booking flow + expected_reply.
-  - `pipeline/response_sender.py` — send/save/trace/meta.
+  - `app/routers/webhook/guards.py` — opt‑out/mute/re‑engage + routing gates.
+  - `app/routers/webhook/shield.py` — spam/toxic/too_long.
+  - `app/routers/webhook/router_sla.py` + `parsing.py` — LLM router + expected_reply orchestration.
+  - `app/routers/webhook/policy.py` — policy‑gates (discount/payment).
+  - `app/routers/webhook/info.py` — info‑bundle + truth/multi‑truth.
+  - `app/routers/webhook/booking.py` — booking flow + expected_reply.
+  - `app/routers/webhook/response.py` — response post‑processing (CTA/quiet hours).
+  - `app/routers/webhook/context_manager.py` — summary/consult return.
+  - `app/routers/webhook/decision.py` — оркестратор стадий.
 - Контекст: единый `RequestContext` (dataclass) вместо разрозненных dict‑ов.
 - Инварианты: поведение не меняем; CI core/long зелёные; trace/meta сохраняются.
 
