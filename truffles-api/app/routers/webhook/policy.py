@@ -7,8 +7,7 @@ import time
 
 from sqlalchemy.orm import Session
 
-from app.models import Client
-from app.models import Conversation, Message, User
+from app.models import Client, Conversation, Message, User
 from app.schemas.webhook import WebhookResponse
 from app.services.demo_salon_knowledge import DemoSalonDecision
 from app.services.intent_service import Intent

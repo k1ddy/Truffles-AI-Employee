@@ -175,9 +175,9 @@ from app.routers.webhook.media import (
 from app.routers.webhook.outbox import _handle_enqueue_only_accept, _prepare_skip_persist
 from app.routers.webhook.pending import (
     _forward_pending_to_telegram,
+    _handle_handover_confirmation_gate,
     _handle_manager_active_gate,
     _handle_pending_gate,
-    _handle_handover_confirmation_gate,
 )
 from app.routers.webhook.policy import (
     _demo_salon_escalation_gate,
@@ -185,12 +185,12 @@ from app.routers.webhook.policy import (
     _detect_booking_cancel,
     _detect_llm_guard_topics,
     _format_discounts_policy_reply,
-    _handle_hard_law_gate,
-    _handle_policy_escalation_gate,
     _get_policy_handler,
     _get_policy_pack,
     _get_policy_type,
     _get_routing_policy,
+    _handle_hard_law_gate,
+    _handle_policy_escalation_gate,
     _has_discount_policy_rules,
     _looks_like_policy_topic,
     _looks_like_promotions_request,

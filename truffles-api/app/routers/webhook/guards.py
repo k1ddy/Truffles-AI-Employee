@@ -223,6 +223,7 @@ def _handle_clarify_limit_escalation(
     *,
     db: Session,
     conversation: Conversation,
+    user: User,
     message_text: str,
     saved_message: Message | None,
     source: str,
