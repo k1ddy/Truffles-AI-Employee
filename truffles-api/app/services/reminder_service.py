@@ -22,6 +22,7 @@ PENDING_AUTO_CLOSE_HOURS = int(os.environ.get("PENDING_AUTO_CLOSE_HOURS", "4"))
 PENDING_SLA_CONTEXT_KEY = "pending_sla"
 PENDING_SLA_PING_SENT_KEY = "ping_sent_at"
 PENDING_SLA_AUTO_CLOSE_KEY = "auto_closed_at"
+DECISION_TRACE_KEY = "decision_trace"
 
 MSG_PENDING_SLA_PING = "Напоминаю: менеджер ещё не подключился. Я на связи — напишите, что нужно уточнить."
 MSG_PENDING_AUTO_CLOSE = "Закрываю ожидание. Если всё ещё актуально — напишите, я помогу."
@@ -70,6 +71,16 @@ def _append_decision_trace(context: dict, payload: dict) -> dict:
     trace_list.append(payload)
     context["decision_trace"] = trace_list
     return context
+
+
+def _reset_context_preserving_trace(conversation: Conversation) -> dict:
+    existing = conversation.context if isinstance(conversation.context, dict) else {}
+    if DECISION_TRACE_KEY in existing:
+        preserved = {DECISION_TRACE_KEY: existing.get(DECISION_TRACE_KEY)}
+    else:
+        preserved = {}
+    conversation.context = preserved
+    return preserved
 
 
 def _send_pending_user_message(
@@ -203,8 +214,7 @@ def auto_close_stale_handovers(db: Session) -> dict:
             conversation.bot_muted_until = None
             conversation.no_count = 0
             conversation.retry_offered_at = None
-            conversation.context = {}
-            context = conversation.context if isinstance(conversation.context, dict) else {}
+            context = _reset_context_preserving_trace(conversation)
             context = _append_decision_trace(
                 context,
                 {
