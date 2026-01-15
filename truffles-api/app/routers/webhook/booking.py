@@ -12,11 +12,12 @@ from typing import TYPE_CHECKING, Any, Callable
 import dateparser
 from rapidfuzz import fuzz, process
 
+from app.schemas.webhook import WebhookResponse
+
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from app.models import Conversation, Message, User
-    from app.schemas.webhook import WebhookResponse
     from app.services.demo_salon_knowledge import DemoSalonDecision
 
 BOOKING_SLOT_ORDER = ("service", "datetime", "name")

@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 import re
 import time
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, TYPE_CHECKING
+
+from app.schemas.webhook import WebhookResponse
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from app.models import Conversation, Message, User
-    from app.schemas.webhook import WebhookResponse
 
 
 def _tokenize_for_matching(normalized: str) -> list[str]:
