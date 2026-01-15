@@ -12,7 +12,7 @@ except Exception:  # pragma: no cover
     trace = None
 
 try:  # Optional at runtime; required in requirements.txt
-    from prometheus_client import (
+    from prometheus_client import (  # noqa: I001
         CONTENT_TYPE_LATEST,
         Counter,
         Gauge,
