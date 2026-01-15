@@ -126,12 +126,15 @@ from app.routers.webhook.dedup import (
     should_process_debounced_message,
 )
 from app.routers.webhook.guards import (
+    _apply_session_timeout_reset,
     _booking_clarify_guard_reason,
     _format_intent_queue_prompt,
     _format_multi_intent_followup,
     _get_clarify_attempt_state,
     _get_intent_queue,
     _handle_clarify_limit_escalation,
+    _handle_opt_out_mute_gate,
+    _handle_reengage_and_mute_gate,
     _match_intent_choice_from_text,
     _register_clarify_attempt,
     _select_intent_from_queue,
@@ -171,25 +174,19 @@ from app.routers.webhook.media import (
 )
 from app.routers.webhook.outbox import _handle_enqueue_only_accept, _prepare_skip_persist
 from app.routers.webhook.pending import (
-    _build_pending_resume_snapshot,
-    _get_pending_resume,
-    _get_pending_sla,
+    _forward_pending_to_telegram,
+    _handle_manager_active_gate,
+    _handle_pending_gate,
     _handle_handover_confirmation_gate,
-    _is_pending_ack,
-    _is_pending_close,
-    _normalize_pending_text,
-    _restore_pending_resume,
-    _set_pending_resume,
-    _set_pending_sla,
 )
 from app.routers.webhook.policy import (
     _demo_salon_escalation_gate,
     _demo_salon_price_sidecar,
     _detect_booking_cancel,
-    _detect_hard_law_match,
     _detect_llm_guard_topics,
-    _detect_policy_gate_section,
     _format_discounts_policy_reply,
+    _handle_hard_law_gate,
+    _handle_policy_escalation_gate,
     _get_policy_handler,
     _get_policy_pack,
     _get_policy_type,
@@ -197,10 +194,7 @@ from app.routers.webhook.policy import (
     _has_discount_policy_rules,
     _looks_like_policy_topic,
     _looks_like_promotions_request,
-    _resolve_complaint_guard,
     _resolve_hard_law_sections,
-    _resolve_policy_intent,
-    _resolve_policy_risk_level,
     _should_escalate_to_pending,
     _should_run_booking_flow,
     _should_run_demo_truth_gate,
@@ -223,12 +217,7 @@ from app.routers.webhook.session_memory import (
     _update_session_memory_on_answer,
     _update_session_memory_on_question,
 )
-from app.routers.webhook.shield import (
-    _compute_shield_flags,
-    _is_nonsense_message,
-    _is_toxic_message,
-    _update_shield_context,
-)
+from app.routers.webhook.shield import _handle_shield_gate
 from app.routers.webhook.trace import (
     _attach_llm_cache_flag,
     _record_decision_trace,
@@ -2898,229 +2887,20 @@ async def _handle_webhook_payload(
                 timing_context["knowledge_tag"] = branch.knowledge_tag
 
     # 4.9 Behavioral shield (pre-LAW/policy).
-    context = _get_conversation_context(conversation)
-    context, shield_state = _update_shield_context(
-        context=context,
+    shield_response = _handle_shield_gate(
+        db=db,
+        conversation=conversation,
+        user=user,
         message_text=message_text,
         metadata=metadata,
         now=now,
+        saved_message=saved_message,
+        send_and_save=_send_and_save,
+        record_escalation_metric=_record_escalation_metric,
+        skip_persist=skip_persist,
     )
-    previous_text = shield_state.get("previous_text")
-    normalized_text = shield_state.get("normalized_text") or ""
-    recent = shield_state.get("recent") or []
-    _set_conversation_context(conversation, context)
-
-    is_short, is_repeat, is_spam_burst, too_long = _compute_shield_flags(
-        message_text=message_text,
-        normalized_text=normalized_text,
-        previous_text=previous_text,
-        recent=recent,
-    )
-    if is_spam_burst or too_long:
-        reason = "spam" if is_spam_burst else "too_long"
-        router_shield_meta = _set_router_observability(
-            saved_message,
-            eligible=False,
-            reason="shield_drop",
-        )
-        trace_payload = {
-            "stage": "shield",
-            "decision": "drop",
-            "reason": reason,
-            "message_length": len(message_text),
-            "recent_messages": len(recent),
-            "is_repeat": is_repeat,
-            "is_short": is_short,
-        }
-        trace_payload.update(router_shield_meta)
-        _record_decision_trace(conversation, trace_payload)
-        if saved_message:
-            _update_message_decision_metadata(
-                saved_message,
-                {
-                    "action": "shield_drop",
-                    "intent": "shield",
-                    "source": "shield",
-                    "shield_reason": reason,
-                },
-            )
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message="Shield drop",
-            conversation_id=conversation.id,
-            bot_response=None,
-        )
-
-    is_toxic = _is_toxic_message(message_text)
-    is_nonsense = _is_nonsense_message(message_text)
-    if (is_toxic or is_nonsense) and conversation.state == ConversationState.BOT_ACTIVE.value:
-        reason = "toxic" if is_toxic else "nonsense"
-        _record_decision_trace(
-            conversation,
-            {
-                "stage": "shield",
-                "decision": "escalate",
-                "reason": reason,
-            },
-        )
-        if saved_message:
-            _update_message_decision_metadata(
-                saved_message,
-                {
-                    "action": "escalate",
-                    "intent": "shield",
-                    "source": "shield",
-                    "shield_reason": reason,
-                },
-            )
-        bot_response = MSG_ESCALATED
-        result_message = "Shield escalation"
-        if not skip_persist and conversation.state == ConversationState.BOT_ACTIVE.value:
-            _record_escalation_metric("shield")
-            esc_result = escalate_to_pending(
-                db=db,
-                conversation=conversation,
-                user_message=message_text,
-                trigger_type="shield",
-                trigger_value=reason,
-            )
-            if esc_result.ok:
-                handover = esc_result.value
-                telegram_sent = send_telegram_notification(
-                    db=db,
-                    handover=handover,
-                    conversation=conversation,
-                    user=user,
-                    message=message_text,
-                )
-                result_message = f"Shield escalation, telegram={'sent' if telegram_sent else 'failed'}"
-            else:
-                result_message = f"Shield escalation failed: {esc_result.error}"
-        bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
-        if not sent:
-            result_message = f"{result_message}; response_send=failed"
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message=result_message,
-            conversation_id=conversation.id,
-            bot_response=bot_response,
-        )
-
-    def _apply_policy_decision(
-        decision: DemoSalonDecision,
-        *,
-        policy_gate: str,
-        policy_section: str | None,
-        risk_level: str | None,
-        sidecar: str | None,
-        policy_t0: float | None,
-        gate_label: str,
-        booking_wants_flow: bool | None,
-    ) -> WebhookResponse:
-        bot_response = decision.response or MSG_ESCALATED
-        if sidecar:
-            bot_response = _combine_sidecar(bot_response, sidecar)
-        _reset_low_confidence_retry(conversation)
-        record_policy_count(payload.client_slug, policy_gate)
-        if decision.action == "escalate":
-            _record_escalation_metric(policy_gate)
-
-        result_message = "Policy reply sent"
-        if decision.action == "escalate":
-            _, reused, telegram_sent = _reuse_active_handover(
-                db=db,
-                conversation=conversation,
-                user=user,
-                message=message_text,
-                source=policy_source,
-                intent=decision.intent,
-            )
-            if reused:
-                result_message = f"Policy reuse, telegram={'sent' if telegram_sent else 'failed'}"
-            elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get("allow_handover_create", False):
-                result = escalate_to_pending(
-                    db=db,
-                    conversation=conversation,
-                    user_message=message_text,
-                    trigger_type="intent",
-                    trigger_value=decision.intent or "policy",
-                )
-                if result.ok:
-                    handover = result.value
-                    telegram_sent = send_telegram_notification(
-                        db=db,
-                        handover=handover,
-                        conversation=conversation,
-                        user=user,
-                        message=message_text,
-                    )
-                    result_message = f"Policy escalation, telegram={'sent' if telegram_sent else 'failed'}"
-                else:
-                    result_message = f"Policy escalation failed: {result.error}"
-            else:
-                result_message = "Policy escalation skipped (already pending)"
-
-        router_skip_reason = "law_gate" if policy_gate == "hard_law" else "policy_gate"
-        router_gate_meta = _set_router_observability(
-            saved_message,
-            eligible=False,
-            reason=router_skip_reason,
-        )
-        trace_payload = {
-            "stage": "policy_gate",
-            "decision": decision.action,
-            "intent": decision.intent,
-            "state": conversation.state,
-            "policy_type": policy_type,
-            "policy_gate": policy_gate,
-            "source": policy_source,
-        }
-        if policy_section:
-            trace_payload["policy_section"] = policy_section
-        if isinstance(risk_level, str) and risk_level:
-            trace_payload["risk_level"] = risk_level
-        if booking_wants_flow is not None:
-            trace_payload["booking_wants_flow"] = booking_wants_flow
-        trace_payload.update(router_gate_meta)
-        _record_decision_trace(conversation, trace_payload)
-        _record_message_decision_meta(
-            saved_message,
-            action=decision.action,
-            intent=decision.intent,
-            source=policy_source,
-            fast_intent=False,
-        )
-        if saved_message:
-            meta_updates = {"policy_gate": policy_gate, "source": policy_source}
-            if policy_pack_missing:
-                meta_updates["policy_pack_missing"] = True
-            if policy_section:
-                meta_updates["policy_section"] = policy_section
-            if isinstance(risk_level, str) and risk_level:
-                meta_updates["risk_level"] = risk_level
-            _update_message_decision_metadata(saved_message, meta_updates)
-        bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
-        if not sent:
-            result_message = f"{result_message}; response_send=failed"
-        if policy_t0 is not None:
-            _log_timing(
-                "policy_gate_ms",
-                (time.monotonic() - policy_t0) * 1000,
-                {
-                    "policy_type": policy_type,
-                    "booking_wants_flow": booking_wants_flow,
-                    "gate": gate_label,
-                },
-            )
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message=result_message,
-            conversation_id=conversation.id,
-            bot_response=bot_response,
-        )
+    if shield_response:
+        return shield_response
 
     # 5. Check session timeout - reset mute if no messages for 24h+
     bot_response = None
@@ -3128,316 +2908,48 @@ async def _handle_webhook_payload(
     result_message = None
     intent = None
 
-    # Reset mute if new session (no messages for 24h+)
-    if previous_last_message_at:
-        last_seen = previous_last_message_at
-        if last_seen.tzinfo is None:
-            last_seen = last_seen.replace(tzinfo=timezone.utc)
-        time_since_last = now - last_seen
-        if time_since_last > timedelta(hours=SESSION_TIMEOUT_HOURS):
-            # New session - reset mute
-            conversation.bot_status = "active"
-            conversation.bot_muted_until = None
-            conversation.no_count = 0
-            _set_conversation_context(conversation, {})
-            logger.info(f"Session reset: {time_since_last} since last message")
+    _apply_session_timeout_reset(
+        conversation=conversation,
+        previous_last_message_at=previous_last_message_at,
+        now=now,
+    )
 
-    # 6. Check if bot is muted - but still forward to topic
-    is_muted = False
-    if conversation.bot_status == "muted" or (conversation.bot_muted_until and conversation.bot_muted_until > now):
-        is_muted = True
+    _forward_pending_to_telegram(
+        db=db,
+        client_id=client.id,
+        conversation=conversation,
+        metadata=metadata,
+        message_text=message_text,
+        has_media=has_media,
+        media_info=media_info,
+        media_decision=media_decision,
+        media_policy=media_policy,
+        saved_message=saved_message,
+        transcript=transcript,
+    )
 
-    forwarded_to_telegram = bool(metadata.forwarded_to_telegram) if metadata else False
-
-    # 7. Forward to topic if pending/manager_active (always, even if muted)
-    if conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value] and not forwarded_to_telegram:
-        if conversation.telegram_topic_id:
-            bot_token, chat_id = get_telegram_credentials(db, client.id)
-            if bot_token and chat_id:
-                telegram = TelegramService(bot_token)
-                forward_result = None
-                caption = None
-                if has_media and media_info and media_decision and media_decision.allowed and (media_policy or {}).get("forward_to_telegram"):
-                    stored_path = None
-                    if saved_message and isinstance(saved_message.message_metadata, dict):
-                        stored_path = (saved_message.message_metadata.get("media") or {}).get("storage_path")
-                    caption = _build_media_caption(message_text, media_info)
-                    forward_result = _send_telegram_media(
-                        telegram=telegram,
-                        chat_id=chat_id,
-                        topic_id=conversation.telegram_topic_id,
-                        media=media_info,
-                        caption=caption,
-                        stored_path=stored_path,
-                    )
-                elif not has_media:
-                    forward_result = telegram.send_message(
-                        chat_id=chat_id,
-                        text=f"👤 <b>Клиент:</b> {message_text}",
-                        message_thread_id=conversation.telegram_topic_id,
-                    )
-                if forward_result and forward_result.get("ok"):
-                    if metadata:
-                        metadata.forwarded_to_telegram = True
-                    if (
-                        transcript
-                        and caption
-                        and _is_voice_note(media_info)
-                        and saved_message
-                        and transcript.strip() == caption.strip()
-                    ):
-                        _update_message_media_metadata(saved_message, {"transcript_forwarded": True})
-                elif forward_result:
-                    logger.warning(
-                        "Forward to Telegram failed",
-                        extra={
-                            "context": {
-                                "conversation_id": str(conversation.id),
-                                "state": conversation.state,
-                                "telegram_topic_id": conversation.telegram_topic_id,
-                                "error": forward_result.get("description") or forward_result.get("error"),
-                            }
-                        },
-                    )
-
-    if (
-        transcript
-        and media_info
-        and _is_voice_note(media_info)
-        and conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]
-        and conversation.telegram_topic_id
-    ):
-        already_forwarded = False
-        if saved_message and isinstance(saved_message.message_metadata, dict):
-            media_meta = saved_message.message_metadata.get("media") or {}
-            already_forwarded = bool(media_meta.get("transcript_forwarded"))
-        if not already_forwarded:
-            bot_token, chat_id = get_telegram_credentials(db, client.id)
-            if bot_token and chat_id:
-                telegram = TelegramService(bot_token)
-                forward_result = telegram.send_message(
-                    chat_id=chat_id,
-                    text=f"📝 <b>Транскрипт:</b> {transcript}",
-                    message_thread_id=conversation.telegram_topic_id,
-                )
-                if forward_result and forward_result.get("ok") and saved_message:
-                    _update_message_media_metadata(saved_message, {"transcript_forwarded": True})
-                elif forward_result:
-                    logger.warning(
-                        "Transcript forward to Telegram failed",
-                        extra={
-                            "context": {
-                                "conversation_id": str(conversation.id),
-                                "state": conversation.state,
-                                "telegram_topic_id": conversation.telegram_topic_id,
-                                "error": forward_result.get("description") or forward_result.get("error"),
-                            }
-                        },
-                    )
-
-    # 8. Manager active → bot must stay silent (only forwarding above)
-    if conversation.state == ConversationState.MANAGER_ACTIVE.value:
-        router_pending_meta = _set_router_observability(
-            saved_message,
-            eligible=False,
-            reason="pending",
-        )
-        trace_payload = {
-            "stage": "routing",
-            "decision": "manager_active_silent",
-            "state": conversation.state,
-        }
-        trace_payload.update(router_pending_meta)
-        _record_decision_trace(conversation, trace_payload)
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message="Manager active, message forwarded",
-            conversation_id=conversation.id,
-            bot_response=None,
-        )
+    manager_active_response = _handle_manager_active_gate(
+        db=db,
+        conversation=conversation,
+        saved_message=saved_message,
+    )
+    if manager_active_response:
+        return manager_active_response
 
     # 8.1 Detect signals early for re-engage and mute decisions.
-    batch_messages = _coerce_batch_messages(message_text, batch_messages)
-    signal_messages = list(batch_messages)
-    opt_out_in_batch = any(is_opt_out_message(msg) for msg in signal_messages)
-    booking_signal, booking_block_meta = _evaluate_booking_signal(
-        signal_messages,
+    reengage_response, batch_messages, reengage_override = _handle_reengage_and_mute_gate(
+        db=db,
+        client_id=client.id,
         client_slug=payload.client_slug,
+        conversation=conversation,
         message_text=message_text,
+        batch_messages=batch_messages,
+        expected_reply_shortcircuit=expected_reply_shortcircuit,
+        now=now,
+        send_and_save=_send_and_save,
     )
-    if expected_reply_shortcircuit:
-        booking_signal = True
-        booking_block_meta = None
-    context = _get_conversation_context(conversation)
-    booking_state = _get_booking_context(context)
-    booking_active = bool(booking_state.get("active"))
-    reengage_override = False
-
-    if conversation.state == ConversationState.BOT_ACTIVE.value:
-        reengage_confirmation = _get_reengage_confirmation(context)
-        if reengage_confirmation:
-            if not _is_reengage_confirmation_active(reengage_confirmation, now):
-                context = _set_reengage_confirmation(context, None)
-                _set_conversation_context(conversation, context)
-            else:
-                decision = classify_confirmation(message_text)
-                if decision == "yes":
-                    context = _set_reengage_confirmation(context, None)
-                    _set_conversation_context(conversation, context)
-                    conversation.bot_status = "active"
-                    conversation.bot_muted_until = None
-                    conversation.no_count = 0
-                    reengage_override = True
-                    stored_messages = reengage_confirmation.get("booking_messages")
-                    if isinstance(stored_messages, list) and stored_messages:
-                        batch_messages = _coerce_batch_messages("", stored_messages)
-                        signal_messages = list(batch_messages)
-                        booking_signal, booking_block_meta = _evaluate_booking_signal(
-                            signal_messages,
-                            client_slug=payload.client_slug,
-                            message_text=signal_messages[-1] if signal_messages else message_text,
-                        )
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "routing",
-                            "decision": "reengage_confirmed",
-                            "reason": "confirmation_yes",
-                            "state": conversation.state,
-                            "booking_signal": booking_signal,
-                            "opt_out_in_batch": opt_out_in_batch,
-                        },
-                    )
-                elif decision == "no":
-                    context = _set_reengage_confirmation(context, None)
-                    _set_conversation_context(conversation, context)
-                    mute_first, mute_second = get_mute_settings(db, client.id)
-                    if conversation.no_count == 0:
-                        conversation.bot_muted_until = now + timedelta(minutes=mute_first)
-                        conversation.no_count = 1
-                    else:
-                        conversation.bot_muted_until = now + timedelta(hours=mute_second)
-                        conversation.no_count += 1
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "routing",
-                            "decision": "reengage_declined",
-                            "reason": "confirmation_no",
-                            "state": conversation.state,
-                            "booking_signal": booking_signal,
-                            "opt_out_in_batch": opt_out_in_batch,
-                        },
-                    )
-                    bot_response = MSG_REENGAGE_DECLINED
-                    bot_response, sent = _send_and_save(bot_response)
-                    result_message = "Re-engage declined" if sent else "Re-engage decline send failed"
-                    db.commit()
-                    return WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=bot_response,
-                    )
-                else:
-                    reengage_confirmation["asked_at"] = now.isoformat()
-                    context = _set_reengage_confirmation(context, reengage_confirmation)
-                    _set_conversation_context(conversation, context)
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "routing",
-                            "decision": "reengage_confirmation_repeat",
-                            "reason": "confirmation_repeat",
-                            "state": conversation.state,
-                            "booking_signal": booking_signal,
-                            "opt_out_in_batch": opt_out_in_batch,
-                        },
-                    )
-                    bot_response = MSG_REENGAGE_CONFIRM
-                    bot_response, sent = _send_and_save(bot_response)
-                    result_message = "Re-engage confirmation requested" if sent else "Re-engage confirmation failed"
-                    db.commit()
-                    return WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=bot_response,
-                    )
-
-    if conversation.state == ConversationState.BOT_ACTIVE.value and opt_out_in_batch and booking_signal:
-        confirmation_payload = {
-            "asked_at": now.isoformat(),
-            "booking_messages": signal_messages,
-        }
-        context = _set_reengage_confirmation(context, confirmation_payload)
-        if booking_active:
-            booking_state["active"] = False
-            context = _set_booking_context(context, booking_state)
-        _set_conversation_context(conversation, context)
-        _record_decision_trace(
-            conversation,
-            {
-                "stage": "routing",
-                "decision": "reengage_confirmation_requested",
-                "reason": "opt_out_booking_signal",
-                "state": conversation.state,
-                "booking_signal": booking_signal,
-                "opt_out_in_batch": opt_out_in_batch,
-            },
-        )
-        bot_response = MSG_REENGAGE_CONFIRM
-        bot_response, sent = _send_and_save(bot_response)
-        result_message = "Re-engage confirmation requested" if sent else "Re-engage confirmation failed"
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message=result_message,
-            conversation_id=conversation.id,
-            bot_response=bot_response,
-        )
-
-    # 9. If muted - don't respond unless booking flow should re-engage.
-    is_muted = conversation.bot_status == "muted" or (conversation.bot_muted_until and conversation.bot_muted_until > now)
-    if is_muted:
-        if (booking_signal or booking_active) and not opt_out_in_batch:
-            conversation.bot_status = "active"
-            conversation.bot_muted_until = None
-            conversation.no_count = 0
-            is_muted = False
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "routing",
-                    "decision": "mute_cleared_for_booking",
-                    "reason": "booking_signal",
-                    "state": conversation.state,
-                    "booking_signal": booking_signal,
-                    "booking_active": booking_active,
-                    "opt_out_in_batch": opt_out_in_batch,
-                },
-            )
-        else:
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "routing",
-                    "decision": "muted_skip",
-                    "reason": "muted",
-                    "state": conversation.state,
-                    "booking_signal": booking_signal,
-                    "booking_active": booking_active,
-                    "opt_out_in_batch": opt_out_in_batch,
-                },
-            )
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message="Bot muted, forwarded to topic" if conversation.telegram_topic_id else "Bot muted",
-                conversation_id=conversation.id,
-                bot_response=None,
-            )
+    if reengage_response:
+        return reengage_response
 
     # 9.01 ASR low-confidence confirmation (bot-active only).
     context = _get_conversation_context(conversation)
@@ -3545,233 +3057,16 @@ async def _handle_webhook_payload(
                 bot_response=bot_response,
             )
 
-    if conversation.state == ConversationState.PENDING.value:
-        router_pending_meta = _set_router_observability(
-            saved_message,
-            eligible=False,
-            reason="pending",
-        )
-        if is_opt_out_message(message_text):
-            handover = get_active_handover(db, conversation.id)
-            if handover:
-                manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
-            bot_response = MSG_MUTED_TEMP
-            trace_payload = {
-                "stage": "rejection",
-                "decision": "cancel_handover",
-                "state": conversation.state,
-            }
-            trace_payload.update(router_pending_meta)
-            _record_decision_trace(conversation, trace_payload)
-            _record_message_decision_meta(
-                saved_message,
-                action="rejection",
-                intent="opt_out",
-                source="pending",
-                fast_intent=False,
-            )
-            bot_response, sent = _send_and_save(bot_response)
-            result_message = "Pending opt-out handled" if sent else "Pending opt-out send failed"
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message=result_message,
-                conversation_id=conversation.id,
-                bot_response=bot_response,
-            )
-
-        if _is_pending_close(message_text):
-            handover = get_active_handover(db, conversation.id)
-            if handover:
-                manager_resolve(db, conversation, handover, manager_id="system", manager_name="system")
-            conversation.bot_status = "muted"
-            conversation.bot_muted_until = None
-            trace_payload = {
-                "stage": "pending_sla",
-                "decision": "pending_close",
-                "state": conversation.state,
-            }
-            trace_payload.update(router_pending_meta)
-            _record_decision_trace(conversation, trace_payload)
-            if saved_message:
-                _update_message_decision_metadata(
-                    saved_message,
-                    {
-                        "pending_action": "pending_close",
-                    },
-                )
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message="Pending closed by user",
-                conversation_id=conversation.id,
-                bot_response=None,
-            )
-
-        if _is_pending_ack(message_text):
-            handover = get_active_handover(db, conversation.id)
-            if handover:
-                manager_resolve(
-                    db,
-                    conversation,
-                    handover,
-                    manager_id="system",
-                    manager_name="system",
-                    preserve_context=True,
-                )
-            conversation.bot_status = "active"
-            pending_resume = _get_pending_resume(_get_conversation_context(conversation))
-            if pending_resume:
-                restored_context = _restore_pending_resume(
-                    context=_get_conversation_context(conversation),
-                    pending_resume=pending_resume,
-                    now=now,
-                )
-                restored_context = _set_re_entry_required(
-                    restored_context,
-                    reason="pending_resume",
-                    now=now,
-                )
-                _set_conversation_context(conversation, restored_context)
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "pending_resume",
-                        "decision": "restore",
-                        "reason": "pending_ack",
-                    },
-                )
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "re_entry",
-                        "decision": "required",
-                        "reason": "pending_resume",
-                    },
-                )
-            trace_payload = {
-                "stage": "pending_sla",
-                "decision": "pending_ack",
-                "state": conversation.state,
-            }
-            trace_payload.update(router_pending_meta)
-            _record_decision_trace(conversation, trace_payload)
-            if saved_message:
-                _update_message_decision_metadata(
-                    saved_message,
-                    {
-                        "pending_action": "pending_ack",
-                        "pending_resume_restored": bool(pending_resume),
-                    },
-                )
-            bot_response = MSG_PENDING_ACK
-            bot_response, sent = _send_and_save(bot_response)
-            result_message = "Pending ack response sent" if sent else "Pending ack send failed"
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message=result_message,
-                conversation_id=conversation.id,
-                bot_response=bot_response,
-            )
-
-        if is_handover_status_question(message_text):
-            bot_response = MSG_PENDING_STATUS
-            trace_payload = {
-                "stage": "pending_status",
-                "decision": "status_reply",
-                "state": conversation.state,
-            }
-            trace_payload.update(router_pending_meta)
-            _record_decision_trace(conversation, trace_payload)
-            if saved_message:
-                _update_message_decision_metadata(
-                    saved_message,
-                    {
-                        "pending_action": "pending_status",
-                    },
-                )
-            bot_response, sent = _send_and_save(bot_response)
-            result_message = "Pending status response sent" if sent else "Pending status response failed"
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message=result_message,
-                conversation_id=conversation.id,
-                bot_response=bot_response,
-            )
-
-        pending_sla = _get_pending_sla(context)
-        ping_sent_at = pending_sla.get(PENDING_SLA_PING_SENT_KEY)
-        escalated_at = conversation.escalated_at
-        if escalated_at and escalated_at.tzinfo is None:
-            escalated_at = escalated_at.replace(tzinfo=timezone.utc)
-        ping_due = bool(
-            escalated_at
-            and not ping_sent_at
-            and now - escalated_at >= timedelta(minutes=PENDING_SLA_PING_MINUTES)
-        )
-        if ping_due:
-            pending_sla[PENDING_SLA_PING_SENT_KEY] = now.isoformat()
-            context = _set_pending_sla(context, pending_sla)
-            _set_conversation_context(conversation, context)
-            trace_payload = {
-                "stage": "pending_sla",
-                "decision": "ping",
-                "state": conversation.state,
-            }
-            trace_payload.update(router_pending_meta)
-            _record_decision_trace(conversation, trace_payload)
-            if saved_message:
-                _update_message_decision_metadata(
-                    saved_message,
-                    {
-                        "pending_sla_ping": True,
-                        "pending_action": "pending_sla_ping",
-                    },
-                )
-            bot_response = MSG_PENDING_SLA_PING
-            bot_response, sent = _send_and_save(bot_response)
-            result_message = "Pending SLA ping sent" if sent else "Pending SLA ping send failed"
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message=result_message,
-                conversation_id=conversation.id,
-                bot_response=bot_response,
-            )
-
-        bot_response = MSG_PENDING_WAIT
-        trace_payload = {
-            "stage": "pending_wait",
-            "decision": "pending_wait",
-            "state": conversation.state,
-        }
-        trace_payload.update(router_pending_meta)
-        _record_decision_trace(conversation, trace_payload)
-        _record_message_decision_meta(
-            saved_message,
-            action="pending_wait",
-            intent=None,
-            source="pending",
-            fast_intent=False,
-        )
-        if saved_message:
-            _update_message_decision_metadata(
-                saved_message,
-                {
-                    "pending_action": "pending_wait",
-                },
-            )
-        bot_response, sent = _send_and_save(bot_response)
-        result_message = "Pending wait response sent" if sent else "Pending wait response failed"
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message=result_message,
-            conversation_id=conversation.id,
-            bot_response=bot_response,
-        )
+    pending_response = _handle_pending_gate(
+        db=db,
+        conversation=conversation,
+        message_text=message_text,
+        saved_message=saved_message,
+        now=now,
+        send_and_save=_send_and_save,
+    )
+    if pending_response:
+        return pending_response
 
     if has_media:
         if not media_info:
@@ -4065,29 +3360,26 @@ async def _handle_webhook_payload(
         booking_signal = False
 
     # 6.95 Hard-LAW pre-LLM gate (policy-pack driven).
-    if policy_pack and not bypass_domain_flows and routing["allow_truth_gate_reply"] and message_text:
-        hard_law_t0 = time.monotonic()
-        hard_law_match = _detect_hard_law_match(message_text, policy_pack=policy_pack)
-        if hard_law_match:
-            section_key, section = hard_law_match
-            risk_level = _resolve_policy_risk_level(section) or "high"
-            intent = _resolve_policy_intent(section_key, section)
-            response = section.get("response") if isinstance(section, dict) else None
-            decision = DemoSalonDecision(
-                action="escalate",
-                response=response or MSG_ESCALATED,
-                intent=intent,
-            )
-            return _apply_policy_decision(
-                decision,
-                policy_gate="hard_law",
-                policy_section=section_key,
-                risk_level=risk_level,
-                sidecar=None,
-                policy_t0=hard_law_t0,
-                gate_label="hard_law",
-                booking_wants_flow=None,
-            )
+    hard_law_response = _handle_hard_law_gate(
+        db=db,
+        conversation=conversation,
+        user=user,
+        message_text=message_text,
+        saved_message=saved_message,
+        policy_pack=policy_pack,
+        bypass_domain_flows=bypass_domain_flows,
+        routing=routing,
+        policy_type=policy_type,
+        policy_source=policy_source,
+        policy_pack_missing=policy_pack_missing,
+        client_slug=payload.client_slug,
+        send_and_save=_send_and_save,
+        record_policy_count=record_policy_count,
+        record_escalation_metric=_record_escalation_metric,
+        log_timing=_log_timing,
+    )
+    if hard_law_response:
+        return hard_law_response
     intent_decomp_payload = None
     intent_decomp_intents: list[str] = []
     intent_decomp_primary = None
@@ -4483,147 +3775,46 @@ async def _handle_webhook_payload(
     multi_intent_booking_followup = None
     multi_intent_other_followup = None
 
-    if (
-        conversation.state == ConversationState.BOT_ACTIVE.value
-        and opt_out_in_batch
-        and not booking_signal
-    ):
-        mute_first, mute_second = get_mute_settings(db, client.id)
-        if conversation.no_count == 0:
-            conversation.bot_muted_until = now + timedelta(minutes=mute_first)
-            conversation.no_count = 1
-            bot_response = MSG_MUTED_TEMP
-            trace_decision = "muted_first"
-        else:
-            conversation.bot_muted_until = now + timedelta(hours=mute_second)
-            conversation.no_count += 1
-            bot_response = MSG_MUTED_LONG
-            trace_decision = "muted_second"
-        _record_decision_trace(
-            conversation,
-            {
-                "stage": "rejection",
-                "decision": trace_decision,
-                "state": conversation.state,
-                "no_count": conversation.no_count,
-            },
-        )
-        _record_message_decision_meta(
-            saved_message,
-            action="rejection",
-            intent="opt_out",
-            source="opt_out",
-            fast_intent=False,
-        )
-        bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
-        result_message = f"Muted (opt-out #{conversation.no_count})" if sent else "Opt-out response failed"
-        db.commit()
-        return WebhookResponse(
-            success=True,
-            message=result_message,
-            conversation_id=conversation.id,
-            bot_response=bot_response,
-        )
+    opt_out_response = _handle_opt_out_mute_gate(
+        db=db,
+        client_id=client.id,
+        conversation=conversation,
+        saved_message=saved_message,
+        opt_out_in_batch=opt_out_in_batch,
+        booking_signal=booking_signal,
+        now=now,
+        send_and_save=_send_and_save,
+    )
+    if opt_out_response:
+        return opt_out_response
 
     # 9.03 Policy escalation gate (policy-pack keywords + intent fallback).
-    if not bypass_domain_flows and routing["allow_truth_gate_reply"] and message_text:
-        policy_t0 = time.monotonic()
-        intent_hints = intent_decomp_intents if policy_pack else None
-        hard_law_match = _detect_hard_law_match(
-            message_text,
-            policy_pack=policy_pack,
-            intent_hints=intent_hints or None,
-        )
-        if hard_law_match:
-            section_key, section = hard_law_match
-            risk_level = _resolve_policy_risk_level(section) or "high"
-            intent = _resolve_policy_intent(section_key, section)
-            response = section.get("response") if isinstance(section, dict) else None
-            decision = DemoSalonDecision(
-                action="escalate",
-                response=response or MSG_ESCALATED,
-                intent=intent,
-            )
-            return _apply_policy_decision(
-                decision,
-                policy_gate="hard_law",
-                policy_section=section_key,
-                risk_level=risk_level,
-                sidecar=None,
-                policy_t0=policy_t0,
-                gate_label="hard_law",
-                booking_wants_flow=booking_wants_flow,
-            )
-
-        policy_match = _detect_policy_gate_section(
-            message_text,
-            policy_pack=policy_pack,
-            hard_law_sections=hard_law_sections | {"discounts"},
-        )
-        if policy_match:
-            section_key, section = policy_match
-            if section_key == "complaint":
-                normalized_text = _normalize_text(message_text)
-                explicit_keywords, consult_override_keywords = _resolve_complaint_guard(policy_pack)
-                complaint_signal = bool(
-                    normalized_text and explicit_keywords and _contains_any(normalized_text, explicit_keywords)
-                )
-                consult_override = bool(
-                    (consult_intent or current_goal == "consult")
-                    and normalized_text
-                    and consult_override_keywords
-                    and _contains_any(normalized_text, consult_override_keywords)
-                )
-                if saved_message:
-                    _update_message_decision_metadata(
-                        saved_message,
-                        {
-                            "complaint_signal": complaint_signal,
-                            "consult_override": consult_override,
-                        },
-                    )
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "complaint_guard",
-                        "decision": "suppressed"
-                        if (consult_override or not complaint_signal)
-                        else "accepted",
-                        "complaint_signal": complaint_signal,
-                        "consult_override": consult_override,
-                    },
-                )
-                if consult_override or not complaint_signal:
-                    section_key = ""
-
-            if section_key:
-                action = section.get("action") if isinstance(section, dict) else None
-                if not isinstance(action, str) or not action.strip():
-                    action = "escalate"
-                response = section.get("response") if isinstance(section, dict) else None
-                intent = _resolve_policy_intent(section_key, section)
-                risk_level = _resolve_policy_risk_level(section)
-                decision = DemoSalonDecision(
-                    action=action,
-                    response=response or MSG_ESCALATED,
-                    intent=intent,
-                )
-                return _apply_policy_decision(
-                    decision,
-                    policy_gate=section_key,
-                    policy_section=section_key,
-                    risk_level=risk_level,
-                    sidecar=multi_intent_other_followup,
-                    policy_t0=policy_t0,
-                    gate_label="policy_gate",
-                    booking_wants_flow=booking_wants_flow,
-                )
-
-        _log_timing(
-            "policy_gate_ms",
-            (time.monotonic() - policy_t0) * 1000,
-            {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow, "gate": "escalation"},
-        )
+    policy_response = _handle_policy_escalation_gate(
+        db=db,
+        conversation=conversation,
+        user=user,
+        message_text=message_text,
+        saved_message=saved_message,
+        policy_pack=policy_pack,
+        hard_law_sections=hard_law_sections,
+        bypass_domain_flows=bypass_domain_flows,
+        routing=routing,
+        policy_type=policy_type,
+        policy_source=policy_source,
+        policy_pack_missing=policy_pack_missing,
+        booking_wants_flow=booking_wants_flow,
+        intent_hints=intent_decomp_intents if policy_pack else None,
+        consult_intent=consult_intent,
+        current_goal=current_goal,
+        multi_intent_other_followup=multi_intent_other_followup,
+        client_slug=payload.client_slug,
+        send_and_save=_send_and_save,
+        record_policy_count=record_policy_count,
+        record_escalation_metric=_record_escalation_metric,
+        log_timing=_log_timing,
+    )
+    if policy_response:
+        return policy_response
 
     controller_signal_class = _resolve_controller_signal_class(
         intent_decomp_set=intent_decomp_set,
