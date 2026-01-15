@@ -12,7 +12,14 @@ except Exception:  # pragma: no cover
     trace = None
 
 try:  # Optional at runtime; required in requirements.txt
-    from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest, REGISTRY
+    from prometheus_client import (
+        CONTENT_TYPE_LATEST,
+        Counter,
+        Gauge,
+        Histogram,
+        REGISTRY,
+        generate_latest,
+    )
 except Exception:  # pragma: no cover
     CONTENT_TYPE_LATEST = "text/plain; version=0.0.4"
     Counter = None
