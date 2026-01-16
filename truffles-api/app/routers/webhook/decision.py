@@ -1,5 +1,7 @@
 """Intent and decision helpers for webhook routing."""
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import os
