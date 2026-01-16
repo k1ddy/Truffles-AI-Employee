@@ -1494,7 +1494,7 @@ from app.logging_config import (
     record_inbound_count,
     record_policy_count,
 )
-from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
+from app.models import Branch, Client, Handover, User
 from app.routers.webhook.booking import (
     BOOKING_SLOT_ORDER,
     _apply_booking_slot,
@@ -1718,6 +1718,7 @@ from app.services.ai_service import (
     rewrite_for_service_match,
     transcribe_audio_with_fallback,
 )
+from app.services.chatflow_service import send_bot_response
 from app.services.conversation_service import (
     get_or_create_conversation,
     get_or_create_user,
@@ -3314,15 +3315,18 @@ async def _handle_webhook_payload(
     def _record_escalation_metric(trigger: str) -> None:
         record_escalation_count(payload.client_slug, trigger)
 
-    _send_response = functools.partial(
-        _send_response_helper,
-        db=db,
-        client_id=client.id,
-        remote_jid=remote_jid,
-        idempotency_key=outbound_idempotency_key,
-        skip_persist=skip_persist,
-        log_timing=_log_timing,
-    )
+    def _send_response(text: str) -> bool:
+        send_start = time.monotonic()
+        sent = send_bot_response(
+            db,
+            client.id,
+            remote_jid,
+            text,
+            idempotency_key=outbound_idempotency_key,
+            raise_on_fail=skip_persist,
+        )
+        _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": sent})
+        return sent
 
     if skip_persist:
         (
