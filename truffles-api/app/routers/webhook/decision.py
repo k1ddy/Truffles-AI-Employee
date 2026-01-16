@@ -1697,7 +1697,7 @@ from app.routers.webhook.trace import (
     _record_message_decision_meta,
     _update_message_decision_metadata,
 )
-from app.schemas.webhook import WebhookRequest, WebhookResponse
+from app.schemas.webhook import WebhookResponse
 from app.services.ai_service import (
     ACKNOWLEDGEMENT_RESPONSE,
     BOT_STATUS_RESPONSE,
@@ -1723,7 +1723,6 @@ from app.services.conversation_service import (
     get_or_create_user,
 )
 from app.services.demo_salon_knowledge import (
-    DemoSalonDecision,
     _detect_promotion_intent,
     _has_duration_signal,
     _has_price_signal,
@@ -1748,7 +1747,6 @@ from app.services.demo_salon_knowledge import (
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
     DomainIntent,
-    Intent,
     classify_domain_with_scores,
     classify_intent,
     interpret_expected_reply,
@@ -3752,16 +3750,12 @@ async def _handle_webhook_payload(
             },
         )
 
-    _send_and_save = functools.partial(
-        _send_and_save_helper,
-        db=db,
-        conversation=conversation,
-        client_id=client.id,
-        finalize_response=_finalize_bot_response,
-        record_contract_traces=_record_contract_traces,
-        send_response=_send_response,
-        save_message=save_message,
-    )
+    def _send_and_save(text: str, *, allow_quiet_hours: bool = True) -> tuple[str, bool]:
+        final_text = _finalize_bot_response(text, allow_quiet_hours=allow_quiet_hours)
+        _record_contract_traces()
+        save_message(db, conversation.id, client.id, role="assistant", content=final_text)
+        sent = _send_response(final_text)
+        return final_text, sent
     previous_last_message_at = conversation.last_message_at
     conversation.last_message_at = now
     context = _get_conversation_context(conversation)
