@@ -721,6 +721,30 @@
 - decision_trace: stage=policy_gate, policy_gate=hard_law, policy_section=payment_info, decision=escalate, intent=payment, recorded_at `2026-01-16T11:57:49.740443+00:00`
 - state: bot_active (pending закрыт)
 
+### 2026-01-16 — Webhook fuzz runner (10 inbound, /webhook/demo_salon)
+
+**Что сделали:**
+- Запустили `ops/diagnose.py webhook-fuzz` (seed=42, 10 inbound) на `/webhook/demo_salon`, затем `/admin/outbox/process`.
+- Проверили наличие decision_meta у всех 10 сообщений.
+- Зафиксировали hard_law эскалацию на кейсе complaint (policy_gate=hard_law, action=escalate, llm_used=false).
+
+**Evidence:**
+- runner: conv_id `1161601f-3f9a-44fb-8380-6e4f424d87d5`, remote_jid `77000000099@s.whatsapp.net`
+- markers: `FZ:INFO_LOCATION:20260116-154736:01`, `FZ:LAW_MEDICAL:20260116-154736:02`, `FZ:LAW_RESCHEDULE:20260116-154736:03`, `FZ:INFO_PRICE:20260116-154736:04`, `FZ:LAW_COMPLAINT:20260116-154736:05`, `FZ:INFO_HOURS:20260116-154736:06`, `FZ:BOOK_TIME:20260116-154736:07`, `FZ:LAW_LEGAL:20260116-154736:08`, `FZ:LAW_REFUND:20260116-154736:09`, `FZ:LAW_PAYMENT:20260116-154736:10`
+- message_ids: `FZ-20260116-154736-01-ea7b8835`, `FZ-20260116-154736-02-cdb7da3c`, `FZ-20260116-154736-03-b4c28722`, `FZ-20260116-154736-04-b391204b`, `FZ-20260116-154736-05-1b148cde`, `FZ-20260116-154736-06-0da361a0`, `FZ-20260116-154736-07-c2b71224`, `FZ-20260116-154736-08-6a1cc94d`, `FZ-20260116-154736-09-f3b6be17`, `FZ-20260116-154736-10-428f5bad`
+- SQL (decision_meta count):
+  - cmd: `WITH ids AS (SELECT unnest(ARRAY['FZ-20260116-154736-01-ea7b8835','FZ-20260116-154736-02-cdb7da3c','FZ-20260116-154736-03-b4c28722','FZ-20260116-154736-04-b391204b','FZ-20260116-154736-05-1b148cde','FZ-20260116-154736-06-0da361a0','FZ-20260116-154736-07-c2b71224','FZ-20260116-154736-08-6a1cc94d','FZ-20260116-154736-09-f3b6be17','FZ-20260116-154736-10-428f5bad']) AS message_id) SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE m.metadata ? 'decision_meta') AS with_decision_meta FROM messages m JOIN ids ON m.metadata->>'messageId' = ids.message_id WHERE m.role='user';`
+  - output: `10 | 10`
+- SQL (hard_law sample, complaint):
+  - cmd: `SELECT metadata->'decision_meta' FROM messages WHERE metadata->>'messageId' = 'FZ-20260116-154736-05-1b148cde' AND role='user';`
+  - output: `{"action": "escalate", "intent": "complaint", "source": "policy_pack", "llm_used": false, "rag_reason": "overridden_by_gate", "rag_scores": {"bm25_max": 0.0, "hybrid_max": 0.0, "vector_max": 0.0}, "risk_level": "high", "fast_intent": false, "llm_timeout": false, "policy_gate": "hard_law", "llm_cache_hit": false, "rag_confident": false, "policy_section": "complaint", "router_eligible": false, "llm_primary_used": false, "controller_eligible": false, "controller_attempted": false, "router_skipped_reason": "law_gate", "llm_degradation_reason": null, "controller_low_confidence": false, "controller_skipped_reason": "law_gate", "controller_fallback_reason": null}`
+- SQL (decision_trace policy_gate):
+  - cmd: `SELECT trace->>'stage' AS stage, trace->>'decision' AS decision, trace->>'recorded_at' AS recorded_at FROM conversations c JOIN LATERAL jsonb_array_elements(c.context->'decision_trace') AS trace ON true WHERE c.id = '1161601f-3f9a-44fb-8380-6e4f424d87d5' AND trace->>'stage' = 'policy_gate' ORDER BY (trace->>'recorded_at')::timestamptz DESC LIMIT 1;`
+  - output: `policy_gate | escalate | 2026-01-16T15:47:43.451168+00:00`
+- /admin/outbox/process: `{"claimed":0,"sent":0,"failed":0,"retry_scheduled":0}`
+- /admin/version: `{"version":"main","git_commit":"d6443979b1bcc2b32c157839feb76b01bfdcd388","build_time":"2026-01-16T12:51:36Z"}`
+- /admin/metrics (2026-01-16): `{"detail":"Metrics not found for date/client"}`
+
 ### 2026-01-16 — Deploy evidence (CI → GHCR → /admin/version)
 
 **Evidence:**
