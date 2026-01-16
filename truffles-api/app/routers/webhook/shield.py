@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from sqlalchemy.orm import Session
+
+from app.models import Conversation, Message, User
+from app.schemas.webhook import WebhookResponse
 from app.services.ai_service import normalize_for_matching
 
 
@@ -100,3 +104,131 @@ def _is_nonsense_message(message_text: str | None) -> bool:
     from . import _legacy as legacy
 
     return not legacy.SHIELD_MEANINGFUL_PATTERN.search(message_text or "")
+
+
+def _handle_shield_gate(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    message_text: str,
+    metadata,
+    now: datetime,
+    saved_message: Message | None,
+    send_and_save,
+    record_escalation_metric,
+    skip_persist: bool,
+) -> WebhookResponse | None:
+    from . import _legacy as legacy
+
+    context = legacy._get_conversation_context(conversation)
+    context, shield_state = _update_shield_context(
+        context=context,
+        message_text=message_text,
+        metadata=metadata,
+        now=now,
+    )
+    previous_text = shield_state.get("previous_text")
+    normalized_text = shield_state.get("normalized_text") or ""
+    recent = shield_state.get("recent") or []
+    legacy._set_conversation_context(conversation, context)
+
+    is_short, is_repeat, is_spam_burst, too_long = _compute_shield_flags(
+        message_text=message_text,
+        normalized_text=normalized_text,
+        previous_text=previous_text,
+        recent=recent,
+    )
+    if is_spam_burst or too_long:
+        reason = "spam" if is_spam_burst else "too_long"
+        router_shield_meta = legacy._set_router_observability(
+            saved_message,
+            eligible=False,
+            reason="shield_drop",
+        )
+        trace_payload = {
+            "stage": "shield",
+            "decision": "drop",
+            "reason": reason,
+            "message_length": len(message_text),
+            "recent_messages": len(recent),
+            "is_repeat": is_repeat,
+            "is_short": is_short,
+        }
+        trace_payload.update(router_shield_meta)
+        legacy._record_decision_trace(conversation, trace_payload)
+        if saved_message:
+            legacy._update_message_decision_metadata(
+                saved_message,
+                {
+                    "action": "shield_drop",
+                    "intent": "shield",
+                    "source": "shield",
+                    "shield_reason": reason,
+                },
+            )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message="Shield drop",
+            conversation_id=conversation.id,
+            bot_response=None,
+        )
+
+    is_toxic = _is_toxic_message(message_text)
+    is_nonsense = _is_nonsense_message(message_text)
+    if (is_toxic or is_nonsense) and conversation.state == legacy.ConversationState.BOT_ACTIVE.value:
+        reason = "toxic" if is_toxic else "nonsense"
+        legacy._record_decision_trace(
+            conversation,
+            {
+                "stage": "shield",
+                "decision": "escalate",
+                "reason": reason,
+            },
+        )
+        if saved_message:
+            legacy._update_message_decision_metadata(
+                saved_message,
+                {
+                    "action": "escalate",
+                    "intent": "shield",
+                    "source": "shield",
+                    "shield_reason": reason,
+                },
+            )
+        bot_response = legacy.MSG_ESCALATED
+        result_message = "Shield escalation"
+        if not skip_persist and conversation.state == legacy.ConversationState.BOT_ACTIVE.value:
+            record_escalation_metric("shield")
+            esc_result = legacy.escalate_to_pending(
+                db=db,
+                conversation=conversation,
+                user_message=message_text,
+                trigger_type="shield",
+                trigger_value=reason,
+            )
+            if esc_result.ok:
+                handover = esc_result.value
+                telegram_sent = legacy.send_telegram_notification(
+                    db=db,
+                    handover=handover,
+                    conversation=conversation,
+                    user=user,
+                    message=message_text,
+                )
+                result_message = f"Shield escalation, telegram={'sent' if telegram_sent else 'failed'}"
+            else:
+                result_message = f"Shield escalation failed: {esc_result.error}"
+        bot_response, sent = send_and_save(bot_response, allow_quiet_hours=False)
+        if not sent:
+            result_message = f"{result_message}; response_send=failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    return None

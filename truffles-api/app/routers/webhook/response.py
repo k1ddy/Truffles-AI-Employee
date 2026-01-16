@@ -2,6 +2,22 @@
 
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Callable
+
+from sqlalchemy.orm import Session
+
+from app.models import Conversation, Message, User
+from app.routers.webhook.trace import (
+    _attach_llm_cache_flag,
+    _record_decision_trace,
+    _record_message_decision_meta,
+    _update_message_decision_metadata,
+)
+from app.schemas.webhook import WebhookResponse
+
 
 def _maybe_append_booking_cta(
     bot_response: str | None,
@@ -38,4 +54,1530 @@ def _apply_quiet_hours_notice(text: str, notice: str | None) -> str:
     return f"{notice}\n\n{text}"
 
 
-__all__ = ["_apply_quiet_hours_notice", "_maybe_append_booking_cta"]
+def _finalize_bot_response(
+    text: str | None,
+    *,
+    conversation: Conversation,
+    quiet_hours_notice: str | None,
+    allow_quiet_hours: bool = True,
+) -> str | None:
+    if not text:
+        return text
+    if not allow_quiet_hours:
+        return text
+    if not quiet_hours_notice:
+        return text
+    from . import _legacy as legacy
+
+    if conversation.state != legacy.ConversationState.BOT_ACTIVE.value:
+        return text
+    return _apply_quiet_hours_notice(text, quiet_hours_notice)
+
+
+def _send_response(
+    *,
+    db: Session,
+    client_id: Any,
+    remote_jid: str,
+    text: str,
+    idempotency_key: str | None,
+    skip_persist: bool,
+    log_timing: Callable[[str, float, dict | None], None],
+) -> bool:
+    from app.services.chatflow_service import send_bot_response
+
+    send_start = time.monotonic()
+    sent = send_bot_response(
+        db,
+        client_id,
+        remote_jid,
+        text,
+        idempotency_key=idempotency_key,
+        raise_on_fail=skip_persist,
+    )
+    log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": sent})
+    return sent
+
+
+def _send_and_save(
+    *,
+    text: str | None,
+    db: Session,
+    conversation: Conversation,
+    client_id: Any,
+    finalize_response: Callable[..., str | None],
+    record_contract_traces: Callable[[], None],
+    send_response: Callable[[str], bool],
+    save_message: Callable[..., Message],
+    allow_quiet_hours: bool = True,
+) -> tuple[str | None, bool]:
+    final_text = finalize_response(text, allow_quiet_hours=allow_quiet_hours)
+    record_contract_traces()
+    save_message(db, conversation.id, client_id, role="assistant", content=final_text)
+    sent = send_response(final_text)
+    return final_text, sent
+
+
+def _record_llm_budget_trace(*, conversation: Conversation, timing_context: dict) -> None:
+    events = timing_context.get("llm_budget_events") if isinstance(timing_context, dict) else None
+    if not isinstance(events, list) or not events:
+        return
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        allowed = bool(event.get("allowed", True))
+        active = bool(event.get("active"))
+        if not active and allowed:
+            continue
+        scope = event.get("scope") or "unknown"
+        trace_payload = {
+            "stage": "budget_gate",
+            "decision": "allow" if allowed else "deny",
+            "llm_scope": scope,
+        }
+        reason = event.get("reason")
+        if isinstance(reason, str) and reason:
+            trace_payload["reason"] = reason
+        limit = event.get("limit")
+        count = event.get("count")
+        if isinstance(limit, int):
+            trace_payload["budget_limit"] = limit
+        if isinstance(count, int):
+            trace_payload["budget_count"] = count
+        if not allowed:
+            trace_payload["llm_degradation_reason"] = "budget_exceeded"
+        _record_decision_trace(conversation, trace_payload)
+    timing_context["llm_budget_events"] = []
+
+
+def _record_llm_degradation(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    timing_context: dict,
+) -> None:
+    reason = timing_context.get("llm_degradation_reason") if isinstance(timing_context, dict) else None
+    if not isinstance(reason, str) or not reason:
+        return
+    if saved_message:
+        metadata = saved_message.message_metadata if isinstance(saved_message.message_metadata, dict) else {}
+        decision_meta = metadata.get("decision_meta") if isinstance(metadata, dict) else None
+        existing_reason = (
+            decision_meta.get("llm_degradation_reason") if isinstance(decision_meta, dict) else None
+        )
+        if not existing_reason:
+            _update_message_decision_metadata(
+                saved_message, {"llm_degradation_reason": reason}
+            )
+    if reason != "budget_exceeded":
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "llm_degradation",
+                "decision": "fallback",
+                "llm_degradation_reason": reason,
+            },
+        )
+    timing_context["llm_degradation_reason"] = None
+
+
+def _ensure_rag_rewrite(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    message_text: str | None,
+    client_slug: str | None,
+    client_config: dict | None,
+    timing_context: dict,
+) -> None:
+    if timing_context.get("rag_rewrite_logged"):
+        return
+    from app.services.ai_service import rewrite_query_for_retrieval
+
+    rag_rewrite_meta = rewrite_query_for_retrieval(
+        message_text,
+        client_slug=client_slug,
+        client_config=client_config,
+        timing_context=timing_context,
+    )
+    _record_llm_budget_trace(conversation=conversation, timing_context=timing_context)
+    if not isinstance(rag_rewrite_meta, dict):
+        return
+    timing_context["rag_rewrite"] = rag_rewrite_meta
+    timing_context["rag_rewrite_logged"] = True
+    rewrite_used = rag_rewrite_meta.get("rewrite_used") is True
+    rewrite_text = rag_rewrite_meta.get("rewrite_text") if rewrite_used else ""
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "rewrite",
+            "decision": "used" if rewrite_used else "skipped",
+            "rewrite_used": rewrite_used,
+            "rewrite_text": rewrite_text,
+            "reason": rag_rewrite_meta.get("reason"),
+        },
+    )
+    if saved_message:
+        _update_message_decision_metadata(
+            saved_message,
+            {"rewrite_used": rewrite_used, "rewrite_text": rewrite_text},
+        )
+
+
+def _record_rag_meta(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    timing_context: dict,
+) -> None:
+    _record_llm_budget_trace(conversation=conversation, timing_context=timing_context)
+    _record_llm_degradation(
+        conversation=conversation,
+        saved_message=saved_message,
+        timing_context=timing_context,
+    )
+    rag_trace = timing_context.get("rag_trace") if isinstance(timing_context, dict) else None
+    if isinstance(rag_trace, list) and rag_trace:
+        for entry in rag_trace:
+            if isinstance(entry, dict):
+                _record_decision_trace(conversation, entry)
+        timing_context["rag_trace"] = []
+    rag_scores = timing_context.get("rag_scores") if isinstance(timing_context, dict) else None
+    from . import _legacy as legacy
+
+    rag_scores = legacy._merge_rag_scores(rag_scores if isinstance(rag_scores, dict) else None)
+    if saved_message:
+        rag_confident, rag_reason = legacy._derive_rag_status(
+            rag_scores=rag_scores,
+            rag_best_score=(
+                timing_context.get("rag_best_score") if isinstance(timing_context, dict) else None
+            ),
+            rag_attempted=bool(
+                timing_context.get("rag_attempted") if isinstance(timing_context, dict) else False
+            ),
+        )
+        _update_message_decision_metadata(
+            saved_message,
+            {
+                "rag_scores": rag_scores,
+                "rag_confident": rag_confident,
+                "rag_reason": rag_reason,
+            },
+        )
+
+
+def _maybe_apply_consult_return(
+    *,
+    conversation: Conversation,
+    saved_message: Message | None,
+    bot_response: str | None,
+    consult_return_pending: bool,
+    consult_return_prompt: str | None,
+    consult_context: dict | None,
+    reason: str,
+) -> str | None:
+    if not consult_return_pending:
+        return bot_response
+    from app.routers.webhook.context_manager import _apply_consult_return
+
+    return _apply_consult_return(
+        conversation=conversation,
+        saved_message=saved_message,
+        bot_response=bot_response,
+        consult_return_prompt=consult_return_prompt,
+        consult_context=consult_context,
+        reason=reason,
+    )
+
+
+@dataclass(frozen=True)
+class LlmPrimaryOutcome:
+    response: WebhookResponse | None
+    llm_primary_result: Any | None
+    llm_primary_failed: bool
+    llm_primary_reason: str | None
+
+
+@dataclass(frozen=True)
+class AiResponseOutcome:
+    response: WebhookResponse | None
+    bot_response: str | None
+    result_message: str | None
+    llm_primary_failed: bool
+    llm_primary_reason: str | None
+
+
+@dataclass(frozen=True)
+class ConsultFlowResult:
+    response: WebhookResponse | None
+    consult_intent: bool | None
+    consult_topic: str | None
+    consult_question: str | None
+    intent_decomp_payload: dict[str, Any] | None
+
+
+def _handle_consult_flow(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    message_text: str | None,
+    saved_message: Message | None,
+    client_slug: str | None,
+    routing: dict,
+    bypass_domain_flows: bool,
+    booking_wants_flow: bool,
+    booking_active: bool,
+    booking_signal: bool,
+    intent_decomp_set: set[str],
+    consult_intent: bool | None,
+    consult_topic: str | None,
+    consult_question: str | None,
+    intent_decomp_payload: dict[str, Any] | None,
+    intent_decomp_service_query: str | None,
+    info_class_intents: set[str],
+    intent_queue_followup: str | None,
+    message_count: int,
+    now: datetime,
+    send_and_save: Callable[..., tuple[str, bool]],
+    record_escalation_metric: Callable[[str], None],
+) -> ConsultFlowResult:
+    from app.services.demo_salon_knowledge import (
+        DemoSalonDecision,
+        build_consult_reply,
+        get_demo_salon_service_hint,
+    )
+
+    from . import _legacy as legacy
+
+    if not (routing.get("allow_bot_reply") and not bypass_domain_flows and message_text):
+        return ConsultFlowResult(
+            response=None,
+            consult_intent=consult_intent,
+            consult_topic=consult_topic,
+            consult_question=consult_question,
+            intent_decomp_payload=intent_decomp_payload,
+        )
+
+    consult_decision = None
+    consult_meta: dict[str, Any] = {}
+    consult_signal = False
+    consult_flow_decision = None
+    consult_short_circuit = False
+    consult_short_circuit_reason = None
+    consult_short_circuit_service = None
+    consult_blocked = bool(booking_wants_flow or booking_active or booking_signal)
+    if consult_intent:
+        consult_blocked = False
+    elif intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}:
+        consult_blocked = True
+    consult_candidate = None
+    if not consult_blocked:
+        consult_candidate = build_consult_reply(
+            message_text,
+            client_slug=client_slug,
+            intent_decomp=intent_decomp_payload,
+            conversation_id=str(conversation.id),
+        )
+    if consult_candidate and not consult_intent and isinstance(intent_decomp_payload, dict):
+        consult_intent = True
+        intent_decomp_payload = dict(intent_decomp_payload)
+        intent_decomp_payload["consult_intent"] = True
+        candidate_meta = consult_candidate.meta if isinstance(consult_candidate.meta, dict) else {}
+        candidate_topic = candidate_meta.get("consult_topic")
+        candidate_question = candidate_meta.get("consult_question")
+        if candidate_topic and not consult_topic:
+            consult_topic = candidate_topic
+            intent_decomp_payload["consult_topic"] = candidate_topic
+        if candidate_question and not consult_question:
+            consult_question = candidate_question
+            intent_decomp_payload["consult_question"] = candidate_question
+    consult_intent_signal = bool(consult_intent or consult_candidate)
+    normalized_message = legacy.normalize_for_matching(message_text) if message_text else ""
+    explicit_info_signal = bool(
+        booking_signal
+        or legacy._has_price_signal(normalized_message, message_text)
+        or legacy._has_duration_signal(normalized_message, message_text)
+        or (legacy._looks_like_info_query(message_text) and not consult_intent_signal)
+    )
+    explicit_info_intent = bool(
+        explicit_info_signal
+        or (
+            intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}
+            and not consult_intent_signal
+        )
+        or (info_class_intents & {"location", "hours"} and not consult_intent_signal)
+    )
+    consult_candidate_meta = (
+        consult_candidate.meta if consult_candidate and isinstance(consult_candidate.meta, dict) else None
+    )
+    if consult_intent_signal:
+        consult_short_circuit_service = intent_decomp_service_query
+        if not consult_short_circuit_service and client_slug == "demo_salon":
+            consult_short_circuit_service = get_demo_salon_service_hint(message_text)
+            if consult_short_circuit_service:
+                consult_short_circuit_reason = "service_hint"
+        if consult_short_circuit_service and explicit_info_intent:
+            consult_short_circuit = True
+            if not consult_short_circuit_reason:
+                consult_short_circuit_reason = "explicit_info"
+            consult_flow_trace = {
+                "stage": "consult_flow",
+                "decision": "short_circuit",
+                "state": conversation.state,
+                "reason": consult_short_circuit_reason,
+            }
+            consult_flow_trace["explicit_info"] = True
+            consult_flow_trace["service_query"] = consult_short_circuit_service
+            if consult_topic:
+                consult_flow_trace["consult_topic"] = consult_topic
+            if consult_question:
+                consult_flow_trace["consult_question"] = consult_question
+            if consult_candidate_meta:
+                consult_playbook_id = consult_candidate_meta.get("consult_playbook_id")
+                if consult_playbook_id:
+                    consult_flow_trace["consult_playbook_id"] = consult_playbook_id
+                consult_variant_id = consult_candidate_meta.get("consult_variant_id")
+                if consult_variant_id:
+                    consult_flow_trace["consult_variant_id"] = consult_variant_id
+            legacy._record_decision_trace(conversation, consult_flow_trace)
+    consult_decision = None if consult_short_circuit else consult_candidate
+    if consult_decision:
+        consult_meta = consult_decision.meta if isinstance(consult_decision.meta, dict) else {}
+        consult_meta = dict(consult_meta)
+        consult_signal = True
+    if consult_intent and not consult_short_circuit:
+        consult_signal = True
+        consult_meta["consult_intent"] = True
+        if consult_topic:
+            consult_meta["consult_topic"] = consult_topic
+        if consult_question:
+            consult_meta["consult_question"] = consult_question
+    if consult_signal:
+        context = legacy._get_conversation_context(conversation)
+        context_manager = legacy._get_context_manager(context)
+        if consult_decision:
+            consult_flow_decision = (
+                "consult_escalate" if consult_decision.action == "escalate" else "consult_reply"
+            )
+        elif legacy._should_escalate_for_clarify(context_manager, "consult"):
+            clarify_count, _ = legacy._get_clarify_attempt_state(context_manager, "consult")
+            legacy._record_context_manager_decision(
+                conversation,
+                saved_message,
+                decision="clarify_limit",
+                updates={
+                    "clarify_attempt": {"intent": "consult", "count": clarify_count},
+                    "clarify_reason": "consult_no_service",
+                    "clarify_limit": True,
+                },
+            )
+            consult_meta["clarify_limit"] = True
+            consult_meta["clarify_reason"] = "consult_no_service"
+            consult_meta["clarify_attempt"] = {"intent": "consult", "count": clarify_count}
+            consult_decision = DemoSalonDecision(
+                action="escalate",
+                response=legacy.MSG_ESCALATED,
+                intent="consult_no_service",
+                meta=consult_meta,
+            )
+            consult_flow_decision = "consult_escalate"
+        else:
+            clarify_count = legacy._register_clarify_attempt(
+                conversation=conversation,
+                saved_message=saved_message,
+                intent="consult",
+                now=now,
+                reason="consult",
+            )
+            context = legacy._get_conversation_context(conversation)
+            context = legacy._set_expected_reply_context(
+                conversation=conversation,
+                saved_message=saved_message,
+                context=context,
+                expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                reason="consult_clarify",
+                now=now,
+            )
+            consult_meta["consult_questions"] = [legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC]
+            consult_meta["clarify_attempt"] = {"intent": "consult", "count": clarify_count}
+            consult_meta["clarify_reason"] = "consult"
+            consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+            consult_decision = DemoSalonDecision(
+                action="reply",
+                response=legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC,
+                intent="consult_reply",
+                meta=consult_meta,
+            )
+            consult_flow_decision = "consult_clarify"
+
+    if consult_decision:
+        if consult_flow_decision:
+            consult_flow_trace = {
+                "stage": "consult_flow",
+                "decision": consult_flow_decision,
+                "state": conversation.state,
+            }
+            if consult_flow_decision == "consult_clarify":
+                consult_flow_trace["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+                consult_flow_trace["reason"] = "consult_clarify"
+            elif consult_flow_decision == "consult_escalate":
+                consult_flow_trace["reason"] = "consult_no_service"
+            else:
+                consult_flow_trace["reason"] = "consult_pack"
+            consult_playbook_id = consult_meta.get("consult_playbook_id")
+            if consult_playbook_id:
+                consult_flow_trace["consult_playbook_id"] = consult_playbook_id
+            consult_variant_id = consult_meta.get("consult_variant_id")
+            if consult_variant_id:
+                consult_flow_trace["consult_variant_id"] = consult_variant_id
+            legacy._record_decision_trace(conversation, consult_flow_trace)
+        if consult_decision.action == "reply":
+            context = legacy._get_conversation_context(conversation)
+            context_manager = legacy._get_context_manager(context)
+            context_manager["current_goal"] = "consult"
+            context_manager = legacy._set_consult_context(
+                context_manager,
+                consult_meta=consult_meta,
+                message_count=message_count,
+            )
+            context = legacy._set_context_manager(context, context_manager)
+            legacy._set_conversation_context(conversation, context)
+            context, memory = legacy._update_session_memory_goal(
+                context, active_goal="consult", now=now
+            )
+            legacy._set_conversation_context(conversation, context)
+            legacy._record_session_memory_update(
+                conversation,
+                saved_message,
+                memory=memory,
+                reason="active_goal",
+            )
+            consult_trace = {
+                "stage": "consult_context",
+                "decision": "set",
+                "current_goal": "consult",
+                "ttl": legacy.CONSULT_CONTEXT_TTL_MESSAGES,
+            }
+            consult_topic = consult_meta.get("consult_topic")
+            if consult_topic:
+                consult_trace["consult_topic"] = consult_topic
+            legacy._record_decision_trace(conversation, consult_trace)
+            if saved_message:
+                legacy._update_message_decision_metadata(saved_message, {"current_goal": "consult"})
+        consult_trace = {
+            "stage": "consult",
+            "decision": consult_decision.action,
+            "intent": consult_decision.intent,
+            "state": conversation.state,
+        }
+        consult_trace.update(consult_meta)
+        legacy._record_decision_trace(conversation, consult_trace)
+        legacy._record_message_decision_meta(
+            saved_message,
+            action=consult_decision.action,
+            intent=consult_decision.intent,
+            source="consult",
+            fast_intent=False,
+        )
+        if saved_message and consult_meta:
+            legacy._update_message_decision_metadata(saved_message, consult_meta)
+
+        if consult_decision.action == "escalate":
+            bot_response = consult_decision.response or legacy.MSG_ESCALATED
+            legacy._reset_low_confidence_retry(conversation)
+
+            result_message = "Consult escalation"
+            _, reused, telegram_sent = legacy._reuse_active_handover(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message=message_text,
+                source="consult",
+                intent=consult_decision.intent,
+            )
+            if reused:
+                result_message = f"Consult reuse, telegram={'sent' if telegram_sent else 'failed'}"
+            elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and routing.get(
+                "allow_handover_create"
+            ):
+                record_escalation_metric("intent")
+                result = legacy.escalate_to_pending(
+                    db=db,
+                    conversation=conversation,
+                    user_message=message_text,
+                    trigger_type="intent",
+                    trigger_value=consult_decision.intent or "consult",
+                )
+                if result.ok:
+                    handover = result.value
+                    telegram_sent = legacy.send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=message_text,
+                    )
+                    result_message = f"Consult escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                else:
+                    result_message = f"Consult escalation failed: {result.error}"
+            else:
+                result_message = "Consult escalation skipped (already pending)"
+
+            bot_response, sent = send_and_save(bot_response)
+            if not sent:
+                result_message = f"{result_message}; response_send=failed"
+            db.commit()
+            return ConsultFlowResult(
+                response=WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                ),
+                consult_intent=consult_intent,
+                consult_topic=consult_topic,
+                consult_question=consult_question,
+                intent_decomp_payload=intent_decomp_payload,
+            )
+
+        bot_response = consult_decision.response
+        bot_response = legacy._combine_sidecar(bot_response, intent_queue_followup)
+        legacy._reset_low_confidence_retry(conversation)
+        bot_response, sent = send_and_save(bot_response)
+        result_message = "Consult reply sent" if sent else "Consult reply send failed"
+        db.commit()
+        return ConsultFlowResult(
+            response=WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            ),
+            consult_intent=consult_intent,
+            consult_topic=consult_topic,
+            consult_question=consult_question,
+            intent_decomp_payload=intent_decomp_payload,
+        )
+
+    return ConsultFlowResult(
+        response=None,
+        consult_intent=consult_intent,
+        consult_topic=consult_topic,
+        consult_question=consult_question,
+        intent_decomp_payload=intent_decomp_payload,
+    )
+
+
+def _handle_llm_primary(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    message_text: str | None,
+    saved_message: Message | None,
+    client_slug: str | None,
+    policy_type: str | None,
+    policy_pack: dict | None,
+    routing: dict,
+    append_user_message: bool,
+    timing_context: dict,
+    client_config: dict | None,
+    intent: Any,
+    multi_intent_other_followup: str | None,
+    send_and_save: Callable[..., tuple[str | None, bool]],
+    record_escalation_metric: Callable[[str], None],
+) -> LlmPrimaryOutcome:
+    from . import _legacy as legacy
+
+    llm_primary_result = None
+    llm_primary_failed = False
+    llm_primary_reason = None
+
+    if not routing.get("allow_bot_reply"):
+        return LlmPrimaryOutcome(
+            response=None,
+            llm_primary_result=llm_primary_result,
+            llm_primary_failed=llm_primary_failed,
+            llm_primary_reason=llm_primary_reason,
+        )
+
+    _ensure_rag_rewrite(
+        conversation=conversation,
+        saved_message=saved_message,
+        message_text=message_text,
+        client_slug=client_slug,
+        client_config=client_config,
+        timing_context=timing_context,
+    )
+    llm_primary_result = legacy.generate_bot_response(
+        db,
+        conversation,
+        message_text,
+        client_slug,
+        append_user_message=append_user_message,
+        pending_hint=conversation.state == legacy.ConversationState.PENDING.value,
+        timing_context=timing_context,
+    )
+    _record_rag_meta(
+        conversation=conversation,
+        saved_message=saved_message,
+        timing_context=timing_context,
+    )
+    if not llm_primary_result.ok:
+        llm_primary_failed = True
+        llm_primary_reason = "ai_error"
+        return LlmPrimaryOutcome(
+            response=None,
+            llm_primary_result=llm_primary_result,
+            llm_primary_failed=llm_primary_failed,
+            llm_primary_reason=llm_primary_reason,
+        )
+
+    response_text, confidence = llm_primary_result.value
+    if confidence == "bot_inactive":
+        llm_primary_failed = True
+        llm_primary_reason = "bot_inactive"
+        return LlmPrimaryOutcome(
+            response=None,
+            llm_primary_result=llm_primary_result,
+            llm_primary_failed=llm_primary_failed,
+            llm_primary_reason=llm_primary_reason,
+        )
+    if response_text and confidence != "low_confidence":
+        blocked_topics = legacy._detect_llm_guard_topics(
+            response_text,
+            policy_type=policy_type,
+            policy_pack=policy_pack,
+        )
+        if blocked_topics:
+            bot_response = legacy.MSG_ESCALATED
+            legacy._reset_low_confidence_retry(conversation)
+
+            result_message = "LLM guard escalation"
+            _, reused, telegram_sent = legacy._reuse_active_handover(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message=message_text,
+                source="llm_guard",
+                intent="llm_guard",
+            )
+            if reused:
+                result_message = f"LLM guard reuse, telegram={'sent' if telegram_sent else 'failed'}"
+            elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and routing.get(
+                "allow_handover_create"
+            ):
+                record_escalation_metric("intent")
+                result = legacy.escalate_to_pending(
+                    db=db,
+                    conversation=conversation,
+                    user_message=message_text,
+                    trigger_type="intent",
+                    trigger_value="llm_guard",
+                )
+                if result.ok:
+                    handover = result.value
+                    telegram_sent = legacy.send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=message_text,
+                    )
+                    result_message = f"LLM guard escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                else:
+                    result_message = f"LLM guard escalation failed: {result.error}"
+            else:
+                result_message = "LLM guard escalation skipped (already pending)"
+
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "llm_guard",
+                    "decision": "blocked_topics",
+                    "state": conversation.state,
+                    "blocked_topics": blocked_topics,
+                },
+            )
+            if saved_message:
+                llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+                llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+                llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "action": "escalate",
+                        "intent": "llm_guard",
+                        "source": "llm_guard",
+                        "fast_intent": False,
+                        "llm_primary_used": False,
+                        "llm_used": llm_used,
+                        "llm_timeout": llm_timeout,
+                        "llm_cache_hit": llm_cache_hit,
+                    },
+                )
+            bot_response, sent = send_and_save(bot_response, allow_quiet_hours=False)
+            if not sent:
+                result_message = f"{result_message}; response_send=failed"
+            db.commit()
+            return LlmPrimaryOutcome(
+                response=WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                ),
+                llm_primary_result=llm_primary_result,
+                llm_primary_failed=llm_primary_failed,
+                llm_primary_reason=llm_primary_reason,
+            )
+
+        bot_response = response_text
+        bot_response = legacy._combine_sidecar(bot_response, multi_intent_other_followup)
+        legacy._reset_low_confidence_retry(conversation)
+        trace = _attach_llm_cache_flag(
+            {
+                "stage": "ai_response",
+                "decision": "bot_reply",
+                "state": conversation.state,
+                "confidence": confidence,
+                "llm_primary_used": True,
+            },
+            timing_context,
+        )
+        _record_decision_trace(conversation, trace)
+        bot_response, sent = send_and_save(bot_response)
+        result_message = "Message sent" if sent else "Failed to send"
+        if saved_message:
+            llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+            llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+            llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "action": "ai_response",
+                    "intent": intent.value if intent else None,
+                    "source": "llm" if llm_used else "rule",
+                    "fast_intent": False,
+                    "llm_primary_used": True,
+                    "llm_used": llm_used,
+                    "llm_timeout": llm_timeout,
+                    "llm_cache_hit": llm_cache_hit,
+                },
+            )
+        db.commit()
+        return LlmPrimaryOutcome(
+            response=WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            ),
+            llm_primary_result=llm_primary_result,
+            llm_primary_failed=llm_primary_failed,
+            llm_primary_reason=llm_primary_reason,
+        )
+
+    llm_primary_failed = True
+    llm_primary_reason = "low_confidence" if confidence == "low_confidence" else "no_response"
+    return LlmPrimaryOutcome(
+        response=None,
+        llm_primary_result=llm_primary_result,
+        llm_primary_failed=llm_primary_failed,
+        llm_primary_reason=llm_primary_reason,
+    )
+
+
+def _handle_ai_response_action(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    message_text: str | None,
+    saved_message: Message | None,
+    client_slug: str | None,
+    client_id: Any,
+    client_config: dict | None,
+    routing: dict,
+    intent: Any,
+    llm_primary_result: Any | None,
+    append_user_message: bool,
+    timing_context: dict,
+    intent_decomp_payload: dict | None,
+    class_router_result: dict | None,
+    expected_reply_shortcircuit: bool,
+    out_of_domain_signal: bool,
+    booking_signal: bool,
+    info_class_intents: set[str],
+    current_goal: str | None,
+    now: datetime,
+    send_and_save: Callable[..., tuple[str | None, bool]],
+    send_response: Callable[[str], bool],
+    finalize_response: Callable[..., str | None],
+) -> AiResponseOutcome:
+    from . import _legacy as legacy
+
+    llm_primary_used = False
+    llm_primary_failed = False
+    llm_primary_reason = None
+    bot_response = None
+    result_message = None
+    gen_result = llm_primary_result
+    if gen_result is None:
+        _ensure_rag_rewrite(
+            conversation=conversation,
+            saved_message=saved_message,
+            message_text=message_text,
+            client_slug=client_slug,
+            client_config=client_config,
+            timing_context=timing_context,
+        )
+        gen_result = legacy.generate_bot_response(
+            db,
+            conversation,
+            message_text,
+            client_slug,
+            append_user_message=append_user_message,
+            pending_hint=conversation.state == legacy.ConversationState.PENDING.value,
+            timing_context=timing_context,
+        )
+        _record_rag_meta(
+            conversation=conversation,
+            saved_message=saved_message,
+            timing_context=timing_context,
+        )
+
+    if not gen_result.ok:
+        bot_response = legacy.MSG_AI_ERROR
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "ai_response",
+                "decision": "ai_error",
+                "state": conversation.state,
+                "error": gen_result.error,
+            },
+        )
+        bot_response, sent = send_and_save(bot_response)
+        result_message = f"AI error: {gen_result.error}"
+        return AiResponseOutcome(
+            response=None,
+            bot_response=bot_response,
+            result_message=result_message,
+            llm_primary_failed=llm_primary_failed,
+            llm_primary_reason=llm_primary_reason,
+        )
+
+    response_text, confidence = gen_result.value
+
+    if confidence == "low_confidence":
+        miss_type = (
+            "llm_timeout"
+            if timing_context and timing_context.get("llm_timeout")
+            else "low_confidence"
+        )
+        legacy._record_knowledge_backlog(
+            db,
+            client_id=client_id,
+            conversation_id=conversation.id,
+            message=saved_message,
+            user_text=message_text,
+            miss_type=miss_type,
+        )
+        semantic_result = None
+        rewrite_query = None
+        info_intent_hint = False
+        if isinstance(intent_decomp_payload, dict):
+            raw_intents = intent_decomp_payload.get("intents")
+            if isinstance(raw_intents, list):
+                normalized_intents = {
+                    item.strip().casefold()
+                    for item in raw_intents
+                    if isinstance(item, str) and item.strip()
+                }
+                info_intent_hint = bool(normalized_intents & {"hours", "pricing", "duration"})
+        if info_intent_hint:
+            llm_primary_failed = True
+            llm_primary_reason = "low_confidence"
+        else:
+            router_meta = None
+            router_output = None
+            router_output_class = None
+            if isinstance(class_router_result, dict):
+                router_meta = class_router_result.get("router")
+                if isinstance(router_meta, dict):
+                    router_output = router_meta.get("output")
+                    if isinstance(router_output, dict):
+                        router_output_class = router_output.get("class")
+            if (
+                router_output_class == "out_of_domain"
+                and not (class_router_result.get("in_signals") or [])
+                and not expected_reply_shortcircuit
+            ):
+                bot_response = legacy.OUT_OF_DOMAIN_RESPONSE
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "out_of_domain",
+                        "decision": "router_low_confidence",
+                        "state": conversation.state,
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="out_of_domain",
+                    intent="out_of_domain",
+                    source="router_low_confidence",
+                    fast_intent=False,
+                )
+                bot_response, sent = send_and_save(bot_response)
+                result_message = (
+                    "Router OOD reply sent" if sent else "Router OOD reply send failed"
+                )
+                db.commit()
+                return AiResponseOutcome(
+                    response=WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    ),
+                    bot_response=bot_response,
+                    result_message=result_message,
+                    llm_primary_failed=llm_primary_failed,
+                    llm_primary_reason=llm_primary_reason,
+                )
+            if out_of_domain_signal and not expected_reply_shortcircuit:
+                bot_response = legacy.OUT_OF_DOMAIN_RESPONSE
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "out_of_domain",
+                        "decision": "domain_anchor",
+                        "state": conversation.state,
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="out_of_domain",
+                    intent="out_of_domain",
+                    source="domain_anchor",
+                    fast_intent=False,
+                )
+                bot_response, sent = send_and_save(bot_response)
+                result_message = (
+                    "Domain anchor OOD reply sent"
+                    if sent
+                    else "Domain anchor OOD reply send failed"
+                )
+                db.commit()
+                return AiResponseOutcome(
+                    response=WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    ),
+                    bot_response=bot_response,
+                    result_message=result_message,
+                    llm_primary_failed=llm_primary_failed,
+                    llm_primary_reason=llm_primary_reason,
+                )
+            if legacy._looks_like_time_only_request(message_text):
+                bot_response = legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "time_only_guard",
+                        "decision": "service_clarify",
+                        "state": conversation.state,
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="reply",
+                    intent="service_clarify",
+                    source="time_only_guard",
+                    fast_intent=False,
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message, {"time_only_guard": True}
+                    )
+                bot_response, sent = send_and_save(bot_response)
+                result_message = (
+                    "Time-only guard reply sent" if sent else "Time-only guard send failed"
+                )
+                db.commit()
+                return AiResponseOutcome(
+                    response=WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    ),
+                    bot_response=bot_response,
+                    result_message=result_message,
+                    llm_primary_failed=llm_primary_failed,
+                    llm_primary_reason=llm_primary_reason,
+                )
+            if not out_of_domain_signal:
+                explicit_service_hint = None
+                if message_text and client_slug:
+                    explicit_service_hint = legacy._extract_service_hint(
+                        message_text, client_slug
+                    )
+                intent_decomp_explicit_query = None
+                if isinstance(intent_decomp_payload, dict):
+                    raw_source = intent_decomp_payload.get("service_query_source")
+                    raw_query = intent_decomp_payload.get("service_query")
+                    if (
+                        isinstance(raw_query, str)
+                        and raw_query.strip()
+                        and raw_source != "context"
+                    ):
+                        intent_decomp_explicit_query = raw_query.strip()
+                controller_service_query = None
+                for state_key in ("router", "controller"):
+                    state = (
+                        class_router_result.get(state_key)
+                        if isinstance(class_router_result, dict)
+                        else None
+                    )
+                    if not isinstance(state, dict):
+                        continue
+                    output = state.get("output")
+                    if not isinstance(output, dict):
+                        continue
+                    slots = output.get("slots")
+                    if not isinstance(slots, dict):
+                        continue
+                    candidate = slots.get("service_query")
+                    if isinstance(candidate, str) and candidate.strip():
+                        controller_service_query = candidate.strip()
+                        break
+                in_signals = class_router_result.get("in_signals") or []
+                anchors_in_hits = int(class_router_result.get("anchors_in_hits") or 0)
+                service_semantic_allowed = bool(
+                    explicit_service_hint
+                    or intent_decomp_explicit_query
+                    or controller_service_query
+                    or booking_signal
+                    or info_intent_hint
+                    or in_signals
+                    or anchors_in_hits > 0
+                )
+                if not service_semantic_allowed:
+                    bot_response = legacy.OUT_OF_DOMAIN_RESPONSE
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "out_of_domain",
+                            "decision": "service_semantic_guard",
+                            "state": conversation.state,
+                        },
+                    )
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="out_of_domain",
+                        intent="out_of_domain",
+                        source="service_semantic_guard",
+                        fast_intent=False,
+                    )
+                    if saved_message:
+                        _update_message_decision_metadata(
+                            saved_message,
+                            {
+                                "service_semantic_match_skipped": True,
+                                "service_semantic_match_skip_reason": "low_signal",
+                            },
+                        )
+                    bot_response, sent = send_and_save(bot_response)
+                    result_message = (
+                        "Service semantic guard reply sent"
+                        if sent
+                        else "Service semantic guard reply send failed"
+                    )
+                    db.commit()
+                    return AiResponseOutcome(
+                        response=WebhookResponse(
+                            success=True,
+                            message=result_message,
+                            conversation_id=conversation.id,
+                            bot_response=bot_response,
+                        ),
+                        bot_response=bot_response,
+                        result_message=result_message,
+                        llm_primary_failed=llm_primary_failed,
+                        llm_primary_reason=llm_primary_reason,
+                    )
+                semantic_result = legacy.semantic_service_match(message_text, client_slug)
+                if not semantic_result:
+                    rewrite_query = legacy.rewrite_for_service_match(
+                        message_text,
+                        client_slug,
+                        client_config=client_config,
+                        timing_context=timing_context,
+                    )
+                    _record_llm_budget_trace(
+                        conversation=conversation,
+                        timing_context=timing_context,
+                    )
+                    if rewrite_query:
+                        semantic_result = legacy.semantic_service_match(rewrite_query, client_slug)
+            if semantic_result:
+                rewrite_used = bool(rewrite_query)
+                bot_response = semantic_result.response
+                legacy._reset_low_confidence_retry(conversation)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "service_semantic_matcher",
+                        "decision": semantic_result.action,
+                        "state": conversation.state,
+                        "score": semantic_result.score,
+                        "canonical_name": semantic_result.canonical_name,
+                        "suggestions": semantic_result.suggestions or [],
+                        "rewrite_used": rewrite_used,
+                        "rewrite_query": rewrite_query,
+                    },
+                )
+                if saved_message:
+                    llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+                    llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+                    llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "action": semantic_result.action,
+                            "intent": "service_semantic",
+                            "source": "service_semantic_matcher",
+                            "service_semantic_score": semantic_result.score,
+                            "service_semantic_rewrite_used": rewrite_used,
+                            "service_semantic_rewrite_query": rewrite_query,
+                            "fast_intent": False,
+                            "llm_primary_used": False,
+                            "llm_used": llm_used,
+                            "llm_timeout": llm_timeout,
+                            "llm_cache_hit": llm_cache_hit,
+                        },
+                    )
+                bot_response, sent = send_and_save(bot_response)
+                result_message = (
+                    "Service semantic matcher reply sent"
+                    if sent
+                    else "Service semantic matcher send failed"
+                )
+                db.commit()
+                return AiResponseOutcome(
+                    response=WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    ),
+                    bot_response=bot_response,
+                    result_message=result_message,
+                    llm_primary_failed=llm_primary_failed,
+                    llm_primary_reason=llm_primary_reason,
+                )
+            if conversation.state == legacy.ConversationState.PENDING.value:
+                bot_response = legacy.MSG_PENDING_LOW_CONFIDENCE
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "ai_response",
+                        "decision": "low_confidence_pending",
+                        "state": conversation.state,
+                    },
+                )
+                bot_response, sent = send_and_save(bot_response)
+                result_message = "Low confidence while pending, responded without re-escalation"
+            else:
+                context = legacy._get_conversation_context(conversation)
+                retry_count = legacy._get_low_confidence_retry_count(context)
+                if legacy.should_offer_low_confidence_retry(conversation, now):
+                    retry_count = 0
+
+                if retry_count < legacy.LOW_CONFIDENCE_MAX_RETRIES:
+                    clarify_intent = current_goal or "info"
+                    context_manager = legacy._get_context_manager(context)
+                    if legacy._should_escalate_for_clarify(context_manager, clarify_intent):
+                        clarify_count, _ = legacy._get_clarify_attempt_state(
+                            context_manager, clarify_intent
+                        )
+                        legacy._record_context_manager_decision(
+                            conversation,
+                            saved_message,
+                            decision="clarify_limit",
+                            updates={
+                                "clarify_attempt": {"intent": clarify_intent, "count": clarify_count},
+                                "clarify_reason": "low_confidence_retry",
+                                "clarify_limit": True,
+                            },
+                        )
+                        return AiResponseOutcome(
+                            response=legacy._handle_clarify_limit_escalation(
+                                db=db,
+                                conversation=conversation,
+                                user=user,
+                                message_text=message_text,
+                                saved_message=saved_message,
+                                source="ai_response",
+                                allow_handover=routing.get("allow_handover_create", False),
+                                send_response=send_response,
+                                finalize_response=finalize_response,
+                            ),
+                            bot_response=None,
+                            result_message=None,
+                            llm_primary_failed=llm_primary_failed,
+                            llm_primary_reason=llm_primary_reason,
+                        )
+                    legacy._register_clarify_attempt(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        intent=clarify_intent,
+                        now=now,
+                        reason="low_confidence_retry",
+                    )
+                    bot_response = legacy.MSG_LOW_CONFIDENCE_RETRY
+                    conversation.retry_offered_at = now
+                    context = legacy._set_low_confidence_retry_count(context, retry_count + 1)
+                    legacy._set_conversation_context(conversation, context)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "ai_response",
+                            "decision": "low_confidence_retry",
+                            "state": conversation.state,
+                            "retry_count": retry_count + 1,
+                        },
+                    )
+                    bot_response, sent = send_and_save(bot_response)
+                    result_message = "Low confidence: asked clarification before escalation"
+                else:
+                    confirmation = {
+                        "status": "pending",
+                        "asked_at": now.isoformat(),
+                        "trigger_type": "low_confidence",
+                        "trigger_value": "low_confidence",
+                        "user_message": message_text,
+                    }
+                    context = legacy._set_handover_confirmation(context, confirmation)
+                    legacy._set_conversation_context(conversation, context)
+
+                    bot_response = legacy.MSG_HANDOVER_CONFIRM
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "ai_response",
+                            "decision": "low_confidence_handover_confirm",
+                            "state": conversation.state,
+                            "retry_count": retry_count,
+                        },
+                    )
+                    bot_response, sent = send_and_save(bot_response)
+                    result_message = (
+                        "Low confidence: asked for handover confirmation"
+                        if sent
+                        else "Low confidence: handover confirmation send failed"
+                    )
+
+    elif confidence == "bot_inactive":
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "ai_response",
+                "decision": "bot_inactive",
+                "state": conversation.state,
+            },
+        )
+        result_message = f"Bot not active (state: {conversation.state})"
+
+    elif response_text:
+        bot_response = response_text
+        legacy.logger.debug(
+            f"bot_response: {bot_response[:100] if bot_response else 'None/Empty'}..."
+        )
+        legacy._reset_low_confidence_retry(conversation)
+        llm_primary_used = True
+        trace = _attach_llm_cache_flag(
+            {
+                "stage": "ai_response",
+                "decision": "bot_reply",
+                "state": conversation.state,
+                "confidence": confidence,
+            },
+            timing_context,
+        )
+        _record_decision_trace(conversation, trace)
+        bot_response, sent = send_and_save(bot_response)
+        result_message = "Message sent" if sent else "Failed to send"
+    else:
+        legacy._record_knowledge_backlog(
+            db,
+            client_id=client_id,
+            conversation_id=conversation.id,
+            message=saved_message,
+            user_text=message_text,
+            miss_type="clarify",
+        )
+        explicit_service_hint = None
+        if message_text and client_slug:
+            explicit_service_hint = legacy._extract_service_hint(message_text, client_slug)
+        intent_decomp_explicit_query = None
+        info_intent_hint = False
+        if isinstance(intent_decomp_payload, dict):
+            raw_source = intent_decomp_payload.get("service_query_source")
+            raw_query = intent_decomp_payload.get("service_query")
+            if (
+                isinstance(raw_query, str)
+                and raw_query.strip()
+                and raw_source != "context"
+            ):
+                intent_decomp_explicit_query = raw_query.strip()
+            raw_intents = intent_decomp_payload.get("intents")
+            if isinstance(raw_intents, list):
+                normalized_intents = {
+                    item.strip().casefold()
+                    for item in raw_intents
+                    if isinstance(item, str) and item.strip()
+                }
+                info_intent_hint = bool(
+                    normalized_intents & {"hours", "pricing", "duration", "location"}
+                )
+        has_domain_signal = bool(
+            explicit_service_hint
+            or intent_decomp_explicit_query
+            or booking_signal
+            or info_class_intents
+            or info_intent_hint
+            or int(class_router_result.get("anchors_in_hits") or 0) > 0
+        )
+        if not has_domain_signal and not expected_reply_shortcircuit:
+            bot_response = legacy.OUT_OF_DOMAIN_RESPONSE
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "out_of_domain",
+                    "decision": "no_response_guard",
+                    "state": conversation.state,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="out_of_domain",
+                intent="out_of_domain",
+                source="no_response_guard",
+                fast_intent=False,
+            )
+            bot_response, sent = send_and_save(bot_response)
+            result_message = (
+                "No-response OOD reply sent" if sent else "No-response OOD reply send failed"
+            )
+            db.commit()
+            return AiResponseOutcome(
+                response=WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                ),
+                bot_response=bot_response,
+                result_message=result_message,
+                llm_primary_failed=llm_primary_failed,
+                llm_primary_reason=llm_primary_reason,
+            )
+        context = legacy._get_conversation_context(conversation)
+        retry_count = legacy._get_low_confidence_retry_count(context)
+        if legacy.should_offer_low_confidence_retry(conversation, now):
+            retry_count = 0
+
+        if retry_count < legacy.LOW_CONFIDENCE_MAX_RETRIES:
+            bot_response = legacy.MSG_LOW_CONFIDENCE_RETRY
+            conversation.retry_offered_at = now
+            context = legacy._set_low_confidence_retry_count(context, retry_count + 1)
+            legacy._set_conversation_context(conversation, context)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "ai_response",
+                    "decision": "no_response_retry",
+                    "state": conversation.state,
+                    "retry_count": retry_count + 1,
+                },
+            )
+            bot_response, sent = send_and_save(bot_response)
+            result_message = "No response: asked clarification"
+        else:
+            confirmation = {
+                "status": "pending",
+                "asked_at": now.isoformat(),
+                "trigger_type": "low_confidence",
+                "trigger_value": "low_confidence",
+                "user_message": message_text,
+            }
+            context = legacy._set_handover_confirmation(context, confirmation)
+            legacy._set_conversation_context(conversation, context)
+
+            bot_response = legacy.MSG_HANDOVER_CONFIRM
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "ai_response",
+                    "decision": "no_response_handover_confirm",
+                    "state": conversation.state,
+                    "retry_count": retry_count,
+                },
+            )
+            bot_response, sent = send_and_save(bot_response)
+            result_message = (
+                "No response: asked for handover confirmation"
+                if sent
+                else "No response: handover confirmation send failed"
+            )
+
+    if saved_message:
+        llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+        llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+        llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+        _update_message_decision_metadata(
+            saved_message,
+            {
+                "action": "ai_response",
+                "intent": intent.value if intent else None,
+                "source": "llm" if llm_used else "rule",
+                "fast_intent": False,
+                "llm_primary_used": llm_primary_used,
+                "llm_used": llm_used,
+                "llm_timeout": llm_timeout,
+                "llm_cache_hit": llm_cache_hit,
+            },
+        )
+
+    return AiResponseOutcome(
+        response=None,
+        bot_response=bot_response,
+        result_message=result_message,
+        llm_primary_failed=llm_primary_failed,
+        llm_primary_reason=llm_primary_reason,
+    )
+
+
+__all__ = [
+    "AiResponseOutcome",
+    "ConsultFlowResult",
+    "LlmPrimaryOutcome",
+    "_apply_quiet_hours_notice",
+    "_ensure_rag_rewrite",
+    "_finalize_bot_response",
+    "_handle_ai_response_action",
+    "_handle_consult_flow",
+    "_handle_llm_primary",
+    "_maybe_apply_consult_return",
+    "_maybe_append_booking_cta",
+    "_record_rag_meta",
+    "_send_and_save",
+    "_send_response",
+]

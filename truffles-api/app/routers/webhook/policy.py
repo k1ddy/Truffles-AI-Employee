@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import re
+import time
 
-from app.models import Client
+from sqlalchemy.orm import Session
+
+from app.models import Client, Conversation, Message, User
+from app.schemas.webhook import WebhookResponse
+from app.services.demo_salon_knowledge import DemoSalonDecision
 from app.services.intent_service import Intent
 
 _POLICY_SECTIONS = (
@@ -535,3 +540,363 @@ def _get_policy_handler(client: Client | None) -> dict | None:
     payload = dict(handler)
     payload["policy_pack"] = policy_pack
     return payload
+
+
+def _apply_policy_decision(
+    decision: DemoSalonDecision,
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    message_text: str,
+    saved_message: Message | None,
+    policy_gate: str,
+    policy_section: str | None,
+    risk_level: str | None,
+    sidecar: str | None,
+    policy_t0: float | None,
+    gate_label: str,
+    booking_wants_flow: bool | None,
+    policy_type: str | None,
+    policy_source: str,
+    policy_pack_missing: bool,
+    routing: dict,
+    client_slug: str,
+    send_and_save,
+    record_policy_count,
+    record_escalation_metric,
+    log_timing,
+) -> WebhookResponse:
+    from . import _legacy as legacy
+
+    bot_response = decision.response or legacy.MSG_ESCALATED
+    if sidecar:
+        bot_response = legacy._combine_sidecar(bot_response, sidecar)
+    legacy._reset_low_confidence_retry(conversation)
+    record_policy_count(client_slug, policy_gate)
+    if decision.action == "escalate":
+        record_escalation_metric(policy_gate)
+
+    result_message = "Policy reply sent"
+    if decision.action == "escalate":
+        _, reused, telegram_sent = legacy._reuse_active_handover(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message=message_text,
+            source=policy_source,
+            intent=decision.intent,
+        )
+        if reused:
+            result_message = f"Policy reuse, telegram={'sent' if telegram_sent else 'failed'}"
+        elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and routing.get(
+            "allow_handover_create", False
+        ):
+            result = legacy.escalate_to_pending(
+                db=db,
+                conversation=conversation,
+                user_message=message_text,
+                trigger_type="intent",
+                trigger_value=decision.intent or "policy",
+            )
+            if result.ok:
+                handover = result.value
+                telegram_sent = legacy.send_telegram_notification(
+                    db=db,
+                    handover=handover,
+                    conversation=conversation,
+                    user=user,
+                    message=message_text,
+                )
+                result_message = f"Policy escalation, telegram={'sent' if telegram_sent else 'failed'}"
+            else:
+                result_message = f"Policy escalation failed: {result.error}"
+        else:
+            result_message = "Policy escalation skipped (already pending)"
+
+    router_skip_reason = "law_gate" if policy_gate == "hard_law" else "policy_gate"
+    router_gate_meta = legacy._set_router_observability(
+        saved_message,
+        eligible=False,
+        reason=router_skip_reason,
+    )
+    trace_payload = {
+        "stage": "policy_gate",
+        "decision": decision.action,
+        "intent": decision.intent,
+        "state": conversation.state,
+        "policy_type": policy_type,
+        "policy_gate": policy_gate,
+        "source": policy_source,
+    }
+    if policy_section:
+        trace_payload["policy_section"] = policy_section
+    if isinstance(risk_level, str) and risk_level:
+        trace_payload["risk_level"] = risk_level
+    if booking_wants_flow is not None:
+        trace_payload["booking_wants_flow"] = booking_wants_flow
+    trace_payload.update(router_gate_meta)
+    legacy._record_decision_trace(conversation, trace_payload)
+    legacy._record_message_decision_meta(
+        saved_message,
+        action=decision.action,
+        intent=decision.intent,
+        source=policy_source,
+        fast_intent=False,
+    )
+    if saved_message:
+        meta_updates = {"policy_gate": policy_gate, "source": policy_source}
+        if policy_pack_missing:
+            meta_updates["policy_pack_missing"] = True
+        if policy_section:
+            meta_updates["policy_section"] = policy_section
+        if isinstance(risk_level, str) and risk_level:
+            meta_updates["risk_level"] = risk_level
+        legacy._update_message_decision_metadata(saved_message, meta_updates)
+    bot_response, sent = send_and_save(bot_response, allow_quiet_hours=False)
+    if not sent:
+        result_message = f"{result_message}; response_send=failed"
+    if policy_t0 is not None:
+        log_timing(
+            "policy_gate_ms",
+            (time.monotonic() - policy_t0) * 1000,
+            {
+                "policy_type": policy_type,
+                "booking_wants_flow": booking_wants_flow,
+                "gate": gate_label,
+            },
+        )
+    db.commit()
+    return WebhookResponse(
+        success=True,
+        message=result_message,
+        conversation_id=conversation.id,
+        bot_response=bot_response,
+    )
+
+
+def _handle_hard_law_gate(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    message_text: str | None,
+    saved_message: Message | None,
+    policy_pack: dict | None,
+    bypass_domain_flows: bool,
+    routing: dict,
+    policy_type: str | None,
+    policy_source: str,
+    policy_pack_missing: bool,
+    client_slug: str,
+    send_and_save,
+    record_policy_count,
+    record_escalation_metric,
+    log_timing,
+) -> WebhookResponse | None:
+    if not policy_pack or bypass_domain_flows or not routing["allow_truth_gate_reply"] or not message_text:
+        return None
+
+    hard_law_t0 = time.monotonic()
+    hard_law_match = _detect_hard_law_match(message_text, policy_pack=policy_pack)
+    if not hard_law_match:
+        return None
+    section_key, section = hard_law_match
+    risk_level = _resolve_policy_risk_level(section) or "high"
+    intent = _resolve_policy_intent(section_key, section)
+    response = section.get("response") if isinstance(section, dict) else None
+    decision = DemoSalonDecision(
+        action="escalate",
+        response=response or _get_escalation_fallback(),
+        intent=intent,
+    )
+    return _apply_policy_decision(
+        decision,
+        db=db,
+        conversation=conversation,
+        user=user,
+        message_text=message_text,
+        saved_message=saved_message,
+        policy_gate="hard_law",
+        policy_section=section_key,
+        risk_level=risk_level,
+        sidecar=None,
+        policy_t0=hard_law_t0,
+        gate_label="hard_law",
+        booking_wants_flow=None,
+        policy_type=policy_type,
+        policy_source=policy_source,
+        policy_pack_missing=policy_pack_missing,
+        routing=routing,
+        client_slug=client_slug,
+        send_and_save=send_and_save,
+        record_policy_count=record_policy_count,
+        record_escalation_metric=record_escalation_metric,
+        log_timing=log_timing,
+    )
+
+
+def _handle_policy_escalation_gate(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    message_text: str | None,
+    saved_message: Message | None,
+    policy_pack: dict | None,
+    hard_law_sections: set[str],
+    bypass_domain_flows: bool,
+    routing: dict,
+    policy_type: str | None,
+    policy_source: str,
+    policy_pack_missing: bool,
+    booking_wants_flow: bool | None,
+    intent_hints: list[str] | None,
+    consult_intent: bool,
+    current_goal: str | None,
+    multi_intent_other_followup: str | None,
+    client_slug: str,
+    send_and_save,
+    record_policy_count,
+    record_escalation_metric,
+    log_timing,
+) -> WebhookResponse | None:
+    from . import _legacy as legacy
+
+    if bypass_domain_flows or not routing["allow_truth_gate_reply"] or not message_text:
+        return None
+
+    policy_t0 = time.monotonic()
+    intent_hints = intent_hints if policy_pack else None
+    hard_law_match = _detect_hard_law_match(
+        message_text,
+        policy_pack=policy_pack,
+        intent_hints=intent_hints or None,
+    )
+    if hard_law_match:
+        section_key, section = hard_law_match
+        risk_level = _resolve_policy_risk_level(section) or "high"
+        intent = _resolve_policy_intent(section_key, section)
+        response = section.get("response") if isinstance(section, dict) else None
+        decision = DemoSalonDecision(
+            action="escalate",
+            response=response or _get_escalation_fallback(),
+            intent=intent,
+        )
+        return _apply_policy_decision(
+            decision,
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text=message_text,
+            saved_message=saved_message,
+            policy_gate="hard_law",
+            policy_section=section_key,
+            risk_level=risk_level,
+            sidecar=None,
+            policy_t0=policy_t0,
+            gate_label="hard_law",
+            booking_wants_flow=booking_wants_flow,
+            policy_type=policy_type,
+            policy_source=policy_source,
+            policy_pack_missing=policy_pack_missing,
+            routing=routing,
+            client_slug=client_slug,
+            send_and_save=send_and_save,
+            record_policy_count=record_policy_count,
+            record_escalation_metric=record_escalation_metric,
+            log_timing=log_timing,
+        )
+
+    policy_match = _detect_policy_gate_section(
+        message_text,
+        policy_pack=policy_pack,
+        hard_law_sections=hard_law_sections | {"discounts"},
+    )
+    if policy_match:
+        section_key, section = policy_match
+        if section_key == "complaint":
+            normalized_text = legacy._normalize_text(message_text)
+            explicit_keywords, consult_override_keywords = _resolve_complaint_guard(policy_pack)
+            complaint_signal = bool(
+                normalized_text
+                and explicit_keywords
+                and legacy._contains_any(normalized_text, explicit_keywords)
+            )
+            consult_override = bool(
+                (consult_intent or current_goal == "consult")
+                and normalized_text
+                and consult_override_keywords
+                and legacy._contains_any(normalized_text, consult_override_keywords)
+            )
+            if saved_message:
+                legacy._update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "complaint_signal": complaint_signal,
+                        "consult_override": consult_override,
+                    },
+                )
+            legacy._record_decision_trace(
+                conversation,
+                {
+                    "stage": "complaint_guard",
+                    "decision": "suppressed"
+                    if (consult_override or not complaint_signal)
+                    else "accepted",
+                    "complaint_signal": complaint_signal,
+                    "consult_override": consult_override,
+                },
+            )
+            if consult_override or not complaint_signal:
+                section_key = ""
+
+        if section_key:
+            action = section.get("action") if isinstance(section, dict) else None
+            if not isinstance(action, str) or not action.strip():
+                action = "escalate"
+            response = section.get("response") if isinstance(section, dict) else None
+            intent = _resolve_policy_intent(section_key, section)
+            risk_level = _resolve_policy_risk_level(section)
+            decision = DemoSalonDecision(
+                action=action,
+                response=response or _get_escalation_fallback(),
+                intent=intent,
+            )
+            return _apply_policy_decision(
+                decision,
+                db=db,
+                conversation=conversation,
+                user=user,
+                message_text=message_text,
+                saved_message=saved_message,
+                policy_gate=section_key,
+                policy_section=section_key,
+                risk_level=risk_level,
+                sidecar=multi_intent_other_followup,
+                policy_t0=policy_t0,
+                gate_label="policy_gate",
+                booking_wants_flow=booking_wants_flow,
+                policy_type=policy_type,
+                policy_source=policy_source,
+                policy_pack_missing=policy_pack_missing,
+                routing=routing,
+                client_slug=client_slug,
+                send_and_save=send_and_save,
+                record_policy_count=record_policy_count,
+                record_escalation_metric=record_escalation_metric,
+                log_timing=log_timing,
+            )
+
+    log_timing(
+        "policy_gate_ms",
+        (time.monotonic() - policy_t0) * 1000,
+        {"policy_type": policy_type, "booking_wants_flow": booking_wants_flow, "gate": "escalation"},
+    )
+    return None
+
+
+def _get_escalation_fallback() -> str:
+    from . import _legacy as legacy
+
+    return legacy.MSG_ESCALATED
