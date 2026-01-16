@@ -125,6 +125,13 @@ Solo founder. Технически не глубокий, но умный и б�
 - Локальный `pytest` без явного разрешения запрещён; единственный gate — CI, core и long гоняются раздельными джобами. Нарушение → stop-line и фиксация в STATE.
 - Live-check: если у роли нет WA‑клиента/allowlist → статус BLOCKED (сразу сообщить). Не просить Жанбола отправлять сообщения. Live-check делают только Hands/OPS с тестовым JID и снимают conv_id + trace/meta.
 
+**GIT / BRANCH / WORKTREE (обязательно):**
+- Одно окно/терминал = одна ветка + один worktree. Не работать в чужой ветке.
+- В Task Package обязательно указать: Branch, Worktree path, Base ref, Merge policy, Cleanup.
+- Запрещён rebase; только merge из base.
+- Любые неожиданные файлы/изменения → STOP, не продолжать, задать вопрос.
+- Cleanup после merge делает Brain (удалить ветку + worktree).
+
 **One‑issue flow:**
 - 1 проблема → 1 правка → 1 проверка → 1 запись в STATE.md.
 - Каждый вывод/решение → короткое “почему” (1–2 предложения) + evidence.
