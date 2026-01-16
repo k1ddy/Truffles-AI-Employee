@@ -1478,10 +1478,9 @@ import mimetypes
 import os
 import re
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import timedelta, timezone
 from urllib.parse import urlparse
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import httpx
 from sqlalchemy import text
