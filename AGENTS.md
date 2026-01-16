@@ -111,12 +111,14 @@ Solo founder. Технически не глубокий, но умный и б�
 **Stop‑the‑line:**
 - Любая ошибка → стоп, пока не исправлена.
 - Любые лишние файлы в diff → стоп.
+- Hands обязаны в отчёте приложить `git status -sb` и `git diff --stat`.
 - Без tests + live‑check + trace/meta → merge запрещён.
 - Live‑check указан в задаче → без evidence (conv_id + decision_trace/meta) STOP, никаких коммитов/STATE.
 - Любой warning (tests/logs/CI) → стоп до решения Brain.
 - CI fail важнее локального pass → стоп.
 - При CI fail сразу отдать пакет: run URL + failed job + failed step + 5–15 строк ошибки + точная команда + матрица (OS/runtime).
 - Запрещены “подрисовки” ответов в тестах; существующие EVAL‑кейсы менять только как багфикс с evidence.
+- Запрещены изменения БД/trace ради evidence (например, чистка `decision_trace`).
 - Запрещены проверки DoD через `docker cp` или `docker run -v`; тесты принимаются только после CI build + restart + `docker exec`.
 - Hands не обновляют `STATE.md` (делает Brain последним шагом).
 - Локальный `pytest` без явного разрешения запрещён; единственный gate — CI, core и long гоняются раздельными джобами. Нарушение → stop-line и фиксация в STATE.
