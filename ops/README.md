@@ -78,6 +78,23 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "docker exec -i truff
 
 ## ЧАСТЫЕ ОПЕРАЦИИ
 
+### 0. Деплой с проверкой версии (обязателен в проде)
+```bash
+IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main \
+PULL_IMAGE=1 REQUIRE_GHCR=1 VERIFY_VERSION=1 \
+EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main \
+bash /home/zhan/restart_api.sh
+```
+
+Проверка вручную:
+```bash
+python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
+  --expected-commit <sha> --expected-version main
+```
+
+**DoD:** `/admin/version` возвращает `version != unknown` и `git_commit == <sha>`.  
+**STOP:** если версия `unknown` или commit не совпадает.
+
 ### 1. Сбросить muted status
 ```bash
  # Файл лежит на сервере: ~/truffles-main/ops/reset_muted.sql
@@ -107,7 +124,7 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "curl -s \"https://ap
 
 Важно:
 - Реальный inbound = WA‑сообщение от клиента → ChatFlow → `/webhook/{client_slug}`.
-- ChatFlow `send-text` — outbound и не создаёт inbound.
+- ChatFlow `send-text` — outbound; inbound появляется только если получатель — ChatFlow‑инстанс (ChatFlow → ChatFlow).
 - POST на `/webhook` — симуляция (использовать только если DoD разрешает).
 - В БД поле называется `messages.metadata` (JSONB), не `message_metadata`.
 - instanceId в webhook — это routing‑token (наш), provider instanceId ChatFlow не используется.
@@ -147,6 +164,37 @@ SELECT o.id, o.created_at,
 FROM outbox_messages o
 WHERE o.payload_json->'body'->'metadata'->>'messageId' = '<message_id_from_step_3>'
 LIMIT 1;
+```
+
+---
+
+## Live-check runner (автоматизация)
+
+**Цель:** автоматизированные live‑checks по CA‑плану с паузами/вариациями/опечатками.
+
+**Запуск:**
+```bash
+CHATFLOW_TOKEN=... \
+CHATFLOW_INSTANCE_ID=... \
+CHATFLOW_JID=... \
+python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max-wait 15
+```
+
+Runner печатает JSON‑лог (marker, case_id, sent_at, expected_policy_section).  
+Marker формат: `LC:<suite>:<case_id>:<timestamp>:<seq>`.
+
+**Evidence (SQL):**
+```sql
+SELECT m.id, m.created_at, m.content,
+       m.metadata->>'messageId' AS message_id,
+       m.metadata->'decision_meta' AS decision_meta,
+       c.id AS conversation_id
+FROM messages m
+JOIN conversations c ON c.id = m.conversation_id
+WHERE m.role = 'user'
+  AND m.content ILIKE '%LC:%'
+ORDER BY m.created_at DESC
+LIMIT 20;
 ```
 
 ---

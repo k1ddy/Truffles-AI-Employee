@@ -139,13 +139,13 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 100"
 ### Деплой API (prod)
 ```bash
 # CI build/push → pull image
-ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main bash ~/restart_api.sh"
 
 # Локальная сборка (fallback)
 ssh -p 222 zhan@5.188.241.234 "docker build -t truffles-api_truffles-api /home/zhan/truffles-main/truffles-api"
 ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 ```
-`restart_api.sh` поддерживает `IMAGE_NAME` и `PULL_IMAGE=1`.
+`restart_api.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`.
 
 ### Перезапуск API (без обновления кода)
 ```bash

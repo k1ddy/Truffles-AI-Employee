@@ -14,3 +14,7 @@ If conflict, follow owner docs; do not add new norms here.
 Start ritual: see `AGENTS.md` (Question gate, Task Package, one-issue flow).
 Task Package must include Branch, Worktree path, Base ref, Merge policy, Cleanup (per `AGENTS.md`).
 Mandatory: follow `STRUCTURE.md` → "ЖЕЛЕЗНЫЙ ПРОЦЕСС СЕССИИ" and `STRUCTURE.md` → "КАНОН-FREEZE" every session.
+Mandatory: open `SPECS/SYSTEM_REFERENCE.md` → "Start Here — Process Map".
+Mandatory (testing): open `SPECS/SYSTEM_REFERENCE.md` → "Live-check SOP (CA audit)".
+Mandatory (CA audit): open `STRATEGY/TECH_ROADMAP.md` → "CANON AUDIT PLAN (P0)".
+Mandatory (deploy): open `SPECS/SYSTEM_REFERENCE.md` → "Deploy Guardrails (anti-drift)".

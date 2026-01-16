@@ -695,6 +695,32 @@
   - decision_meta.rag_scores.bm25_filter: `{"branch_id":"cf86bee7-e38f-4c8c-a087-aa4961911e0b","client_slug":"truffles","filter_mode":"branch","filter_reason":"branch_filter_empty","knowledge_tag":null}`
   - decision_trace (rag_retrieve): `{"filter_mode":"branch","filter_reason":"branch_filter_empty","branch_id":"cf86bee7-e38f-4c8c-a087-aa4961911e0b"}`
 
+### 2026-01-16 — PRECHECK ChatFlow inbound (Instance A → B)
+
+**Что сделали:**
+- Отправили send-text из INSTANCE_TRUFFLES на JID demo_salon с маркером `LIVECHK-A2B-20260116-133042`.
+- Проверили inbound в БД и наличие decision_meta.
+
+**Evidence:**
+- Marker: `LIVECHK-A2B-20260116-133042`
+- SQL (messages inbound):
+  - msg_id `2096fa75-229d-4c0a-bc1d-501be4a66ed0`, messageId `3EB0E63F868442246E1259`, conv_id `4b355349-15bc-41df-b26d-4c76a6e7be41`
+  - created_at `2026-01-16 08:30:46.891377+00`, instance_id `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`, remote_jid `77759841926@s.whatsapp.net`, client_name `demo_salon`
+- SQL (decision_meta): action `match`, policy_gate `NULL`, llm_used `false`
+- PASS: role=user + marker found + decision_meta present; instance_id=demo_salon; remote_jid=sender (Instance TRUFFLES) `77759841926@s.whatsapp.net`
+
+**Note/GAP:**
+- Provided INSTANCE_SALON (client_id=salon) не найден в БД; inbound instance_id соответствует demo_salon. Нужна верификация корректного receiver instance_id.
+
+### 2026-01-16 — CA-01 refund (policy_gate hard_law / payment_info)
+
+**Evidence:**
+- conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+- message_id `3EB0D4278723BEEB9A381B`
+- decision_meta: action=escalate, policy_gate=hard_law, policy_section=payment_info, intent=payment, llm_used=false
+- decision_trace: stage=policy_gate, policy_gate=hard_law, policy_section=payment_info, decision=escalate, intent=payment, recorded_at `2026-01-16T11:57:49.740443+00:00`
+- state: bot_active (pending закрыт)
+
 ### 2026-01-16 — RCA: trace retention drops booking_interrupt/multi_truth
 
 **Дефект:** при `booking_interrupt_info=true` в decision_meta отсутствуют `decision_trace.stage=booking_interrupt/multi_truth`.

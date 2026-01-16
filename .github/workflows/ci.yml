@@ -248,4 +248,7 @@ jobs:
             if [ "${{ github.ref }}" != "refs/heads/main" ]; then
               IMAGE_TAG=sha-${{ github.sha }}
             fi
-            IMAGE_NAME=${{ env.IMAGE_NAME }}:${IMAGE_TAG} PULL_IMAGE=1 bash ~/restart_api.sh
+            IMAGE_NAME=${{ env.IMAGE_NAME }}:${IMAGE_TAG} PULL_IMAGE=1 \
+            REQUIRE_GHCR=1 VERIFY_VERSION=1 \
+            EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
+            bash ~/restart_api.sh

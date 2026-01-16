@@ -7,9 +7,222 @@
 - Состояние conversations
 - Состояние handovers
 """
+import argparse
+import json
 import os
+import random
 import subprocess
+import sys
+import time
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
+
+LIVECHECK_SUITES = {
+    "ca01-core": [
+        {
+            "case_id": "CA01_REFUND",
+            "expected_policy_section": "refund",
+            "messages": [
+                "хочу вернуть деньги за услугу",
+                "верните оплату пожалуйста",
+                "нужен возврат денег",
+            ],
+        },
+        {
+            "case_id": "CA01_PAYMENT",
+            "expected_policy_section": "payment_info",
+            "messages": [
+                "можно оплатить картой?",
+                "есть оплата каспи?",
+                "можно оплатить переводом?",
+            ],
+        },
+        {
+            "case_id": "CA01_RESCHEDULE",
+            "expected_policy_section": "reschedule",
+            "messages": [
+                "перенесите запись на завтра",
+                "поменять дату записи",
+                "переписать на другой день",
+            ],
+        },
+        {
+            "case_id": "CA01_MEDICAL",
+            "expected_policy_section": "medical",
+            "messages": [
+                "у меня аллергия на гель-лак",
+                "жжет после окрашивания",
+                "можно беременным на процедуру?",
+            ],
+        },
+    ],
+    "ca01-extended": [
+        {
+            "case_id": "CA01_CANCEL",
+            "expected_policy_section": "cancel",
+            "messages": [
+                "отмените запись пожалуйста",
+                "я не приду, отмените",
+            ],
+        },
+        {
+            "case_id": "CA01_LEGAL",
+            "expected_policy_section": "legal",
+            "messages": [
+                "хочу договор и оферту",
+                "у меня юридическая претензия",
+            ],
+        },
+        {
+            "case_id": "CA01_COMPLAINT",
+            "expected_policy_section": "complaint",
+            "messages": [
+                "жалоба: плохо сделали",
+                "недоволен качеством услуги",
+            ],
+        },
+    ],
+}
+
+NOISE_SUFFIXES = ["плз", "срочно", "спс"]
+
+def _parse_livecheck_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py livecheck",
+        description="Run live-check runner via ChatFlow send-text.",
+    )
+    parser.add_argument("--suite", default="ca01-core", choices=sorted(LIVECHECK_SUITES.keys()))
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--min-wait", type=float, default=5.0)
+    parser.add_argument("--max-wait", type=float, default=15.0)
+    parser.add_argument("--noise", choices=["none", "low"], default="low")
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args(argv)
+
+def _apply_noise(text, rng, level):
+    if level == "none":
+        return text
+    suffix = rng.choice(NOISE_SUFFIXES)
+    return f"{text} {suffix}"
+
+def _send_chatflow_message(api_url, token, instance_id, jid, message, timeout):
+    params = {
+        "token": token,
+        "instance_id": instance_id,
+        "jid": jid,
+        "msg": message,
+    }
+    query = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
+    url = f"{api_url}?{query}"
+    req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = resp.read().decode("utf-8", errors="replace")
+        return resp.status, body
+
+def _run_livecheck(args):
+    suite = LIVECHECK_SUITES.get(args.suite)
+    if not suite:
+        raise SystemExit(f"Unknown suite: {args.suite}")
+    token = os.environ.get("CHATFLOW_TOKEN")
+    instance_id = os.environ.get("CHATFLOW_INSTANCE_ID")
+    jid = os.environ.get("CHATFLOW_JID")
+    api_url = os.environ.get("CHATFLOW_API_URL", "https://app.chatflow.kz/api/v1/send-text")
+    timeout = float(os.environ.get("CHATFLOW_TIMEOUT_SECONDS", "30"))
+    if not token or not instance_id or not jid:
+        raise SystemExit("Missing CHATFLOW_TOKEN/CHATFLOW_INSTANCE_ID/CHATFLOW_JID in env.")
+
+    rng = random.Random(args.seed or int(time.time()))
+    min_wait = min(args.min_wait, args.max_wait)
+    max_wait = max(args.min_wait, args.max_wait)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+    for idx, case in enumerate(suite, start=1):
+        base_text = rng.choice(case["messages"])
+        text = _apply_noise(base_text, rng, args.noise)
+        marker = f"LC:{args.suite}:{case['case_id']}:{timestamp}:{idx:02d}"
+        message = f"{text} [{marker}]"
+        sent_at = datetime.now(timezone.utc).isoformat()
+        status = "dry_run"
+        response_body = None
+        response_status = None
+        if not args.dry_run:
+            response_status, response_body = _send_chatflow_message(
+                api_url, token, instance_id, jid, message, timeout
+            )
+            status = "sent" if response_status == 200 else "error"
+        log = {
+            "case_id": case["case_id"],
+            "marker": marker,
+            "text": message,
+            "sent_at": sent_at,
+            "expected_policy_section": case["expected_policy_section"],
+            "status": status,
+            "http_status": response_status,
+        }
+        if response_body:
+            log["response"] = response_body[:200]
+        print(json.dumps(log, ensure_ascii=False))
+        if idx < len(suite):
+            time.sleep(rng.uniform(min_wait, max_wait))
+
+
+def _parse_deploy_verify_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py deploy-verify",
+        description="Verify deployed build via /admin/version.",
+    )
+    parser.add_argument("--base-url", default="http://localhost:8000")
+    parser.add_argument("--expected-commit", default=None)
+    parser.add_argument("--expected-version", default=None)
+    parser.add_argument("--timeout", type=float, default=10.0)
+    parser.add_argument("--retries", type=int, default=10)
+    parser.add_argument("--sleep", type=float, default=1.0)
+    return parser.parse_args(argv)
+
+
+def _fetch_json(url, timeout):
+    req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = resp.read().decode("utf-8", errors="replace")
+        return json.loads(body)
+
+
+def _run_deploy_verify(args):
+    url = args.base_url.rstrip("/") + "/admin/version"
+    last_error = None
+    payload = None
+    for _ in range(max(args.retries, 1)):
+        try:
+            payload = _fetch_json(url, args.timeout)
+            break
+        except Exception as exc:
+            last_error = str(exc)
+            time.sleep(max(args.sleep, 0))
+
+    if not isinstance(payload, dict):
+        raise SystemExit(f"deploy-verify failed: no response from {url}. last_error={last_error}")
+
+    version = payload.get("version") or ""
+    git_commit = payload.get("git_commit") or ""
+
+    if not version or version == "unknown":
+        raise SystemExit("deploy-verify failed: version unknown")
+    if args.expected_commit and git_commit != args.expected_commit:
+        raise SystemExit(
+            f"deploy-verify failed: git_commit mismatch (expected {args.expected_commit}, got {git_commit})"
+        )
+    if args.expected_version and version != args.expected_version:
+        raise SystemExit(
+            f"deploy-verify failed: version mismatch (expected {args.expected_version}, got {version})"
+        )
+
+    print(
+        json.dumps(
+            {"ok": True, "version": version, "git_commit": git_commit, "url": url},
+            ensure_ascii=False,
+        )
+    )
 
 def run_command(command):
     return subprocess.run(command, capture_output=True, text=True)
@@ -47,6 +260,13 @@ def run_curl(url, headers=None):
             cmd.extend(["-H", f"{key}: {value}"])
     cmd.append(url)
     return run_command(cmd)
+
+if len(sys.argv) > 1 and sys.argv[1] == "livecheck":
+    _run_livecheck(_parse_livecheck_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "deploy-verify":
+    _run_deploy_verify(_parse_deploy_verify_args(sys.argv[2:]))
+    raise SystemExit(0)
 
 print("=" * 60)
 print("ДИАГНОСТИКА TRUFFLES")

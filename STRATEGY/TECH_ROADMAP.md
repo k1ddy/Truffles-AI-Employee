@@ -50,6 +50,7 @@
 - Статусы в этом плане — статусы аудита, не статусы системы. Фактический статус и evidence фиксируются только в `STATE.md`.
 - Любой `verified`/`gap` обязан ссылаться на evidence в `STATE.md` (conv_id/trace/SQL/CI).
 - Любые фиксы — только через отдельный Task Package с CA‑ID.
+- Live-check процесс: см. `SPECS/SYSTEM_REFERENCE.md` (Live-check SOP); запуск через `ops/diagnose.py livecheck`.
 
 ### Checklist (evidence-first)
 

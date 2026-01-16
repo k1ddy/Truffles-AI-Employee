@@ -10,6 +10,32 @@
 **Читай это перед любыми изменениями.**
 ---
 
+## 0. Start Here — Process Map (session → audit → evidence)
+
+**Если амнезия/неясно с чего начать:**
+1) Открой `AGENTS.md` → `STATE.md` → `STRUCTURE.md`.
+2) Определи роль и Task Package (если нет — STOP и вопрос владельцу).
+3) Для CA‑аудита открой `STRATEGY/TECH_ROADMAP.md` (CA‑plan) и раздел 4.3 (Live‑check SOP).
+4) Отдели аудит от фикса: аудит = evidence, фикс = отдельный Task Package с CA‑ID.
+
+**Правила evidence:**
+- Единственный источник фактов — `STATE.md` (PASS/FAIL с conv_id/trace/SQL/CI).
+- Статусы в CA‑plan — только статусы аудита; `verified/gap` всегда с ссылкой на `STATE.md`.
+- Если live‑check невозможен → статус **BLOCKED**, без подмены.
+
+**Карта инструментов (что запускать):**
+- `ops/diagnose.py livecheck` — реальный inbound через ChatFlow, маркеры для SQL evidence.
+- `ops/diagnose.py` — health/metrics/outbox snapshot.
+- `ops/diagnose.py deploy-verify` — проверка версии деплоя (`/admin/version`) и совпадения commit.
+- `ops/sync_client.py` — validate/sync client packs (truth → Qdrant).
+- `/home/zhan/restart_api.sh` — restart API контейнера.
+- SQL evidence: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "<SQL>"`.
+
+**Где фиксировать изменения:**
+- Статус/evidence → `STATE.md` (Brain последним шагом).
+- Статус аудита → `STRATEGY/TECH_ROADMAP.md` (Top Architect, со ссылкой на `STATE.md`).
+- Процессы/инварианты → `SPECS/*` или `STRATEGY/*` (owner‑docs).
+
 ## 1. Репозиторий и процесс
 
 | Параметр | Значение |
@@ -144,6 +170,139 @@ ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/health"
 6) **STATE.md** обновляет Brain последним шагом, с evidence.
 
 **Запрещено:** `docker cp`, `docker run -v`, “локальные” фиксы без CI/перезапуска.
+
+---
+
+## 4.2.1 Deploy Guardrails (anti-drift)
+
+**Цель:** исключить ситуацию “CI зелёный, а контейнер на старом коде”.
+
+**Инварианты (обязательны в проде):**
+- Контейнер запускается только из GHCR‑образа (`ghcr.io/k1ddy/truffles-ai-employee:*`).
+- `/admin/version` не должен быть `unknown`.
+- `git_commit` в `/admin/version` обязан совпадать с SHA деплоя.
+
+**Как обеспечиваем:**
+```bash
+IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main \
+PULL_IMAGE=1 REQUIRE_GHCR=1 VERIFY_VERSION=1 \
+EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main \
+bash /home/zhan/restart_api.sh
+```
+
+**Ручная проверка:**
+```bash
+python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
+  --expected-commit <sha> --expected-version main
+```
+
+**STOP‑line:** версия `unknown` или commit mismatch.
+
+---
+
+## 4.3 Live-check SOP (CA audit)
+
+**Зачем:** доказать соответствие канону на реальном inbound, убрать дрейф и “каждый раз по‑разному”, зафиксировать готовность к онбордингу.
+
+**Кто делает:**
+- **Hands/OPS:** запускают live‑check runner.
+- **Brain:** снимает evidence из БД и фиксирует в `STATE.md`.
+- **Top Architect:** обновляет статус аудита в `STRATEGY/TECH_ROADMAP.md` (CA‑plan) только со ссылкой на `STATE.md`.
+
+**Перед запуском (обязательно):**
+- Используем **отдельный тестовый номер** (внешний JID). Self‑send в ChatFlow не гарантирует доставку на телефон.
+- Делаем короткий ping на тестовый номер. Если не дошло — **STOP**, чинить доставку.
+- Проверяем согласованность instance_id:
+  - `clients.config.instance_id` — outbound instance (ChatFlow).
+  - `branches.instance_id` — routing token для branch.
+  - `instanceId` в webhook query — routing token (должен совпадать с `branches.instance_id`).
+
+**Операторская инструкция (без тех. знаний):**
+- Оператор **не** знает время/conv_id/msg_id/SQL. Это снимает Brain/OPS.
+- Оператор только отправляет сообщения по шаблонам ниже и пишет “готово”.
+- Порядок строго такой: сообщение → дождаться ответа бота → ACK (`ок`/`да`/`жду`) → дождаться ответа → следующий кейс.
+- Если ответа нет 2–3 минуты — **STOP**, сообщить Brain/OPS (проверка доставки/outbox).
+- Шаблоны ниже — **ориентиры**, не канон. Главное — смысл категории.
+
+**CA‑01 — текстовые шаблоны (выберите по одному из каждой группы):**
+- **Refund:** `хочу вернуть деньги` / `верните оплату` / `нужен возврат денег`
+- **Payment:** `можно оплатить картой?` / `есть каспи?` / `можно оплатить переводом?`
+- **Reschedule:** `перенесите запись на завтра` / `поменять дату записи` / `переписать на другой день`
+- **Medical:** `беременна, можно?` / `аллергия на гель‑лак` / `жжет после окрашивания`
+
+**Человеческие вариации (разрешены и полезны):**
+- Опечатки, лишние слова, смайлы, разный регистр — можно.
+- Смысл должен сохраняться (refund/payment/reschedule/medical).
+- Если удобно, добавляйте короткий тег в конце: `[CA01-1]`, `[CA01-2]` — это ускоряет поиск в БД, но не обязательно.
+
+**Почему такой процесс:**
+- Live‑check требует **реального inbound**: только он пишет `decision_meta` и `decision_trace`.
+- `send-text`/симуляции не доказывают доставку на телефон, поэтому без внешнего номера audit невалиден.
+- Policy‑кейсы переводят диалог в `pending`; без ACK следующий кейс не попадёт в `policy_gate`.
+- Вариативные тексты нужны, чтобы проверить устойчивость к человеческим ошибкам, а не “под шаблон”.
+
+**Как проверяем (процесс):**
+1) Выбрать CA‑suite (например, `ca01-core`) и окно запуска.
+2) Запустить runner (реальный inbound через ChatFlow → `/webhook/{client_slug}`).
+3) Brain снимает evidence в БД по marker‑логам (decision_meta + decision_trace).
+4) Brain фиксирует PASS/FAIL в `STATE.md` с ссылкой на CA‑ID и артефактами.
+5) Top Architect обновляет статус CA‑пункта в `STRATEGY/TECH_ROADMAP.md` с ссылкой на `STATE.md`.
+6) Если runner/БД недоступны → статус **BLOCKED**, без фиктивных проверок.
+
+**Принципы:**
+- Реальный inbound обязателен (WhatsApp → ChatFlow → `/webhook/{client_slug}`).
+- Любой `verified/gap` в CA‑plan обязан ссылаться на evidence в `STATE.md`.
+- Токены/секреты **не** попадают в git/логи.
+- Если runner недоступен — статус **BLOCKED**, без ручных “подмен”.
+
+**Типы проверок:**
+- **CI (gate):** автоматические тесты до релиза, без live‑evidence.
+- **Live‑check (CA audit):** реальный inbound + trace/meta + evidence в `STATE.md`.
+- **SQL‑snapshot:** подтверждение метрик/состояния (outbox/SLA/trace coverage).
+
+**Запуск (runner):**
+```bash
+CHATFLOW_TOKEN=... \
+CHATFLOW_INSTANCE_ID=... \
+CHATFLOW_JID=... \
+python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max-wait 15
+```
+
+Runner печатает JSON‑лог (marker, case_id, sent_at, expected_policy_section).  
+Marker формат: `LC:<suite>:<case_id>:<timestamp>:<seq>`.
+
+**Evidence (SQL):**
+```sql
+SELECT m.id, m.created_at, m.content,
+       m.metadata->>'messageId' AS message_id,
+       m.metadata->'decision_meta' AS decision_meta,
+       c.id AS conversation_id
+FROM messages m
+JOIN conversations c ON c.id = m.conversation_id
+WHERE m.role = 'user'
+  AND m.content ILIKE '%LC:%'
+ORDER BY m.created_at DESC
+LIMIT 20;
+```
+
+```sql
+SELECT trace
+FROM conversations c
+JOIN LATERAL jsonb_array_elements(c.context->'decision_trace') AS trace ON true
+WHERE c.id = '<CONVERSATION_ID>'
+  AND trace->>'stage' = '<EXPECTED_STAGE>'
+ORDER BY (trace->>'recorded_at')::timestamptz DESC
+LIMIT 3;
+```
+
+**Что фиксируем в STATE.md:**
+- conv_id + msg_id + decision_meta ключи + trace JSON + PASS/FAIL.
+- Ссылка на CA‑ID (например: `CA-01`).
+
+**Где искать процесс:**
+- Этот раздел (`SPECS/SYSTEM_REFERENCE.md` → Live‑check SOP).
+- CA‑plan в `STRATEGY/TECH_ROADMAP.md` (статусы аудита).
+- Стартовый ритуал: `docs/SESSION_START_PROMPT.txt`.
 
 ---
 

@@ -38,6 +38,7 @@
 - Бизнес-ограничения: `STRATEGY/REQUIREMENTS.md`.
 - Тарифы/обещания: `STRATEGY/PRODUCT.md` + `docs/SELLING_TRUTHS.md` (claim/proof/boundary).
 - Поведение/архитектура: `SPECS/*` (кроме `SPECS/ACTIVE_LEARNING_PLAN.md`; ключевые: `CONSULTANT.md`, `ESCALATION.md`, `ARCHITECTURE.md`).
+- Процесс/инструменты (entrypoint): `SPECS/SYSTEM_REFERENCE.md` → section "Start Here — Process Map".
 - План/приоритеты: `STRATEGY/TECH_ROADMAP.md`.
 - Операционные SOP: `SPECS/SYSTEM_REFERENCE.md` (deploy/knowledge update) + `TECH.md`.
 - Решения/GAP: `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml`.
@@ -425,6 +426,7 @@ droid --droid truffles-coder
 | Какие тарифы? | `STRATEGY/PRODUCT.md` |
 | Как подключить заказчика? | `SPECS/MULTI_TENANT.md` |
 | Какие команды на сервере? | `TECH.md` |
+| Как тестировать live‑check и CA‑audit? | `SPECS/SYSTEM_REFERENCE.md` (Live‑check SOP), `STRATEGY/TECH_ROADMAP.md` (CA‑plan) |
 | Как бот должен отвечать? | `SPECS/CONSULTANT.md`, `knowledge/examples.md` |
 | Какие интенты есть? | `context/intents/` |
 | Какой код за что отвечает? | `SPECS/ARCHITECTURE.md` |
