@@ -65,6 +65,10 @@
 - S5 (LLM‑path + post‑hooks): LLM‑path (llm_guard/ai_response/rewrite/budget_gate/llm_degradation) и response composition вынесены в `truffles-api/app/routers/webhook/response.py`; consult_return через helper. CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21051820513. Live‑check: consult_return conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48 msg_id 1d3515d6-9dbc-4dea-9479-a5532d011a93; LLM‑path conv_id 590848f8-423c-4118-9de0-5f830c643a46 msg_id 99087746-9dcb-4785-804c-e90a32f3c930 (rewrite timeout, llm_degradation=llm_skip, ai_response low_confidence_retry). BLOCKED: llm_guard/budget_gate не сработали без условий.
 - S6 (Adapter‑only): `_legacy.py` приведён к thin adapter (орchestrator в `decision.py`), поведение сохранено; единственное изменение — порядок импортов под ruff. CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21054296472. Live‑check (prod, conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48): msg_id 44e9cbb6-f6c9-4d44-b743-100ebea350d8 (info_bundle), msg_id 899b5d56-7a62-49ef-a5f0-a0df443b6455 (booking_interrupt), msg_id a14abb4c-5471-40f8-a326-4d46d4a6db24 (consult).
 
+### Stabilization pass (2026‑01‑16)
+- Подтверждено: `truffles-api/app/routers/webhook/_legacy.py` — adapter‑only (re‑export decision orchestrator, без логики).
+- Cleanup: удалены все merged worktrees/ветки; осталась только `main` в `/home/zhan/truffles-main` (единая рабочая папка).
+
 ### RCA / дефект: missing trace for booking_interrupt + multi_truth
 - Симптом: при booking_interrupt_info=true в decision_meta отсутствуют stages booking_interrupt/multi_truth в decision_trace.
 - Причина: retention decision_trace при лимите 40 оставляет только critical‑stages; booking_interrupt/multi_truth не critical и отбрасываются.
