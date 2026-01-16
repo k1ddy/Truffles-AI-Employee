@@ -721,6 +721,14 @@
 - decision_trace: stage=policy_gate, policy_gate=hard_law, policy_section=payment_info, decision=escalate, intent=payment, recorded_at `2026-01-16T11:57:49.740443+00:00`
 - state: bot_active (pending закрыт)
 
+### 2026-01-16 — Deploy evidence (CI → GHCR → /admin/version)
+
+**Evidence:**
+- CI run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21067016601
+- commit: `69fe13e203182fafa1151f9d39e41732507d4701`
+- GHCR image env: `APP_VERSION=main`, `GIT_COMMIT=69fe13e203182fafa1151f9d39e41732507d4701`
+- /admin/version: `{"version":"main","git_commit":"69fe13e203182fafa1151f9d39e41732507d4701","build_time":"2026-01-16T12:44:26Z"}`
+
 ### 2026-01-16 — RCA: trace retention drops booking_interrupt/multi_truth
 
 **Дефект:** при `booking_interrupt_info=true` в decision_meta отсутствуют `decision_trace.stage=booking_interrupt/multi_truth`.
