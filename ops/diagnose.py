@@ -14,8 +14,10 @@ import random
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 
 LIVECHECK_SUITES = {
@@ -85,6 +87,97 @@ LIVECHECK_SUITES = {
     ],
 }
 
+WEBHOOK_FUZZ_CASES = [
+    {
+        "case_id": "LAW_REFUND",
+        "expected_policy_section": "refund",
+        "messages": [
+            "хочу вернуть деньги за услугу",
+            "нужен возврат денег",
+        ],
+    },
+    {
+        "case_id": "LAW_PAYMENT",
+        "expected_policy_section": "payment_info",
+        "messages": [
+            "можно оплатить картой?",
+            "есть оплата каспи?",
+        ],
+    },
+    {
+        "case_id": "LAW_RESCHEDULE",
+        "expected_policy_section": "reschedule",
+        "messages": [
+            "перенесите запись на завтра",
+            "поменять дату записи",
+        ],
+    },
+    {
+        "case_id": "LAW_MEDICAL",
+        "expected_policy_section": "medical",
+        "messages": [
+            "у меня аллергия на гель-лак",
+            "жжет после окрашивания",
+        ],
+    },
+    {
+        "case_id": "LAW_LEGAL",
+        "expected_policy_section": "legal",
+        "messages": [
+            "хочу договор и оферту",
+            "у меня юридическая претензия",
+        ],
+    },
+    {
+        "case_id": "LAW_COMPLAINT",
+        "expected_policy_section": "complaint",
+        "messages": [
+            "жалоба: плохо сделали",
+            "недоволен качеством услуги",
+        ],
+    },
+    {
+        "case_id": "INFO_HOURS",
+        "expected_policy_section": None,
+        "messages": [
+            "до скольки работаете?",
+            "какой график работы?",
+        ],
+    },
+    {
+        "case_id": "INFO_LOCATION",
+        "expected_policy_section": None,
+        "messages": [
+            "где вы находитесь?",
+            "как до вас добраться?",
+        ],
+    },
+    {
+        "case_id": "INFO_PRICE",
+        "expected_policy_section": None,
+        "messages": [
+            "сколько стоит маникюр?",
+            "какая цена на стрижку?",
+        ],
+    },
+    {
+        "case_id": "BOOK_TIME",
+        "expected_policy_section": None,
+        "messages": [
+            "хочу записаться на завтра вечером",
+            "запишите на понедельник",
+        ],
+    },
+    {
+        "case_id": "CONSULT_AFTERCOLOR",
+        "expected_policy_section": None,
+        "messages": [
+            "посоветуйте уход после окрашивания",
+            "как ухаживать после окраски?",
+        ],
+    },
+]
+
 NOISE_SUFFIXES = ["плз", "срочно", "спс"]
 
 def _parse_livecheck_args(argv):
@@ -119,6 +212,228 @@ def _send_chatflow_message(api_url, token, instance_id, jid, message, timeout):
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read().decode("utf-8", errors="replace")
         return resp.status, body
+
+def _parse_webhook_fuzz_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py webhook-fuzz",
+        description="Send webhook fuzz batch directly to /webhook/{client_slug}.",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=os.environ.get("TRUFFLES_API_BASE_URL", "http://localhost:8000"),
+    )
+    parser.add_argument(
+        "--client-slug",
+        default=os.environ.get("TRUFFLES_CLIENT_SLUG", "demo_salon"),
+    )
+    parser.add_argument("--count", type=int, default=10)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--min-wait", type=float, default=0.5)
+    parser.add_argument("--max-wait", type=float, default=2.0)
+    parser.add_argument("--noise", choices=["none", "low"], default="low")
+    parser.add_argument("--remote-jid", default=None)
+    parser.add_argument("--instance-id", default=None)
+    parser.add_argument("--webhook-secret", default=None)
+    parser.add_argument("--admin-token", default=None)
+    parser.add_argument("--timeout", type=float, default=15.0)
+    parser.add_argument("--skip-outbox", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args(argv)
+
+def _pick_fuzz_cases(cases, count, rng):
+    if count <= 0:
+        return []
+    shuffled = list(cases)
+    rng.shuffle(shuffled)
+    if count <= len(shuffled):
+        return shuffled[:count]
+    selected = list(shuffled)
+    while len(selected) < count:
+        selected.append(rng.choice(cases))
+    return selected
+
+def _resolve_env_from_container(container_name, var_name):
+    if not container_name:
+        return ""
+    result = run_docker_exec(container_name, f'printf "%s" "${{{var_name}:-}}"')
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+def _resolve_remote_jid(explicit, rng, container_name=None):
+    if explicit:
+        return explicit
+    env_value = (
+        os.environ.get("FUZZ_REMOTE_JID")
+        or os.environ.get("CHATFLOW_JID")
+        or os.environ.get("OUTBOUND_ALLOWLIST_JIDS")
+    )
+    if not env_value and container_name:
+        env_value = _resolve_env_from_container(container_name, "OUTBOUND_ALLOWLIST_JIDS")
+    if not env_value and container_name:
+        env_value = _resolve_env_from_container(container_name, "CHATFLOW_JID")
+    jids = [jid.strip() for jid in (env_value or "").split(",") if jid.strip()]
+    if jids:
+        return rng.choice(jids) if len(jids) > 1 else jids[0]
+    return "77015705555@s.whatsapp.net"
+
+def _send_webhook_payload(url, payload, secret, timeout):
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if secret:
+        headers["X-Webhook-Secret"] = secret
+    req = urllib.request.Request(url, data=data, method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            return resp.status, body, None
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
+        return exc.code, body, str(exc)
+    except urllib.error.URLError as exc:
+        return None, "", str(exc)
+
+def _post_admin_outbox(url, admin_token, timeout):
+    headers = {"X-Admin-Token": admin_token} if admin_token else {}
+    req = urllib.request.Request(url, data=b"", method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            return resp.status, body, None
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
+        return exc.code, body, str(exc)
+    except urllib.error.URLError as exc:
+        return None, "", str(exc)
+
+def _run_webhook_fuzz(args):
+    if args.count < 1:
+        raise SystemExit("webhook-fuzz: --count must be >= 1")
+    rng = random.Random(args.seed or int(time.time()))
+    min_wait = min(args.min_wait, args.max_wait)
+    max_wait = max(args.min_wait, args.max_wait)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    base_url = args.base_url.rstrip("/")
+    client_slug = args.client_slug
+    webhook_url = f"{base_url}/webhook/{client_slug}"
+
+    container_name = None
+    if not args.admin_token or not args.remote_jid:
+        container_name, _ = resolve_container_name()
+
+    webhook_secret = (
+        args.webhook_secret
+        or os.environ.get("WEBHOOK_SECRET")
+        or os.environ.get("TRUFFLES_WEBHOOK_SECRET")
+    )
+    admin_token = args.admin_token or os.environ.get("ALERTS_ADMIN_TOKEN")
+    if not admin_token and container_name:
+        admin_token = _resolve_env_from_container(container_name, "ALERTS_ADMIN_TOKEN")
+
+    instance_id = (
+        args.instance_id
+        or os.environ.get("CHATFLOW_INSTANCE_ID")
+        or os.environ.get("INSTANCE_ID")
+    )
+    remote_jid = _resolve_remote_jid(args.remote_jid, rng, container_name)
+
+    selected_cases = _pick_fuzz_cases(WEBHOOK_FUZZ_CASES, args.count, rng)
+    markers = []
+    message_ids = []
+
+    for idx, case in enumerate(selected_cases, start=1):
+        base_text = rng.choice(case["messages"])
+        text = _apply_noise(base_text, rng, args.noise)
+        marker = f"FZ:{case['case_id']}:{timestamp}:{idx:02d}"
+        message = f"{text} [{marker}]"
+        message_id = f"FZ-{timestamp}-{idx:02d}-{uuid.uuid4().hex[:8]}"
+        sent_at = datetime.now(timezone.utc).isoformat()
+        metadata = {
+            "sender": "FuzzRunner",
+            "timestamp": int(time.time()),
+            "messageId": message_id,
+            "remoteJid": remote_jid,
+        }
+        if instance_id:
+            metadata["instanceId"] = instance_id
+        payload = {
+            "body": {
+                "messageType": "text",
+                "message": message,
+                "metadata": metadata,
+            }
+        }
+
+        status = "dry_run"
+        response_status = None
+        response_body = None
+        response_error = None
+        if not args.dry_run:
+            response_status, response_body, response_error = _send_webhook_payload(
+                webhook_url, payload, webhook_secret, args.timeout
+            )
+            if response_status and 200 <= response_status < 300:
+                status = "sent"
+            else:
+                status = "error"
+
+        log = {
+            "case_id": case["case_id"],
+            "marker": marker,
+            "message_id": message_id,
+            "remote_jid": remote_jid,
+            "text": message,
+            "sent_at": sent_at,
+            "expected_policy_section": case["expected_policy_section"],
+            "status": status,
+            "http_status": response_status,
+        }
+        if response_error:
+            log["error"] = response_error
+        if response_body:
+            log["response"] = response_body[:200]
+        print(json.dumps(log, ensure_ascii=False))
+
+        markers.append(marker)
+        message_ids.append(message_id)
+
+        if idx < len(selected_cases):
+            time.sleep(rng.uniform(min_wait, max_wait))
+
+    outbox_status = None
+    outbox_error = None
+    outbox_body = None
+    if not args.skip_outbox:
+        if not admin_token and not args.dry_run:
+            raise SystemExit("webhook-fuzz: missing admin token for outbox/process")
+        if not args.dry_run:
+            outbox_url = f"{base_url}/admin/outbox/process"
+            outbox_status, outbox_body, outbox_error = _post_admin_outbox(
+                outbox_url, admin_token, args.timeout
+            )
+            outbox_log = {
+                "outbox_url": outbox_url,
+                "status": outbox_status,
+                "error": outbox_error,
+            }
+            if outbox_body:
+                outbox_log["response"] = outbox_body[:200]
+            print(json.dumps(outbox_log, ensure_ascii=False))
+            if outbox_status and outbox_status >= 400:
+                raise SystemExit(f"webhook-fuzz: outbox/process failed (status {outbox_status})")
+
+    summary = {
+        "count": len(selected_cases),
+        "base_url": base_url,
+        "client_slug": client_slug,
+        "seed": args.seed,
+        "remote_jid": remote_jid,
+        "instance_id": instance_id,
+        "markers": markers,
+        "message_ids": message_ids,
+        "outbox_status": outbox_status,
+    }
+    print(json.dumps({"summary": summary}, ensure_ascii=False))
 
 def _run_livecheck(args):
     suite = LIVECHECK_SUITES.get(args.suite)
@@ -261,6 +576,9 @@ def run_curl(url, headers=None):
     cmd.append(url)
     return run_command(cmd)
 
+if len(sys.argv) > 1 and sys.argv[1] == "webhook-fuzz":
+    _run_webhook_fuzz(_parse_webhook_fuzz_args(sys.argv[2:]))
+    raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "livecheck":
     _run_livecheck(_parse_livecheck_args(sys.argv[2:]))
     raise SystemExit(0)
