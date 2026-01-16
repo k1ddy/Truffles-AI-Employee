@@ -56,6 +56,22 @@
 - Clarify policy: максимум 2 уточнения, дальше эскалация/hand over.
 - Gates: CI core/long/ASR зелёные, offline без ключа, метрики/trace пишутся всегда.
 
+### P0 Canon‑Compliance Plan (долгий цикл, главный приоритет)
+Цель: привести код/поведение/доки к единому канону и исключить потерю изменений.
+
+1) Freeze scope: новых фичей не делаем, только соответствие канону и стабилизация.
+   - Почему: иначе расхождение канон↔код растет быстрее, чем мы закрываем.
+2) Canon‑audit: собрать матрицу “канон → код → evidence → статус (OK/GAP/DEFECT)”.
+   - Почему: превращает ощущения в проверяемый список.
+3) Risk‑first triage: порядок закрытия — LAW/policy → trace/meta → booking/expected_reply → routing/LLM → ops/outbox.
+   - Почему: это максимальный бизнес и юридический риск.
+4) One‑issue execution: 1 задача = 1 ветка/worktree, Task Package, CI core/long + live‑check + запись в STATE.
+   - Почему: исключает потерю изменений и размывание ответственности.
+5) Stabilization guardrails: быстрые тех‑фиксы, снижающие регрессии (P1‑2 JSONB defaults, P1‑8 CI unit tests).
+   - Почему: дешевые правки с высоким эффектом стабильности.
+6) Weekly drift check: короткий аудит на рассинхрон канон↔код и чистка веток/worktree.
+   - Почему: предотвращает возврат хаоса.
+
 ### P0 Legacy refactor (S0–S6) — детальный лог (2026‑01‑15/16)
 - S0 (Trace coverage ранних возвратов): добавлены _resolve_trace_conversation + _record_early_trace в `truffles-api/app/routers/webhook/_legacy.py`; trace пишется только при resolvable conversation. Покрыты preflight/skip_persist/dedupe/outbox/branch_selection/re‑engage/mute/ASR/debounce/handover_confirmation. CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21028149787.
 - S1 (Early-return gates → helpers): вынесены ранние гейты в модули `http.py` (_run_preflight), `outbox.py` (_prepare_skip_persist, _handle_enqueue_only_accept), `dedup.py` (_handle_dedup_gate, _handle_debounce_gate), `branch_selection.py` (_handle_branch_selection_gate), `pending.py` (_handle_handover_confirmation_gate); `_legacy.py` оставлен как call‑through по прежнему порядку. CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21029896007. Live‑check (prod): conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48 — “где вы находитесь?” (truth_gate reply, info_sections=["address","hours"]); “хочу записаться на маникюр” (booking prompt).
