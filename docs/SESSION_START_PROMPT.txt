@@ -12,3 +12,4 @@ Owner docs (source of truth):
 If conflict, follow owner docs; do not add new norms here.
 
 Start ritual: see `AGENTS.md` (Question gate, Task Package, one-issue flow).
+Task Package must include Branch, Worktree path, Base ref, Merge policy, Cleanup (per `AGENTS.md`).
