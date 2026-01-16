@@ -46,6 +46,33 @@
 
 ---
 
+## КАНОН-FREEZE (как не допустить дрейфа)
+
+- **Норма** живет только в owner-doc из канон-карты; derived-доки не вводят новых правил.
+- **Статус/evidence** — только `STATE.md` (и `docs/TECH_STATUS.md`).
+- **Обещания наружу** — только `STRATEGY/PRODUCT.md` + `docs/SELLING_TRUTHS.md`.
+- **Правка**: меняем owner-doc → проверяем derived → при изменении обещаний/статуса синхронизируем соответствующий owner-doc.
+- **Быстрая проверка перед merge**:
+  - `rg "СТАТУС РЕАЛИЗАЦИИ|ТЕКУЩИЙ СТАТУС|Где мы сейчас" SPECS STRATEGY docs`
+  - `rg "24/7|SLA|минут|refund|бесплат" STRATEGY/PRODUCT.md docs/SELLING_TRUTHS.md`
+
+---
+
+## ЖЕЛЕЗНЫЙ ПРОЦЕСС СЕССИИ (ОБЯЗАТЕЛЕН ВСЕГДА)
+
+**Правило:** если шаг не выполнен — стоп, не продолжать.
+
+1) **Старт:** открыть `STRUCTURE.md` (карта) и `STATE.md` (факты).
+2) **Owner‑doc:** выбрать единственный owner‑doc для задачи; если не найден — задать вопрос и зафиксировать GAP.
+3) **Куда писать:**
+   - Норма/инвариант → owner‑doc в `SPECS/*` или `STRATEGY/*`.
+   - Статус/evidence → только `STATE.md` (и `docs/TECH_STATUS.md` как derived).
+   - Обещания/позиционирование → `STRATEGY/PRODUCT.md` + `docs/SELLING_TRUTHS.md`.
+4) **PLAN vs LIVE:** если нет evidence — помечаем как PLAN, не выдаём как факт.
+5) **Перед merge:** выполнить `rg`‑проверки из Canon‑Freeze и сверить `git diff --stat`.
+
+---
+
 ## ДОК-СТАТУСЫ (CANON / DERIVED / ARCHIVE)
 
 **CANON (истина, спорить нельзя):**
@@ -90,10 +117,53 @@
 | Файл | Зачем читать |
 |------|--------------|
 | `STATE.md` | Базовые факты, текущие блокеры, следующий шаг |
+| `STRATEGY/VISION.md` | ДНК и принципы (North Star) |
+| `STRATEGY/REQUIREMENTS.md` | Бизнес‑ограничения и DoD |
+| `STRATEGY/TECH_ROADMAP.md` | Канон тех‑развития и приоритеты |
+| `SPECS/CONSULTANT.md` | Поведение бота (info/consult/booking) |
+| `SPECS/ESCALATION.md` | Эскалация, статусы, SLA‑поведение |
+| `SPECS/ARCHITECTURE.md` | Рантайм‑архитектура и Decision Graph |
 | `docs/SESSION_START_PROMPT.txt` | Минимальный протокол старта и проверки фактов |
 | `TECH.md` | Доступы, команды, где что работает |
 | `truffles-api/app/routers/webhook/` | Входящие WhatsApp (direct + legacy). Модули: `_legacy.py`, `booking.py`, `branch_selection.py`, `context_manager.py`, `decision.py`, `dedup.py`, `guards.py`, `http.py`, `info.py`, `media.py`, `outbox.py`, `parsing.py`, `pending.py`, `policy.py`, `response.py`, `router_sla.py`, `secrets.py`, `session_memory.py`, `shield.py`, `trace.py`. |
 | `truffles-api/app/routers/telegram_webhook.py` | Telegram сообщения/кнопки менеджеров |
+
+---
+
+## КОД-КАРТА (entrypoints → pipeline → data)
+
+**Entry points:**
+| Узел | Назначение |
+|------|------------|
+| `truffles-api/app/main.py` | Инициализация приложения |
+| `truffles-api/app/routers/webhook/` | Входящие WhatsApp (основной pipeline) |
+| `truffles-api/app/routers/telegram_webhook.py` | Менеджерский UI и handoff |
+| `truffles-api/app/routers/admin.py` | Админ‑эндпойнты |
+| `truffles-api/app/routers/message.py` | Legacy direct‑вход |
+
+**Pipeline (WhatsApp):**
+| Узел | Назначение |
+|------|------------|
+| `truffles-api/app/routers/webhook/decision.py` | Оркестрация стадий |
+| `truffles-api/app/routers/webhook/guards.py`, `shield.py`, `policy.py` | Гейты/безопасность |
+| `truffles-api/app/routers/webhook/info.py`, `booking.py`, `pending.py`, `response.py` | Доменные потоки |
+| `truffles-api/app/routers/webhook/trace.py`, `outbox.py`, `context_manager.py`, `session_memory.py` | Trace/outbox/memory |
+
+**Services (ядро):**
+| Узел | Назначение |
+|------|------------|
+| `truffles-api/app/services/state_service.py`, `state_machine.py` | Статусы/переходы |
+| `truffles-api/app/services/escalation_service.py`, `manager_message_service.py`, `reminder_service.py` | Эскалация/SLA |
+| `truffles-api/app/services/knowledge_service.py`, `demo_salon_knowledge.py`, `intent_service.py`, `ai_service.py` | Facts/Intent/LLM |
+| `truffles-api/app/services/outbox_service.py`, `alert_service.py`, `health_service.py` | Надежность/алерты |
+
+**Данные и контракты:**
+| Узел | Назначение |
+|------|------------|
+| `truffles-api/app/schemas/*` | Pydantic‑контракты |
+| `truffles-api/app/models/*` | Модели БД |
+| `truffles-api/app/knowledge/<client_slug>/*` | Truth/policy/eval packs |
+| `knowledge/<client_slug>/*` | Канон RAG‑контента |
 
 ---
 
@@ -130,7 +200,7 @@
 | `TECH_ROADMAP.md` | Технический план | Архитектор: планирование |
 | `PRODUCT.md` | Тарифы, roadmap продукта | При вопросах о ценах |
 | `MARKET.md` | Исследования, метрики, ниши | При вопросах о рынке |
-| `VISION.md` | Видение продукта | Редко |
+| `VISION.md` | ДНК/принципы (North Star) | Редко |
 
 ---
 

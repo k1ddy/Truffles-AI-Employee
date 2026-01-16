@@ -3,6 +3,8 @@ DERIVED: handover only; not canonical. Verify all claims before use.
 
 ⚠️ Этот handover требует проверки. Пункты ниже — ориентир, но их нужно подтвердить по API/DB/логам.
 
+Canon Audit Plan: see `STRATEGY/TECH_ROADMAP.md` (section "CANON AUDIT PLAN (P0)").
+
 Session handover (2026-01-11)
 - Цель: закрыть A6/A7 и зафиксировать E2E‑доказательства в проде (CI → deploy → live‑trace).
 - A6 Policy rules‑as‑data: policy перенесён в `client_pack.policy`, policy_gate пишет `risk_level`; E544/E545 добавили `risk_level=low`. PR #131; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20894731972; prod `/admin/version` commit `8e1d70160d74f82e41dee956decc7673de573c2d`; live‑check conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48` с trace `policy_gate=discounts` и `risk_level=low`.

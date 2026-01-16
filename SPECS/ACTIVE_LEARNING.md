@@ -1,5 +1,5 @@
 # ACTIVE LEARNING — План реализации
-SOURCE OF TRUTH: canonical active learning spec and status.
+SOURCE OF TRUTH: canonical active learning spec; status/evidence live in `STATE.md`.
 
 **Статус:** CANON (P2)  
 **Owner:** Top Architect  
@@ -13,7 +13,10 @@ SOURCE OF TRUTH: canonical active learning spec and status.
 
 ---
 
-## СТАТУС РЕАЛИЗАЦИИ
+## СТАТУС РЕАЛИЗАЦИИ (DERIVED, НЕ ИСТОЧНИК ИСТИНЫ)
+
+_Актуальный статус и evidence — в `STATE.md`._
+_Любые статусы ниже — DERIVED; единственный источник истины — `STATE.md`._
 
 | Компонент | Статус |
 |-----------|--------|
