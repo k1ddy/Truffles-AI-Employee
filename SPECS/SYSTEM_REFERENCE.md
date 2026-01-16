@@ -235,6 +235,16 @@ python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
 - Смысл должен сохраняться (refund/payment/reschedule/medical).
 - Если удобно, добавляйте короткий тег в конце: `[CA01-1]`, `[CA01-2]` — это ускоряет поиск в БД, но не обязательно.
 
+**CA‑01 — ожидаемые реакции (канон):**
+- **Refund/Payment:** ответ бота `По оплате уточню у администратора — передам администратору ваш вопрос.`  
+  `decision_meta`: `action=escalate`, `policy_gate=hard_law`, `policy_section=payment_info`, `intent=payment`.
+- **Reschedule:** ответ бота `Перенос записи подтверждает администратор. Передам ваш запрос.`  
+  `decision_meta`: `action=escalate`, `policy_gate=hard_law`, `policy_section=reschedule`, `intent=reschedule`.
+- **Medical:** ответ бота `По таким вопросам нужна консультация мастера или администратора — передам ваш вопрос.`  
+  `decision_meta`: `action=escalate`, `policy_gate=hard_law`, `policy_section=medical`, `intent=medical`.
+- **ACK (после каждого кейса):** `ок`/`да`/`жду` → ответ `Хорошо. Напишите, что именно нужно: цена/запись/адрес/мастер.`  
+  `decision_meta`: `pending_action=pending_ack`.
+
 **Почему такой процесс:**
 - Live‑check требует **реального inbound**: только он пишет `decision_meta` и `decision_trace`.
 - `send-text`/симуляции не доказывают доставку на телефон, поэтому без внешнего номера audit невалиден.
