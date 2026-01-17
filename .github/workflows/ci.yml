@@ -395,7 +395,9 @@ jobs:
             --suite ca01-core \
             --seed 777 \
             --jid-mode allowlist \
-            --remote-jid 77015705555@s.whatsapp.net
+            --remote-jid 77015705555@s.whatsapp.net \
+            --poll-timeout 60 \
+            --poll-interval 1
           REMOTE
           $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca08.jsonl
           set -euo pipefail
@@ -406,7 +408,9 @@ jobs:
             --suite ca08-state \
             --seed 778 \
             --jid-mode allowlist \
-            --remote-jid 77015705555@s.whatsapp.net
+            --remote-jid 77015705555@s.whatsapp.net \
+            --poll-timeout 60 \
+            --poll-interval 1
           REMOTE
           $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca09.jsonl
           set -euo pipefail
@@ -417,7 +421,9 @@ jobs:
             --suite ca09-manager \
             --seed 779 \
             --jid-mode allowlist \
-            --remote-jid 77015705555@s.whatsapp.net
+            --remote-jid 77015705555@s.whatsapp.net \
+            --poll-timeout 60 \
+            --poll-interval 1
           REMOTE
           $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca10.jsonl
           set -euo pipefail
@@ -428,7 +434,9 @@ jobs:
             --suite ca10-outbox \
             --seed 780 \
             --jid-mode allowlist \
-            --remote-jid 77015705555@s.whatsapp.net
+            --remote-jid 77015705555@s.whatsapp.net \
+            --poll-timeout 60 \
+            --poll-interval 1
           REMOTE
 
       - name: Upload livecheck artifacts
