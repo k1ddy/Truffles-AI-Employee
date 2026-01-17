@@ -9,6 +9,7 @@
 """
 import argparse
 import base64
+import glob
 import json
 import os
 import random
@@ -2481,6 +2482,439 @@ def _run_deploy_verify(args):
         )
     )
 
+def _parse_emit_evidence_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py emit-evidence",
+        description="Generate markdown evidence from livecheck jsonl artifacts.",
+    )
+    parser.add_argument(
+        "--input",
+        action="append",
+        default=[],
+        help="Path/glob to livecheck jsonl file (repeatable).",
+    )
+    parser.add_argument(
+        "--input-dir",
+        default=None,
+        help="Directory containing livecheck-*.jsonl artifacts.",
+    )
+    parser.add_argument("--gate", default=None, help="Path to livecheck-gate.txt.")
+    parser.add_argument(
+        "--output",
+        default="livecheck-evidence.md",
+        help="Markdown output path (use '-' for stdout).",
+    )
+    parser.add_argument("--title", default="Livecheck Evidence")
+    parser.add_argument(
+        "--suite-order",
+        default=None,
+        help="Comma-separated suite order (default: alphabetical).",
+    )
+    return parser.parse_args(argv)
+
+def _resolve_emit_inputs(inputs, input_dir):
+    paths = []
+    if input_dir:
+        paths.extend(sorted(glob.glob(os.path.join(input_dir, "livecheck-*.jsonl"))))
+    for raw in inputs or []:
+        if not raw:
+            continue
+        if os.path.isdir(raw):
+            paths.extend(sorted(glob.glob(os.path.join(raw, "livecheck-*.jsonl"))))
+            continue
+        expanded = glob.glob(raw)
+        if expanded:
+            paths.extend(sorted(expanded))
+        else:
+            paths.append(raw)
+    seen = set()
+    resolved = []
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        resolved.append(path)
+    if not resolved:
+        raise SystemExit("emit-evidence: no jsonl inputs found")
+    return resolved
+
+def _resolve_gate_path(gate_path, input_dir):
+    if gate_path:
+        return gate_path
+    if input_dir:
+        direct = os.path.join(input_dir, "livecheck-gate.txt")
+        if os.path.isfile(direct):
+            return direct
+        matches = sorted(glob.glob(os.path.join(input_dir, "livecheck-gate-*.txt")))
+        if matches:
+            return matches[0]
+    return None
+
+def _read_gate_file(path):
+    if not path or not os.path.isfile(path):
+        return None
+    values = {}
+    flags = []
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            if "=" in line:
+                key, value = line.split("=", 1)
+                values[key.strip()] = value
+            else:
+                flags.append(line)
+    return {"path": path, "values": values, "flags": flags}
+
+def _load_jsonl_entries(path):
+    entries = []
+    errors = []
+    with open(path, "r", encoding="utf-8") as handle:
+        for idx, line in enumerate(handle, start=1):
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                entries.append(json.loads(raw))
+            except Exception as exc:
+                errors.append({"line": idx, "error": str(exc), "raw": raw[:200]})
+    return entries, errors
+
+def _extract_summary(entries):
+    summary = None
+    for entry in entries:
+        if isinstance(entry, dict) and "summary" in entry:
+            summary = entry.get("summary")
+    return summary
+
+def _extract_case_logs(entries):
+    logs = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if "summary" in entry:
+            continue
+        if entry.get("case_id"):
+            logs.append(entry)
+    return logs
+
+def _suite_name_from_path(path, summary):
+    if isinstance(summary, dict):
+        suite = summary.get("suite")
+        if suite:
+            return suite
+    base = os.path.basename(path)
+    if base.startswith("livecheck-") and base.endswith(".jsonl"):
+        return base[len("livecheck-") : -len(".jsonl")]
+    return os.path.splitext(base)[0]
+
+def _format_cell(value):
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return ",".join(str(item) for item in value)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+def _escape_table(value):
+    return _format_cell(value).replace("|", "\\|").replace("\n", " ").strip()
+
+def _render_table(columns, rows):
+    lines = []
+    header = "| " + " | ".join(label for label, _ in columns) + " |"
+    sep = "| " + " | ".join(["---"] * len(columns)) + " |"
+    lines.append(header)
+    lines.append(sep)
+    for row in rows:
+        values = []
+        for _, key in columns:
+            values.append(_escape_table(row.get(key)))
+        lines.append("| " + " | ".join(values) + " |")
+    return lines
+
+def _compact_errors(errors):
+    if not isinstance(errors, dict):
+        return None
+    present = {key: value for key, value in errors.items() if value}
+    if not present:
+        return None
+    return json.dumps(present, ensure_ascii=False)
+
+def _render_suite_summary(lines, summary):
+    if not isinstance(summary, dict):
+        lines.append("- summary: missing")
+        return
+    case_ids = summary.get("case_ids")
+    if case_ids:
+        lines.append(f"- case_ids: {', '.join(case_ids)}")
+    for key in (
+        "client_slug",
+        "instance_id",
+        "branch_instance_id",
+        "client_instance_id",
+        "instance_drift",
+        "jid_mode",
+        "remote_jid",
+        "test_mode",
+        "learning_mode",
+        "qdrant_collection",
+    ):
+        value = summary.get(key)
+        if value is None or value == "":
+            continue
+        lines.append(f"- {key}: `{_format_cell(value)}`")
+    error_note = _compact_errors(summary.get("errors"))
+    if error_note:
+        lines.append(f"- errors: `{error_note}`")
+
+def _render_suite_lines(suite):
+    lines = [f"## Suite {suite['name']}", f"- input: `{suite['input']}`"]
+    summary = suite.get("summary")
+    _render_suite_summary(lines, summary)
+    if not isinstance(summary, dict):
+        if suite.get("case_logs"):
+            lines.append("")
+            columns = [
+                ("case_id", "case_id"),
+                ("message_id", "message_id"),
+                ("marker", "marker"),
+                ("status", "status"),
+                ("http_status", "http_status"),
+            ]
+            lines.extend(_render_table(columns, suite["case_logs"]))
+        return lines
+
+    suite_name = suite["name"]
+    results = summary.get("results")
+    if suite_name == "ca05-booking" and isinstance(results, list):
+        reset = summary.get("reset") or {}
+        if reset:
+            reset_parts = []
+            for key in (
+                "reset_message_id",
+                "reset_action",
+                "reset_intent",
+                "reset_expected_reply_type",
+                "reset_booking_active",
+                "reset_booking_service",
+            ):
+                if key in reset and reset.get(key) is not None:
+                    reset_parts.append(f"{key}={_format_cell(reset.get(key))}")
+            if reset_parts:
+                lines.append(f"- reset: {'; '.join(reset_parts)}")
+        lines.append("")
+        columns = [
+            ("step", "step"),
+            ("message_id", "message_id"),
+            ("conversation_id", "conversation_id"),
+            ("expected_reply_type", "expected_reply_type"),
+            ("booking_service", "booking_service"),
+            ("booking_info_interrupt", "booking_info_interrupt"),
+            ("booking_info_intents", "booking_info_intents"),
+            ("trace_booking_interrupt", "trace_booking_interrupt"),
+            ("llm_used", "llm_used"),
+        ]
+        lines.extend(_render_table(columns, results))
+        return lines
+
+    if suite_name == "ca08-state":
+        for key in ("message_id", "ack_message_id", "conversation_id"):
+            value = _format_cell(summary.get(key))
+            if value:
+                lines.append(f"- {key}: `{value}`")
+        lines.append(
+            f"- conversation_state: `{summary.get('conversation_state_before')}` → `{summary.get('conversation_state_after')}`"
+        )
+        lines.append(
+            f"- handover_status: `{summary.get('handover_status_before')}` → `{summary.get('handover_status_after')}`"
+        )
+        for key in ("policy_gate", "action", "pending_action"):
+            value = _format_cell(summary.get(key))
+            if value:
+                lines.append(f"- {key}: `{value}`")
+        lines.append(f"- pending_sla_trace: `{_format_cell(summary.get('pending_sla_trace'))}`")
+        lines.append(f"- pending_resume_trace: `{_format_cell(summary.get('pending_resume_trace'))}`")
+        return lines
+
+    if suite_name == "ca09-manager":
+        for key in ("message_id", "conversation_id"):
+            value = _format_cell(summary.get(key))
+            if value:
+                lines.append(f"- {key}: `{value}`")
+        lines.append(
+            f"- conversation_state: `{summary.get('conversation_state_before')}` → `{summary.get('conversation_state_after')}`"
+        )
+        lines.append(
+            f"- handover_status: `{summary.get('handover_status_before')}` → `{summary.get('handover_status_after')}`"
+        )
+        for key in ("assigned_to", "first_response_at"):
+            value = _format_cell(summary.get(key))
+            if value:
+                lines.append(f"- {key}: `{value}`")
+        lines.append(f"- qdrant_found: `{_format_cell(summary.get('qdrant_found'))}`")
+        for key in ("outbox_status", "telegram_status"):
+            value = _format_cell(summary.get(key))
+            if value:
+                lines.append(f"- {key}: `{value}`")
+        return lines
+
+    if suite_name == "ca10-outbox":
+        for key in (
+            "message_id",
+            "message_count",
+            "message_dedup_count",
+            "outbox_count",
+            "outbox_status",
+        ):
+            value = _format_cell(summary.get(key))
+            if value:
+                lines.append(f"- {key}: `{value}`")
+        return lines
+
+    if isinstance(results, list):
+        suite_columns = {
+            "ca01-core": [
+                ("case_id", "case_id"),
+                ("message_id", "message_id"),
+                ("conversation_id", "conversation_id"),
+                ("action", "action"),
+                ("intent", "intent"),
+                ("policy_gate", "policy_gate"),
+                ("policy_section", "policy_section"),
+                ("risk_level", "risk_level"),
+                ("llm_used", "llm_used"),
+                ("trace_policy_gate", "trace_policy_gate"),
+                ("trace_policy_section", "trace_policy_section"),
+            ],
+            "ca02-policy": [
+                ("case_id", "case_id"),
+                ("message_id", "message_id"),
+                ("conversation_id", "conversation_id"),
+                ("action", "action"),
+                ("intent", "intent"),
+                ("policy_gate", "policy_gate"),
+                ("policy_section", "policy_section"),
+                ("risk_level", "risk_level"),
+                ("llm_used", "llm_used"),
+                ("trace_policy_type", "trace_policy_type"),
+                ("trace_policy_gate", "trace_policy_gate"),
+                ("trace_policy_section", "trace_policy_section"),
+            ],
+            "ca03-info": [
+                ("case_id", "case_id"),
+                ("message_id", "message_id"),
+                ("conversation_id", "conversation_id"),
+                ("fact_source", "fact_source"),
+                ("info_sections", "info_sections"),
+                ("fact_intents", "fact_intents"),
+                ("info_combined", "info_combined"),
+                ("llm_used", "llm_used"),
+                ("source", "source"),
+                ("trace_stage", "trace_stage"),
+                ("trace_fact_source", "trace_fact_source"),
+                ("trace_info_sections", "trace_info_sections"),
+            ],
+            "ca04-service": [
+                ("case_id", "case_id"),
+                ("message_id", "message_id"),
+                ("conversation_id", "conversation_id"),
+                ("action", "action"),
+                ("intent", "intent"),
+                ("fact_source", "fact_source"),
+                ("fact_intents", "fact_intents"),
+                ("service_query", "service_query"),
+                ("llm_used", "llm_used"),
+                ("trace_stage", "trace_stage"),
+                ("trace_decision", "trace_decision"),
+                ("trace_fact_source", "trace_fact_source"),
+            ],
+        }
+        columns = suite_columns.get(
+            suite_name,
+            [
+                ("case_id", "case_id"),
+                ("message_id", "message_id"),
+                ("conversation_id", "conversation_id"),
+            ],
+        )
+        lines.append("")
+        lines.extend(_render_table(columns, results))
+    return lines
+
+def _run_emit_evidence(args):
+    inputs = _resolve_emit_inputs(args.input, args.input_dir)
+    gate_path = _resolve_gate_path(args.gate, args.input_dir)
+    gate = _read_gate_file(gate_path)
+
+    suites = []
+    for path in inputs:
+        entries, parse_errors = _load_jsonl_entries(path)
+        summary = _extract_summary(entries)
+        suite_name = _suite_name_from_path(path, summary)
+        suites.append(
+            {
+                "name": suite_name,
+                "input": os.path.basename(path),
+                "summary": summary,
+                "case_logs": _extract_case_logs(entries),
+                "parse_errors": parse_errors,
+            }
+        )
+
+    if args.suite_order:
+        ordered = []
+        suite_map = {suite["name"]: suite for suite in suites}
+        for name in _parse_csv_values(args.suite_order):
+            suite = suite_map.pop(name, None)
+            if suite:
+                ordered.append(suite)
+        for name in sorted(suite_map.keys()):
+            ordered.append(suite_map[name])
+        suites = ordered
+    else:
+        suites = sorted(suites, key=lambda item: item["name"])
+
+    lines = [f"# {args.title}"]
+    generated_at = datetime.now(timezone.utc).isoformat()
+    lines.append(f"- generated_at: `{generated_at}`")
+    lines.append(
+        "- inputs: " + ", ".join(f"`{os.path.basename(path)}`" for path in inputs)
+    )
+    if gate:
+        lines.append("")
+        lines.append("## Gate")
+        for key in sorted(gate.get("values", {}).keys()):
+            value = gate["values"].get(key, "")
+            lines.append(f"- {key}={value}")
+        if gate.get("flags"):
+            lines.append(f"- flags: {', '.join(gate['flags'])}")
+        lines.append(f"- gate_file: `{os.path.basename(gate['path'])}`")
+    else:
+        lines.append("")
+        lines.append("## Gate")
+        lines.append("- gate_file: missing")
+
+    for suite in suites:
+        lines.append("")
+        lines.extend(_render_suite_lines(suite))
+        if suite.get("parse_errors"):
+            lines.append(f"- parse_errors: `{json.dumps(suite['parse_errors'], ensure_ascii=False)}`")
+
+    output = "\n".join(lines).rstrip() + "\n"
+    if args.output == "-":
+        print(output)
+        return
+    output_dir = os.path.dirname(args.output)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(args.output, "w", encoding="utf-8") as handle:
+        handle.write(output)
+    print(json.dumps({"output": args.output, "suites": [s['name'] for s in suites]}, ensure_ascii=False))
+
 def run_command(command):
     return subprocess.run(command, capture_output=True, text=True)
 
@@ -2520,6 +2954,9 @@ def run_curl(url, headers=None):
 
 if len(sys.argv) > 1 and sys.argv[1] == "webhook-fuzz":
     _run_webhook_fuzz(_parse_webhook_fuzz_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "emit-evidence":
+    _run_emit_evidence(_parse_emit_evidence_args(sys.argv[2:]))
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "livecheck-auto":
     _run_livecheck_auto(_parse_livecheck_auto_args(sys.argv[2:]))

@@ -501,11 +501,41 @@ LIMIT 3;
 - Малый объём (4–10 сообщений), фиксированный seed, без спама.
 
 **CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca04-service`, `ca05-booking`, `ca08-state`, `ca09-manager`, `ca10-outbox`, артефакты `livecheck-artifacts/*`.
+**Evidence artifact:** `livecheck-evidence.md` (генерируется из jsonl + gate через `ops/diagnose.py emit-evidence`).
 **CA‑03 (ca03-info):** truth‑first info_bundle → `decision_meta.fact_source=truth`, `info_sections`+`fact_intents`, `info_combined` (address+hours), `llm_used=false`, `source` ∈ {`truth_gate`,`class_router`}, trace `stage` ∈ {`truth_gate`,`info_class`}.
 **CA‑04 (ca04-service):** service matcher → `decision_meta.action=reply`, `intent` ∈ {`service_match`,`service_not_found`}, `fact_source=service_matcher`, `fact_intents` contains `service_match`/`service_not_found`, `source=service_matcher`, `llm_used=false`, trace `stage=service_matcher`, `decision` = intent, `fact_source=service_matcher`.
 **CA‑05 (ca05-booking):** booking‑first → `expected_reply_type=service_choice` после “хочу записаться”, затем `expected_reply_type=time` и `booking.service` заполнен после сервиса; interrupt‑вопрос → `booking_info_interrupt=true`, `booking_info_intents` непустой, trace `stage=booking_interrupt` с `info_intents`.
 
 **Важно:** CI‑livecheck покрывает CA‑инварианты в dev‑фазе; финальный live‑check на живых клиентах — вручную.
+
+### 5.13 CA‑Matrix (suite/mode/evidence)
+
+**Назначение:** единая матрица CA → suite → mode → required meta/trace → evidence source.
+
+**Suite:** имя набора в `ops/diagnose.py` (`livecheck-auto` или `webhook-fuzz`).  
+**Mode:** `logic` / `state` / `live` (см. 5.8).  
+**Manual:** suite отсутствует, evidence собирается вручную.
+
+| CA-ID | Suite | Mode | Required decision_meta | Required decision_trace | Evidence source |
+| --- | --- | --- | --- | --- | --- |
+| CA-01 | `ca01-core` | live | action=escalate; policy_gate=hard_law; policy_section ∈ {refund,payment_info,reschedule,medical}; intent; risk_level; llm_used=false | stage=policy_gate; policy_gate=hard_law; policy_section | `livecheck-ca01-core.jsonl` + `livecheck-gate.txt` + SQL/`STATE.md` |
+| CA-02 | `ca02-policy` | live | policy_gate ∈ {discounts,hard_law}; policy_section; action; risk_level; llm_used=false | stage=policy_gate; policy_type; risk_level; policy_section | `livecheck-ca02-policy.jsonl` + `livecheck-gate.txt` + CI core |
+| CA-03 | `ca03-info` | live | fact_source=truth; info_sections; fact_intents; info_combined (address+hours); llm_used=false; source ∈ {truth_gate,class_router} | stage ∈ {truth_gate,info_class}; fact_source=truth; info_sections/intents | `livecheck-ca03-info.jsonl` + `livecheck-gate.txt` + CI core |
+| CA-04 | `ca04-service` | live | action=reply; intent ∈ {service_match,service_not_found}; fact_source=service_matcher; fact_intents; llm_used=false; source=service_matcher | stage=service_matcher; decision=intent; fact_source=service_matcher | `livecheck-ca04-service.jsonl` + `livecheck-gate.txt` + CI core |
+| CA-05 | `ca05-booking` | live | expected_reply_type (service_choice→time); booking.service; booking_info_interrupt=true; booking_info_intents | stage=booking_interrupt; info_intents | `livecheck-ca05-booking.jsonl` + `livecheck-gate.txt` + CI booking |
+| CA-06 | manual | live | action=consult_reply; consult_playbook_id; consult_topic; source=pack | stage=consult_flow/consult; consult_playbook_id | manual live-check + CI consult |
+| CA-07 | manual | logic | action=out_of_domain/smalltalk; source=guard/router; llm_used=false (when gated) | stage ∈ {out_of_domain,fast_intent,smalltalk} | CI core + SQL trace |
+| CA-08 | `ca08-state` | live | action=escalate; pending_action=pending_ack | stage ∈ {pending_sla,pending_resume} | `livecheck-ca08-state.jsonl` + `livecheck-gate.txt` + SQL state/handover |
+| CA-09 | `ca09-manager` | live | action=escalate; policy_gate=hard_law | stage=policy_gate (hard_law) | `livecheck-ca09-manager.jsonl` + `livecheck-gate.txt` + Telegram/DB/Qdrant |
+| CA-10 | `ca10-outbox` | live | n/a | stage ∈ {outbox,dedup} (if traced) | `livecheck-ca10-outbox.jsonl` + `livecheck-gate.txt` + SQL outbox |
+| CA-11 | manual | state | decision_meta present on user messages | critical stages retained in decision_trace | SQL audit (decision_trace retention) |
+| CA-12 | manual | logic | router_* meta + budget/llm_degradation flags | stages budget_gate/llm_degradation | `/admin/metrics` + SQL meta/trace |
+| CA-13 | manual | live | branch_id; knowledge_tag | trace/rag filter evidence | live-check + SQL trace/meta |
+| CA-14 | manual | logic | n/a | n/a | `ops/sync_client.py --validate` + Qdrant sync + `/admin/version` |
+| CA-15 | manual | logic | n/a | n/a | `/admin/health` + `/admin/metrics` + `/alerts/test` + no_response alerts |
+
+**Авто‑evidence:**  
+`python3 ops/diagnose.py emit-evidence --input-dir artifacts --gate artifacts/livecheck-gate.txt --output artifacts/livecheck-evidence.md`
 
 ## 5. Архитектура — потоки данных
 

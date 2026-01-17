@@ -51,28 +51,29 @@
 - Любой `verified`/`gap` обязан ссылаться на evidence в `STATE.md` (conv_id/trace/SQL/CI).
 - Любые фиксы — только через отдельный Task Package с CA‑ID.
 - Live-check процесс: см. `SPECS/SYSTEM_REFERENCE.md` (Live-check SOP); запуск через `ops/diagnose.py livecheck`.
+- CA‑Matrix (suite/mode/evidence): `SPECS/SYSTEM_REFERENCE.md` → section "5.13 CA‑Matrix".
 - CI обязан покрывать все CA‑инварианты: для пунктов с live‑evidence используется CI live‑check job (safety‑контур обязателен).
 - Live‑check в CI на проде допускается **только** в dev‑фазе при включённом safety‑контуре; после готовности — выборочный ручной live‑check владельцем.
 
 ### Checklist (evidence-first)
 
-| ID | Requirement | Canon source | Evidence required | Status |
-| --- | --- | --- | --- | --- |
-| CA-01 | Hard-LAW pre-LLM gate на всех входах (`/webhook`, `/message`) | REQUIREMENTS + CONSULTANT | code refs + decision_trace `policy_gate=hard_law` + decision_meta `action=escalate` + live-check (conv_id, msg_id) | verified (STATE.md:839) |
-| CA-02 | Policy gates (discounts/payment) по policy_pack, fail-closed | REQUIREMENTS + CONSULTANT | code refs + trace `policy_gate` (`policy_type`, `risk_level`) + CI core case + live-check | verified (STATE.md:893) |
-| CA-03 | Truth-first факты + info_bundle инвариант | CONSULTANT + ARCHITECTURE | trace `truth_gate/info_class` + `info_sections` + llm_used=false + CI core info cases | verified (STATE.md:915) |
-| CA-04 | Service matcher + service presence ответы | CONSULTANT | trace `service_matcher/service_presence` + CI core service cases + live-check | pending |
-| CA-05 | Booking-first + expected_reply интерпретатор + booking_interrupt | CONSULTANT | trace `booking/booking_interrupt` + `expected_reply_type` + CI booking tests + live-check | pending |
-| CA-06 | Consult pack-only + short-circuit при явной услуге | CONSULTANT | trace `consult_flow/consult` + `consult_playbook_id` + `source=pack` + CI consult cases | pending |
-| CA-07 | OOD + low-signal guard + smalltalk redirect | CONSULTANT + ARCHITECTURE | trace `out_of_domain/fast_intent/smalltalk` + CI core cases | pending |
-| CA-08 | State machine + pending/manager_active поведение | ESCALATION | trace `pending_sla/pending_resume` + SQL state vs handover + live-check | verified (STATE.md:874) |
-| CA-09 | Escalation pipeline + manager reply + learning trigger | ESCALATION | Telegram flow logs + DB handovers update + manager reply delivered + learned_responses/Qdrant evidence (owner) | verified (STATE.md:839) |
-| CA-10 | Outbox ack-first + dedup + idempotency | ARCHITECTURE | trace `outbox/dedupe` + SQL outbox status + `/admin/outbox/process` evidence | verified (STATE.md:839) |
-| CA-11 | Trace/meta coverage + critical stages retention | ARCHITECTURE | SQL decision_trace stages + trace validation + missing-stage audit | pending |
-| CA-12 | Router SLA + LLM budget/degradation | ARCHITECTURE + REQUIREMENTS | decision_meta router_* + trace `budget_gate/llm_degradation` + `/admin/metrics` | pending |
-| CA-13 | Branch routing isolation before pricing | ARCHITECTURE + REQUIREMENTS | decision_meta `branch_id/knowledge_tag` + RAG filter evidence + live-check | pending |
-| CA-14 | Onboarding readiness (pack validate + sync) | TECH_ROADMAP + MULTI_TENANT | `ops/sync_client.py --validate` output + Qdrant sync log + `/admin/version` | pending |
-| CA-15 | Observability baseline (health/metrics/alerts) | REQUIREMENTS + ARCHITECTURE | `/admin/health` + `/admin/metrics` + `/alerts/test` + no_response alerts evidence | verified (STATE.md:783) |
+| ID | Requirement | Canon source | Suite/Mode | Evidence required | Status |
+| --- | --- | --- | --- | --- | --- |
+| CA-01 | Hard-LAW pre-LLM gate на всех входах (`/webhook`, `/message`) | REQUIREMENTS + CONSULTANT | `ca01-core` / live | code refs + decision_trace `policy_gate=hard_law` + decision_meta `action=escalate` + live-check (conv_id, msg_id) | verified (STATE.md:839) |
+| CA-02 | Policy gates (discounts/payment) по policy_pack, fail-closed | REQUIREMENTS + CONSULTANT | `ca02-policy` / live | code refs + trace `policy_gate` (`policy_type`, `risk_level`) + CI core case + live-check | verified (STATE.md:893) |
+| CA-03 | Truth-first факты + info_bundle инвариант | CONSULTANT + ARCHITECTURE | `ca03-info` / live | trace `truth_gate/info_class` + `info_sections` + llm_used=false + CI core info cases | verified (STATE.md:915) |
+| CA-04 | Service matcher + service presence ответы | CONSULTANT | `ca04-service` / live | trace `service_matcher/service_presence` + CI core service cases + live-check | pending |
+| CA-05 | Booking-first + expected_reply интерпретатор + booking_interrupt | CONSULTANT | `ca05-booking` / live | trace `booking/booking_interrupt` + `expected_reply_type` + CI booking tests + live-check | pending |
+| CA-06 | Consult pack-only + short-circuit при явной услуге | CONSULTANT | manual / live | trace `consult_flow/consult` + `consult_playbook_id` + `source=pack` + CI consult cases | pending |
+| CA-07 | OOD + low-signal guard + smalltalk redirect | CONSULTANT + ARCHITECTURE | manual / logic | trace `out_of_domain/fast_intent/smalltalk` + CI core cases | pending |
+| CA-08 | State machine + pending/manager_active поведение | ESCALATION | `ca08-state` / live | trace `pending_sla/pending_resume` + SQL state vs handover + live-check | verified (STATE.md:874) |
+| CA-09 | Escalation pipeline + manager reply + learning trigger | ESCALATION | `ca09-manager` / live | Telegram flow logs + DB handovers update + manager reply delivered + learned_responses/Qdrant evidence (owner) | verified (STATE.md:839) |
+| CA-10 | Outbox ack-first + dedup + idempotency | ARCHITECTURE | `ca10-outbox` / live | trace `outbox/dedupe` + SQL outbox status + `/admin/outbox/process` evidence | verified (STATE.md:839) |
+| CA-11 | Trace/meta coverage + critical stages retention | ARCHITECTURE | manual / state | SQL decision_trace stages + trace validation + missing-stage audit | pending |
+| CA-12 | Router SLA + LLM budget/degradation | ARCHITECTURE + REQUIREMENTS | manual / logic | decision_meta router_* + trace `budget_gate/llm_degradation` + `/admin/metrics` | pending |
+| CA-13 | Branch routing isolation before pricing | ARCHITECTURE + REQUIREMENTS | manual / live | decision_meta `branch_id/knowledge_tag` + RAG filter evidence + live-check | pending |
+| CA-14 | Onboarding readiness (pack validate + sync) | TECH_ROADMAP + MULTI_TENANT | manual / logic | `ops/sync_client.py --validate` output + Qdrant sync log + `/admin/version` | pending |
+| CA-15 | Observability baseline (health/metrics/alerts) | REQUIREMENTS + ARCHITECTURE | manual / logic | `/admin/health` + `/admin/metrics` + `/alerts/test` + no_response alerts evidence | verified (STATE.md:783) |
 
 ---
 

@@ -258,6 +258,8 @@ jobs:
     needs: deploy
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Configure SSH
         run: |
           set -euo pipefail
@@ -476,6 +478,19 @@ jobs:
           test -s artifacts/livecheck-gate.txt
           if [ "${run_status}" -ne 0 ]; then
             exit "${run_status}"
+          fi
+
+      - name: Generate livecheck evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          if ls artifacts/livecheck-*.jsonl >/dev/null 2>&1; then
+            python3 ops/diagnose.py emit-evidence \
+              --input-dir artifacts \
+              --gate artifacts/livecheck-gate.txt \
+              --output artifacts/livecheck-evidence.md
+          else
+            echo "No livecheck jsonl artifacts found; skipping evidence."
           fi
 
       - name: Upload livecheck artifacts
