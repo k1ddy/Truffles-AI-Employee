@@ -345,6 +345,7 @@ jobs:
           SSH="ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes ${SERVER_USER}@${SERVER_HOST}"
           $SSH "bash -s" <<'REMOTE' 2>&1 | tee artifacts/livecheck-gate.txt
           set -euo pipefail
+          set -x
           TEST_MODE=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"')
           ALLOWLIST=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"')
           LEARNING_MODE=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${LEARNING_MODE:-}"')
