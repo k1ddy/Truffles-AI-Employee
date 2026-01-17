@@ -932,6 +932,32 @@
   - guest_policy message_id `LC-AUTO-20260117-092723-02-62a50fce`:
     - fact_source=truth, info_sections includes guest_policy, info_combined=true, llm_used=false, source=class_router
 
+### 2026-01-17 — CA-05 booking-first + booking_interrupt live-check
+
+**Что сделали:**
+- Запустили CI livecheck (ci-livecheck) на main commit `8c0668e439c96814d17665520f35f7138e196708` с CI_LIVECHECK_ENABLED=1.
+- Прогнали suite ca05-booking.
+
+**Evidence:**
+- CI run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21094899435
+- artifacts: `livecheck-artifacts` (gate + jsonl)
+- gate (livecheck-gate.txt):
+  - TEST_MODE=1
+  - OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net
+  - QDRANT_COLLECTION_EFFECTIVE=truffles_knowledge_ci
+- CA-05 (livecheck-ca05-booking.jsonl):
+  - conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+  - reset message_id `LC-AUTO-20260117-132304-CA05-RESET-830256cf` (reset_booking_active=false)
+  - step 1 message_id `LC-AUTO-20260117-132304-CA05-01-6c778cfd`:
+    - expected_reply_type=service_choice, llm_used=false
+  - step 2 message_id `LC-AUTO-20260117-132304-CA05-02-e0032573`:
+    - expected_reply_type=time, booking_service=Маникюр, llm_used=false
+  - step 3 message_id `LC-AUTO-20260117-132304-CA05-03-98a1e880`:
+    - booking_info_interrupt=true, booking_info_intents=["pricing"], trace_booking_interrupt=true, llm_used=false
+
+**Note/GAP:**
+- instance_drift=true (client_instance_id != branch_instance_id) in livecheck-ca05-booking.jsonl.
+
 ### 2026-01-16 — RCA: trace retention drops booking_interrupt/multi_truth
 
 **Дефект:** при `booking_interrupt_info=true` в decision_meta отсутствуют `decision_trace.stage=booking_interrupt/multi_truth`.
