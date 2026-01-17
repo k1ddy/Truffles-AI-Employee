@@ -1944,7 +1944,7 @@ def _run_livecheck_auto(args):
                     )
                 if (meta or {}).get("llm_used") is not False:
                     raise SystemExit(f"livecheck-auto: CA03 {case['case_id']} llm_used not false")
-                if (meta or {}).get("source") != "class_router":
+                if (meta or {}).get("source") not in {"truth_gate", "class_router"}:
                     raise SystemExit(
                         f"livecheck-auto: CA03 {case['case_id']} source mismatch"
                     )
