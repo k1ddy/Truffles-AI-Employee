@@ -263,13 +263,67 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.ssh
           KEY_RAW="${{ secrets.SSH_PRIVATE_KEY }}"
-          if printf '%s' "${KEY_RAW}" | grep -q "BEGIN .*PRIVATE KEY"; then
-            printf '%b' "${KEY_RAW}" | tr -d '\r' > ~/.ssh/id_rsa
-          else
-            printf '%s' "${KEY_RAW}" | tr -d '\r' | base64 -d > ~/.ssh/id_rsa
-          fi
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keygen -yf ~/.ssh/id_rsa >/dev/null
+          export KEY_RAW
+          python3 - <<'PY'
+          import base64
+          import os
+          import subprocess
+          from pathlib import Path
+
+          raw = os.environ.get("KEY_RAW", "")
+          key_path = Path.home() / ".ssh" / "id_rsa"
+
+          def try_write(content: str) -> bool:
+              key_path.write_text(content.replace("\r", ""))
+              key_path.chmod(0o600)
+              try:
+                  subprocess.check_output(
+                      ["ssh-keygen", "-yf", str(key_path)],
+                      stderr=subprocess.STDOUT,
+                  )
+                  return True
+              except subprocess.CalledProcessError:
+                  return False
+
+          candidates = [raw, raw.replace("\r", "")]
+          if "\\n" in raw and "\n" not in raw:
+              candidates.append(raw.replace("\\n", "\n"))
+              candidates.append(raw.replace("\\n", "\n").replace("\r", ""))
+          if "\\n" in raw or "\\r" in raw:
+              try:
+                  candidates.append(raw.encode("utf-8").decode("unicode_escape"))
+              except Exception:
+                  pass
+          for b64 in {
+              raw,
+              raw.replace("\n", ""),
+              raw.replace("\r", ""),
+              raw.replace("\\n", ""),
+              raw.replace(" ", ""),
+          }:
+              try:
+                  decoded = base64.b64decode(b64)
+              except Exception:
+                  continue
+              try:
+                  candidates.append(decoded.decode("utf-8"))
+              except UnicodeDecodeError:
+                  candidates.append(decoded.decode("utf-8", errors="ignore"))
+
+          seen = set()
+          for candidate in candidates:
+              if not candidate or not candidate.strip():
+                  continue
+              if candidate in seen:
+                  continue
+              seen.add(candidate)
+              if try_write(candidate):
+                  print("KEY_OK")
+                  raise SystemExit(0)
+
+          print("KEY_INVALID")
+          raise SystemExit(1)
+          PY
           ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Livecheck safety gate
