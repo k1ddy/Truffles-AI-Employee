@@ -262,8 +262,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          printf '%s' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          KEY_RAW="${{ secrets.SSH_PRIVATE_KEY }}"
+          if printf '%s' "${KEY_RAW}" | grep -q "BEGIN .*PRIVATE KEY"; then
+            printf '%b' "${KEY_RAW}" | tr -d '\r' > ~/.ssh/id_rsa
+          else
+            printf '%s' "${KEY_RAW}" | tr -d '\r' | base64 -d > ~/.ssh/id_rsa
+          fi
           chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -yf ~/.ssh/id_rsa >/dev/null
           ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Livecheck safety gate
