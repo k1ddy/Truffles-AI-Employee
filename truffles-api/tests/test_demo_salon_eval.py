@@ -867,6 +867,52 @@ def test_policy_gates_discount_and_payment():
         )
 
 
+def test_truth_first_info_bundle():
+    cases = [
+        {
+            "case_id": "CA03_ADDRESS_HOURS",
+            "message": "где вы и когда работаете?",
+            "expected_info_sections": ["address", "hours"],
+            "expected_fact_intents": ["location", "hours"],
+            "expect_info_combined": True,
+        },
+        {
+            "case_id": "CA03_GUEST_POLICY",
+            "message": "можно с ребенком?",
+            "expected_info_sections": ["guest_policy"],
+            "expected_fact_intents": ["guest_policy"],
+        },
+    ]
+
+    for case in cases:
+        case_id = case["case_id"]
+        _response, conversation, saved_message = _run_webhook_conversation(
+            [case["message"]],
+            case_id,
+            None,
+        )
+        meta = saved_message.message_metadata.get("decision_meta", {})
+        assert meta.get("fact_source") == "truth", f"{case_id}: fact_source mismatch"
+        assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+        assert meta.get("source") == "class_router", f"{case_id}: source mismatch"
+        _assert_list_contains(meta.get("info_sections"), case["expected_info_sections"], case_id, "info_sections")
+        _assert_list_contains(meta.get("fact_intents"), case["expected_fact_intents"], case_id, "fact_intents")
+        if case.get("expect_info_combined"):
+            assert meta.get("info_combined") is True, f"{case_id}: info_combined mismatch"
+
+        trace = _get_decision_trace(conversation)
+        info_trace = next((entry for entry in trace if entry.get("stage") == "info_class"), None)
+        assert info_trace is not None, f"{case_id}: missing info_class trace"
+        assert info_trace.get("decision") == "reply", f"{case_id}: info_class decision mismatch"
+        assert info_trace.get("fact_source") == "truth", f"{case_id}: trace fact_source mismatch"
+        _assert_list_contains(
+            info_trace.get("info_sections"),
+            case["expected_info_sections"],
+            case_id,
+            "trace info_sections",
+        )
+
+
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:
     normalized = _normalize(response)
     for item in items:
@@ -883,6 +929,14 @@ def _assert_not_contains(response: str, items: list[str], case_id: str) -> None:
     normalized = _normalize(response)
     for item in items:
         assert _normalize(item) not in normalized, f"{case_id}: must_not contains '{item}'"
+
+
+def _assert_list_contains(value: object, expected: list[str], case_id: str, label: str) -> None:
+    if not isinstance(value, list):
+        raise AssertionError(f"{case_id}: {label} not list")
+    for item in expected:
+        if item not in value:
+            raise AssertionError(f"{case_id}: missing {label} '{item}'")
 
 
 def _match_trace(entry: dict, expected: dict) -> bool:

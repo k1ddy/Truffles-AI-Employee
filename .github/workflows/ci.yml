@@ -377,7 +377,7 @@ jobs:
           REMOTE
           test -s artifacts/livecheck-gate.txt
 
-      - name: Livecheck runner (CA-01/02/08/09/10)
+      - name: Livecheck runner (CA-01/02/03/08/09/10)
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
@@ -407,6 +407,19 @@ jobs:
             --client-slug demo_salon \
             --suite ca02-policy \
             --seed 776 \
+            --jid-mode allowlist \
+            --remote-jid 77015705555@s.whatsapp.net \
+            --poll-timeout 60 \
+            --poll-interval 1
+          REMOTE
+          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca03.jsonl
+          set -euo pipefail
+          cd ~/truffles-main
+          python3 ops/diagnose.py livecheck-auto \
+            --base-url http://localhost:8000 \
+            --client-slug demo_salon \
+            --suite ca03-info \
+            --seed 775 \
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \

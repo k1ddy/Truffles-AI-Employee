@@ -108,6 +108,27 @@ LIVECHECK_SUITES = {
             ],
         },
     ],
+    "ca03-info": [
+        {
+            "case_id": "CA03_ADDRESS_HOURS",
+            "expected_info_sections": ["address", "hours"],
+            "expected_fact_intents": ["location", "hours"],
+            "expected_info_combined": True,
+            "messages": [
+                "где вы и когда работаете?",
+                "где находитесь и во сколько открыты?",
+            ],
+        },
+        {
+            "case_id": "CA03_GUEST_POLICY",
+            "expected_info_sections": ["guest_policy"],
+            "expected_fact_intents": ["guest_policy"],
+            "messages": [
+                "можно с ребенком?",
+                "детям можно приходить?",
+            ],
+        },
+    ],
     "ca08-state": [
         {
             "case_id": "CA08_PENDING",
@@ -1792,7 +1813,7 @@ def _run_livecheck_auto(args):
         "outbox_wait_seconds": _resolve_outbox_wait_seconds(container_name),
     }
 
-    if args.suite in {"ca01-core", "ca02-policy"}:
+    if args.suite in {"ca01-core", "ca02-policy", "ca03-info"}:
         _ensure_bot_active_before_suite(args, context)
 
     if args.suite == "ca08-state":
@@ -1859,10 +1880,16 @@ def _run_livecheck_auto(args):
             "remote_jid": remote_jid,
             "text": message,
             "sent_at": sent_at,
-            "expected_policy_section": case["expected_policy_section"],
+            "expected_policy_section": case.get("expected_policy_section"),
             "status": status,
             "http_status": response_status,
         }
+        if case.get("expected_info_sections"):
+            log["expected_info_sections"] = case.get("expected_info_sections")
+        if case.get("expected_fact_intents"):
+            log["expected_fact_intents"] = case.get("expected_fact_intents")
+        if case.get("expected_info_combined") is not None:
+            log["expected_info_combined"] = case.get("expected_info_combined")
         if response_error:
             log["error"] = response_error
         if response_body:
@@ -1906,20 +1933,83 @@ def _run_livecheck_auto(args):
             if policy_pack_missing:
                 raise SystemExit("livecheck-auto: policy_pack_missing=true")
 
+            expected_sections = case.get("expected_info_sections") or []
+            expected_fact_intents = case.get("expected_fact_intents") or []
+            expected_info_combined = case.get("expected_info_combined")
+            if args.suite == "ca03-info":
+                fact_source = (meta or {}).get("fact_source")
+                if fact_source != "truth":
+                    raise SystemExit(
+                        f"livecheck-auto: CA03 {case['case_id']} fact_source mismatch ({fact_source})"
+                    )
+                if (meta or {}).get("llm_used") is not False:
+                    raise SystemExit(f"livecheck-auto: CA03 {case['case_id']} llm_used not false")
+                if (meta or {}).get("source") != "class_router":
+                    raise SystemExit(
+                        f"livecheck-auto: CA03 {case['case_id']} source mismatch"
+                    )
+                info_sections = (meta or {}).get("info_sections")
+                if expected_sections:
+                    if not isinstance(info_sections, list) or any(
+                        item not in info_sections for item in expected_sections
+                    ):
+                        raise SystemExit(
+                            f"livecheck-auto: CA03 {case['case_id']} info_sections mismatch"
+                        )
+                fact_intents = (meta or {}).get("fact_intents")
+                if expected_fact_intents:
+                    if not isinstance(fact_intents, list) or any(
+                        item not in fact_intents for item in expected_fact_intents
+                    ):
+                        raise SystemExit(
+                            f"livecheck-auto: CA03 {case['case_id']} fact_intents mismatch"
+                        )
+                if expected_info_combined is True and (meta or {}).get("info_combined") is not True:
+                    raise SystemExit(
+                        f"livecheck-auto: CA03 {case['case_id']} info_combined mismatch"
+                    )
+
             conv_meta = None
             conv_error = None
             trace_entry = None
+            info_trace = None
             if conv_id:
                 conv_meta, conv_error = _fetch_conversation_meta(db_user, conv_id)
                 trace_list = None
                 if conv_meta and isinstance(conv_meta.get("context"), dict):
                     trace_list = conv_meta.get("context", {}).get("decision_trace")
-                trace_entry = _find_trace_entry(
-                    trace_list,
-                    stage="policy_gate",
-                    policy_gate=(meta or {}).get("policy_gate"),
-                    policy_section=(meta or {}).get("policy_section") or case.get("expected_policy_section"),
-                )
+                if (meta or {}).get("policy_gate") or case.get("expected_policy_section"):
+                    trace_entry = _find_trace_entry(
+                        trace_list,
+                        stage="policy_gate",
+                        policy_gate=(meta or {}).get("policy_gate"),
+                        policy_section=(meta or {}).get("policy_section")
+                        or case.get("expected_policy_section"),
+                    )
+                if args.suite == "ca03-info":
+                    info_trace = _find_trace_entry(trace_list, stage="info_class")
+
+            if args.suite == "ca03-info":
+                if not info_trace:
+                    raise SystemExit(
+                        f"livecheck-auto: CA03 {case['case_id']} missing info_class trace"
+                    )
+                if info_trace.get("decision") != "reply":
+                    raise SystemExit(
+                        f"livecheck-auto: CA03 {case['case_id']} info_class decision mismatch"
+                    )
+                if info_trace.get("fact_source") != "truth":
+                    raise SystemExit(
+                        f"livecheck-auto: CA03 {case['case_id']} trace fact_source mismatch"
+                    )
+                trace_sections = info_trace.get("info_sections")
+                if expected_sections:
+                    if not isinstance(trace_sections, list) or any(
+                        item not in trace_sections for item in expected_sections
+                    ):
+                        raise SystemExit(
+                            f"livecheck-auto: CA03 {case['case_id']} trace info_sections mismatch"
+                        )
 
             results.append(
                 {
@@ -1934,6 +2024,10 @@ def _run_livecheck_auto(args):
                     "risk_level": (meta or {}).get("risk_level"),
                     "policy_pack_missing": policy_pack_missing,
                     "llm_used": (meta or {}).get("llm_used"),
+                    "fact_source": (meta or {}).get("fact_source"),
+                    "info_sections": (meta or {}).get("info_sections"),
+                    "info_combined": (meta or {}).get("info_combined"),
+                    "fact_intents": (meta or {}).get("fact_intents"),
                     "ack_message_id": ack_message_id,
                     "ack_marker": ack_marker,
                     "ack_text": ack_text,
@@ -1943,6 +2037,11 @@ def _run_livecheck_auto(args):
                     "trace_policy_gate": (trace_entry or {}).get("policy_gate") if trace_entry else None,
                     "trace_policy_section": (trace_entry or {}).get("policy_section") if trace_entry else None,
                     "trace_risk_level": (trace_entry or {}).get("risk_level") if trace_entry else None,
+                    "trace_stage": (info_trace or {}).get("stage") if info_trace else None,
+                    "trace_decision": (info_trace or {}).get("decision") if info_trace else None,
+                    "trace_fact_source": (info_trace or {}).get("fact_source") if info_trace else None,
+                    "trace_info_sections": (info_trace or {}).get("info_sections") if info_trace else None,
+                    "trace_intents": (info_trace or {}).get("intents") if info_trace else None,
                     "trace_error": conv_error,
                 }
             )
