@@ -64,7 +64,7 @@
 | CA-03 | Truth-first факты + info_bundle инвариант | CONSULTANT + ARCHITECTURE | `ca03-info` / live | trace `truth_gate/info_class` + `info_sections` + llm_used=false + CI core info cases | verified (STATE.md:915) |
 | CA-04 | Service matcher + service presence ответы | CONSULTANT | `ca04-service` / live | trace `service_matcher/service_presence` + CI core service cases + live-check | pending |
 | CA-05 | Booking-first + expected_reply интерпретатор + booking_interrupt | CONSULTANT | `ca05-booking` / live | trace `booking/booking_interrupt` + `expected_reply_type` + CI booking tests + live-check | verified (STATE.md:935) |
-| CA-06 | Consult pack-only + short-circuit при явной услуге | CONSULTANT | manual / live | trace `consult_flow/consult` + `consult_playbook_id` + `source=pack` + CI consult cases | pending |
+| CA-06 | Consult pack-only + short-circuit при явной услуге | CONSULTANT | `ca06-consult` / live | trace `consult_flow/consult` + `consult_playbook_id` + `source=pack` + CI consult cases | pending |
 | CA-07 | OOD + low-signal guard + smalltalk redirect | CONSULTANT + ARCHITECTURE | manual / logic | trace `out_of_domain/fast_intent/smalltalk` + CI core cases | pending |
 | CA-08 | State machine + pending/manager_active поведение | ESCALATION | `ca08-state` / live | trace `pending_sla/pending_resume` + SQL state vs handover + live-check | verified (STATE.md:874) |
 | CA-09 | Escalation pipeline + manager reply + learning trigger | ESCALATION | `ca09-manager` / live | Telegram flow logs + DB handovers update + manager reply delivered + learned_responses/Qdrant evidence (owner) | verified (STATE.md:839) |
