@@ -962,6 +962,58 @@ def test_service_matcher_core():
         )
 
 
+def test_booking_flow_expected_reply_and_interrupt():
+    case_id = "CA05_BOOKING_START"
+    _response, conversation, saved_message = _run_webhook_conversation(
+        ["хочу записаться"],
+        case_id,
+        None,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE, f"{case_id}: expected_reply_type mismatch"
+    assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+    assert (
+        (conversation.context or {}).get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
+    ), f"{case_id}: context expected_reply_type mismatch"
+
+    case_id = "CA05_BOOKING_SERVICE"
+    _response, conversation, saved_message = _run_webhook_conversation(
+        ["хочу записаться", "маникюр"],
+        case_id,
+        None,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME, f"{case_id}: expected_reply_type mismatch"
+    assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+    assert (
+        (conversation.context or {}).get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
+    ), f"{case_id}: context expected_reply_type mismatch"
+    booking_state = (conversation.context or {}).get("booking", {})
+    booking_service = booking_state.get("service") if isinstance(booking_state, dict) else None
+    assert booking_service, f"{case_id}: booking.service missing"
+    assert "маникюр" in booking_service.lower(), f"{case_id}: booking.service mismatch"
+
+    case_id = "CA05_BOOKING_INTERRUPT"
+    _response, conversation, saved_message = _run_webhook_conversation(
+        ["хочу записаться на маникюр", "сколько стоит маникюр?"],
+        case_id,
+        None,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("booking_info_interrupt") is True, f"{case_id}: booking_info_interrupt mismatch"
+    booking_info_intents = meta.get("booking_info_intents")
+    assert isinstance(booking_info_intents, list) and booking_info_intents, f"{case_id}: booking_info_intents empty"
+
+    trace = _get_decision_trace(conversation)
+    interrupt_trace = next(
+        (entry for entry in trace if entry.get("stage") == "booking_interrupt"),
+        None,
+    )
+    assert interrupt_trace is not None, f"{case_id}: missing booking_interrupt trace"
+    trace_intents = interrupt_trace.get("info_intents")
+    assert isinstance(trace_intents, list) and trace_intents, f"{case_id}: trace info_intents empty"
+
+
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:
     normalized = _normalize(response)
     for item in items:

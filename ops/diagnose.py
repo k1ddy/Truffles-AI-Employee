@@ -149,6 +149,34 @@ LIVECHECK_SUITES = {
             ],
         },
     ],
+    "ca05-booking": [
+        {
+            "case_id": "CA05_BOOKING_FLOW",
+            "expected_policy_section": None,
+            "messages": [
+                "хочу записаться",
+                "маникюр",
+                "сколько стоит маникюр?",
+            ],
+            "steps": [
+                {
+                    "message": "хочу записаться",
+                    "expect_expected_reply_type": "service_choice",
+                    "expect_llm_used": False,
+                },
+                {
+                    "message": "маникюр",
+                    "expect_expected_reply_type": "time",
+                    "expect_booking_service": "маникюр",
+                    "expect_llm_used": False,
+                },
+                {
+                    "message": "сколько стоит маникюр?",
+                    "expect_booking_interrupt": True,
+                },
+            ],
+        }
+    ],
     "ca08-state": [
         {
             "case_id": "CA08_PENDING",
@@ -1271,6 +1299,156 @@ def _run_webhook_fuzz(args):
     }
     print(json.dumps({"summary": summary}, ensure_ascii=False))
 
+def _run_livecheck_ca05_booking(args, context):
+    rng = context["rng"]
+    case = context["cases"][0]
+    steps = case.get("steps") or []
+    if not steps:
+        raise SystemExit("livecheck-auto: CA05 missing steps")
+    timestamp = context["timestamp"]
+    webhook_url = context["webhook_url"]
+    base_url = context["base_url"]
+    webhook_secret = context["webhook_secret"]
+    admin_token = context["admin_token"]
+    instance_id = context["instance_id"]
+    remote_jid = context["remote_jid"]
+    db_user = context["db_user"]
+    allowlist_jids = context["allowlist_jids"]
+    outbox_url = f"{base_url}/admin/outbox/process"
+    min_wait = min(args.min_wait, args.max_wait)
+    max_wait = max(args.min_wait, args.max_wait)
+
+    if not remote_jid or remote_jid not in allowlist_jids:
+        raise SystemExit("livecheck-auto: CA05 remote_jid not in allowlist")
+
+    results = []
+    conv_id = None
+
+    for idx, step in enumerate(steps, start=1):
+        base_text = step.get("message") or ""
+        if not base_text:
+            raise SystemExit("livecheck-auto: CA05 empty step message")
+        text = _apply_noise(base_text, rng, args.noise)
+        marker = f"LC:AUTO:CA05:{case['case_id']}:{timestamp}:{idx:02d}"
+        message = f"{text} [{marker}]"
+        message_id = f"LC-AUTO-{timestamp}-CA05-{idx:02d}-{uuid.uuid4().hex[:8]}"
+        sent_at = datetime.now(timezone.utc).isoformat()
+
+        metadata = {
+            "sender": "LivecheckAuto",
+            "timestamp": int(time.time()),
+            "messageId": message_id,
+            "remoteJid": remote_jid,
+        }
+        if instance_id:
+            metadata["instanceId"] = instance_id
+        payload = {"body": {"messageType": "text", "message": message, "metadata": metadata}}
+
+        status = "dry_run"
+        response_status = None
+        response_body = None
+        response_error = None
+        if not args.dry_run:
+            response_status, response_body, response_error = _send_webhook_payload(
+                webhook_url, payload, webhook_secret, args.timeout
+            )
+            status = "sent" if response_status and 200 <= response_status < 300 else "error"
+        print(
+            json.dumps(
+                {
+                    "case_id": case["case_id"],
+                    "step": idx,
+                    "marker": marker,
+                    "message_id": message_id,
+                    "remote_jid": remote_jid,
+                    "text": message,
+                    "sent_at": sent_at,
+                    "status": status,
+                    "http_status": response_status,
+                    "error": response_error,
+                    "response": (response_body or "")[:200] if response_body else None,
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        meta = None
+        conv_meta = None
+        conv_error = None
+        if not args.dry_run:
+            _post_admin_outbox(outbox_url, admin_token, args.timeout)
+            conv_id, meta, error = _poll_decision_meta(
+                db_user, message_id, args.poll_timeout, args.poll_interval
+            )
+            if error:
+                raise SystemExit(f"livecheck-auto: CA05 decision_meta poll failed ({error})")
+            conv_meta, conv_error = _fetch_conversation_meta(db_user, conv_id)
+
+        conv_context = conv_meta.get("context") if isinstance(conv_meta, dict) else None
+        expected_reply_type = conv_context.get("expected_reply_type") if isinstance(conv_context, dict) else None
+        booking_state = conv_context.get("booking") if isinstance(conv_context, dict) else None
+        trace_list = conv_context.get("decision_trace") if isinstance(conv_context, dict) else None
+        interrupt_trace = None
+        for entry in reversed(_trace_as_list(trace_list)):
+            if entry.get("stage") == "booking_interrupt":
+                interrupt_trace = entry
+                break
+
+        if not args.dry_run:
+            expected_reply = step.get("expect_expected_reply_type")
+            if expected_reply and expected_reply_type != expected_reply:
+                raise SystemExit(
+                    f"livecheck-auto: CA05 expected_reply_type mismatch ({expected_reply_type})"
+                )
+            expected_llm = step.get("expect_llm_used")
+            if expected_llm is not None and (meta or {}).get("llm_used") is not expected_llm:
+                raise SystemExit("livecheck-auto: CA05 llm_used mismatch")
+            expected_service = step.get("expect_booking_service")
+            if expected_service:
+                service = None
+                if isinstance(booking_state, dict):
+                    service = booking_state.get("service")
+                if not service or expected_service not in str(service).lower():
+                    raise SystemExit("livecheck-auto: CA05 booking.service mismatch")
+            if step.get("expect_booking_interrupt"):
+                if (meta or {}).get("booking_info_interrupt") is not True:
+                    raise SystemExit("livecheck-auto: CA05 booking_info_interrupt mismatch")
+                info_intents = (meta or {}).get("booking_info_intents")
+                if not isinstance(info_intents, list) or not info_intents:
+                    raise SystemExit("livecheck-auto: CA05 booking_info_intents empty")
+                if not interrupt_trace:
+                    raise SystemExit("livecheck-auto: CA05 missing booking_interrupt trace")
+                trace_intents = interrupt_trace.get("info_intents")
+                if not isinstance(trace_intents, list) or not trace_intents:
+                    raise SystemExit("livecheck-auto: CA05 trace info_intents empty")
+
+        results.append(
+            {
+                "step": idx,
+                "message_id": message_id,
+                "conversation_id": conv_id,
+                "expected_reply_type": expected_reply_type,
+                "booking_service": booking_state.get("service") if isinstance(booking_state, dict) else None,
+                "booking_info_interrupt": (meta or {}).get("booking_info_interrupt"),
+                "booking_info_intents": (meta or {}).get("booking_info_intents"),
+                "trace_booking_interrupt": bool(interrupt_trace),
+                "trace_info_intents": interrupt_trace.get("info_intents") if interrupt_trace else None,
+                "llm_used": (meta or {}).get("llm_used"),
+                "error": conv_error,
+            }
+        )
+
+        if idx < len(steps):
+            time.sleep(rng.uniform(min_wait, max_wait))
+
+    summary = {
+        "suite": "ca05-booking",
+        "case_id": case["case_id"],
+        "conversation_id": conv_id,
+        "results": results,
+    }
+    return summary
+
 def _run_livecheck_ca08_state(args, context):
     rng = context["rng"]
     case = context["cases"][0]
@@ -1836,11 +2014,16 @@ def _run_livecheck_auto(args):
         "outbox_wait_seconds": _resolve_outbox_wait_seconds(container_name),
     }
 
-    if args.suite in {"ca01-core", "ca02-policy", "ca03-info", "ca04-service"}:
+    if args.suite in {"ca01-core", "ca02-policy", "ca03-info", "ca04-service", "ca05-booking"}:
         _ensure_bot_active_before_suite(args, context)
 
     if args.suite == "ca08-state":
         summary = _run_livecheck_ca08_state(args, context)
+        summary.update(common)
+        print(json.dumps({"summary": summary}, ensure_ascii=False))
+        return
+    if args.suite == "ca05-booking":
+        summary = _run_livecheck_ca05_booking(args, context)
         summary.update(common)
         print(json.dumps({"summary": summary}, ensure_ascii=False))
         return
