@@ -58,16 +58,16 @@
 
 | ID | Requirement | Canon source | Evidence required | Status |
 | --- | --- | --- | --- | --- |
-| CA-01 | Hard-LAW pre-LLM gate на всех входах (`/webhook`, `/message`) | REQUIREMENTS + CONSULTANT | code refs + decision_trace `policy_gate=hard_law` + decision_meta `action=escalate` + live-check (conv_id, msg_id) | in_progress |
+| CA-01 | Hard-LAW pre-LLM gate на всех входах (`/webhook`, `/message`) | REQUIREMENTS + CONSULTANT | code refs + decision_trace `policy_gate=hard_law` + decision_meta `action=escalate` + live-check (conv_id, msg_id) | verified (STATE.md:839) |
 | CA-02 | Policy gates (discounts/payment) по policy_pack, fail-closed | REQUIREMENTS + CONSULTANT | code refs + trace `policy_gate` (`policy_type`, `risk_level`) + CI core case + live-check | pending |
 | CA-03 | Truth-first факты + info_bundle инвариант | CONSULTANT + ARCHITECTURE | trace `truth_gate/info_class` + `info_sections` + llm_used=false + CI core info cases | pending |
 | CA-04 | Service matcher + service presence ответы | CONSULTANT | trace `service_matcher/service_presence` + CI core service cases + live-check | pending |
 | CA-05 | Booking-first + expected_reply интерпретатор + booking_interrupt | CONSULTANT | trace `booking/booking_interrupt` + `expected_reply_type` + CI booking tests + live-check | pending |
 | CA-06 | Consult pack-only + short-circuit при явной услуге | CONSULTANT | trace `consult_flow/consult` + `consult_playbook_id` + `source=pack` + CI consult cases | pending |
 | CA-07 | OOD + low-signal guard + smalltalk redirect | CONSULTANT + ARCHITECTURE | trace `out_of_domain/fast_intent/smalltalk` + CI core cases | pending |
-| CA-08 | State machine + pending/manager_active поведение | ESCALATION | trace `pending_sla/pending_resume` + SQL state vs handover + live-check | pending |
-| CA-09 | Escalation pipeline + manager reply + learning trigger | ESCALATION | Telegram flow logs + DB handovers update + manager reply delivered + learned_responses/Qdrant evidence (owner) | pending |
-| CA-10 | Outbox ack-first + dedup + idempotency | ARCHITECTURE | trace `outbox/dedupe` + SQL outbox status + `/admin/outbox/process` evidence | pending |
+| CA-08 | State machine + pending/manager_active поведение | ESCALATION | trace `pending_sla/pending_resume` + SQL state vs handover + live-check | gap (STATE.md:839, missing pending_sla/pending_resume trace) |
+| CA-09 | Escalation pipeline + manager reply + learning trigger | ESCALATION | Telegram flow logs + DB handovers update + manager reply delivered + learned_responses/Qdrant evidence (owner) | verified (STATE.md:839) |
+| CA-10 | Outbox ack-first + dedup + idempotency | ARCHITECTURE | trace `outbox/dedupe` + SQL outbox status + `/admin/outbox/process` evidence | verified (STATE.md:839) |
 | CA-11 | Trace/meta coverage + critical stages retention | ARCHITECTURE | SQL decision_trace stages + trace validation + missing-stage audit | pending |
 | CA-12 | Router SLA + LLM budget/degradation | ARCHITECTURE + REQUIREMENTS | decision_meta router_* + trace `budget_gate/llm_degradation` + `/admin/metrics` | pending |
 | CA-13 | Branch routing isolation before pricing | ARCHITECTURE + REQUIREMENTS | decision_meta `branch_id/knowledge_tag` + RAG filter evidence + live-check | pending |
