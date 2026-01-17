@@ -88,6 +88,26 @@ LIVECHECK_SUITES = {
             ],
         },
     ],
+    "ca02-policy": [
+        {
+            "case_id": "CA02_DISCOUNT",
+            "expected_policy_section": "discounts",
+            "messages": [
+                "есть скидка на услуги?",
+                "можно скидку?",
+                "какие акции сейчас есть?",
+            ],
+        },
+        {
+            "case_id": "CA02_PAYMENT",
+            "expected_policy_section": "payment_info",
+            "messages": [
+                "можно оплатить картой?",
+                "есть оплата каспи?",
+                "можно оплатить переводом?",
+            ],
+        },
+    ],
     "ca08-state": [
         {
             "case_id": "CA08_PENDING",
@@ -746,6 +766,26 @@ def _trace_has_entry(trace_list, stage, decision=None):
             continue
         return True
     return False
+
+
+def _trace_as_list(trace_list):
+    if isinstance(trace_list, dict):
+        return [trace_list]
+    if isinstance(trace_list, list):
+        return [entry for entry in trace_list if isinstance(entry, dict)]
+    return []
+
+
+def _find_trace_entry(trace_list, *, stage, policy_gate=None, policy_section=None):
+    for entry in _trace_as_list(trace_list):
+        if entry.get("stage") != stage:
+            continue
+        if policy_gate and entry.get("policy_gate") != policy_gate:
+            continue
+        if policy_section and entry.get("policy_section") != policy_section:
+            continue
+        return entry
+    return None
 
 def _send_json_payload(url, payload, timeout):
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -1752,7 +1792,7 @@ def _run_livecheck_auto(args):
         "outbox_wait_seconds": _resolve_outbox_wait_seconds(container_name),
     }
 
-    if args.suite == "ca01-core":
+    if args.suite in {"ca01-core", "ca02-policy"}:
         _ensure_bot_active_before_suite(args, context)
 
     if args.suite == "ca08-state":
@@ -1862,6 +1902,25 @@ def _run_livecheck_auto(args):
                 raise SystemExit(f"livecheck-auto: ACK failed ({ack_error})")
             _post_admin_outbox(outbox_url, admin_token, args.timeout)
 
+            policy_pack_missing = (meta or {}).get("policy_pack_missing")
+            if policy_pack_missing:
+                raise SystemExit("livecheck-auto: policy_pack_missing=true")
+
+            conv_meta = None
+            conv_error = None
+            trace_entry = None
+            if conv_id:
+                conv_meta, conv_error = _fetch_conversation_meta(db_user, conv_id)
+                trace_list = None
+                if conv_meta and isinstance(conv_meta.get("context"), dict):
+                    trace_list = conv_meta.get("context", {}).get("decision_trace")
+                trace_entry = _find_trace_entry(
+                    trace_list,
+                    stage="policy_gate",
+                    policy_gate=(meta or {}).get("policy_gate"),
+                    policy_section=(meta or {}).get("policy_section") or case.get("expected_policy_section"),
+                )
+
             results.append(
                 {
                     "case_id": case["case_id"],
@@ -1871,11 +1930,20 @@ def _run_livecheck_auto(args):
                     "action": (meta or {}).get("action"),
                     "policy_gate": (meta or {}).get("policy_gate"),
                     "policy_section": (meta or {}).get("policy_section"),
+                    "policy_source": (meta or {}).get("source"),
+                    "risk_level": (meta or {}).get("risk_level"),
+                    "policy_pack_missing": policy_pack_missing,
                     "llm_used": (meta or {}).get("llm_used"),
                     "ack_message_id": ack_message_id,
                     "ack_marker": ack_marker,
                     "ack_text": ack_text,
                     "ack_status": ack_status,
+                    "trace_policy_type": (trace_entry or {}).get("policy_type") if trace_entry else None,
+                    "trace_source": (trace_entry or {}).get("source") if trace_entry else None,
+                    "trace_policy_gate": (trace_entry or {}).get("policy_gate") if trace_entry else None,
+                    "trace_policy_section": (trace_entry or {}).get("policy_section") if trace_entry else None,
+                    "trace_risk_level": (trace_entry or {}).get("risk_level") if trace_entry else None,
+                    "trace_error": conv_error,
                 }
             )
 

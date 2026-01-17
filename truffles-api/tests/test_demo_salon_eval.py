@@ -832,6 +832,41 @@ def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str
     return last_response, conversation, saved_message
 
 
+def test_policy_gates_discount_and_payment():
+    cases = [
+        ("CA02_DISCOUNT", "есть скидка на маникюр?", "discounts", "discounts", "reply", "low"),
+        ("CA02_PAYMENT", "можно оплатить картой?", "hard_law", "payment_info", "escalate", "medium"),
+    ]
+    for case_id, message, policy_gate, policy_section, action, risk_level in cases:
+        _response, conversation, saved_message = _run_webhook_conversation(
+            [message],
+            case_id,
+            None,
+        )
+        meta = saved_message.message_metadata.get("decision_meta", {})
+        assert meta.get("action") == action, f"{case_id}: action mismatch"
+        assert meta.get("policy_gate") == policy_gate, f"{case_id}: policy_gate mismatch"
+        assert meta.get("policy_section") == policy_section, f"{case_id}: policy_section mismatch"
+        assert meta.get("risk_level") == risk_level, f"{case_id}: risk_level mismatch"
+        assert meta.get("source") == "policy_pack", f"{case_id}: source mismatch"
+        assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+        assert not meta.get("policy_pack_missing"), f"{case_id}: policy_pack_missing true"
+
+        trace = _get_decision_trace(conversation)
+        _assert_trace_contains(
+            trace,
+            {
+                "stage": "policy_gate",
+                "policy_type": "demo_salon",
+                "policy_gate": policy_gate,
+                "policy_section": policy_section,
+                "risk_level": risk_level,
+                "source": "policy_pack",
+            },
+            case_id,
+        )
+
+
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:
     normalized = _normalize(response)
     for item in items:
