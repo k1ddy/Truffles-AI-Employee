@@ -453,6 +453,10 @@ jobs:
               suite_fail=1
               return
             fi
+            local poll_timeout=60
+            if [ "${suite_name}" = "ca06-consult" ]; then
+              poll_timeout=120
+            fi
             echo "SUITE_${suite_name}_JID=${suite_jid}" >> "${GATE_LOG}"
             local outfile="/tmp/livecheck-${suite_name}.jsonl"
             : > "${outfile}"
@@ -464,7 +468,7 @@ jobs:
               --jid-mode allowlist \
               --remote-jid "${suite_jid}" \
               --allowlist-jids "${ALLOWLIST_CLEAN}" \
-              --poll-timeout 60 \
+              --poll-timeout "${poll_timeout}" \
               --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then
               :
             else

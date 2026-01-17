@@ -974,6 +974,28 @@ def _poll_decision_meta(db_user, message_id, timeout, interval):
         time.sleep(max(interval, 0.2))
     return last_conv_id, last_meta, last_error or "timeout"
 
+def _poll_decision_trace(db_user, conversation_id, timeout, interval):
+    if not conversation_id:
+        return None, [], "missing conversation_id"
+    deadline = time.time() + max(timeout, 0)
+    last_meta = None
+    last_error = None
+    last_trace = []
+    while time.time() <= deadline:
+        conv_meta, conv_error = _fetch_conversation_meta(db_user, conversation_id)
+        if conv_error:
+            last_error = conv_error
+        elif conv_meta:
+            last_meta = conv_meta
+            context = conv_meta.get("context") if isinstance(conv_meta, dict) else None
+            trace_list = context.get("decision_trace") if isinstance(context, dict) else None
+            trace_entries = _trace_as_list(trace_list)
+            if trace_entries:
+                return conv_meta, trace_entries, None
+            last_trace = trace_entries
+        time.sleep(max(interval, 0.2))
+    return last_meta, last_trace, last_error or "trace timeout"
+
 def _resolve_env_from_container(container_name, var_name):
     if not container_name:
         return ""
@@ -1555,6 +1577,83 @@ def _run_livecheck_ca05_booking(args, context):
     }
     return summary
 
+def _run_livecheck_ca06_reset(args, context):
+    if args.dry_run:
+        return None
+    timestamp = context["timestamp"]
+    webhook_url = context["webhook_url"]
+    base_url = context["base_url"]
+    webhook_secret = context["webhook_secret"]
+    admin_token = context["admin_token"]
+    instance_id = context["instance_id"]
+    remote_jid = context["remote_jid"]
+    db_user = context["db_user"]
+    allowlist_jids = context["allowlist_jids"]
+    outbox_url = f"{base_url}/admin/outbox/process"
+
+    if not remote_jid or remote_jid not in allowlist_jids:
+        raise SystemExit("livecheck-auto: CA06 remote_jid not in allowlist")
+
+    reset_text = "начнем сначала"
+    reset_marker = f"LC:AUTO:CA06:RESET:{timestamp}"
+    reset_message_id = f"LC-AUTO-{timestamp}-CA06-RESET-{uuid.uuid4().hex[:8]}"
+    reset_payload = {
+        "body": {
+            "messageType": "text",
+            "message": f"{reset_text} [{reset_marker}]",
+            "metadata": {
+                "sender": "LivecheckAuto",
+                "timestamp": int(time.time()),
+                "messageId": reset_message_id,
+                "remoteJid": remote_jid,
+            },
+        }
+    }
+    if instance_id:
+        reset_payload["body"]["metadata"]["instanceId"] = instance_id
+    reset_status, reset_body, reset_error = _send_webhook_payload(
+        webhook_url, reset_payload, webhook_secret, args.timeout
+    )
+    print(
+        json.dumps(
+            {
+                "case_id": "CA06_RESET",
+                "step": "reset",
+                "marker": reset_marker,
+                "message_id": reset_message_id,
+                "remote_jid": remote_jid,
+                "text": reset_payload["body"]["message"],
+                "sent_at": datetime.now(timezone.utc).isoformat(),
+                "status": "sent" if reset_status and 200 <= reset_status < 300 else "error",
+                "http_status": reset_status,
+                "error": reset_error,
+                "response": (reset_body or "")[:200] if reset_body else None,
+            },
+            ensure_ascii=False,
+        )
+    )
+    _post_admin_outbox(outbox_url, admin_token, args.timeout)
+    conv_id, reset_meta, reset_meta_error = _poll_decision_meta(
+        db_user, reset_message_id, args.poll_timeout, args.poll_interval
+    )
+    if reset_meta_error:
+        raise SystemExit(f"livecheck-auto: CA06 reset meta poll failed ({reset_meta_error})")
+    reset_conv_meta, reset_trace, reset_trace_error = _poll_decision_trace(
+        db_user, conv_id, args.poll_timeout, args.poll_interval
+    )
+    if reset_trace_error:
+        raise SystemExit(f"livecheck-auto: CA06 reset trace poll failed ({reset_trace_error})")
+    last_trace = reset_trace[-1] if reset_trace else None
+    reset_state = reset_conv_meta.get("state") if isinstance(reset_conv_meta, dict) else None
+    return {
+        "reset_message_id": reset_message_id,
+        "reset_action": (reset_meta or {}).get("action"),
+        "reset_intent": (reset_meta or {}).get("intent"),
+        "reset_state": reset_state,
+        "reset_trace_stage": (last_trace or {}).get("stage"),
+        "reset_trace_decision": (last_trace or {}).get("decision"),
+    }
+
 def _run_livecheck_ca08_state(args, context):
     rng = context["rng"]
     case = context["cases"][0]
@@ -2130,6 +2229,10 @@ def _run_livecheck_auto(args):
     }:
         _ensure_bot_active_before_suite(args, context)
 
+    reset_summary = None
+    if args.suite == "ca06-consult":
+        reset_summary = _run_livecheck_ca06_reset(args, context)
+
     if args.suite == "ca08-state":
         summary = _run_livecheck_ca08_state(args, context)
         summary.update(common)
@@ -2473,6 +2576,8 @@ def _run_livecheck_auto(args):
 
     summary = dict(common)
     summary["results"] = results
+    if reset_summary:
+        summary["reset"] = reset_summary
     print(json.dumps({"summary": summary}, ensure_ascii=False))
 
 def _run_livecheck(args):
