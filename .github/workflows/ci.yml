@@ -403,69 +403,35 @@ jobs:
             exit 1
           fi
           cd ~/truffles-main
-          python3 ops/diagnose.py livecheck-auto \
-            --base-url http://localhost:8000 \
-            --client-slug demo_salon \
-            --suite ca01-core \
-            --seed 777 \
-            --jid-mode allowlist \
-            --remote-jid 77015705555@s.whatsapp.net \
-            --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca01.jsonl 2>>"${RUN_LOG}"
-          python3 ops/diagnose.py livecheck-auto \
-            --base-url http://localhost:8000 \
-            --client-slug demo_salon \
-            --suite ca02-policy \
-            --seed 776 \
-            --jid-mode allowlist \
-            --remote-jid 77015705555@s.whatsapp.net \
-            --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca02.jsonl 2>>"${RUN_LOG}"
-          python3 ops/diagnose.py livecheck-auto \
-            --base-url http://localhost:8000 \
-            --client-slug demo_salon \
-            --suite ca03-info \
-            --seed 775 \
-            --jid-mode allowlist \
-            --remote-jid 77015705555@s.whatsapp.net \
-            --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca03.jsonl 2>>"${RUN_LOG}"
-          python3 ops/diagnose.py livecheck-auto \
-            --base-url http://localhost:8000 \
-            --client-slug demo_salon \
-            --suite ca04-service \
-            --seed 774 \
-            --jid-mode allowlist \
-            --remote-jid 77015705555@s.whatsapp.net \
-            --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca04.jsonl 2>>"${RUN_LOG}"
-          python3 ops/diagnose.py livecheck-auto \
-            --base-url http://localhost:8000 \
-            --client-slug demo_salon \
-            --suite ca08-state \
-            --seed 778 \
-            --jid-mode allowlist \
-            --remote-jid 77015705555@s.whatsapp.net \
-            --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca08.jsonl 2>>"${RUN_LOG}"
-          python3 ops/diagnose.py livecheck-auto \
-            --base-url http://localhost:8000 \
-            --client-slug demo_salon \
-            --suite ca09-manager \
-            --seed 779 \
-            --jid-mode allowlist \
-            --remote-jid 77015705555@s.whatsapp.net \
-            --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca09.jsonl 2>>"${RUN_LOG}"
-          python3 ops/diagnose.py livecheck-auto \
-            --base-url http://localhost:8000 \
-            --client-slug demo_salon \
-            --suite ca10-outbox \
-            --seed 780 \
-            --jid-mode allowlist \
-            --remote-jid 77015705555@s.whatsapp.net \
-            --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca10.jsonl 2>>"${RUN_LOG}"
+          suite_fail=0
+          run_suite() {
+            local suite_name="$1"
+            local suite_seed="$2"
+            local outfile="/tmp/livecheck-${suite_name}.jsonl"
+            : > "${outfile}"
+            if ! python3 ops/diagnose.py livecheck-auto \
+              --base-url http://localhost:8000 \
+              --client-slug demo_salon \
+              --suite "${suite_name}" \
+              --seed "${suite_seed}" \
+              --jid-mode allowlist \
+              --remote-jid 77015705555@s.whatsapp.net \
+              --poll-timeout 60 \
+              --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then
+              echo "suite ${suite_name} failed" >> "${RUN_LOG}"
+              suite_fail=1
+            fi
+          }
+          run_suite ca01-core 777
+          run_suite ca02-policy 776
+          run_suite ca03-info 775
+          run_suite ca04-service 774
+          run_suite ca08-state 778
+          run_suite ca09-manager 779
+          run_suite ca10-outbox 780
+          if [ "${suite_fail}" -ne 0 ]; then
+            exit 1
+          fi
           REMOTE
           run_status=0
           if ! "${SSH[@]}" "RUN_ID=${RUN_ID} bash -s" < "${REMOTE_SCRIPT}"; then
