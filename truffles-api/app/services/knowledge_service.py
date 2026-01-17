@@ -11,7 +11,10 @@ logger = get_logger("knowledge_service")
 
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
-QDRANT_COLLECTION = "truffles_knowledge"
+TEST_MODE = os.environ.get("TEST_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION")
+if not QDRANT_COLLECTION:
+    QDRANT_COLLECTION = "truffles_knowledge_ci" if TEST_MODE else "truffles_knowledge"
 BGE_M3_URL = os.environ.get("BGE_M3_URL", "http://bge-m3:80/embed")
 
 

@@ -482,6 +482,28 @@ LIMIT 3;
 
 **Почему так:** иначе получаем “слепые” тесты, регрессии и ручной хаос.
 
+### 5.11 Риски и ограничения (принятые)
+
+**CI покрывает все CA‑инварианты:** для пунктов с live‑evidence используется CI live‑check job.  
+**Live‑check в CI на проде:** разрешён только в dev‑фазе и **только** при safety‑контуре (allowlist + TEST_MODE).  
+**После готовности:** владелец делает выборочный live‑check на живых клиентах.
+
+### 5.12 CI live‑check policy (dev‑phase)
+
+**Разрешение:** включать только при явном флаге (например `CI_LIVECHECK_ENABLED=1`).  
+**Обязательные гейты:**
+- `TEST_MODE=1`
+- `OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net`
+- Для CA‑09: `QDRANT_COLLECTION` должен оканчиваться на `_ci` (если env пуст — default `truffles_knowledge_ci` в TEST_MODE).
+- Guard: при `TEST_MODE=1` и коллекции не `_ci` learning блокируется (`learning_mode=blocked`).
+- Только тестовый `client_slug` и test‑instance; любые другие → STOP.
+- `instanceId` в payload должен совпадать с `branches.instance_id` (DB); рассинхрон с `clients.config.instance_id` фиксируем как GAP.
+- Малый объём (4–10 сообщений), фиксированный seed, без спама.
+
+**CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca08-state`, `ca09-manager`, `ca10-outbox`, артефакты `livecheck-artifacts/*`.
+
+**Важно:** CI‑livecheck покрывает CA‑инварианты в dev‑фазе; финальный live‑check на живых клиентах — вручную.
+
 ## 5. Архитектура — потоки данных
 
 ### WhatsApp → Бот (факт)

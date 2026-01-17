@@ -1,9 +1,11 @@
+import os
 import re
 import uuid
 from typing import Optional
 from uuid import UUID
 
 import httpx
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
@@ -17,6 +19,8 @@ from app.services.knowledge_service import (
 )
 
 logger = get_logger("learning_service")
+
+TEST_MODE = os.environ.get("TEST_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 MAX_KNOWLEDGE_TEXT_LENGTH = 2000
 MIN_QUESTION_LENGTH = 5
@@ -229,6 +233,78 @@ def add_to_knowledge(
             },
         )
         return None
+
+    if TEST_MODE and not (QDRANT_COLLECTION or "").endswith("_ci"):
+        logger.warning(
+            "Learning blocked: TEST_MODE requires _ci collection",
+            extra={
+                "context": {
+                    "client_slug": client_slug,
+                    "handover_id": str(handover.id),
+                    "qdrant_collection": QDRANT_COLLECTION,
+                    "learning_mode": "blocked",
+                }
+            },
+        )
+        return None
+
+    learning_mode = (os.environ.get("LEARNING_MODE") or "").strip().lower()
+    if learning_mode in {"skip", "off", "disabled"}:
+        logger.info(
+            "Learning skipped by LEARNING_MODE",
+            extra={
+                "context": {
+                    "client_slug": client_slug,
+                    "handover_id": str(handover.id),
+                    "learning_mode": learning_mode,
+                }
+            },
+        )
+        return None
+
+    if learning_mode in {"record-only", "record"}:
+        point_id = str(uuid.uuid4())
+        try:
+            db.execute(
+                text(
+                    "UPDATE handovers "
+                    "SET added_to_knowledge = TRUE, knowledge_doc_id = :doc_id "
+                    "WHERE id = :handover_id"
+                ),
+                {"doc_id": point_id, "handover_id": str(handover.id)},
+            )
+            db.commit()
+        except Exception as exc:
+            logger.warning(
+                "Learning record-only update failed",
+                extra={
+                    "context": {
+                        "handover_id": str(handover.id),
+                        "error": str(exc),
+                    }
+                },
+            )
+        logger.info(
+            "Learning recorded (record-only mode)",
+            extra={
+                "context": {
+                    "client_slug": client_slug,
+                    "handover_id": str(handover.id),
+                    "point_id": point_id,
+                    "learning_mode": learning_mode,
+                }
+            },
+        )
+        alert_warning(
+            "Learning record-only",
+            {
+                "client_slug": client_slug,
+                "handover_id": str(handover.id),
+                "point_id": point_id,
+                "learning_mode": learning_mode,
+            },
+        )
+        return point_id
 
     content = f"Вопрос: {question}\nОтвет: {answer}"
     if len(handover.user_message.strip()) > len(question) or len(handover.manager_response.strip()) > len(answer):

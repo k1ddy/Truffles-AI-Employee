@@ -252,3 +252,118 @@ jobs:
             REQUIRE_GHCR=1 VERIFY_VERSION=1 \
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
             bash ~/restart_api.sh
+
+  ci-livecheck:
+    if: vars.CI_LIVECHECK_ENABLED == '1' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Livecheck safety gate
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          SSH="ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes ${SERVER_USER}@${SERVER_HOST}"
+          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-gate.txt
+          set -euo pipefail
+          TEST_MODE=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"')
+          ALLOWLIST=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"')
+          LEARNING_MODE=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${LEARNING_MODE:-}"')
+          QDRANT_COLLECTION=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${QDRANT_COLLECTION:-}"')
+          QDRANT_COLLECTION_EFFECTIVE="${QDRANT_COLLECTION}"
+          if [ -z "${QDRANT_COLLECTION_EFFECTIVE}" ]; then
+            QDRANT_COLLECTION_EFFECTIVE="truffles_knowledge_ci"
+          fi
+          echo "TEST_MODE=${TEST_MODE}"
+          echo "OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}"
+          echo "LEARNING_MODE=${LEARNING_MODE}"
+          echo "QDRANT_COLLECTION=${QDRANT_COLLECTION}"
+          echo "QDRANT_COLLECTION_EFFECTIVE=${QDRANT_COLLECTION_EFFECTIVE}"
+          if [ "${TEST_MODE}" != "1" ]; then
+            echo "TEST_MODE_NOT_ENABLED"
+            exit 1
+          fi
+          if [ "${ALLOWLIST}" != "77015705555@s.whatsapp.net" ]; then
+            echo "ALLOWLIST_MISMATCH"
+            exit 1
+          fi
+          case "${QDRANT_COLLECTION_EFFECTIVE}" in
+            *_ci) ;;
+            *)
+              echo "QDRANT_COLLECTION_UNSAFE"
+              exit 1
+              ;;
+          esac
+REMOTE
+
+      - name: Livecheck runner (CA-01/08/09/10)
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          SSH="ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes ${SERVER_USER}@${SERVER_HOST}"
+          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca01.jsonl
+          set -euo pipefail
+          cd ~/truffles-main
+          python3 ops/diagnose.py livecheck-auto \
+            --base-url http://localhost:8000 \
+            --client-slug demo_salon \
+            --suite ca01-core \
+            --seed 777 \
+            --jid-mode allowlist \
+            --remote-jid 77015705555@s.whatsapp.net
+REMOTE
+          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca08.jsonl
+          set -euo pipefail
+          cd ~/truffles-main
+          python3 ops/diagnose.py livecheck-auto \
+            --base-url http://localhost:8000 \
+            --client-slug demo_salon \
+            --suite ca08-state \
+            --seed 778 \
+            --jid-mode allowlist \
+            --remote-jid 77015705555@s.whatsapp.net
+REMOTE
+          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca09.jsonl
+          set -euo pipefail
+          cd ~/truffles-main
+          python3 ops/diagnose.py livecheck-auto \
+            --base-url http://localhost:8000 \
+            --client-slug demo_salon \
+            --suite ca09-manager \
+            --seed 779 \
+            --jid-mode allowlist \
+            --remote-jid 77015705555@s.whatsapp.net
+REMOTE
+          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca10.jsonl
+          set -euo pipefail
+          cd ~/truffles-main
+          python3 ops/diagnose.py livecheck-auto \
+            --base-url http://localhost:8000 \
+            --client-slug demo_salon \
+            --suite ca10-outbox \
+            --seed 780 \
+            --jid-mode allowlist \
+            --remote-jid 77015705555@s.whatsapp.net
+REMOTE
+
+      - name: Upload livecheck artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: livecheck-artifacts
+          path: artifacts
