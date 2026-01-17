@@ -337,6 +337,8 @@ def _handle_consult_flow(
     intent_decomp_service_query: str | None,
     info_class_intents: set[str],
     intent_queue_followup: str | None,
+    current_goal: str | None,
+    consult_context: dict | None,
     message_count: int,
     now: datetime,
     send_and_save: Callable[..., tuple[str, bool]],
@@ -366,8 +368,9 @@ def _handle_consult_flow(
     consult_short_circuit = False
     consult_short_circuit_reason = None
     consult_short_circuit_service = None
+    consult_context_active = bool(current_goal == "consult" and consult_context)
     consult_blocked = bool(booking_wants_flow or booking_active or booking_signal)
-    if consult_intent:
+    if consult_intent or consult_context_active:
         consult_blocked = False
     elif intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}:
         consult_blocked = True
@@ -392,7 +395,7 @@ def _handle_consult_flow(
         if candidate_question and not consult_question:
             consult_question = candidate_question
             intent_decomp_payload["consult_question"] = candidate_question
-    consult_intent_signal = bool(consult_intent or consult_candidate)
+    consult_intent_signal = bool(consult_intent or consult_candidate or consult_context_active)
     normalized_message = legacy.normalize_for_matching(message_text) if message_text else ""
     explicit_info_signal = bool(
         booking_signal
