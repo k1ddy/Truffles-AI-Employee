@@ -818,6 +818,22 @@ def _resolve_env_from_container(container_name, var_name):
         return ""
     return result.stdout.strip()
 
+def _resolve_outbox_coalesce_seconds(container_name):
+    value = os.environ.get("OUTBOX_COALESCE_SECONDS") or ""
+    if container_name:
+        container_value = _resolve_env_from_container(container_name, "OUTBOX_COALESCE_SECONDS")
+        if container_value:
+            value = container_value
+    if not value:
+        return 8.0
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return 8.0
+
+def _resolve_outbox_wait_seconds(container_name, extra_seconds=1.0):
+    return max(0.0, _resolve_outbox_coalesce_seconds(container_name) + extra_seconds)
+
 def _resolve_remote_jid(explicit, rng, container_name=None):
     if explicit:
         return explicit
@@ -1116,13 +1132,13 @@ def _run_livecheck_ca08_state(args, context):
     conv_before, conv_before_error = _fetch_conversation_meta(db_user, conv_id) if conv_id else (None, None)
     handover_before, handover_before_error = _fetch_handover_meta(db_user, conv_id) if conv_id else (None, None)
 
-    ack_text = rng.choice(PENDING_ACK_PHRASES)
+    ack_text = args.ack_text or "ок"
     ack_marker = f"LC:ACK:CA08:{timestamp}:01"
     ack_message_id = f"LC-ACK-{timestamp}-CA08-{uuid.uuid4().hex[:8]}"
     ack_payload = {
         "body": {
             "messageType": "text",
-            "message": f"{ack_text} [{ack_marker}]",
+            "message": ack_text,
             "metadata": {
                 "sender": "LivecheckAuto",
                 "timestamp": int(time.time()),
@@ -1165,6 +1181,7 @@ def _run_livecheck_ca08_state(args, context):
         "suite": "ca08-state",
         "message_id": message_id,
         "ack_message_id": ack_message_id,
+        "ack_marker": ack_marker,
         "conversation_id": conv_id,
         "policy_gate": (meta or {}).get("policy_gate"),
         "action": (meta or {}).get("action"),
@@ -1394,6 +1411,7 @@ def _run_livecheck_ca10_outbox(args, context):
     admin_token = context["admin_token"]
     instance_id = context["instance_id"]
     remote_jid = context["remote_jid"]
+    outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
     db_user = context["db_user"]
     client_id = context["client_meta"].get("client_id") if context.get("client_meta") else None
     allowlist_jids = context["allowlist_jids"]
@@ -1407,6 +1425,7 @@ def _run_livecheck_ca10_outbox(args, context):
         rng, case, "LC:AUTO:CA10", timestamp, 1, args.noise
     )
     message_id = f"LC-DEDUP-{timestamp}-{uuid.uuid4().hex[:8]}"
+    outbox_url = f"{base_url}/admin/outbox/process"
 
     def _send_once(seq):
         sent_at = datetime.now(timezone.utc).isoformat()
@@ -1449,12 +1468,21 @@ def _run_livecheck_ca10_outbox(args, context):
     if not args.dry_run:
         _send_once(1)
         _send_once(2)
-        outbox_url = f"{base_url}/admin/outbox/process"
+        if outbox_wait_seconds > 0:
+            time.sleep(outbox_wait_seconds)
         _post_admin_outbox(outbox_url, admin_token, args.timeout)
 
     message_count, message_error = _fetch_message_count(db_user, message_id)
     dedup_count, dedup_error = _fetch_message_dedup_count(db_user, client_id, message_id)
     outbox_summary, outbox_error = _fetch_outbox_summary(db_user, client_id, message_id)
+    if (
+        not args.dry_run
+        and outbox_summary
+        and outbox_summary.get("status") == "PENDING"
+    ):
+        time.sleep(2.0)
+        _post_admin_outbox(outbox_url, admin_token, args.timeout)
+        outbox_summary, outbox_error = _fetch_outbox_summary(db_user, client_id, message_id)
 
     summary = {
         "suite": "ca10-outbox",
@@ -1587,6 +1615,7 @@ def _run_livecheck_auto(args):
         "learning_env": learning_env,
         "qdrant_env": qdrant_env,
         "container_name": container_name,
+        "outbox_wait_seconds": _resolve_outbox_wait_seconds(container_name),
     }
 
     if args.suite == "ca08-state":
@@ -1674,10 +1703,11 @@ def _run_livecheck_auto(args):
 
             ack_marker = f"LC:ACK:{case['case_id']}:{timestamp}:{idx:02d}"
             ack_message_id = f"LC-ACK-{timestamp}-{idx:02d}-{uuid.uuid4().hex[:8]}"
+            ack_text = args.ack_text or "ок"
             ack_payload = {
                 "body": {
                     "messageType": "text",
-                    "message": f"{args.ack_text} [{ack_marker}]",
+                    "message": ack_text,
                     "metadata": {
                         "sender": "LivecheckAuto",
                         "timestamp": int(time.time()),
@@ -1706,6 +1736,8 @@ def _run_livecheck_auto(args):
                     "policy_section": (meta or {}).get("policy_section"),
                     "llm_used": (meta or {}).get("llm_used"),
                     "ack_message_id": ack_message_id,
+                    "ack_marker": ack_marker,
+                    "ack_text": ack_text,
                     "ack_status": ack_status,
                 }
             )

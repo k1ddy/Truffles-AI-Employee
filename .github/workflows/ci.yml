@@ -343,7 +343,7 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts
           SSH="ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes ${SERVER_USER}@${SERVER_HOST}"
-          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-gate.txt
+          $SSH "bash -s" <<'REMOTE' 2>&1 | tee artifacts/livecheck-gate.txt
           set -euo pipefail
           TEST_MODE=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"')
           ALLOWLIST=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"')
@@ -374,6 +374,7 @@ jobs:
               ;;
           esac
           REMOTE
+          test -s artifacts/livecheck-gate.txt
 
       - name: Livecheck runner (CA-01/08/09/10)
         env:
