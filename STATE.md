@@ -798,6 +798,17 @@
   - cmd: `curl -s -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" "http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=2026-01-17"`
   - output: `{"metric_date":"2026-01-17","outbox_latency_p50":null,"outbox_latency_p90":null,"llm_timeout_rate":0.0,"llm_used_rate":0.0,"escalation_rate":0.0,"fast_intent_rate":0.0,"asr_fail_rate":0.0,"rag_low_conf_rate":0.0,"clarify_rate":0.0,"clarify_success_rate":0.0,"total_user_messages":0,"total_outbox_sent":0,"total_outbox_failed":0,"total_llm_used":0,"total_llm_timeout":0,"total_handovers":0,"total_fast_intent":0,"total_asr_used":0,"total_asr_failed":0,"created_at":"2026-01-17T01:41:36.002061+00:00","updated_at":"2026-01-17T01:41:36.002061+00:00","client_slug":"demo_salon"}`
 
+### 2026-01-17 — Safety‑контур env check (TEST_MODE + allowlist)
+
+**Что сделали:**
+- Проверили в контейнере `truffles-api`, что `TEST_MODE=1` и allowlist ограничен тестовым номером.
+
+**Evidence:**
+- cmd: `docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"'`
+  - output: `1`
+- cmd: `docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"'`
+  - output: `77015705555@s.whatsapp.net`
+
 ### 2026-01-16 — RCA: trace retention drops booking_interrupt/multi_truth
 
 **Дефект:** при `booking_interrupt_info=true` в decision_meta отсутствуют `decision_trace.stage=booking_interrupt/multi_truth`.
