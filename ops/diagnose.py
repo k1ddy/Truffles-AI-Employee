@@ -497,6 +497,27 @@ def _fetch_conversation_meta(db_user, conversation_id):
         "context": context,
     }, None
 
+def _fetch_latest_conversation_state(db_user, client_id, remote_jid):
+    if not client_id or not remote_jid:
+        return None, None, "missing client_id or remote_jid"
+    safe_client = _escape_sql_literal(client_id)
+    safe_jid = _escape_sql_literal(remote_jid)
+    query = (
+        "SELECT c.id, c.state "
+        "FROM conversations c "
+        "JOIN users u ON u.id = c.user_id "
+        f"WHERE c.client_id = '{safe_client}' AND u.remote_jid = '{safe_jid}' "
+        "ORDER BY c.last_message_at DESC NULLS LAST, c.started_at DESC "
+        "LIMIT 1;"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, None, error
+    if not row:
+        return None, None, None
+    parts = row.split("\t", 1)
+    return parts[0] if parts else None, parts[1] if len(parts) > 1 else None, None
+
 def _fetch_handover_meta(db_user, conversation_id):
     safe_id = _escape_sql_literal(conversation_id)
     query = (
@@ -883,6 +904,71 @@ def _post_admin_outbox(url, admin_token, timeout):
         return exc.code, body, str(exc)
     except urllib.error.URLError as exc:
         return None, "", str(exc)
+
+def _ensure_bot_active_before_suite(args, context):
+    if args.dry_run:
+        return
+    remote_jid = context.get("remote_jid")
+    client_meta = context.get("client_meta") or {}
+    client_id = client_meta.get("client_id")
+    db_user = context.get("db_user")
+    webhook_url = context.get("webhook_url")
+    webhook_secret = context.get("webhook_secret")
+    admin_token = context.get("admin_token")
+    instance_id = context.get("instance_id")
+    timestamp = context.get("timestamp")
+    if not remote_jid or not client_id or not db_user:
+        return
+    conv_id, state, error = _fetch_latest_conversation_state(db_user, client_id, remote_jid)
+    if error:
+        print(json.dumps({"stage": "preflight_state", "error": error}, ensure_ascii=False))
+        return
+    if state != "pending":
+        return
+    ack_text = args.ack_text or "ок"
+    ack_message_id = f"LC-ACK-PREFLIGHT-{timestamp}-{uuid.uuid4().hex[:8]}"
+    ack_payload = {
+        "body": {
+            "messageType": "text",
+            "message": ack_text,
+            "metadata": {
+                "sender": "LivecheckAuto",
+                "timestamp": int(time.time()),
+                "messageId": ack_message_id,
+                "remoteJid": remote_jid,
+            },
+        }
+    }
+    if instance_id:
+        ack_payload["body"]["metadata"]["instanceId"] = instance_id
+    ack_status, _, ack_error = _send_webhook_payload(
+        webhook_url, ack_payload, webhook_secret, args.timeout
+    )
+    if ack_error:
+        raise SystemExit(f"livecheck-auto: preflight ACK failed ({ack_error})")
+    _post_admin_outbox(f"{context.get('base_url')}/admin/outbox/process", admin_token, args.timeout)
+    cleared = False
+    for _ in range(10):
+        time.sleep(1.0)
+        conv_id, state, _ = _fetch_latest_conversation_state(db_user, client_id, remote_jid)
+        if state == "bot_active":
+            cleared = True
+            break
+    print(
+        json.dumps(
+            {
+                "stage": "preflight_clear_pending",
+                "conversation_id": conv_id,
+                "ack_message_id": ack_message_id,
+                "ack_status": ack_status,
+                "state_after": state,
+                "cleared": cleared,
+            },
+            ensure_ascii=False,
+        )
+    )
+    if not cleared:
+        raise SystemExit("livecheck-auto: pending state not cleared before CA01")
 
 def _run_webhook_fuzz(args):
     if args.count < 1:
@@ -1617,6 +1703,9 @@ def _run_livecheck_auto(args):
         "container_name": container_name,
         "outbox_wait_seconds": _resolve_outbox_wait_seconds(container_name),
     }
+
+    if args.suite == "ca01-core":
+        _ensure_bot_active_before_suite(args, context)
 
     if args.suite == "ca08-state":
         summary = _run_livecheck_ca08_state(args, context)
