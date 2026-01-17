@@ -17,6 +17,7 @@ DECISION_TRACE_KEY = "decision_trace"
 DECISION_TRACE_MAX = 40
 DECISION_TRACE_CRITICAL_STAGES = {
     "booking",
+    "booking_interrupt",
     "consult_flow",
     "consult_return",
     "contract_error",
