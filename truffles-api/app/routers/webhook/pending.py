@@ -512,6 +512,15 @@ def _handle_pending_gate(
                 manager_name="system",
                 preserve_context=True,
             )
+        else:
+            legacy.transition_state(
+                conversation,
+                ConversationState.BOT_ACTIVE,
+                allow_same=False,
+                enforce=True,
+            )
+            if not isinstance(conversation.context, dict):
+                conversation.context = {}
         conversation.bot_status = "active"
         pending_resume = _get_pending_resume(legacy._get_conversation_context(conversation))
         if pending_resume:
@@ -540,6 +549,15 @@ def _handle_pending_gate(
                     "stage": "re_entry",
                     "decision": "required",
                     "reason": "pending_resume",
+                },
+            )
+        elif not handover:
+            legacy._record_decision_trace(
+                conversation,
+                {
+                    "stage": "pending_resume",
+                    "decision": "resume",
+                    "reason": "pending_ack_no_handover",
                 },
             )
         trace_payload = {
