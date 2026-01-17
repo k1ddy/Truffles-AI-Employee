@@ -385,7 +385,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          SSH=(ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 ${SERVER_USER}@${SERVER_HOST})
+          SSH=(ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 ${SERVER_USER}@${SERVER_HOST})
           REMOTE_SCRIPT="$(mktemp)"
           cat > "${REMOTE_SCRIPT}" <<'REMOTE'
           set -euo pipefail
@@ -473,9 +473,14 @@ jobs:
           max=3
           while true; do
             if "${SSH[@]}" "bash -s" < "${REMOTE_SCRIPT}" > artifacts/livecheck-artifacts.tar.gz; then
-              break
+              if tar -tzf artifacts/livecheck-artifacts.tar.gz >/dev/null 2>&1; then
+                break
+              fi
+              echo "livecheck runner produced incomplete tar, retrying..."
+              status=1
+            else
+              status=$?
             fi
-            status=$?
             if [ "${attempt}" -ge "${max}" ]; then
               exit "${status}"
             fi
