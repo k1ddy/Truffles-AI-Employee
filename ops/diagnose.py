@@ -179,6 +179,7 @@ WEBHOOK_FUZZ_CASES = [
 ]
 
 NOISE_SUFFIXES = ["плз", "срочно", "спс"]
+SAFE_ALLOWLIST_JID = "77015705555@s.whatsapp.net"
 
 def _parse_livecheck_args(argv):
     parser = argparse.ArgumentParser(
@@ -190,6 +191,38 @@ def _parse_livecheck_args(argv):
     parser.add_argument("--min-wait", type=float, default=5.0)
     parser.add_argument("--max-wait", type=float, default=15.0)
     parser.add_argument("--noise", choices=["none", "low"], default="low")
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args(argv)
+
+def _parse_livecheck_auto_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py livecheck-auto",
+        description="Run webhook live-check with auto-ACK and DB polling.",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=os.environ.get("TRUFFLES_API_BASE_URL", "http://localhost:8000"),
+    )
+    parser.add_argument(
+        "--client-slug",
+        default=os.environ.get("TRUFFLES_CLIENT_SLUG", "demo_salon"),
+    )
+    parser.add_argument("--suite", default="ca01-core", choices=sorted(LIVECHECK_SUITES.keys()))
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--min-wait", type=float, default=1.0)
+    parser.add_argument("--max-wait", type=float, default=3.0)
+    parser.add_argument("--noise", choices=["none", "low"], default="low")
+    parser.add_argument("--case-ids", default=None)
+    parser.add_argument("--jid-mode", choices=["unique", "allowlist"], default="unique")
+    parser.add_argument("--remote-jid", default=None)
+    parser.add_argument("--allowlist-jids", default=None)
+    parser.add_argument("--webhook-secret", default=None)
+    parser.add_argument("--admin-token", default=None)
+    parser.add_argument("--instance-id", default=None)
+    parser.add_argument("--ack-text", default="ок")
+    parser.add_argument("--poll-interval", type=float, default=1.0)
+    parser.add_argument("--poll-timeout", type=float, default=20.0)
+    parser.add_argument("--timeout", type=float, default=15.0)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
@@ -292,6 +325,80 @@ def _resolve_test_mode(container_name):
     if (value is None or value == "") and container_name:
         value = _resolve_env_from_container(container_name, "TEST_MODE")
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+def _resolve_db_user_simple():
+    env_user = os.environ.get("DB_USER")
+    if env_user:
+        return env_user
+    result = run_command(
+        ["docker", "exec", "-i", "truffles_postgres_1", "/bin/sh", "-lc", "printf '%s' \"${POSTGRES_USER:-}\""]
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    return "postgres"
+
+def _fetch_message_meta(db_user, message_id):
+    query = (
+        "SELECT conversation_id, metadata->'decision_meta' AS decision_meta "
+        "FROM messages WHERE role='user' "
+        f"AND metadata->>'messageId' = '{message_id}' "
+        "ORDER BY created_at DESC LIMIT 1;"
+    )
+    result = run_command(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "truffles_postgres_1",
+            "psql",
+            "-U",
+            db_user,
+            "-d",
+            "chatbot",
+            "-t",
+            "-A",
+            "-F",
+            "\t",
+            "-c",
+            query,
+        ]
+    )
+    if result.returncode != 0:
+        return None, None, result.stderr.strip()
+    row = result.stdout.strip()
+    if not row:
+        return None, None, None
+    parts = row.split("\t", 1)
+    conversation_id = parts[0] if parts else None
+    meta_raw = parts[1] if len(parts) > 1 else None
+    if meta_raw:
+        try:
+            meta = json.loads(meta_raw)
+        except Exception:
+            meta = None
+    else:
+        meta = None
+    return conversation_id, meta, None
+
+def _poll_decision_meta(db_user, message_id, timeout, interval):
+    deadline = time.time() + max(timeout, 0)
+    last_meta = None
+    last_conv_id = None
+    last_error = None
+    while time.time() <= deadline:
+        conversation_id, meta, error = _fetch_message_meta(db_user, message_id)
+        if error:
+            last_error = error
+        if conversation_id:
+            last_conv_id = conversation_id
+        if meta:
+            last_meta = meta
+            action = meta.get("action") or meta.get("pending_action")
+            policy_gate = meta.get("policy_gate")
+            if action or policy_gate:
+                return last_conv_id, last_meta, None
+        time.sleep(max(interval, 0.2))
+    return last_conv_id, last_meta, last_error or "timeout"
 
 def _resolve_env_from_container(container_name, var_name):
     if not container_name:
@@ -520,6 +627,175 @@ def _run_webhook_fuzz(args):
     }
     print(json.dumps({"summary": summary}, ensure_ascii=False))
 
+def _run_livecheck_auto(args):
+    suite_cases = LIVECHECK_SUITES.get(args.suite)
+    if not suite_cases:
+        raise SystemExit(f"Unknown suite: {args.suite}")
+    rng = random.Random(args.seed or int(time.time()))
+    min_wait = min(args.min_wait, args.max_wait)
+    max_wait = max(args.min_wait, args.max_wait)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    base_url = args.base_url.rstrip("/")
+    client_slug = args.client_slug
+    webhook_url = f"{base_url}/webhook/{client_slug}"
+
+    container_name, _ = resolve_container_name()
+    test_mode_enabled = _resolve_test_mode(container_name)
+    allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
+    if SAFE_ALLOWLIST_JID not in allowlist_jids or len(allowlist_jids) != 1:
+        raise SystemExit(
+            f"livecheck-auto: allowlist must contain only {SAFE_ALLOWLIST_JID} (got {allowlist_jids})"
+        )
+    if not test_mode_enabled:
+        raise SystemExit("livecheck-auto: TEST_MODE disabled; refusing to run")
+
+    webhook_secret = (
+        args.webhook_secret
+        or os.environ.get("WEBHOOK_SECRET")
+        or os.environ.get("TRUFFLES_WEBHOOK_SECRET")
+    )
+    if not webhook_secret:
+        raise SystemExit("livecheck-auto: missing webhook secret")
+
+    admin_token = args.admin_token or os.environ.get("ALERTS_ADMIN_TOKEN")
+    if not admin_token and container_name:
+        admin_token = _resolve_env_from_container(container_name, "ALERTS_ADMIN_TOKEN")
+    if not admin_token and not args.dry_run:
+        raise SystemExit("livecheck-auto: missing admin token")
+
+    instance_id = (
+        args.instance_id
+        or os.environ.get("CHATFLOW_INSTANCE_ID")
+        or os.environ.get("INSTANCE_ID")
+    )
+
+    selected_cases, requested_case_ids = _select_cases(suite_cases, args.case_ids)
+    if selected_cases is None:
+        selected_cases = suite_cases
+        requested_case_ids = [case["case_id"] for case in suite_cases]
+
+    if args.jid_mode == "allowlist":
+        remote_jid = args.remote_jid or allowlist_jids[0]
+        if remote_jid not in allowlist_jids:
+            raise SystemExit(
+                f"livecheck-auto: remote-jid {remote_jid} not in allowlist; refusing to send"
+            )
+    else:
+        remote_jid = None
+
+    db_user = _resolve_db_user_simple()
+    results = []
+
+    for idx, case in enumerate(selected_cases, start=1):
+        base_text = rng.choice(case["messages"])
+        text = _apply_noise(base_text, rng, args.noise)
+        marker = f"LC:AUTO:{args.suite}:{case['case_id']}:{timestamp}:{idx:02d}"
+        message = f"{text} [{marker}]"
+        message_id = f"LC-AUTO-{timestamp}-{idx:02d}-{uuid.uuid4().hex[:8]}"
+        sent_at = datetime.now(timezone.utc).isoformat()
+        if args.jid_mode == "unique":
+            remote_jid = _logic_jid_for_index(idx)
+        metadata = {
+            "sender": "LivecheckAuto",
+            "timestamp": int(time.time()),
+            "messageId": message_id,
+            "remoteJid": remote_jid,
+        }
+        if instance_id:
+            metadata["instanceId"] = instance_id
+        payload = {
+            "body": {
+                "messageType": "text",
+                "message": message,
+                "metadata": metadata,
+            }
+        }
+        status = "dry_run"
+        response_status = None
+        response_body = None
+        response_error = None
+        if not args.dry_run:
+            response_status, response_body, response_error = _send_webhook_payload(
+                webhook_url, payload, webhook_secret, args.timeout
+            )
+            status = "sent" if response_status and 200 <= response_status < 300 else "error"
+        log = {
+            "case_id": case["case_id"],
+            "marker": marker,
+            "message_id": message_id,
+            "remote_jid": remote_jid,
+            "text": message,
+            "sent_at": sent_at,
+            "expected_policy_section": case["expected_policy_section"],
+            "status": status,
+            "http_status": response_status,
+        }
+        if response_error:
+            log["error"] = response_error
+        if response_body:
+            log["response"] = response_body[:200]
+        print(json.dumps(log, ensure_ascii=False))
+
+        if not args.dry_run:
+            outbox_url = f"{base_url}/admin/outbox/process"
+            _post_admin_outbox(outbox_url, admin_token, args.timeout)
+            conv_id, meta, error = _poll_decision_meta(
+                db_user, message_id, args.poll_timeout, args.poll_interval
+            )
+            if error:
+                raise SystemExit(f"livecheck-auto: decision_meta poll failed ({error})")
+
+            ack_marker = f"LC:ACK:{case['case_id']}:{timestamp}:{idx:02d}"
+            ack_message_id = f"LC-ACK-{timestamp}-{idx:02d}-{uuid.uuid4().hex[:8]}"
+            ack_payload = {
+                "body": {
+                    "messageType": "text",
+                    "message": f"{args.ack_text} [{ack_marker}]",
+                    "metadata": {
+                        "sender": "LivecheckAuto",
+                        "timestamp": int(time.time()),
+                        "messageId": ack_message_id,
+                        "remoteJid": remote_jid,
+                    },
+                }
+            }
+            if instance_id:
+                ack_payload["body"]["metadata"]["instanceId"] = instance_id
+            ack_status, ack_body, ack_error = _send_webhook_payload(
+                webhook_url, ack_payload, webhook_secret, args.timeout
+            )
+            if ack_error:
+                raise SystemExit(f"livecheck-auto: ACK failed ({ack_error})")
+            _post_admin_outbox(outbox_url, admin_token, args.timeout)
+
+            results.append(
+                {
+                    "case_id": case["case_id"],
+                    "message_id": message_id,
+                    "conversation_id": conv_id,
+                    "remote_jid": remote_jid,
+                    "action": (meta or {}).get("action"),
+                    "policy_gate": (meta or {}).get("policy_gate"),
+                    "policy_section": (meta or {}).get("policy_section"),
+                    "llm_used": (meta or {}).get("llm_used"),
+                    "ack_message_id": ack_message_id,
+                    "ack_status": ack_status,
+                }
+            )
+
+        if idx < len(selected_cases):
+            time.sleep(rng.uniform(min_wait, max_wait))
+
+    summary = {
+        "suite": args.suite,
+        "case_ids": requested_case_ids,
+        "jid_mode": args.jid_mode,
+        "allowlist_jids": allowlist_jids,
+        "test_mode": test_mode_enabled,
+        "results": results,
+    }
+    print(json.dumps({"summary": summary}, ensure_ascii=False))
+
 def _run_livecheck(args):
     suite = LIVECHECK_SUITES.get(args.suite)
     if not suite:
@@ -663,6 +939,9 @@ def run_curl(url, headers=None):
 
 if len(sys.argv) > 1 and sys.argv[1] == "webhook-fuzz":
     _run_webhook_fuzz(_parse_webhook_fuzz_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "livecheck-auto":
+    _run_livecheck_auto(_parse_livecheck_auto_args(sys.argv[2:]))
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "livecheck":
     _run_livecheck(_parse_livecheck_args(sys.argv[2:]))

@@ -809,6 +809,33 @@
 - cmd: `docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"'`
   - output: `77015705555@s.whatsapp.net`
 
+### 2026-01-17 — CA-01 live-check auto-ACK (webhook livecheck-auto)
+
+**Что сделали:**
+- Запустили `ops/diagnose.py livecheck-auto` (suite ca01-core, unique JID per case, auto-ACK).
+- Подтвердили policy_gate=hard_law, action=escalate, llm_used=false для refund/payment/reschedule/medical.
+- Подтвердили decision_trace stage=policy_gate по каждому conversation_id.
+
+**Evidence:**
+- runner markers: `LC:AUTO:ca01-core:CA01_REFUND:20260117-040946:01`, `LC:AUTO:ca01-core:CA01_PAYMENT:20260117-040946:02`, `LC:AUTO:ca01-core:CA01_RESCHEDULE:20260117-040946:03`, `LC:AUTO:ca01-core:CA01_MEDICAL:20260117-040946:04`
+- message_ids:
+  - refund: `LC-AUTO-20260117-040946-01-d699985f` (conv_id `56894357-8309-42d3-bf66-02893e239287`)
+  - payment: `LC-AUTO-20260117-040946-02-c4d256bd` (conv_id `09456217-7dfb-43aa-927c-e8fe22f216d8`)
+  - reschedule: `LC-AUTO-20260117-040946-03-c49303c9` (conv_id `7f79317f-5fa7-4348-8bdd-707a208b0b84`)
+  - medical: `LC-AUTO-20260117-040946-04-fc3246fc` (conv_id `177660c2-5685-46df-89da-0347970fc662`)
+- SQL (decision_meta):
+  - cmd: `SELECT metadata->>'messageId' AS message_id, conversation_id, metadata->'decision_meta' AS decision_meta FROM messages WHERE role='user' AND metadata->>'messageId' IN ('LC-AUTO-20260117-040946-01-d699985f','LC-AUTO-20260117-040946-02-c4d256bd','LC-AUTO-20260117-040946-03-c49303c9','LC-AUTO-20260117-040946-04-fc3246fc') ORDER BY created_at;`
+  - output: `LC-AUTO-20260117-040946-01-d699985f | 56894357-8309-42d3-bf66-02893e239287 | {"action": "escalate", "intent": "refund", "source": "policy_pack", "llm_used": false, "rag_reason": "overridden_by_gate", "rag_scores": {"bm25_max": 0.0, "hybrid_max": 0.0, "vector_max": 0.0}, "risk_level": "high", "fast_intent": false, "llm_timeout": false, "policy_gate": "hard_law", "llm_cache_hit": false, "rag_confident": false, "policy_section": "refund", "router_eligible": false, "llm_primary_used": false, "controller_eligible": false, "controller_attempted": false, "router_skipped_reason": "law_gate", "llm_degradation_reason": null, "controller_low_confidence": false, "controller_skipped_reason": "law_gate", "controller_fallback_reason": null}`
+  - output: `LC-AUTO-20260117-040946-02-c4d256bd | 09456217-7dfb-43aa-927c-e8fe22f216d8 | {"action": "escalate", "intent": "payment", "source": "policy_pack", "llm_used": false, "rag_reason": "overridden_by_gate", "rag_scores": {"bm25_max": 0.0, "hybrid_max": 0.0, "vector_max": 0.0}, "risk_level": "medium", "fast_intent": false, "llm_timeout": false, "policy_gate": "hard_law", "llm_cache_hit": false, "rag_confident": false, "policy_section": "payment_info", "router_eligible": false, "llm_primary_used": false, "controller_eligible": false, "controller_attempted": false, "router_skipped_reason": "law_gate", "llm_degradation_reason": null, "controller_low_confidence": false, "controller_skipped_reason": "law_gate", "controller_fallback_reason": null}`
+  - output: `LC-AUTO-20260117-040946-03-c49303c9 | 7f79317f-5fa7-4348-8bdd-707a208b0b84 | {"action": "escalate", "intent": "reschedule", "source": "policy_pack", "llm_used": false, "rag_reason": "overridden_by_gate", "rag_scores": {"bm25_max": 0.0, "hybrid_max": 0.0, "vector_max": 0.0}, "risk_level": "high", "fast_intent": false, "llm_timeout": false, "policy_gate": "hard_law", "llm_cache_hit": false, "rag_confident": false, "policy_section": "reschedule", "router_eligible": false, "llm_primary_used": false, "controller_eligible": false, "controller_attempted": false, "router_skipped_reason": "law_gate", "llm_degradation_reason": null, "controller_low_confidence": false, "controller_skipped_reason": "law_gate", "controller_fallback_reason": null}`
+  - output: `LC-AUTO-20260117-040946-04-fc3246fc | 177660c2-5685-46df-89da-0347970fc662 | {"action": "escalate", "intent": "medical", "source": "policy_pack", "llm_used": false, "rag_reason": "overridden_by_gate", "rag_scores": {"bm25_max": 0.0, "hybrid_max": 0.0, "vector_max": 0.0}, "risk_level": "high", "fast_intent": false, "llm_timeout": false, "policy_gate": "hard_law", "llm_cache_hit": false, "rag_confident": false, "policy_section": "medical", "router_eligible": false, "llm_primary_used": false, "controller_eligible": false, "controller_attempted": false, "router_skipped_reason": "law_gate", "llm_degradation_reason": null, "controller_low_confidence": false, "controller_skipped_reason": "law_gate", "controller_fallback_reason": null}`
+- SQL (decision_trace policy_gate):
+  - cmd: `SELECT c.id AS conversation_id, trace->>'stage' AS stage, trace->>'decision' AS decision, trace->>'policy_section' AS policy_section, trace->>'recorded_at' AS recorded_at FROM conversations c JOIN LATERAL jsonb_array_elements(c.context->'decision_trace') AS trace ON true WHERE c.id IN ('56894357-8309-42d3-bf66-02893e239287','09456217-7dfb-43aa-927c-e8fe22f216d8','7f79317f-5fa7-4348-8bdd-707a208b0b84','177660c2-5685-46df-89da-0347970fc662') AND trace->>'stage' = 'policy_gate' ORDER BY recorded_at;`
+  - output: `56894357-8309-42d3-bf66-02893e239287 | policy_gate | escalate | refund | 2026-01-17T04:09:51.504186+00:00`
+  - output: `09456217-7dfb-43aa-927c-e8fe22f216d8 | policy_gate | escalate | payment_info | 2026-01-17T04:09:58.778073+00:00`
+  - output: `7f79317f-5fa7-4348-8bdd-707a208b0b84 | policy_gate | escalate | reschedule | 2026-01-17T04:10:15.279469+00:00`
+  - output: `177660c2-5685-46df-89da-0347970fc662 | policy_gate | escalate | medical | 2026-01-17T04:10:22.382383+00:00`
+
 ### 2026-01-16 — RCA: trace retention drops booking_interrupt/multi_truth
 
 **Дефект:** при `booking_interrupt_info=true` в decision_meta отсутствуют `decision_trace.stage=booking_interrupt/multi_truth`.
