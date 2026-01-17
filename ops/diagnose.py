@@ -226,11 +226,14 @@ def _parse_webhook_fuzz_args(argv):
         "--client-slug",
         default=os.environ.get("TRUFFLES_CLIENT_SLUG", "demo_salon"),
     )
+    parser.add_argument("--mode", choices=["logic", "state"], default="logic")
     parser.add_argument("--count", type=int, default=10)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--min-wait", type=float, default=0.5)
     parser.add_argument("--max-wait", type=float, default=2.0)
     parser.add_argument("--noise", choices=["none", "low"], default="low")
+    parser.add_argument("--case-ids", default=None)
+    parser.add_argument("--allowlist-jids", default=None)
     parser.add_argument("--remote-jid", default=None)
     parser.add_argument("--instance-id", default=None)
     parser.add_argument("--webhook-secret", default=None)
@@ -251,6 +254,44 @@ def _pick_fuzz_cases(cases, count, rng):
     while len(selected) < count:
         selected.append(rng.choice(cases))
     return selected
+
+def _parse_csv_values(value):
+    if not value:
+        return []
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+def _resolve_allowlist_jids(explicit, container_name):
+    for value in (
+        explicit,
+        os.environ.get("FUZZ_ALLOWLIST_JIDS"),
+        os.environ.get("OUTBOUND_ALLOWLIST_JIDS"),
+        os.environ.get("CHATFLOW_JID"),
+    ):
+        jids = _parse_csv_values(value)
+        if jids:
+            return jids
+    if container_name:
+        for env_name in ("OUTBOUND_ALLOWLIST_JIDS", "CHATFLOW_JID"):
+            jids = _parse_csv_values(_resolve_env_from_container(container_name, env_name))
+            if jids:
+                return jids
+    return []
+
+def _select_cases(cases, case_ids):
+    if not case_ids:
+        return None, []
+    requested = _parse_csv_values(case_ids)
+    case_map = {case["case_id"]: case for case in cases}
+    missing = [case_id for case_id in requested if case_id not in case_map]
+    if missing:
+        raise SystemExit(f"webhook-fuzz: unknown case_ids: {', '.join(missing)}")
+    return [case_map[case_id] for case_id in requested], requested
+
+def _resolve_test_mode(container_name):
+    value = os.environ.get("TEST_MODE")
+    if (value is None or value == "") and container_name:
+        value = _resolve_env_from_container(container_name, "TEST_MODE")
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 def _resolve_env_from_container(container_name, var_name):
     if not container_name:
@@ -276,6 +317,10 @@ def _resolve_remote_jid(explicit, rng, container_name=None):
     if jids:
         return rng.choice(jids) if len(jids) > 1 else jids[0]
     return "77015705555@s.whatsapp.net"
+
+def _logic_jid_for_index(idx):
+    base = int(os.environ.get("FUZZ_LOGIC_JID_BASE", "99900000000"))
+    return f"{base + idx}@s.whatsapp.net"
 
 def _send_webhook_payload(url, payload, secret, timeout):
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -316,10 +361,10 @@ def _run_webhook_fuzz(args):
     base_url = args.base_url.rstrip("/")
     client_slug = args.client_slug
     webhook_url = f"{base_url}/webhook/{client_slug}"
+    mode = args.mode
+    skip_outbox = args.skip_outbox or mode == "logic"
 
-    container_name = None
-    if not args.admin_token or not args.remote_jid:
-        container_name, _ = resolve_container_name()
+    container_name, _ = resolve_container_name()
 
     webhook_secret = (
         args.webhook_secret
@@ -335,11 +380,29 @@ def _run_webhook_fuzz(args):
         or os.environ.get("CHATFLOW_INSTANCE_ID")
         or os.environ.get("INSTANCE_ID")
     )
-    remote_jid = _resolve_remote_jid(args.remote_jid, rng, container_name)
+    test_mode_enabled = _resolve_test_mode(container_name)
+    allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
+    selected_cases, requested_case_ids = _select_cases(WEBHOOK_FUZZ_CASES, args.case_ids)
+    if selected_cases is None:
+        selected_cases = _pick_fuzz_cases(WEBHOOK_FUZZ_CASES, args.count, rng)
+        requested_case_ids = []
 
-    selected_cases = _pick_fuzz_cases(WEBHOOK_FUZZ_CASES, args.count, rng)
+    if mode == "logic" and not test_mode_enabled:
+        raise SystemExit("webhook-fuzz: TEST_MODE disabled; logic mode is blocked for safety")
+
+    remote_jid = None
+    if mode == "state":
+        if not allowlist_jids:
+            raise SystemExit("webhook-fuzz: allowlist-jids required for state mode")
+        remote_jid = args.remote_jid or allowlist_jids[0]
+        if remote_jid not in allowlist_jids:
+            raise SystemExit(
+                f"webhook-fuzz: remote-jid {remote_jid} not in allowlist; refusing to send"
+            )
+
     markers = []
     message_ids = []
+    remote_jids = []
 
     for idx, case in enumerate(selected_cases, start=1):
         base_text = rng.choice(case["messages"])
@@ -348,6 +411,13 @@ def _run_webhook_fuzz(args):
         message = f"{text} [{marker}]"
         message_id = f"FZ-{timestamp}-{idx:02d}-{uuid.uuid4().hex[:8]}"
         sent_at = datetime.now(timezone.utc).isoformat()
+        if mode == "logic":
+            remote_jid = _logic_jid_for_index(idx)
+            if not skip_outbox and allowlist_jids and remote_jid not in allowlist_jids:
+                raise SystemExit(
+                    f"webhook-fuzz: remote-jid {remote_jid} not in allowlist; refusing to send"
+                )
+        remote_jids.append(remote_jid)
         metadata = {
             "sender": "FuzzRunner",
             "timestamp": int(time.time()),
@@ -403,7 +473,16 @@ def _run_webhook_fuzz(args):
     outbox_status = None
     outbox_error = None
     outbox_body = None
-    if not args.skip_outbox:
+    if not skip_outbox:
+        if not allowlist_jids:
+            raise SystemExit("webhook-fuzz: allowlist-jids required when outbox enabled")
+        unique_jids = sorted(set(remote_jids))
+        not_allowed = [jid for jid in unique_jids if jid not in allowlist_jids]
+        if not_allowed:
+            raise SystemExit(
+                "webhook-fuzz: outbox enabled for non-allowlist JID(s): "
+                + ", ".join(not_allowed)
+            )
         if not admin_token and not args.dry_run:
             raise SystemExit("webhook-fuzz: missing admin token for outbox/process")
         if not args.dry_run:
@@ -427,8 +506,14 @@ def _run_webhook_fuzz(args):
         "base_url": base_url,
         "client_slug": client_slug,
         "seed": args.seed,
+        "mode": mode,
+        "skip_outbox": skip_outbox,
+        "allowlist_jids": allowlist_jids,
+        "case_ids": requested_case_ids,
         "remote_jid": remote_jid,
+        "remote_jids": remote_jids,
         "instance_id": instance_id,
+        "test_mode": test_mode_enabled,
         "markers": markers,
         "message_ids": message_ids,
         "outbox_status": outbox_status,

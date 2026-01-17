@@ -354,6 +354,43 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 Runner печатает JSON‑лог (marker, case_id, sent_at, expected_policy_section).  
 Marker формат: `LC:<suite>:<case_id>:<timestamp>:<seq>`.
 
+### 5.7 Webhook fuzz SOP (safe runner)
+
+**Цель:** безопасный и детерминированный прогон `/webhook/{client_slug}` без риска отправки на чужие номера.
+
+**Режимы:**
+- `logic` (default): уникальный JID на кейс, `--skip-outbox` по умолчанию.
+- `state`: один allowlist‑JID (только тестовый номер), outbox включён для проверки pending/manager.
+
+**Safety gate:**
+- `--allowlist-jids` (comma list) обязателен при включённом outbox.
+- Любая попытка outbox с JID вне allowlist → STOP.
+- `logic` режим требует `TEST_MODE=1` (outbound guard).
+
+**Выбор кейсов:**
+- `--case-ids` = список case_id через запятую (например `LAW_MEDICAL,INFO_HOURS`).
+
+**Примеры:**
+```bash
+python3 ops/diagnose.py webhook-fuzz \
+  --mode logic \
+  --client-slug demo_salon \
+  --count 10 \
+  --seed 42 \
+  --webhook-secret "$WEBHOOK_SECRET"
+```
+
+```bash
+python3 ops/diagnose.py webhook-fuzz \
+  --mode state \
+  --client-slug demo_salon \
+  --case-ids LAW_COMPLAINT \
+  --remote-jid 77015705555@s.whatsapp.net \
+  --allowlist-jids 77015705555@s.whatsapp.net \
+  --webhook-secret "$WEBHOOK_SECRET" \
+  --admin-token "$ALERTS_ADMIN_TOKEN"
+```
+
 **Evidence (SQL):**
 ```sql
 SELECT m.id, m.created_at, m.content,
@@ -364,6 +401,19 @@ FROM messages m
 JOIN conversations c ON c.id = m.conversation_id
 WHERE m.role = 'user'
   AND m.content ILIKE '%LC:%'
+ORDER BY m.created_at DESC
+LIMIT 20;
+```
+
+```sql
+SELECT m.id, m.created_at, m.content,
+       m.metadata->>'messageId' AS message_id,
+       m.metadata->'decision_meta' AS decision_meta,
+       c.id AS conversation_id
+FROM messages m
+JOIN conversations c ON c.id = m.conversation_id
+WHERE m.role = 'user'
+  AND m.content ILIKE '%FZ:%'
 ORDER BY m.created_at DESC
 LIMIT 20;
 ```
