@@ -274,13 +274,12 @@ jobs:
           key_path = Path.home() / ".ssh" / "id_rsa"
 
           def normalize(content: str) -> str:
-              content = content.replace("\r", "").strip()
+              content = content.replace("\r", "")
               if content.startswith('"') and content.endswith('"'):
                   content = content[1:-1]
-              lines = content.splitlines()
-              if not lines:
-                  return content
-              return "\n".join(line.strip() for line in lines).strip()
+              if not content.endswith("\n"):
+                  content += "\n"
+              return content
 
           def try_write(content: str) -> bool:
               key_path.write_text(normalize(content))
