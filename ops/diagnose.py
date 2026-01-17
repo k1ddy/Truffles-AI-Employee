@@ -923,29 +923,35 @@ def _ensure_bot_active_before_suite(args, context):
     if error:
         print(json.dumps({"stage": "preflight_state", "error": error}, ensure_ascii=False))
         return
-    if state != "pending":
+    state_before = state
+    if state not in ("pending", "manager_active"):
         return
-    ack_text = args.ack_text or "ок"
-    ack_message_id = f"LC-ACK-PREFLIGHT-{timestamp}-{uuid.uuid4().hex[:8]}"
-    ack_payload = {
+    if state == "manager_active":
+        preflight_text = "нет"
+        preflight_action = "reject_manager"
+    else:
+        preflight_text = args.ack_text or "ок"
+        preflight_action = "ack_pending"
+    preflight_message_id = f"LC-PREFLIGHT-{timestamp}-{uuid.uuid4().hex[:8]}"
+    preflight_payload = {
         "body": {
             "messageType": "text",
-            "message": ack_text,
+            "message": preflight_text,
             "metadata": {
                 "sender": "LivecheckAuto",
                 "timestamp": int(time.time()),
-                "messageId": ack_message_id,
+                "messageId": preflight_message_id,
                 "remoteJid": remote_jid,
             },
         }
     }
     if instance_id:
-        ack_payload["body"]["metadata"]["instanceId"] = instance_id
-    ack_status, _, ack_error = _send_webhook_payload(
-        webhook_url, ack_payload, webhook_secret, args.timeout
+        preflight_payload["body"]["metadata"]["instanceId"] = instance_id
+    preflight_status, _, preflight_error = _send_webhook_payload(
+        webhook_url, preflight_payload, webhook_secret, args.timeout
     )
-    if ack_error:
-        raise SystemExit(f"livecheck-auto: preflight ACK failed ({ack_error})")
+    if preflight_error:
+        raise SystemExit(f"livecheck-auto: preflight message failed ({preflight_error})")
     _post_admin_outbox(f"{context.get('base_url')}/admin/outbox/process", admin_token, args.timeout)
     cleared = False
     for _ in range(10):
@@ -958,9 +964,11 @@ def _ensure_bot_active_before_suite(args, context):
         json.dumps(
             {
                 "stage": "preflight_clear_pending",
+                "state_before": state_before,
+                "action": preflight_action,
                 "conversation_id": conv_id,
-                "ack_message_id": ack_message_id,
-                "ack_status": ack_status,
+                "message_id": preflight_message_id,
+                "status": preflight_status,
                 "state_after": state,
                 "cleared": cleared,
             },
