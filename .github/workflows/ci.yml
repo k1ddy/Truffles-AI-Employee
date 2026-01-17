@@ -305,7 +305,7 @@ jobs:
               exit 1
               ;;
           esac
-REMOTE
+          REMOTE
 
       - name: Livecheck runner (CA-01/08/09/10)
         env:
@@ -326,7 +326,7 @@ REMOTE
             --seed 777 \
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net
-REMOTE
+          REMOTE
           $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca08.jsonl
           set -euo pipefail
           cd ~/truffles-main
@@ -337,7 +337,7 @@ REMOTE
             --seed 778 \
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net
-REMOTE
+          REMOTE
           $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca09.jsonl
           set -euo pipefail
           cd ~/truffles-main
@@ -348,7 +348,7 @@ REMOTE
             --seed 779 \
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net
-REMOTE
+          REMOTE
           $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca10.jsonl
           set -euo pipefail
           cd ~/truffles-main
@@ -359,7 +359,7 @@ REMOTE
             --seed 780 \
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net
-REMOTE
+          REMOTE
 
       - name: Upload livecheck artifacts
         if: always()
