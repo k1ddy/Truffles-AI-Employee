@@ -439,6 +439,49 @@ LIMIT 3;
 
 ---
 
+### 5.8 Ожидаемые исходы (чтобы не путаться)
+
+**Logic‑mode (`webhook-fuzz --mode logic`):**
+- Цель: проверить decision_graph без pending/менеджера.
+- Ожидаемо: 1 inbound → decision_meta + decision_trace (в БД).
+- Outbox по умолчанию выключен, поэтому сообщений в WhatsApp не будет.
+
+**State‑mode (`webhook-fuzz --mode state`):**
+- Цель: проверить pending/manager поведения.
+- Ожидаемо: после hard‑law эскалации ответы идут как `Администратор подключится...`.
+- Повторные inbound могут **не** проходить decision_graph (это нормально).
+
+**Live‑check (WhatsApp реальный inbound):**
+- Цель: доказать канон на реальной доставке (ChatFlow → /webhook).
+- Ожидаемо: decision_meta + decision_trace, фиксируется в `STATE.md`.
+- Ручное действие: отправка сообщений делает только владелец тестового номера.
+
+**Важно:** outbox coalescing и debounce могут давать меньше ответов, чем inbound. Это не баг, если trace/meta в БД корректны.
+
+### 5.9 Safety‑контур (обязательная защита)
+
+**Правило:** автопрогоны не пишут живым людям.
+
+**Обязательные условия в проде:**
+- `TEST_MODE=1` (блокирует outbound вне allowlist).
+- `OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net` (только тестовый номер).
+- Любая попытка отправки вне allowlist → STOP и GAP.
+
+### 5.10 “Frozen” план действий (не менять без Top Architect)
+
+**Единственный план:** CA‑01…CA‑15 в `STRATEGY/TECH_ROADMAP.md`.  
+**Как идём:** один CA‑ID за раз → evidence в `STATE.md` → статус в CA‑plan.
+
+**Последовательность выполнения:**
+1) Safety‑контур (env + allowlist доказаны).  
+2) CA‑01 полностью (refund/payment/reschedule/medical + ACK).  
+3) Observability‑контур (OTel + Prometheus/Grafana + Loki/Tempo).  
+4) Automated quality‑контур (Schemathesis + Hypothesis + k6).  
+5) Evidence‑контур (ежедневный snapshot + автологи).  
+6) CA‑02…CA‑15 по порядку.
+
+**Почему так:** иначе получаем “слепые” тесты, регрессии и ручной хаос.
+
 ## 5. Архитектура — потоки данных
 
 ### WhatsApp → Бот (факт)
