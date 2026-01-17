@@ -436,7 +436,8 @@ jobs:
           fi
           REMOTE
           run_status=0
-          if ! "${SSH[@]}" "RUN_ID=${RUN_ID} bash -s" < "${REMOTE_SCRIPT}"; then
+          SCRIPT_PATH="/tmp/livecheck-${RUN_ID}.sh"
+          if ! "${SSH[@]}" "RUN_ID=${RUN_ID} bash -c 'cat > ${SCRIPT_PATH} && chmod 700 ${SCRIPT_PATH} && bash ${SCRIPT_PATH} < /dev/null; status=\\$?; rm -f ${SCRIPT_PATH}; exit \\$status'" < "${REMOTE_SCRIPT}"; then
             run_status=$?
           fi
           rm -f "${REMOTE_SCRIPT}"
