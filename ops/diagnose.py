@@ -1323,6 +1323,77 @@ def _run_livecheck_ca05_booking(args, context):
 
     results = []
     conv_id = None
+    reset_summary = None
+
+    if not args.dry_run:
+        reset_text = "начнем сначала"
+        reset_marker = f"LC:AUTO:CA05:RESET:{timestamp}"
+        reset_message_id = f"LC-AUTO-{timestamp}-CA05-RESET-{uuid.uuid4().hex[:8]}"
+        reset_payload = {
+            "body": {
+                "messageType": "text",
+                "message": f"{reset_text} [{reset_marker}]",
+                "metadata": {
+                    "sender": "LivecheckAuto",
+                    "timestamp": int(time.time()),
+                    "messageId": reset_message_id,
+                    "remoteJid": remote_jid,
+                },
+            }
+        }
+        if instance_id:
+            reset_payload["body"]["metadata"]["instanceId"] = instance_id
+        reset_status, reset_body, reset_error = _send_webhook_payload(
+            webhook_url, reset_payload, webhook_secret, args.timeout
+        )
+        print(
+            json.dumps(
+                {
+                    "case_id": case["case_id"],
+                    "step": "reset",
+                    "marker": reset_marker,
+                    "message_id": reset_message_id,
+                    "remote_jid": remote_jid,
+                    "text": reset_payload["body"]["message"],
+                    "sent_at": datetime.now(timezone.utc).isoformat(),
+                    "status": "sent" if reset_status and 200 <= reset_status < 300 else "error",
+                    "http_status": reset_status,
+                    "error": reset_error,
+                    "response": (reset_body or "")[:200] if reset_body else None,
+                },
+                ensure_ascii=False,
+            )
+        )
+        _post_admin_outbox(outbox_url, admin_token, args.timeout)
+        conv_id, reset_meta, reset_meta_error = _poll_decision_meta(
+            db_user, reset_message_id, args.poll_timeout, args.poll_interval
+        )
+        if reset_meta_error:
+            raise SystemExit(f"livecheck-auto: CA05 reset poll failed ({reset_meta_error})")
+        reset_conv_meta, reset_conv_error = _fetch_conversation_meta(db_user, conv_id)
+        reset_context = reset_conv_meta.get("context") if isinstance(reset_conv_meta, dict) else None
+        reset_expected = (
+            reset_context.get("expected_reply_type") if isinstance(reset_context, dict) else None
+        )
+        reset_booking = reset_context.get("booking") if isinstance(reset_context, dict) else None
+        booking_active = False
+        booking_service = None
+        if isinstance(reset_booking, dict):
+            booking_active = bool(reset_booking.get("active"))
+            booking_service = reset_booking.get("service")
+        if reset_expected:
+            raise SystemExit("livecheck-auto: CA05 reset did not clear expected_reply_type")
+        if booking_active:
+            raise SystemExit("livecheck-auto: CA05 reset did not clear booking active")
+        reset_summary = {
+            "reset_message_id": reset_message_id,
+            "reset_action": (reset_meta or {}).get("action"),
+            "reset_intent": (reset_meta or {}).get("intent"),
+            "reset_expected_reply_type": reset_expected,
+            "reset_booking_active": booking_active,
+            "reset_booking_service": booking_service,
+            "reset_error": reset_conv_error,
+        }
 
     for idx, step in enumerate(steps, start=1):
         base_text = step.get("message") or ""
@@ -1446,6 +1517,7 @@ def _run_livecheck_ca05_booking(args, context):
         "case_id": case["case_id"],
         "conversation_id": conv_id,
         "results": results,
+        "reset": reset_summary,
     }
     return summary
 
