@@ -929,6 +929,8 @@ def _ensure_bot_active_before_suite(args, context):
     if state == "manager_active":
         handover_meta, _ = _fetch_handover_meta(db_user, conv_id)
         handover_id = (handover_meta or {}).get("handover_id")
+        conv_meta, _ = _fetch_conversation_meta(db_user, conv_id)
+        topic_id = (conv_meta or {}).get("telegram_topic_id")
         chat_id_raw = client_meta.get("telegram_chat_id")
         if not handover_id or not chat_id_raw:
             raise SystemExit("livecheck-auto: preflight missing handover or telegram_chat_id")
@@ -941,6 +943,13 @@ def _ensure_bot_active_before_suite(args, context):
         manager_username = owner_username or "ci_manager"
         preflight_action = "resolve_manager"
         preflight_message_id = f"LC-PREFLIGHT-{timestamp}-{uuid.uuid4().hex[:8]}"
+        callback_message = {
+            "message_id": int(time.time() * 1000) % 1000000,
+            "date": int(time.time()),
+            "chat": {"id": chat_id, "type": "supergroup", "title": "CI"},
+        }
+        if topic_id:
+            callback_message["message_thread_id"] = topic_id
         callback_payload = {
             "update_id": int(time.time()),
             "callback_query": {
@@ -952,14 +961,11 @@ def _ensure_bot_active_before_suite(args, context):
                     "last_name": "Runner",
                     "username": manager_username,
                 },
-                "message": {
-                    "message_id": int(time.time() * 1000) % 1000000,
-                    "chat": {"id": chat_id, "type": "supergroup", "title": "CI"},
-                },
+                "message": callback_message,
                 "data": f"resolve_{handover_id}",
             },
         }
-        preflight_status, _, preflight_error = _send_json_payload(
+        preflight_status, preflight_body, preflight_error = _send_json_payload(
             f"{context.get('base_url')}/telegram-webhook", callback_payload, args.timeout
         )
     else:
@@ -980,7 +986,7 @@ def _ensure_bot_active_before_suite(args, context):
         }
         if instance_id:
             preflight_payload["body"]["metadata"]["instanceId"] = instance_id
-        preflight_status, _, preflight_error = _send_webhook_payload(
+        preflight_status, preflight_body, preflight_error = _send_webhook_payload(
             webhook_url, preflight_payload, webhook_secret, args.timeout
         )
         _post_admin_outbox(f"{context.get('base_url')}/admin/outbox/process", admin_token, args.timeout)
@@ -1002,6 +1008,7 @@ def _ensure_bot_active_before_suite(args, context):
                 "conversation_id": conv_id,
                 "message_id": preflight_message_id,
                 "status": preflight_status,
+                "response": (preflight_body or "")[:200] if preflight_body else None,
                 "state_after": state,
                 "cleared": cleared,
             },
