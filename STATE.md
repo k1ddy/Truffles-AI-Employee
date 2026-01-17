@@ -780,6 +780,24 @@
 - GHCR image env: `APP_VERSION=main`, `GIT_COMMIT=69fe13e203182fafa1151f9d39e41732507d4701`
 - /admin/version: `{"version":"main","git_commit":"69fe13e203182fafa1151f9d39e41732507d4701","build_time":"2026-01-16T12:44:26Z"}`
 
+### 2026-01-17 — CA-15 /admin/metrics snapshot (demo_salon)
+
+**Что сделали:**
+- Проверили наличие таблицы `metrics_daily` и ASR колонок (миграции 015/016).
+- Создали дневной snapshot метрик через `ops/metrics_daily_snapshot.sql`.
+- Подтвердили `/admin/metrics` для даты.
+
+**Evidence:**
+- SQL (schema check):
+  - cmd: `SELECT column_name FROM information_schema.columns WHERE table_name = 'metrics_daily' ORDER BY ordinal_position;`
+  - output: `metric_date, client_id, outbox_latency_p50, outbox_latency_p90, llm_timeout_rate, llm_used_rate, escalation_rate, fast_intent_rate, total_user_messages, total_outbox_sent, total_outbox_failed, total_llm_used, total_llm_timeout, total_handovers, total_fast_intent, created_at, updated_at, asr_fail_rate, total_asr_used, total_asr_failed, rag_low_conf_rate, clarify_rate, clarify_success_rate`
+- SQL (snapshot row):
+  - cmd: `SELECT m.metric_date, c.name AS client_slug, m.total_user_messages, m.total_outbox_sent, m.total_outbox_failed, m.total_llm_used, m.total_llm_timeout, m.llm_used_rate, m.llm_timeout_rate, m.escalation_rate, m.fast_intent_rate, m.asr_fail_rate, m.rag_low_conf_rate, m.clarify_rate, m.clarify_success_rate, m.created_at, m.updated_at FROM metrics_daily m JOIN clients c ON c.id = m.client_id WHERE c.name = 'demo_salon' AND m.metric_date = '2026-01-17';`
+  - output: `2026-01-17 | demo_salon | 0 | 0 | 0 | 0 | 0 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 2026-01-17 01:41:36.002061+00 | 2026-01-17 01:41:36.002061+00`
+- /admin/metrics:
+  - cmd: `curl -s -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" "http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=2026-01-17"`
+  - output: `{"metric_date":"2026-01-17","outbox_latency_p50":null,"outbox_latency_p90":null,"llm_timeout_rate":0.0,"llm_used_rate":0.0,"escalation_rate":0.0,"fast_intent_rate":0.0,"asr_fail_rate":0.0,"rag_low_conf_rate":0.0,"clarify_rate":0.0,"clarify_success_rate":0.0,"total_user_messages":0,"total_outbox_sent":0,"total_outbox_failed":0,"total_llm_used":0,"total_llm_timeout":0,"total_handovers":0,"total_fast_intent":0,"total_asr_used":0,"total_asr_failed":0,"created_at":"2026-01-17T01:41:36.002061+00:00","updated_at":"2026-01-17T01:41:36.002061+00:00","client_slug":"demo_salon"}`
+
 ### 2026-01-16 — RCA: trace retention drops booking_interrupt/multi_truth
 
 **Дефект:** при `booking_interrupt_info=true` в decision_meta отсутствуют `decision_trace.stage=booking_interrupt/multi_truth`.
