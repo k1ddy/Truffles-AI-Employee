@@ -70,7 +70,7 @@
 | CA-12 | Router SLA + LLM budget/degradation | ARCHITECTURE + REQUIREMENTS | decision_meta router_* + trace `budget_gate/llm_degradation` + `/admin/metrics` | pending |
 | CA-13 | Branch routing isolation before pricing | ARCHITECTURE + REQUIREMENTS | decision_meta `branch_id/knowledge_tag` + RAG filter evidence + live-check | pending |
 | CA-14 | Onboarding readiness (pack validate + sync) | TECH_ROADMAP + MULTI_TENANT | `ops/sync_client.py --validate` output + Qdrant sync log + `/admin/version` | pending |
-| CA-15 | Observability baseline (health/metrics/alerts) | REQUIREMENTS + ARCHITECTURE | `/admin/health` + `/admin/metrics` + `/alerts/test` + no_response alerts evidence | pending |
+| CA-15 | Observability baseline (health/metrics/alerts) | REQUIREMENTS + ARCHITECTURE | `/admin/health` + `/admin/metrics` + `/alerts/test` + no_response alerts evidence | verified (STATE.md:783) |
 
 ---
 
