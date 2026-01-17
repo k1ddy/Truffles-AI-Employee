@@ -871,6 +871,25 @@
 **Note/GAP:**
 - CA-08 pending_sla/pending_resume trace entries missing in decision_trace (see livecheck-ca08.jsonl).
 
+### 2026-01-17 — CA-08 trace retention fix (CI live-check)
+
+**Что сделали:**
+- Добавили pending_sla/pending_resume в критические стадии retention.
+- Запустили CI livecheck на main commit `b1e978a36a1318dc54641f684ab9d7ccfc669947`.
+
+**Evidence:**
+- CI run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21090995977
+- artifacts: `livecheck-artifacts` (gate + jsonl)
+- gate (livecheck-gate.txt):
+  - TEST_MODE=1
+  - OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net
+  - QDRANT_COLLECTION_EFFECTIVE=truffles_knowledge_ci
+- CA-08 (livecheck-ca08.jsonl):
+  - message_id `LC-AUTO-20260117-075405-CA08-c8c11ff4`
+  - ack_message_id `LC-ACK-20260117-075405-CA08-4dce9054`
+  - conversation_state pending→bot_active; handover_status pending→resolved
+  - pending_sla_trace=true, pending_resume_trace=true
+
 ### 2026-01-16 — RCA: trace retention drops booking_interrupt/multi_truth
 
 **Дефект:** при `booking_interrupt_info=true` в decision_meta отсутствуют `decision_trace.stage=booking_interrupt/multi_truth`.
