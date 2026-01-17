@@ -458,6 +458,16 @@ def _resolve_allowlist_jids(explicit, container_name):
                 return jids
     return []
 
+def _select_allowlist_jid(allowlist_jids, suite_name, seed):
+    if not allowlist_jids:
+        return None
+    if len(allowlist_jids) == 1:
+        return allowlist_jids[0]
+    seed_value = f"{suite_name}:{seed or 0}"
+    digest = uuid.uuid5(uuid.NAMESPACE_DNS, seed_value).int
+    idx = digest % len(allowlist_jids)
+    return allowlist_jids[idx]
+
 def _select_cases(cases, case_ids):
     if not case_ids:
         return None, []
@@ -2010,10 +2020,8 @@ def _run_livecheck_auto(args):
         )
     test_mode_enabled = _resolve_test_mode(container_name)
     allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
-    if SAFE_ALLOWLIST_JID not in allowlist_jids or len(allowlist_jids) != 1:
-        raise SystemExit(
-            f"livecheck-auto: allowlist must contain only {SAFE_ALLOWLIST_JID} (got {allowlist_jids})"
-        )
+    if not allowlist_jids:
+        raise SystemExit("livecheck-auto: allowlist-jids is empty")
     if not test_mode_enabled:
         raise SystemExit("livecheck-auto: TEST_MODE disabled; refusing to run")
 
@@ -2066,7 +2074,9 @@ def _run_livecheck_auto(args):
         requested_case_ids = [case["case_id"] for case in suite_cases]
 
     if args.jid_mode == "allowlist":
-        remote_jid = args.remote_jid or allowlist_jids[0]
+        remote_jid = args.remote_jid or _select_allowlist_jid(
+            allowlist_jids, args.suite, args.seed
+        )
         if remote_jid not in allowlist_jids:
             raise SystemExit(
                 f"livecheck-auto: remote-jid {remote_jid} not in allowlist; refusing to send"
