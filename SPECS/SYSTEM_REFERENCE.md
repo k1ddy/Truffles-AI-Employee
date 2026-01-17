@@ -501,7 +501,7 @@ LIMIT 3;
 - Малый объём (4–10 сообщений), фиксированный seed, без спама.
 
 **CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca08-state`, `ca09-manager`, `ca10-outbox`, артефакты `livecheck-artifacts/*`.
-**CA‑03 (ca03-info):** truth‑first info_bundle → `decision_meta.fact_source=truth`, `info_sections`+`fact_intents`, `info_combined` (address+hours), `llm_used=false`, `source=class_router`, trace `stage=info_class`.
+**CA‑03 (ca03-info):** truth‑first info_bundle → `decision_meta.fact_source=truth`, `info_sections`+`fact_intents`, `info_combined` (address+hours), `llm_used=false`, `source` ∈ {`truth_gate`,`class_router`}, trace `stage` ∈ {`truth_gate`,`info_class`}.
 
 **Важно:** CI‑livecheck покрывает CA‑инварианты в dev‑фазе; финальный live‑check на живых клиентах — вручную.
 

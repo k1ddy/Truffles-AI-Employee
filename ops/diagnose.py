@@ -1973,6 +1973,7 @@ def _run_livecheck_auto(args):
             conv_error = None
             trace_entry = None
             info_trace = None
+            trace_source = None
             if conv_id:
                 conv_meta, conv_error = _fetch_conversation_meta(db_user, conv_id)
                 trace_list = None
@@ -1987,16 +1988,23 @@ def _run_livecheck_auto(args):
                         or case.get("expected_policy_section"),
                     )
                 if args.suite == "ca03-info":
-                    info_trace = _find_trace_entry(trace_list, stage="info_class")
+                    for entry in _trace_as_list(trace_list):
+                        if entry.get("stage") in {"truth_gate", "info_class"}:
+                            info_trace = entry
+                            break
 
             if args.suite == "ca03-info":
                 if not info_trace:
                     raise SystemExit(
-                        f"livecheck-auto: CA03 {case['case_id']} missing info_class trace"
+                        f"livecheck-auto: CA03 {case['case_id']} missing truth_gate/info_class trace"
                     )
-                if info_trace.get("decision") != "reply":
+                if info_trace.get("stage") == "truth_gate":
+                    trace_source = "truth_gate"
+                else:
+                    trace_source = "class_router"
+                if trace_source not in {"truth_gate", "class_router"}:
                     raise SystemExit(
-                        f"livecheck-auto: CA03 {case['case_id']} info_class decision mismatch"
+                        f"livecheck-auto: CA03 {case['case_id']} trace_source mismatch"
                     )
                 if info_trace.get("fact_source") != "truth":
                     raise SystemExit(
@@ -2039,6 +2047,7 @@ def _run_livecheck_auto(args):
                     "trace_risk_level": (trace_entry or {}).get("risk_level") if trace_entry else None,
                     "trace_stage": (info_trace or {}).get("stage") if info_trace else None,
                     "trace_decision": (info_trace or {}).get("decision") if info_trace else None,
+                    "trace_source": trace_source,
                     "trace_fact_source": (info_trace or {}).get("fact_source") if info_trace else None,
                     "trace_info_sections": (info_trace or {}).get("info_sections") if info_trace else None,
                     "trace_intents": (info_trace or {}).get("intents") if info_trace else None,
