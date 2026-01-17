@@ -1857,6 +1857,7 @@ def build_consult_reply(
     client_slug: str | None = "demo_salon",
     intent_decomp: dict | None = None,
     conversation_id: str | None = None,
+    allow_service_query: bool = False,
 ) -> DemoSalonDecision | None:
     normalized = _normalize_text(message)
     consult_intent = False
@@ -1872,7 +1873,9 @@ def build_consult_reply(
             intent_service_query = service_query.strip() or None
 
     if not normalized or (
-        _should_skip_consult(normalized, message) and not (consult_intent and intent_service_query)
+        _should_skip_consult(normalized, message)
+        and not (consult_intent and intent_service_query)
+        and not (allow_service_query and intent_service_query)
     ):
         return None
 

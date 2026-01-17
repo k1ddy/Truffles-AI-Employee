@@ -381,6 +381,7 @@ def _handle_consult_flow(
             client_slug=client_slug,
             intent_decomp=intent_decomp_payload,
             conversation_id=str(conversation.id),
+            allow_service_query=consult_context_active,
         )
     if consult_candidate and not consult_intent and isinstance(intent_decomp_payload, dict):
         consult_intent = True
