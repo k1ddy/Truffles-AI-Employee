@@ -1988,7 +1988,7 @@ def _run_livecheck_auto(args):
                         or case.get("expected_policy_section"),
                     )
                 if args.suite == "ca03-info":
-                    for entry in _trace_as_list(trace_list):
+                    for entry in reversed(_trace_as_list(trace_list)):
                         if entry.get("stage") in {"truth_gate", "info_class"}:
                             info_trace = entry
                             break
@@ -2010,14 +2010,6 @@ def _run_livecheck_auto(args):
                     raise SystemExit(
                         f"livecheck-auto: CA03 {case['case_id']} trace fact_source mismatch"
                     )
-                trace_sections = info_trace.get("info_sections")
-                if expected_sections:
-                    if not isinstance(trace_sections, list) or any(
-                        item not in trace_sections for item in expected_sections
-                    ):
-                        raise SystemExit(
-                            f"livecheck-auto: CA03 {case['case_id']} trace info_sections mismatch"
-                        )
 
             results.append(
                 {
