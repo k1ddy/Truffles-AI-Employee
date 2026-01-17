@@ -129,6 +129,26 @@ LIVECHECK_SUITES = {
             ],
         },
     ],
+    "ca04-service": [
+        {
+            "case_id": "CA04_SERVICE_MATCH",
+            "expected_intent": "service_match",
+            "expected_fact_intents": ["service_match"],
+            "messages": [
+                "делаете маникюр?",
+                "маникюр делаете?",
+            ],
+        },
+        {
+            "case_id": "CA04_SERVICE_NOT_FOUND",
+            "expected_intent": "service_not_found",
+            "expected_fact_intents": ["service_not_found"],
+            "messages": [
+                "делаете татуировки?",
+                "тату делаете?",
+            ],
+        },
+    ],
     "ca08-state": [
         {
             "case_id": "CA08_PENDING",
@@ -1813,7 +1833,7 @@ def _run_livecheck_auto(args):
         "outbox_wait_seconds": _resolve_outbox_wait_seconds(container_name),
     }
 
-    if args.suite in {"ca01-core", "ca02-policy", "ca03-info"}:
+    if args.suite in {"ca01-core", "ca02-policy", "ca03-info", "ca04-service"}:
         _ensure_bot_active_before_suite(args, context)
 
     if args.suite == "ca08-state":
@@ -1890,6 +1910,8 @@ def _run_livecheck_auto(args):
             log["expected_fact_intents"] = case.get("expected_fact_intents")
         if case.get("expected_info_combined") is not None:
             log["expected_info_combined"] = case.get("expected_info_combined")
+        if case.get("expected_intent"):
+            log["expected_intent"] = case.get("expected_intent")
         if response_error:
             log["error"] = response_error
         if response_body:
@@ -1969,6 +1991,27 @@ def _run_livecheck_auto(args):
                         f"livecheck-auto: CA03 {case['case_id']} info_combined mismatch"
                     )
 
+            if args.suite == "ca04-service":
+                expected_intent = case.get("expected_intent")
+                if (meta or {}).get("action") != "reply":
+                    raise SystemExit(f"livecheck-auto: CA04 {case['case_id']} action mismatch")
+                if (meta or {}).get("intent") != expected_intent:
+                    raise SystemExit(f"livecheck-auto: CA04 {case['case_id']} intent mismatch")
+                if (meta or {}).get("fact_source") != "service_matcher":
+                    raise SystemExit(f"livecheck-auto: CA04 {case['case_id']} fact_source mismatch")
+                if (meta or {}).get("source") != "service_matcher":
+                    raise SystemExit(f"livecheck-auto: CA04 {case['case_id']} source mismatch")
+                if (meta or {}).get("llm_used") is not False:
+                    raise SystemExit(f"livecheck-auto: CA04 {case['case_id']} llm_used not false")
+                fact_intents = (meta or {}).get("fact_intents")
+                if expected_fact_intents:
+                    if not isinstance(fact_intents, list) or any(
+                        item not in fact_intents for item in expected_fact_intents
+                    ):
+                        raise SystemExit(
+                            f"livecheck-auto: CA04 {case['case_id']} fact_intents mismatch"
+                        )
+
             conv_meta = None
             conv_error = None
             trace_entry = None
@@ -1992,6 +2035,11 @@ def _run_livecheck_auto(args):
                         if entry.get("stage") in {"truth_gate", "info_class"}:
                             info_trace = entry
                             break
+                if args.suite == "ca04-service":
+                    for entry in reversed(_trace_as_list(trace_list)):
+                        if entry.get("stage") == "service_matcher":
+                            info_trace = entry
+                            break
 
             if args.suite == "ca03-info":
                 if not info_trace:
@@ -2011,6 +2059,20 @@ def _run_livecheck_auto(args):
                         f"livecheck-auto: CA03 {case['case_id']} trace fact_source mismatch"
                     )
 
+            if args.suite == "ca04-service":
+                if not info_trace:
+                    raise SystemExit(
+                        f"livecheck-auto: CA04 {case['case_id']} missing service_matcher trace"
+                    )
+                if info_trace.get("decision") != case.get("expected_intent"):
+                    raise SystemExit(
+                        f"livecheck-auto: CA04 {case['case_id']} trace decision mismatch"
+                    )
+                if info_trace.get("fact_source") != "service_matcher":
+                    raise SystemExit(
+                        f"livecheck-auto: CA04 {case['case_id']} trace fact_source mismatch"
+                    )
+
             results.append(
                 {
                     "case_id": case["case_id"],
@@ -2018,6 +2080,7 @@ def _run_livecheck_auto(args):
                     "conversation_id": conv_id,
                     "remote_jid": remote_jid,
                     "action": (meta or {}).get("action"),
+                    "intent": (meta or {}).get("intent"),
                     "policy_gate": (meta or {}).get("policy_gate"),
                     "policy_section": (meta or {}).get("policy_section"),
                     "policy_source": (meta or {}).get("source"),
@@ -2028,6 +2091,8 @@ def _run_livecheck_auto(args):
                     "info_sections": (meta or {}).get("info_sections"),
                     "info_combined": (meta or {}).get("info_combined"),
                     "fact_intents": (meta or {}).get("fact_intents"),
+                    "service_query": (meta or {}).get("service_query"),
+                    "source": (meta or {}).get("source"),
                     "ack_message_id": ack_message_id,
                     "ack_marker": ack_marker,
                     "ack_text": ack_text,

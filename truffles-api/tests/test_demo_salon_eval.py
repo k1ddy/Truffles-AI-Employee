@@ -914,6 +914,54 @@ def test_truth_first_info_bundle():
         )
 
 
+def test_service_matcher_core():
+    cases = [
+        {
+            "case_id": "CA04_SERVICE_MATCH",
+            "message": "делаете маникюр?",
+            "expected_intent": "service_match",
+            "expected_fact_intents": ["service_match"],
+        },
+        {
+            "case_id": "CA04_SERVICE_NOT_FOUND",
+            "message": "делаете татуировки?",
+            "expected_intent": "service_not_found",
+            "expected_fact_intents": ["service_not_found"],
+        },
+    ]
+
+    for case in cases:
+        case_id = case["case_id"]
+        _response, conversation, saved_message = _run_webhook_conversation(
+            [case["message"]],
+            case_id,
+            None,
+        )
+        meta = saved_message.message_metadata.get("decision_meta", {})
+        assert meta.get("action") == "reply", f"{case_id}: action mismatch"
+        assert meta.get("intent") == case["expected_intent"], f"{case_id}: intent mismatch"
+        assert meta.get("fact_source") == "service_matcher", f"{case_id}: fact_source mismatch"
+        assert meta.get("source") == "service_matcher", f"{case_id}: source mismatch"
+        assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+        _assert_list_contains(
+            meta.get("fact_intents"),
+            case["expected_fact_intents"],
+            case_id,
+            "fact_intents",
+        )
+
+        trace = _get_decision_trace(conversation)
+        _assert_trace_contains(
+            trace,
+            {
+                "stage": "service_matcher",
+                "decision": case["expected_intent"],
+                "fact_source": "service_matcher",
+            },
+            case_id,
+        )
+
+
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:
     normalized = _normalize(response)
     for item in items:
