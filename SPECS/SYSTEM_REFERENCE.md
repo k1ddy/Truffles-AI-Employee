@@ -67,6 +67,17 @@
 
 ---
 
+## 2.1 Внешние системы и быстрые проверки
+
+**Цель:** не “верить на слово”, а уметь быстро доказать состояние ключевых интеграций.
+
+- **GitHub Actions + GHCR:** CI run → образ в GHCR → `/admin/version` совпадает с SHA деплоя.
+- **ChatFlow (WhatsApp):** outbound = `send-text`; inbound валиден только через реальный WA → `/webhook/{client_slug}`.
+- **Telegram:** алерты через `/alerts/test`, менеджерские ответы через `/telegram-webhook`.
+- **Qdrant:** `ops/sync_client.py --validate/--sync`, проверка коллекций.
+- **Redis:** outbox/debounce; контроль через `/admin/metrics` (latency, retries).
+- **Postgres:** факты/evidence только через SQL (messages, conversations, outbox, handovers).
+
 ## 3. Секреты и доступы
 
 | Где | Что |
@@ -278,8 +289,107 @@ CHATFLOW_JID=... \
 python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max-wait 15
 ```
 
+---
+
+## 5. Quality & Validation Framework (обязательный процесс)
+
+**Цель:** единый стандарт качества: доказать корректность, устойчивость и наблюдаемость.
+
+### 5.1 Тестовые уровни (что и зачем)
+
+| Уровень | Что проверяет | Инструмент | Evidence |
+| --- | --- | --- | --- |
+| CI core | детерминизм/регрессии | GitHub Actions (core) | ссылка на run |
+| CI long | длинные диалоги/устойчивость | GitHub Actions (long) | ссылка на run |
+| CA audit | канон на реальном inbound | Live-check SOP | `STATE.md` (conv_id/trace/meta) |
+| Fuzz/Soak | шум/ошибки/неожиданности | Runner (см. ниже) | метрики + sampling |
+
+### 5.2 Fuzz/Soak (симуляция “живого” человека)
+
+**Что это:** автоматический прогон `/webhook` с вариациями текста, ошибок и ритма (не хардкод в коде, а сценарии в runner).
+
+**Статус:** требует отдельного Task Package. Параметры задаются в runner (кол-во, шум, паузы, категории).
+
+**Инварианты (минимум):**
+- `decision_meta` и `decision_trace` не пустые.
+- Hard‑LAW категории → `policy_gate=hard_law`, `action=escalate`, `llm_used=false`.
+- Нет preflight‑reject для валидных сообщений.
+
+### 5.3 LLM debug и наблюдаемость
+
+**Что уже есть (runtime evidence):**
+- `decision_trace` (conversation.context) — стадии решения.
+- `decision_meta` (messages.metadata) — факты, intent, policy, llm flags.
+- LLM‑поля: `llm_used`, `llm_timeout`, `llm_cache_hit`, `llm_primary_reason`.
+- Метрики: `/admin/metrics` (latency, outbox, SLA), алерты: `/alerts/test`.
+
+**Принцип:** все сомнения проверяются trace/meta/metrics, а не “ощущением”.
+
+### 5.4 Готовность к старту (минимальный порог)
+
+1) CA‑01…CA‑15 = `verified` с evidence в `STATE.md`.  
+2) CI core + long зелёные.  
+3) `/admin/version` = HEAD, `/admin/health` OK.  
+4) `/alerts/test` доставляет алерт.  
+5) Метрики фиксируются в `STATE.md` (p50/p90 + fallback_rate).  
+
+### 5.5 OSS toolchain (стандарт, без велосипедов)
+
+**Выбор инструментов (современный OSS‑стек):**
+- **Contract/Fuzz:** Schemathesis (OpenAPI‑fuzz, на базе Hypothesis).
+- **Property‑based:** Hypothesis (инварианты логики).
+- **Load/Soak:** k6 (контейнер, deterministic сценарии).
+- **Observability:** OpenTelemetry + Prometheus + Grafana + Loki/Tempo.
+- **Tracing/Debug:** decision_trace + decision_meta (runtime evidence).
+
+**Правило:** инструменты не заменяют канон; они дают повторяемые доказательства.
+
+### 5.6 Повторяемый процесс запуска (один сценарий для всех ролей)
+
+1) **CI core/long** → ссылка на run (без этого STOP).  
+2) **CA live‑check** → evidence в `STATE.md` (conv_id/trace/meta).  
+3) **Fuzz/Soak** → метрики стабильности + sampling evidence.  
+4) **Review evidence** → только после этого обновляем CA‑статус в `STRATEGY/TECH_ROADMAP.md`.
+
 Runner печатает JSON‑лог (marker, case_id, sent_at, expected_policy_section).  
 Marker формат: `LC:<suite>:<case_id>:<timestamp>:<seq>`.
+
+### 5.7 Webhook fuzz SOP (safe runner)
+
+**Цель:** безопасный и детерминированный прогон `/webhook/{client_slug}` без риска отправки на чужие номера.
+
+**Режимы:**
+- `logic` (default): уникальный JID на кейс, `--skip-outbox` по умолчанию.
+- `state`: один allowlist‑JID (только тестовый номер), outbox включён для проверки pending/manager.
+
+**Safety gate:**
+- `--allowlist-jids` (comma list) обязателен при включённом outbox.
+- Любая попытка outbox с JID вне allowlist → STOP.
+- `logic` режим требует `TEST_MODE=1` (outbound guard).
+
+**Выбор кейсов:**
+- `--case-ids` = список case_id через запятую (например `LAW_MEDICAL,INFO_HOURS`).
+
+**Примеры:**
+```bash
+python3 ops/diagnose.py webhook-fuzz \
+  --mode logic \
+  --client-slug demo_salon \
+  --count 10 \
+  --seed 42 \
+  --webhook-secret "$WEBHOOK_SECRET"
+```
+
+```bash
+python3 ops/diagnose.py webhook-fuzz \
+  --mode state \
+  --client-slug demo_salon \
+  --case-ids LAW_COMPLAINT \
+  --remote-jid 77015705555@s.whatsapp.net \
+  --allowlist-jids 77015705555@s.whatsapp.net \
+  --webhook-secret "$WEBHOOK_SECRET" \
+  --admin-token "$ALERTS_ADMIN_TOKEN"
+```
 
 **Evidence (SQL):**
 ```sql
@@ -291,6 +401,19 @@ FROM messages m
 JOIN conversations c ON c.id = m.conversation_id
 WHERE m.role = 'user'
   AND m.content ILIKE '%LC:%'
+ORDER BY m.created_at DESC
+LIMIT 20;
+```
+
+```sql
+SELECT m.id, m.created_at, m.content,
+       m.metadata->>'messageId' AS message_id,
+       m.metadata->'decision_meta' AS decision_meta,
+       c.id AS conversation_id
+FROM messages m
+JOIN conversations c ON c.id = m.conversation_id
+WHERE m.role = 'user'
+  AND m.content ILIKE '%FZ:%'
 ORDER BY m.created_at DESC
 LIMIT 20;
 ```

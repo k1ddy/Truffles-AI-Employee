@@ -118,6 +118,20 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 
 ---
 
+## Quality toolchain (OSS стандарт)
+
+**Цель:** повторяемые проверки без “самописных” велосипедов.
+
+**Инструменты (принятый стандарт):**
+- **Schemathesis** — contract/fuzz по OpenAPI.
+- **Hypothesis** — property‑based инварианты логики.
+- **k6** — load/soak (контейнер).
+- **OpenTelemetry + Prometheus + Grafana + Loki/Tempo** — наблюдаемость.
+
+**Примечание:** интеграция инструментов делается через Task Package и фиксируется evidence в `STATE.md`.
+
+---
+
 ## Telegram
 
 | Клиент | Bot username | Bot token |

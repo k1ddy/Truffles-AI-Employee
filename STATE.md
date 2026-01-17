@@ -721,6 +721,57 @@
 - decision_trace: stage=policy_gate, policy_gate=hard_law, policy_section=payment_info, decision=escalate, intent=payment, recorded_at `2026-01-16T11:57:49.740443+00:00`
 - state: bot_active (pending закрыт)
 
+### 2026-01-16 — Webhook fuzz runner (10 inbound, /webhook/demo_salon)
+
+**Что сделали:**
+- Запустили `ops/diagnose.py webhook-fuzz` (seed=42, 10 inbound) на `/webhook/demo_salon`, затем `/admin/outbox/process`.
+- Проверили наличие decision_meta у всех 10 сообщений.
+- Зафиксировали hard_law эскалацию на кейсе complaint (policy_gate=hard_law, action=escalate, llm_used=false).
+
+**Evidence:**
+- runner: conv_id `1161601f-3f9a-44fb-8380-6e4f424d87d5`, remote_jid `77000000099@s.whatsapp.net`
+- markers: `FZ:INFO_LOCATION:20260116-154736:01`, `FZ:LAW_MEDICAL:20260116-154736:02`, `FZ:LAW_RESCHEDULE:20260116-154736:03`, `FZ:INFO_PRICE:20260116-154736:04`, `FZ:LAW_COMPLAINT:20260116-154736:05`, `FZ:INFO_HOURS:20260116-154736:06`, `FZ:BOOK_TIME:20260116-154736:07`, `FZ:LAW_LEGAL:20260116-154736:08`, `FZ:LAW_REFUND:20260116-154736:09`, `FZ:LAW_PAYMENT:20260116-154736:10`
+- message_ids: `FZ-20260116-154736-01-ea7b8835`, `FZ-20260116-154736-02-cdb7da3c`, `FZ-20260116-154736-03-b4c28722`, `FZ-20260116-154736-04-b391204b`, `FZ-20260116-154736-05-1b148cde`, `FZ-20260116-154736-06-0da361a0`, `FZ-20260116-154736-07-c2b71224`, `FZ-20260116-154736-08-6a1cc94d`, `FZ-20260116-154736-09-f3b6be17`, `FZ-20260116-154736-10-428f5bad`
+- SQL (decision_meta count):
+  - cmd: `WITH ids AS (SELECT unnest(ARRAY['FZ-20260116-154736-01-ea7b8835','FZ-20260116-154736-02-cdb7da3c','FZ-20260116-154736-03-b4c28722','FZ-20260116-154736-04-b391204b','FZ-20260116-154736-05-1b148cde','FZ-20260116-154736-06-0da361a0','FZ-20260116-154736-07-c2b71224','FZ-20260116-154736-08-6a1cc94d','FZ-20260116-154736-09-f3b6be17','FZ-20260116-154736-10-428f5bad']) AS message_id) SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE m.metadata ? 'decision_meta') AS with_decision_meta FROM messages m JOIN ids ON m.metadata->>'messageId' = ids.message_id WHERE m.role='user';`
+  - output: `10 | 10`
+- SQL (hard_law sample, complaint):
+  - cmd: `SELECT metadata->'decision_meta' FROM messages WHERE metadata->>'messageId' = 'FZ-20260116-154736-05-1b148cde' AND role='user';`
+  - output: `{"action": "escalate", "intent": "complaint", "source": "policy_pack", "llm_used": false, "rag_reason": "overridden_by_gate", "rag_scores": {"bm25_max": 0.0, "hybrid_max": 0.0, "vector_max": 0.0}, "risk_level": "high", "fast_intent": false, "llm_timeout": false, "policy_gate": "hard_law", "llm_cache_hit": false, "rag_confident": false, "policy_section": "complaint", "router_eligible": false, "llm_primary_used": false, "controller_eligible": false, "controller_attempted": false, "router_skipped_reason": "law_gate", "llm_degradation_reason": null, "controller_low_confidence": false, "controller_skipped_reason": "law_gate", "controller_fallback_reason": null}`
+- SQL (decision_trace policy_gate):
+  - cmd: `SELECT trace->>'stage' AS stage, trace->>'decision' AS decision, trace->>'recorded_at' AS recorded_at FROM conversations c JOIN LATERAL jsonb_array_elements(c.context->'decision_trace') AS trace ON true WHERE c.id = '1161601f-3f9a-44fb-8380-6e4f424d87d5' AND trace->>'stage' = 'policy_gate' ORDER BY (trace->>'recorded_at')::timestamptz DESC LIMIT 1;`
+  - output: `policy_gate | escalate | 2026-01-16T15:47:43.451168+00:00`
+- /admin/outbox/process: `{"claimed":0,"sent":0,"failed":0,"retry_scheduled":0}`
+- /admin/version: `{"version":"main","git_commit":"d6443979b1bcc2b32c157839feb76b01bfdcd388","build_time":"2026-01-16T12:51:36Z"}`
+- /admin/metrics (2026-01-16): `{"detail":"Metrics not found for date/client"}`
+
+### 2026-01-16 — Webhook fuzz v2 (logic/state modes)
+
+**Что сделали:**
+- Прогнали `webhook-fuzz` в режиме `logic` (уникальный JID, outbox skip).
+- Прогнали `webhook-fuzz` в режиме `state` (allowlist JID, outbox on) для проверки pending_wait.
+- Добавили safety‑gate: `logic` требует `TEST_MODE=1`, outbox только для allowlist.
+
+**Evidence:**
+- logic runner: marker `FZ:INFO_HOURS:20260116-163902:01`, msg_id `FZ-20260116-163902-01-b23d0d11`, conv_id `56894357-8309-42d3-bf66-02893e239287`, remote_jid `99900000001@s.whatsapp.net`
+- state runner: marker `FZ:INFO_HOURS:20260116-164124:01`, msg_id `FZ-20260116-164124-01-23fa6332`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, remote_jid `77015705555@s.whatsapp.net`
+- SQL (logic decision_meta):
+  - cmd: `SELECT m.id, m.conversation_id, m.metadata->>'messageId' AS message_id, m.metadata->'decision_meta' AS decision_meta FROM messages m WHERE m.metadata->>'messageId' = 'FZ-20260116-163902-01-b23d0d11' AND m.role='user';`
+  - output: `f573bd01-0cde-4689-b408-663f07448ebe | 56894357-8309-42d3-bf66-02893e239287 | FZ-20260116-163902-01-b23d0d11 | {"rag_reason": "overridden_by_gate", "rag_scores": {"bm25_max": 0.0, "hybrid_max": 0.0, "vector_max": 0.0}, "rag_confident": false, "router_eligible": false, "router_skipped_reason": "not_run"}`
+- SQL (logic state):
+  - cmd: `SELECT state, bot_status, last_message_at FROM conversations WHERE id = '56894357-8309-42d3-bf66-02893e239287';`
+  - output: `bot_active | active | 2026-01-16 16:39:03.747405+00`
+- SQL (logic trace sample):
+  - cmd: `SELECT trace->>'stage' AS stage, trace->>'decision' AS decision, trace->>'recorded_at' AS recorded_at FROM conversations c JOIN LATERAL jsonb_array_elements(c.context->'decision_trace') AS trace ON true WHERE c.id = '56894357-8309-42d3-bf66-02893e239287' ORDER BY (trace->>'recorded_at')::timestamptz DESC LIMIT 5;`
+  - output: `contract | response | 2026-01-16T16:39:21.725550+00:00`
+- SQL (state decision_meta pending_wait):
+  - cmd: `SELECT metadata->'decision_meta' FROM messages WHERE metadata->>'messageId' = 'FZ-20260116-164124-01-23fa6332' AND role='user';`
+  - output: `{"action": "pending_wait", "intent": null, "source": "pending", "llm_used": false, "rag_reason": "overridden_by_gate", "rag_scores": {"bm25_max": 0.0, "hybrid_max": 0.0, "vector_max": 0.0}, "fast_intent": false, "llm_timeout": false, "llm_cache_hit": false, "rag_confident": false, "pending_action": "pending_wait", "router_eligible": false, "llm_primary_used": false, "controller_eligible": false, "controller_attempted": false, "router_skipped_reason": "pending", "llm_degradation_reason": null, "controller_low_confidence": false, "controller_skipped_reason": "pending", "controller_fallback_reason": null}`
+- SQL (state trace pending_wait):
+  - cmd: `SELECT trace->>'stage' AS stage, trace->>'decision' AS decision, trace->>'recorded_at' AS recorded_at FROM conversations c JOIN LATERAL jsonb_array_elements(c.context->'decision_trace') AS trace ON true WHERE c.id = 'b8c559d1-f8cd-4173-ae70-0a9683833e48' AND trace->>'stage' = 'pending_wait' ORDER BY (trace->>'recorded_at')::timestamptz DESC LIMIT 1;`
+  - output: `pending_wait | pending_wait | 2026-01-16T16:41:29.054919+00:00`
+- /admin/outbox/process: `{"claimed":0,"sent":0,"failed":0,"retry_scheduled":0}`
+
 ### 2026-01-16 — Deploy evidence (CI → GHCR → /admin/version)
 
 **Evidence:**
