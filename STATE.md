@@ -890,6 +890,28 @@
   - conversation_state pending→bot_active; handover_status pending→resolved
   - pending_sla_trace=true, pending_resume_trace=true
 
+### 2026-01-17 — CA-02 policy gates (discounts/payment) live-check
+
+**Что сделали:**
+- Запустили CI livecheck (ci-livecheck) на main commit `68a987cb751f3660cc993504ded9be33a875fef6` с CI_LIVECHECK_ENABLED=1.
+- Прогнали suite ca02-policy.
+
+**Evidence:**
+- CI run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21091426177
+- artifacts: `livecheck-artifacts` (gate + jsonl)
+- gate (livecheck-gate.txt):
+  - TEST_MODE=1
+  - OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net
+  - QDRANT_COLLECTION_EFFECTIVE=truffles_knowledge_ci
+- CA-02 (livecheck-ca02.jsonl):
+  - conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+  - discount message_id `LC-AUTO-20260117-083128-01-b995cb45`:
+    - policy_gate=discounts, policy_section=discounts, action=reply, risk_level=low, llm_used=false
+    - trace_policy_type=demo_salon, trace_source=policy_pack
+  - payment message_id `LC-AUTO-20260117-083128-02-4a59af4f`:
+    - policy_gate=hard_law, policy_section=payment_info, action=escalate, risk_level=medium, llm_used=false
+    - trace_policy_type=demo_salon, trace_source=policy_pack
+
 ### 2026-01-16 — RCA: trace retention drops booking_interrupt/multi_truth
 
 **Дефект:** при `booking_interrupt_info=true` в decision_meta отсутствуют `decision_trace.stage=booking_interrupt/multi_truth`.

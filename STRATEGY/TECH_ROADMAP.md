@@ -59,7 +59,7 @@
 | ID | Requirement | Canon source | Evidence required | Status |
 | --- | --- | --- | --- | --- |
 | CA-01 | Hard-LAW pre-LLM gate на всех входах (`/webhook`, `/message`) | REQUIREMENTS + CONSULTANT | code refs + decision_trace `policy_gate=hard_law` + decision_meta `action=escalate` + live-check (conv_id, msg_id) | verified (STATE.md:839) |
-| CA-02 | Policy gates (discounts/payment) по policy_pack, fail-closed | REQUIREMENTS + CONSULTANT | code refs + trace `policy_gate` (`policy_type`, `risk_level`) + CI core case + live-check | pending |
+| CA-02 | Policy gates (discounts/payment) по policy_pack, fail-closed | REQUIREMENTS + CONSULTANT | code refs + trace `policy_gate` (`policy_type`, `risk_level`) + CI core case + live-check | verified (STATE.md:893) |
 | CA-03 | Truth-first факты + info_bundle инвариант | CONSULTANT + ARCHITECTURE | trace `truth_gate/info_class` + `info_sections` + llm_used=false + CI core info cases | pending |
 | CA-04 | Service matcher + service presence ответы | CONSULTANT | trace `service_matcher/service_presence` + CI core service cases + live-check | pending |
 | CA-05 | Booking-first + expected_reply интерпретатор + booking_interrupt | CONSULTANT | trace `booking/booking_interrupt` + `expected_reply_type` + CI booking tests + live-check | pending |
