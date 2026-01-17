@@ -27,6 +27,7 @@ DECISION_TRACE_CRITICAL_STAGES = {
     "policy_gate",
     "question_contract",
     "re_entry",
+    "service_matcher",
     "service_semantic_matcher",
     "session_memory",
     "state_transition",
