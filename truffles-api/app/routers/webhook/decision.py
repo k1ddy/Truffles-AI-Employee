@@ -5017,6 +5017,7 @@ async def _handle_webhook_payload(
             "state": conversation.state,
             "policy_type": policy_type,
             "policy_gate": "discounts",
+            "policy_section": "discounts",
             "source": policy_source,
             "class_router": class_router_result,
         }
@@ -5039,6 +5040,7 @@ async def _handle_webhook_payload(
             meta_updates = {
                 "class_router": class_router_result,
                 "policy_gate": "discounts",
+                "policy_section": "discounts",
                 "source": policy_source,
             }
             if policy_pack_missing:
