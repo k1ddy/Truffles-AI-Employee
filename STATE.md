@@ -958,6 +958,187 @@
 **Note/GAP:**
 - instance_drift=true (client_instance_id != branch_instance_id) in livecheck-ca05-booking.jsonl.
 
+### 2026-01-17 — CI livecheck (pending-clear fix)
+
+**Что сделали:**
+- Запустили CI livecheck (ci-livecheck) на main commit `ef9984feea0ec94d79dca1e77508262ea5520aa1` с CI_LIVECHECK_ENABLED=1.
+- Прогнали suites: ca01-core, ca02-policy, ca03-info, ca04-service, ca05-booking, ca08-state, ca09-manager, ca10-outbox.
+
+**Evidence:**
+- CI run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21095745824
+- artifacts: `livecheck-artifacts` (gate + jsonl + livecheck-evidence.md)
+- livecheck-evidence.md:
+```md
+# Livecheck Evidence
+- generated_at: `2026-01-17T14:32:44.909290+00:00`
+- inputs: `livecheck-ca01-core.jsonl`, `livecheck-ca02-policy.jsonl`, `livecheck-ca03-info.jsonl`, `livecheck-ca04-service.jsonl`, `livecheck-ca05-booking.jsonl`, `livecheck-ca08-state.jsonl`, `livecheck-ca09-manager.jsonl`, `livecheck-ca10-outbox.jsonl`
+
+## Gate
+- LEARNING_MODE=
+- OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net
+- QDRANT_COLLECTION=
+- QDRANT_COLLECTION_EFFECTIVE=truffles_knowledge_ci
+- TEST_MODE=1
+- gate_file: `livecheck-gate.txt`
+
+## Suite ca01-core
+- input: `livecheck-ca01-core.jsonl`
+- case_ids: CA01_REFUND, CA01_PAYMENT, CA01_RESCHEDULE, CA01_MEDICAL
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77015705555@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+
+| case_id | message_id | conversation_id | action | intent | policy_gate | policy_section | risk_level | llm_used | trace_policy_gate | trace_policy_section |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CA01_REFUND | LC-AUTO-20260117-142906-01-0bc188ce | b8c559d1-f8cd-4173-ae70-0a9683833e48 | escalate | refund | hard_law | refund | high | false | hard_law | refund |
+| CA01_PAYMENT | LC-AUTO-20260117-142906-02-46d2620a | b8c559d1-f8cd-4173-ae70-0a9683833e48 | escalate | payment | hard_law | payment_info | medium | false | hard_law | payment_info |
+| CA01_RESCHEDULE | LC-AUTO-20260117-142906-03-6295c328 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | escalate | reschedule | hard_law | reschedule | high | false | hard_law | reschedule |
+| CA01_MEDICAL | LC-AUTO-20260117-142906-04-b5cae9ab | b8c559d1-f8cd-4173-ae70-0a9683833e48 | escalate | medical | hard_law | medical | high | false | hard_law | medical |
+
+## Suite ca02-policy
+- input: `livecheck-ca02-policy.jsonl`
+- case_ids: CA02_DISCOUNT, CA02_PAYMENT
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77015705555@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+
+| case_id | message_id | conversation_id | action | intent | policy_gate | policy_section | risk_level | llm_used | trace_policy_type | trace_policy_gate | trace_policy_section |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CA02_DISCOUNT | LC-AUTO-20260117-142944-01-c23ca948 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | reply | discounts | discounts | discounts | low | false | demo_salon | discounts | discounts |
+| CA02_PAYMENT | LC-AUTO-20260117-142944-02-2b3955de | b8c559d1-f8cd-4173-ae70-0a9683833e48 | escalate | payment | hard_law | payment_info | medium | false | demo_salon | hard_law | payment_info |
+
+## Suite ca03-info
+- input: `livecheck-ca03-info.jsonl`
+- case_ids: CA03_ADDRESS_HOURS, CA03_GUEST_POLICY
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77015705555@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+
+| case_id | message_id | conversation_id | fact_source | info_sections | fact_intents | info_combined | llm_used | source | trace_stage | trace_fact_source | trace_info_sections |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CA03_ADDRESS_HOURS | LC-AUTO-20260117-143018-01-6fc593c8 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | truth | address,hours | location,hours | true | false | truth_gate | truth_gate | truth | address,hours |
+| CA03_GUEST_POLICY | LC-AUTO-20260117-143018-02-3be40e89 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | truth | address,hours,guest_policy | location,hours,guest_policy | true | false | class_router | truth_gate | truth | address,hours |
+
+## Suite ca04-service
+- input: `livecheck-ca04-service.jsonl`
+- case_ids: CA04_SERVICE_MATCH, CA04_SERVICE_NOT_FOUND
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77015705555@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+
+| case_id | message_id | conversation_id | action | intent | fact_source | fact_intents | service_query | llm_used | trace_stage | trace_decision | trace_fact_source |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CA04_SERVICE_MATCH | LC-AUTO-20260117-143051-01-a3a7429f | b8c559d1-f8cd-4173-ae70-0a9683833e48 | reply | service_match | service_matcher | service_match | Маникюр | false | service_matcher | service_match | service_matcher |
+| CA04_SERVICE_NOT_FOUND | LC-AUTO-20260117-143051-02-1c8df04b | b8c559d1-f8cd-4173-ae70-0a9683833e48 | reply | service_not_found | service_matcher | service_not_found |  | false | service_matcher | service_not_found | service_matcher |
+
+## Suite ca05-booking
+- input: `livecheck-ca05-booking.jsonl`
+- case_ids: CA05_BOOKING_FLOW
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77015705555@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+- reset: reset_message_id=LC-AUTO-20260117-143117-CA05-RESET-4f9cd1ec; reset_action=out_of_domain; reset_intent=out_of_domain; reset_booking_active=false
+
+| step | message_id | conversation_id | expected_reply_type | booking_service | booking_info_interrupt | booking_info_intents | trace_booking_interrupt | llm_used |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | LC-AUTO-20260117-143117-CA05-01-7832dac1 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | service_choice |  |  |  | false | false |
+| 2 | LC-AUTO-20260117-143117-CA05-02-eaa86c84 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | time | Маникюр |  |  | false | false |
+| 3 | LC-AUTO-20260117-143117-CA05-03-cff015b9 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | time | Маникюр | true | pricing | true | false |
+
+## Suite ca08-state
+- input: `livecheck-ca08-state.jsonl`
+- case_ids: CA08_PENDING
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77015705555@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+- message_id: `LC-AUTO-20260117-143210-CA08-28d576c9`
+- ack_message_id: `LC-ACK-20260117-143210-CA08-7d486d9c`
+- conversation_id: `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+- conversation_state: `pending` → `bot_active`
+- handover_status: `pending` → `resolved`
+- policy_gate: `hard_law`
+- action: `escalate`
+- pending_action: `pending_ack`
+- pending_sla_trace: `true`
+- pending_resume_trace: `true`
+
+## Suite ca09-manager
+- input: `livecheck-ca09-manager.jsonl`
+- case_ids: CA09_MANAGER
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77015705555@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+- message_id: `LC-AUTO-20260117-143224-CA09-53703694`
+- conversation_id: `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+- conversation_state: `pending` → `manager_active`
+- handover_status: `pending` → `active`
+- assigned_to: `1969855532`
+- first_response_at: `2026-01-17 14:32:34.275145+00`
+- qdrant_found: `true`
+- outbox_status: `SENT`
+- telegram_status: `200`
+
+## Suite ca10-outbox
+- input: `livecheck-ca10-outbox.jsonl`
+- case_ids: CA10_DEDUP
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77015705555@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+- message_id: `LC-DEDUP-20260117-143237-4bed9f37`
+- message_count: `1`
+- message_dedup_count: `1`
+- outbox_count: `1`
+- outbox_status: `SENT`
+```
+
 ### 2026-01-16 — RCA: trace retention drops booking_interrupt/multi_truth
 
 **Дефект:** при `booking_interrupt_info=true` в decision_meta отсутствуют `decision_trace.stage=booking_interrupt/multi_truth`.
