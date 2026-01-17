@@ -273,8 +273,17 @@ jobs:
           raw = os.environ.get("KEY_RAW", "")
           key_path = Path.home() / ".ssh" / "id_rsa"
 
+          def normalize(content: str) -> str:
+              content = content.replace("\r", "").strip()
+              if content.startswith('"') and content.endswith('"'):
+                  content = content[1:-1]
+              lines = content.splitlines()
+              if not lines:
+                  return content
+              return "\n".join(line.strip() for line in lines).strip()
+
           def try_write(content: str) -> bool:
-              key_path.write_text(content.replace("\r", ""))
+              key_path.write_text(normalize(content))
               key_path.chmod(0o600)
               try:
                   subprocess.check_output(
