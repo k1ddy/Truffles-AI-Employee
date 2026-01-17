@@ -912,6 +912,26 @@
     - policy_gate=hard_law, policy_section=payment_info, action=escalate, risk_level=medium, llm_used=false
     - trace_policy_type=demo_salon, trace_source=policy_pack
 
+### 2026-01-17 — CA-03 truth-first info_bundle live-check
+
+**Что сделали:**
+- Запустили CI livecheck (ci-livecheck) на main commit `e84abeb20c6601f29a0bb2d2a7a2a4366b7f427f` с CI_LIVECHECK_ENABLED=1.
+- Прогнали suite ca03-info.
+
+**Evidence:**
+- CI run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21092088615
+- artifacts: `livecheck-artifacts` (gate + jsonl)
+- gate (livecheck-gate.txt):
+  - TEST_MODE=1
+  - OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net
+  - QDRANT_COLLECTION_EFFECTIVE=truffles_knowledge_ci
+- CA-03 (livecheck-ca03.jsonl):
+  - conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+  - address/hours message_id `LC-AUTO-20260117-092723-01-830bf95a`:
+    - fact_source=truth, info_sections=address+hours, info_combined=true, llm_used=false, source=truth_gate
+  - guest_policy message_id `LC-AUTO-20260117-092723-02-62a50fce`:
+    - fact_source=truth, info_sections includes guest_policy, info_combined=true, llm_used=false, source=class_router
+
 ### 2026-01-16 — RCA: trace retention drops booking_interrupt/multi_truth
 
 **Дефект:** при `booking_interrupt_info=true` в decision_meta отсутствуют `decision_trace.stage=booking_interrupt/multi_truth`.
