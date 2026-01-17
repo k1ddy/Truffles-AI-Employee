@@ -346,10 +346,10 @@ jobs:
           $SSH "bash -s" <<'REMOTE' 2>&1 | tee artifacts/livecheck-gate.txt
           set -euo pipefail
           set -x
-          TEST_MODE=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"')
-          ALLOWLIST=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"')
-          LEARNING_MODE=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${LEARNING_MODE:-}"')
-          QDRANT_COLLECTION=$(docker exec -i truffles-api /bin/sh -lc 'printf "%s" "${QDRANT_COLLECTION:-}"')
+          TEST_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"')
+          ALLOWLIST=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"')
+          LEARNING_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${LEARNING_MODE:-}"')
+          QDRANT_COLLECTION=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${QDRANT_COLLECTION:-}"')
           QDRANT_COLLECTION_EFFECTIVE="${QDRANT_COLLECTION}"
           if [ -z "${QDRANT_COLLECTION_EFFECTIVE}" ]; then
             QDRANT_COLLECTION_EFFECTIVE="truffles_knowledge_ci"
