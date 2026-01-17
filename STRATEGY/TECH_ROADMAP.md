@@ -51,6 +51,8 @@
 - Любой `verified`/`gap` обязан ссылаться на evidence в `STATE.md` (conv_id/trace/SQL/CI).
 - Любые фиксы — только через отдельный Task Package с CA‑ID.
 - Live-check процесс: см. `SPECS/SYSTEM_REFERENCE.md` (Live-check SOP); запуск через `ops/diagnose.py livecheck`.
+- CI обязан покрывать все CA‑инварианты: для пунктов с live‑evidence используется CI live‑check job (safety‑контур обязателен).
+- Live‑check в CI на проде допускается **только** в dev‑фазе при включённом safety‑контуре; после готовности — выборочный ручной live‑check владельцем.
 
 ### Checklist (evidence-first)
 

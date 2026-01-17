@@ -8,9 +8,12 @@
 - Состояние handovers
 """
 import argparse
+import base64
 import json
 import os
 import random
+import re
+import shlex
 import subprocess
 import sys
 import time
@@ -84,6 +87,36 @@ LIVECHECK_SUITES = {
                 "недоволен качеством услуги",
             ],
         },
+    ],
+    "ca08-state": [
+        {
+            "case_id": "CA08_PENDING",
+            "expected_policy_section": "refund",
+            "messages": [
+                "верните оплату пожалуйста",
+                "хочу вернуть деньги",
+            ],
+        }
+    ],
+    "ca09-manager": [
+        {
+            "case_id": "CA09_MANAGER",
+            "expected_policy_section": "payment_info",
+            "messages": [
+                "можно оплатить картой?",
+                "есть оплата каспи?",
+            ],
+        }
+    ],
+    "ca10-outbox": [
+        {
+            "case_id": "CA10_DEDUP",
+            "expected_policy_section": "reschedule",
+            "messages": [
+                "перенесите запись на завтра",
+                "поменять дату записи",
+            ],
+        }
     ],
 }
 
@@ -179,7 +212,9 @@ WEBHOOK_FUZZ_CASES = [
 ]
 
 NOISE_SUFFIXES = ["плз", "срочно", "спс"]
+PENDING_ACK_PHRASES = ["ок", "да", "жду", "ага", "можно"]
 SAFE_ALLOWLIST_JID = "77015705555@s.whatsapp.net"
+SAFE_ALLOWLIST_CLIENT_SLUG = "demo_salon"
 
 def _parse_livecheck_args(argv):
     parser = argparse.ArgumentParser(
@@ -213,7 +248,7 @@ def _parse_livecheck_auto_args(argv):
     parser.add_argument("--max-wait", type=float, default=3.0)
     parser.add_argument("--noise", choices=["none", "low"], default="low")
     parser.add_argument("--case-ids", default=None)
-    parser.add_argument("--jid-mode", choices=["unique", "allowlist"], default="unique")
+    parser.add_argument("--jid-mode", choices=["unique", "allowlist"], default="allowlist")
     parser.add_argument("--remote-jid", default=None)
     parser.add_argument("--allowlist-jids", default=None)
     parser.add_argument("--webhook-secret", default=None)
@@ -336,6 +371,381 @@ def _resolve_db_user_simple():
     if result.returncode == 0 and result.stdout.strip():
         return result.stdout.strip()
     return "postgres"
+
+def _escape_sql_literal(value):
+    return str(value).replace("'", "''")
+
+def _resolve_webhook_secret(client_slug, explicit):
+    if explicit:
+        return explicit
+    for env_name in ("WEBHOOK_SECRET", "TRUFFLES_WEBHOOK_SECRET"):
+        env_value = os.environ.get(env_name)
+        if env_value:
+            return env_value
+    if not client_slug:
+        return None
+    db_user = _resolve_db_user_simple()
+    safe_slug = _escape_sql_literal(client_slug)
+    query = (
+        "SELECT cs.webhook_secret "
+        "FROM client_settings cs "
+        "JOIN clients c ON c.id = cs.client_id "
+        f"WHERE c.name = '{safe_slug}' LIMIT 1;"
+    )
+    result = run_command(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "truffles_postgres_1",
+            "psql",
+            "-U",
+            db_user,
+            "-d",
+            "chatbot",
+            "-t",
+            "-A",
+            "-c",
+            query,
+        ]
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+def _run_psql_query(db_user, query):
+    result = run_command(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "truffles_postgres_1",
+            "psql",
+            "-U",
+            db_user,
+            "-d",
+            "chatbot",
+            "-t",
+            "-A",
+            "-F",
+            "\t",
+            "-c",
+            query,
+        ]
+    )
+    if result.returncode != 0:
+        return None, result.stderr.strip()
+    return result.stdout.strip(), None
+
+def _fetch_client_meta(db_user, client_slug):
+    safe_slug = _escape_sql_literal(client_slug)
+    query = (
+        "SELECT c.id, c.config->>'instance_id', b.id, b.instance_id, "
+        "cs.telegram_chat_id, cs.owner_telegram_id "
+        "FROM clients c "
+        "LEFT JOIN branches b ON b.client_id = c.id AND b.is_active = TRUE "
+        "LEFT JOIN client_settings cs ON cs.client_id = c.id "
+        f"WHERE c.name = '{safe_slug}' "
+        "ORDER BY b.created_at DESC NULLS LAST "
+        "LIMIT 1;"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not row:
+        return None, None
+    parts = row.split("\t")
+    return {
+        "client_id": parts[0] if len(parts) > 0 else None,
+        "client_instance_id": parts[1] if len(parts) > 1 and parts[1] else None,
+        "branch_id": parts[2] if len(parts) > 2 else None,
+        "branch_instance_id": parts[3] if len(parts) > 3 and parts[3] else None,
+        "telegram_chat_id": parts[4] if len(parts) > 4 and parts[4] else None,
+        "owner_telegram_id": parts[5] if len(parts) > 5 and parts[5] else None,
+    }, None
+
+def _fetch_conversation_meta(db_user, conversation_id):
+    safe_id = _escape_sql_literal(conversation_id)
+    query = (
+        "SELECT state, telegram_topic_id, context::text "
+        f"FROM conversations WHERE id = '{safe_id}' LIMIT 1;"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not row:
+        return None, None
+    parts = row.split("\t", 2)
+    state = parts[0] if len(parts) > 0 else None
+    topic_raw = parts[1] if len(parts) > 1 else None
+    context_raw = parts[2] if len(parts) > 2 else None
+    topic_id = None
+    if topic_raw:
+        try:
+            topic_id = int(topic_raw)
+        except ValueError:
+            topic_id = None
+    context = None
+    if context_raw:
+        try:
+            context = json.loads(context_raw)
+        except Exception:
+            context = None
+    return {
+        "state": state,
+        "telegram_topic_id": topic_id,
+        "context": context,
+    }, None
+
+def _fetch_handover_meta(db_user, conversation_id):
+    safe_id = _escape_sql_literal(conversation_id)
+    query = (
+        "SELECT id, status, assigned_to, assigned_to_name, first_response_at, "
+        "manager_response, resolved_at, added_to_knowledge, knowledge_doc_id "
+        f"FROM handovers WHERE conversation_id = '{safe_id}' "
+        "ORDER BY created_at DESC LIMIT 1;"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not row:
+        return None, None
+    parts = row.split("\t", 8)
+    return {
+        "handover_id": parts[0] if len(parts) > 0 else None,
+        "status": parts[1] if len(parts) > 1 else None,
+        "assigned_to": parts[2] if len(parts) > 2 and parts[2] else None,
+        "assigned_to_name": parts[3] if len(parts) > 3 and parts[3] else None,
+        "first_response_at": parts[4] if len(parts) > 4 and parts[4] else None,
+        "manager_response": parts[5] if len(parts) > 5 and parts[5] else None,
+        "resolved_at": parts[6] if len(parts) > 6 and parts[6] else None,
+        "added_to_knowledge": parts[7] if len(parts) > 7 and parts[7] else None,
+        "knowledge_doc_id": parts[8] if len(parts) > 8 and parts[8] else None,
+    }, None
+
+def _fetch_message_count(db_user, message_id):
+    safe_id = _escape_sql_literal(message_id)
+    query = f"SELECT COUNT(*) FROM messages WHERE metadata->>'messageId' = '{safe_id}';"
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not row:
+        return 0, None
+    try:
+        return int(row.strip()), None
+    except ValueError:
+        return None, None
+
+def _fetch_message_dedup_count(db_user, client_id, message_id):
+    safe_client = _escape_sql_literal(client_id)
+    safe_id = _escape_sql_literal(message_id)
+    query = (
+        "SELECT COUNT(*) FROM message_dedup "
+        f"WHERE client_id = '{safe_client}' AND message_id = '{safe_id}';"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not row:
+        return 0, None
+    try:
+        return int(row.strip()), None
+    except ValueError:
+        return None, None
+
+def _fetch_outbox_summary(db_user, client_id, inbound_message_id):
+    safe_client = _escape_sql_literal(client_id)
+    safe_id = _escape_sql_literal(inbound_message_id)
+    query = (
+        "SELECT COUNT(*), MAX(status) "
+        "FROM outbox_messages "
+        f"WHERE client_id = '{safe_client}' AND inbound_message_id = '{safe_id}';"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not row:
+        return {"count": 0, "status": None}, None
+    parts = row.split("\t", 1)
+    count = None
+    try:
+        count = int(parts[0]) if parts and parts[0] else 0
+    except ValueError:
+        count = None
+    status = parts[1] if len(parts) > 1 and parts[1] else None
+    return {"count": count, "status": status}, None
+
+def _fetch_latest_outbox_for_conversation(db_user, conversation_id):
+    safe_id = _escape_sql_literal(conversation_id)
+    query = (
+        "SELECT inbound_message_id, status, payload_json::text "
+        f"FROM outbox_messages WHERE conversation_id = '{safe_id}' "
+        "ORDER BY created_at DESC LIMIT 1;"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not row:
+        return None, None
+    parts = row.split("\t", 2)
+    payload = None
+    if len(parts) > 2 and parts[2]:
+        try:
+            payload = json.loads(parts[2])
+        except Exception:
+            payload = None
+    return {
+        "inbound_message_id": parts[0] if len(parts) > 0 else None,
+        "status": parts[1] if len(parts) > 1 else None,
+        "payload_json": payload,
+    }, None
+
+def _parse_owner_identity(raw_value):
+    if not raw_value:
+        return None, None
+    tokens = [token for token in re.split(r"[\\s,]+", raw_value.strip()) if token]
+    for token in tokens:
+        cleaned = token.strip().lstrip("@")
+        if not cleaned:
+            continue
+        if cleaned.lstrip("-").isdigit():
+            try:
+                return int(cleaned), None
+            except ValueError:
+                continue
+        return None, cleaned
+    return None, None
+
+def _resolve_learning_env(container_name):
+    learning_mode = os.environ.get("LEARNING_MODE") or ""
+    qdrant_collection = os.environ.get("QDRANT_COLLECTION") or ""
+    if container_name:
+        learning_mode = _resolve_env_from_container(container_name, "LEARNING_MODE") or learning_mode
+        qdrant_collection = _resolve_env_from_container(container_name, "QDRANT_COLLECTION") or qdrant_collection
+    return {
+        "learning_mode": learning_mode.strip().lower(),
+        "qdrant_collection": qdrant_collection.strip(),
+    }
+
+def _resolve_qdrant_env(container_name):
+    host = os.environ.get("QDRANT_HOST", "") or ""
+    api_key = os.environ.get("QDRANT_API_KEY", "") or ""
+    if container_name:
+        host = _resolve_env_from_container(container_name, "QDRANT_HOST") or host
+        api_key = _resolve_env_from_container(container_name, "QDRANT_API_KEY") or api_key
+    host = host.strip() or "http://qdrant:6333"
+    return {"host": host, "api_key": api_key.strip()}
+
+def _qdrant_find_handover(
+    *,
+    container_name,
+    host,
+    api_key,
+    collection,
+    handover_id,
+    client_slug,
+    timeout,
+):
+    if not container_name:
+        return None, "qdrant: container not found"
+    if not collection:
+        return None, "qdrant: collection missing"
+    payload = {
+        "filter": {
+            "must": [
+                {"key": "metadata.handover_id", "match": {"value": handover_id}},
+                {"key": "metadata.client_slug", "match": {"value": client_slug}},
+            ]
+        },
+        "limit": 1,
+        "with_payload": True,
+    }
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    url = f"{host.rstrip('/')}/collections/{collection}/points/scroll"
+    max_time = int(max(timeout, 1))
+    curl_check = run_docker_exec(container_name, "command -v curl >/dev/null 2>&1 && echo curl_ok")
+    use_curl = curl_check.returncode == 0 and "curl_ok" in (curl_check.stdout or "")
+    if use_curl:
+        headers = "-H 'Content-Type: application/json'"
+        if api_key:
+            headers += f" -H 'api-key: {api_key}'"
+        cmd = (
+            f"printf %s {shlex.quote(payload_json)} | "
+            f"curl -sS -X POST {headers} --data-binary @- --max-time {max_time} {shlex.quote(url)}"
+        )
+        result = run_docker_exec(container_name, cmd)
+        if result.returncode != 0:
+            return None, (result.stderr.strip() or "qdrant: curl failed")
+    else:
+        payload_b64 = base64.b64encode(payload_json.encode("utf-8")).decode("ascii")
+        env_parts = [
+            f"PAYLOAD_B64={shlex.quote(payload_b64)}",
+            f"QDRANT_URL={shlex.quote(url)}",
+        ]
+        if api_key:
+            env_parts.append(f"QDRANT_API_KEY={shlex.quote(api_key)}")
+        env_prefix = " ".join(env_parts)
+        python_script = (
+            "import base64, json, os, sys, urllib.request\n"
+            "payload = json.loads(base64.b64decode(os.environ['PAYLOAD_B64']).decode('utf-8'))\n"
+            "url = os.environ.get('QDRANT_URL')\n"
+            "api_key = os.environ.get('QDRANT_API_KEY')\n"
+            "req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), method='POST')\n"
+            "req.add_header('Content-Type', 'application/json')\n"
+            "if api_key:\n"
+            "    req.add_header('api-key', api_key)\n"
+            "try:\n"
+            f"    with urllib.request.urlopen(req, timeout={max_time}) as resp:\n"
+            "        body = resp.read().decode('utf-8', 'replace')\n"
+            "        print(body)\n"
+            "except Exception as exc:\n"
+            "    print('ERROR:' + str(exc))\n"
+            "    sys.exit(1)\n"
+        )
+        cmd = f"{env_prefix} python3 - <<'PY'\n{python_script}PY"
+        result = run_docker_exec(container_name, cmd)
+        if result.returncode != 0:
+            return None, (result.stderr.strip() or "qdrant: python request failed")
+    try:
+        data = json.loads(result.stdout or "")
+    except Exception:
+        return None, "qdrant: invalid json response"
+    points = (data.get("result") or {}).get("points") or []
+    return bool(points), None
+
+def _trace_has_entry(trace_list, stage, decision=None):
+    if not isinstance(trace_list, list):
+        return False
+    for entry in trace_list:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("stage") != stage:
+            continue
+        if decision is not None and entry.get("decision") != decision:
+            continue
+        return True
+    return False
+
+def _send_json_payload(url, payload, timeout):
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    req = urllib.request.Request(url, data=data, method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            return resp.status, body, None
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
+        return exc.code, body, str(exc)
+    except urllib.error.URLError as exc:
+        return None, "", str(exc)
+
+def _build_livecheck_message(rng, case, marker_prefix, timestamp, idx, noise):
+    base_text = rng.choice(case["messages"])
+    text = _apply_noise(base_text, rng, noise)
+    marker = f"{marker_prefix}:{case['case_id']}:{timestamp}:{idx:02d}"
+    message = f"{text} [{marker}]"
+    return text, marker, message
 
 def _fetch_message_meta(db_user, message_id):
     query = (
@@ -627,6 +1037,440 @@ def _run_webhook_fuzz(args):
     }
     print(json.dumps({"summary": summary}, ensure_ascii=False))
 
+def _run_livecheck_ca08_state(args, context):
+    rng = context["rng"]
+    case = context["cases"][0]
+    timestamp = context["timestamp"]
+    webhook_url = context["webhook_url"]
+    base_url = context["base_url"]
+    webhook_secret = context["webhook_secret"]
+    admin_token = context["admin_token"]
+    instance_id = context["instance_id"]
+    remote_jid = context["remote_jid"]
+    db_user = context["db_user"]
+    outbox_url = f"{base_url}/admin/outbox/process"
+    allowlist_jids = context["allowlist_jids"]
+
+    if not remote_jid or remote_jid not in allowlist_jids:
+        raise SystemExit("livecheck-auto: CA08 remote_jid not in allowlist")
+
+    text, marker, message = _build_livecheck_message(
+        rng, case, "LC:AUTO:CA08", timestamp, 1, args.noise
+    )
+    message_id = f"LC-AUTO-{timestamp}-CA08-{uuid.uuid4().hex[:8]}"
+    sent_at = datetime.now(timezone.utc).isoformat()
+
+    metadata = {
+        "sender": "LivecheckAuto",
+        "timestamp": int(time.time()),
+        "messageId": message_id,
+        "remoteJid": remote_jid,
+    }
+    if instance_id:
+        metadata["instanceId"] = instance_id
+    payload = {"body": {"messageType": "text", "message": message, "metadata": metadata}}
+
+    status = "dry_run"
+    response_status = None
+    response_body = None
+    response_error = None
+    if not args.dry_run:
+        response_status, response_body, response_error = _send_webhook_payload(
+            webhook_url, payload, webhook_secret, args.timeout
+        )
+        status = "sent" if response_status and 200 <= response_status < 300 else "error"
+    print(
+        json.dumps(
+            {
+                "case_id": case["case_id"],
+                "marker": marker,
+                "message_id": message_id,
+                "remote_jid": remote_jid,
+                "text": message,
+                "sent_at": sent_at,
+                "expected_policy_section": case["expected_policy_section"],
+                "status": status,
+                "http_status": response_status,
+                "error": response_error,
+                "response": (response_body or "")[:200] if response_body else None,
+            },
+            ensure_ascii=False,
+        )
+    )
+
+    conv_id = None
+    meta = None
+    outbox_status = None
+    outbox_body = None
+    outbox_error = None
+    if not args.dry_run:
+        outbox_status, outbox_body, outbox_error = _post_admin_outbox(
+            outbox_url, admin_token, args.timeout
+        )
+        conv_id, meta, error = _poll_decision_meta(
+            db_user, message_id, args.poll_timeout, args.poll_interval
+        )
+        if error:
+            raise SystemExit(f"livecheck-auto: CA08 decision_meta poll failed ({error})")
+
+    conv_before, conv_before_error = _fetch_conversation_meta(db_user, conv_id) if conv_id else (None, None)
+    handover_before, handover_before_error = _fetch_handover_meta(db_user, conv_id) if conv_id else (None, None)
+
+    ack_text = rng.choice(PENDING_ACK_PHRASES)
+    ack_marker = f"LC:ACK:CA08:{timestamp}:01"
+    ack_message_id = f"LC-ACK-{timestamp}-CA08-{uuid.uuid4().hex[:8]}"
+    ack_payload = {
+        "body": {
+            "messageType": "text",
+            "message": f"{ack_text} [{ack_marker}]",
+            "metadata": {
+                "sender": "LivecheckAuto",
+                "timestamp": int(time.time()),
+                "messageId": ack_message_id,
+                "remoteJid": remote_jid,
+            },
+        }
+    }
+    if instance_id:
+        ack_payload["body"]["metadata"]["instanceId"] = instance_id
+
+    ack_status = None
+    ack_body = None
+    ack_error = None
+    ack_meta = None
+    ack_outbox_status = None
+    ack_outbox_body = None
+    ack_outbox_error = None
+    if not args.dry_run:
+        ack_status, ack_body, ack_error = _send_webhook_payload(
+            webhook_url, ack_payload, webhook_secret, args.timeout
+        )
+        ack_outbox_status, ack_outbox_body, ack_outbox_error = _post_admin_outbox(
+            outbox_url, admin_token, args.timeout
+        )
+        _, ack_meta, ack_meta_error = _poll_decision_meta(
+            db_user, ack_message_id, args.poll_timeout, args.poll_interval
+        )
+        if ack_meta_error:
+            raise SystemExit(f"livecheck-auto: CA08 ACK poll failed ({ack_meta_error})")
+
+    conv_after, conv_after_error = _fetch_conversation_meta(db_user, conv_id) if conv_id else (None, None)
+    handover_after, handover_after_error = _fetch_handover_meta(db_user, conv_id) if conv_id else (None, None)
+
+    trace_list = None
+    if conv_after and isinstance(conv_after.get("context"), dict):
+        trace_list = conv_after.get("context", {}).get("decision_trace")
+
+    summary = {
+        "suite": "ca08-state",
+        "message_id": message_id,
+        "ack_message_id": ack_message_id,
+        "conversation_id": conv_id,
+        "policy_gate": (meta or {}).get("policy_gate"),
+        "action": (meta or {}).get("action"),
+        "pending_action": (ack_meta or {}).get("pending_action"),
+        "ack_text": ack_text,
+        "conversation_state_before": (conv_before or {}).get("state"),
+        "conversation_state_after": (conv_after or {}).get("state"),
+        "handover_status_before": (handover_before or {}).get("status"),
+        "handover_status_after": (handover_after or {}).get("status"),
+        "handover_added_to_knowledge": (handover_after or {}).get("added_to_knowledge"),
+        "pending_sla_trace": _trace_has_entry(trace_list, "pending_sla", "pending_ack"),
+        "pending_resume_trace": _trace_has_entry(trace_list, "pending_resume"),
+        "errors": {
+            "conversation_before": conv_before_error,
+            "handover_before": handover_before_error,
+            "conversation_after": conv_after_error,
+            "handover_after": handover_after_error,
+            "ack_error": ack_error,
+            "outbox_error": outbox_error,
+            "ack_outbox_error": ack_outbox_error,
+        },
+        "ack_http_status": ack_status,
+        "ack_http_response": (ack_body or "")[:200] if ack_body else None,
+        "outbox_status": outbox_status,
+        "outbox_response": (outbox_body or "")[:200] if outbox_body else None,
+        "ack_outbox_status": ack_outbox_status,
+        "ack_outbox_response": (ack_outbox_body or "")[:200] if ack_outbox_body else None,
+    }
+    return summary
+
+def _run_livecheck_ca09_manager(args, context):
+    rng = context["rng"]
+    case = context["cases"][0]
+    timestamp = context["timestamp"]
+    webhook_url = context["webhook_url"]
+    base_url = context["base_url"]
+    webhook_secret = context["webhook_secret"]
+    admin_token = context["admin_token"]
+    instance_id = context["instance_id"]
+    remote_jid = context["remote_jid"]
+    db_user = context["db_user"]
+    client_slug = context["client_slug"]
+    client_meta = context["client_meta"]
+    learning_env = context["learning_env"]
+    outbox_url = f"{base_url}/admin/outbox/process"
+    allowlist_jids = context["allowlist_jids"]
+    qdrant_env = context["qdrant_env"]
+
+    if not remote_jid or remote_jid not in allowlist_jids:
+        raise SystemExit("livecheck-auto: CA09 remote_jid not in allowlist")
+
+    text, marker, message = _build_livecheck_message(
+        rng, case, "LC:AUTO:CA09", timestamp, 1, args.noise
+    )
+    message_id = f"LC-AUTO-{timestamp}-CA09-{uuid.uuid4().hex[:8]}"
+    metadata = {
+        "sender": "LivecheckAuto",
+        "timestamp": int(time.time()),
+        "messageId": message_id,
+        "remoteJid": remote_jid,
+    }
+    if instance_id:
+        metadata["instanceId"] = instance_id
+    payload = {"body": {"messageType": "text", "message": message, "metadata": metadata}}
+
+    status = "dry_run"
+    response_status = None
+    response_body = None
+    response_error = None
+    if not args.dry_run:
+        response_status, response_body, response_error = _send_webhook_payload(
+            webhook_url, payload, webhook_secret, args.timeout
+        )
+        status = "sent" if response_status and 200 <= response_status < 300 else "error"
+    print(
+        json.dumps(
+            {
+                "case_id": case["case_id"],
+                "marker": marker,
+                "message_id": message_id,
+                "remote_jid": remote_jid,
+                "text": message,
+                "expected_policy_section": case["expected_policy_section"],
+                "status": status,
+                "http_status": response_status,
+                "error": response_error,
+                "response": (response_body or "")[:200] if response_body else None,
+            },
+            ensure_ascii=False,
+        )
+    )
+
+    conv_id = None
+    meta = None
+    if not args.dry_run:
+        _post_admin_outbox(outbox_url, admin_token, args.timeout)
+        conv_id, meta, error = _poll_decision_meta(
+            db_user, message_id, args.poll_timeout, args.poll_interval
+        )
+        if error:
+            raise SystemExit(f"livecheck-auto: CA09 decision_meta poll failed ({error})")
+
+    conv_before, conv_before_error = _fetch_conversation_meta(db_user, conv_id) if conv_id else (None, None)
+    handover_before, handover_before_error = _fetch_handover_meta(db_user, conv_id) if conv_id else (None, None)
+
+    chat_id_raw = client_meta.get("telegram_chat_id") if client_meta else None
+    topic_id = (conv_before or {}).get("telegram_topic_id")
+    if not chat_id_raw:
+        raise SystemExit("livecheck-auto: CA09 missing telegram_chat_id for client")
+    if not topic_id:
+        raise SystemExit("livecheck-auto: CA09 missing telegram_topic_id for conversation")
+    try:
+        chat_id = int(chat_id_raw)
+    except ValueError:
+        raise SystemExit(f"livecheck-auto: CA09 invalid telegram_chat_id {chat_id_raw}")
+
+    owner_id, owner_username = _parse_owner_identity(client_meta.get("owner_telegram_id"))
+    manager_id = owner_id if owner_id is not None else 10001
+    manager_username = owner_username or "ci_manager"
+
+    qdrant_collection = learning_env.get("qdrant_collection_effective") or ""
+    if not qdrant_collection.endswith("_ci"):
+        raise SystemExit("livecheck-auto: CA09 requires _ci Qdrant collection")
+
+    manager_text = "Менеджер: уточнили детали, вернемся с ответом."
+    telegram_payload = {
+        "update_id": int(time.time()),
+        "message": {
+            "message_id": int(time.time() * 1000) % 1000000,
+            "date": int(time.time()),
+            "chat": {"id": chat_id, "type": "supergroup", "title": "CI"},
+            "from": {
+                "id": manager_id,
+                "is_bot": False,
+                "first_name": "CI",
+                "last_name": "Runner",
+                "username": manager_username,
+            },
+            "text": manager_text,
+            "message_thread_id": topic_id,
+        },
+    }
+
+    manager_status = None
+    manager_body = None
+    manager_error = None
+    if not args.dry_run:
+        manager_status, manager_body, manager_error = _send_json_payload(
+            f"{base_url}/telegram-webhook", telegram_payload, args.timeout
+        )
+        _post_admin_outbox(outbox_url, admin_token, args.timeout)
+
+    conv_after, conv_after_error = _fetch_conversation_meta(db_user, conv_id) if conv_id else (None, None)
+    handover_after, handover_after_error = _fetch_handover_meta(db_user, conv_id) if conv_id else (None, None)
+    outbox_latest, outbox_error = _fetch_latest_outbox_for_conversation(db_user, conv_id) if conv_id else (None, None)
+    outbox_remote_jid = None
+    if outbox_latest and isinstance(outbox_latest.get("payload_json"), dict):
+        payload_meta = outbox_latest["payload_json"].get("body", {}).get("metadata", {})
+        outbox_remote_jid = payload_meta.get("remoteJid")
+
+    qdrant_found = None
+    qdrant_error = None
+    if not args.dry_run:
+        handover_id = (handover_after or {}).get("handover_id")
+        if not handover_id:
+            qdrant_error = "qdrant: handover_id missing"
+        else:
+            qdrant_found, qdrant_error = _qdrant_find_handover(
+                container_name=context.get("container_name"),
+                host=qdrant_env.get("host"),
+                api_key=qdrant_env.get("api_key"),
+                collection=qdrant_collection,
+                handover_id=handover_id,
+                client_slug=client_slug,
+                timeout=args.timeout,
+            )
+
+    summary = {
+        "suite": "ca09-manager",
+        "message_id": message_id,
+        "conversation_id": conv_id,
+        "policy_gate": (meta or {}).get("policy_gate"),
+        "action": (meta or {}).get("action"),
+        "manager_message": manager_text,
+        "manager_identity": {
+            "manager_id": manager_id,
+            "manager_username": manager_username,
+            "owner_used": owner_id is not None or owner_username is not None,
+        },
+        "telegram_chat_id": chat_id,
+        "telegram_topic_id": topic_id,
+        "conversation_state_before": (conv_before or {}).get("state"),
+        "conversation_state_after": (conv_after or {}).get("state"),
+        "handover_status_before": (handover_before or {}).get("status"),
+        "handover_status_after": (handover_after or {}).get("status"),
+        "assigned_to": (handover_after or {}).get("assigned_to"),
+        "first_response_at": (handover_after or {}).get("first_response_at"),
+        "manager_response": (handover_after or {}).get("manager_response"),
+        "learning_mode": learning_env.get("learning_mode"),
+        "qdrant_collection": qdrant_collection,
+        "added_to_knowledge": (handover_after or {}).get("added_to_knowledge"),
+        "knowledge_doc_id": (handover_after or {}).get("knowledge_doc_id"),
+        "qdrant_found": qdrant_found,
+        "qdrant_error": qdrant_error,
+        "outbox_status": (outbox_latest or {}).get("status"),
+        "outbox_remote_jid": outbox_remote_jid,
+        "telegram_status": manager_status,
+        "errors": {
+            "conversation_before": conv_before_error,
+            "handover_before": handover_before_error,
+            "conversation_after": conv_after_error,
+            "handover_after": handover_after_error,
+            "outbox": outbox_error,
+            "telegram": manager_error,
+        },
+        "telegram_response": (manager_body or "")[:200] if manager_body else None,
+    }
+    return summary
+
+def _run_livecheck_ca10_outbox(args, context):
+    rng = context["rng"]
+    case = context["cases"][0]
+    timestamp = context["timestamp"]
+    webhook_url = context["webhook_url"]
+    base_url = context["base_url"]
+    webhook_secret = context["webhook_secret"]
+    admin_token = context["admin_token"]
+    instance_id = context["instance_id"]
+    remote_jid = context["remote_jid"]
+    db_user = context["db_user"]
+    client_id = context["client_meta"].get("client_id") if context.get("client_meta") else None
+    allowlist_jids = context["allowlist_jids"]
+
+    if not client_id:
+        raise SystemExit("livecheck-auto: CA10 missing client_id")
+    if not remote_jid or remote_jid not in allowlist_jids:
+        raise SystemExit("livecheck-auto: CA10 remote_jid not in allowlist")
+
+    text, marker, message = _build_livecheck_message(
+        rng, case, "LC:AUTO:CA10", timestamp, 1, args.noise
+    )
+    message_id = f"LC-DEDUP-{timestamp}-{uuid.uuid4().hex[:8]}"
+
+    def _send_once(seq):
+        sent_at = datetime.now(timezone.utc).isoformat()
+        payload = {
+            "body": {
+                "messageType": "text",
+                "message": f"{message} [SEQ:{seq:02d}]",
+                "metadata": {
+                    "sender": "LivecheckAuto",
+                    "timestamp": int(time.time()),
+                    "messageId": message_id,
+                    "remoteJid": remote_jid,
+                },
+            }
+        }
+        if instance_id:
+            payload["body"]["metadata"]["instanceId"] = instance_id
+        response_status, response_body, response_error = _send_webhook_payload(
+            webhook_url, payload, webhook_secret, args.timeout
+        )
+        status = "sent" if response_status and 200 <= response_status < 300 else "error"
+        print(
+            json.dumps(
+                {
+                    "case_id": case["case_id"],
+                    "marker": marker,
+                    "message_id": message_id,
+                    "remote_jid": remote_jid,
+                    "text": payload["body"]["message"],
+                    "sent_at": sent_at,
+                    "status": status,
+                    "http_status": response_status,
+                    "error": response_error,
+                    "response": (response_body or "")[:200] if response_body else None,
+                },
+                ensure_ascii=False,
+            )
+        )
+
+    if not args.dry_run:
+        _send_once(1)
+        _send_once(2)
+        outbox_url = f"{base_url}/admin/outbox/process"
+        _post_admin_outbox(outbox_url, admin_token, args.timeout)
+
+    message_count, message_error = _fetch_message_count(db_user, message_id)
+    dedup_count, dedup_error = _fetch_message_dedup_count(db_user, client_id, message_id)
+    outbox_summary, outbox_error = _fetch_outbox_summary(db_user, client_id, message_id)
+
+    summary = {
+        "suite": "ca10-outbox",
+        "message_id": message_id,
+        "message_count": message_count,
+        "message_dedup_count": dedup_count,
+        "outbox_count": (outbox_summary or {}).get("count"),
+        "outbox_status": (outbox_summary or {}).get("status"),
+        "errors": {
+            "message_count": message_error,
+            "dedup_count": dedup_error,
+            "outbox": outbox_error,
+        },
+    }
+    return summary
+
 def _run_livecheck_auto(args):
     suite_cases = LIVECHECK_SUITES.get(args.suite)
     if not suite_cases:
@@ -640,6 +1484,10 @@ def _run_livecheck_auto(args):
     webhook_url = f"{base_url}/webhook/{client_slug}"
 
     container_name, _ = resolve_container_name()
+    if client_slug != SAFE_ALLOWLIST_CLIENT_SLUG:
+        raise SystemExit(
+            f"livecheck-auto: client_slug {client_slug} not allowed; expected {SAFE_ALLOWLIST_CLIENT_SLUG}"
+        )
     test_mode_enabled = _resolve_test_mode(container_name)
     allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
     if SAFE_ALLOWLIST_JID not in allowlist_jids or len(allowlist_jids) != 1:
@@ -649,11 +1497,7 @@ def _run_livecheck_auto(args):
     if not test_mode_enabled:
         raise SystemExit("livecheck-auto: TEST_MODE disabled; refusing to run")
 
-    webhook_secret = (
-        args.webhook_secret
-        or os.environ.get("WEBHOOK_SECRET")
-        or os.environ.get("TRUFFLES_WEBHOOK_SECRET")
-    )
+    webhook_secret = _resolve_webhook_secret(client_slug, args.webhook_secret)
     if not webhook_secret:
         raise SystemExit("livecheck-auto: missing webhook secret")
 
@@ -663,11 +1507,38 @@ def _run_livecheck_auto(args):
     if not admin_token and not args.dry_run:
         raise SystemExit("livecheck-auto: missing admin token")
 
+    db_user = _resolve_db_user_simple()
+    client_meta, client_error = _fetch_client_meta(db_user, client_slug)
+    if client_error:
+        raise SystemExit(f"livecheck-auto: client meta lookup failed ({client_error})")
+    if not client_meta or not client_meta.get("client_id"):
+        raise SystemExit(f"livecheck-auto: client {client_slug} not found in DB")
+
+    branch_instance_id = client_meta.get("branch_instance_id")
+    if not branch_instance_id:
+        raise SystemExit("livecheck-auto: branch.instance_id missing for client")
+
     instance_id = (
         args.instance_id
         or os.environ.get("CHATFLOW_INSTANCE_ID")
         or os.environ.get("INSTANCE_ID")
+        or branch_instance_id
     )
+    if instance_id != branch_instance_id:
+        raise SystemExit(
+            f"livecheck-auto: instance_id mismatch (payload {instance_id} vs branch {branch_instance_id})"
+        )
+    instance_drift = bool(
+        client_meta.get("client_instance_id")
+        and client_meta.get("client_instance_id") != branch_instance_id
+    )
+
+    learning_env = _resolve_learning_env(container_name)
+    qdrant_collection = learning_env.get("qdrant_collection") or ""
+    if not qdrant_collection and test_mode_enabled:
+        qdrant_collection = "truffles_knowledge_ci"
+    learning_env["qdrant_collection_effective"] = qdrant_collection
+    qdrant_env = _resolve_qdrant_env(container_name)
 
     selected_cases, requested_case_ids = _select_cases(suite_cases, args.case_ids)
     if selected_cases is None:
@@ -683,18 +1554,74 @@ def _run_livecheck_auto(args):
     else:
         remote_jid = None
 
-    db_user = _resolve_db_user_simple()
+    common = {
+        "suite": args.suite,
+        "case_ids": requested_case_ids,
+        "client_slug": client_slug,
+        "instance_id": instance_id,
+        "branch_instance_id": branch_instance_id,
+        "client_instance_id": client_meta.get("client_instance_id"),
+        "instance_drift": instance_drift,
+        "jid_mode": args.jid_mode,
+        "remote_jid": remote_jid,
+        "allowlist_jids": allowlist_jids,
+        "test_mode": test_mode_enabled,
+        "learning_mode": learning_env.get("learning_mode"),
+        "qdrant_collection": learning_env.get("qdrant_collection_effective"),
+    }
+
+    context = {
+        "rng": rng,
+        "cases": selected_cases,
+        "timestamp": timestamp,
+        "base_url": base_url,
+        "webhook_url": webhook_url,
+        "webhook_secret": webhook_secret,
+        "admin_token": admin_token,
+        "instance_id": instance_id,
+        "allowlist_jids": allowlist_jids,
+        "remote_jid": remote_jid,
+        "db_user": db_user,
+        "client_slug": client_slug,
+        "client_meta": client_meta,
+        "learning_env": learning_env,
+        "qdrant_env": qdrant_env,
+        "container_name": container_name,
+    }
+
+    if args.suite == "ca08-state":
+        summary = _run_livecheck_ca08_state(args, context)
+        summary.update(common)
+        print(json.dumps({"summary": summary}, ensure_ascii=False))
+        return
+    if args.suite == "ca09-manager":
+        summary = _run_livecheck_ca09_manager(args, context)
+        summary.update(common)
+        print(json.dumps({"summary": summary}, ensure_ascii=False))
+        if not args.dry_run and summary.get("qdrant_found") is not True:
+            error_note = summary.get("qdrant_error") or "qdrant evidence missing"
+            raise SystemExit(f"livecheck-auto: CA09 {error_note}")
+        return
+    if args.suite == "ca10-outbox":
+        summary = _run_livecheck_ca10_outbox(args, context)
+        summary.update(common)
+        print(json.dumps({"summary": summary}, ensure_ascii=False))
+        return
+
     results = []
 
     for idx, case in enumerate(selected_cases, start=1):
-        base_text = rng.choice(case["messages"])
-        text = _apply_noise(base_text, rng, args.noise)
-        marker = f"LC:AUTO:{args.suite}:{case['case_id']}:{timestamp}:{idx:02d}"
-        message = f"{text} [{marker}]"
+        text, marker, message = _build_livecheck_message(
+            rng, case, f"LC:AUTO:{args.suite}", timestamp, idx, args.noise
+        )
         message_id = f"LC-AUTO-{timestamp}-{idx:02d}-{uuid.uuid4().hex[:8]}"
         sent_at = datetime.now(timezone.utc).isoformat()
         if args.jid_mode == "unique":
             remote_jid = _logic_jid_for_index(idx)
+        if remote_jid not in allowlist_jids:
+            raise SystemExit(
+                f"livecheck-auto: remote-jid {remote_jid} not in allowlist; refusing to send"
+            )
         metadata = {
             "sender": "LivecheckAuto",
             "timestamp": int(time.time()),
@@ -761,7 +1688,7 @@ def _run_livecheck_auto(args):
             }
             if instance_id:
                 ack_payload["body"]["metadata"]["instanceId"] = instance_id
-            ack_status, ack_body, ack_error = _send_webhook_payload(
+            ack_status, _, ack_error = _send_webhook_payload(
                 webhook_url, ack_payload, webhook_secret, args.timeout
             )
             if ack_error:
@@ -786,14 +1713,8 @@ def _run_livecheck_auto(args):
         if idx < len(selected_cases):
             time.sleep(rng.uniform(min_wait, max_wait))
 
-    summary = {
-        "suite": args.suite,
-        "case_ids": requested_case_ids,
-        "jid_mode": args.jid_mode,
-        "allowlist_jids": allowlist_jids,
-        "test_mode": test_mode_enabled,
-        "results": results,
-    }
+    summary = dict(common)
+    summary["results"] = results
     print(json.dumps({"summary": summary}, ensure_ascii=False))
 
 def _run_livecheck(args):

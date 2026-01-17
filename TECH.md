@@ -111,6 +111,7 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `MEDIA_STORAGE_DIR` — базовый каталог медиа (default: /home/zhan/truffles-media).
 - `MEDIA_CLEANUP_TTL_DAYS` — TTL очистки локальных медиа (default: 7).
 - `MEDIA_STORAGE_WARN_BYTES` — порог алерта по объёму (default: 5GB).
+- `QDRANT_COLLECTION` — коллекция Qdrant (default: truffles_knowledge; при `TEST_MODE=1` и пустом env → truffles_knowledge_ci).
 - `AUDIO_TRANSCRIPTION_ENABLED` — включить транскрибацию коротких голосовых (default: false).
 - `AUDIO_TRANSCRIPTION_MAX_MB` — максимум размера голосового для транскрипции (default: 2).
 - `AUDIO_TRANSCRIPTION_MODEL` — модель транскрипции (default: whisper-1).
