@@ -924,7 +924,7 @@ def test_service_matcher_core():
         },
         {
             "case_id": "CA04_SERVICE_NOT_FOUND",
-            "message": "делаете татуировки?",
+            "message": "делаете массаж?",
             "expected_intent": "service_not_found",
             "expected_fact_intents": ["service_not_found"],
         },
