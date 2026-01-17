@@ -334,49 +334,6 @@ jobs:
           PY
           ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Livecheck safety gate
-        env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_USER: ${{ secrets.SERVER_USER }}
-          SERVER_PORT: ${{ secrets.SERVER_PORT }}
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts
-          SSH="ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes ${SERVER_USER}@${SERVER_HOST}"
-          $SSH "bash -s" <<'REMOTE' 2>&1 | tee artifacts/livecheck-gate.txt
-          set -euo pipefail
-          set -x
-          TEST_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"')
-          ALLOWLIST=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"')
-          LEARNING_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${LEARNING_MODE:-}"')
-          QDRANT_COLLECTION=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${QDRANT_COLLECTION:-}"')
-          QDRANT_COLLECTION_EFFECTIVE="${QDRANT_COLLECTION}"
-          if [ -z "${QDRANT_COLLECTION_EFFECTIVE}" ]; then
-            QDRANT_COLLECTION_EFFECTIVE="truffles_knowledge_ci"
-          fi
-          echo "TEST_MODE=${TEST_MODE}"
-          echo "OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}"
-          echo "LEARNING_MODE=${LEARNING_MODE}"
-          echo "QDRANT_COLLECTION=${QDRANT_COLLECTION}"
-          echo "QDRANT_COLLECTION_EFFECTIVE=${QDRANT_COLLECTION_EFFECTIVE}"
-          if [ "${TEST_MODE}" != "1" ]; then
-            echo "TEST_MODE_NOT_ENABLED"
-            exit 1
-          fi
-          if [ "${ALLOWLIST}" != "77015705555@s.whatsapp.net" ]; then
-            echo "ALLOWLIST_MISMATCH"
-            exit 1
-          fi
-          case "${QDRANT_COLLECTION_EFFECTIVE}" in
-            *_ci) ;;
-            *)
-              echo "QDRANT_COLLECTION_UNSAFE"
-              exit 1
-              ;;
-          esac
-          REMOTE
-          test -s artifacts/livecheck-gate.txt
-
       - name: Livecheck runner (CA-01/02/03/04/08/09/10)
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
@@ -385,10 +342,66 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          SSH=(ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 ${SERVER_USER}@${SERVER_HOST})
+          RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SSH=(ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=5 ${SERVER_USER}@${SERVER_HOST})
           REMOTE_SCRIPT="$(mktemp)"
           cat > "${REMOTE_SCRIPT}" <<'REMOTE'
           set -euo pipefail
+          RUN_ID="${RUN_ID:?}"
+          GATE_LOG="/tmp/livecheck-gate-${RUN_ID}.txt"
+          RUN_LOG="/tmp/livecheck-run-${RUN_ID}.log"
+          ARTIFACT_TAR="/tmp/livecheck-artifacts-${RUN_ID}.tar.gz"
+          : > "${GATE_LOG}"
+          : > "${RUN_LOG}"
+          cleanup() {
+            tar -czf "${ARTIFACT_TAR}" -C /tmp \
+              "livecheck-gate-${RUN_ID}.txt" \
+              "livecheck-run-${RUN_ID}.log" \
+              "livecheck-ca01.jsonl" \
+              "livecheck-ca02.jsonl" \
+              "livecheck-ca03.jsonl" \
+              "livecheck-ca04.jsonl" \
+              "livecheck-ca08.jsonl" \
+              "livecheck-ca09.jsonl" \
+              "livecheck-ca10.jsonl" \
+              2>>"${RUN_LOG}" || true
+          }
+          trap cleanup EXIT
+          TEST_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"')
+          ALLOWLIST=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"')
+          LEARNING_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${LEARNING_MODE:-}"')
+          QDRANT_COLLECTION=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${QDRANT_COLLECTION:-}"')
+          QDRANT_COLLECTION_EFFECTIVE="${QDRANT_COLLECTION}"
+          if [ -z "${QDRANT_COLLECTION_EFFECTIVE}" ]; then
+            QDRANT_COLLECTION_EFFECTIVE="truffles_knowledge_ci"
+          fi
+          {
+            echo "TEST_MODE=${TEST_MODE}"
+            echo "OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}"
+            echo "LEARNING_MODE=${LEARNING_MODE}"
+            echo "QDRANT_COLLECTION=${QDRANT_COLLECTION}"
+            echo "QDRANT_COLLECTION_EFFECTIVE=${QDRANT_COLLECTION_EFFECTIVE}"
+          } > "${GATE_LOG}"
+          gate_ok=1
+          if [ "${TEST_MODE}" != "1" ]; then
+            echo "TEST_MODE_NOT_ENABLED" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
+          if [ "${ALLOWLIST}" != "77015705555@s.whatsapp.net" ]; then
+            echo "ALLOWLIST_MISMATCH" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
+          case "${QDRANT_COLLECTION_EFFECTIVE}" in
+            *_ci) ;;
+            *)
+              echo "QDRANT_COLLECTION_UNSAFE" >> "${GATE_LOG}"
+              gate_ok=0
+              ;;
+          esac
+          if [ "${gate_ok}" -ne 1 ]; then
+            echo "GATE_FAILED" >> "${RUN_LOG}"
+            exit 1
+          fi
           cd ~/truffles-main
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
@@ -398,7 +411,7 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca01.jsonl
+            --poll-interval 1 > /tmp/livecheck-ca01.jsonl 2>>"${RUN_LOG}"
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
             --client-slug demo_salon \
@@ -407,7 +420,7 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca02.jsonl
+            --poll-interval 1 > /tmp/livecheck-ca02.jsonl 2>>"${RUN_LOG}"
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
             --client-slug demo_salon \
@@ -416,7 +429,7 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca03.jsonl
+            --poll-interval 1 > /tmp/livecheck-ca03.jsonl 2>>"${RUN_LOG}"
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
             --client-slug demo_salon \
@@ -425,7 +438,7 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca04.jsonl
+            --poll-interval 1 > /tmp/livecheck-ca04.jsonl 2>>"${RUN_LOG}"
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
             --client-slug demo_salon \
@@ -434,7 +447,7 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca08.jsonl
+            --poll-interval 1 > /tmp/livecheck-ca08.jsonl 2>>"${RUN_LOG}"
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
             --client-slug demo_salon \
@@ -443,7 +456,7 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca09.jsonl
+            --poll-interval 1 > /tmp/livecheck-ca09.jsonl 2>>"${RUN_LOG}"
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
             --client-slug demo_salon \
@@ -452,31 +465,22 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1 > /tmp/livecheck-ca10.jsonl
-          tar -czf - \
-            /tmp/livecheck-ca01.jsonl \
-            /tmp/livecheck-ca02.jsonl \
-            /tmp/livecheck-ca03.jsonl \
-            /tmp/livecheck-ca04.jsonl \
-            /tmp/livecheck-ca08.jsonl \
-            /tmp/livecheck-ca09.jsonl \
-            /tmp/livecheck-ca10.jsonl
-          rm -f /tmp/livecheck-ca01.jsonl \
-            /tmp/livecheck-ca02.jsonl \
-            /tmp/livecheck-ca03.jsonl \
-            /tmp/livecheck-ca04.jsonl \
-            /tmp/livecheck-ca08.jsonl \
-            /tmp/livecheck-ca09.jsonl \
-            /tmp/livecheck-ca10.jsonl
+            --poll-interval 1 > /tmp/livecheck-ca10.jsonl 2>>"${RUN_LOG}"
           REMOTE
+          run_status=0
+          if ! "${SSH[@]}" "RUN_ID=${RUN_ID} bash -s" < "${REMOTE_SCRIPT}"; then
+            run_status=$?
+          fi
+          rm -f "${REMOTE_SCRIPT}"
           attempt=1
-          max=3
+          max=5
+          REMOTE_TAR="/tmp/livecheck-artifacts-${RUN_ID}.tar.gz"
           while true; do
-            if "${SSH[@]}" "bash -s" < "${REMOTE_SCRIPT}" > artifacts/livecheck-artifacts.tar.gz; then
+            if "${SSH[@]}" "cat ${REMOTE_TAR}" > artifacts/livecheck-artifacts.tar.gz; then
               if tar -tzf artifacts/livecheck-artifacts.tar.gz >/dev/null 2>&1; then
                 break
               fi
-              echo "livecheck runner produced incomplete tar, retrying..."
+              echo "livecheck artifacts download incomplete, retrying..."
               status=1
             else
               status=$?
@@ -484,12 +488,21 @@ jobs:
             if [ "${attempt}" -ge "${max}" ]; then
               exit "${status}"
             fi
-            echo "livecheck runner failed (attempt ${attempt}/${max}), retrying in 10s..."
+            echo "livecheck artifacts download failed (attempt ${attempt}/${max}), retrying in 10s..."
             attempt=$((attempt + 1))
             sleep 10
           done
-          rm -f "${REMOTE_SCRIPT}"
           tar -xzf artifacts/livecheck-artifacts.tar.gz -C artifacts
+          if [ ! -s artifacts/livecheck-gate.txt ]; then
+            gate_file=$(ls artifacts/livecheck-gate-*.txt 2>/dev/null | head -n 1 || true)
+            if [ -n "${gate_file}" ]; then
+              mv "${gate_file}" artifacts/livecheck-gate.txt
+            fi
+          fi
+          test -s artifacts/livecheck-gate.txt
+          if [ "${run_status}" -ne 0 ]; then
+            exit "${run_status}"
+          fi
 
       - name: Upload livecheck artifacts
         if: always()
