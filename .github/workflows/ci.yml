@@ -336,7 +336,7 @@ jobs:
           PY
           ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Livecheck runner (CA-01/02/03/04/05/08/09/10)
+      - name: Livecheck runner (CA-01/02/03/04/05/06/08/09/10)
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
@@ -364,6 +364,7 @@ jobs:
               "livecheck-ca03-info.jsonl" \
               "livecheck-ca04-service.jsonl" \
               "livecheck-ca05-booking.jsonl" \
+              "livecheck-ca06-consult.jsonl" \
               "livecheck-ca08-state.jsonl" \
               "livecheck-ca09-manager.jsonl" \
               "livecheck-ca10-outbox.jsonl" \
@@ -432,6 +433,7 @@ jobs:
           run_suite ca03-info 775
           run_suite ca04-service 774
           run_suite ca05-booking 773
+          run_suite ca06-consult 772
           run_suite ca08-state 778
           run_suite ca09-manager 779
           run_suite ca10-outbox 780

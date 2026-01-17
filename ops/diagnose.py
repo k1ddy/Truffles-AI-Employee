@@ -178,6 +178,29 @@ LIVECHECK_SUITES = {
             ],
         }
     ],
+    "ca06-consult": [
+        {
+            "case_id": "CA06_PACK_ONLY",
+            "expected_consult_playbook_id": "hair_damage",
+            "expected_meta_consult_playbook_id": "hair_damage",
+            "expected_consult_decision": "consult_reply",
+            "expected_source": "pack",
+            "expected_llm_used": False,
+            "messages": [
+                "сухие волосы, что посоветуете?",
+            ],
+        },
+        {
+            "case_id": "CA06_SHORT_CIRCUIT",
+            "expected_consult_playbook_id": "nails_care",
+            "expected_consult_decision": "short_circuit",
+            "expected_fact_source_any": ["truth", "service_matcher"],
+            "expected_llm_used": False,
+            "messages": [
+                "уход за ногтями, сколько стоит маникюр?",
+            ],
+        },
+    ],
     "ca08-state": [
         {
             "case_id": "CA08_PENDING",
@@ -2087,7 +2110,14 @@ def _run_livecheck_auto(args):
         "outbox_wait_seconds": _resolve_outbox_wait_seconds(container_name),
     }
 
-    if args.suite in {"ca01-core", "ca02-policy", "ca03-info", "ca04-service", "ca05-booking"}:
+    if args.suite in {
+        "ca01-core",
+        "ca02-policy",
+        "ca03-info",
+        "ca04-service",
+        "ca05-booking",
+        "ca06-consult",
+    }:
         _ensure_bot_active_before_suite(args, context)
 
     if args.suite == "ca08-state":
@@ -2271,10 +2301,37 @@ def _run_livecheck_auto(args):
                             f"livecheck-auto: CA04 {case['case_id']} fact_intents mismatch"
                         )
 
+            if args.suite == "ca06-consult":
+                expected_source = case.get("expected_source")
+                if expected_source and (meta or {}).get("source") != expected_source:
+                    raise SystemExit(
+                        f"livecheck-auto: CA06 {case['case_id']} source mismatch"
+                    )
+                expected_meta_playbook = case.get("expected_meta_consult_playbook_id")
+                if expected_meta_playbook and (
+                    (meta or {}).get("consult_playbook_id") != expected_meta_playbook
+                ):
+                    raise SystemExit(
+                        f"livecheck-auto: CA06 {case['case_id']} consult_playbook_id mismatch"
+                    )
+                expected_fact_sources = case.get("expected_fact_source_any") or []
+                if expected_fact_sources:
+                    fact_source = (meta or {}).get("fact_source")
+                    if fact_source not in expected_fact_sources:
+                        raise SystemExit(
+                            f"livecheck-auto: CA06 {case['case_id']} fact_source mismatch"
+                        )
+                expected_llm = case.get("expected_llm_used")
+                if expected_llm is not None and (meta or {}).get("llm_used") is not expected_llm:
+                    raise SystemExit(
+                        f"livecheck-auto: CA06 {case['case_id']} llm_used mismatch"
+                    )
+
             conv_meta = None
             conv_error = None
             trace_entry = None
             info_trace = None
+            consult_trace = None
             trace_source = None
             if conv_id:
                 conv_meta, conv_error = _fetch_conversation_meta(db_user, conv_id)
@@ -2298,6 +2355,11 @@ def _run_livecheck_auto(args):
                     for entry in reversed(_trace_as_list(trace_list)):
                         if entry.get("stage") == "service_matcher":
                             info_trace = entry
+                            break
+                if args.suite == "ca06-consult":
+                    for entry in reversed(_trace_as_list(trace_list)):
+                        if entry.get("stage") == "consult_flow":
+                            consult_trace = entry
                             break
 
             if args.suite == "ca03-info":
@@ -2332,6 +2394,24 @@ def _run_livecheck_auto(args):
                         f"livecheck-auto: CA04 {case['case_id']} trace fact_source mismatch"
                     )
 
+            if args.suite == "ca06-consult":
+                if not consult_trace:
+                    raise SystemExit(
+                        f"livecheck-auto: CA06 {case['case_id']} missing consult_flow trace"
+                    )
+                expected_decision = case.get("expected_consult_decision")
+                if expected_decision and consult_trace.get("decision") != expected_decision:
+                    raise SystemExit(
+                        f"livecheck-auto: CA06 {case['case_id']} consult_flow decision mismatch"
+                    )
+                expected_trace_playbook = case.get("expected_consult_playbook_id")
+                if expected_trace_playbook and (
+                    consult_trace.get("consult_playbook_id") != expected_trace_playbook
+                ):
+                    raise SystemExit(
+                        f"livecheck-auto: CA06 {case['case_id']} consult_flow playbook mismatch"
+                    )
+
             results.append(
                 {
                     "case_id": case["case_id"],
@@ -2351,6 +2431,9 @@ def _run_livecheck_auto(args):
                     "info_combined": (meta or {}).get("info_combined"),
                     "fact_intents": (meta or {}).get("fact_intents"),
                     "service_query": (meta or {}).get("service_query"),
+                    "consult_playbook_id": (meta or {}).get("consult_playbook_id"),
+                    "consult_topic": (meta or {}).get("consult_topic"),
+                    "consult_variant_id": (meta or {}).get("consult_variant_id"),
                     "source": (meta or {}).get("source"),
                     "ack_message_id": ack_message_id,
                     "ack_marker": ack_marker,
@@ -2367,6 +2450,10 @@ def _run_livecheck_auto(args):
                     "trace_fact_source": (info_trace or {}).get("fact_source") if info_trace else None,
                     "trace_info_sections": (info_trace or {}).get("info_sections") if info_trace else None,
                     "trace_intents": (info_trace or {}).get("intents") if info_trace else None,
+                    "trace_consult_decision": (consult_trace or {}).get("decision") if consult_trace else None,
+                    "trace_consult_playbook_id": (consult_trace or {}).get("consult_playbook_id")
+                    if consult_trace
+                    else None,
                     "trace_error": conv_error,
                 }
             )
@@ -2831,6 +2918,19 @@ def _render_suite_lines(suite):
                 ("trace_stage", "trace_stage"),
                 ("trace_decision", "trace_decision"),
                 ("trace_fact_source", "trace_fact_source"),
+            ],
+            "ca06-consult": [
+                ("case_id", "case_id"),
+                ("message_id", "message_id"),
+                ("conversation_id", "conversation_id"),
+                ("action", "action"),
+                ("intent", "intent"),
+                ("consult_playbook_id", "consult_playbook_id"),
+                ("source", "source"),
+                ("fact_source", "fact_source"),
+                ("llm_used", "llm_used"),
+                ("trace_consult_decision", "trace_consult_decision"),
+                ("trace_consult_playbook_id", "trace_consult_playbook_id"),
             ],
         }
         columns = suite_columns.get(
