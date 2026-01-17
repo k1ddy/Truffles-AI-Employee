@@ -836,6 +836,41 @@
   - output: `7f79317f-5fa7-4348-8bdd-707a208b0b84 | policy_gate | escalate | reschedule | 2026-01-17T04:10:15.279469+00:00`
   - output: `177660c2-5685-46df-89da-0347970fc662 | policy_gate | escalate | medical | 2026-01-17T04:10:22.382383+00:00`
 
+### 2026-01-17 — CI live-check CA-01/08/09/10 (main)
+
+**Что сделали:**
+- Запустили CI livecheck (ci-livecheck) на main commit `dea202228eda67362fe6ec77aa219ad18b303b63` с CI_LIVECHECK_ENABLED=1.
+- Подтвердили safety gate (TEST_MODE, allowlist, QDRANT_COLLECTION_EFFECTIVE).
+- Прогнали suites: ca01-core, ca08-state, ca09-manager, ca10-outbox.
+
+**Evidence:**
+- CI run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21090746962
+- artifacts: `livecheck-artifacts` (gate + jsonl)
+- gate (livecheck-gate.txt):
+  - TEST_MODE=1
+  - OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net
+  - QDRANT_COLLECTION_EFFECTIVE=truffles_knowledge_ci
+- CA-01 (livecheck-ca01.jsonl):
+  - conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+  - message_ids: `LC-AUTO-20260117-073227-01-39a0951f`, `LC-AUTO-20260117-073227-02-6aaa5b7f`, `LC-AUTO-20260117-073227-03-cb4c0416`, `LC-AUTO-20260117-073227-04-57d589e0`
+  - policy_gate=hard_law, action=escalate, llm_used=false
+- CA-08 (livecheck-ca08.jsonl):
+  - message_id `LC-AUTO-20260117-073307-CA08-9133bc59`
+  - ack_message_id `LC-ACK-20260117-073307-CA08-060901cf`
+  - conversation_state pending→bot_active; handover_status pending→resolved
+  - pending_action=pending_ack
+  - pending_sla_trace=false, pending_resume_trace=false
+- CA-09 (livecheck-ca09.jsonl):
+  - message_id `LC-AUTO-20260117-073322-CA09-d8e4fe6a`
+  - handover_status active; assigned_to `1969855532`; outbox_status SENT
+  - qdrant_collection truffles_knowledge_ci; qdrant_found=true
+- CA-10 (livecheck-ca10.jsonl):
+  - message_id `LC-DEDUP-20260117-073335-fe79cc37`
+  - message_count=1, message_dedup_count=1, outbox_status=SENT
+
+**Note/GAP:**
+- CA-08 pending_sla/pending_resume trace entries missing in decision_trace (see livecheck-ca08.jsonl).
+
 ### 2026-01-16 — RCA: trace retention drops booking_interrupt/multi_truth
 
 **Дефект:** при `booking_interrupt_info=true` в decision_meta отсутствуют `decision_trace.stage=booking_interrupt/multi_truth`.
