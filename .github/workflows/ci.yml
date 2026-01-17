@@ -385,8 +385,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          SSH="ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes ${SERVER_USER}@${SERVER_HOST}"
-          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca01.jsonl
+          SSH="ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 ${SERVER_USER}@${SERVER_HOST}"
+          REMOTE_SCRIPT="$(mktemp)"
+          cat > "${REMOTE_SCRIPT}" <<'REMOTE'
           set -euo pipefail
           cd ~/truffles-main
           python3 ops/diagnose.py livecheck-auto \
@@ -397,11 +398,7 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1
-          REMOTE
-          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca02.jsonl
-          set -euo pipefail
-          cd ~/truffles-main
+            --poll-interval 1 > /tmp/livecheck-ca01.jsonl
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
             --client-slug demo_salon \
@@ -410,11 +407,7 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1
-          REMOTE
-          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca03.jsonl
-          set -euo pipefail
-          cd ~/truffles-main
+            --poll-interval 1 > /tmp/livecheck-ca02.jsonl
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
             --client-slug demo_salon \
@@ -423,11 +416,7 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1
-          REMOTE
-          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca04.jsonl
-          set -euo pipefail
-          cd ~/truffles-main
+            --poll-interval 1 > /tmp/livecheck-ca03.jsonl
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
             --client-slug demo_salon \
@@ -436,11 +425,7 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1
-          REMOTE
-          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca08.jsonl
-          set -euo pipefail
-          cd ~/truffles-main
+            --poll-interval 1 > /tmp/livecheck-ca04.jsonl
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
             --client-slug demo_salon \
@@ -449,11 +434,7 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1
-          REMOTE
-          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca09.jsonl
-          set -euo pipefail
-          cd ~/truffles-main
+            --poll-interval 1 > /tmp/livecheck-ca08.jsonl
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
             --client-slug demo_salon \
@@ -462,11 +443,7 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1
-          REMOTE
-          $SSH "bash -s" <<'REMOTE' | tee artifacts/livecheck-ca10.jsonl
-          set -euo pipefail
-          cd ~/truffles-main
+            --poll-interval 1 > /tmp/livecheck-ca09.jsonl
           python3 ops/diagnose.py livecheck-auto \
             --base-url http://localhost:8000 \
             --client-slug demo_salon \
@@ -475,8 +452,39 @@ jobs:
             --jid-mode allowlist \
             --remote-jid 77015705555@s.whatsapp.net \
             --poll-timeout 60 \
-            --poll-interval 1
+            --poll-interval 1 > /tmp/livecheck-ca10.jsonl
+          tar -czf - \
+            /tmp/livecheck-ca01.jsonl \
+            /tmp/livecheck-ca02.jsonl \
+            /tmp/livecheck-ca03.jsonl \
+            /tmp/livecheck-ca04.jsonl \
+            /tmp/livecheck-ca08.jsonl \
+            /tmp/livecheck-ca09.jsonl \
+            /tmp/livecheck-ca10.jsonl
+          rm -f /tmp/livecheck-ca01.jsonl \
+            /tmp/livecheck-ca02.jsonl \
+            /tmp/livecheck-ca03.jsonl \
+            /tmp/livecheck-ca04.jsonl \
+            /tmp/livecheck-ca08.jsonl \
+            /tmp/livecheck-ca09.jsonl \
+            /tmp/livecheck-ca10.jsonl
           REMOTE
+          attempt=1
+          max=3
+          while true; do
+            if "${SSH}" "bash -s" < "${REMOTE_SCRIPT}" > artifacts/livecheck-artifacts.tar.gz; then
+              break
+            fi
+            status=$?
+            if [ "${attempt}" -ge "${max}" ]; then
+              exit "${status}"
+            fi
+            echo "livecheck runner failed (attempt ${attempt}/${max}), retrying in 10s..."
+            attempt=$((attempt + 1))
+            sleep 10
+          done
+          rm -f "${REMOTE_SCRIPT}"
+          tar -xzf artifacts/livecheck-artifacts.tar.gz -C artifacts
 
       - name: Upload livecheck artifacts
         if: always()
