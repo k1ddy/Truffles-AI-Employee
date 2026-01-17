@@ -443,6 +443,7 @@ jobs:
           rm -f "${REMOTE_SCRIPT}"
           attempt=1
           max=5
+          status=1
           REMOTE_TAR="/tmp/livecheck-artifacts-${RUN_ID}.tar.gz"
           while true; do
             if "${SSH[@]}" "cat ${REMOTE_TAR}" > artifacts/livecheck-artifacts.tar.gz; then
