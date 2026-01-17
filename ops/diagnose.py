@@ -1074,7 +1074,8 @@ def _ensure_bot_active_before_suite(args, context):
     if preflight_error:
         raise SystemExit(f"livecheck-auto: preflight message failed ({preflight_error})")
     cleared = False
-    for _ in range(10):
+    clear_wait_seconds = 30
+    for _ in range(clear_wait_seconds):
         time.sleep(1.0)
         conv_id, state, _ = _fetch_latest_conversation_state(db_user, client_id, remote_jid)
         if state == "bot_active":
@@ -1097,7 +1098,9 @@ def _ensure_bot_active_before_suite(args, context):
         )
     )
     if not cleared:
-        raise SystemExit("livecheck-auto: pending state not cleared before CA01")
+        raise SystemExit(
+            f"livecheck-auto: pending state not cleared before {args.suite} (state_after={state})"
+        )
 
 def _run_webhook_fuzz(args):
     if args.count < 1:
