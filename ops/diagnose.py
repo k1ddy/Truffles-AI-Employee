@@ -249,6 +249,7 @@ LIVECHECK_SUITES = {
             "expected_trace_decision_any": ["smalltalk", "greeting"],
             "expected_llm_used": False,
             "marker_in_text": False,
+            "reset_before_case": True,
             "messages": [
                 "привет",
             ],
@@ -2321,6 +2322,8 @@ def _run_livecheck_auto(args):
     results = []
 
     for idx, case in enumerate(selected_cases, start=1):
+        if args.suite == "ca07-ood" and case.get("reset_before_case"):
+            _run_livecheck_ca06_reset(args, context, suite_label="CA07")
         text, marker, message = _build_livecheck_message(
             rng, case, f"LC:AUTO:{args.suite}", timestamp, idx, args.noise
         )
