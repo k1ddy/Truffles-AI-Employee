@@ -262,17 +262,23 @@ jobs:
             if [ -f "${COMPOSE_FILE}" ]; then
               sed -i "s|OUTBOUND_ALLOWLIST_JIDS=.*|OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}|" "${COMPOSE_FILE}"
               sed -i "s|OUTBOUND_ALLOWLIST_JIDS:[[:space:]]*.*|OUTBOUND_ALLOWLIST_JIDS: ${ALLOWLIST}|" "${COMPOSE_FILE}"
+              echo "ALLOWLIST in ${COMPOSE_FILE}:"
               grep -n 'OUTBOUND_ALLOWLIST_JIDS' "${COMPOSE_FILE}" || true
             fi
             for ENV_FILE in "${ENV_FILES[@]}"; do
               if [ -f "${ENV_FILE}" ]; then
+                echo "ALLOWLIST in ${ENV_FILE}:"
                 grep -n '^OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
+              else
+                echo "ENV_FILE missing: ${ENV_FILE}"
               fi
             done
             if [ -f "/home/zhan/restart_api.sh" ]; then
               grep -n 'OUTBOUND_ALLOWLIST_JIDS' /home/zhan/restart_api.sh || true
               grep -n 'CHATFLOW_JID' /home/zhan/restart_api.sh || true
               grep -n 'env-file' /home/zhan/restart_api.sh || true
+              grep -n 'docker compose' /home/zhan/restart_api.sh || true
+              grep -n '^cd ' /home/zhan/restart_api.sh || true
             fi
             docker rm -f truffles-api >/dev/null 2>&1 || true
             IMAGE_TAG=main
@@ -286,6 +292,7 @@ jobs:
             bash ~/restart_api.sh
             for ENV_FILE in "${ENV_FILES[@]}"; do
               if [ -f "${ENV_FILE}" ]; then
+                echo "ALLOWLIST after restart in ${ENV_FILE}:"
                 grep -n '^OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
               fi
             done
