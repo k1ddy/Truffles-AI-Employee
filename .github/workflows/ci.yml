@@ -527,7 +527,13 @@ jobs:
                   raise SystemExit("healthcheck timeout")
               time.sleep(2)
           PY
-          cd ~/truffles-main
+          WORKDIR="/tmp/truffles-main-${GIT_SHA}"
+          if [ ! -d "${WORKDIR}/.git" ]; then
+            rm -rf "${WORKDIR}"
+            mkdir -p "${WORKDIR}"
+            cp -R ~/truffles-main/. "${WORKDIR}/"
+          fi
+          cd "${WORKDIR}"
           git config --global --add safe.directory "$(pwd)"
           git fetch origin "${GIT_SHA}" --depth=1
           git checkout -q "${GIT_SHA}"
