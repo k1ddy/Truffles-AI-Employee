@@ -249,7 +249,7 @@ jobs:
               IMAGE_TAG=sha-${{ github.sha }}
             fi
             IMAGE_NAME=${{ env.IMAGE_NAME }}:${IMAGE_TAG} PULL_IMAGE=1 \
-            OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net,77781658799@s.whatsapp.net \
+            OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net,77759841926@s.whatsapp.net,77781658799@s.whatsapp.net \
             REQUIRE_GHCR=1 VERIFY_VERSION=1 \
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
             bash ~/restart_api.sh
