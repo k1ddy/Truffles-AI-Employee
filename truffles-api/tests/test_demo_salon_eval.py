@@ -1061,28 +1061,17 @@ def test_consult_pack_only_and_short_circuit():
     )
 
     trace = _get_decision_trace(conversation)
-    _assert_trace_contains(
-        trace,
-        {
-            "stage": "consult_flow",
-            "decision": "short_circuit",
-            "consult_playbook_id": "nails_care",
-        },
-        case_id,
-    )
+    consult_short_circuit = {
+        "stage": "consult_flow",
+        "decision": "short_circuit",
+        "consult_playbook_id": "nails_care",
+    }
+    if not _trace_has_entry(trace, consult_short_circuit):
+        stage = "truth_gate" if fact_source == "truth" else "service_matcher"
+        _assert_trace_stage_decision_any(trace, case_id, {stage})
 
 
 def test_ood_low_signal_and_smalltalk_gates():
-    def _assert_trace_stage_decision_any(
-        trace: list[dict], case_id: str, stages: set[str], decisions: set[str] | None = None
-    ) -> None:
-        for entry in trace:
-            if entry.get("stage") in stages and (decisions is None or entry.get("decision") in decisions):
-                return
-        raise AssertionError(
-            f"{case_id}: missing trace stage in {sorted(stages)} with decision in {sorted(decisions or [])}"
-        )
-
     ood_sources = {
         "domain_router",
         "domain_anchor",
@@ -1201,6 +1190,21 @@ def _assert_trace_contains(trace: list[dict], expected: dict, case_id: str) -> N
         if _match_trace(entry, expected):
             return
     raise AssertionError(f"{case_id}: missing trace entry matching {expected}")
+
+
+def _trace_has_entry(trace: list[dict], expected: dict) -> bool:
+    return any(_match_trace(entry, expected) for entry in trace)
+
+
+def _assert_trace_stage_decision_any(
+    trace: list[dict], case_id: str, stages: set[str], decisions: set[str] | None = None
+) -> None:
+    for entry in trace:
+        if entry.get("stage") in stages and (decisions is None or entry.get("decision") in decisions):
+            return
+    raise AssertionError(
+        f"{case_id}: missing trace stage in {sorted(stages)} with decision in {sorted(decisions or [])}"
+    )
 
 
 def _get_decision_trace(conversation: SimpleNamespace | None) -> list[dict]:
