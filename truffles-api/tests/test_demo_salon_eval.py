@@ -14,6 +14,7 @@ import app.services.demo_salon_knowledge as demo_knowledge
 import app.services.reminder_service as reminder_service
 from app.models import Client, ClientSettings, Conversation, Handover, User
 from app.routers import webhook as webhook_router
+from app.routers.webhook import response as webhook_response
 from app.routers.webhook import trace as webhook_trace
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
 from app.services.demo_salon_knowledge import get_demo_salon_decision, get_salon_timezone
@@ -1143,6 +1144,106 @@ def test_ood_low_signal_and_smalltalk_gates():
         case_id,
         {"fast_intent", "smalltalk"},
         {"smalltalk", "greeting"},
+    )
+
+
+def test_llm_guard_records_trace_and_meta():
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", remote_jid="77000000000@s.whatsapp.net")
+    saved_message = SimpleNamespace(message_metadata={"decision_meta": {}})
+    timing_context: dict = {}
+
+    def _send_and_save(text: str | None, allow_quiet_hours: bool = True):
+        return text, True
+
+    with patch(
+        "app.services.ai_service.rewrite_query_for_retrieval",
+        return_value={"rewrite_used": False, "rewrite_text": "", "reason": "disabled"},
+    ), patch(
+        "app.routers.webhook._legacy.generate_bot_response",
+        return_value=SimpleNamespace(ok=True, error=None, error_code=None, value=("плохой ответ", "high")),
+    ), patch(
+        "app.routers.webhook._legacy._detect_llm_guard_topics",
+        return_value=["hard_law"],
+    ), patch(
+        "app.routers.webhook._legacy._reuse_active_handover",
+        return_value=(None, False, False),
+    ), patch(
+        "app.routers.webhook._legacy.escalate_to_pending",
+        return_value=SimpleNamespace(ok=True, value=SimpleNamespace()),
+    ), patch(
+        "app.routers.webhook._legacy.send_telegram_notification",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook._legacy._reset_low_confidence_retry",
+        return_value=None,
+    ):
+        webhook_response._handle_llm_primary(
+            db=Mock(),
+            conversation=conversation,
+            user=user,
+            message_text="что-то странное",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            policy_type="demo_salon",
+            policy_pack={},
+            routing={"allow_bot_reply": True, "allow_handover_create": True},
+            append_user_message=False,
+            timing_context=timing_context,
+            client_config={},
+            intent=None,
+            multi_intent_other_followup=None,
+            send_and_save=_send_and_save,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+        )
+
+    trace = _get_decision_trace(conversation)
+    assert _trace_has_entry(
+        trace,
+        {"stage": "llm_guard", "decision": "blocked_topics"},
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("action") == "escalate"
+    assert meta.get("intent") == "llm_guard"
+    assert meta.get("source") == "llm_guard"
+
+
+def test_budget_gate_trace_records_on_budget_exceeded():
+    conversation = SimpleNamespace(context={})
+    saved_message = SimpleNamespace(message_metadata={"decision_meta": {}})
+    timing_context: dict = {}
+
+    with patch(
+        "app.services.ai_service.OPENAI_API_KEY",
+        "test-key",
+    ), patch(
+        "app.services.ai_service.consume_llm_budget",
+        return_value={
+            "active": True,
+            "allowed": False,
+            "reason": "budget_exceeded",
+            "limit": 1,
+            "count": 2,
+            "scope": "rag_rewrite",
+        },
+    ):
+        webhook_response._ensure_rag_rewrite(
+            conversation=conversation,
+            saved_message=saved_message,
+            message_text="нужна информация",
+            client_slug="demo_salon",
+            client_config={"llm_budget": {"daily_max_calls": 0}},
+            timing_context=timing_context,
+        )
+
+    trace = _get_decision_trace(conversation)
+    assert _trace_has_entry(
+        trace,
+        {"stage": "budget_gate", "decision": "deny", "llm_scope": "rag_rewrite"},
     )
 
 
