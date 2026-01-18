@@ -269,6 +269,11 @@ jobs:
                 grep -n '^OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
               fi
             done
+            if [ -f "/home/zhan/restart_api.sh" ]; then
+              grep -n 'OUTBOUND_ALLOWLIST_JIDS' /home/zhan/restart_api.sh || true
+              grep -n 'CHATFLOW_JID' /home/zhan/restart_api.sh || true
+              grep -n 'env-file' /home/zhan/restart_api.sh || true
+            fi
             docker rm -f truffles-api >/dev/null 2>&1 || true
             IMAGE_TAG=main
             if [ "${{ github.ref }}" != "refs/heads/main" ]; then
@@ -279,6 +284,11 @@ jobs:
             REQUIRE_GHCR=1 VERIFY_VERSION=1 \
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
             bash ~/restart_api.sh
+            for ENV_FILE in "${ENV_FILES[@]}"; do
+              if [ -f "${ENV_FILE}" ]; then
+                grep -n '^OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
+              fi
+            done
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
