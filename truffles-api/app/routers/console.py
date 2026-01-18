@@ -577,8 +577,8 @@ async def list_audit_events(
     db: Session = Depends(get_db),
 ) -> ConsoleAuditListResponse:
     """List audit events for the current client."""
-    from app.services.audit_service import AuditEvent
     from app.schemas.console import ConsoleAuditListResponse
+    from app.services.audit_service import AuditEvent
     
     context = get_console_context(request, db)
     

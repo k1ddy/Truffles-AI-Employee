@@ -1,9 +1,7 @@
 import asyncio
 import os
+
 from dotenv import load_dotenv
-
-load_dotenv()
-
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -22,6 +20,8 @@ from app.models import Conversation, Handover, Message, User
 from app.routers import admin, alerts, calendar, callback, console, message, reminders, telegram_webhook, webhook
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
 from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
+
+load_dotenv()
 
 setup_logging()
 
