@@ -531,7 +531,15 @@ jobs:
           if [ ! -d "${WORKDIR}/.git" ]; then
             rm -rf "${WORKDIR}"
             mkdir -p "${WORKDIR}"
-            cp -R ~/truffles-main/. "${WORKDIR}/"
+            if command -v rsync >/dev/null 2>&1; then
+              rsync -a --delete \
+                --exclude '.ruff_cache' \
+                --exclude '.pytest_cache' \
+                --exclude '.mypy_cache' \
+                ~/truffles-main/ "${WORKDIR}/"
+            else
+              tar --exclude='.ruff_cache' --exclude='.pytest_cache' --exclude='.mypy_cache' -C ~/truffles-main -cf - . | tar -C "${WORKDIR}" -xf -
+            fi
           fi
           cd "${WORKDIR}"
           git config --global --add safe.directory "$(pwd)"
