@@ -17,11 +17,12 @@
 2) Определи роль и Task Package (если нет — STOP и вопрос владельцу).
 3) Для CA‑аудита открой `STRATEGY/TECH_ROADMAP.md` (CA‑plan) и раздел 4.3 (Live‑check SOP).
 4) Отдели аудит от фикса: аудит = evidence, фикс = отдельный Task Package с CA‑ID.
+5) Если `STATE.md` NOW не помещается в 1 экран или нет следующих шагов — STOP и запросить Brain обновление брифа.
 
 **Правила evidence:**
 - Единственный источник фактов — `STATE.md` (PASS/FAIL с conv_id/trace/SQL/CI).
 - Статусы в CA‑plan — только статусы аудита; `verified/gap` всегда с ссылкой на `STATE.md`.
-- Если live‑check невозможен → статус **BLOCKED**, без подмены.
+- Если live‑check невозможен → статус **BLOCKED**, без подмены. **Исключение CA‑13:** допускается simulated inbound (`/webhook` или instance→instance) при наличии inbound row в БД + `decision_meta/trace`; в `STATE.md` пометка `simulated`.
 
 **Карта инструментов (что запускать):**
 - `ops/diagnose.py livecheck` — реальный inbound через ChatFlow, маркеры для SQL evidence.
@@ -32,9 +33,23 @@
 - SQL evidence: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "<SQL>"`.
 
 **Где фиксировать изменения:**
-- Статус/evidence → `STATE.md` (Brain последним шагом).
+- Статус/evidence → `STATE.md` (Brain; для core/поведенческих изменений — до merge в рамках PR, плюс финальная запись в конце сессии).
 - Статус аудита → `STRATEGY/TECH_ROADMAP.md` (Top Architect, со ссылкой на `STATE.md`).
 - Процессы/инварианты → `SPECS/*` или `STRATEGY/*` (owner‑docs).
+
+## 0.1 Термины и сущности (единый словарь)
+
+- **Заказчик:** бизнес‑владелец (компания), платит за сервис.
+- **Клиент / tenant:** запись в `clients` (логическая единица в системе).
+- **Филиал / branch:** запись в `branches` (подразделение клиента).
+- **client_slug:** идентификатор в URL `/webhook/{client_slug}` (должен соответствовать клиенту в БД).
+- **Receiver‑номер:** входящий номер салона (ChatFlow instance).
+- **Sender‑JID:** тестовый номер, который пишет на receiver (используется в live‑checks).
+- **instanceId:** ChatFlow instance ID receiver‑номера; используется для routing и хранится в `branches.instance_id`.
+- **remote_jid:** JID отправителя (sender), на него уходит ответ.
+- **allowlist:** список sender‑JID, на которые разрешён outbox в `TEST_MODE`.
+
+**Правило:** instanceId хранится **в БД**, не в git; sender‑JID пул фиксируется в SOP и env allowlist.
 
 ## 1. Репозиторий и процесс
 
@@ -178,7 +193,7 @@ ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/health"
 3) **Деплой** по разделу 4 (GHCR → `PULL_IMAGE=1`; fallback build допустим).
 4) **Проверка версии**: `/admin/version` + `/admin/health` (если version unknown → STOP).
 5) **Live-check** (если указан в DoD): реальный inbound → conv_id + decision_trace/meta.
-6) **STATE.md** обновляет Brain последним шагом, с evidence.
+6) **STATE.md** обновляет Brain с evidence **до merge** для core/поведенческих изменений; финальная запись — в конце сессии.
 
 **Запрещено:** `docker cp`, `docker run -v`, “локальные” фиксы без CI/перезапуска.
 
@@ -217,10 +232,23 @@ python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
 
 **Кто делает:**
 - **Hands/OPS:** запускают live‑check runner.
-- **Brain:** снимает evidence из БД и фиксирует в `STATE.md`.
+- **Brain:** снимает evidence из БД и фиксирует в `STATE.md` (для core/поведенческих изменений — до merge).
 - **Top Architect:** обновляет статус аудита в `STRATEGY/TECH_ROADMAP.md` (CA‑plan) только со ссылкой на `STATE.md`.
 
 **Перед запуском (обязательно):**
+- **Определения (фиксируем):**
+  - **JID allowlist** = список тестовых WA‑номеров (JID), на которые **разрешено** слать сообщения для проверок.
+  - **instance_id** = ChatFlow instance, привязанный к конкретному тестовому номеру; нужен **только** для
+    ChatFlow send‑text (instance→instance).
+  - **instance→instance** = отправка через ChatFlow send‑text с instance A на JID instance B; live‑check валиден,
+    **если есть inbound row в БД** + `decision_meta/trace`.
+- **CI livecheck** = прямой `/webhook` + allowlist + `TEST_MODE=1` (instance_id опционален).
+- **CA‑13 исключение:** допускается simulated inbound (`/webhook` или instance→instance) **без allowlist**, если inbound записан в БД и outbound заблокирован; в `STATE.md` пометка `simulated`.
+- **Receiver (inbound номер салона):**
+  - `demo_salon` → `77055740455@s.whatsapp.net` (instanceId берём из ChatFlow, может меняться).
+- **Sender JID‑пул (тестовые отправители):**
+  - `truffles` → `77759841926@s.whatsapp.net`
+  - Добавлять новые sender‑JID по мере появления (allowlist).
 - Используем **пул тестовых JID** (внешние номера). Один suite → один JID, чтобы не текло `pending/expected_reply_type`.
 - Self‑send в ChatFlow не гарантирует доставку на телефон. **Разрешена симуляция instance→instance**, если inbound реально записан в БД.
 - Делаем короткий ping на тестовый номер. Если не дошло — **STOP**, чинить доставку.
@@ -228,7 +256,7 @@ python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
   - `clients.config.instance_id` — outbound instance (ChatFlow).
   - `branches.instance_id` — routing token для branch.
   - `instanceId` в webhook query — routing token (должен совпадать с `branches.instance_id`).
-  - Для симуляции instance→instance: **live считается валидным только при наличии inbound row** + `decision_meta/trace` в БД.
+- Для симуляции instance→instance: **live считается валидным только при наличии inbound row** + `decision_meta/trace` в БД.
 
 **Операторская инструкция (без тех. знаний):**
 - Оператор **не** знает время/conv_id/msg_id/SQL. Это снимает Brain/OPS.
@@ -273,7 +301,9 @@ python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
 6) Если runner/БД недоступны → статус **BLOCKED**, без фиктивных проверок.
 
 **Принципы:**
-- Реальный inbound обязателен (WhatsApp → ChatFlow → `/webhook/{client_slug}`).
+- Live‑check валиден при **наличии inbound row в БД** + `decision_meta/trace`.
+- Канонический поток: WhatsApp → ChatFlow → `/webhook/{client_slug}`.
+- Instance→instance допустим, если inbound подтверждён в БД.
 - Любой `verified/gap` в CA‑plan обязан ссылаться на evidence в `STATE.md`.
 - Токены/секреты **не** попадают в git/логи.
 - **Prod БД не трогаем ради evidence.** Допустимы staging/test DB с явной пометкой окружения в `STATE.md`.
@@ -291,6 +321,78 @@ CHATFLOW_INSTANCE_ID=... \
 CHATFLOW_JID=... \
 python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max-wait 15
 ```
+
+---
+
+## 4.4 Onboarding Test SOP (CA‑13/CA‑14)
+
+**Цель:** сделать подключение нового клиента/филиала доказуемым и повторяемым (без “на глаз”).
+
+**Входные данные (фиксируем в Task Package):**
+- `client_slug`, `branch_id`, inbound WA‑номер (receiver).
+- ChatFlow `instanceId` (может меняться; не хардкодим).
+- `webhook_secret` (в git не пишем).
+- Sender JID‑пул (тестовые номера, allowlist).
+
+**Шаги:**
+1) **DB mapping:** привязать `branches.instance_id` к текущему ChatFlow `instanceId`.
+2) **Pack validate/sync:** `ops/sync_client.py --validate` → `--sync` (data packs готовы).
+3) **Webhook:** ChatFlow → `/webhook/{client_slug}?webhook_secret=...&instanceId=<current>`.
+4) **Inbound proof:** отправить 1 тест‑сообщение с sender‑JID → убедиться в inbound row (metadata.instanceId +
+   `decision_meta/trace`).
+5) **Live smoke‑suite:** минимум CA‑01/02/03/07 (и CA‑13 для multi‑branch) → evidence в `STATE.md`.
+6) **Health/metrics:** `/admin/health` + `/admin/metrics` snapshot → `STATE.md`.
+
+**CA‑13 исключение:** допускается simulated inbound (`/webhook` или instance→instance) без allowlist, если inbound записан в БД и outbound заблокирован; в `STATE.md` пометка `simulated`.
+
+**Evidence (минимум):**
+- inbound row с `instanceId` + `decision_meta/trace`;
+- `conversation_id` + outbox status;
+- ссылки на CI/livecheck артефакты.
+
+**Правило:** если instanceId поменялся в ChatFlow → новый Task Package на обновление `branches.instance_id` и повторный onboarding‑check.
+
+---
+
+## 4.5 Test pools and number roles (CI vs Live)
+
+**Роли номеров:**
+- **Receiver (inbound номер салона):** номер, на который пишет пользователь. Его instanceId идёт в webhook и нужен
+  для branch routing (`branches.instance_id`).
+- **Sender JID‑pool:** тестовые номера, которые пишут на receiver (используются для live‑evidence и изоляции suites).
+
+**Два пула:**
+- **CI‑pool (logic):** может быть synthetic; используется только в `/webhook`‑симуляции без реального WA трафика.
+- **Live‑pool (real):** только реальные номера; используется для live‑evidence и outbox.
+
+**Правило:** instanceId хранится **в БД** (routing), **не в git**. JID‑pool фиксируется в SOP и env allowlist.
+
+---
+
+## 4.6 Add sender JID to allowlist (процесс)
+
+**Цель:** безопасно расширить пул sender‑JID для live‑checks (изоляция suites).
+
+**Шаги:**
+1) Получить sender‑JID (реальный номер для live‑pool).
+2) Обновить allowlist в env (`OUTBOUND_ALLOWLIST_JIDS`), без коммита.
+3) Запустить CI livecheck → проверить `livecheck-gate.txt`.
+4) Зафиксировать evidence в `STATE.md` (run URL + gate).
+
+**Важно:** JID добавляется в allowlist **без создания клиента/филиала**, если он используется только как sender.
+
+---
+
+## 4.7 Add receiver number / instanceId (процесс)
+
+**Цель:** подключить новый inbound номер (клиент/филиал).
+
+**Шаги:**
+1) Создать instance в ChatFlow (receiver номер).
+2) Настроить webhook: `/webhook/{client_slug}?webhook_secret=...&instanceId=<current>`.
+3) Обновить `branches.instance_id` → текущий instanceId (Task Package).
+4) Отправить 1 тест‑сообщение → подтвердить inbound row + `decision_meta/trace`.
+5) Запустить onboarding smoke‑suite (CA‑01/02/03/07 минимум).
 
 ---
 
@@ -317,6 +419,7 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 - `decision_meta` и `decision_trace` не пустые.
 - Hard‑LAW категории → `policy_gate=hard_law`, `action=escalate`, `llm_used=false`.
 - Нет preflight‑reject для валидных сообщений.
+- Шум/опечатки/перестановки не должны ломать канон (проверяем meta/trace, не текст).
 
 ### 5.3 LLM debug и наблюдаемость
 
@@ -358,6 +461,16 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 - Результат фиксируется в артефактах + краткое summary в `STATE.md` как risk‑note (без смены статуса CA).
 
 **Почему:** LLM‑текст недетерминирован; проверяем поведение через meta/trace и агрегированные метрики качества.
+
+### 5.5.2 Known risks and fixes (процесс/тестирование)
+
+- **Термины путаются (JID vs instanceId vs remote_jid vs CI/live):** фиксируются в 4.3, в отчётах всегда указывать тип.
+- **Течёт состояние между suite‑ами:** использовать JID‑пул (one suite → one JID) или обязательный reset‑шаг.
+- **instanceId дрейфует в ChatFlow:** обновлять `branches.instance_id` отдельным Task Package + повторный onboarding‑check.
+- **CI vs реальный inbound смешаны:** CI = `/webhook` + meta/trace; live‑evidence = inbound row + meta/trace.
+- **Demo‑only данные дают ложное чувство готовности:** добавлять test tenants/branches и пак‑валидацию в CI.
+- **LLM текст недетерминирован:** проверки через meta/trace + статистические eval‑метрики, не через literal‑текст.
+- **Allowlist неверный → риск писать живым людям:** `TEST_MODE=1` + allowlist gate + gate‑лог в CI.
 
 ### 5.6 Повторяемый процесс запуска (один сценарий для всех ролей)
 
@@ -473,6 +586,31 @@ LIMIT 3;
 
 **Важно:** outbox coalescing и debounce могут давать меньше ответов, чем inbound. Это не баг, если trace/meta в БД корректны.
 
+### 5.8.1 Правила дизайна тестов (anchors + dialogs + noise)
+
+**Цель:** тесты проверяют смысл и устойчивость, а не “запоминание фраз”.
+
+**Anchors (минимум):**
+- На каждый CA — 2–4 **якорных** фразы, чтобы гарантировать срабатывание гейта.
+- Якоря = детерминизм. **Текст ответа не сравниваем**, только meta/trace.
+
+**Dialogs (6–10 шагов):**
+- Для booking/consult/pending обязателен dialog‑suite на 6–10 шагов.
+- Каждый шаг фиксирует meta/trace + контекст (`expected_reply_type`, `current_goal`, `service_hint`, `info_sections`).
+- Между suite‑ами: reset‑шаг или отдельный JID из пула (чтобы не текло состояние).
+
+**Noise/chaos:**
+- Перестановка слов, опечатки, смена темы, смешанные интенты.
+- Проверяем только meta/trace (без сравнения ответа).
+
+**ASR‑noise:**
+- Транскрипции с ошибками (слитные слова, пропуски, кириллица/латиница).
+- Требования: meta/trace пишутся; канон не ломается; LLM‑гейты соблюдаются.
+
+**Onboarding data quality:**
+- Негативные pack‑кейсы обязаны падать в `sync_client.py --validate`.
+- При неполных данных — fail‑closed (эскалация/уточнение), без “выдумки”.
+
 ### 5.9 Safety‑контур (обязательная защита)
 
 **Правило:** автопрогоны не пишут живым людям.
@@ -515,7 +653,7 @@ LIMIT 3;
 - `instanceId` в payload должен совпадать с `branches.instance_id` (DB); рассинхрон с `clients.config.instance_id` фиксируем как GAP.
 - Малый объём (4–10 сообщений), фиксированный seed, без спама.
 
-**CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca04-service`, `ca05-booking`, `ca06-consult`, `ca08-state`, `ca09-manager`, `ca10-outbox`, артефакты `livecheck-artifacts/*`.
+**CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca04-service`, `ca05-booking`, `ca06-consult`, `ca07-ood`, `ca08-state`, `ca09-manager`, `ca10-outbox`, артефакты `livecheck-artifacts/*`.
 **Evidence artifact:** `livecheck-evidence.md` (генерируется из jsonl + gate через `ops/diagnose.py emit-evidence`).
 **CA‑03 (ca03-info):** truth‑first info_bundle → `decision_meta.fact_source=truth`, `info_sections`+`fact_intents`, `info_combined` (address+hours), `llm_used=false`, `source` ∈ {`truth_gate`,`class_router`}, trace `stage` ∈ {`truth_gate`,`info_class`}.
 **CA‑04 (ca04-service):** service matcher → `decision_meta.action=reply`, `intent` ∈ {`service_match`,`service_not_found`}, `fact_source=service_matcher`, `fact_intents` contains `service_match`/`service_not_found`, `source=service_matcher`, `llm_used=false`, trace `stage=service_matcher`, `decision` = intent, `fact_source=service_matcher`.
@@ -539,15 +677,22 @@ LIMIT 3;
 | CA-04 | `ca04-service` | live | action=reply; intent ∈ {service_match,service_not_found}; fact_source=service_matcher; fact_intents; llm_used=false; source=service_matcher | stage=service_matcher; decision=intent; fact_source=service_matcher | `livecheck-ca04-service.jsonl` + `livecheck-gate.txt` + CI core |
 | CA-05 | `ca05-booking` | live | expected_reply_type (service_choice→time); booking.service; booking_info_interrupt=true; booking_info_intents | stage=booking_interrupt; info_intents | `livecheck-ca05-booking.jsonl` + `livecheck-gate.txt` + CI booking |
 | CA-06 | `ca06-consult` | live | consult_reply: consult_playbook_id + source=pack; short_circuit: fact_source ∈ {truth,service_matcher}; llm_used=false | stage=consult_flow (decision=consult_reply/short_circuit); consult_playbook_id | `livecheck-ca06-consult.jsonl` + `livecheck-gate.txt` + CI consult |
-| CA-07 | manual | logic | action=out_of_domain/smalltalk; source=guard/router; llm_used=false (when gated) | stage ∈ {out_of_domain,fast_intent,smalltalk} | CI core + SQL trace |
+| CA-07 | `ca07-ood` | live | action ∈ {out_of_domain,smalltalk}; source ∈ {guard,router,fast_intent}; llm_used=false | stage ∈ {out_of_domain,fast_intent,smalltalk} | `livecheck-ca07-ood.jsonl` + `livecheck-gate.txt` + CI core |
 | CA-08 | `ca08-state` | live | action=escalate; pending_action=pending_ack | stage ∈ {pending_sla,pending_resume} | `livecheck-ca08-state.jsonl` + `livecheck-gate.txt` + SQL state/handover |
 | CA-09 | `ca09-manager` | live | action=escalate; policy_gate=hard_law | stage=policy_gate (hard_law) | `livecheck-ca09-manager.jsonl` + `livecheck-gate.txt` + Telegram/DB/Qdrant |
 | CA-10 | `ca10-outbox` | live | n/a | stage ∈ {outbox,dedup} (if traced) | `livecheck-ca10-outbox.jsonl` + `livecheck-gate.txt` + SQL outbox |
 | CA-11 | manual | state | decision_meta present on user messages | critical stages retained in decision_trace | SQL audit (decision_trace retention) |
 | CA-12 | manual | logic | router_* meta + budget/llm_degradation flags | stages budget_gate/llm_degradation | `/admin/metrics` + SQL meta/trace |
-| CA-13 | manual | live | branch_id; knowledge_tag | trace/rag filter evidence | live-check + SQL trace/meta |
+| CA-13 | manual | live | branch_id; knowledge_tag | trace/rag filter evidence | live-check **or** simulated inbound + SQL trace/meta (`simulated` in `STATE.md`) |
 | CA-14 | manual | logic | n/a | n/a | `ops/sync_client.py --validate` + Qdrant sync + `/admin/version` |
 | CA-15 | manual | logic | n/a | n/a | `/admin/health` + `/admin/metrics` + `/alerts/test` + no_response alerts |
+
+### 5.13.1 Trace stage registry (single source of truth)
+
+- **Источник стадий:** stage‑литералы, переданные в `_record_decision_trace` в `truffles-api/app/routers/webhook/`.
+- **CI‑сканер:** извлекает stage‑множество из кода и использует его как единственный источник правды.
+- **Gate:** каждая стадия должна быть “зажжена” тестом **или** перечислена в waiver‑списке с причиной и сроком.
+- **Новые стадии:** без теста/waiver → CI красный.
 
 **Авто‑evidence:**  
 `python3 ops/diagnose.py emit-evidence --input-dir artifacts --gate artifacts/livecheck-gate.txt --output artifacts/livecheck-evidence.md`
