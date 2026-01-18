@@ -248,6 +248,7 @@ LIVECHECK_SUITES = {
             "expected_trace_stage_any": ["fast_intent", "smalltalk"],
             "expected_trace_decision_any": ["smalltalk", "greeting"],
             "expected_llm_used": False,
+            "marker_in_text": False,
             "messages": [
                 "привет",
             ],
@@ -960,7 +961,11 @@ def _build_livecheck_message(rng, case, marker_prefix, timestamp, idx, noise):
     base_text = rng.choice(case["messages"])
     text = _apply_noise(base_text, rng, noise)
     marker = f"{marker_prefix}:{case['case_id']}:{timestamp}:{idx:02d}"
-    message = f"{text} [{marker}]"
+    marker_in_text = case.get("marker_in_text", True)
+    if marker_in_text:
+        message = f"{text} [{marker}]"
+    else:
+        message = text
     return text, marker, message
 
 def _fetch_message_meta(db_user, message_id):
@@ -2508,19 +2513,28 @@ def _run_livecheck_auto(args):
 
             if args.suite == "ca07-ood":
                 expected_action = case.get("expected_action")
-                if expected_action and (meta or {}).get("action") != expected_action:
+                actual_action = (meta or {}).get("action")
+                if expected_action and actual_action != expected_action:
                     raise SystemExit(
-                        f"livecheck-auto: CA07 {case['case_id']} action mismatch"
+                        "livecheck-auto: CA07 "
+                        f"{case['case_id']} action mismatch "
+                        f"(expected {expected_action}, got {actual_action})"
                     )
                 expected_intent = case.get("expected_intent")
-                if expected_intent and (meta or {}).get("intent") != expected_intent:
+                actual_intent = (meta or {}).get("intent")
+                if expected_intent and actual_intent != expected_intent:
                     raise SystemExit(
-                        f"livecheck-auto: CA07 {case['case_id']} intent mismatch"
+                        "livecheck-auto: CA07 "
+                        f"{case['case_id']} intent mismatch "
+                        f"(expected {expected_intent}, got {actual_intent})"
                     )
                 expected_sources = case.get("expected_source_any") or []
-                if expected_sources and (meta or {}).get("source") not in expected_sources:
+                actual_source = (meta or {}).get("source")
+                if expected_sources and actual_source not in expected_sources:
                     raise SystemExit(
-                        f"livecheck-auto: CA07 {case['case_id']} source mismatch"
+                        "livecheck-auto: CA07 "
+                        f"{case['case_id']} source mismatch "
+                        f"(expected one of {expected_sources}, got {actual_source})"
                     )
                 expected_llm = case.get("expected_llm_used")
                 if expected_llm is not None and (meta or {}).get("llm_used") is not expected_llm:
