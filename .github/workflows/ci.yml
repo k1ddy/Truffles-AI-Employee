@@ -529,6 +529,7 @@ jobs:
           PY
           SOURCE_REPO="${HOME}/truffles-main"
           git config --global --add safe.directory "${SOURCE_REPO}"
+          git config --global --add safe.directory "${SOURCE_REPO}/.git"
           WORKDIR="/tmp/truffles-main-${GIT_SHA}"
           if [ ! -d "${WORKDIR}/.git" ]; then
             rm -rf "${WORKDIR}"
