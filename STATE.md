@@ -32,7 +32,7 @@
 - DONE: P0 Legacy slice 5 — вынесены domain flows (booking/info/consult) без изменения поведения; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21050469012; live‑check (prod) conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48: msg_id cd3625fc-d16c-4c2b-832f-2d0b7c3e0dcd (info_bundle) decision_meta action=reply intent=location source=truth_gate info_sections=["address","hours","parking"]; msg_id 6d78cf61-cb15-4f4f-b121-6fb91d579658 (consult) decision_meta action=reply intent=consult_reply source=pack consult_playbook_id=hair_aftercolor; decision_trace stages truth_gate reply/location + consult_flow/consult reply consult_reply source=pack.
 - BLOCKED: P0 Legacy slice 6 — вынесены LLM/response + post‑hooks (llm_guard/ai_response/rewrite/budget_gate/llm_degradation + consult_return) без изменения поведения; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21051820513; live‑check consult_return conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48 msg_id 1d3515d6-9dbc-4dea-9479-a5532d011a93 decision_meta consult_return=true; live‑check LLM‑path conv_id 590848f8-423c-4118-9de0-5f830c643a46 msg_id 99087746-9dcb-4785-804c-e90a32f3c930 decision_meta action=ai_response llm_degradation_reason=llm_skip; decision_trace stages rewrite(timeout) + llm_degradation(llm_skip) + ai_response(low_confidence_retry); BLOCKED: llm_guard/budget_gate не сработали (нет условий).
 - DONE: P0 Legacy refactor S0–S6 — детальный лог ниже (CI+live‑check evidence).
-- DEFECT: booking_interrupt/multi_truth trace пропадает при заполненном decision_trace (лимит 40, retention только critical) — см. RCA ниже.
+- FIX READY (CA-11): booking_interrupt/multi_truth retention при trace_len=40; PR #197 https://github.com/k1ddy/Truffles-AI-Employee/pull/197; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21110933209; SQL evidence conv_id da9519fd-bdab-4f22-966a-0c535f3ea6a1 msg_id ca11-3-1768735290143673848 trace_len=40 stages booking_interrupt+multi_truth present (simulated inbound via /webhook on local container, TEST_MODE=1) — см. запись 2026-01-18 ниже.
 - STOP‑LINE: были нарушения процесса (очистка decision_trace ради evidence, изменение STATE.md не ролью Brain) — зафиксировано ниже.
 - BLOCKERS: нет.
 
@@ -1139,6 +1139,235 @@
 - outbox_status: `SENT`
 ```
 
+### 2026-01-18 — CA-07 OOD + low-signal + smalltalk live-check
+
+**Что сделали:**
+- Запустили CI livecheck (ci-livecheck) на ветке `ca07-ood`, commit `2c475aef9ca01c880e3e34099aac63c7de105614` с CI_LIVECHECK_ENABLED=1.
+- Прогнали suites: ca01-core, ca02-policy, ca03-info, ca04-service, ca05-booking, ca06-consult, ca07-ood, ca08-state, ca09-manager, ca10-outbox.
+- В suite ca07-ood перед CA07_SMALLTALK выполнен reset (ops/diagnose.py); требуется clean run без reset для полного verify.
+
+**Evidence:**
+- CI run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21108958762
+- artifacts: `livecheck-artifacts` (gate + jsonl + livecheck-evidence.md)
+- livecheck-evidence.md:
+```md
+# Livecheck Evidence
+- generated_at: `2026-01-18T08:55:57.444840+00:00`
+- inputs: `livecheck-ca01-core.jsonl`, `livecheck-ca02-policy.jsonl`, `livecheck-ca03-info.jsonl`, `livecheck-ca04-service.jsonl`, `livecheck-ca05-booking.jsonl`, `livecheck-ca06-consult.jsonl`, `livecheck-ca07-ood.jsonl`, `livecheck-ca08-state.jsonl`, `livecheck-ca09-manager.jsonl`, `livecheck-ca10-outbox.jsonl`
+
+## Gate
+- LEARNING_MODE=
+- OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net,77759841926@s.whatsapp.net,77781658799@s.whatsapp.net
+- QDRANT_COLLECTION=
+- QDRANT_COLLECTION_EFFECTIVE=truffles_knowledge_ci
+- SUITE_ca01-core_JID=77015705555@s.whatsapp.net
+- SUITE_ca02-policy_JID=77759841926@s.whatsapp.net
+- SUITE_ca03-info_JID=77781658799@s.whatsapp.net
+- SUITE_ca04-service_JID=77015705555@s.whatsapp.net
+- SUITE_ca05-booking_JID=77759841926@s.whatsapp.net
+- SUITE_ca06-consult_JID=77781658799@s.whatsapp.net
+- SUITE_ca07-ood_JID=77015705555@s.whatsapp.net
+- SUITE_ca08-state_JID=77759841926@s.whatsapp.net
+- SUITE_ca09-manager_JID=77781658799@s.whatsapp.net
+- SUITE_ca10-outbox_JID=77015705555@s.whatsapp.net
+- TEST_MODE=1
+- gate_file: `livecheck-gate.txt`
+
+## Suite ca01-core
+- input: `livecheck-ca01-core.jsonl`
+- case_ids: CA01_REFUND, CA01_PAYMENT, CA01_RESCHEDULE, CA01_MEDICAL
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77015705555@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+
+| case_id | message_id | conversation_id | action | intent | policy_gate | policy_section | risk_level | llm_used | trace_policy_gate | trace_policy_section |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CA01_REFUND | LC-AUTO-20260118-084827-01-762dd39c | b8c559d1-f8cd-4173-ae70-0a9683833e48 | escalate | refund | hard_law | refund | high | false | hard_law | refund |
+| CA01_PAYMENT | LC-AUTO-20260118-084827-02-0b895e88 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | escalate | payment | hard_law | payment_info | medium | false | hard_law | payment_info |
+| CA01_RESCHEDULE | LC-AUTO-20260118-084827-03-eacc5530 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | escalate | reschedule | hard_law | reschedule | high | false | hard_law | reschedule |
+| CA01_MEDICAL | LC-AUTO-20260118-084827-04-585b1afc | b8c559d1-f8cd-4173-ae70-0a9683833e48 | escalate | medical | hard_law | medical | high | false | hard_law | medical |
+
+## Suite ca02-policy
+- input: `livecheck-ca02-policy.jsonl`
+- case_ids: CA02_DISCOUNT, CA02_PAYMENT
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77759841926@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+
+| case_id | message_id | conversation_id | action | intent | policy_gate | policy_section | risk_level | llm_used | trace_policy_type | trace_policy_gate | trace_policy_section |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CA02_DISCOUNT | LC-AUTO-20260118-084904-01-8a50c92e | 4b355349-15bc-41df-b26d-4c76a6e7be41 | reply | discounts | discounts | discounts | low | false | demo_salon | discounts | discounts |
+| CA02_PAYMENT | LC-AUTO-20260118-084904-02-9f0e18e8 | 4b355349-15bc-41df-b26d-4c76a6e7be41 | escalate | payment | hard_law | payment_info | medium | false | demo_salon | hard_law | payment_info |
+
+## Suite ca03-info
+- input: `livecheck-ca03-info.jsonl`
+- case_ids: CA03_ADDRESS_HOURS, CA03_GUEST_POLICY
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77781658799@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+
+| case_id | message_id | conversation_id | fact_source | info_sections | fact_intents | info_combined | llm_used | source | trace_stage | trace_fact_source | trace_info_sections |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CA03_ADDRESS_HOURS | LC-AUTO-20260118-084947-01-52845c51 | da9519fd-bdab-4f22-966a-0c535f3ea6a1 | truth | address,hours | location,hours | true | false | truth_gate | truth_gate | truth | address,hours |
+| CA03_GUEST_POLICY | LC-AUTO-20260118-084947-02-83b3806c | da9519fd-bdab-4f22-966a-0c535f3ea6a1 | truth | address,hours,guest_policy | location,hours,guest_policy | true | false | class_router | truth_gate | truth | address,hours |
+
+## Suite ca04-service
+- input: `livecheck-ca04-service.jsonl`
+- case_ids: CA04_SERVICE_MATCH, CA04_SERVICE_NOT_FOUND
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77015705555@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+
+| case_id | message_id | conversation_id | action | intent | fact_source | fact_intents | service_query | llm_used | trace_stage | trace_decision | trace_fact_source |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CA04_SERVICE_MATCH | LC-AUTO-20260118-085036-01-6f60efb9 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | reply | service_match | service_matcher | service_match | Маникюр | false | service_matcher | service_match | service_matcher |
+| CA04_SERVICE_NOT_FOUND | LC-AUTO-20260118-085036-02-bd6c34b0 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | reply | service_not_found | service_matcher | service_not_found |  | false | service_matcher | service_not_found | service_matcher |
+
+## Suite ca05-booking
+- input: `livecheck-ca05-booking.jsonl`
+- case_ids: CA05_BOOKING_FLOW
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77759841926@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+- reset: reset_message_id=LC-AUTO-20260118-085110-CA05-RESET-ac1bba0a; reset_action=out_of_domain; reset_intent=out_of_domain; reset_booking_active=false
+
+| step | message_id | conversation_id | expected_reply_type | booking_service | booking_info_interrupt | booking_info_intents | trace_booking_interrupt | llm_used |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | LC-AUTO-20260118-085110-CA05-01-1efc584d | 4b355349-15bc-41df-b26d-4c76a6e7be41 | service_choice |  |  |  | true | false |
+| 2 | LC-AUTO-20260118-085110-CA05-02-f2467a66 | 4b355349-15bc-41df-b26d-4c76a6e7be41 | time | Маникюр |  |  | true | false |
+| 3 | LC-AUTO-20260118-085110-CA05-03-1d0edee0 | 4b355349-15bc-41df-b26d-4c76a6e7be41 | time | Маникюр | true | pricing | true | false |
+
+## Suite ca06-consult
+- input: `livecheck-ca06-consult.jsonl`
+- case_ids: CA06_PACK_ONLY, CA06_SHORT_CIRCUIT
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77781658799@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+
+| case_id | message_id | conversation_id | action | intent | consult_playbook_id | source | fact_source | llm_used | trace_consult_decision | trace_consult_playbook_id |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CA06_PACK_ONLY | LC-AUTO-20260118-085237-01-d12e49f5 | da9519fd-bdab-4f22-966a-0c535f3ea6a1 | reply | consult_reply | hair_damage | pack |  | false | consult_reply | hair_damage |
+| CA06_SHORT_CIRCUIT | LC-AUTO-20260118-085237-02-5488f835 | da9519fd-bdab-4f22-966a-0c535f3ea6a1 | reply | price_manicure |  | truth_gate | truth | false | short_circuit | nails_care |
+
+## Suite ca07-ood
+- input: `livecheck-ca07-ood.jsonl`
+- case_ids: CA07_OOD, CA07_LOW_SIGNAL, CA07_SMALLTALK
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77015705555@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+
+| case_id | message_id | conversation_id | action | intent | source | llm_used | trace_stage | trace_decision |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| CA07_OOD | LC-AUTO-20260118-085340-01-6aa700e5 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | out_of_domain | out_of_domain | domain_router | false | out_of_domain | early_block |
+| CA07_LOW_SIGNAL | LC-AUTO-20260118-085340-02-3db3a8c7 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | out_of_domain | out_of_domain | service_semantic_guard | false | out_of_domain | service_semantic_guard |
+| CA07_SMALLTALK | LC-AUTO-20260118-085340-03-c5d695c1 | b8c559d1-f8cd-4173-ae70-0a9683833e48 | smalltalk | greeting | fast_intent | false | fast_intent | smalltalk |
+
+## Suite ca08-state
+- input: `livecheck-ca08-state.jsonl`
+- case_ids: CA08_PENDING
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77759841926@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+- message_id: `LC-AUTO-20260118-085500-CA08-7524dc55`
+- ack_message_id: `LC-ACK-20260118-085500-CA08-928894a3`
+- conversation_id: `4b355349-15bc-41df-b26d-4c76a6e7be41`
+- conversation_state: `pending` → `bot_active`
+- handover_status: `pending` → `resolved`
+- policy_gate: `hard_law`
+- action: `escalate`
+- pending_action: `pending_ack`
+- pending_sla_trace: `true`
+- pending_resume_trace: `true`
+
+## Suite ca09-manager
+- input: `livecheck-ca09-manager.jsonl`
+- case_ids: CA09_MANAGER
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77781658799@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+- message_id: `LC-AUTO-20260118-085532-CA09-b65cf6d9`
+- conversation_id: `da9519fd-bdab-4f22-966a-0c535f3ea6a1`
+- conversation_state: `pending` → `manager_active`
+- handover_status: `pending` → `active`
+- assigned_to: `1969855532`
+- first_response_at: `2026-01-18 08:55:46.587246+00`
+- qdrant_found: `true`
+- outbox_status: `SENT`
+- telegram_status: `200`
+
+## Suite ca10-outbox
+- input: `livecheck-ca10-outbox.jsonl`
+- case_ids: CA10_DEDUP
+- client_slug: `demo_salon`
+- instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- branch_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9zYWxvbiJ9`
+- client_instance_id: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6InNhbG9uIn0=`
+- instance_drift: `true`
+- jid_mode: `allowlist`
+- remote_jid: `77015705555@s.whatsapp.net`
+- test_mode: `true`
+- qdrant_collection: `truffles_knowledge_ci`
+- message_id: `LC-DEDUP-20260118-085550-2680d0a2`
+- message_count: `1`
+- message_dedup_count: `1`
+- outbox_count: `1`
+- outbox_status: `SENT`
+```
+
 ### 2026-01-18 — CA-06 consult pack-only + short-circuit live-check
 
 **Что сделали:**
@@ -1361,6 +1590,21 @@
   - `SELECT jsonb_array_length(context->'decision_trace') ...` → `40`
   - `SELECT COUNT(*) ... stage IN ('booking_interrupt','multi_truth')` → `0`
   - `SELECT metadata->'decision_meta' FROM messages WHERE id='899b5d56-7a62-49ef-a5f0-a0df443b6455'` → `booking_interrupt_info=true`, `intent=multi_truth`, `source=multi_truth`
+
+### 2026-01-18 — CA-11 fix: retain booking_interrupt/multi_truth in decision_trace
+
+**Что сделали:**
+- В `trace.py` добавлен priority bucket для `booking_interrupt` + `multi_truth`; `multi_truth` добавлен в critical list.
+- Регресс‑тест retention overflow (PR #197).
+
+**Evidence:**
+- PR #197: https://github.com/k1ddy/Truffles-AI-Employee/pull/197
+- CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21110933209 (success)
+- SQL (conv_id `da9519fd-bdab-4f22-966a-0c535f3ea6a1`, msg_id `ca11-3-1768735290143673848`):
+  - `SELECT ... trace_len` → `40`
+  - `SELECT ... stage IN ('booking_interrupt','multi_truth')` → `t/t`
+  - `SELECT trace->>'stage', trace->>'recorded_at' ...` → booking_interrupt (2026-01-18T11:20:26.035537+00:00, 2026-01-18T11:21:37.115386+00:00), multi_truth (2026-01-18T11:21:37.115674+00:00)
+- Inbound: simulated via `/webhook` on local container (`TEST_MODE=1`, allowlist JID), **без** ручной правки БД/trace.
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**

@@ -1073,87 +1073,88 @@ def test_consult_pack_only_and_short_circuit():
 
 
 def test_ood_low_signal_and_smalltalk_gates():
-    cases = [
-        {
-            "case_id": "CA07_OOD",
-            "message": "какая погода?",
-            "expected_action": "out_of_domain",
-            "expected_intent": "out_of_domain",
-            "allowed_sources": {
-                "domain_router",
-                "question_contract",
-                "domain_anchor",
-                "router_low_confidence",
-                "no_response_guard",
-                "service_semantic_guard",
-            },
-            "allowed_trace_stages": {"out_of_domain"},
-            "allowed_trace_decisions": {
-                "early_block",
-                "fallback",
-                "router_low_confidence",
-                "domain_anchor",
-                "service_semantic_guard",
-                "no_response_guard",
-                "expected_reply_off_topic",
-            },
-        },
-        {
-            "case_id": "CA07_LOW_SIGNAL",
-            "message": "мм...",
-            "expected_action": "out_of_domain",
-            "expected_intent": "out_of_domain",
-            "allowed_sources": {
-                "no_response_guard",
-                "service_semantic_guard",
-                "domain_router",
-                "question_contract",
-                "domain_anchor",
-            },
-            "allowed_trace_stages": {"out_of_domain"},
-            "allowed_trace_decisions": {
-                "service_semantic_guard",
-                "no_response_guard",
-                "early_block",
-            },
-        },
-        {
-            "case_id": "CA07_SMALLTALK",
-            "message": "привет",
-            "expected_action": "smalltalk",
-            "expected_intent": "greeting",
-            "allowed_sources": {"fast_intent"},
-            "allowed_trace_stages": {"fast_intent", "smalltalk"},
-            "allowed_trace_decisions": {"smalltalk", "greeting"},
-        },
-    ]
-
-    for case in cases:
-        case_id = case["case_id"]
-        _response, conversation, saved_message = _run_webhook_conversation(
-            [case["message"]],
-            case_id,
-            None,
+    def _assert_trace_stage_decision_any(
+        trace: list[dict], case_id: str, stages: set[str], decisions: set[str] | None = None
+    ) -> None:
+        for entry in trace:
+            if entry.get("stage") in stages and (decisions is None or entry.get("decision") in decisions):
+                return
+        raise AssertionError(
+            f"{case_id}: missing trace stage in {sorted(stages)} with decision in {sorted(decisions or [])}"
         )
-        meta = saved_message.message_metadata.get("decision_meta", {})
-        assert meta.get("action") == case["expected_action"], f"{case_id}: action mismatch"
-        assert meta.get("intent") == case["expected_intent"], f"{case_id}: intent mismatch"
-        allowed_sources = case.get("allowed_sources")
-        if allowed_sources:
-            assert meta.get("source") in allowed_sources, f"{case_id}: source mismatch"
-        assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
 
-        trace = _get_decision_trace(conversation)
-        trace_entry = next(
-            (entry for entry in trace if entry.get("stage") in case["allowed_trace_stages"]),
-            None,
-        )
-        assert trace_entry is not None, f"{case_id}: missing trace gate"
-        allowed_trace_decisions = case.get("allowed_trace_decisions")
-        if allowed_trace_decisions:
-            assert trace_entry.get("decision") in allowed_trace_decisions, (
-                f"{case_id}: trace decision mismatch"
-            )
+    ood_sources = {
+        "domain_router",
+        "domain_anchor",
+        "router_low_confidence",
+        "service_semantic_guard",
+        "no_response_guard",
+        "question_contract",
+    }
+    ood_decisions = {
+        "early_block",
+        "domain_anchor",
+        "router_low_confidence",
+        "service_semantic_guard",
+        "no_response_guard",
+        "expected_reply_off_topic",
+    }
+    low_signal_sources = {"service_semantic_guard", "no_response_guard", "router_low_confidence"}
+
+    case_id = "CA07_OOD"
+    _response, conversation, saved_message = _run_webhook_conversation(
+        ["какая погода?"],
+        case_id,
+        None,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("action") == "out_of_domain", f"{case_id}: action mismatch"
+    assert meta.get("intent") == "out_of_domain", f"{case_id}: intent mismatch"
+    assert meta.get("source") in ood_sources, f"{case_id}: source mismatch"
+    assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+
+    trace = _get_decision_trace(conversation)
+    _assert_trace_stage_decision_any(trace, case_id, {"out_of_domain"}, ood_decisions)
+
+    case_id = "CA07_LOW_SIGNAL"
+    _response, conversation, saved_message = _run_webhook_conversation(
+        ["мм..."],
+        case_id,
+        None,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("action") == "out_of_domain", f"{case_id}: action mismatch"
+    assert meta.get("intent") == "out_of_domain", f"{case_id}: intent mismatch"
+    assert meta.get("source") in low_signal_sources, f"{case_id}: source mismatch"
+    assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+
+    trace = _get_decision_trace(conversation)
+    _assert_trace_stage_decision_any(
+        trace,
+        case_id,
+        {"out_of_domain"},
+        {"service_semantic_guard", "no_response_guard", "router_low_confidence"},
+    )
+
+    case_id = "CA07_SMALLTALK"
+    _response, conversation, saved_message = _run_webhook_conversation(
+        ["привет"],
+        case_id,
+        None,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("action") == "smalltalk", f"{case_id}: action mismatch"
+    assert meta.get("intent") == "greeting", f"{case_id}: intent mismatch"
+    assert meta.get("source") == "fast_intent", f"{case_id}: source mismatch"
+    assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+
+    trace = _get_decision_trace(conversation)
+    _assert_trace_stage_decision_any(
+        trace,
+        case_id,
+        {"fast_intent", "smalltalk"},
+        {"smalltalk", "greeting"},
+    )
 
 
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:
