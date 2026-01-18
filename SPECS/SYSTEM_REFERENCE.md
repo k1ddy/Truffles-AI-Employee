@@ -515,7 +515,7 @@ LIMIT 3;
 - `instanceId` в payload должен совпадать с `branches.instance_id` (DB); рассинхрон с `clients.config.instance_id` фиксируем как GAP.
 - Малый объём (4–10 сообщений), фиксированный seed, без спама.
 
-**CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca04-service`, `ca05-booking`, `ca06-consult`, `ca08-state`, `ca09-manager`, `ca10-outbox`, артефакты `livecheck-artifacts/*`.
+**CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca04-service`, `ca05-booking`, `ca06-consult`, `ca07-ood`, `ca08-state`, `ca09-manager`, `ca10-outbox`, артефакты `livecheck-artifacts/*`.
 **Evidence artifact:** `livecheck-evidence.md` (генерируется из jsonl + gate через `ops/diagnose.py emit-evidence`).
 **CA‑03 (ca03-info):** truth‑first info_bundle → `decision_meta.fact_source=truth`, `info_sections`+`fact_intents`, `info_combined` (address+hours), `llm_used=false`, `source` ∈ {`truth_gate`,`class_router`}, trace `stage` ∈ {`truth_gate`,`info_class`}.
 **CA‑04 (ca04-service):** service matcher → `decision_meta.action=reply`, `intent` ∈ {`service_match`,`service_not_found`}, `fact_source=service_matcher`, `fact_intents` contains `service_match`/`service_not_found`, `source=service_matcher`, `llm_used=false`, trace `stage=service_matcher`, `decision` = intent, `fact_source=service_matcher`.
@@ -539,7 +539,7 @@ LIMIT 3;
 | CA-04 | `ca04-service` | live | action=reply; intent ∈ {service_match,service_not_found}; fact_source=service_matcher; fact_intents; llm_used=false; source=service_matcher | stage=service_matcher; decision=intent; fact_source=service_matcher | `livecheck-ca04-service.jsonl` + `livecheck-gate.txt` + CI core |
 | CA-05 | `ca05-booking` | live | expected_reply_type (service_choice→time); booking.service; booking_info_interrupt=true; booking_info_intents | stage=booking_interrupt; info_intents | `livecheck-ca05-booking.jsonl` + `livecheck-gate.txt` + CI booking |
 | CA-06 | `ca06-consult` | live | consult_reply: consult_playbook_id + source=pack; short_circuit: fact_source ∈ {truth,service_matcher}; llm_used=false | stage=consult_flow (decision=consult_reply/short_circuit); consult_playbook_id | `livecheck-ca06-consult.jsonl` + `livecheck-gate.txt` + CI consult |
-| CA-07 | manual | logic | action=out_of_domain/smalltalk; source=guard/router; llm_used=false (when gated) | stage ∈ {out_of_domain,fast_intent,smalltalk} | CI core + SQL trace |
+| CA-07 | `ca07-ood` | live | action=out_of_domain/smalltalk; source=guard/router/fast_intent; llm_used=false | stage ∈ {out_of_domain,fast_intent,smalltalk} | `livecheck-ca07-ood.jsonl` + `livecheck-gate.txt` + CI core |
 | CA-08 | `ca08-state` | live | action=escalate; pending_action=pending_ack | stage ∈ {pending_sla,pending_resume} | `livecheck-ca08-state.jsonl` + `livecheck-gate.txt` + SQL state/handover |
 | CA-09 | `ca09-manager` | live | action=escalate; policy_gate=hard_law | stage=policy_gate (hard_law) | `livecheck-ca09-manager.jsonl` + `livecheck-gate.txt` + Telegram/DB/Qdrant |
 | CA-10 | `ca10-outbox` | live | n/a | stage ∈ {outbox,dedup} (if traced) | `livecheck-ca10-outbox.jsonl` + `livecheck-gate.txt` + SQL outbox |

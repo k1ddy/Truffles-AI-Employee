@@ -336,7 +336,7 @@ jobs:
           PY
           ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Livecheck runner (CA-01/02/03/04/05/06/08/09/10)
+      - name: Livecheck runner (CA-01/02/03/04/05/06/07/08/09/10)
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
@@ -365,6 +365,7 @@ jobs:
               "livecheck-ca04-service.jsonl" \
               "livecheck-ca05-booking.jsonl" \
               "livecheck-ca06-consult.jsonl" \
+              "livecheck-ca07-ood.jsonl" \
               "livecheck-ca08-state.jsonl" \
               "livecheck-ca09-manager.jsonl" \
               "livecheck-ca10-outbox.jsonl" \
@@ -424,7 +425,7 @@ jobs:
             exit 1
           fi
           cd ~/truffles-main
-          suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca06-consult ca08-state ca09-manager ca10-outbox)
+          suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca06-consult ca07-ood ca08-state ca09-manager ca10-outbox)
           jid_for_suite() {
             local suite_name="$1"
             local idx=0
@@ -482,6 +483,7 @@ jobs:
           run_suite ca04-service 774
           run_suite ca05-booking 773
           run_suite ca06-consult 772
+          run_suite ca07-ood 771
           run_suite ca08-state 778
           run_suite ca09-manager 779
           run_suite ca10-outbox 780

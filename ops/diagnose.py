@@ -201,6 +201,56 @@ LIVECHECK_SUITES = {
             ],
         },
     ],
+    "ca07-ood": [
+        {
+            "case_id": "CA07_OOD",
+            "expected_action": "out_of_domain",
+            "expected_intent": "out_of_domain",
+            "expected_source_any": [
+                "domain_router",
+                "domain_anchor",
+                "router_low_confidence",
+                "service_semantic_guard",
+                "question_contract",
+            ],
+            "expected_trace_stage_any": ["out_of_domain"],
+            "expected_trace_decision_any": [
+                "early_block",
+                "domain_anchor",
+                "router_low_confidence",
+                "service_semantic_guard",
+                "expected_reply_off_topic",
+            ],
+            "expected_llm_used": False,
+            "messages": [
+                "какая погода?",
+            ],
+        },
+        {
+            "case_id": "CA07_LOW_SIGNAL",
+            "expected_action": "out_of_domain",
+            "expected_intent": "out_of_domain",
+            "expected_source_any": ["service_semantic_guard"],
+            "expected_trace_stage_any": ["out_of_domain"],
+            "expected_trace_decision_any": ["service_semantic_guard"],
+            "expected_llm_used": False,
+            "messages": [
+                "мм...",
+            ],
+        },
+        {
+            "case_id": "CA07_SMALLTALK",
+            "expected_action": "smalltalk",
+            "expected_intent": "greeting",
+            "expected_source_any": ["fast_intent"],
+            "expected_trace_stage_any": ["fast_intent", "smalltalk"],
+            "expected_trace_decision_any": ["smalltalk", "greeting"],
+            "expected_llm_used": False,
+            "messages": [
+                "привет",
+            ],
+        },
+    ],
     "ca08-state": [
         {
             "case_id": "CA08_PENDING",
@@ -2226,6 +2276,7 @@ def _run_livecheck_auto(args):
         "ca04-service",
         "ca05-booking",
         "ca06-consult",
+        "ca07-ood",
     }:
         _ensure_bot_active_before_suite(args, context)
 
@@ -2312,8 +2363,18 @@ def _run_livecheck_auto(args):
             log["expected_fact_intents"] = case.get("expected_fact_intents")
         if case.get("expected_info_combined") is not None:
             log["expected_info_combined"] = case.get("expected_info_combined")
+        if case.get("expected_action"):
+            log["expected_action"] = case.get("expected_action")
         if case.get("expected_intent"):
             log["expected_intent"] = case.get("expected_intent")
+        if case.get("expected_source_any"):
+            log["expected_source_any"] = case.get("expected_source_any")
+        if case.get("expected_trace_stage_any"):
+            log["expected_trace_stage_any"] = case.get("expected_trace_stage_any")
+        if case.get("expected_trace_decision_any"):
+            log["expected_trace_decision_any"] = case.get("expected_trace_decision_any")
+        if case.get("expected_llm_used") is not None:
+            log["expected_llm_used"] = case.get("expected_llm_used")
         if response_error:
             log["error"] = response_error
         if response_body:
@@ -2440,6 +2501,28 @@ def _run_livecheck_auto(args):
                         f"livecheck-auto: CA06 {case['case_id']} llm_used mismatch"
                     )
 
+            if args.suite == "ca07-ood":
+                expected_action = case.get("expected_action")
+                if expected_action and (meta or {}).get("action") != expected_action:
+                    raise SystemExit(
+                        f"livecheck-auto: CA07 {case['case_id']} action mismatch"
+                    )
+                expected_intent = case.get("expected_intent")
+                if expected_intent and (meta or {}).get("intent") != expected_intent:
+                    raise SystemExit(
+                        f"livecheck-auto: CA07 {case['case_id']} intent mismatch"
+                    )
+                expected_sources = case.get("expected_source_any") or []
+                if expected_sources and (meta or {}).get("source") not in expected_sources:
+                    raise SystemExit(
+                        f"livecheck-auto: CA07 {case['case_id']} source mismatch"
+                    )
+                expected_llm = case.get("expected_llm_used")
+                if expected_llm is not None and (meta or {}).get("llm_used") is not expected_llm:
+                    raise SystemExit(
+                        f"livecheck-auto: CA07 {case['case_id']} llm_used mismatch"
+                    )
+
             conv_meta = None
             conv_error = None
             trace_entry = None
@@ -2473,6 +2556,11 @@ def _run_livecheck_auto(args):
                     for entry in reversed(_trace_as_list(trace_list)):
                         if entry.get("stage") == "consult_flow":
                             consult_trace = entry
+                            break
+                if args.suite == "ca07-ood":
+                    for entry in reversed(_trace_as_list(trace_list)):
+                        if entry.get("stage") in {"out_of_domain", "fast_intent", "smalltalk"}:
+                            info_trace = entry
                             break
 
             if args.suite == "ca03-info":
@@ -2523,6 +2611,22 @@ def _run_livecheck_auto(args):
                 ):
                     raise SystemExit(
                         f"livecheck-auto: CA06 {case['case_id']} consult_flow playbook mismatch"
+                    )
+
+            if args.suite == "ca07-ood":
+                if not info_trace:
+                    raise SystemExit(
+                        f"livecheck-auto: CA07 {case['case_id']} missing guard trace"
+                    )
+                expected_stages = case.get("expected_trace_stage_any") or []
+                if expected_stages and info_trace.get("stage") not in expected_stages:
+                    raise SystemExit(
+                        f"livecheck-auto: CA07 {case['case_id']} trace stage mismatch"
+                    )
+                expected_decisions = case.get("expected_trace_decision_any") or []
+                if expected_decisions and info_trace.get("decision") not in expected_decisions:
+                    raise SystemExit(
+                        f"livecheck-auto: CA07 {case['case_id']} trace decision mismatch"
                     )
 
             results.append(
@@ -3046,6 +3150,17 @@ def _render_suite_lines(suite):
                 ("llm_used", "llm_used"),
                 ("trace_consult_decision", "trace_consult_decision"),
                 ("trace_consult_playbook_id", "trace_consult_playbook_id"),
+            ],
+            "ca07-ood": [
+                ("case_id", "case_id"),
+                ("message_id", "message_id"),
+                ("conversation_id", "conversation_id"),
+                ("action", "action"),
+                ("intent", "intent"),
+                ("source", "source"),
+                ("llm_used", "llm_used"),
+                ("trace_stage", "trace_stage"),
+                ("trace_decision", "trace_decision"),
             ],
         }
         columns = suite_columns.get(
