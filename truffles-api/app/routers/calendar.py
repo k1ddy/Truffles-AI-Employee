@@ -3,27 +3,27 @@ Calendar and Booking API Router.
 Provides endpoints for slots, bookings, and Google Calendar OAuth.
 """
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.services.console_auth import get_console_context, ConsoleAuthContext
-from app.services.booking_service import (
-    BookingService, 
-    BookingConflictError, 
-    BookingNotFoundError,
-    SpecialistNotFoundError
-)
-from app.services.google_calendar_service import GoogleCalendarService
-from app.models.specialist import Specialist
-from app.models.booking import Booking
-from app.services.console_errors import ConsoleAPIError
 from app.logging_config import get_logger
+from app.models.booking import Booking
+from app.models.specialist import Specialist
+from app.services.booking_service import (
+    BookingConflictError,
+    BookingNotFoundError,
+    BookingService,
+    SpecialistNotFoundError,
+)
+from app.services.console_auth import ConsoleAuthContext, get_console_context
+from app.services.console_errors import ConsoleAPIError
+from app.services.google_calendar_service import GoogleCalendarService
 
 logger = get_logger(__name__)
 
@@ -265,8 +265,8 @@ async def create_booking(
         
     except BookingConflictError as e:
         raise ConsoleAPIError(
-            409, 
-            "BOOKING_CONFLICT", 
+            409,
+            "BOOKING_CONFLICT",
             "Выбранное время уже занято. Пожалуйста, выберите другой слот.",
             details={"reason": str(e)}
         )
@@ -310,7 +310,7 @@ async def list_bookings(
     # Get specialist names
     specialist_ids = {b.specialist_id for b in bookings}
     specialists_map = {
-        s.id: s.name 
+        s.id: s.name
         for s in db.query(Specialist).filter(Specialist.id.in_(specialist_ids)).all()
     }
     

@@ -130,7 +130,7 @@ async def list_cases(
     
     # Assigned to me
     if assigned_to_me:
-        # Assuming agent.name matches assigned_to_name or we use ID. 
+        # Assuming agent.name matches assigned_to_name or we use ID.
         # For MVP we use name as per model, but ideally should be ID.
         # Using agent.name for now as per schema.
         query = query.filter(Handover.assigned_to_name == context.agent.name)
@@ -200,9 +200,9 @@ async def take_case(
     # 2. Check if already taken
     if case.status == "active" and case.assigned_to_name and case.assigned_to_name != context.agent.name:
         raise ConsoleAPIError(
-            409, 
-            "CASE_ALREADY_TAKEN", 
-            "Case already taken", 
+            409,
+            "CASE_ALREADY_TAKEN",
+            "Case already taken",
             details={"current_assignee": case.assigned_to_name}
         )
 
@@ -290,8 +290,8 @@ async def resolve_case(
     response_model=ConsoleMessageListResponse,
 )
 async def get_case_messages(
-    case_id: UUID, 
-    request: Request, 
+    case_id: UUID,
+    request: Request,
     cursor: Optional[str] = None,
     limit: int = 50,
     db: Session = Depends(get_db)
@@ -352,7 +352,7 @@ async def get_case(
     context = get_console_context(request, db)
     
     case = db.query(Handover).filter(
-        Handover.id == case_id, 
+        Handover.id == case_id,
         Handover.client_id == context.client.id
     ).first()
     
@@ -373,7 +373,8 @@ async def get_case(
         sla_status = "breached"
     
     # Get customer info from User table via Conversation
-    from app.models import User, Conversation as ConvModel
+    from app.models import Conversation as ConvModel
+    from app.models import User
     customer_name = None
     customer_phone = None
     customer_remote_jid = None
@@ -426,11 +427,11 @@ async def send_manager_message(
     db: Session = Depends(get_db),
 ) -> ConsoleManagerMessageResponse:
     """Send a message from the manager to the customer via WhatsApp."""
+    from app.logging_config import get_logger
+    from app.models import Conversation, User
     from app.schemas.console import ConsoleManagerMessageRequest, ConsoleManagerMessageResponse
-    from app.models import User, Conversation
     from app.services.chatflow_service import send_bot_response
     from app.services.manager_message_service import get_user_remote_jid
-    from app.logging_config import get_logger
     
     logger = get_logger("console_send_message")
     
@@ -531,9 +532,10 @@ async def send_manager_message(
 )
 async def get_health(db: Session = Depends(get_db)) -> ConsoleHealthResponse:
     """Get system health status."""
-    from app.schemas.console import ConsoleHealthResponse
-    from app.models import OutboxMessage
     import os
+
+    from app.models import OutboxMessage
+    from app.schemas.console import ConsoleHealthResponse
     
     # Check database
     try:
@@ -573,7 +575,7 @@ async def list_audit_events(
 ) -> ConsoleAuditListResponse:
     """List audit events for the current client."""
     from app.models import AuditEvent
-    from app.schemas.console import ConsoleAuditEvent, ConsoleAuditListResponse
+    from app.schemas.console import ConsoleAuditListResponse
     
     context = get_console_context(request, db)
     
@@ -636,7 +638,7 @@ async def get_settings(
     """Get settings info: branches, agents, and bot config for the current client."""
     from app.models import Agent
     from app.models.client_settings import ClientSettings
-    from app.schemas.console import ConsoleAgentInfo, ConsoleSettingsResponse, ConsoleBotConfig
+    from app.schemas.console import ConsoleBotConfig, ConsoleSettingsResponse
     
     context = get_console_context(request, db)
     
@@ -699,6 +701,7 @@ async def get_metrics_daily(
 ) -> ConsoleMetricsDailyResponse:
     """Get daily metrics for cases."""
     from sqlalchemy import func
+
     from app.schemas.console import ConsoleMetricsDailyResponse
     
     context = get_console_context(request, db)

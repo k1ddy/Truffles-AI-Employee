@@ -11,7 +11,8 @@ from app.models import Agent, AgentIdentity, Branch, Client
 from app.services.console_errors import ConsoleAPIError
 
 try:
-    from jwt import InvalidTokenError, PyJWKClient, decode as jwt_decode
+    from jwt import InvalidTokenError, PyJWKClient
+    from jwt import decode as jwt_decode
 except Exception:  # pragma: no cover - optional dependency for dev scaffold
     InvalidTokenError = Exception
     PyJWKClient = None
