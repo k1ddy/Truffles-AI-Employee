@@ -1670,6 +1670,7 @@ def _run_livecheck_ca06_reset(args, context, *, suite_label="CA06"):
     db_user = context["db_user"]
     allowlist_jids = context["allowlist_jids"]
     outbox_url = f"{base_url}/admin/outbox/process"
+    outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
 
     if not remote_jid or remote_jid not in allowlist_jids:
         raise SystemExit(f"livecheck-auto: {suite_label} remote_jid not in allowlist")
