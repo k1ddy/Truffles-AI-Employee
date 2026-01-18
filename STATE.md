@@ -1762,6 +1762,30 @@ SELECT t FROM traces WHERE t->>'stage'='rag_retrieve';"
 **Note:**
 - у demo_salon сейчас один branch; изоляция подтверждена через branch_filter_empty + branch_id в decision_meta. Для теста A/B нужен второй branch (отдельное согласование, это изменение данных).
 
+### 2026-01-18 — CA-14 Onboarding readiness (validate + Qdrant + version)
+
+**Pack validate**
+- cmd: `python3 ops/sync_client.py demo_salon --validate-only`
+- output: ✅ client_pack валиден
+
+**Qdrant collections**
+- `truffles_knowledge`: status=green, points_count=80, segments=2
+- `services_index`: status=green, points_count=69, segments=4
+- source: Qdrant `/collections` endpoints (api-key via env)
+
+**/admin/version**
+- `{"version":"main","git_commit":"8230bd3e6f30aad9262a7f543116864af36c2ee3","build_time":"2026-01-18T15:30:49Z"}`
+
+Команды для сверки (без ключей в явном виде):
+
+python3 ops/sync_client.py demo_salon --validate-only
+curl -s http://localhost:8000/admin/version
+
+QDRANT_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' truffles_qdrant_1)
+QDRANT_KEY=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "$QDRANT_API_KEY"')
+curl -s -H "api-key: ${QDRANT_KEY}" "http://${QDRANT_IP}:6333/collections/truffles_knowledge"
+curl -s -H "api-key: ${QDRANT_KEY}" "http://${QDRANT_IP}:6333/collections/services_index"
+
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**
