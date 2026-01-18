@@ -1,11 +1,12 @@
 """
 Audit service for recording and querying audit events.
 """
+
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, DateTime, String, JSON
+from sqlalchemy import JSON, Column, DateTime, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,7 @@ from app.database import Base
 
 class AuditEvent(Base):
     """Audit log entry for tracking actions in the console."""
+
     __tablename__ = "audit_events"
 
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -37,7 +39,7 @@ def record_audit_event(
 ) -> AuditEvent:
     """
     Record an audit event.
-    
+
     Args:
         db: Database session
         actor: The agent performing the action (has id, name, client_id)
@@ -45,7 +47,7 @@ def record_audit_event(
         entity_type: Type of entity being acted upon (handover, conversation, etc.)
         entity_id: ID of the entity
         payload: Additional event data
-    
+
     Returns:
         The created AuditEvent
     """
@@ -73,13 +75,13 @@ def list_audit_events(
 ) -> list[AuditEvent]:
     """
     List audit events for a client.
-    
+
     Args:
         db: Database session
         client_id: Filter by client ID
         limit: Maximum number of events to return
         offset: Number of events to skip
-    
+
     Returns:
         List of AuditEvent objects
     """
