@@ -243,15 +243,98 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            export ALLOWLIST="77015705555@s.whatsapp.net,77759841926@s.whatsapp.net,77781658799@s.whatsapp.net"
+            ENV_FILES=(
+              "/home/zhan/infrastructure/.env"
+              "/home/zhan/.env"
+              "/home/zhan/truffles-main/.env"
+              "/home/zhan/truffles-main/truffles-api/.env"
+            )
+            python3 - <<'PY'
+            import os
+            from pathlib import Path
+
+            allowlist = os.environ.get("ALLOWLIST", "")
+            if not allowlist:
+                raise SystemExit("ALLOWLIST missing in deploy environment")
+            paths = [
+                "/home/zhan/infrastructure/.env",
+                "/home/zhan/.env",
+                "/home/zhan/truffles-main/.env",
+                "/home/zhan/truffles-main/truffles-api/.env",
+            ]
+
+            for path in paths:
+                env_path = Path(path)
+                if not env_path.exists():
+                    print(f"ENV_FILE missing: {path}")
+                    continue
+                try:
+                    text = env_path.read_text()
+                except Exception as exc:
+                    print(f"ENV_FILE read failed: {path}: {exc}")
+                    continue
+                lines = text.splitlines()
+                updated = False
+                for idx, line in enumerate(lines):
+                    if line.strip().startswith("OUTBOUND_ALLOWLIST_JIDS="):
+                        lines[idx] = f"OUTBOUND_ALLOWLIST_JIDS={allowlist}"
+                        updated = True
+                if not updated:
+                    lines.append(f"OUTBOUND_ALLOWLIST_JIDS={allowlist}")
+                new_text = "\n".join(lines)
+                if text.endswith("\n"):
+                    new_text += "\n"
+                try:
+                    env_path.write_text(new_text)
+                except Exception as exc:
+                    print(f"ENV_FILE write failed: {path}: {exc}")
+                    continue
+                print(f"ALLOWLIST in {path}:")
+                for line_no, line in enumerate(lines, 1):
+                    if "OUTBOUND_ALLOWLIST_JIDS=" in line:
+                        print(f"{line_no}:{line}")
+            PY
+            COMPOSE_FILE="/home/zhan/infrastructure/docker-compose.truffles.yml"
+            if [ -f "${COMPOSE_FILE}" ]; then
+              sed -i "s|OUTBOUND_ALLOWLIST_JIDS=.*|OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}|" "${COMPOSE_FILE}"
+              sed -i "s|OUTBOUND_ALLOWLIST_JIDS:[[:space:]]*.*|OUTBOUND_ALLOWLIST_JIDS: ${ALLOWLIST}|" "${COMPOSE_FILE}"
+              echo "ALLOWLIST in ${COMPOSE_FILE}:"
+              grep -n 'OUTBOUND_ALLOWLIST_JIDS' "${COMPOSE_FILE}" || true
+            fi
+            for ENV_FILE in "${ENV_FILES[@]}"; do
+              if [ -f "${ENV_FILE}" ]; then
+                echo "ALLOWLIST in ${ENV_FILE}:"
+                grep -n 'OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
+                ls -l "${ENV_FILE}" || true
+              else
+                echo "ENV_FILE missing: ${ENV_FILE}"
+              fi
+            done
+            if [ -f "/home/zhan/restart_api.sh" ]; then
+              grep -n 'OUTBOUND_ALLOWLIST_JIDS' /home/zhan/restart_api.sh || true
+              grep -n 'CHATFLOW_JID' /home/zhan/restart_api.sh || true
+              grep -n 'env-file' /home/zhan/restart_api.sh || true
+              grep -n 'docker compose' /home/zhan/restart_api.sh || true
+              grep -n '^cd ' /home/zhan/restart_api.sh || true
+            fi
             docker rm -f truffles-api >/dev/null 2>&1 || true
             IMAGE_TAG=main
             if [ "${{ github.ref }}" != "refs/heads/main" ]; then
               IMAGE_TAG=sha-${{ github.sha }}
             fi
             IMAGE_NAME=${{ env.IMAGE_NAME }}:${IMAGE_TAG} PULL_IMAGE=1 \
+            OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net,77759841926@s.whatsapp.net,77781658799@s.whatsapp.net \
             REQUIRE_GHCR=1 VERIFY_VERSION=1 \
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
             bash ~/restart_api.sh
+            for ENV_FILE in "${ENV_FILES[@]}"; do
+              if [ -f "${ENV_FILE}" ]; then
+                echo "ALLOWLIST after restart in ${ENV_FILE}:"
+                grep -n 'OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
+              fi
+            done
+            docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
     if: vars.CI_LIVECHECK_ENABLED == '1' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
@@ -336,7 +419,7 @@ jobs:
           PY
           ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Livecheck runner (CA-01/02/03/04/05/06/08/09/10)
+      - name: Livecheck runner (CA-01/02/03/04/05/06/07/08/09/10)
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
@@ -350,6 +433,7 @@ jobs:
           cat > "${REMOTE_SCRIPT}" <<'REMOTE'
           set -euo pipefail
           RUN_ID="${RUN_ID:?}"
+          GIT_SHA="${GIT_SHA:?}"
           GATE_LOG="/tmp/livecheck-gate-${RUN_ID}.txt"
           RUN_LOG="/tmp/livecheck-run-${RUN_ID}.log"
           ARTIFACT_TAR="/tmp/livecheck-artifacts-${RUN_ID}.tar.gz"
@@ -365,6 +449,7 @@ jobs:
               "livecheck-ca04-service.jsonl" \
               "livecheck-ca05-booking.jsonl" \
               "livecheck-ca06-consult.jsonl" \
+              "livecheck-ca07-ood.jsonl" \
               "livecheck-ca08-state.jsonl" \
               "livecheck-ca09-manager.jsonl" \
               "livecheck-ca10-outbox.jsonl" \
@@ -423,8 +508,38 @@ jobs:
             echo "GATE_FAILED" >> "${RUN_LOG}"
             exit 1
           fi
-          cd ~/truffles-main
-          suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca06-consult ca08-state ca09-manager ca10-outbox)
+          python3 - <<'PY' >> "${RUN_LOG}" 2>&1
+          import time
+          import urllib.request
+
+          url = "http://localhost:8000/health"
+          deadline = time.time() + 90
+          while True:
+              try:
+                  with urllib.request.urlopen(url, timeout=5) as resp:
+                      if 200 <= resp.status < 300:
+                          print(f"healthcheck ok: {resp.status}")
+                          break
+                      print(f"healthcheck status={resp.status}")
+              except Exception as exc:
+                  print(f"healthcheck error: {exc}")
+              if time.time() >= deadline:
+                  raise SystemExit("healthcheck timeout")
+              time.sleep(2)
+          PY
+          SOURCE_REPO="${HOME}/truffles-main"
+          git config --global --add safe.directory "${SOURCE_REPO}"
+          git config --global --add safe.directory "${SOURCE_REPO}/.git"
+          WORKDIR="/tmp/truffles-main-${GIT_SHA}"
+          if [ ! -d "${WORKDIR}/.git" ]; then
+            rm -rf "${WORKDIR}"
+            git clone --no-checkout "${SOURCE_REPO}" "${WORKDIR}"
+          fi
+          cd "${WORKDIR}"
+          git config --global --add safe.directory "$(pwd)"
+          git fetch origin "${GIT_SHA}" --depth=1
+          git checkout -q "${GIT_SHA}"
+          suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca06-consult ca07-ood ca08-state ca09-manager ca10-outbox)
           jid_for_suite() {
             local suite_name="$1"
             local idx=0
@@ -457,6 +572,11 @@ jobs:
             if [ "${suite_name}" = "ca06-consult" ]; then
               poll_timeout=120
             fi
+            local request_timeout=30
+            local noise_level="low"
+            if [ "${suite_name}" = "ca07-ood" ]; then
+              noise_level="none"
+            fi
             echo "SUITE_${suite_name}_JID=${suite_jid}" >> "${GATE_LOG}"
             local outfile="/tmp/livecheck-${suite_name}.jsonl"
             : > "${outfile}"
@@ -465,10 +585,12 @@ jobs:
               --client-slug demo_salon \
               --suite "${suite_name}" \
               --seed "${suite_seed}" \
+              --noise "${noise_level}" \
               --jid-mode allowlist \
               --remote-jid "${suite_jid}" \
               --allowlist-jids "${ALLOWLIST_CLEAN}" \
               --poll-timeout "${poll_timeout}" \
+              --timeout "${request_timeout}" \
               --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then
               :
             else
@@ -482,6 +604,7 @@ jobs:
           run_suite ca04-service 774
           run_suite ca05-booking 773
           run_suite ca06-consult 772
+          run_suite ca07-ood 771
           run_suite ca08-state 778
           run_suite ca09-manager 779
           run_suite ca10-outbox 780
@@ -491,7 +614,7 @@ jobs:
           REMOTE
           run_status=0
           SCRIPT_PATH="/tmp/livecheck-${RUN_ID}.sh"
-          if "${SSH[@]}" "RUN_ID=${RUN_ID} bash -c 'cat > ${SCRIPT_PATH} && chmod 700 ${SCRIPT_PATH} && bash ${SCRIPT_PATH} < /dev/null; status=\$?; rm -f ${SCRIPT_PATH}; exit \$status'" < "${REMOTE_SCRIPT}"; then
+          if "${SSH[@]}" "RUN_ID=${RUN_ID} GIT_SHA=${GITHUB_SHA} bash -c 'cat > ${SCRIPT_PATH} && chmod 700 ${SCRIPT_PATH} && bash ${SCRIPT_PATH} < /dev/null; status=\$?; rm -f ${SCRIPT_PATH}; exit \$status'" < "${REMOTE_SCRIPT}"; then
             run_status=0
           else
             run_status=$?
