@@ -178,6 +178,29 @@ LIVECHECK_SUITES = {
             ],
         }
     ],
+    "ca06-consult": [
+        {
+            "case_id": "CA06_PACK_ONLY",
+            "expected_consult_playbook_id": "hair_damage",
+            "expected_meta_consult_playbook_id": "hair_damage",
+            "expected_consult_decision": "consult_reply",
+            "expected_source": "pack",
+            "expected_llm_used": False,
+            "messages": [
+                "сухие волосы, что посоветуете?",
+            ],
+        },
+        {
+            "case_id": "CA06_SHORT_CIRCUIT",
+            "expected_consult_playbook_id": "nails_care",
+            "expected_consult_decision": "short_circuit",
+            "expected_fact_source_any": ["truth", "service_matcher"],
+            "expected_llm_used": False,
+            "messages": [
+                "уход за ногтями, сколько стоит маникюр?",
+            ],
+        },
+    ],
     "ca08-state": [
         {
             "case_id": "CA08_PENDING",
@@ -434,6 +457,16 @@ def _resolve_allowlist_jids(explicit, container_name):
             if jids:
                 return jids
     return []
+
+def _select_allowlist_jid(allowlist_jids, suite_name, seed):
+    if not allowlist_jids:
+        return None
+    if len(allowlist_jids) == 1:
+        return allowlist_jids[0]
+    seed_value = f"{suite_name}:{seed or 0}"
+    digest = uuid.uuid5(uuid.NAMESPACE_DNS, seed_value).int
+    idx = digest % len(allowlist_jids)
+    return allowlist_jids[idx]
 
 def _select_cases(cases, case_ids):
     if not case_ids:
@@ -940,6 +973,28 @@ def _poll_decision_meta(db_user, message_id, timeout, interval):
                 return last_conv_id, last_meta, None
         time.sleep(max(interval, 0.2))
     return last_conv_id, last_meta, last_error or "timeout"
+
+def _poll_decision_trace(db_user, conversation_id, timeout, interval):
+    if not conversation_id:
+        return None, [], "missing conversation_id"
+    deadline = time.time() + max(timeout, 0)
+    last_meta = None
+    last_error = None
+    last_trace = []
+    while time.time() <= deadline:
+        conv_meta, conv_error = _fetch_conversation_meta(db_user, conversation_id)
+        if conv_error:
+            last_error = conv_error
+        elif conv_meta:
+            last_meta = conv_meta
+            context = conv_meta.get("context") if isinstance(conv_meta, dict) else None
+            trace_list = context.get("decision_trace") if isinstance(context, dict) else None
+            trace_entries = _trace_as_list(trace_list)
+            if trace_entries:
+                return conv_meta, trace_entries, None
+            last_trace = trace_entries
+        time.sleep(max(interval, 0.2))
+    return last_meta, last_trace, last_error or "trace timeout"
 
 def _resolve_env_from_container(container_name, var_name):
     if not container_name:
@@ -1522,6 +1577,83 @@ def _run_livecheck_ca05_booking(args, context):
     }
     return summary
 
+def _run_livecheck_ca06_reset(args, context):
+    if args.dry_run:
+        return None
+    timestamp = context["timestamp"]
+    webhook_url = context["webhook_url"]
+    base_url = context["base_url"]
+    webhook_secret = context["webhook_secret"]
+    admin_token = context["admin_token"]
+    instance_id = context["instance_id"]
+    remote_jid = context["remote_jid"]
+    db_user = context["db_user"]
+    allowlist_jids = context["allowlist_jids"]
+    outbox_url = f"{base_url}/admin/outbox/process"
+
+    if not remote_jid or remote_jid not in allowlist_jids:
+        raise SystemExit("livecheck-auto: CA06 remote_jid not in allowlist")
+
+    reset_text = "начнем сначала"
+    reset_marker = f"LC:AUTO:CA06:RESET:{timestamp}"
+    reset_message_id = f"LC-AUTO-{timestamp}-CA06-RESET-{uuid.uuid4().hex[:8]}"
+    reset_payload = {
+        "body": {
+            "messageType": "text",
+            "message": f"{reset_text} [{reset_marker}]",
+            "metadata": {
+                "sender": "LivecheckAuto",
+                "timestamp": int(time.time()),
+                "messageId": reset_message_id,
+                "remoteJid": remote_jid,
+            },
+        }
+    }
+    if instance_id:
+        reset_payload["body"]["metadata"]["instanceId"] = instance_id
+    reset_status, reset_body, reset_error = _send_webhook_payload(
+        webhook_url, reset_payload, webhook_secret, args.timeout
+    )
+    print(
+        json.dumps(
+            {
+                "case_id": "CA06_RESET",
+                "step": "reset",
+                "marker": reset_marker,
+                "message_id": reset_message_id,
+                "remote_jid": remote_jid,
+                "text": reset_payload["body"]["message"],
+                "sent_at": datetime.now(timezone.utc).isoformat(),
+                "status": "sent" if reset_status and 200 <= reset_status < 300 else "error",
+                "http_status": reset_status,
+                "error": reset_error,
+                "response": (reset_body or "")[:200] if reset_body else None,
+            },
+            ensure_ascii=False,
+        )
+    )
+    _post_admin_outbox(outbox_url, admin_token, args.timeout)
+    conv_id, reset_meta, reset_meta_error = _poll_decision_meta(
+        db_user, reset_message_id, args.poll_timeout, args.poll_interval
+    )
+    if reset_meta_error:
+        raise SystemExit(f"livecheck-auto: CA06 reset meta poll failed ({reset_meta_error})")
+    reset_conv_meta, reset_trace, reset_trace_error = _poll_decision_trace(
+        db_user, conv_id, args.poll_timeout, args.poll_interval
+    )
+    if reset_trace_error:
+        raise SystemExit(f"livecheck-auto: CA06 reset trace poll failed ({reset_trace_error})")
+    last_trace = reset_trace[-1] if reset_trace else None
+    reset_state = reset_conv_meta.get("state") if isinstance(reset_conv_meta, dict) else None
+    return {
+        "reset_message_id": reset_message_id,
+        "reset_action": (reset_meta or {}).get("action"),
+        "reset_intent": (reset_meta or {}).get("intent"),
+        "reset_state": reset_state,
+        "reset_trace_stage": (last_trace or {}).get("stage"),
+        "reset_trace_decision": (last_trace or {}).get("decision"),
+    }
+
 def _run_livecheck_ca08_state(args, context):
     rng = context["rng"]
     case = context["cases"][0]
@@ -1987,10 +2119,8 @@ def _run_livecheck_auto(args):
         )
     test_mode_enabled = _resolve_test_mode(container_name)
     allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
-    if SAFE_ALLOWLIST_JID not in allowlist_jids or len(allowlist_jids) != 1:
-        raise SystemExit(
-            f"livecheck-auto: allowlist must contain only {SAFE_ALLOWLIST_JID} (got {allowlist_jids})"
-        )
+    if not allowlist_jids:
+        raise SystemExit("livecheck-auto: allowlist-jids is empty")
     if not test_mode_enabled:
         raise SystemExit("livecheck-auto: TEST_MODE disabled; refusing to run")
 
@@ -2043,7 +2173,9 @@ def _run_livecheck_auto(args):
         requested_case_ids = [case["case_id"] for case in suite_cases]
 
     if args.jid_mode == "allowlist":
-        remote_jid = args.remote_jid or allowlist_jids[0]
+        remote_jid = args.remote_jid or _select_allowlist_jid(
+            allowlist_jids, args.suite, args.seed
+        )
         if remote_jid not in allowlist_jids:
             raise SystemExit(
                 f"livecheck-auto: remote-jid {remote_jid} not in allowlist; refusing to send"
@@ -2087,8 +2219,19 @@ def _run_livecheck_auto(args):
         "outbox_wait_seconds": _resolve_outbox_wait_seconds(container_name),
     }
 
-    if args.suite in {"ca01-core", "ca02-policy", "ca03-info", "ca04-service", "ca05-booking"}:
+    if args.suite in {
+        "ca01-core",
+        "ca02-policy",
+        "ca03-info",
+        "ca04-service",
+        "ca05-booking",
+        "ca06-consult",
+    }:
         _ensure_bot_active_before_suite(args, context)
+
+    reset_summary = None
+    if args.suite == "ca06-consult":
+        reset_summary = _run_livecheck_ca06_reset(args, context)
 
     if args.suite == "ca08-state":
         summary = _run_livecheck_ca08_state(args, context)
@@ -2271,10 +2414,37 @@ def _run_livecheck_auto(args):
                             f"livecheck-auto: CA04 {case['case_id']} fact_intents mismatch"
                         )
 
+            if args.suite == "ca06-consult":
+                expected_source = case.get("expected_source")
+                if expected_source and (meta or {}).get("source") != expected_source:
+                    raise SystemExit(
+                        f"livecheck-auto: CA06 {case['case_id']} source mismatch"
+                    )
+                expected_meta_playbook = case.get("expected_meta_consult_playbook_id")
+                if expected_meta_playbook and (
+                    (meta or {}).get("consult_playbook_id") != expected_meta_playbook
+                ):
+                    raise SystemExit(
+                        f"livecheck-auto: CA06 {case['case_id']} consult_playbook_id mismatch"
+                    )
+                expected_fact_sources = case.get("expected_fact_source_any") or []
+                if expected_fact_sources:
+                    fact_source = (meta or {}).get("fact_source")
+                    if fact_source not in expected_fact_sources:
+                        raise SystemExit(
+                            f"livecheck-auto: CA06 {case['case_id']} fact_source mismatch"
+                        )
+                expected_llm = case.get("expected_llm_used")
+                if expected_llm is not None and (meta or {}).get("llm_used") is not expected_llm:
+                    raise SystemExit(
+                        f"livecheck-auto: CA06 {case['case_id']} llm_used mismatch"
+                    )
+
             conv_meta = None
             conv_error = None
             trace_entry = None
             info_trace = None
+            consult_trace = None
             trace_source = None
             if conv_id:
                 conv_meta, conv_error = _fetch_conversation_meta(db_user, conv_id)
@@ -2298,6 +2468,11 @@ def _run_livecheck_auto(args):
                     for entry in reversed(_trace_as_list(trace_list)):
                         if entry.get("stage") == "service_matcher":
                             info_trace = entry
+                            break
+                if args.suite == "ca06-consult":
+                    for entry in reversed(_trace_as_list(trace_list)):
+                        if entry.get("stage") == "consult_flow":
+                            consult_trace = entry
                             break
 
             if args.suite == "ca03-info":
@@ -2332,6 +2507,24 @@ def _run_livecheck_auto(args):
                         f"livecheck-auto: CA04 {case['case_id']} trace fact_source mismatch"
                     )
 
+            if args.suite == "ca06-consult":
+                if not consult_trace:
+                    raise SystemExit(
+                        f"livecheck-auto: CA06 {case['case_id']} missing consult_flow trace"
+                    )
+                expected_decision = case.get("expected_consult_decision")
+                if expected_decision and consult_trace.get("decision") != expected_decision:
+                    raise SystemExit(
+                        f"livecheck-auto: CA06 {case['case_id']} consult_flow decision mismatch"
+                    )
+                expected_trace_playbook = case.get("expected_consult_playbook_id")
+                if expected_trace_playbook and (
+                    consult_trace.get("consult_playbook_id") != expected_trace_playbook
+                ):
+                    raise SystemExit(
+                        f"livecheck-auto: CA06 {case['case_id']} consult_flow playbook mismatch"
+                    )
+
             results.append(
                 {
                     "case_id": case["case_id"],
@@ -2351,6 +2544,9 @@ def _run_livecheck_auto(args):
                     "info_combined": (meta or {}).get("info_combined"),
                     "fact_intents": (meta or {}).get("fact_intents"),
                     "service_query": (meta or {}).get("service_query"),
+                    "consult_playbook_id": (meta or {}).get("consult_playbook_id"),
+                    "consult_topic": (meta or {}).get("consult_topic"),
+                    "consult_variant_id": (meta or {}).get("consult_variant_id"),
                     "source": (meta or {}).get("source"),
                     "ack_message_id": ack_message_id,
                     "ack_marker": ack_marker,
@@ -2367,6 +2563,10 @@ def _run_livecheck_auto(args):
                     "trace_fact_source": (info_trace or {}).get("fact_source") if info_trace else None,
                     "trace_info_sections": (info_trace or {}).get("info_sections") if info_trace else None,
                     "trace_intents": (info_trace or {}).get("intents") if info_trace else None,
+                    "trace_consult_decision": (consult_trace or {}).get("decision") if consult_trace else None,
+                    "trace_consult_playbook_id": (consult_trace or {}).get("consult_playbook_id")
+                    if consult_trace
+                    else None,
                     "trace_error": conv_error,
                 }
             )
@@ -2376,6 +2576,8 @@ def _run_livecheck_auto(args):
 
     summary = dict(common)
     summary["results"] = results
+    if reset_summary:
+        summary["reset"] = reset_summary
     print(json.dumps({"summary": summary}, ensure_ascii=False))
 
 def _run_livecheck(args):
@@ -2831,6 +3033,19 @@ def _render_suite_lines(suite):
                 ("trace_stage", "trace_stage"),
                 ("trace_decision", "trace_decision"),
                 ("trace_fact_source", "trace_fact_source"),
+            ],
+            "ca06-consult": [
+                ("case_id", "case_id"),
+                ("message_id", "message_id"),
+                ("conversation_id", "conversation_id"),
+                ("action", "action"),
+                ("intent", "intent"),
+                ("consult_playbook_id", "consult_playbook_id"),
+                ("source", "source"),
+                ("fact_source", "fact_source"),
+                ("llm_used", "llm_used"),
+                ("trace_consult_decision", "trace_consult_decision"),
+                ("trace_consult_playbook_id", "trace_consult_playbook_id"),
             ],
         }
         columns = suite_columns.get(

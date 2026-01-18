@@ -721,6 +721,7 @@ def _run_webhook_conversation_turns(
     case_id: str,
     local_time: str | None,
     pending_sla_expected: bool = False,
+    intent_decomp_fn=_fake_intent_decomp,
 ) -> tuple[list[str], SimpleNamespace, SimpleNamespace]:
     conversation_id = uuid4()
     client = SimpleNamespace(id="client-123", name="demo_salon", config=_load_client_config_from_truth())
@@ -760,7 +761,7 @@ def _run_webhook_conversation_turns(
     carryover_patches, _ = _build_service_carryover_patch()
     patches = [
         patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint),
-        patch("app.routers.webhook._legacy.detect_multi_intent", side_effect=_fake_intent_decomp),
+        patch("app.routers.webhook._legacy.detect_multi_intent", side_effect=intent_decomp_fn),
         patch("app.routers.webhook._legacy._get_debounce_redis", return_value=None),
         patch("app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)),
         patch("app.routers.webhook._legacy.send_bot_response", return_value=True),
@@ -1012,6 +1013,63 @@ def test_booking_flow_expected_reply_and_interrupt():
     assert interrupt_trace is not None, f"{case_id}: missing booking_interrupt trace"
     trace_intents = interrupt_trace.get("info_intents")
     assert isinstance(trace_intents, list) and trace_intents, f"{case_id}: trace info_intents empty"
+
+
+def test_consult_pack_only_and_short_circuit():
+    def _consult_intent_decomp(text: str, **_kwargs) -> dict:
+        payload = _fake_intent_decomp(text, **_kwargs)
+        normalized = (text or "").casefold()
+        if any(keyword in normalized for keyword in ("уход", "посовет", "сух")):
+            payload["consult_intent"] = True
+        return payload
+
+    case_id = "CA06_PACK_ONLY"
+    _responses, conversation, saved_message = _run_webhook_conversation_turns(
+        ["сухие волосы, что посоветуете?"],
+        case_id,
+        None,
+        intent_decomp_fn=_consult_intent_decomp,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("consult_playbook_id") == "hair_damage", f"{case_id}: consult_playbook_id mismatch"
+    assert meta.get("source") == "pack", f"{case_id}: source mismatch"
+    assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+
+    trace = _get_decision_trace(conversation)
+    _assert_trace_contains(
+        trace,
+        {
+            "stage": "consult_flow",
+            "decision": "consult_reply",
+            "consult_playbook_id": "hair_damage",
+        },
+        case_id,
+    )
+
+    case_id = "CA06_SHORT_CIRCUIT"
+    _responses, conversation, saved_message = _run_webhook_conversation_turns(
+        ["уход за ногтями, сколько стоит маникюр?"],
+        case_id,
+        None,
+        intent_decomp_fn=_consult_intent_decomp,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+    fact_source = meta.get("fact_source")
+    assert fact_source in {"truth", "service_matcher"}, (
+        f"{case_id}: fact_source mismatch ({fact_source})"
+    )
+
+    trace = _get_decision_trace(conversation)
+    _assert_trace_contains(
+        trace,
+        {
+            "stage": "consult_flow",
+            "decision": "short_circuit",
+            "consult_playbook_id": "nails_care",
+        },
+        case_id,
+    )
 
 
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:

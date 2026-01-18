@@ -337,6 +337,8 @@ def _handle_consult_flow(
     intent_decomp_service_query: str | None,
     info_class_intents: set[str],
     intent_queue_followup: str | None,
+    current_goal: str | None,
+    consult_context: dict | None,
     message_count: int,
     now: datetime,
     send_and_save: Callable[..., tuple[str, bool]],
@@ -366,11 +368,20 @@ def _handle_consult_flow(
     consult_short_circuit = False
     consult_short_circuit_reason = None
     consult_short_circuit_service = None
+    consult_context_active = bool(current_goal == "consult")
     consult_blocked = bool(booking_wants_flow or booking_active or booking_signal)
-    if consult_intent:
+    if consult_intent or consult_context_active:
         consult_blocked = False
     elif intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}:
         consult_blocked = True
+    service_hint = None
+    service_hint_reason = None
+    if client_slug == "demo_salon" and message_text and (consult_intent or consult_context_active):
+        service_hint = get_demo_salon_service_hint(message_text)
+        if service_hint:
+            service_hint_reason = "service_hint"
+    service_query_for_consult = intent_decomp_service_query or service_hint
+    allow_service_query = bool(service_query_for_consult and (consult_intent or consult_context_active))
     consult_candidate = None
     if not consult_blocked:
         consult_candidate = build_consult_reply(
@@ -378,6 +389,7 @@ def _handle_consult_flow(
             client_slug=client_slug,
             intent_decomp=intent_decomp_payload,
             conversation_id=str(conversation.id),
+            allow_service_query=allow_service_query,
         )
     if consult_candidate and not consult_intent and isinstance(intent_decomp_payload, dict):
         consult_intent = True
@@ -392,7 +404,7 @@ def _handle_consult_flow(
         if candidate_question and not consult_question:
             consult_question = candidate_question
             intent_decomp_payload["consult_question"] = candidate_question
-    consult_intent_signal = bool(consult_intent or consult_candidate)
+    consult_intent_signal = bool(consult_intent or consult_candidate or consult_context_active)
     normalized_message = legacy.normalize_for_matching(message_text) if message_text else ""
     explicit_info_signal = bool(
         booking_signal
@@ -412,11 +424,13 @@ def _handle_consult_flow(
         consult_candidate.meta if consult_candidate and isinstance(consult_candidate.meta, dict) else None
     )
     if consult_intent_signal:
-        consult_short_circuit_service = intent_decomp_service_query
-        if not consult_short_circuit_service and client_slug == "demo_salon":
-            consult_short_circuit_service = get_demo_salon_service_hint(message_text)
-            if consult_short_circuit_service:
-                consult_short_circuit_reason = "service_hint"
+        if not service_hint and client_slug == "demo_salon" and message_text:
+            service_hint = get_demo_salon_service_hint(message_text)
+            if service_hint:
+                service_hint_reason = "service_hint"
+        consult_short_circuit_service = intent_decomp_service_query or service_hint
+        if consult_short_circuit_service and not intent_decomp_service_query and service_hint_reason:
+            consult_short_circuit_reason = service_hint_reason
         if consult_short_circuit_service and explicit_info_intent:
             consult_short_circuit = True
             if not consult_short_circuit_reason:

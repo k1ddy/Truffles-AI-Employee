@@ -221,12 +221,14 @@ python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
 - **Top Architect:** обновляет статус аудита в `STRATEGY/TECH_ROADMAP.md` (CA‑plan) только со ссылкой на `STATE.md`.
 
 **Перед запуском (обязательно):**
-- Используем **отдельный тестовый номер** (внешний JID). Self‑send в ChatFlow не гарантирует доставку на телефон.
+- Используем **пул тестовых JID** (внешние номера). Один suite → один JID, чтобы не текло `pending/expected_reply_type`.
+- Self‑send в ChatFlow не гарантирует доставку на телефон. **Разрешена симуляция instance→instance**, если inbound реально записан в БД.
 - Делаем короткий ping на тестовый номер. Если не дошло — **STOP**, чинить доставку.
 - Проверяем согласованность instance_id:
   - `clients.config.instance_id` — outbound instance (ChatFlow).
   - `branches.instance_id` — routing token для branch.
   - `instanceId` в webhook query — routing token (должен совпадать с `branches.instance_id`).
+  - Для симуляции instance→instance: **live считается валидным только при наличии inbound row** + `decision_meta/trace` в БД.
 
 **Операторская инструкция (без тех. знаний):**
 - Оператор **не** знает время/conv_id/msg_id/SQL. Это снимает Brain/OPS.
@@ -258,13 +260,13 @@ python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
 
 **Почему такой процесс:**
 - Live‑check требует **реального inbound**: только он пишет `decision_meta` и `decision_trace`.
-- `send-text`/симуляции не доказывают доставку на телефон, поэтому без внешнего номера audit невалиден.
+- Self‑send не доказателен; **instance→instance допустим**, если inbound подтверждён в БД.
 - Policy‑кейсы переводят диалог в `pending`; без ACK следующий кейс не попадёт в `policy_gate`.
 - Вариативные тексты нужны, чтобы проверить устойчивость к человеческим ошибкам, а не “под шаблон”.
 
 **Как проверяем (процесс):**
 1) Выбрать CA‑suite (например, `ca01-core`) и окно запуска.
-2) Запустить runner (реальный inbound через ChatFlow → `/webhook/{client_slug}`).
+2) Запустить runner (реальный inbound через ChatFlow → `/webhook/{client_slug}`), suite→JID фиксирован.
 3) Brain снимает evidence в БД по marker‑логам (decision_meta + decision_trace).
 4) Brain фиксирует PASS/FAIL в `STATE.md` с ссылкой на CA‑ID и артефактами.
 5) Top Architect обновляет статус CA‑пункта в `STRATEGY/TECH_ROADMAP.md` с ссылкой на `STATE.md`.
@@ -274,6 +276,7 @@ python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
 - Реальный inbound обязателен (WhatsApp → ChatFlow → `/webhook/{client_slug}`).
 - Любой `verified/gap` в CA‑plan обязан ссылаться на evidence в `STATE.md`.
 - Токены/секреты **не** попадают в git/логи.
+- **Prod БД не трогаем ради evidence.** Допустимы staging/test DB с явной пометкой окружения в `STATE.md`.
 - Если runner недоступен — статус **BLOCKED**, без ручных “подмен”.
 
 **Типы проверок:**
@@ -344,6 +347,18 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 
 **Правило:** инструменты не заменяют канон; они дают повторяемые доказательства.
 
+### 5.5.1 LLM testing policy (детерминизм + статистика)
+
+**Блокирующие (deterministic) гейты:**
+- Факты/консалт из pack: `llm_used=false`, `source=pack`, `consult_playbook_id` присутствует.
+- Hard‑LAW/Policy: LLM не вызывается, `policy_gate` фиксируется.
+
+**Неблокирующие (statistical) проверки:**
+- Ночной eval‑прогон: семантическое соответствие по рубрике/эмбеддингам (без сравнения текста).
+- Результат фиксируется в артефактах + краткое summary в `STATE.md` как risk‑note (без смены статуса CA).
+
+**Почему:** LLM‑текст недетерминирован; проверяем поведение через meta/trace и агрегированные метрики качества.
+
 ### 5.6 Повторяемый процесс запуска (один сценарий для всех ролей)
 
 1) **CI core/long** → ссылка на run (без этого STOP).  
@@ -360,7 +375,7 @@ Marker формат: `LC:<suite>:<case_id>:<timestamp>:<seq>`.
 
 **Режимы:**
 - `logic` (default): уникальный JID на кейс, `--skip-outbox` по умолчанию.
-- `state`: один allowlist‑JID (только тестовый номер), outbox включён для проверки pending/manager.
+- `state`: **JID‑pool** из allowlist; один JID на suite/запуск, outbox включён для проверки pending/manager.
 
 **Safety gate:**
 - `--allowlist-jids` (comma list) обязателен при включённом outbox.
@@ -386,7 +401,7 @@ python3 ops/diagnose.py webhook-fuzz \
   --client-slug demo_salon \
   --case-ids LAW_COMPLAINT \
   --remote-jid 77015705555@s.whatsapp.net \
-  --allowlist-jids 77015705555@s.whatsapp.net \
+  --allowlist-jids 77015705555@s.whatsapp.net,7701XXXXXXX@s.whatsapp.net \
   --webhook-secret "$WEBHOOK_SECRET" \
   --admin-token "$ALERTS_ADMIN_TOKEN"
 ```
@@ -464,7 +479,7 @@ LIMIT 3;
 
 **Обязательные условия в проде:**
 - `TEST_MODE=1` (блокирует outbound вне allowlist).
-- `OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net` (только тестовый номер).
+- `OUTBOUND_ALLOWLIST_JIDS` — comma list тестовых JID (пул).
 - Любая попытка отправки вне allowlist → STOP и GAP.
 
 ### 5.10 “Frozen” план действий (не менять без Top Architect)
@@ -493,14 +508,14 @@ LIMIT 3;
 **Разрешение:** включать только при явном флаге (например `CI_LIVECHECK_ENABLED=1`).  
 **Обязательные гейты:**
 - `TEST_MODE=1`
-- `OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net`
+- `OUTBOUND_ALLOWLIST_JIDS` — comma list тестовых JID (пул)
 - Для CA‑09: `QDRANT_COLLECTION` должен оканчиваться на `_ci` (если env пуст — default `truffles_knowledge_ci` в TEST_MODE).
 - Guard: при `TEST_MODE=1` и коллекции не `_ci` learning блокируется (`learning_mode=blocked`).
 - Только тестовый `client_slug` и test‑instance; любые другие → STOP.
 - `instanceId` в payload должен совпадать с `branches.instance_id` (DB); рассинхрон с `clients.config.instance_id` фиксируем как GAP.
 - Малый объём (4–10 сообщений), фиксированный seed, без спама.
 
-**CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca04-service`, `ca05-booking`, `ca08-state`, `ca09-manager`, `ca10-outbox`, артефакты `livecheck-artifacts/*`.
+**CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca04-service`, `ca05-booking`, `ca06-consult`, `ca08-state`, `ca09-manager`, `ca10-outbox`, артефакты `livecheck-artifacts/*`.
 **Evidence artifact:** `livecheck-evidence.md` (генерируется из jsonl + gate через `ops/diagnose.py emit-evidence`).
 **CA‑03 (ca03-info):** truth‑first info_bundle → `decision_meta.fact_source=truth`, `info_sections`+`fact_intents`, `info_combined` (address+hours), `llm_used=false`, `source` ∈ {`truth_gate`,`class_router`}, trace `stage` ∈ {`truth_gate`,`info_class`}.
 **CA‑04 (ca04-service):** service matcher → `decision_meta.action=reply`, `intent` ∈ {`service_match`,`service_not_found`}, `fact_source=service_matcher`, `fact_intents` contains `service_match`/`service_not_found`, `source=service_matcher`, `llm_used=false`, trace `stage=service_matcher`, `decision` = intent, `fact_source=service_matcher`.
@@ -523,7 +538,7 @@ LIMIT 3;
 | CA-03 | `ca03-info` | live | fact_source=truth; info_sections; fact_intents; info_combined (address+hours); llm_used=false; source ∈ {truth_gate,class_router} | stage ∈ {truth_gate,info_class}; fact_source=truth; info_sections/intents | `livecheck-ca03-info.jsonl` + `livecheck-gate.txt` + CI core |
 | CA-04 | `ca04-service` | live | action=reply; intent ∈ {service_match,service_not_found}; fact_source=service_matcher; fact_intents; llm_used=false; source=service_matcher | stage=service_matcher; decision=intent; fact_source=service_matcher | `livecheck-ca04-service.jsonl` + `livecheck-gate.txt` + CI core |
 | CA-05 | `ca05-booking` | live | expected_reply_type (service_choice→time); booking.service; booking_info_interrupt=true; booking_info_intents | stage=booking_interrupt; info_intents | `livecheck-ca05-booking.jsonl` + `livecheck-gate.txt` + CI booking |
-| CA-06 | manual | live | action=consult_reply; consult_playbook_id; consult_topic; source=pack | stage=consult_flow/consult; consult_playbook_id | manual live-check + CI consult |
+| CA-06 | `ca06-consult` | live | consult_reply: consult_playbook_id + source=pack; short_circuit: fact_source ∈ {truth,service_matcher}; llm_used=false | stage=consult_flow (decision=consult_reply/short_circuit); consult_playbook_id | `livecheck-ca06-consult.jsonl` + `livecheck-gate.txt` + CI consult |
 | CA-07 | manual | logic | action=out_of_domain/smalltalk; source=guard/router; llm_used=false (when gated) | stage ∈ {out_of_domain,fast_intent,smalltalk} | CI core + SQL trace |
 | CA-08 | `ca08-state` | live | action=escalate; pending_action=pending_ack | stage ∈ {pending_sla,pending_resume} | `livecheck-ca08-state.jsonl` + `livecheck-gate.txt` + SQL state/handover |
 | CA-09 | `ca09-manager` | live | action=escalate; policy_gate=hard_law | stage=policy_gate (hard_law) | `livecheck-ca09-manager.jsonl` + `livecheck-gate.txt` + Telegram/DB/Qdrant |

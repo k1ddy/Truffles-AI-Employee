@@ -5514,6 +5514,8 @@ async def _handle_webhook_payload(
         intent_decomp_service_query=intent_decomp_service_query,
         info_class_intents=info_class_intents,
         intent_queue_followup=intent_queue_followup,
+        current_goal=current_goal,
+        consult_context=consult_context,
         message_count=message_count,
         now=now,
         send_and_save=_send_and_save,

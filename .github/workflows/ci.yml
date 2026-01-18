@@ -336,7 +336,7 @@ jobs:
           PY
           ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Livecheck runner (CA-01/02/03/04/05/08/09/10)
+      - name: Livecheck runner (CA-01/02/03/04/05/06/08/09/10)
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
@@ -364,6 +364,7 @@ jobs:
               "livecheck-ca03-info.jsonl" \
               "livecheck-ca04-service.jsonl" \
               "livecheck-ca05-booking.jsonl" \
+              "livecheck-ca06-consult.jsonl" \
               "livecheck-ca08-state.jsonl" \
               "livecheck-ca09-manager.jsonl" \
               "livecheck-ca10-outbox.jsonl" \
@@ -390,9 +391,26 @@ jobs:
             echo "TEST_MODE_NOT_ENABLED" >> "${GATE_LOG}"
             gate_ok=0
           fi
-          if [ "${ALLOWLIST}" != "77015705555@s.whatsapp.net" ]; then
-            echo "ALLOWLIST_MISMATCH" >> "${GATE_LOG}"
+          ALLOWLIST_CLEAN="${ALLOWLIST// /}"
+          IFS=',' read -r -a ALLOWLIST_POOL <<< "${ALLOWLIST_CLEAN}"
+          if [ -z "${ALLOWLIST_CLEAN}" ]; then
+            echo "ALLOWLIST_EMPTY" >> "${GATE_LOG}"
             gate_ok=0
+          else
+            for jid in "${ALLOWLIST_POOL[@]}"; do
+              if [ -z "${jid}" ]; then
+                echo "ALLOWLIST_EMPTY_ITEM" >> "${GATE_LOG}"
+                gate_ok=0
+                continue
+              fi
+              case "${jid}" in
+                *@s.whatsapp.net) ;;
+                *)
+                  echo "ALLOWLIST_INVALID_JID" >> "${GATE_LOG}"
+                  gate_ok=0
+                  ;;
+              esac
+            done
           fi
           case "${QDRANT_COLLECTION_EFFECTIVE}" in
             *_ci) ;;
@@ -406,10 +424,40 @@ jobs:
             exit 1
           fi
           cd ~/truffles-main
+          suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca06-consult ca08-state ca09-manager ca10-outbox)
+          jid_for_suite() {
+            local suite_name="$1"
+            local idx=0
+            for i in "${!suite_order[@]}"; do
+              if [ "${suite_order[$i]}" = "${suite_name}" ]; then
+                idx=$i
+                break
+              fi
+            done
+            local pool_size=${#ALLOWLIST_POOL[@]}
+            if [ "${pool_size}" -le 0 ]; then
+              echo ""
+              return
+            fi
+            local pool_idx=$((idx % pool_size))
+            echo "${ALLOWLIST_POOL[$pool_idx]}"
+          }
           suite_fail=0
           run_suite() {
             local suite_name="$1"
             local suite_seed="$2"
+            local suite_jid
+            suite_jid=$(jid_for_suite "${suite_name}")
+            if [ -z "${suite_jid}" ]; then
+              echo "suite ${suite_name} missing allowlist jid" >> "${RUN_LOG}"
+              suite_fail=1
+              return
+            fi
+            local poll_timeout=60
+            if [ "${suite_name}" = "ca06-consult" ]; then
+              poll_timeout=120
+            fi
+            echo "SUITE_${suite_name}_JID=${suite_jid}" >> "${GATE_LOG}"
             local outfile="/tmp/livecheck-${suite_name}.jsonl"
             : > "${outfile}"
             if python3 ops/diagnose.py livecheck-auto \
@@ -418,8 +466,9 @@ jobs:
               --suite "${suite_name}" \
               --seed "${suite_seed}" \
               --jid-mode allowlist \
-              --remote-jid 77015705555@s.whatsapp.net \
-              --poll-timeout 60 \
+              --remote-jid "${suite_jid}" \
+              --allowlist-jids "${ALLOWLIST_CLEAN}" \
+              --poll-timeout "${poll_timeout}" \
               --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then
               :
             else
@@ -432,6 +481,7 @@ jobs:
           run_suite ca03-info 775
           run_suite ca04-service 774
           run_suite ca05-booking 773
+          run_suite ca06-consult 772
           run_suite ca08-state 778
           run_suite ca09-manager 779
           run_suite ca10-outbox 780

@@ -1857,18 +1857,24 @@ def build_consult_reply(
     client_slug: str | None = "demo_salon",
     intent_decomp: dict | None = None,
     conversation_id: str | None = None,
+    allow_service_query: bool = False,
 ) -> DemoSalonDecision | None:
     normalized = _normalize_text(message)
-    if not normalized or _should_skip_consult(normalized, message):
-        return None
-
     consult_intent = False
     consult_topic = None
     consult_question = None
+    intent_service_query = None
     if isinstance(intent_decomp, dict):
         consult_intent = intent_decomp.get("consult_intent") is True
         consult_topic = _clean_consult_value(intent_decomp.get("consult_topic"), 4)
         consult_question = _clean_consult_value(intent_decomp.get("consult_question"), 12)
+        service_query = intent_decomp.get("service_query")
+        if isinstance(service_query, str):
+            intent_service_query = service_query.strip() or None
+
+    has_service_query = bool(intent_service_query) or allow_service_query
+    if not normalized or (_should_skip_consult(normalized, message) and not has_service_query):
+        return None
 
     playbooks = _load_consult_playbooks()
     if not playbooks:
