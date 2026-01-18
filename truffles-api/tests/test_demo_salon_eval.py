@@ -1126,25 +1126,27 @@ def test_ood_low_signal_and_smalltalk_gates():
         {"service_semantic_guard", "no_response_guard", "router_low_confidence"},
     )
 
-    case_id = "CA07_SMALLTALK"
-    _response, conversation, saved_message = _run_webhook_conversation(
-        ["привет"],
-        case_id,
-        None,
-    )
-    meta = saved_message.message_metadata.get("decision_meta", {})
-    assert meta.get("action") == "smalltalk", f"{case_id}: action mismatch"
-    assert meta.get("intent") == "greeting", f"{case_id}: intent mismatch"
-    assert meta.get("source") == "fast_intent", f"{case_id}: source mismatch"
-    assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+    greetings = ["привет", "привет плз"]
+    for idx, greeting in enumerate(greetings, start=1):
+        case_id = f"CA07_SMALLTALK_{idx}"
+        _response, conversation, saved_message = _run_webhook_conversation(
+            [greeting],
+            case_id,
+            None,
+        )
+        meta = saved_message.message_metadata.get("decision_meta", {})
+        assert meta.get("action") == "smalltalk", f"{case_id}: action mismatch"
+        assert meta.get("intent") == "greeting", f"{case_id}: intent mismatch"
+        assert meta.get("source") == "fast_intent", f"{case_id}: source mismatch"
+        assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
 
-    trace = _get_decision_trace(conversation)
-    _assert_trace_stage_decision_any(
-        trace,
-        case_id,
-        {"fast_intent", "smalltalk"},
-        {"smalltalk", "greeting"},
-    )
+        trace = _get_decision_trace(conversation)
+        _assert_trace_stage_decision_any(
+            trace,
+            case_id,
+            {"fast_intent", "smalltalk"},
+            {"smalltalk", "greeting"},
+        )
 
 
 def test_llm_guard_records_trace_and_meta():
