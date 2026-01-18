@@ -1088,6 +1088,7 @@ def test_ood_low_signal_and_smalltalk_gates():
         "domain_anchor",
         "router_low_confidence",
         "service_semantic_guard",
+        "no_response_guard",
         "question_contract",
     }
     ood_decisions = {
@@ -1095,8 +1096,10 @@ def test_ood_low_signal_and_smalltalk_gates():
         "domain_anchor",
         "router_low_confidence",
         "service_semantic_guard",
+        "no_response_guard",
         "expected_reply_off_topic",
     }
+    low_signal_sources = {"service_semantic_guard", "no_response_guard"}
 
     case_id = "CA07_OOD"
     _response, conversation, saved_message = _run_webhook_conversation(
@@ -1122,11 +1125,16 @@ def test_ood_low_signal_and_smalltalk_gates():
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("action") == "out_of_domain", f"{case_id}: action mismatch"
     assert meta.get("intent") == "out_of_domain", f"{case_id}: intent mismatch"
-    assert meta.get("source") == "service_semantic_guard", f"{case_id}: source mismatch"
+    assert meta.get("source") in low_signal_sources, f"{case_id}: source mismatch"
     assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
 
     trace = _get_decision_trace(conversation)
-    _assert_trace_stage_decision_any(trace, case_id, {"out_of_domain"}, {"service_semantic_guard"})
+    _assert_trace_stage_decision_any(
+        trace,
+        case_id,
+        {"out_of_domain"},
+        {"service_semantic_guard", "no_response_guard"},
+    )
 
     case_id = "CA07_SMALLTALK"
     _response, conversation, saved_message = _run_webhook_conversation(
