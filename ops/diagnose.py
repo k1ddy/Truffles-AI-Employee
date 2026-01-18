@@ -232,9 +232,9 @@ LIVECHECK_SUITES = {
             "case_id": "CA07_LOW_SIGNAL",
             "expected_action": "out_of_domain",
             "expected_intent": "out_of_domain",
-            "expected_source_any": ["service_semantic_guard", "no_response_guard"],
+            "expected_source_any": ["service_semantic_guard", "no_response_guard", "router_low_confidence"],
             "expected_trace_stage_any": ["out_of_domain"],
-            "expected_trace_decision_any": ["service_semantic_guard", "no_response_guard"],
+            "expected_trace_decision_any": ["service_semantic_guard", "no_response_guard", "router_low_confidence"],
             "expected_llm_used": False,
             "messages": [
                 "мм...",

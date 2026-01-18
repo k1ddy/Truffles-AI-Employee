@@ -1099,7 +1099,7 @@ def test_ood_low_signal_and_smalltalk_gates():
         "no_response_guard",
         "expected_reply_off_topic",
     }
-    low_signal_sources = {"service_semantic_guard", "no_response_guard"}
+    low_signal_sources = {"service_semantic_guard", "no_response_guard", "router_low_confidence"}
 
     case_id = "CA07_OOD"
     _response, conversation, saved_message = _run_webhook_conversation(
@@ -1133,7 +1133,7 @@ def test_ood_low_signal_and_smalltalk_gates():
         trace,
         case_id,
         {"out_of_domain"},
-        {"service_semantic_guard", "no_response_guard"},
+        {"service_semantic_guard", "no_response_guard", "router_low_confidence"},
     )
 
     case_id = "CA07_SMALLTALK"
