@@ -250,16 +250,49 @@ jobs:
               "/home/zhan/truffles-main/.env"
               "/home/zhan/truffles-main/truffles-api/.env"
             )
-            for ENV_FILE in "${ENV_FILES[@]}"; do
-              if [ -f "${ENV_FILE}" ]; then
-                chmod u+w "${ENV_FILE}" || true
-                if grep -q 'OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}"; then
-                  sed -i "s|^[[:space:]]*OUTBOUND_ALLOWLIST_JIDS=.*|OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}|" "${ENV_FILE}"
-                else
-                  echo "OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}" >> "${ENV_FILE}"
-                fi
-              fi
-            done
+            python3 - <<'PY'
+            import os
+            from pathlib import Path
+
+            allowlist = os.environ.get("ALLOWLIST", "")
+            paths = [
+                "/home/zhan/infrastructure/.env",
+                "/home/zhan/.env",
+                "/home/zhan/truffles-main/.env",
+                "/home/zhan/truffles-main/truffles-api/.env",
+            ]
+
+            for path in paths:
+                env_path = Path(path)
+                if not env_path.exists():
+                    print(f"ENV_FILE missing: {path}")
+                    continue
+                try:
+                    text = env_path.read_text()
+                except Exception as exc:
+                    print(f"ENV_FILE read failed: {path}: {exc}")
+                    continue
+                lines = text.splitlines()
+                updated = False
+                for idx, line in enumerate(lines):
+                    if line.strip().startswith("OUTBOUND_ALLOWLIST_JIDS="):
+                        lines[idx] = f"OUTBOUND_ALLOWLIST_JIDS={allowlist}"
+                        updated = True
+                if not updated:
+                    lines.append(f"OUTBOUND_ALLOWLIST_JIDS={allowlist}")
+                new_text = "\n".join(lines)
+                if text.endswith("\n"):
+                    new_text += "\n"
+                try:
+                    env_path.write_text(new_text)
+                except Exception as exc:
+                    print(f"ENV_FILE write failed: {path}: {exc}")
+                    continue
+                print(f"ALLOWLIST in {path}:")
+                for line_no, line in enumerate(lines, 1):
+                    if "OUTBOUND_ALLOWLIST_JIDS=" in line:
+                        print(f"{line_no}:{line}")
+            PY
             COMPOSE_FILE="/home/zhan/infrastructure/docker-compose.truffles.yml"
             if [ -f "${COMPOSE_FILE}" ]; then
               sed -i "s|OUTBOUND_ALLOWLIST_JIDS=.*|OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}|" "${COMPOSE_FILE}"
