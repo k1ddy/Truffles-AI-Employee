@@ -1128,6 +1128,11 @@ def _post_admin_outbox(url, admin_token, timeout):
     except urllib.error.URLError as exc:
         return None, "", str(exc)
 
+def _post_admin_outbox_with_wait(url, admin_token, timeout, wait_seconds):
+    if wait_seconds and wait_seconds > 0:
+        time.sleep(wait_seconds)
+    return _post_admin_outbox(url, admin_token, timeout)
+
 def _ensure_bot_active_before_suite(args, context):
     if args.dry_run:
         return
@@ -1140,6 +1145,7 @@ def _ensure_bot_active_before_suite(args, context):
     admin_token = context.get("admin_token")
     instance_id = context.get("instance_id")
     timestamp = context.get("timestamp")
+    outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
     if not remote_jid or not client_id or not db_user:
         return
     conv_id, state, error = _fetch_latest_conversation_state(db_user, client_id, remote_jid)
@@ -1212,7 +1218,12 @@ def _ensure_bot_active_before_suite(args, context):
         preflight_status, preflight_body, preflight_error = _send_webhook_payload(
             webhook_url, preflight_payload, webhook_secret, args.timeout
         )
-        _post_admin_outbox(f"{context.get('base_url')}/admin/outbox/process", admin_token, args.timeout)
+        _post_admin_outbox_with_wait(
+            f"{context.get('base_url')}/admin/outbox/process",
+            admin_token,
+            args.timeout,
+            outbox_wait_seconds,
+        )
     if preflight_error:
         raise SystemExit(f"livecheck-auto: preflight message failed ({preflight_error})")
     cleared = False
@@ -1429,8 +1440,9 @@ def _run_livecheck_ca05_booking(args, context):
     db_user = context["db_user"]
     allowlist_jids = context["allowlist_jids"]
     outbox_url = f"{base_url}/admin/outbox/process"
-    min_wait = min(args.min_wait, args.max_wait)
-    max_wait = max(args.min_wait, args.max_wait)
+    outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
+    min_wait = max(min(args.min_wait, args.max_wait), outbox_wait_seconds)
+    max_wait = max(max(args.min_wait, args.max_wait), outbox_wait_seconds)
 
     if not remote_jid or remote_jid not in allowlist_jids:
         raise SystemExit("livecheck-auto: CA05 remote_jid not in allowlist")
@@ -1478,7 +1490,12 @@ def _run_livecheck_ca05_booking(args, context):
                 ensure_ascii=False,
             )
         )
-        _post_admin_outbox(outbox_url, admin_token, args.timeout)
+        _post_admin_outbox_with_wait(
+            outbox_url,
+            admin_token,
+            args.timeout,
+            outbox_wait_seconds,
+        )
         conv_id, reset_meta, reset_meta_error = _poll_decision_meta(
             db_user, reset_message_id, args.poll_timeout, args.poll_interval
         )
@@ -1561,7 +1578,12 @@ def _run_livecheck_ca05_booking(args, context):
         conv_meta = None
         conv_error = None
         if not args.dry_run:
-            _post_admin_outbox(outbox_url, admin_token, args.timeout)
+            _post_admin_outbox_with_wait(
+                outbox_url,
+                admin_token,
+                args.timeout,
+                outbox_wait_seconds,
+            )
             conv_id, meta, error = _poll_decision_meta(
                 db_user, message_id, args.poll_timeout, args.poll_interval
             )
@@ -1690,7 +1712,12 @@ def _run_livecheck_ca06_reset(args, context, *, suite_label="CA06"):
             ensure_ascii=False,
         )
     )
-    _post_admin_outbox(outbox_url, admin_token, args.timeout)
+    _post_admin_outbox_with_wait(
+        outbox_url,
+        admin_token,
+        args.timeout,
+        outbox_wait_seconds,
+    )
     conv_id, reset_meta, reset_meta_error = _poll_decision_meta(
         db_user, reset_message_id, args.poll_timeout, args.poll_interval
     )
@@ -1726,6 +1753,7 @@ def _run_livecheck_ca08_state(args, context):
     db_user = context["db_user"]
     outbox_url = f"{base_url}/admin/outbox/process"
     allowlist_jids = context["allowlist_jids"]
+    outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
 
     if not remote_jid or remote_jid not in allowlist_jids:
         raise SystemExit("livecheck-auto: CA08 remote_jid not in allowlist")
@@ -1780,8 +1808,11 @@ def _run_livecheck_ca08_state(args, context):
     outbox_body = None
     outbox_error = None
     if not args.dry_run:
-        outbox_status, outbox_body, outbox_error = _post_admin_outbox(
-            outbox_url, admin_token, args.timeout
+        outbox_status, outbox_body, outbox_error = _post_admin_outbox_with_wait(
+            outbox_url,
+            admin_token,
+            args.timeout,
+            outbox_wait_seconds,
         )
         conv_id, meta, error = _poll_decision_meta(
             db_user, message_id, args.poll_timeout, args.poll_interval
@@ -1821,8 +1852,11 @@ def _run_livecheck_ca08_state(args, context):
         ack_status, ack_body, ack_error = _send_webhook_payload(
             webhook_url, ack_payload, webhook_secret, args.timeout
         )
-        ack_outbox_status, ack_outbox_body, ack_outbox_error = _post_admin_outbox(
-            outbox_url, admin_token, args.timeout
+        ack_outbox_status, ack_outbox_body, ack_outbox_error = _post_admin_outbox_with_wait(
+            outbox_url,
+            admin_token,
+            args.timeout,
+            outbox_wait_seconds,
         )
         _, ack_meta, ack_meta_error = _poll_decision_meta(
             db_user, ack_message_id, args.poll_timeout, args.poll_interval
@@ -1889,6 +1923,7 @@ def _run_livecheck_ca09_manager(args, context):
     outbox_url = f"{base_url}/admin/outbox/process"
     allowlist_jids = context["allowlist_jids"]
     qdrant_env = context["qdrant_env"]
+    outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
 
     if not remote_jid or remote_jid not in allowlist_jids:
         raise SystemExit("livecheck-auto: CA09 remote_jid not in allowlist")
@@ -1937,7 +1972,12 @@ def _run_livecheck_ca09_manager(args, context):
     conv_id = None
     meta = None
     if not args.dry_run:
-        _post_admin_outbox(outbox_url, admin_token, args.timeout)
+        _post_admin_outbox_with_wait(
+            outbox_url,
+            admin_token,
+            args.timeout,
+            outbox_wait_seconds,
+        )
         conv_id, meta, error = _poll_decision_meta(
             db_user, message_id, args.poll_timeout, args.poll_interval
         )
@@ -1992,7 +2032,12 @@ def _run_livecheck_ca09_manager(args, context):
         manager_status, manager_body, manager_error = _send_json_payload(
             f"{base_url}/telegram-webhook", telegram_payload, args.timeout
         )
-        _post_admin_outbox(outbox_url, admin_token, args.timeout)
+        _post_admin_outbox_with_wait(
+            outbox_url,
+            admin_token,
+            args.timeout,
+            outbox_wait_seconds,
+        )
 
     conv_after, conv_after_error = _fetch_conversation_meta(db_user, conv_id) if conv_id else (None, None)
     handover_after, handover_after_error = _fetch_handover_meta(db_user, conv_id) if conv_id else (None, None)
@@ -2277,6 +2322,9 @@ def _run_livecheck_auto(args):
         "container_name": container_name,
         "outbox_wait_seconds": _resolve_outbox_wait_seconds(container_name),
     }
+    outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
+    sleep_min = max(min_wait, outbox_wait_seconds)
+    sleep_max = max(max_wait, outbox_wait_seconds)
 
     if args.suite in {
         "ca01-core",
@@ -2286,6 +2334,9 @@ def _run_livecheck_auto(args):
         "ca05-booking",
         "ca06-consult",
         "ca07-ood",
+        "ca08-state",
+        "ca09-manager",
+        "ca10-outbox",
     }:
         _ensure_bot_active_before_suite(args, context)
 
@@ -2294,6 +2345,8 @@ def _run_livecheck_auto(args):
         reset_summary = _run_livecheck_ca06_reset(args, context, suite_label="CA06")
     elif args.suite == "ca07-ood":
         reset_summary = _run_livecheck_ca06_reset(args, context, suite_label="CA07")
+    if reset_summary and not args.dry_run and outbox_wait_seconds > 0:
+        time.sleep(outbox_wait_seconds)
 
     if args.suite == "ca08-state":
         summary = _run_livecheck_ca08_state(args, context)
@@ -2324,6 +2377,8 @@ def _run_livecheck_auto(args):
     for idx, case in enumerate(selected_cases, start=1):
         if args.suite == "ca07-ood" and case.get("reset_before_case"):
             _run_livecheck_ca06_reset(args, context, suite_label="CA07")
+            if not args.dry_run and outbox_wait_seconds > 0:
+                time.sleep(outbox_wait_seconds)
         text, marker, message = _build_livecheck_message(
             rng, case, f"LC:AUTO:{args.suite}", timestamp, idx, args.noise
         )
@@ -2396,7 +2451,12 @@ def _run_livecheck_auto(args):
 
         if not args.dry_run:
             outbox_url = f"{base_url}/admin/outbox/process"
-            _post_admin_outbox(outbox_url, admin_token, args.timeout)
+            _post_admin_outbox_with_wait(
+                outbox_url,
+                admin_token,
+                args.timeout,
+                outbox_wait_seconds,
+            )
             conv_id, meta, error = _poll_decision_meta(
                 db_user, message_id, args.poll_timeout, args.poll_interval
             )
@@ -2425,7 +2485,12 @@ def _run_livecheck_auto(args):
             )
             if ack_error:
                 raise SystemExit(f"livecheck-auto: ACK failed ({ack_error})")
-            _post_admin_outbox(outbox_url, admin_token, args.timeout)
+            _post_admin_outbox_with_wait(
+                outbox_url,
+                admin_token,
+                args.timeout,
+                outbox_wait_seconds,
+            )
 
             policy_pack_missing = (meta or {}).get("policy_pack_missing")
             if policy_pack_missing:
@@ -2698,7 +2763,7 @@ def _run_livecheck_auto(args):
             )
 
         if idx < len(selected_cases):
-            time.sleep(rng.uniform(min_wait, max_wait))
+            time.sleep(rng.uniform(sleep_min, sleep_max))
 
     summary = dict(common)
     summary["results"] = results
