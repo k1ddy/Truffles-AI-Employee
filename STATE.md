@@ -1642,6 +1642,58 @@
   - `SELECT id, ROUND(EXTRACT(EPOCH FROM (updated_at - created_at))::numeric, 2) AS total_s FROM outbox_messages WHERE status='SENT' ORDER BY updated_at DESC LIMIT 10;`
   - output: `2.84, 5.47, 12.67, 1.96, 8.02, 7.08, 16.93, 10.83, 10.60, 16.70`
 
+### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
+
+**CI:**
+- main CI green: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21114094208
+
+**Budget gate (trace):**
+- conv_id: `56894357-8309-42d3-bf66-02893e239287`
+- msg_id: `FZ-20260118-154554-01-92ca954f`, `FZ-20260118-154606-01-14b8b7fe`
+- decision_trace budget_gate:
+  - `2026-01-18T15:46:03.075640+00:00` allow (count=1/limit=1, scope=router)
+  - `2026-01-18T15:46:12.064975+00:00` deny (reason=budget_exceeded, count=2/limit=1, scope=router)
+
+**LLM degradation (trace + meta):**
+- conv_id: `590848f8-423c-4118-9de0-5f830c643a46`
+- decision_trace: stage=llm_degradation, reason=llm_skip, recorded_at=`2026-01-16T01:34:19.188694+00:00`
+- decision_meta sample (router_* + degradation):
+  - msg_id: `80d192bf-e41a-45f4-b2f6-8e9e9d577e46`
+  - router_eligible=true, controller_attempted=true, llm_degradation_reason=llm_skip
+  - class_router.router.sla present (attempts/timeouts/fallbacks)
+
+**/admin/metrics:**
+- `GET /admin/metrics?client_slug=demo_salon&metric_date=2026-01-17`
+- Response: `{"metric_date":"2026-01-17","outbox_latency_p50":null,"outbox_latency_p90":null,"llm_timeout_rate":0.0,"llm_used_rate":0.0,"escalation_rate":0.0,"fast_intent_rate":0.0,"asr_fail_rate":0.0,"rag_low_conf_rate":0.0,"clarify_rate":0.0,"clarify_success_rate":0.0,"total_user_messages":0,"total_outbox_sent":0,"total_outbox_failed":0,"total_llm_used":0,"total_llm_timeout":0,"total_handovers":0,"total_fast_intent":0,"total_asr_used":0,"total_asr_failed":0,"created_at":"2026-01-17T01:41:36.002061+00:00","updated_at":"2026-01-17T01:41:36.002061+00:00","client_slug":"demo_salon"}`
+
+**Note:**
+- временно выставлял `client.config.llm_budget.daily_max_calls=1` для demo_salon; после evidence вернул без llm_budget.
+
+Команды для сверки (без секретов), если Brain захочет перепроверить:
+
+# budget_gate trace
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"SELECT t->>'recorded_at', t->>'decision', t->>'reason', t->>'llm_scope', t->>'budget_count', t->>'budget_limit', \
+t->>'llm_degradation_reason' \
+ FROM conversations c, LATERAL jsonb_array_elements(c.context->'decision_trace') t \
+ WHERE c.id='56894357-8309-42d3-bf66-02893e239287' AND t->>'stage'='budget_gate' ORDER BY 1;"
+
+# llm_degradation trace
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"SELECT t->>'recorded_at', t->>'llm_degradation_reason' \
+ FROM conversations c, LATERAL jsonb_array_elements(c.context->'decision_trace') t \
+ WHERE c.id='590848f8-423c-4118-9de0-5f830c643a46' AND t->>'stage'='llm_degradation';"
+
+# decision_meta sample
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"SELECT metadata->>'messageId' AS msg_id, metadata->'decision_meta' AS meta \
+ FROM messages WHERE conversation_id='590848f8-423c-4118-9de0-5f830c643a46' AND role='user' \
+ ORDER BY created_at DESC LIMIT 1;"
+
+# /admin/metrics
+curl -s -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" \
+"http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=2026-01-17"
+
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**
