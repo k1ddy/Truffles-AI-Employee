@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_long:
+        description: "Force long-eval/asr-eval"
+        type: boolean
+        default: false
+      run_livecheck:
+        description: "Force ci-livecheck (requires deploy)"
+        type: boolean
+        default: false
 
 env:
   IMAGE_NAME: ghcr.io/k1ddy/truffles-ai-employee
@@ -15,6 +24,42 @@ permissions:
   packages: write
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      l1: ${{ steps.manual.outputs.l1 || steps.filter.outputs.l1 }}
+      l2: ${{ steps.manual.outputs.l2 || steps.filter.outputs.l2 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Manual overrides (workflow_dispatch)
+        id: manual
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "l1=true" >> "$GITHUB_OUTPUT"
+          if [ "${{ inputs.run_long }}" = "true" ]; then
+            echo "l2=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Path filter
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            l1:
+              - "truffles-api/app/**"
+              - "truffles-api/tests/**"
+              - "knowledge/**"
+              - "SPECS/**"
+              - "STRATEGY/**"
+              - "ops/**"
+              - ".github/workflows/**"
+            l2:
+              - "truffles-api/app/knowledge/**/EVAL.yaml"
+              - "truffles-api/app/knowledge/**/SALON_TRUTH.yaml"
+              - "truffles-api/tests/test_demo_salon_eval.py"
+
   lint:
     runs-on: ubuntu-latest
     defaults:
@@ -64,6 +109,8 @@ jobs:
         run: pytest -q tests/test_webhook_*.py
 
   core-eval:
+    needs: [lint, unit-tests, changes]
+    if: needs.changes.outputs.l1 == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -88,6 +135,8 @@ jobs:
         run: pytest -q tests/test_demo_salon_eval.py
 
   long-eval:
+    needs: [lint, unit-tests, changes]
+    if: needs.changes.outputs.l2 == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-long'))
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -112,6 +161,8 @@ jobs:
         run: pytest -q tests/test_demo_salon_eval.py -o EVAL_TIER=long
 
   asr-eval:
+    needs: [lint, unit-tests, changes]
+    if: needs.changes.outputs.l2 == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-long'))
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -169,7 +220,17 @@ jobs:
           path: results.sarif
 
   build-push:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: >-
+      ${{
+        always() &&
+        (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') &&
+        needs.lint.result == 'success' &&
+        needs.unit-tests.result == 'success' &&
+        (needs.core-eval.result == 'success' || needs.core-eval.result == 'skipped') &&
+        (needs.long-eval.result == 'success' || needs.long-eval.result == 'skipped') &&
+        (needs.asr-eval.result == 'success' || needs.asr-eval.result == 'skipped') &&
+        needs.secret-scan.result == 'success'
+      }}
     needs: [lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
     runs-on: ubuntu-latest
     steps:
@@ -337,7 +398,11 @@ jobs:
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
-    if: vars.CI_LIVECHECK_ENABLED == '1' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    if: >-
+      ${{
+        vars.CI_LIVECHECK_ENABLED == '1' &&
+        (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true'))
+      }}
     needs: deploy
     runs-on: ubuntu-latest
     steps:
