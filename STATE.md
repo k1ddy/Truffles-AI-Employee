@@ -1144,6 +1144,7 @@
 **Что сделали:**
 - Запустили CI livecheck (ci-livecheck) на ветке `ca07-ood`, commit `2c475aef9ca01c880e3e34099aac63c7de105614` с CI_LIVECHECK_ENABLED=1.
 - Прогнали suites: ca01-core, ca02-policy, ca03-info, ca04-service, ca05-booking, ca06-consult, ca07-ood, ca08-state, ca09-manager, ca10-outbox.
+- В suite ca07-ood перед CA07_SMALLTALK выполнен reset (ops/diagnose.py); требуется clean run без reset для полного verify.
 
 **Evidence:**
 - CI run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21108958762

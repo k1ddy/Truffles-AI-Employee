@@ -65,7 +65,7 @@
 | CA-04 | Service matcher + service presence ответы | CONSULTANT | `ca04-service` / live | trace `service_matcher/service_presence` + CI core service cases + live-check | pending |
 | CA-05 | Booking-first + expected_reply интерпретатор + booking_interrupt | CONSULTANT | `ca05-booking` / live | trace `booking/booking_interrupt` + `expected_reply_type` + CI booking tests + live-check | verified (STATE.md:935) |
 | CA-06 | Consult pack-only + short-circuit при явной услуге | CONSULTANT | `ca06-consult` / live | trace `consult_flow/consult` + `consult_playbook_id` + `source=pack` + CI consult cases | verified (STATE.md:1370) |
-| CA-07 | OOD + low-signal guard + smalltalk redirect | CONSULTANT + ARCHITECTURE | `ca07-ood` / live | trace `out_of_domain/fast_intent/smalltalk` + `livecheck-ca07-ood.jsonl` + `livecheck-evidence.md` | verified (STATE.md:1142) |
+| CA-07 | OOD + low-signal guard + smalltalk redirect | CONSULTANT + ARCHITECTURE | `ca07-ood` / live | trace `out_of_domain/fast_intent/smalltalk` + `livecheck-ca07-ood.jsonl` + `livecheck-evidence.md` | pending (GAP: requires clean run without reset; evidence STATE.md:1142) |
 | CA-08 | State machine + pending/manager_active поведение | ESCALATION | `ca08-state` / live | trace `pending_sla/pending_resume` + SQL state vs handover + live-check | verified (STATE.md:874) |
 | CA-09 | Escalation pipeline + manager reply + learning trigger | ESCALATION | `ca09-manager` / live | Telegram flow logs + DB handovers update + manager reply delivered + learned_responses/Qdrant evidence (owner) | verified (STATE.md:839) |
 | CA-10 | Outbox ack-first + dedup + idempotency | ARCHITECTURE | `ca10-outbox` / live | trace `outbox/dedupe` + SQL outbox status + `/admin/outbox/process` evidence | verified (STATE.md:839) |
