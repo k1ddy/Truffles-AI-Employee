@@ -528,6 +528,7 @@ jobs:
               time.sleep(2)
           PY
           cd ~/truffles-main
+          git config --global --add safe.directory "$(pwd)"
           git fetch origin "${GIT_SHA}" --depth=1
           git checkout -q "${GIT_SHA}"
           suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca06-consult ca07-ood ca08-state ca09-manager ca10-outbox)
