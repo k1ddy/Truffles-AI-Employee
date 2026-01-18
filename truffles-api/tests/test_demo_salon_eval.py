@@ -1072,6 +1072,90 @@ def test_consult_pack_only_and_short_circuit():
     )
 
 
+def test_ood_low_signal_and_smalltalk_gates():
+    cases = [
+        {
+            "case_id": "CA07_OOD",
+            "message": "какая погода?",
+            "expected_action": "out_of_domain",
+            "expected_intent": "out_of_domain",
+            "allowed_sources": {
+                "domain_router",
+                "question_contract",
+                "domain_anchor",
+                "router_low_confidence",
+                "no_response_guard",
+                "service_semantic_guard",
+            },
+            "allowed_trace_stages": {"out_of_domain"},
+            "allowed_trace_decisions": {
+                "early_block",
+                "fallback",
+                "router_low_confidence",
+                "domain_anchor",
+                "service_semantic_guard",
+                "no_response_guard",
+                "expected_reply_off_topic",
+            },
+        },
+        {
+            "case_id": "CA07_LOW_SIGNAL",
+            "message": "мм...",
+            "expected_action": "out_of_domain",
+            "expected_intent": "out_of_domain",
+            "allowed_sources": {
+                "no_response_guard",
+                "service_semantic_guard",
+                "domain_router",
+                "question_contract",
+                "domain_anchor",
+            },
+            "allowed_trace_stages": {"out_of_domain"},
+            "allowed_trace_decisions": {
+                "service_semantic_guard",
+                "no_response_guard",
+                "early_block",
+            },
+        },
+        {
+            "case_id": "CA07_SMALLTALK",
+            "message": "привет",
+            "expected_action": "smalltalk",
+            "expected_intent": "greeting",
+            "allowed_sources": {"fast_intent"},
+            "allowed_trace_stages": {"fast_intent", "smalltalk"},
+            "allowed_trace_decisions": {"smalltalk", "greeting"},
+        },
+    ]
+
+    for case in cases:
+        case_id = case["case_id"]
+        _response, conversation, saved_message = _run_webhook_conversation(
+            [case["message"]],
+            case_id,
+            None,
+        )
+        meta = saved_message.message_metadata.get("decision_meta", {})
+        assert meta.get("action") == case["expected_action"], f"{case_id}: action mismatch"
+        assert meta.get("intent") == case["expected_intent"], f"{case_id}: intent mismatch"
+        allowed_sources = case.get("allowed_sources")
+        if allowed_sources:
+            assert meta.get("source") in allowed_sources, f"{case_id}: source mismatch"
+        assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+
+        trace = _get_decision_trace(conversation)
+        trace_entry = next(
+            (entry for entry in trace if entry.get("stage") in case["allowed_trace_stages"]),
+            None,
+        )
+        assert trace_entry is not None, f"{case_id}: missing trace gate"
+        allowed_trace_decisions = case.get("allowed_trace_decisions")
+        if allowed_trace_decisions:
+            assert trace_entry.get("decision") in allowed_trace_decisions, (
+                f"{case_id}: trace decision mismatch"
+            )
+
+
 def _assert_contains_all(response: str, items: list[str], case_id: str, label: str) -> None:
     normalized = _normalize(response)
     for item in items:
