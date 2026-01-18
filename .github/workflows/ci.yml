@@ -534,9 +534,9 @@ jobs:
             echo "source repo missing: ${SOURCE_REPO}" >> "${RUN_LOG}"
             exit 1
           fi
-          git -C "${SOURCE_REPO}" fetch origin "${GIT_SHA}" --depth=1
-          if ! git -C "${SOURCE_REPO}" cat-file -e "${GIT_SHA}^{commit}" 2>/dev/null; then
-            echo "fatal: GIT_SHA ${GIT_SHA} not found in ${SOURCE_REPO} after fetch" >> "${RUN_LOG}"
+          SOURCE_ORIGIN_URL="$(git -C "${SOURCE_REPO}" config --get remote.origin.url || true)"
+          if [ -z "${SOURCE_ORIGIN_URL}" ]; then
+            echo "source repo missing origin url: ${SOURCE_REPO}" >> "${RUN_LOG}"
             exit 1
           fi
           WORKDIR="/tmp/truffles-main-${GIT_SHA}"
@@ -546,6 +546,7 @@ jobs:
           fi
           cd "${WORKDIR}"
           git config --global --add safe.directory "$(pwd)"
+          git remote set-url origin "${SOURCE_ORIGIN_URL}"
           git fetch origin "${GIT_SHA}" --depth=1
           git checkout -q "${GIT_SHA}"
           suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca06-consult ca07-ood ca08-state ca09-manager ca10-outbox)
