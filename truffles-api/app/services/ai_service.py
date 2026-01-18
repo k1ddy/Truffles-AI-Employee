@@ -42,6 +42,16 @@ GREETING_PHRASES = {
     "салют",
     "дд",
 }
+GREETING_FILLER_TOKENS = {
+    "плз",
+    "плиз",
+    "пожалуйста",
+    "пж",
+    "пжл",
+    "pls",
+    "plz",
+    "please",
+}
 
 THANKS_PHRASES = {
     "спасибо",
@@ -1334,7 +1344,18 @@ def is_acknowledgement_message(text: str) -> bool:
 
 
 def is_greeting_message(text: str) -> bool:
-    return normalize_for_matching(text) in GREETING_PHRASES
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return False
+    if normalized in GREETING_PHRASES:
+        return True
+    for phrase in GREETING_PHRASES:
+        prefix = f"{phrase} "
+        if normalized.startswith(prefix):
+            remainder = normalized[len(prefix):].strip()
+            if remainder and all(token in GREETING_FILLER_TOKENS for token in remainder.split()):
+                return True
+    return False
 
 
 def is_thanks_message(text: str) -> bool:
