@@ -2464,34 +2464,40 @@ def _run_livecheck_auto(args):
             if error:
                 raise SystemExit(f"livecheck-auto: decision_meta poll failed ({error})")
 
-            ack_marker = f"LC:ACK:{case['case_id']}:{timestamp}:{idx:02d}"
-            ack_message_id = f"LC-ACK-{timestamp}-{idx:02d}-{uuid.uuid4().hex[:8]}"
-            ack_text = args.ack_text or "ок"
-            ack_payload = {
-                "body": {
-                    "messageType": "text",
-                    "message": ack_text,
-                    "metadata": {
-                        "sender": "LivecheckAuto",
-                        "timestamp": int(time.time()),
-                        "messageId": ack_message_id,
-                        "remoteJid": remote_jid,
-                    },
+            ack_marker = None
+            ack_message_id = None
+            ack_text = None
+            ack_status = None
+            # Skip ACK for CA07 to avoid overwriting the OOD trace with fast_intent.
+            if args.suite != "ca07-ood":
+                ack_marker = f"LC:ACK:{case['case_id']}:{timestamp}:{idx:02d}"
+                ack_message_id = f"LC-ACK-{timestamp}-{idx:02d}-{uuid.uuid4().hex[:8]}"
+                ack_text = args.ack_text or "ок"
+                ack_payload = {
+                    "body": {
+                        "messageType": "text",
+                        "message": ack_text,
+                        "metadata": {
+                            "sender": "LivecheckAuto",
+                            "timestamp": int(time.time()),
+                            "messageId": ack_message_id,
+                            "remoteJid": remote_jid,
+                        },
+                    }
                 }
-            }
-            if instance_id:
-                ack_payload["body"]["metadata"]["instanceId"] = instance_id
-            ack_status, _, ack_error = _send_webhook_payload(
-                webhook_url, ack_payload, webhook_secret, args.timeout
-            )
-            if ack_error:
-                raise SystemExit(f"livecheck-auto: ACK failed ({ack_error})")
-            _post_admin_outbox_with_wait(
-                outbox_url,
-                admin_token,
-                args.timeout,
-                outbox_wait_seconds,
-            )
+                if instance_id:
+                    ack_payload["body"]["metadata"]["instanceId"] = instance_id
+                ack_status, _, ack_error = _send_webhook_payload(
+                    webhook_url, ack_payload, webhook_secret, args.timeout
+                )
+                if ack_error:
+                    raise SystemExit(f"livecheck-auto: ACK failed ({ack_error})")
+                _post_admin_outbox_with_wait(
+                    outbox_url,
+                    admin_token,
+                    args.timeout,
+                    outbox_wait_seconds,
+                )
 
             policy_pack_missing = (meta or {}).get("policy_pack_missing")
             if policy_pack_missing:
