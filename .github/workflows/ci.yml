@@ -530,6 +530,15 @@ jobs:
           SOURCE_REPO="${HOME}/truffles-main"
           git config --global --add safe.directory "${SOURCE_REPO}"
           git config --global --add safe.directory "${SOURCE_REPO}/.git"
+          if [ ! -d "${SOURCE_REPO}/.git" ]; then
+            echo "source repo missing: ${SOURCE_REPO}" >> "${RUN_LOG}"
+            exit 1
+          fi
+          git -C "${SOURCE_REPO}" fetch origin "${GIT_SHA}" --depth=1
+          if ! git -C "${SOURCE_REPO}" cat-file -e "${GIT_SHA}^{commit}" 2>/dev/null; then
+            echo "fatal: GIT_SHA ${GIT_SHA} not found in ${SOURCE_REPO} after fetch" >> "${RUN_LOG}"
+            exit 1
+          fi
           WORKDIR="/tmp/truffles-main-${GIT_SHA}"
           if [ ! -d "${WORKDIR}/.git" ]; then
             rm -rf "${WORKDIR}"
