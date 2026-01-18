@@ -248,6 +248,7 @@ jobs:
               "/home/zhan/infrastructure/.env"
               "/home/zhan/.env"
               "/home/zhan/truffles-main/.env"
+              "/home/zhan/truffles-main/truffles-api/.env"
             )
             for ENV_FILE in "${ENV_FILES[@]}"; do
               if [ -f "${ENV_FILE}" ]; then
