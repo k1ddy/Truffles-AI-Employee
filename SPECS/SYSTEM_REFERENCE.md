@@ -404,10 +404,52 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 
 | Уровень | Что проверяет | Инструмент | Evidence |
 | --- | --- | --- | --- |
-| CI core | детерминизм/регрессии | GitHub Actions (core) | ссылка на run |
-| CI long | длинные диалоги/устойчивость | GitHub Actions (long) | ссылка на run |
-| CA audit | канон на реальном inbound | Live-check SOP | `STATE.md` (conv_id/trace/meta) |
-| Fuzz/Soak | шум/ошибки/неожиданности | Runner (см. ниже) | метрики + sampling |
+| L0 (fast) | lint + unit (базовая регрессия) | GitHub Actions (lint/unit) | ссылка на run |
+| L1 (core) | детерминизм/регрессии поведения | GitHub Actions (core-eval) | ссылка на run |
+| L2 (long/asr) | длинные диалоги + шум/ASR | GitHub Actions (long-eval/asr-eval) | ссылка на run |
+| L3 (livecheck) | канон на реальном inbound | CI livecheck + Live-check SOP | `livecheck-*` артефакты + `STATE.md` |
+| L4 (nightly) | стресс 10–15 ходов + LLM-вариации | Nightly workflow (planned) | nightly artifacts + summary |
+
+### 5.1.1 Политика CI‑tier (гибкость по всей системе)
+
+**Цель:** быстрые и правильные проверки без “лишнего” прогонов, но с обязательным качеством.
+
+**Правило:** тесты запускаются **по влиянию изменения**, а не “всегда всё”.
+
+**Триггеры:**
+- **L0** — всегда на PR и на main (любые изменения).
+- **L1** — если менялись `truffles-api/app/**`, `truffles-api/tests/**`, `knowledge/**`, `SPECS/**`,
+  `STRATEGY/**`, `ops/**` (любой поведенческий/процессный слой).
+- **L2** — если менялись `EVAL.yaml`, `SALON_TRUTH.yaml`, `tests/test_demo_salon_eval.py`,
+  либо указан label `run-long`.
+- **L3** — только на `main` или вручную через `workflow_dispatch` (`run_livecheck=true`).
+- **L4** — nightly (планируется; не блокирует релиз).
+
+**Release gate:** L0 + L1 обязательны; L2 обязателен, если затронуты файлы из L2; L3 выполняется по DoD/CA‑audit.
+
+### 5.1.2 Контракт eval‑тестов (без хрупкости)
+
+**Правило:** тесты проверяют **инвариант**, а не конкретный `source`.
+
+**Обязательное:**
+- `action` + `intent` + наличие правильной `stage` в trace.
+- `source` и `decision` через allowlist (`expected_source_any`, `expected_trace_decision_any`).
+- Для LLM: проверять `llm_used` и policy/trace, не текст ответа.
+
+**Запрещено:** “пристрелка” к одному `source`, если канон допускает несколько.
+
+### 5.1.3 Redis в CI (детерминизм против скорости)
+
+**Стандарт:** сначала включаем Redis‑service в CI для eval, фиксируем время прогона.
+
+**Fallback:** если L1/L2 становятся слишком медленными — включаем детерминированный режим без Redis
+(`REDIS_DISABLED=1` или аналогичный флаг) и фиксируем это в DoD задачи.
+
+### 5.1.4 Nightly gauntlet (planned)
+
+**Цель:** “суровая” проверка устойчивости (10–15 ходов, максимальные вариации, LLM‑тесты).
+
+**Статус:** planned; запуск и DoD — отдельный Task Package.
 
 ### 5.2 Fuzz/Soak (симуляция “живого” человека)
 
@@ -434,7 +476,7 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 ### 5.4 Готовность к старту (минимальный порог)
 
 1) CA‑01…CA‑15 = `verified` с evidence в `STATE.md`.  
-2) CI core + long зелёные.  
+2) CI L0+L1 зелёные; L2 зелёный, если затронуты файлы L2‑триггеров.  
 3) `/admin/version` = HEAD, `/admin/health` OK.  
 4) `/alerts/test` доставляет алерт.  
 5) Метрики фиксируются в `STATE.md` (p50/p90 + fallback_rate).  
@@ -474,7 +516,7 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 
 ### 5.6 Повторяемый процесс запуска (один сценарий для всех ролей)
 
-1) **CI core/long** → ссылка на run (без этого STOP).  
+1) **CI L0+L1** → ссылка на run (без этого STOP); **L2** обязателен при L2‑триггерах.  
 2) **CA live‑check** → evidence в `STATE.md` (conv_id/trace/meta).  
 3) **Fuzz/Soak** → метрики стабильности + sampling evidence.  
 4) **Review evidence** → только после этого обновляем CA‑статус в `STRATEGY/TECH_ROADMAP.md`.
