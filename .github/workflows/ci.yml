@@ -112,9 +112,21 @@ jobs:
     needs: [lint, unit-tests, changes]
     if: needs.changes.outputs.l1 == 'true'
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: truffles-api
+    env:
+      REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
 
@@ -138,9 +150,21 @@ jobs:
     needs: [lint, unit-tests, changes]
     if: needs.changes.outputs.l2 == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-long'))
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: truffles-api
+    env:
+      REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
 
@@ -164,9 +188,21 @@ jobs:
     needs: [lint, unit-tests, changes]
     if: needs.changes.outputs.l2 == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-long'))
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: truffles-api
+    env:
+      REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
 
