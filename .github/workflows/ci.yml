@@ -244,16 +244,25 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             ALLOWLIST="77015705555@s.whatsapp.net,77759841926@s.whatsapp.net,77781658799@s.whatsapp.net"
-            ENV_FILE="/home/zhan/infrastructure/.env"
-            if [ -f "${ENV_FILE}" ]; then
-              if grep -q '^OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}"; then
-                sed -i "s|^OUTBOUND_ALLOWLIST_JIDS=.*|OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}|" "${ENV_FILE}"
-              else
-                echo "OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}" >> "${ENV_FILE}"
+            ENV_FILES=(
+              "/home/zhan/infrastructure/.env"
+              "/home/zhan/.env"
+              "/home/zhan/truffles-main/.env"
+            )
+            for ENV_FILE in "${ENV_FILES[@]}"; do
+              if [ -f "${ENV_FILE}" ]; then
+                if grep -q '^OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}"; then
+                  sed -i "s|^OUTBOUND_ALLOWLIST_JIDS=.*|OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}|" "${ENV_FILE}"
+                else
+                  echo "OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}" >> "${ENV_FILE}"
+                fi
               fi
-            else
-              echo "OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}" > "${ENV_FILE}"
-            fi
+            done
+            for ENV_FILE in "${ENV_FILES[@]}"; do
+              if [ -f "${ENV_FILE}" ]; then
+                grep -n '^OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
+              fi
+            done
             docker rm -f truffles-api >/dev/null 2>&1 || true
             IMAGE_TAG=main
             if [ "${{ github.ref }}" != "refs/heads/main" ]; then
@@ -264,6 +273,7 @@ jobs:
             REQUIRE_GHCR=1 VERIFY_VERSION=1 \
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
             bash ~/restart_api.sh
+            docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
     if: vars.CI_LIVECHECK_ENABLED == '1' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
