@@ -46,7 +46,7 @@
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
 - **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
-- **Последняя диагностика:** 2026-01-08T15:46:51Z (ops/diagnose.py: outbox FAILED 12 / SENT 1235; `OUTBOX_WORKER_ENABLED=MISSING`; `/admin/version` `487a6ff9...`).
+- **Последняя диагностика:** 2026-01-18T15:13:38Z (`/admin/version` `8d1a6e16...`; `OUTBOX_WORKER_ENABLED=1`; outbox SENT=3610 FAILED=17; last 1h latency avg 7.70s p90 14.95s max 23.40s — SQL).
 
 **IMPERIUM DoD (short)**
 - Truth-first: ответ только из KB/правил; догадки запрещены; LAW/оплата/медицина/жалобы → эскалация.
@@ -1605,6 +1605,43 @@
   - `SELECT ... stage IN ('booking_interrupt','multi_truth')` → `t/t`
   - `SELECT trace->>'stage', trace->>'recorded_at' ...` → booking_interrupt (2026-01-18T11:20:26.035537+00:00, 2026-01-18T11:21:37.115386+00:00), multi_truth (2026-01-18T11:21:37.115674+00:00)
 - Inbound: simulated via `/webhook` on local container (`TEST_MODE=1`, allowlist JID), **без** ручной правки БД/trace.
+
+### 2026-01-18 — CI hygiene merges (#202–#205)
+
+**Что сделали:**
+- Смёржены PR #202–#205 (docs CI tiers, CI tier gating, Redis service in CI eval, eval allowlist CA06 short-circuit).
+
+**Evidence:**
+- PR #202 merge commit `3415f2bef696867142661594cd337a3c226aa35c`; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21113180996 (success).
+- PR #203 merge commit `bb69906f5fb042248d9096ca919fefb736b5e0a6`; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21113191932 (success).
+- PR #204 merge commit `456053144d9d5d3436d9346b745619b84e5c0252`; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21113396370 (workflow_dispatch, success).
+- PR #205 merge commit `8d1a6e16bd87be36215e415c37c0c61a179b55da`; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21113290070 (success).
+- main CI after merges: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21113485808 (success).
+
+### 2026-01-18 — Outbox worker enabled + latency snapshot (prod)
+
+**Что подтвердили:**
+- Runtime включён: `OUTBOX_WORKER_ENABLED=1`.
+- Деплой на main: `/admin/version` показывает `8d1a6e16...`.
+- Outbox статусы и latency сняты SQL (last 1h) + срез последних 10 SENT.
+
+**Evidence:**
+- `/admin/version`:
+  - `{"version":"main","git_commit":"8d1a6e16bd87be36215e415c37c0c61a179b55da","build_time":"2026-01-18T14:46:04Z"}`
+- `/admin/health`:
+  - `{"conversations":{"bot_active":390,"pending":1,"manager_active":1},"handovers":{"pending":1,"active":1},"checked_at":"2026-01-18T15:13:38.133575+00:00"}`
+- env (container):
+  - `OUTBOX_WORKER_ENABLED=1`
+- SQL outbox status counts:
+  - `SELECT status, count(*) FROM outbox_messages GROUP BY status ORDER BY status;`
+  - output: `FAILED=17`, `SENT=3610`
+- SQL outbox latency (last 1h, SENT):
+  - `SELECT COUNT(*) AS sent_count, ROUND(AVG(EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS avg_s, ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS p90_s, ROUND(MAX(EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS max_s FROM outbox_messages WHERE status='SENT' AND updated_at >= NOW() - interval '1 hour';`
+  - output: `96 | 7.70s | 14.95s | 23.40s`
+- SQL last 10 SENT (total_s):
+  - `SELECT id, ROUND(EXTRACT(EPOCH FROM (updated_at - created_at))::numeric, 2) AS total_s FROM outbox_messages WHERE status='SENT' ORDER BY updated_at DESC LIMIT 10;`
+  - output: `2.84, 5.47, 12.67, 1.96, 8.02, 7.08, 16.93, 10.83, 10.60, 16.70`
+
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**
