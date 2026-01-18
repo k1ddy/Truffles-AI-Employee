@@ -1,9 +1,10 @@
 import asyncio
 import os
 
-from fastapi import Depends, FastAPI
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -16,8 +17,11 @@ from app.logging_config import (
     setup_logging,
 )
 from app.models import Conversation, Handover, Message, User
-from app.routers import admin, alerts, callback, message, reminders, telegram_webhook, webhook
+from app.routers import admin, alerts, calendar, callback, console, message, reminders, telegram_webhook, webhook
+from app.services.console_errors import ConsoleAPIError, build_console_error_payload
 from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
+
+load_dotenv()
 
 setup_logging()
 
@@ -42,6 +46,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.exception_handler(ConsoleAPIError)
+async def console_api_exception_handler(request: Request, exc: ConsoleAPIError):
+    print(f"DEBUG: ConsoleAPIError: {exc.code} - {exc.message} - {exc.details}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=build_console_error_payload(request, exc),
+    )
+
 app.include_router(message.router)
 app.include_router(callback.router)
 app.include_router(reminders.router)
@@ -49,6 +61,8 @@ app.include_router(webhook.router)
 app.include_router(telegram_webhook.router)
 app.include_router(alerts.router)
 app.include_router(admin.router)
+app.include_router(console.router)
+app.include_router(calendar.router, prefix="/console/v1")
 
 outbox_logger = get_logger("outbox_worker")
 _outbox_worker_task: asyncio.Task | None = None
