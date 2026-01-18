@@ -40,15 +40,40 @@ export default function ChatInterface({
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
-    // Send message mutation
+    // Send message mutation with optimistic updates
     const sendMutation = useMutation({
         mutationFn: (content: string) => sendMessage(conversationId, content),
+        onMutate: async (content) => {
+            // Cancel any outgoing refetches
+            await queryClient.cancelQueries({ queryKey: ["messages", caseId] });
+
+            // Snapshot previous value
+            const previousMessages = queryClient.getQueryData(["messages", caseId]);
+
+            // Optimistically add the new message
+            const optimisticMessage: Message = {
+                id: `temp-${Date.now()}`,
+                role: "manager",
+                content,
+                created_at: new Date().toISOString(),
+            };
+
+            queryClient.setQueryData(["messages", caseId], (old: { items: Message[] } | undefined) => ({
+                items: [optimisticMessage, ...(old?.items || [])],
+            }));
+
+            return { previousMessages };
+        },
         onSuccess: () => {
             setInputValue("");
             queryClient.invalidateQueries({ queryKey: ["messages", caseId] });
             toast.success("Сообщение отправлено");
         },
-        onError: (error: any) => {
+        onError: (error: any, _, context) => {
+            // Rollback on error
+            if (context?.previousMessages) {
+                queryClient.setQueryData(["messages", caseId], context.previousMessages);
+            }
             const code = error?.response?.data?.error?.code;
             if (code === "NOT_ASSIGNED") {
                 toast.error("Вы не назначены на эту заявку");
@@ -64,13 +89,19 @@ export default function ChatInterface({
         e.preventDefault();
         const content = inputValue.trim();
         if (!content) return;
+        setInputValue(""); // Clear immediately for better UX
         sendMutation.mutate(content);
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === "Enter" && !e.shiftKey) {
+        // Enter (without shift) or Ctrl+Enter to send
+        if ((e.key === "Enter" && !e.shiftKey) || (e.key === "Enter" && e.ctrlKey)) {
             e.preventDefault();
             handleSubmit(e);
+        }
+        // Escape to clear input
+        if (e.key === "Escape") {
+            setInputValue("");
         }
     };
 
@@ -95,31 +126,34 @@ export default function ChatInterface({
                         Нет сообщений
                     </div>
                 ) : (
-                    sortedMessages.map((msg) => (
-                        <div
-                            key={msg.id}
-                            className={`flex flex-col max-w-[80%] ${msg.role === "user" ? "self-start" : "self-end items-end"
-                                }`}
-                        >
-                            <div className="text-xs text-gray-500 mb-1">
-                                {msg.role === "user" ? "Клиент" :
-                                    msg.role === "manager" ? "Менеджер" : "Бот"}
-                            </div>
+                    sortedMessages.map((msg) => {
+                        const isOptimistic = msg.id.startsWith("temp-");
+                        return (
                             <div
-                                className={`p-3 rounded-lg ${msg.role === "user"
-                                    ? "bg-white border border-gray-200"
-                                    : msg.role === "manager"
-                                        ? "bg-green-500 text-white"
-                                        : "bg-blue-500 text-white"
-                                    }`}
+                                key={msg.id}
+                                className={`flex flex-col max-w-[80%] ${msg.role === "user" ? "self-start" : "self-end items-end"} ${isOptimistic ? "opacity-70" : ""}`}
                             >
-                                <p className="whitespace-pre-wrap">{msg.content}</p>
+                                <div className="text-xs text-gray-500 mb-1">
+                                    {msg.role === "user" ? "Клиент" :
+                                        msg.role === "manager" ? "Менеджер" : "Бот"}
+                                    {isOptimistic && " (отправка...)"}
+                                </div>
+                                <div
+                                    className={`p-3 rounded-lg ${msg.role === "user"
+                                        ? "bg-white border border-gray-200"
+                                        : msg.role === "manager"
+                                            ? "bg-green-500 text-white"
+                                            : "bg-blue-500 text-white"
+                                        }`}
+                                >
+                                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                                </div>
+                                <span className="text-xs text-gray-400 mt-1">
+                                    {isOptimistic ? "..." : new Date(msg.created_at).toLocaleString("ru-RU")}
+                                </span>
                             </div>
-                            <span className="text-xs text-gray-400 mt-1">
-                                {new Date(msg.created_at).toLocaleString("ru-RU")}
-                            </span>
-                        </div>
-                    ))
+                        );
+                    })
                 )}
                 <div ref={messagesEndRef} />
             </div>

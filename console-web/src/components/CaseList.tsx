@@ -120,6 +120,8 @@ export default function CaseList() {
         queryKey: ["cases", filters, cursor],
         queryFn: () => fetchCases(filters, cursor),
         enabled: !!session,
+        refetchInterval: 30000, // Auto-refresh every 30 seconds
+        refetchIntervalInBackground: false, // Only refresh when tab is active
     });
 
     // Update allCases when data changes
