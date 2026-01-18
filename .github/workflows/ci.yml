@@ -252,8 +252,9 @@ jobs:
             )
             for ENV_FILE in "${ENV_FILES[@]}"; do
               if [ -f "${ENV_FILE}" ]; then
-                if grep -q '^OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}"; then
-                  sed -i "s|^OUTBOUND_ALLOWLIST_JIDS=.*|OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}|" "${ENV_FILE}"
+                chmod u+w "${ENV_FILE}" || true
+                if grep -q 'OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}"; then
+                  sed -i "s|^[[:space:]]*OUTBOUND_ALLOWLIST_JIDS=.*|OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}|" "${ENV_FILE}"
                 else
                   echo "OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}" >> "${ENV_FILE}"
                 fi
@@ -269,7 +270,8 @@ jobs:
             for ENV_FILE in "${ENV_FILES[@]}"; do
               if [ -f "${ENV_FILE}" ]; then
                 echo "ALLOWLIST in ${ENV_FILE}:"
-                grep -n '^OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
+                grep -n 'OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
+                ls -l "${ENV_FILE}" || true
               else
                 echo "ENV_FILE missing: ${ENV_FILE}"
               fi
@@ -294,7 +296,7 @@ jobs:
             for ENV_FILE in "${ENV_FILES[@]}"; do
               if [ -f "${ENV_FILE}" ]; then
                 echo "ALLOWLIST after restart in ${ENV_FILE}:"
-                grep -n '^OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
+                grep -n 'OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
               fi
             done
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
