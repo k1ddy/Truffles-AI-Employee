@@ -1642,6 +1642,29 @@
   - `SELECT id, ROUND(EXTRACT(EPOCH FROM (updated_at - created_at))::numeric, 2) AS total_s FROM outbox_messages WHERE status='SENT' ORDER BY updated_at DESC LIMIT 10;`
   - output: `2.84, 5.47, 12.67, 1.96, 8.02, 7.08, 16.93, 10.83, 10.60, 16.70`
 
+### 2026-01-18 — P0 Ops hygiene (instanceId/outbox/deploy)
+
+**Deploy**
+- /admin/version: `{"version":"main","git_commit":"8230bd3e6f30aad9262a7f543116864af36c2ee3","build_time":"2026-01-18T15:30:49Z"}`
+- origin/main: `8230bd3e6f30aad9262a7f543116864af36c2ee3`
+
+**Outbox worker env**
+- OUTBOX_WORKER_ENABLED=1
+- OUTBOX_COALESCE_SECONDS=1
+- OUTBOX_WORKER_INTERVAL_SECONDS=1
+
+**Outbox latency (last 1h, status=SENT)**
+- total=51, avg=6.68s, p50=6.13s, p90=10.93s, max=15.16s
+
+**Outbox status**
+- SENT=3661, FAILED=17
+- FAILED top errors (old): `_apply_consult_return` missing; OpenAI 400 temp=0.0 (historical)
+
+**InstanceId inbound**
+- messages last 7d: total=2425, with instanceId=2392
+- messages with instanceId AND branch_id NULL = 0
+- outbox payloads last 7d: total=2421, with instanceId=2392
+
 ### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
 
 **CI:**
