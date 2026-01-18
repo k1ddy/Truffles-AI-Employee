@@ -258,6 +258,12 @@ jobs:
                 fi
               fi
             done
+            COMPOSE_FILE="/home/zhan/infrastructure/docker-compose.truffles.yml"
+            if [ -f "${COMPOSE_FILE}" ]; then
+              sed -i "s|OUTBOUND_ALLOWLIST_JIDS=.*|OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}|" "${COMPOSE_FILE}"
+              sed -i "s|OUTBOUND_ALLOWLIST_JIDS:[[:space:]]*.*|OUTBOUND_ALLOWLIST_JIDS: ${ALLOWLIST}|" "${COMPOSE_FILE}"
+              grep -n 'OUTBOUND_ALLOWLIST_JIDS' "${COMPOSE_FILE}" || true
+            fi
             for ENV_FILE in "${ENV_FILES[@]}"; do
               if [ -f "${ENV_FILE}" ]; then
                 grep -n '^OUTBOUND_ALLOWLIST_JIDS=' "${ENV_FILE}" || true
