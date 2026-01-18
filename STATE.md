@@ -1694,6 +1694,51 @@ docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
 curl -s -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" \
 "http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=2026-01-17"
 
+### 2026-01-18 — CA-13 Branch routing isolation (simulated inbound)
+
+**Decision_meta (branch_id/knowledge_tag):**
+- msg_id: `3EB092190CDED7B4223BDB`
+- conv_id: `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+- decision_meta.branch_id = `b7f75692-951e-421a-aae6-f5db97394799`
+- decision_meta.knowledge_tag = null
+
+**Simulated inbound (allowed by CA-13 exception, TEST_MODE=1):**
+- msg_id: `CA13-20260118162524-15666`
+- conv_id: `277c2396-b8ce-4aad-9c2e-df23c607f95f`
+- conversation.branch_id = `b7f75692-951e-421a-aae6-f5db97394799`
+
+**RAG filter evidence (decision_trace.rag_retrieve):**
+- conv_id: `277c2396-b8ce-4aad-9c2e-df23c607f95f`
+- recorded_at: `2026-01-18T16:25:35.587104+00:00`
+- rag_filter: `{"branch_id":"b7f75692-951e-421a-aae6-f5db97394799","client_slug":"demo_salon","filter_mode":"branch","filter_reason":"branch_filter_empty","knowledge_tag":null}`
+
+Команды для сверки (если нужно):
+
+# decision_meta with branch_id
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"SELECT metadata->>'messageId' AS msg_id, conversation_id, metadata->'decision_meta' AS meta \
+ FROM messages \
+ WHERE role='user' AND metadata->'decision_meta' ? 'branch_id' \
+ ORDER BY created_at DESC LIMIT 1;"
+
+# conversation.branch_id for CA-13 simulated inbound
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"SELECT id, branch_id, started_at, last_message_at \
+ FROM conversations \
+ WHERE id='277c2396-b8ce-4aad-9c2e-df23c607f95f';"
+
+# rag_retrieve trace with rag_filter
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"WITH traces AS ( \
+  SELECT jsonb_array_elements(context->'decision_trace') AS t \
+  FROM conversations \
+  WHERE id='277c2396-b8ce-4aad-9c2e-df23c607f95f' \
+) \
+SELECT t FROM traces WHERE t->>'stage'='rag_retrieve';"
+
+**Note:**
+- у demo_salon сейчас один branch; изоляция подтверждена через branch_filter_empty + branch_id в decision_meta. Для теста A/B нужен второй branch (отдельное согласование, это изменение данных).
+
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**
