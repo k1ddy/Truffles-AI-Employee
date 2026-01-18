@@ -69,7 +69,7 @@
 | CA-08 | State machine + pending/manager_active поведение | ESCALATION | `ca08-state` / live | trace `pending_sla/pending_resume` + SQL state vs handover + live-check | verified (STATE.md:874) |
 | CA-09 | Escalation pipeline + manager reply + learning trigger | ESCALATION | `ca09-manager` / live | Telegram flow logs + DB handovers update + manager reply delivered + learned_responses/Qdrant evidence (owner) | verified (STATE.md:839) |
 | CA-10 | Outbox ack-first + dedup + idempotency | ARCHITECTURE | `ca10-outbox` / live | trace `outbox/dedupe` + SQL outbox status + `/admin/outbox/process` evidence | verified (STATE.md:839) |
-| CA-11 | Trace/meta coverage + critical stages retention | ARCHITECTURE | manual / state | SQL decision_trace stages + trace validation + missing-stage audit | pending |
+| CA-11 | Trace/meta coverage + critical stages retention | ARCHITECTURE | manual / state | SQL decision_trace stages + trace validation + missing-stage audit | verified (STATE.md:2026-01-18 CA-11 fix) |
 | CA-12 | Router SLA + LLM budget/degradation | ARCHITECTURE + REQUIREMENTS | manual / logic | decision_meta router_* + trace `budget_gate/llm_degradation` + `/admin/metrics` | pending |
 | CA-13 | Branch routing isolation before pricing | ARCHITECTURE + REQUIREMENTS | manual / live | decision_meta `branch_id/knowledge_tag` + RAG filter evidence + live-check **or simulated inbound** (DB inbound + trace/meta) | pending |
 | CA-14 | Onboarding readiness (pack validate + sync) | TECH_ROADMAP + MULTI_TENANT | manual / logic | `ops/sync_client.py --validate` output + Qdrant sync log + `/admin/version` | pending |
