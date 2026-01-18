@@ -19,3 +19,11 @@ opentelemetry-exporter-otlp==1.26.0
 opentelemetry-instrumentation-fastapi==0.47b0
 opentelemetry-instrumentation-httpx==0.47b0
 opentelemetry-instrumentation-sqlalchemy==0.47b0
+
+# Console API dependencies
+PyJWT[crypto]==2.8.0
+
+# Google Calendar Integration
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.0.0

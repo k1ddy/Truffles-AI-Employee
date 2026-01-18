@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  console-postgres:
+    image: postgres:15-alpine
+    container_name: truffles-console-postgres
+    environment:
+      POSTGRES_USER: truffles
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: truffles_console
+    ports:
+      - "5433:5432"
+    volumes:
+      - console_postgres_data:/var/lib/postgresql/data
+    networks:
+      - truffles-console-net
+
+  console-keycloak:
+    image: quay.io/keycloak/keycloak:23.0.0
+    container_name: truffles-console-keycloak
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./ops/keycloak-realm.json:/opt/keycloak/data/import/realm.json
+    networks:
+      - truffles-console-net
+
+  console-redis:
+    image: redis:7-alpine
+    container_name: truffles-console-redis
+    ports:
+      - "6380:6379"
+    networks:
+      - truffles-console-net
+
+volumes:
+  console_postgres_data:
+
+networks:
+  truffles-console-net:
+    driver: bridge

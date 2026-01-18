@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-body: "IBM Plex Sans", sans-serif;
+  --font-heading: "Space Grotesk", sans-serif;
+  --color-ink: #1f2937;
+  --color-mist: #f6f1e8;
+  --color-accent: #0f766e;
+  --color-glow: #f7a54a;
+  --color-surface: #ffffff;
+  --color-border: rgba(15, 23, 42, 0.12);
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--color-mist);
+  color: var(--color-ink);
+}
+
+@layer components {
+  .font-heading {
+    font-family: var(--font-heading);
+  }
+
+  .fade-up {
+    animation: fade-up 0.6s ease-out both;
+  }
+
+  .fade-up-delay-1 {
+    animation-delay: 0.12s;
+  }
+
+  .fade-up-delay-2 {
+    animation-delay: 0.24s;
+  }
+
+  .fade-up-delay-3 {
+    animation-delay: 0.36s;
+  }
+
+  .card-surface {
+    @apply rounded-3xl border border-[color:var(--color-border)] bg-white/70 shadow-soft backdrop-blur;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-2 rounded-full border border-[color:var(--color-border)] bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.18em];
+  }
+
+  .btn-primary {
+    @apply rounded-full bg-[color:var(--color-accent)] px-5 py-3 text-sm font-semibold text-white shadow-soft transition hover:translate-y-[-1px];
+  }
+
+  .btn-ghost {
+    @apply rounded-full border border-[color:var(--color-border)] px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white/70;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-up,
+  .fade-up-delay-1,
+  .fade-up-delay-2,
+  .fade-up-delay-3 {
+    animation: none;
+  }
+}

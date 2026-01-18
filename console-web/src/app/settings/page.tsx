@@ -1,0 +1,259 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import api from "@/lib/api";
+import { useSession } from "next-auth/react";
+import Link from "next/link";
+
+interface Branch {
+    id: string;
+    slug: string;
+    name: string;
+    is_active: boolean;
+}
+
+interface Agent {
+    id: string;
+    name: string | null;
+    role: string;
+    is_active: boolean;
+}
+
+interface BotConfig {
+    reminder_timeout_1: number | null;
+    reminder_timeout_2: number | null;
+    auto_close_timeout: number | null;
+    quiet_hours_enabled: boolean;
+    quiet_hours_start: string | null;
+    quiet_hours_end: string | null;
+    tone: string | null;
+    autolearn_enabled: boolean;
+    booking_enabled: boolean;
+    enable_reminders: boolean;
+    enable_owner_escalation: boolean;
+}
+
+interface SettingsData {
+    branches: Branch[];
+    agents: Agent[];
+    bot_config: BotConfig | null;
+}
+
+async function fetchSettings(): Promise<SettingsData> {
+    const response = await api.get("/settings");
+    return response.data;
+}
+
+function RoleBadge({ role }: { role: string }) {
+    const styles: Record<string, string> = {
+        owner: "bg-purple-100 text-purple-800",
+        admin: "bg-blue-100 text-blue-800",
+        manager: "bg-green-100 text-green-800",
+        support: "bg-gray-100 text-gray-800",
+    };
+    return (
+        <span className={`px-2 py-1 rounded text-xs font-medium ${styles[role] || "bg-gray-100 text-gray-800"}`}>
+            {role}
+        </span>
+    );
+}
+
+function ConfigCard({ label, value, type = "text" }: { label: string; value: string | number | boolean | null; type?: string }) {
+    let displayValue: React.ReactNode = value;
+
+    if (type === "boolean") {
+        displayValue = value ? (
+            <span className="text-green-600 font-medium">✓ Включено</span>
+        ) : (
+            <span className="text-gray-400">Выключено</span>
+        );
+    } else if (type === "minutes" && typeof value === "number") {
+        displayValue = `${value} мин`;
+    } else if (value === null || value === undefined) {
+        displayValue = <span className="text-gray-400">—</span>;
+    }
+
+    return (
+        <div className="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
+            <span className="text-gray-600">{label}</span>
+            <span className="font-medium">{displayValue}</span>
+        </div>
+    );
+}
+
+export default function SettingsPage() {
+    const { data: session } = useSession();
+
+    const { data, isLoading, error, refetch } = useQuery({
+        queryKey: ["settings"],
+        queryFn: fetchSettings,
+        enabled: !!session,
+    });
+
+    if (!session) {
+        return (
+            <div className="p-8 text-center text-gray-500">
+                Пожалуйста, войдите для просмотра настроек.
+            </div>
+        );
+    }
+
+    if (isLoading) {
+        return (
+            <div className="max-w-5xl mx-auto p-6">
+                <h1 className="text-2xl font-bold mb-6">Настройки</h1>
+                <div className="animate-pulse grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="h-48 bg-gray-200 rounded-lg"></div>
+                    <div className="h-48 bg-gray-200 rounded-lg"></div>
+                    <div className="h-48 bg-gray-200 rounded-lg"></div>
+                    <div className="h-48 bg-gray-200 rounded-lg"></div>
+                </div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="max-w-5xl mx-auto p-6">
+                <h1 className="text-2xl font-bold mb-6">Настройки</h1>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+                    <p className="text-red-600 mb-4">Не удалось загрузить настройки</p>
+                    <button
+                        onClick={() => refetch()}
+                        className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                    >
+                        Повторить
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    const config = data?.bot_config;
+
+    return (
+        <div className="max-w-5xl mx-auto p-6">
+            <div className="flex justify-between items-center mb-6">
+                <h1 className="text-2xl font-bold">Настройки</h1>
+                <Link href="/" className="text-blue-600 hover:underline">
+                    ← Назад в Inbox
+                </Link>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* SLA & Reminders */}
+                <div className="bg-white border rounded-lg p-5">
+                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        ⏱️ SLA и напоминания
+                    </h2>
+                    {config ? (
+                        <div>
+                            <ConfigCard label="Первое напоминание" value={config.reminder_timeout_1} type="minutes" />
+                            <ConfigCard label="Второе напоминание" value={config.reminder_timeout_2} type="minutes" />
+                            <ConfigCard label="Авто-закрытие" value={config.auto_close_timeout} type="minutes" />
+                            <ConfigCard label="Напоминания включены" value={config.enable_reminders} type="boolean" />
+                            <ConfigCard label="Эскалация на владельца" value={config.enable_owner_escalation} type="boolean" />
+                        </div>
+                    ) : (
+                        <p className="text-gray-400 text-center py-4">Нет данных</p>
+                    )}
+                </div>
+
+                {/* Quiet Hours */}
+                <div className="bg-white border rounded-lg p-5">
+                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        🌙 Тихие часы
+                    </h2>
+                    {config ? (
+                        <div>
+                            <ConfigCard label="Тихие часы" value={config.quiet_hours_enabled} type="boolean" />
+                            <ConfigCard label="Начало" value={config.quiet_hours_start} />
+                            <ConfigCard label="Конец" value={config.quiet_hours_end} />
+                        </div>
+                    ) : (
+                        <p className="text-gray-400 text-center py-4">Нет данных</p>
+                    )}
+                </div>
+
+                {/* Bot Behavior */}
+                <div className="bg-white border rounded-lg p-5">
+                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        🤖 Поведение бота
+                    </h2>
+                    {config ? (
+                        <div>
+                            <ConfigCard label="Тон общения" value={config.tone} />
+                            <ConfigCard label="Авто-обучение" value={config.autolearn_enabled} type="boolean" />
+                            <ConfigCard label="Бронирование" value={config.booking_enabled} type="boolean" />
+                        </div>
+                    ) : (
+                        <p className="text-gray-400 text-center py-4">Нет данных</p>
+                    )}
+                </div>
+
+                {/* Branches */}
+                <div className="bg-white border rounded-lg p-5">
+                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        🏢 Филиалы
+                    </h2>
+                    <div className="space-y-2">
+                        {data?.branches.map((branch) => (
+                            <div
+                                key={branch.id}
+                                className="flex items-center justify-between p-2 bg-gray-50 rounded"
+                            >
+                                <div>
+                                    <span className="font-medium">{branch.name}</span>
+                                    <span className="text-sm text-gray-500 ml-2">({branch.slug})</span>
+                                </div>
+                                <span
+                                    className={`px-2 py-0.5 rounded text-xs ${branch.is_active
+                                        ? "bg-green-100 text-green-800"
+                                        : "bg-gray-100 text-gray-800"
+                                        }`}
+                                >
+                                    {branch.is_active ? "Активен" : "Неактивен"}
+                                </span>
+                            </div>
+                        ))}
+                        {data?.branches.length === 0 && (
+                            <p className="text-gray-400 text-center py-2">Нет филиалов</p>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Team Members - Full Width */}
+            <div className="bg-white border rounded-lg p-5 mt-6">
+                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                    👥 Команда
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {data?.agents.map((agent) => (
+                        <div
+                            key={agent.id}
+                            className="flex items-center justify-between p-3 bg-gray-50 rounded"
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-medium">
+                                    {agent.name?.charAt(0).toUpperCase() || "?"}
+                                </div>
+                                <span className="font-medium">{agent.name || "Без имени"}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <RoleBadge role={agent.role} />
+                                <span
+                                    className={`w-2 h-2 rounded-full ${agent.is_active ? "bg-green-500" : "bg-gray-300"
+                                        }`}
+                                ></span>
+                            </div>
+                        </div>
+                    ))}
+                    {data?.agents.length === 0 && (
+                        <p className="text-gray-400 text-center py-4 col-span-3">Нет участников команды</p>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
