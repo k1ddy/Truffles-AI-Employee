@@ -1218,6 +1218,9 @@ def test_budget_gate_trace_records_on_budget_exceeded():
     timing_context: dict = {}
 
     with patch(
+        "app.services.ai_service.OPENAI_API_KEY",
+        "test-key",
+    ), patch(
         "app.services.ai_service.consume_llm_budget",
         return_value={
             "active": True,
