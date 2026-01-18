@@ -243,7 +243,7 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            ALLOWLIST="77015705555@s.whatsapp.net,77759841926@s.whatsapp.net,77781658799@s.whatsapp.net"
+            export ALLOWLIST="77015705555@s.whatsapp.net,77759841926@s.whatsapp.net,77781658799@s.whatsapp.net"
             ENV_FILES=(
               "/home/zhan/infrastructure/.env"
               "/home/zhan/.env"
@@ -255,6 +255,8 @@ jobs:
             from pathlib import Path
 
             allowlist = os.environ.get("ALLOWLIST", "")
+            if not allowlist:
+                raise SystemExit("ALLOWLIST missing in deploy environment")
             paths = [
                 "/home/zhan/infrastructure/.env",
                 "/home/zhan/.env",
