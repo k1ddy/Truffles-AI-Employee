@@ -71,7 +71,7 @@
 | CA-10 | Outbox ack-first + dedup + idempotency | ARCHITECTURE | `ca10-outbox` / live | trace `outbox/dedupe` + SQL outbox status + `/admin/outbox/process` evidence | verified (STATE.md:839) |
 | CA-11 | Trace/meta coverage + critical stages retention | ARCHITECTURE | manual / state | SQL decision_trace stages + trace validation + missing-stage audit | pending |
 | CA-12 | Router SLA + LLM budget/degradation | ARCHITECTURE + REQUIREMENTS | manual / logic | decision_meta router_* + trace `budget_gate/llm_degradation` + `/admin/metrics` | pending |
-| CA-13 | Branch routing isolation before pricing | ARCHITECTURE + REQUIREMENTS | manual / live | decision_meta `branch_id/knowledge_tag` + RAG filter evidence + live-check | pending |
+| CA-13 | Branch routing isolation before pricing | ARCHITECTURE + REQUIREMENTS | manual / live | decision_meta `branch_id/knowledge_tag` + RAG filter evidence + live-check **or simulated inbound** (DB inbound + trace/meta) | pending |
 | CA-14 | Onboarding readiness (pack validate + sync) | TECH_ROADMAP + MULTI_TENANT | manual / logic | `ops/sync_client.py --validate` output + Qdrant sync log + `/admin/version` | pending |
 | CA-15 | Observability baseline (health/metrics/alerts) | REQUIREMENTS + ARCHITECTURE | manual / logic | `/admin/health` + `/admin/metrics` + `/alerts/test` + no_response alerts evidence | verified (STATE.md:783) |
 
