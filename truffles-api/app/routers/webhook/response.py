@@ -368,7 +368,9 @@ def _handle_consult_flow(
     consult_short_circuit = False
     consult_short_circuit_reason = None
     consult_short_circuit_service = None
-    consult_context_active = bool(current_goal == "consult" and consult_context)
+    consult_context_active = bool(
+        current_goal == "consult" and (consult_context or consult_topic or consult_question)
+    )
     consult_blocked = bool(booking_wants_flow or booking_active or booking_signal)
     if consult_intent or consult_context_active:
         consult_blocked = False
