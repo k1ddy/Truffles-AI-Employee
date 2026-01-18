@@ -9,7 +9,7 @@ from sqlalchemy import Column, DateTime, String, JSON
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Session
 
-from app.db.database import Base
+from app.database import Base
 
 
 class AuditEvent(Base):
