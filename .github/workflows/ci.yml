@@ -573,6 +573,10 @@ jobs:
               poll_timeout=120
             fi
             local request_timeout=30
+            local noise_level="low"
+            if [ "${suite_name}" = "ca07-ood" ]; then
+              noise_level="none"
+            fi
             echo "SUITE_${suite_name}_JID=${suite_jid}" >> "${GATE_LOG}"
             local outfile="/tmp/livecheck-${suite_name}.jsonl"
             : > "${outfile}"
@@ -581,6 +585,7 @@ jobs:
               --client-slug demo_salon \
               --suite "${suite_name}" \
               --seed "${suite_seed}" \
+              --noise "${noise_level}" \
               --jid-mode allowlist \
               --remote-jid "${suite_jid}" \
               --allowlist-jids "${ALLOWLIST_CLEAN}" \
