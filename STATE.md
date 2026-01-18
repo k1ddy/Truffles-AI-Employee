@@ -32,7 +32,7 @@
 - DONE: P0 Legacy slice 5 — вынесены domain flows (booking/info/consult) без изменения поведения; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21050469012; live‑check (prod) conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48: msg_id cd3625fc-d16c-4c2b-832f-2d0b7c3e0dcd (info_bundle) decision_meta action=reply intent=location source=truth_gate info_sections=["address","hours","parking"]; msg_id 6d78cf61-cb15-4f4f-b121-6fb91d579658 (consult) decision_meta action=reply intent=consult_reply source=pack consult_playbook_id=hair_aftercolor; decision_trace stages truth_gate reply/location + consult_flow/consult reply consult_reply source=pack.
 - BLOCKED: P0 Legacy slice 6 — вынесены LLM/response + post‑hooks (llm_guard/ai_response/rewrite/budget_gate/llm_degradation + consult_return) без изменения поведения; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21051820513; live‑check consult_return conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48 msg_id 1d3515d6-9dbc-4dea-9479-a5532d011a93 decision_meta consult_return=true; live‑check LLM‑path conv_id 590848f8-423c-4118-9de0-5f830c643a46 msg_id 99087746-9dcb-4785-804c-e90a32f3c930 decision_meta action=ai_response llm_degradation_reason=llm_skip; decision_trace stages rewrite(timeout) + llm_degradation(llm_skip) + ai_response(low_confidence_retry); BLOCKED: llm_guard/budget_gate не сработали (нет условий).
 - DONE: P0 Legacy refactor S0–S6 — детальный лог ниже (CI+live‑check evidence).
-- DEFECT: booking_interrupt/multi_truth trace пропадает при заполненном decision_trace (лимит 40, retention только critical) — см. RCA ниже.
+- FIX READY (CA-11): booking_interrupt/multi_truth retention при trace_len=40; PR #197 https://github.com/k1ddy/Truffles-AI-Employee/pull/197; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21110801195; SQL evidence conv_id da9519fd-bdab-4f22-966a-0c535f3ea6a1 msg_id ca11-3-1768735290143673848 trace_len=40 stages booking_interrupt+multi_truth present (simulated inbound via /webhook on local container, TEST_MODE=1) — см. запись 2026-01-18 ниже.
 - STOP‑LINE: были нарушения процесса (очистка decision_trace ради evidence, изменение STATE.md не ролью Brain) — зафиксировано ниже.
 - BLOCKERS: нет.
 
@@ -1590,6 +1590,21 @@
   - `SELECT jsonb_array_length(context->'decision_trace') ...` → `40`
   - `SELECT COUNT(*) ... stage IN ('booking_interrupt','multi_truth')` → `0`
   - `SELECT metadata->'decision_meta' FROM messages WHERE id='899b5d56-7a62-49ef-a5f0-a0df443b6455'` → `booking_interrupt_info=true`, `intent=multi_truth`, `source=multi_truth`
+
+### 2026-01-18 — CA-11 fix: retain booking_interrupt/multi_truth in decision_trace
+
+**Что сделали:**
+- В `trace.py` добавлен priority bucket для `booking_interrupt` + `multi_truth`; `multi_truth` добавлен в critical list.
+- Регресс‑тест retention overflow (PR #197).
+
+**Evidence:**
+- PR #197: https://github.com/k1ddy/Truffles-AI-Employee/pull/197
+- CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21110801195 (success)
+- SQL (conv_id `da9519fd-bdab-4f22-966a-0c535f3ea6a1`, msg_id `ca11-3-1768735290143673848`):
+  - `SELECT ... trace_len` → `40`
+  - `SELECT ... stage IN ('booking_interrupt','multi_truth')` → `t/t`
+  - `SELECT trace->>'stage', trace->>'recorded_at' ...` → booking_interrupt (2026-01-18T11:20:26.035537+00:00, 2026-01-18T11:21:37.115386+00:00), multi_truth (2026-01-18T11:21:37.115674+00:00)
+- Inbound: simulated via `/webhook` on local container (`TEST_MODE=1`, allowlist JID), **без** ручной правки БД/trace.
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**
