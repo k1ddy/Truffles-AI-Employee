@@ -1629,7 +1629,7 @@ def _run_livecheck_ca05_booking(args, context):
     }
     return summary
 
-def _run_livecheck_ca06_reset(args, context):
+def _run_livecheck_ca06_reset(args, context, *, suite_label="CA06"):
     if args.dry_run:
         return None
     timestamp = context["timestamp"]
@@ -1644,11 +1644,11 @@ def _run_livecheck_ca06_reset(args, context):
     outbox_url = f"{base_url}/admin/outbox/process"
 
     if not remote_jid or remote_jid not in allowlist_jids:
-        raise SystemExit("livecheck-auto: CA06 remote_jid not in allowlist")
+        raise SystemExit(f"livecheck-auto: {suite_label} remote_jid not in allowlist")
 
     reset_text = "начнем сначала"
-    reset_marker = f"LC:AUTO:CA06:RESET:{timestamp}"
-    reset_message_id = f"LC-AUTO-{timestamp}-CA06-RESET-{uuid.uuid4().hex[:8]}"
+    reset_marker = f"LC:AUTO:{suite_label}:RESET:{timestamp}"
+    reset_message_id = f"LC-AUTO-{timestamp}-{suite_label}-RESET-{uuid.uuid4().hex[:8]}"
     reset_payload = {
         "body": {
             "messageType": "text",
@@ -1669,7 +1669,7 @@ def _run_livecheck_ca06_reset(args, context):
     print(
         json.dumps(
             {
-                "case_id": "CA06_RESET",
+                "case_id": f"{suite_label}_RESET",
                 "step": "reset",
                 "marker": reset_marker,
                 "message_id": reset_message_id,
@@ -1698,6 +1698,7 @@ def _run_livecheck_ca06_reset(args, context):
     last_trace = reset_trace[-1] if reset_trace else None
     reset_state = reset_conv_meta.get("state") if isinstance(reset_conv_meta, dict) else None
     return {
+        "reset_suite": suite_label,
         "reset_message_id": reset_message_id,
         "reset_action": (reset_meta or {}).get("action"),
         "reset_intent": (reset_meta or {}).get("intent"),
@@ -2284,7 +2285,9 @@ def _run_livecheck_auto(args):
 
     reset_summary = None
     if args.suite == "ca06-consult":
-        reset_summary = _run_livecheck_ca06_reset(args, context)
+        reset_summary = _run_livecheck_ca06_reset(args, context, suite_label="CA06")
+    elif args.suite == "ca07-ood":
+        reset_summary = _run_livecheck_ca06_reset(args, context, suite_label="CA07")
 
     if args.suite == "ca08-state":
         summary = _run_livecheck_ca08_state(args, context)

@@ -507,6 +507,25 @@ jobs:
             echo "GATE_FAILED" >> "${RUN_LOG}"
             exit 1
           fi
+          python3 - <<'PY' >> "${RUN_LOG}" 2>&1
+          import time
+          import urllib.request
+
+          url = "http://localhost:8000/health"
+          deadline = time.time() + 90
+          while True:
+              try:
+                  with urllib.request.urlopen(url, timeout=5) as resp:
+                      if 200 <= resp.status < 300:
+                          print(f"healthcheck ok: {resp.status}")
+                          break
+                      print(f"healthcheck status={resp.status}")
+              except Exception as exc:
+                  print(f"healthcheck error: {exc}")
+              if time.time() >= deadline:
+                  raise SystemExit("healthcheck timeout")
+              time.sleep(2)
+          PY
           cd ~/truffles-main
           suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca06-consult ca07-ood ca08-state ca09-manager ca10-outbox)
           jid_for_suite() {
@@ -541,6 +560,7 @@ jobs:
             if [ "${suite_name}" = "ca06-consult" ]; then
               poll_timeout=120
             fi
+            local request_timeout=30
             echo "SUITE_${suite_name}_JID=${suite_jid}" >> "${GATE_LOG}"
             local outfile="/tmp/livecheck-${suite_name}.jsonl"
             : > "${outfile}"
@@ -553,6 +573,7 @@ jobs:
               --remote-jid "${suite_jid}" \
               --allowlist-jids "${ALLOWLIST_CLEAN}" \
               --poll-timeout "${poll_timeout}" \
+              --timeout "${request_timeout}" \
               --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then
               :
             else
