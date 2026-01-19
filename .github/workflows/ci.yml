@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_long:
+        description: "Force long-eval/asr-eval"
+        type: boolean
+        default: false
+      run_livecheck:
+        description: "Force ci-livecheck (requires deploy)"
+        type: boolean
+        default: false
 
 env:
   IMAGE_NAME: ghcr.io/k1ddy/truffles-ai-employee
@@ -15,6 +24,42 @@ permissions:
   packages: write
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      l1: ${{ steps.manual.outputs.l1 || steps.filter.outputs.l1 }}
+      l2: ${{ steps.manual.outputs.l2 || steps.filter.outputs.l2 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Manual overrides (workflow_dispatch)
+        id: manual
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "l1=true" >> "$GITHUB_OUTPUT"
+          if [ "${{ inputs.run_long }}" = "true" ]; then
+            echo "l2=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Path filter
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            l1:
+              - "truffles-api/app/**"
+              - "truffles-api/tests/**"
+              - "knowledge/**"
+              - "SPECS/**"
+              - "STRATEGY/**"
+              - "ops/**"
+              - ".github/workflows/**"
+            l2:
+              - "truffles-api/app/knowledge/**/EVAL.yaml"
+              - "truffles-api/app/knowledge/**/SALON_TRUTH.yaml"
+              - "truffles-api/tests/test_demo_salon_eval.py"
+
   lint:
     runs-on: ubuntu-latest
     defaults:
@@ -64,10 +109,24 @@ jobs:
         run: pytest -q tests/test_webhook_*.py
 
   core-eval:
+    needs: [lint, unit-tests, changes]
+    if: needs.changes.outputs.l1 == 'true'
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: truffles-api
+    env:
+      REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
 
@@ -88,10 +147,24 @@ jobs:
         run: pytest -q tests/test_demo_salon_eval.py
 
   long-eval:
+    needs: [lint, unit-tests, changes]
+    if: needs.changes.outputs.l2 == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-long'))
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: truffles-api
+    env:
+      REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
 
@@ -112,10 +185,24 @@ jobs:
         run: pytest -q tests/test_demo_salon_eval.py -o EVAL_TIER=long
 
   asr-eval:
+    needs: [lint, unit-tests, changes]
+    if: needs.changes.outputs.l2 == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-long'))
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: truffles-api
+    env:
+      REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
 
@@ -169,7 +256,17 @@ jobs:
           path: results.sarif
 
   build-push:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: >-
+      ${{
+        always() &&
+        (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') &&
+        needs.lint.result == 'success' &&
+        needs.unit-tests.result == 'success' &&
+        (needs.core-eval.result == 'success' || needs.core-eval.result == 'skipped') &&
+        (needs.long-eval.result == 'success' || needs.long-eval.result == 'skipped') &&
+        (needs.asr-eval.result == 'success' || needs.asr-eval.result == 'skipped') &&
+        needs.secret-scan.result == 'success'
+      }}
     needs: [lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
     runs-on: ubuntu-latest
     steps:
@@ -337,7 +434,11 @@ jobs:
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
-    if: vars.CI_LIVECHECK_ENABLED == '1' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    if: >-
+      ${{
+        vars.CI_LIVECHECK_ENABLED == '1' &&
+        (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true'))
+      }}
     needs: deploy
     runs-on: ubuntu-latest
     steps:
@@ -459,6 +560,10 @@ jobs:
           TEST_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"')
           ALLOWLIST=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"')
           LEARNING_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${LEARNING_MODE:-}"')
+          ALERTS_ADMIN_TOKEN=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${ALERTS_ADMIN_TOKEN:-}"')
+          OUTBOX_WORKER_ENABLED=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_WORKER_ENABLED:-}"')
+          OUTBOX_WORKER_INTERVAL_SECONDS=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_WORKER_INTERVAL_SECONDS:-}"')
+          OUTBOX_COALESCE_SECONDS=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_COALESCE_SECONDS:-}"')
           QDRANT_COLLECTION=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${QDRANT_COLLECTION:-}"')
           QDRANT_COLLECTION_EFFECTIVE="${QDRANT_COLLECTION}"
           if [ -z "${QDRANT_COLLECTION_EFFECTIVE}" ]; then
@@ -470,10 +575,22 @@ jobs:
             echo "LEARNING_MODE=${LEARNING_MODE}"
             echo "QDRANT_COLLECTION=${QDRANT_COLLECTION}"
             echo "QDRANT_COLLECTION_EFFECTIVE=${QDRANT_COLLECTION_EFFECTIVE}"
+            if [ -n "${ALERTS_ADMIN_TOKEN}" ]; then
+              echo "ALERTS_ADMIN_TOKEN_SET=1"
+            else
+              echo "ALERTS_ADMIN_TOKEN_SET=0"
+            fi
+            echo "OUTBOX_WORKER_ENABLED=${OUTBOX_WORKER_ENABLED}"
+            echo "OUTBOX_WORKER_INTERVAL_SECONDS=${OUTBOX_WORKER_INTERVAL_SECONDS}"
+            echo "OUTBOX_COALESCE_SECONDS=${OUTBOX_COALESCE_SECONDS}"
           } > "${GATE_LOG}"
           gate_ok=1
           if [ "${TEST_MODE}" != "1" ]; then
             echo "TEST_MODE_NOT_ENABLED" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
+          if [ -z "${ALERTS_ADMIN_TOKEN}" ]; then
+            echo "ALERTS_ADMIN_TOKEN_MISSING" >> "${GATE_LOG}"
             gate_ok=0
           fi
           ALLOWLIST_CLEAN="${ALLOWLIST// /}"
@@ -508,6 +625,28 @@ jobs:
             echo "GATE_FAILED" >> "${RUN_LOG}"
             exit 1
           fi
+          POLL_VARS=$(python3 - <<'PY'
+          import math
+          import os
+
+          def parse(value, default):
+              try:
+                  return float(value)
+              except (TypeError, ValueError):
+                  return default
+
+          coalesce = parse(os.environ.get("OUTBOX_COALESCE_SECONDS"), 8.0)
+          interval = parse(os.environ.get("OUTBOX_WORKER_INTERVAL_SECONDS"), 2.0)
+          poll_timeout = max(60.0, coalesce + interval * 5 + 10.0)
+          fail_fast_after = max(10.0, min(30.0, poll_timeout / 3))
+          print(f"{poll_timeout:.0f} {fail_fast_after:.0f}")
+          PY
+          )
+          set -- ${POLL_VARS}
+          POLL_TIMEOUT_BASE="${1:-60}"
+          FAIL_FAST_AFTER="${2:-10}"
+          echo "POLL_TIMEOUT_BASE=${POLL_TIMEOUT_BASE}" >> "${GATE_LOG}"
+          echo "FAIL_FAST_AFTER=${FAIL_FAST_AFTER}" >> "${GATE_LOG}"
           python3 - <<'PY' >> "${RUN_LOG}" 2>&1
           import time
           import urllib.request
@@ -578,9 +717,9 @@ jobs:
               suite_fail=1
               return
             fi
-            local poll_timeout=60
+            local poll_timeout="${POLL_TIMEOUT_BASE}"
             if [ "${suite_name}" = "ca06-consult" ]; then
-              poll_timeout=120
+              poll_timeout=$((poll_timeout + 60))
             fi
             local request_timeout=30
             local noise_level="low"
@@ -600,6 +739,8 @@ jobs:
               --remote-jid "${suite_jid}" \
               --allowlist-jids "${ALLOWLIST_CLEAN}" \
               --poll-timeout "${poll_timeout}" \
+              --fail-fast-after "${FAIL_FAST_AFTER}" \
+              --reset-before-suite \
               --timeout "${request_timeout}" \
               --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then
               :

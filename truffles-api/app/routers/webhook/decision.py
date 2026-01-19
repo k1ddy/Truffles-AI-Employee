@@ -5701,6 +5701,13 @@ async def _handle_webhook_payload(
                 "state": conversation.state,
             },
         )
+        _record_message_decision_meta(
+            saved_message,
+            action="smalltalk",
+            intent=intent.value,
+            source="fast_intent",
+            fast_intent=True,
+        )
         bot_response, sent = _send_and_save(bot_response)
         result_message = "Greeting response sent" if sent else "Greeting response failed"
         db.commit()
@@ -5717,6 +5724,13 @@ async def _handle_webhook_payload(
                 "decision": "status_reply",
                 "state": conversation.state,
             },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="pending_status",
+            intent=intent.value,
+            source="pending_status",
+            fast_intent=False,
         )
         bot_response, sent = _send_and_save(bot_response)
         result_message = "Pending status response sent" if sent else "Pending status response failed"
@@ -5736,6 +5750,13 @@ async def _handle_webhook_payload(
                 "state": conversation.state,
             },
         )
+        _record_message_decision_meta(
+            saved_message,
+            action="bot_status",
+            intent=intent.value,
+            source="bot_status",
+            fast_intent=False,
+        )
         bot_response, sent = _send_and_save(bot_response)
         result_message = "Bot status response sent" if sent else "Bot status response failed"
         db.commit()
@@ -5753,6 +5774,13 @@ async def _handle_webhook_payload(
                 "state": conversation.state,
             },
         )
+        _record_message_decision_meta(
+            saved_message,
+            action="style_reference",
+            intent=intent.value,
+            source="style_reference",
+            fast_intent=False,
+        )
         bot_response, sent = _send_and_save(bot_response)
         result_message = "Style reference prompt sent" if sent else "Style reference prompt failed"
         db.commit()
@@ -5763,6 +5791,7 @@ async def _handle_webhook_payload(
     if decision.action == "out_of_domain":
         bot_response = OUT_OF_DOMAIN_RESPONSE
         _reset_low_confidence_retry(conversation)
+        ood_source = "router_low_confidence" if signals.is_low_signal else "domain_router"
         _record_decision_trace(
             conversation,
             {
@@ -5771,6 +5800,13 @@ async def _handle_webhook_payload(
                 "state": conversation.state,
                 "rag_confident": rag_confident,
             },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="out_of_domain",
+            intent="out_of_domain",
+            source=ood_source,
+            fast_intent=False,
         )
         _record_knowledge_backlog(
             db,
@@ -5804,6 +5840,13 @@ async def _handle_webhook_payload(
 
         if reused:
             bot_response = MSG_ESCALATED
+            _record_message_decision_meta(
+                saved_message,
+                action="escalate",
+                intent=intent.value,
+                source="intent_escalation",
+                fast_intent=False,
+            )
             bot_response, sent = _send_and_save(bot_response)
             result_message = (
                 f"Escalation reused ({intent.value}), telegram={'sent' if telegram_sent else 'failed'}"
@@ -5840,6 +5883,13 @@ async def _handle_webhook_payload(
                         "telegram_sent": telegram_sent,
                     },
                 )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="escalate",
+                    intent=intent.value,
+                    source="intent_escalation",
+                    fast_intent=False,
+                )
                 bot_response, sent = _send_and_save(bot_response)
                 result_message = f"Escalated ({intent.value}), telegram={'sent' if telegram_sent else 'failed'}"
             else:
@@ -5855,32 +5905,39 @@ async def _handle_webhook_payload(
                         "error": result.error_code,
                     },
                 )
-                _ensure_rag_rewrite(
+                ai_response_outcome = _handle_ai_response_action(
+                    db=db,
                     conversation=conversation,
-                    saved_message=saved_message,
+                    user=user,
                     message_text=message_text,
-                    client_slug=payload.client_slug,
-                    client_config=client.config if client else None,
-                    timing_context=timing_context,
-                )
-                gen_result = generate_bot_response(
-                    db,
-                    conversation,
-                    message_text,
-                    payload.client_slug,
-                    append_user_message=append_user_message,
-                    pending_hint=conversation.state == ConversationState.PENDING.value,
-                    timing_context=timing_context,
-                )
-                _record_rag_meta(
-                    conversation=conversation,
                     saved_message=saved_message,
+                    client_slug=payload.client_slug,
+                    client_id=client.id,
+                    client_config=client.config if client else None,
+                    routing=routing,
+                    intent=intent,
+                    llm_primary_result=None,
+                    append_user_message=append_user_message,
                     timing_context=timing_context,
+                    intent_decomp_payload=intent_decomp_payload,
+                    class_router_result=class_router_result,
+                    expected_reply_shortcircuit=expected_reply_shortcircuit,
+                    out_of_domain_signal=out_of_domain_signal,
+                    booking_signal=booking_signal,
+                    info_class_intents=info_class_intents,
+                    current_goal=current_goal,
+                    now=now,
+                    send_and_save=_send_and_save,
+                    send_response=_send_response,
+                    finalize_response=_finalize_bot_response,
                 )
-                if gen_result.ok and gen_result.value[0]:
-                    bot_response = gen_result.value[0]
-                    bot_response, sent = _send_and_save(bot_response)
-                result_message = f"Escalation failed ({result.error_code}), responded normally"
+                if ai_response_outcome.response:
+                    return ai_response_outcome.response
+                bot_response = ai_response_outcome.bot_response
+                result_message = (
+                    ai_response_outcome.result_message
+                    or f"Escalation failed ({result.error_code}), responded normally"
+                )
 
     elif decision.action == "pending_escalation":
         bot_response = MSG_PENDING_ESCALATION if intent == Intent.FRUSTRATION else MSG_PENDING_STATUS
@@ -5892,6 +5949,13 @@ async def _handle_webhook_payload(
                 "state": conversation.state,
                 "intent": intent.value,
             },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="pending_escalation",
+            intent=intent.value,
+            source="intent_escalation",
+            fast_intent=False,
         )
         bot_response, sent = _send_and_save(bot_response)
         result_message = "Escalation skipped (pending), status response sent" if sent else "Pending status response failed"
@@ -5910,6 +5974,13 @@ async def _handle_webhook_payload(
                     "decision": "cancel_handover",
                     "state": conversation.state,
                 },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="rejection",
+                intent=intent.value,
+                source="rejection",
+                fast_intent=False,
             )
             bot_response, sent = _send_and_save(bot_response)
             result_message = "Request cancelled, bot reactivated"
@@ -5936,6 +6007,13 @@ async def _handle_webhook_payload(
                     "state": conversation.state,
                     "no_count": conversation.no_count,
                 },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="rejection",
+                intent=intent.value,
+                source="rejection",
+                fast_intent=False,
             )
             bot_response, sent = _send_and_save(bot_response)
             result_message = f"Muted (rejection #{conversation.no_count})"
@@ -5982,6 +6060,13 @@ async def _handle_webhook_payload(
                 "decision": "unknown_state",
                 "state": conversation.state,
             },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="unknown_state",
+            intent=intent.value,
+            source="routing",
+            fast_intent=False,
         )
         result_message = f"Unknown state: {conversation.state}"
 

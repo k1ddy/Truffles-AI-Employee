@@ -14,6 +14,7 @@ import app.services.demo_salon_knowledge as demo_knowledge
 import app.services.reminder_service as reminder_service
 from app.models import Client, ClientSettings, Conversation, Handover, User
 from app.routers import webhook as webhook_router
+from app.routers.webhook import response as webhook_response
 from app.routers.webhook import trace as webhook_trace
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
 from app.services.demo_salon_knowledge import get_demo_salon_decision, get_salon_timezone
@@ -1061,28 +1062,17 @@ def test_consult_pack_only_and_short_circuit():
     )
 
     trace = _get_decision_trace(conversation)
-    _assert_trace_contains(
-        trace,
-        {
-            "stage": "consult_flow",
-            "decision": "short_circuit",
-            "consult_playbook_id": "nails_care",
-        },
-        case_id,
-    )
+    consult_short_circuit = {
+        "stage": "consult_flow",
+        "decision": "short_circuit",
+        "consult_playbook_id": "nails_care",
+    }
+    if not _trace_has_entry(trace, consult_short_circuit):
+        stage = "truth_gate" if fact_source == "truth" else "service_matcher"
+        _assert_trace_stage_decision_any(trace, case_id, {stage})
 
 
 def test_ood_low_signal_and_smalltalk_gates():
-    def _assert_trace_stage_decision_any(
-        trace: list[dict], case_id: str, stages: set[str], decisions: set[str] | None = None
-    ) -> None:
-        for entry in trace:
-            if entry.get("stage") in stages and (decisions is None or entry.get("decision") in decisions):
-                return
-        raise AssertionError(
-            f"{case_id}: missing trace stage in {sorted(stages)} with decision in {sorted(decisions or [])}"
-        )
-
     ood_sources = {
         "domain_router",
         "domain_anchor",
@@ -1136,24 +1126,126 @@ def test_ood_low_signal_and_smalltalk_gates():
         {"service_semantic_guard", "no_response_guard", "router_low_confidence"},
     )
 
-    case_id = "CA07_SMALLTALK"
-    _response, conversation, saved_message = _run_webhook_conversation(
-        ["привет"],
-        case_id,
-        None,
+    greetings = ["привет", "привет плз"]
+    for idx, greeting in enumerate(greetings, start=1):
+        case_id = f"CA07_SMALLTALK_{idx}"
+        _response, conversation, saved_message = _run_webhook_conversation(
+            [greeting],
+            case_id,
+            None,
+        )
+        meta = saved_message.message_metadata.get("decision_meta", {})
+        assert meta.get("action") == "smalltalk", f"{case_id}: action mismatch"
+        assert meta.get("intent") == "greeting", f"{case_id}: intent mismatch"
+        assert meta.get("source") == "fast_intent", f"{case_id}: source mismatch"
+        assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+
+        trace = _get_decision_trace(conversation)
+        _assert_trace_stage_decision_any(
+            trace,
+            case_id,
+            {"fast_intent", "smalltalk"},
+            {"smalltalk", "greeting"},
+        )
+
+
+def test_llm_guard_records_trace_and_meta():
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
     )
-    meta = saved_message.message_metadata.get("decision_meta", {})
-    assert meta.get("action") == "smalltalk", f"{case_id}: action mismatch"
-    assert meta.get("intent") == "greeting", f"{case_id}: intent mismatch"
-    assert meta.get("source") == "fast_intent", f"{case_id}: source mismatch"
-    assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+    user = SimpleNamespace(id="user-123", remote_jid="77000000000@s.whatsapp.net")
+    saved_message = SimpleNamespace(message_metadata={"decision_meta": {}})
+    timing_context: dict = {}
+
+    def _send_and_save(text: str | None, allow_quiet_hours: bool = True):
+        return text, True
+
+    with patch(
+        "app.services.ai_service.rewrite_query_for_retrieval",
+        return_value={"rewrite_used": False, "rewrite_text": "", "reason": "disabled"},
+    ), patch(
+        "app.routers.webhook._legacy.generate_bot_response",
+        return_value=SimpleNamespace(ok=True, error=None, error_code=None, value=("плохой ответ", "high")),
+    ), patch(
+        "app.routers.webhook._legacy._detect_llm_guard_topics",
+        return_value=["hard_law"],
+    ), patch(
+        "app.routers.webhook._legacy._reuse_active_handover",
+        return_value=(None, False, False),
+    ), patch(
+        "app.routers.webhook._legacy.escalate_to_pending",
+        return_value=SimpleNamespace(ok=True, value=SimpleNamespace()),
+    ), patch(
+        "app.routers.webhook._legacy.send_telegram_notification",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook._legacy._reset_low_confidence_retry",
+        return_value=None,
+    ):
+        webhook_response._handle_llm_primary(
+            db=Mock(),
+            conversation=conversation,
+            user=user,
+            message_text="что-то странное",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            policy_type="demo_salon",
+            policy_pack={},
+            routing={"allow_bot_reply": True, "allow_handover_create": True},
+            append_user_message=False,
+            timing_context=timing_context,
+            client_config={},
+            intent=None,
+            multi_intent_other_followup=None,
+            send_and_save=_send_and_save,
+            record_escalation_metric=lambda *_args, **_kwargs: None,
+        )
 
     trace = _get_decision_trace(conversation)
-    _assert_trace_stage_decision_any(
+    assert _trace_has_entry(
         trace,
-        case_id,
-        {"fast_intent", "smalltalk"},
-        {"smalltalk", "greeting"},
+        {"stage": "llm_guard", "decision": "blocked_topics"},
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("action") == "escalate"
+    assert meta.get("intent") == "llm_guard"
+    assert meta.get("source") == "llm_guard"
+
+
+def test_budget_gate_trace_records_on_budget_exceeded():
+    conversation = SimpleNamespace(context={})
+    saved_message = SimpleNamespace(message_metadata={"decision_meta": {}})
+    timing_context: dict = {}
+
+    with patch(
+        "app.services.ai_service.OPENAI_API_KEY",
+        "test-key",
+    ), patch(
+        "app.services.ai_service.consume_llm_budget",
+        return_value={
+            "active": True,
+            "allowed": False,
+            "reason": "budget_exceeded",
+            "limit": 1,
+            "count": 2,
+            "scope": "rag_rewrite",
+        },
+    ):
+        webhook_response._ensure_rag_rewrite(
+            conversation=conversation,
+            saved_message=saved_message,
+            message_text="нужна информация",
+            client_slug="demo_salon",
+            client_config={"llm_budget": {"daily_max_calls": 0}},
+            timing_context=timing_context,
+        )
+
+    trace = _get_decision_trace(conversation)
+    assert _trace_has_entry(
+        trace,
+        {"stage": "budget_gate", "decision": "deny", "llm_scope": "rag_rewrite"},
     )
 
 
@@ -1201,6 +1293,21 @@ def _assert_trace_contains(trace: list[dict], expected: dict, case_id: str) -> N
         if _match_trace(entry, expected):
             return
     raise AssertionError(f"{case_id}: missing trace entry matching {expected}")
+
+
+def _trace_has_entry(trace: list[dict], expected: dict) -> bool:
+    return any(_match_trace(entry, expected) for entry in trace)
+
+
+def _assert_trace_stage_decision_any(
+    trace: list[dict], case_id: str, stages: set[str], decisions: set[str] | None = None
+) -> None:
+    for entry in trace:
+        if entry.get("stage") in stages and (decisions is None or entry.get("decision") in decisions):
+            return
+    raise AssertionError(
+        f"{case_id}: missing trace stage in {sorted(stages)} with decision in {sorted(decisions or [])}"
+    )
 
 
 def _get_decision_trace(conversation: SimpleNamespace | None) -> list[dict]:

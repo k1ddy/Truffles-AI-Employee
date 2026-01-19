@@ -422,7 +422,7 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
   `STRATEGY/**`, `ops/**` (любой поведенческий/процессный слой).
 - **L2** — если менялись `EVAL.yaml`, `SALON_TRUTH.yaml`, `tests/test_demo_salon_eval.py`,
   либо указан label `run-long`.
-- **L3** — только на `main` или label `run-livecheck` (manual trigger допускается).
+- **L3** — только на `main` или вручную через `workflow_dispatch` (`run_livecheck=true`).
 - **L4** — nightly (планируется; не блокирует релиз).
 
 **Release gate:** L0 + L1 обязательны; L2 обязателен, если затронуты файлы из L2; L3 выполняется по DoD/CA‑audit.

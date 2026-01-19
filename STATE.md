@@ -46,7 +46,7 @@
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
 - **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
-- **Последняя диагностика:** 2026-01-08T15:46:51Z (ops/diagnose.py: outbox FAILED 12 / SENT 1235; `OUTBOX_WORKER_ENABLED=MISSING`; `/admin/version` `487a6ff9...`).
+- **Последняя диагностика:** 2026-01-18T15:13:38Z (`/admin/version` `8d1a6e16...`; `OUTBOX_WORKER_ENABLED=1`; outbox SENT=3610 FAILED=17; last 1h latency avg 7.70s p90 14.95s max 23.40s — SQL).
 
 **IMPERIUM DoD (short)**
 - Truth-first: ответ только из KB/правил; догадки запрещены; LAW/оплата/медицина/жалобы → эскалация.
@@ -1605,6 +1605,231 @@
   - `SELECT ... stage IN ('booking_interrupt','multi_truth')` → `t/t`
   - `SELECT trace->>'stage', trace->>'recorded_at' ...` → booking_interrupt (2026-01-18T11:20:26.035537+00:00, 2026-01-18T11:21:37.115386+00:00), multi_truth (2026-01-18T11:21:37.115674+00:00)
 - Inbound: simulated via `/webhook` on local container (`TEST_MODE=1`, allowlist JID), **без** ручной правки БД/trace.
+
+### 2026-01-18 — CI hygiene merges (#202–#205)
+
+**Что сделали:**
+- Смёржены PR #202–#205 (docs CI tiers, CI tier gating, Redis service in CI eval, eval allowlist CA06 short-circuit).
+
+**Evidence:**
+- PR #202 merge commit `3415f2bef696867142661594cd337a3c226aa35c`; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21113180996 (success).
+- PR #203 merge commit `bb69906f5fb042248d9096ca919fefb736b5e0a6`; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21113191932 (success).
+- PR #204 merge commit `456053144d9d5d3436d9346b745619b84e5c0252`; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21113396370 (workflow_dispatch, success).
+- PR #205 merge commit `8d1a6e16bd87be36215e415c37c0c61a179b55da`; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21113290070 (success).
+- main CI after merges: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21113485808 (success).
+
+### 2026-01-18 — Outbox worker enabled + latency snapshot (prod)
+
+**Что подтвердили:**
+- Runtime включён: `OUTBOX_WORKER_ENABLED=1`.
+- Деплой на main: `/admin/version` показывает `8d1a6e16...`.
+- Outbox статусы и latency сняты SQL (last 1h) + срез последних 10 SENT.
+
+**Evidence:**
+- `/admin/version`:
+  - `{"version":"main","git_commit":"8d1a6e16bd87be36215e415c37c0c61a179b55da","build_time":"2026-01-18T14:46:04Z"}`
+- `/admin/health`:
+  - `{"conversations":{"bot_active":390,"pending":1,"manager_active":1},"handovers":{"pending":1,"active":1},"checked_at":"2026-01-18T15:13:38.133575+00:00"}`
+- env (container):
+  - `OUTBOX_WORKER_ENABLED=1`
+- SQL outbox status counts:
+  - `SELECT status, count(*) FROM outbox_messages GROUP BY status ORDER BY status;`
+  - output: `FAILED=17`, `SENT=3610`
+- SQL outbox latency (last 1h, SENT):
+  - `SELECT COUNT(*) AS sent_count, ROUND(AVG(EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS avg_s, ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS p90_s, ROUND(MAX(EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS max_s FROM outbox_messages WHERE status='SENT' AND updated_at >= NOW() - interval '1 hour';`
+  - output: `96 | 7.70s | 14.95s | 23.40s`
+- SQL last 10 SENT (total_s):
+  - `SELECT id, ROUND(EXTRACT(EPOCH FROM (updated_at - created_at))::numeric, 2) AS total_s FROM outbox_messages WHERE status='SENT' ORDER BY updated_at DESC LIMIT 10;`
+  - output: `2.84, 5.47, 12.67, 1.96, 8.02, 7.08, 16.93, 10.83, 10.60, 16.70`
+
+### 2026-01-18 — P0 Ops hygiene (instanceId/outbox/deploy)
+
+**Deploy**
+- /admin/version: `{"version":"main","git_commit":"8230bd3e6f30aad9262a7f543116864af36c2ee3","build_time":"2026-01-18T15:30:49Z"}`
+- origin/main: `8230bd3e6f30aad9262a7f543116864af36c2ee3`
+
+**Outbox worker env**
+- OUTBOX_WORKER_ENABLED=1
+- OUTBOX_COALESCE_SECONDS=1
+- OUTBOX_WORKER_INTERVAL_SECONDS=1
+
+**Outbox latency (last 1h, status=SENT)**
+- total=51, avg=6.68s, p50=6.13s, p90=10.93s, max=15.16s
+
+**Outbox status**
+- SENT=3661, FAILED=17
+- FAILED top errors (old): `_apply_consult_return` missing; OpenAI 400 temp=0.0 (historical)
+
+**InstanceId inbound**
+- messages last 7d: total=2425, with instanceId=2392
+- messages with instanceId AND branch_id NULL = 0
+- outbox payloads last 7d: total=2421, with instanceId=2392
+
+### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
+
+**CI:**
+- main CI green: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21114094208
+
+**Budget gate (trace):**
+- conv_id: `56894357-8309-42d3-bf66-02893e239287`
+- msg_id: `FZ-20260118-154554-01-92ca954f`, `FZ-20260118-154606-01-14b8b7fe`
+- decision_trace budget_gate:
+  - `2026-01-18T15:46:03.075640+00:00` allow (count=1/limit=1, scope=router)
+  - `2026-01-18T15:46:12.064975+00:00` deny (reason=budget_exceeded, count=2/limit=1, scope=router)
+
+**LLM degradation (trace + meta):**
+- conv_id: `590848f8-423c-4118-9de0-5f830c643a46`
+- decision_trace: stage=llm_degradation, reason=llm_skip, recorded_at=`2026-01-16T01:34:19.188694+00:00`
+- decision_meta sample (router_* + degradation):
+  - msg_id: `80d192bf-e41a-45f4-b2f6-8e9e9d577e46`
+  - router_eligible=true, controller_attempted=true, llm_degradation_reason=llm_skip
+  - class_router.router.sla present (attempts/timeouts/fallbacks)
+
+**/admin/metrics:**
+- `GET /admin/metrics?client_slug=demo_salon&metric_date=2026-01-17`
+- Response: `{"metric_date":"2026-01-17","outbox_latency_p50":null,"outbox_latency_p90":null,"llm_timeout_rate":0.0,"llm_used_rate":0.0,"escalation_rate":0.0,"fast_intent_rate":0.0,"asr_fail_rate":0.0,"rag_low_conf_rate":0.0,"clarify_rate":0.0,"clarify_success_rate":0.0,"total_user_messages":0,"total_outbox_sent":0,"total_outbox_failed":0,"total_llm_used":0,"total_llm_timeout":0,"total_handovers":0,"total_fast_intent":0,"total_asr_used":0,"total_asr_failed":0,"created_at":"2026-01-17T01:41:36.002061+00:00","updated_at":"2026-01-17T01:41:36.002061+00:00","client_slug":"demo_salon"}`
+
+**Note:**
+- временно выставлял `client.config.llm_budget.daily_max_calls=1` для demo_salon; после evidence вернул без llm_budget.
+
+Команды для сверки (без секретов), если Brain захочет перепроверить:
+
+# budget_gate trace
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"SELECT t->>'recorded_at', t->>'decision', t->>'reason', t->>'llm_scope', t->>'budget_count', t->>'budget_limit', \
+t->>'llm_degradation_reason' \
+ FROM conversations c, LATERAL jsonb_array_elements(c.context->'decision_trace') t \
+ WHERE c.id='56894357-8309-42d3-bf66-02893e239287' AND t->>'stage'='budget_gate' ORDER BY 1;"
+
+# llm_degradation trace
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"SELECT t->>'recorded_at', t->>'llm_degradation_reason' \
+ FROM conversations c, LATERAL jsonb_array_elements(c.context->'decision_trace') t \
+ WHERE c.id='590848f8-423c-4118-9de0-5f830c643a46' AND t->>'stage'='llm_degradation';"
+
+# decision_meta sample
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"SELECT metadata->>'messageId' AS msg_id, metadata->'decision_meta' AS meta \
+ FROM messages WHERE conversation_id='590848f8-423c-4118-9de0-5f830c643a46' AND role='user' \
+ ORDER BY created_at DESC LIMIT 1;"
+
+# /admin/metrics
+curl -s -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" \
+"http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=2026-01-17"
+
+### 2026-01-18 — CA-13 Branch routing isolation (simulated inbound)
+
+**Decision_meta (branch_id/knowledge_tag):**
+- msg_id: `3EB092190CDED7B4223BDB`
+- conv_id: `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+- decision_meta.branch_id = `b7f75692-951e-421a-aae6-f5db97394799`
+- decision_meta.knowledge_tag = null
+
+**Simulated inbound (allowed by CA-13 exception, TEST_MODE=1):**
+- msg_id: `CA13-20260118162524-15666`
+- conv_id: `277c2396-b8ce-4aad-9c2e-df23c607f95f`
+- conversation.branch_id = `b7f75692-951e-421a-aae6-f5db97394799`
+
+**RAG filter evidence (decision_trace.rag_retrieve):**
+- conv_id: `277c2396-b8ce-4aad-9c2e-df23c607f95f`
+- recorded_at: `2026-01-18T16:25:35.587104+00:00`
+- rag_filter: `{"branch_id":"b7f75692-951e-421a-aae6-f5db97394799","client_slug":"demo_salon","filter_mode":"branch","filter_reason":"branch_filter_empty","knowledge_tag":null}`
+
+Команды для сверки (если нужно):
+
+# decision_meta with branch_id
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"SELECT metadata->>'messageId' AS msg_id, conversation_id, metadata->'decision_meta' AS meta \
+ FROM messages \
+ WHERE role='user' AND metadata->'decision_meta' ? 'branch_id' \
+ ORDER BY created_at DESC LIMIT 1;"
+
+# conversation.branch_id for CA-13 simulated inbound
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"SELECT id, branch_id, started_at, last_message_at \
+ FROM conversations \
+ WHERE id='277c2396-b8ce-4aad-9c2e-df23c607f95f';"
+
+# rag_retrieve trace with rag_filter
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"WITH traces AS ( \
+  SELECT jsonb_array_elements(context->'decision_trace') AS t \
+  FROM conversations \
+  WHERE id='277c2396-b8ce-4aad-9c2e-df23c607f95f' \
+) \
+SELECT t FROM traces WHERE t->>'stage'='rag_retrieve';"
+
+**Note:**
+- у demo_salon сейчас один branch; изоляция подтверждена через branch_filter_empty + branch_id в decision_meta. Для теста A/B нужен второй branch (отдельное согласование, это изменение данных).
+
+### 2026-01-18 — CA-14 Onboarding readiness (validate + Qdrant + version)
+
+**Pack validate**
+- cmd: `python3 ops/sync_client.py demo_salon --validate-only`
+- output: ✅ client_pack валиден
+
+**Qdrant collections**
+- `truffles_knowledge`: status=green, points_count=80, segments=2
+- `services_index`: status=green, points_count=69, segments=4
+- source: Qdrant `/collections` endpoints (api-key via env)
+
+**/admin/version**
+- `{"version":"main","git_commit":"8230bd3e6f30aad9262a7f543116864af36c2ee3","build_time":"2026-01-18T15:30:49Z"}`
+
+Команды для сверки (без ключей в явном виде):
+
+python3 ops/sync_client.py demo_salon --validate-only
+curl -s http://localhost:8000/admin/version
+
+QDRANT_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' truffles_qdrant_1)
+QDRANT_KEY=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "$QDRANT_API_KEY"')
+curl -s -H "api-key: ${QDRANT_KEY}" "http://${QDRANT_IP}:6333/collections/truffles_knowledge"
+curl -s -H "api-key: ${QDRANT_KEY}" "http://${QDRANT_IP}:6333/collections/services_index"
+
+### 2026-01-19 — decision_meta coverage + livecheck reset meta
+
+**Что сделали:**
+- Добавили decision_meta для routing‑веток (smalltalk/status/style_reference/out_of_domain/escalation/pending/rejection/unknown).
+- При провале эскалации — fallback через `_handle_ai_response_action`, чтобы decision_meta/trace оставались валидными.
+- В livecheck reset‑poll допускается decision_meta без action/policy_gate.
+
+**Evidence:**
+- PR #214 https://github.com/k1ddy/Truffles-AI-Employee/pull/214 (merge commit `f914641b9cb9e1cb09c892865dbf196faad400a7`), CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21121717504 (success).
+- PR #215 https://github.com/k1ddy/Truffles-AI-Employee/pull/215 (merge commit `f9c0529aea4108112a4a1064c1f1f19bb8386473`), CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21121724198 (success).
+
+### 2026-01-19 — CI livecheck harden (PR #219)
+
+Отчёт для Brain (копируй как есть):
+
+```text
+PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/219
+
+git status -sb
+## ci-livecheck-harden...origin/ci-livecheck-harden
+
+git diff --stat origin/main...HEAD
+ .github/workflows/ci.yml | 44 +++++++++++++++++++++--
+ ops/diagnose.py          | 93 ++++++++++++++++++++++++++++++++++++++++--------
+ 2 files changed, 121 insertions(+), 16 deletions(-)
+
+Что изменили
+- Harden livecheck runner: fail-fast по missing action, reset-before-suite, allow_non_allowlist и безопасные таймауты polling.
+- CI livecheck gate: логируем admin token/outbox timing env, адаптивный poll_timeout + fail_fast_after, reset-before-suite в runner.
+
+Как проверили
+- CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21124965776
+  - lint/unit/core: pass
+  - long/asr: skipped (нет триггеров)
+  - build/deploy/livecheck: не запускаются на PR
+
+Evidence
+- CI run URL выше (артефактов livecheck нет, потому что это PR).
+
+Файлы
+- .github/workflows/ci.yml
+- ops/diagnose.py
+```
+
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**

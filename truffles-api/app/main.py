@@ -1,9 +1,7 @@
 import asyncio
 import os
+
 from dotenv import load_dotenv
-
-load_dotenv()
-
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -22,6 +20,8 @@ from app.models import Conversation, Handover, Message, User
 from app.routers import admin, alerts, calendar, callback, console, message, reminders, telegram_webhook, webhook
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
 from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
+
+load_dotenv()
 
 setup_logging()
 
@@ -48,6 +48,7 @@ app.add_middleware(
 
 @app.exception_handler(ConsoleAPIError)
 async def console_api_exception_handler(request: Request, exc: ConsoleAPIError):
+    print(f"DEBUG: ConsoleAPIError: {exc.code} - {exc.message} - {exc.details}")
     return JSONResponse(
         status_code=exc.status_code,
         content=build_console_error_payload(request, exc),
@@ -61,7 +62,7 @@ app.include_router(telegram_webhook.router)
 app.include_router(alerts.router)
 app.include_router(admin.router)
 app.include_router(console.router)
-app.include_router(calendar.router)
+app.include_router(calendar.router, prefix="/console/v1")
 
 outbox_logger = get_logger("outbox_worker")
 _outbox_worker_task: asyncio.Task | None = None
@@ -247,102 +248,58 @@ def db_check(db: Session = Depends(get_db)):
 
 
 @app.get("/admin/health/check")
-def health_check(db: Session = Depends(get_db)):
-    """
-    Comprehensive health check for all platform components.
-    Returns overall status and individual component statuses.
-    """
-    import httpx
+async def health_check(db: Session = Depends(get_db)):
+    """Comprehensive health check for monitoring."""
     import time
+    import httpx
     
     checks = {}
+    start_total = time.time()
     overall_healthy = True
-    start_time = time.time()
     
-    # 1. Database check
+    # Database check
     try:
+        start = time.time()
         db.execute(text("SELECT 1"))
-        checks["database"] = {"status": "healthy", "latency_ms": 0}
+        checks["database"] = {"status": "healthy", "latency_ms": int((time.time() - start) * 1000)}
     except Exception as e:
-        checks["database"] = {"status": "unhealthy", "error": str(e)}
+        checks["database"] = {"status": "unhealthy", "error": str(e)[:100]}
         overall_healthy = False
     
-    # 2. Qdrant check
+    # Qdrant check
     qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
-    qdrant_api_key = os.environ.get("QDRANT_API_KEY")
     try:
-        headers = {}
-        if qdrant_api_key:
-            headers["api-key"] = qdrant_api_key
-        with httpx.Client(timeout=5.0) as client:
-            qdrant_start = time.time()
-            resp = client.get(f"{qdrant_url}/collections", headers=headers)
-            qdrant_latency = int((time.time() - qdrant_start) * 1000)
+        start = time.time()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{qdrant_url}/collections")
             if resp.status_code == 200:
-                checks["qdrant"] = {"status": "healthy", "latency_ms": qdrant_latency}
+                checks["qdrant"] = {"status": "healthy", "latency_ms": int((time.time() - start) * 1000)}
             else:
-                checks["qdrant"] = {"status": "degraded", "status_code": resp.status_code}
+                checks["qdrant"] = {"status": "unhealthy", "error": f"HTTP {resp.status_code}"}
                 overall_healthy = False
     except Exception as e:
-        checks["qdrant"] = {"status": "unhealthy", "error": str(e)}
+        checks["qdrant"] = {"status": "unhealthy", "error": str(e)[:100]}
         overall_healthy = False
     
-    # 3. Outbox queue check
+    # Outbox check
     try:
-        outbox_stats = db.execute(
-            text("""
-                SELECT 
-                    status,
-                    COUNT(*) as count,
-                    MIN(created_at) as oldest
-                FROM outbox_messages 
-                WHERE status IN ('PENDING', 'PROCESSING', 'FAILED')
-                GROUP BY status
-            """)
-        ).mappings().all()
-        
-        outbox_pending = 0
-        outbox_processing = 0
-        outbox_failed = 0
-        for row in outbox_stats:
-            if row["status"] == "PENDING":
-                outbox_pending = row["count"]
-            elif row["status"] == "PROCESSING":
-                outbox_processing = row["count"]
-            elif row["status"] == "FAILED":
-                outbox_failed = row["count"]
-        
-        outbox_status = "healthy"
-        if outbox_pending > 100:
-            outbox_status = "degraded"
+        from app.models import OutboxMessage
+        pending = db.query(OutboxMessage).filter(OutboxMessage.status == "PENDING").count()
+        failed = db.query(OutboxMessage).filter(OutboxMessage.status == "FAILED").count()
+        checks["outbox"] = {"status": "healthy" if failed < 100 else "warning", "pending": pending, "failed": failed}
+        if failed >= 100:
             overall_healthy = False
-        if outbox_failed > 50:
-            outbox_status = "unhealthy"
-            overall_healthy = False
-            
-        checks["outbox"] = {
-            "status": outbox_status,
-            "pending": outbox_pending,
-            "processing": outbox_processing,
-            "failed": outbox_failed,
-        }
     except Exception as e:
-        checks["outbox"] = {"status": "unhealthy", "error": str(e)}
-        overall_healthy = False
+        checks["outbox"] = {"status": "error", "error": str(e)[:100]}
     
-    # 4. Active handovers (pending escalations)
+    # Active handovers
     try:
-        pending_handovers = db.execute(
-            text("SELECT COUNT(*) as count FROM handovers WHERE status IN ('pending', 'active')")
-        ).scalar()
-        checks["handovers"] = {
-            "status": "healthy",
-            "active_count": pending_handovers,
-        }
-    except Exception as e:
-        checks["handovers"] = {"status": "unknown", "error": str(e)}
+        active = db.query(Handover).filter(Handover.status.in_(["pending", "active"])).count()
+        checks["handovers"] = {"active": active}
+    except Exception:
+        pass
     
-    total_latency = int((time.time() - start_time) * 1000)
+    total_latency = int((time.time() - start_total) * 1000)
     
     return {
         "status": "healthy" if overall_healthy else "unhealthy",

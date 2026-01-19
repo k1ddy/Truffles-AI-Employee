@@ -34,7 +34,6 @@ class ConsoleBranch(BaseModel):
     slug: str
     name: str
     is_active: bool
-    telegram_chat_id: Optional[str] = None
 
 
 class ConsoleMeResponse(BaseModel):
@@ -49,16 +48,6 @@ class ConsoleMessage(BaseModel):
     content: str
     created_at: str
     metadata: Optional[dict] = None
-
-
-class ConsoleTelegramTrail(BaseModel):
-    """Telegram notification details for a case."""
-    message_id: Optional[int] = None
-    topic_id: Optional[int] = None
-    chat_id: Optional[str] = None
-    telegram_link: Optional[str] = None
-    delivery_status: Optional[str] = None  # sent, failed, pending
-    delivered_at: Optional[str] = None
 
 
 class ConsoleCase(BaseModel):
@@ -80,8 +69,6 @@ class ConsoleCase(BaseModel):
     customer_remote_jid: Optional[str] = None
     # Decision trace
     decision_trace: Optional[list[dict]] = None
-    # Telegram trail (TG-01)
-    telegram_trail: Optional[ConsoleTelegramTrail] = None
 
 
 class ConsoleCaseListResponse(BaseModel):
@@ -186,39 +173,5 @@ class ConsoleSettingsUpdateResponse(BaseModel):
     message: str
 
 
-# TG-02: Branch Telegram Settings
-class ConsoleBranchTelegramUpdate(BaseModel):
-    telegram_chat_id: Optional[str] = None
 
 
-class ConsoleBranchTelegramResponse(BaseModel):
-    id: UUID
-    slug: str
-    name: str
-    telegram_chat_id: Optional[str] = None
-    telegram_verified: bool = False
-
-
-class ConsoleTelegramVerifyResponse(BaseModel):
-    verified: bool
-    chat_title: Optional[str] = None
-    chat_type: Optional[str] = None
-    is_forum: bool = False
-    error: Optional[str] = None
-
-
-class ConsoleTelegramTestResponse(BaseModel):
-    success: bool
-    message_id: Optional[int] = None
-    error: Optional[str] = None
-
-
-# TG-03: Telegram Health
-class ConsoleTelegramHealthResponse(BaseModel):
-    status: str  # ok, degraded, error
-    webhook_alive: bool = False
-    last_success_at: Optional[str] = None
-    last_error_at: Optional[str] = None
-    last_error_message: Optional[str] = None
-    error_rate_24h: float = 0.0
-    pending_messages: int = 0

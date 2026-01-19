@@ -1,11 +1,8 @@
 import base64
 import json
-import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Optional
-
-logger = logging.getLogger(__name__)
 
 from fastapi import Request
 from sqlalchemy.orm import Session
@@ -102,23 +99,22 @@ def _decode_verified_payload(token: str) -> dict[str, Any]:
             options={"verify_aud": bool(audience), "verify_iss": bool(issuer)},
         )
     except InvalidTokenError as exc:
+        print(f"DEBUG: JWT Validation Error: {exc}")
         raise ConsoleAPIError(401, "TOKEN_INVALID", "Token validation failed") from exc
 
 
 def _decode_token(token: str) -> dict[str, Any]:
-    logger.debug("Decoding token. JWKS_URL=%s, ALLOW_UNVERIFIED=%s",
-                 os.environ.get('CONSOLE_OIDC_JWKS_URL'),
-                 os.environ.get('CONSOLE_OIDC_ALLOW_UNVERIFIED'))
+    print(f"DEBUG: Decoding token. JWKS_URL={os.environ.get('CONSOLE_OIDC_JWKS_URL')}, ALLOW_UNVERIFIED={os.environ.get('CONSOLE_OIDC_ALLOW_UNVERIFIED')}")
     if os.environ.get("CONSOLE_OIDC_JWKS_URL"):
         return _decode_verified_payload(token)
     if os.environ.get("CONSOLE_OIDC_ALLOW_UNVERIFIED", "0") == "1":
         try:
             payload = _decode_unverified_payload(token)
-            logger.debug("Unverified payload decoded successfully")
+            print(f"DEBUG: Unverified payload: {payload}")
             _verify_expected_claims(payload)
             return payload
         except Exception as e:
-            logger.warning("Error in unverified token decoding: %s", e)
+            print(f"DEBUG: Error in unverified decoding: {e}")
             raise
     raise ConsoleAPIError(
         500,

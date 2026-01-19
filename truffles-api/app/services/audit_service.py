@@ -18,10 +18,10 @@ class AuditEvent(Base):
 
     __tablename__ = "audit_events"
 
-    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    id = Column("event_id", PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     client_id = Column(PGUUID(as_uuid=True), nullable=True)
-    actor_id = Column(PGUUID(as_uuid=True), nullable=True)
+    actor_id = Column("actor_agent_id", PGUUID(as_uuid=True), nullable=True)
     actor_name = Column(String(255), nullable=True)
     event_type = Column(String(100), nullable=False)
     entity_type = Column(String(100), nullable=True)
