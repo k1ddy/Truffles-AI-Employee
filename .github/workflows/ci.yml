@@ -834,6 +834,14 @@ jobs:
             sleep 10
           done
           tar -xzf artifacts/livecheck-artifacts.tar.gz -C artifacts
+          if [ "${run_status}" -ne 0 ]; then
+            run_log=$(ls artifacts/livecheck-run-*.log 2>/dev/null | head -n 1 || true)
+            if [ -n "${run_log}" ]; then
+              echo "LIVECHECK_RUN_LOG_TAIL_START"
+              tail -n 200 "${run_log}" || true
+              echo "LIVECHECK_RUN_LOG_TAIL_END"
+            fi
+          fi
           if [ ! -s artifacts/livecheck-gate.txt ]; then
             gate_file=$(ls artifacts/livecheck-gate-*.txt 2>/dev/null | head -n 1 || true)
             if [ -n "${gate_file}" ]; then
