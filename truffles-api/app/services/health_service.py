@@ -217,3 +217,39 @@ def get_system_health(db: Session) -> dict:
         },
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def check_and_alert_health(checks: dict) -> list[str]:
+    """Check health results and log alerts for critical issues.
+    
+    Returns list of alert messages sent.
+    Currently just logs warnings, can be extended to send Telegram/email alerts.
+    """
+    alerts_sent = []
+    
+    # Check database
+    db_status = checks.get("database", {})
+    if db_status.get("status") == "unhealthy":
+        msg = f"Database unhealthy: {db_status.get('error', 'unknown')}"
+        logger.error(msg)
+        alerts_sent.append(msg)
+    
+    # Check Qdrant
+    qdrant_status = checks.get("qdrant", {})
+    if qdrant_status.get("status") == "unhealthy":
+        msg = f"Qdrant unhealthy: {qdrant_status.get('error', 'unknown')}"
+        logger.warning(msg)
+        # Don't add to alerts_sent - Qdrant is optional
+    
+    # Check outbox
+    outbox_status = checks.get("outbox", {})
+    failed = outbox_status.get("failed", 0)
+    if failed >= 100:
+        msg = f"Outbox critical: {failed} failed messages"
+        logger.error(msg)
+        alerts_sent.append(msg)
+    elif failed >= 50:
+        msg = f"Outbox warning: {failed} failed messages"
+        logger.warning(msg)
+    
+    return alerts_sent
