@@ -460,7 +460,11 @@ jobs:
     if: >-
       ${{
         vars.CI_LIVECHECK_ENABLED == '1' &&
-        needs.deploy.outputs.deployed == 'true'
+        needs.deploy.result == 'success' &&
+        (
+          github.ref == 'refs/heads/main' ||
+          (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true')
+        )
       }}
     needs: deploy
     runs-on: ubuntu-latest
