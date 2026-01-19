@@ -415,6 +415,8 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 **Цель:** быстрые и правильные проверки без “лишнего” прогонов, но с обязательным качеством.
 
 **Правило:** тесты запускаются **по влиянию изменения**, а не “всегда всё”.
+**Применение:** правило распространяется **на все** наборы (eval/livecheck/fuzz/perf). Любой новый suite обязан
+сразу указать уровень (L1‑L4) + триггеры/labels в Task Package.
 
 **Триггеры:**
 - **L0** — всегда на PR и на main (любые изменения).
@@ -426,6 +428,8 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 - **L4** — nightly (планируется; не блокирует релиз).
 
 **Release gate:** L0 + L1 обязательны; L2 обязателен, если затронуты файлы из L2; L3 выполняется по DoD/CA‑audit.
+**Livecheck‑храннес:** любые изменения в `.github/workflows/ci.yml` или `ops/diagnose.py` требуют L3 (livecheck)
+или явного waiver в Task Package с причиной.
 
 ### 5.1.2 Контракт eval‑тестов (без хрупкости)
 
@@ -437,6 +441,8 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 - Для LLM: проверять `llm_used` и policy/trace, не текст ответа.
 
 **Запрещено:** “пристрелка” к одному `source`, если канон допускает несколько.
+**LLM‑ключи:** CI‑eval не должен зависеть от `OPENAI_API_KEY`. Нужные LLM‑проверки переносятся в L4/nightly или
+стабятся (patch) так, чтобы trace/meta фиксировали ожидаемую стадию без внешнего API.
 
 ### 5.1.3 Redis в CI (детерминизм против скорости)
 
@@ -444,12 +450,17 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 
 **Fallback:** если L1/L2 становятся слишком медленными — включаем детерминированный режим без Redis
 (`REDIS_DISABLED=1` или аналогичный флаг) и фиксируем это в DoD задачи.
+**Решение:** выбор режима (Redis on/off) фиксируется в Task Package и подтверждается CI‑таймингами.
 
 ### 5.1.4 Nightly gauntlet (planned)
 
 **Цель:** “суровая” проверка устойчивости (10–15 ходов, максимальные вариации, LLM‑тесты).
 
 **Статус:** planned; запуск и DoD — отдельный Task Package.
+**Требования (черновик):**
+- 10–15 ходов + шум/опечатки/перефразы/ASR‑мусор.
+- Минимум 3 варианта на класс (booking/info/consult/OOD).
+- LLM‑тесты разрешены, но проверка через meta/trace + агрегаты, не текст.
 
 ### 5.2 Fuzz/Soak (симуляция “живого” человека)
 
@@ -694,6 +705,21 @@ LIMIT 3;
 - Только тестовый `client_slug` и test‑instance; любые другие → STOP.
 - `instanceId` в payload должен совпадать с `branches.instance_id` (DB); рассинхрон с `clients.config.instance_id` фиксируем как GAP.
 - Малый объём (4–10 сообщений), фиксированный seed, без спама.
+
+**Детерминизм suites:**
+- **One suite → one JID:** размер allowlist **не меньше** числа suites; иначе CI падает с причиной `ALLOWLIST_TOO_SMALL`.
+- **Reset перед suite:** каждый suite обязан пройти reset/clear‑meta шаг; без reset → STOP.
+- **Adaptive poll_timeout:** вычислять минимум как
+  `OUTBOX_COALESCE_SECONDS + OUTBOX_WORKER_INTERVAL_SECONDS + (CHATFLOW_RETRY_ATTEMPTS * CHATFLOW_RETRY_BACKOFF_SECONDS) + 10s`.
+  Значение и входные параметры логируются в `livecheck-run-*.log`.
+
+**Fail‑fast gate (контур готовности):**
+- `/admin/health` OK, `OUTBOX_WORKER_ENABLED=1` **или** активен cron‑контур (явно).
+- `ALERTS_ADMIN_TOKEN` доступен; `/admin/metrics` отвечает.
+- При провале — CI прекращается с причиной `ENV_NOT_READY` (без “таймаутов”).
+
+**Диагностика падений:**
+- В артефактах должны быть `remote_jid`, `conversation_id`, `last_decision_meta` и последний `decision_trace` stage.
 
 **CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca04-service`, `ca05-booking`, `ca06-consult`, `ca07-ood`, `ca08-state`, `ca09-manager`, `ca10-outbox`, артефакты `livecheck-artifacts/*`.
 **Evidence artifact:** `livecheck-evidence.md` (генерируется из jsonl + gate через `ops/diagnose.py emit-evidence`).
