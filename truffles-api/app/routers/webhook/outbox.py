@@ -456,13 +456,33 @@ async def _process_outbox_rows(
             )
             results["sent"] += 1
         except Exception as exc:
-            try:
-                db.rollback()
-            except Exception as rollback_exc:
-                logger.warning(
-                    "Outbox rollback failed",
-                    extra={"context": {"error": str(rollback_exc)}},
-                )
+            commit_on_failure = (
+                isinstance(exc, RuntimeError)
+                and str(exc).strip() == "ChatFlow delivery failed"
+            )
+            if commit_on_failure:
+                try:
+                    db.commit()
+                except Exception as commit_exc:
+                    logger.warning(
+                        "Outbox commit failed after delivery error",
+                        extra={"context": {"error": str(commit_exc)}},
+                    )
+                    try:
+                        db.rollback()
+                    except Exception as rollback_exc:
+                        logger.warning(
+                            "Outbox rollback failed",
+                            extra={"context": {"error": str(rollback_exc)}},
+                        )
+            else:
+                try:
+                    db.rollback()
+                except Exception as rollback_exc:
+                    logger.warning(
+                        "Outbox rollback failed",
+                        extra={"context": {"error": str(rollback_exc)}},
+                    )
             logger.info(
                 "Outbox timing",
                 extra={
