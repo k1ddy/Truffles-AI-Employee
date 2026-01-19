@@ -1665,6 +1665,20 @@
 - messages with instanceId AND branch_id NULL = 0
 - outbox payloads last 7d: total=2421, with instanceId=2392
 
+### 2026-01-20 — P0 outbox latency tail (code analysis → PLAN)
+
+**Факт (код):**
+- Outbox latency в SQL считается как `updated_at - created_at` для `status='SENT'` → это очередь + процессинг (не только ожидание).
+- Queue‑wait метрика отдельно пишется в `record_outbox_latency()` как `picked_at - created_at` (см. `webhook/outbox.py`).
+- Claim‑логика batch‑outbox (`claim_pending_outbox_batches`) пропускает разговоры, пока они не “idle” (`OUTBOX_COALESCE_SECONDS`), без верхней границы ожидания.
+
+**Риск:**
+- Активный диалог без паузы → сообщения могут ждать в PENDING дольше SLA, даже при включённом worker.
+
+**План (best practice):**
+- Ввести `OUTBOX_MAX_WAIT_SECONDS`: если самый старый pending > max_wait, обработать batch даже без idle‑окна.
+- Это сохраняет coalesce, но ставит верхнюю границу ожидания (bounded latency).
+
 ### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
 
 **CI:**
