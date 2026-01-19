@@ -1833,11 +1833,49 @@ Evidence
 ### 2026-01-19 — Outbox lookup for decision_meta (missing_action fix)
 
 **Что сделали:**
-- Восстановили поиск user‑сообщения по `messageId` (CamelCase) как fallback к `message_id`, чтобы outbox‑processing обновлял decision_meta нужного inbound и не оставлял `missing_action` в CA‑02/03/06/07.
+- Исправили missing_action в livecheck (CA‑02/03/06/07): outbox‑processing всегда находит inbound по `message_id` или `messageId` и обновляет decision_meta.action.
+
+**Task Package (executed):**
+- Chosen issue (NOW): CA‑02/03/06/07 missing_action in CI livecheck; блокер P0 инварианта decision_meta required.
+- Invariants protected: decision_meta/action присутствует; поведение routing/gates не меняется; `_legacy.py` остаётся adapter‑only.
+- Scope: outbox message lookup + decision_meta update path.
+- Out of scope: policy/intent logic, packs, routing, stage order.
+- Touch‑list: `truffles-api/app/routers/webhook/decision.py`, `STATE.md`.
+- Plan: add messageId fallback → CI → merge → evidence в STATE.md.
+- DoD: CI green (incl. livecheck), missing_action устранён, evidence записан.
+- Checks: CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21136937211 (code) + https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21137237013 (docs).
+- Evidence: PRs #237/#238 + CI URLs + merge SHAs.
+- Rollback: revert merge commits `4b8a9b6f6ea222fd035d819f6261ddd207414277` и `b7db6a714066a23d6859ce05c1fd3fa53ea4ef5f`.
+- No‑go: no DB edits, no logic changes in routing/LLM/policy.
+
+**What changed:**
+- `truffles-api/app/routers/webhook/decision.py`: `_find_message_by_message_id` matches `message_id` OR `messageId` so outbox updates decision_meta for the correct inbound.
+- `STATE.md`: evidence entry for the fix.
 
 **Evidence:**
-- PR #237 https://github.com/k1ddy/Truffles-AI-Employee/pull/237 (merge commit `4b8a9b6f6ea222fd035d819f6261ddd207414277`)
-- CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21136937211 (success, livecheck pass)
+- PR #237: https://github.com/k1ddy/Truffles-AI-Employee/pull/237
+  - Merge: `4b8a9b6f6ea222fd035d819f6261ddd207414277`
+  - CI (incl. livecheck): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21136937211
+- PR #238: https://github.com/k1ddy/Truffles-AI-Employee/pull/238
+  - Merge: `b7db6a714066a23d6859ce05c1fd3fa53ea4ef5f`
+  - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21137237013
+
+**Brain report (copy/paste):**
+
+```text
+PR #237 (code): https://github.com/k1ddy/Truffles-AI-Employee/pull/237
+Merge commit: 4b8a9b6f6ea222fd035d819f6261ddd207414277
+Files: truffles-api/app/routers/webhook/decision.py
+Diff: +5/-2 (message lookup now matches message_id OR messageId)
+Reason: outbox processing now updates decision_meta on the correct inbound; fixes missing_action in CA-02/03/06/07.
+Checks: CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21136937211 (livecheck pass).
+
+PR #238 (STATE): https://github.com/k1ddy/Truffles-AI-Employee/pull/238
+Merge commit: b7db6a714066a23d6859ce05c1fd3fa53ea4ef5f
+Files: STATE.md
+Diff: +9 lines (evidence entry for missing_action fix)
+Checks: CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21137237013
+```
 
 ### 2026-01-19 — CI livecheck gating report (arch/ci-livecheck-always)
 
