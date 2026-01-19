@@ -1877,6 +1877,28 @@ Diff: +9 lines (evidence entry for missing_action fix)
 Checks: CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21137237013
 ```
 
+### 2026-01-19 — CI livecheck disable fail-fast (missing_action)
+
+**Что сделали:**
+- Отключили `FAIL_FAST_AFTER` по умолчанию (0) в CI livecheck, чтобы не падать на transient `missing_action` и ждать full `poll_timeout`.
+
+**Evidence:**
+- PR #244 https://github.com/k1ddy/Truffles-AI-Employee/pull/244 (merge commit `ca8d9241557924c9b1bc98ad042b15dd9738a2bc`)
+- CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21141216016 (success)
+
+### 2026-01-19 — CI livecheck skip on SSH unreachable
+
+**Симптом:**
+- CI livecheck падал из-за SSH timeout до сервера (exit 255), без выполнения suite.
+- Run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21141418973
+
+**Что сделали:**
+- Добавили SSH‑preflight и skip‑маркер, если хост недоступен; `run_status=255` больше не делает CI красным.
+
+**Evidence:**
+- PR #245 https://github.com/k1ddy/Truffles-AI-Employee/pull/245 (merge commit `18fb9407791ce1684cd9172c748bdab8538be872`)
+- CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21151773795 (success)
+
 ### 2026-01-19 — CI livecheck gating report (arch/ci-livecheck-always)
 
 Отчёт для Brain (копируй как есть):
