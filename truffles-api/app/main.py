@@ -245,3 +245,67 @@ def db_check(db: Session = Depends(get_db)):
         "messages": messages_count,
         "handovers": handovers_count,
     }
+
+
+@app.get("/admin/health/check")
+async def health_check(db: Session = Depends(get_db)):
+    """Comprehensive health check for monitoring."""
+    import time
+
+    import httpx
+    
+    checks = {}
+    start_total = time.time()
+    overall_healthy = True
+    
+    # Database check
+    try:
+        start = time.time()
+        db.execute(text("SELECT 1"))
+        checks["database"] = {"status": "healthy", "latency_ms": int((time.time() - start) * 1000)}
+    except Exception as e:
+        checks["database"] = {"status": "unhealthy", "error": str(e)[:100]}
+        overall_healthy = False
+    
+    # Qdrant check
+    qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+    try:
+        start = time.time()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{qdrant_url}/collections")
+            if resp.status_code == 200:
+                checks["qdrant"] = {"status": "healthy", "latency_ms": int((time.time() - start) * 1000)}
+            else:
+                checks["qdrant"] = {"status": "unhealthy", "error": f"HTTP {resp.status_code}"}
+                overall_healthy = False
+    except Exception as e:
+        checks["qdrant"] = {"status": "unhealthy", "error": str(e)[:100]}
+        overall_healthy = False
+    
+    # Outbox check
+    try:
+        from app.models import OutboxMessage
+        pending = db.query(OutboxMessage).filter(OutboxMessage.status == "PENDING").count()
+        failed = db.query(OutboxMessage).filter(OutboxMessage.status == "FAILED").count()
+        checks["outbox"] = {"status": "healthy" if failed < 100 else "warning", "pending": pending, "failed": failed}
+        if failed >= 100:
+            overall_healthy = False
+    except Exception as e:
+        checks["outbox"] = {"status": "error", "error": str(e)[:100]}
+    
+    # Active handovers
+    try:
+        active = db.query(Handover).filter(Handover.status.in_(["pending", "active"])).count()
+        checks["handovers"] = {"active": active}
+    except Exception:
+        pass
+    
+    total_latency = int((time.time() - start_total) * 1000)
+    
+    return {
+        "status": "healthy" if overall_healthy else "unhealthy",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "latency_ms": total_latency,
+        "checks": checks,
+    }
+

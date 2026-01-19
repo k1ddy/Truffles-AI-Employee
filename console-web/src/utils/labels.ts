@@ -1,0 +1,85 @@
+/**
+ * Shared label utility functions for Truffles Console
+ * Eliminates duplication across CaseList, CaseView, OpsPage, calendar
+ */
+
+// Status labels for cases
+export function getStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+        pending: "Ожидает",
+        active: "В работе",
+        resolved: "Закрыт",
+        escalated: "Эскалация",
+    };
+    return labels[status] || status;
+}
+
+// SLA status labels
+export function getSlaLabel(status?: string): string {
+    const labels: Record<string, string> = {
+        ok: "В норме",
+        warning: "Внимание",
+        breached: "Просрочено",
+    };
+    return labels[status || ""] || status || "";
+}
+
+// System status labels (for OpsPage health checks)
+export function getSystemStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+        ok: "норма",
+        connected: "подключено",
+        degraded: "ухудшено",
+        error: "ошибка",
+        unknown: "неизвестно",
+    };
+    return labels[status] || status;
+}
+
+// SLA indicator with color styling based on elapsed time
+export interface SlaIndicator {
+    label: string;
+    className: string;
+    minutes: number;
+}
+
+export function getSlaIndicator(createdAt: string): SlaIndicator {
+    const created = new Date(createdAt);
+    const now = new Date();
+    const diffMs = now.getTime() - created.getTime();
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+
+    if (diffMinutes < 30) {
+        return { label: `${diffMinutes}м`, className: "bg-green-100 text-green-800", minutes: diffMinutes };
+    } else if (diffMinutes < 60) {
+        return { label: `${diffMinutes}м`, className: "bg-yellow-100 text-yellow-800", minutes: diffMinutes };
+    } else {
+        const hours = Math.floor(diffMinutes / 60);
+        return { label: `${hours}ч+`, className: "bg-red-100 text-red-800", minutes: diffMinutes };
+    }
+}
+
+// Booking status labels (for calendar)
+export function getBookingStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+        pending: "ожидает",
+        confirmed: "подтверждена",
+        cancelled: "отменена",
+        completed: "завершена",
+        no_show: "не пришёл",
+    };
+    return labels[status] || status;
+}
+
+// Booking status colors (for calendar badges)
+export function getBookingStatusColor(status: string): string {
+    const colors: Record<string, string> = {
+        pending: "bg-yellow-100 text-yellow-800",
+        confirmed: "bg-green-100 text-green-800",
+        cancelled: "bg-gray-100 text-gray-800",
+        completed: "bg-blue-100 text-blue-800",
+        no_show: "bg-red-100 text-red-800",
+    };
+    return colors[status] || "bg-gray-100 text-gray-800";
+}
+

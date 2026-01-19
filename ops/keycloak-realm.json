@@ -1,0 +1,39 @@
+{
+    "realm": "truffles",
+    "enabled": true,
+    "users": [
+        {
+            "username": "admin",
+            "enabled": true,
+            "credentials": [
+                {
+                    "type": "password",
+                    "value": "admin"
+                }
+            ],
+            "realmRoles": [
+                "admin"
+            ]
+        }
+    ],
+    "clients": [
+        {
+            "clientId": "console-web",
+            "enabled": true,
+            "publicClient": false,
+            "secret": "console-client-secret",
+            "redirectUris": [
+                "http://localhost:3000/*",
+                "http://192.168.5.27:3000/*"
+            ],
+            "webOrigins": [
+                "http://localhost:3000",
+                "http://192.168.5.27:3000"
+            ],
+            "standardFlowEnabled": true,
+            "directAccessGrantsEnabled": true,
+            "serviceAccountsEnabled": true,
+            "authorizationServicesEnabled": true
+        }
+    ]
+}
