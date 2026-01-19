@@ -457,18 +457,7 @@ jobs:
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
-    if: >-
-      ${{
-        needs.deploy.result == 'success' &&
-        (
-          github.ref == 'refs/heads/main' ||
-          (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true')
-        ) &&
-        (
-          vars.CI_LIVECHECK_ENABLED == '1' ||
-          (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true')
-        )
-      }}
+    if: ${{ needs.deploy.result == 'success' && github.ref == 'refs/heads/main' }}
     needs: deploy
     runs-on: ubuntu-latest
     steps:
