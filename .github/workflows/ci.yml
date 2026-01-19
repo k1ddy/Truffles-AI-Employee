@@ -695,7 +695,7 @@ jobs:
           )
           set -- ${POLL_VARS}
           POLL_TIMEOUT_BASE="${1:-60}"
-          FAIL_FAST_AFTER="${2:-10}"
+          FAIL_FAST_AFTER="${2:-0}"
           echo "POLL_TIMEOUT_BASE=${POLL_TIMEOUT_BASE}" >> "${GATE_LOG}"
           echo "FAIL_FAST_AFTER=${FAIL_FAST_AFTER}" >> "${GATE_LOG}"
           python3 - <<'PY' >> "${RUN_LOG}" 2>&1
