@@ -1665,7 +1665,7 @@
 - messages with instanceId AND branch_id NULL = 0
 - outbox payloads last 7d: total=2421, with instanceId=2392
 
-### 2026-01-20 — P0 outbox latency tail (code analysis → PLAN)
+### 2026-01-20 — P0 outbox latency tail (bounded wait)
 
 **Факт (код):**
 - Outbox latency в SQL считается как `updated_at - created_at` для `status='SENT'` → это очередь + процессинг (не только ожидание).
@@ -1675,9 +1675,15 @@
 **Риск:**
 - Активный диалог без паузы → сообщения могут ждать в PENDING дольше SLA, даже при включённом worker.
 
-**План (best practice):**
-- Ввести `OUTBOX_MAX_WAIT_SECONDS`: если самый старый pending > max_wait, обработать batch даже без idle‑окна.
-- Это сохраняет coalesce, но ставит верхнюю границу ожидания (bounded latency).
+**Сделали (bounded latency):**
+- Добавили `OUTBOX_MAX_WAIT_SECONDS` (default 10): если самый старый pending > max_wait, batch берётся даже без idle‑окна.
+- Worker и `/admin/outbox/process` передают `max_wait_seconds` в claim.
+- Обновили `TECH.md` и добавили unit‑test для парсинга max‑wait.
+
+**Evidence:**
+- PR #247: https://github.com/k1ddy/Truffles-AI-Employee/pull/247
+- CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21152805961
+- Local test: `docker build -t truffles-api-test truffles-api` + `docker run --rm truffles-api-test pytest tests/test_outbox_worker_settings.py -q` (2 passed; FastAPI on_event deprecation warnings).
 
 ### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
 
