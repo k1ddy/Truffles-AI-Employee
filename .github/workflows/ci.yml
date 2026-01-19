@@ -65,6 +65,22 @@ jobs:
               - "truffles-api/app/knowledge/**/SALON_TRUTH.yaml"
               - "truffles-api/tests/test_demo_salon_eval.py"
 
+  contract-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate OpenAPI spec
+        run: npx @redocly/cli lint contracts/console_api/openapi.v1.yaml --skip-rule=no-server-example.yaml
+
+      - name: Validate error codes JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('contracts/console_api/errors.v1.json'))"
+
   lint:
     runs-on: ubuntu-latest
     defaults:
@@ -89,6 +105,9 @@ jobs:
       - name: Lint (ruff)
         run: ruff check app tests
 
+      - name: Smoke test (import check)
+        run: python -c "from app.main import app; print('Import OK')"
+
   unit-tests:
     runs-on: ubuntu-latest
     defaults:
@@ -110,8 +129,22 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-cov ruff
 
-      - name: Unit tests (webhook helpers)
-        run: pytest -q tests/test_webhook_*.py
+      - name: All tests with coverage
+        run: |
+          pytest tests/ \
+            --ignore=tests/test_demo_salon_eval.py \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            -q
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 7
 
   core-eval:
     needs: [lint, unit-tests, changes]
