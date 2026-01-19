@@ -82,16 +82,26 @@ def _is_outbox_worker_enabled() -> bool:
     return _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=True)
 
 
-def _get_outbox_worker_settings() -> tuple[float, int, int, int, float, int]:
+def _get_outbox_worker_settings() -> tuple[float, int, int, int, float, int, int]:
     interval_seconds = float(os.environ.get("OUTBOX_WORKER_INTERVAL_SECONDS", "2"))
     interval_seconds = max(interval_seconds, 0.1)
     limit = int(os.environ.get("OUTBOX_PROCESS_LIMIT", "10"))
     idle_seconds = int(float(os.environ.get("OUTBOX_COALESCE_SECONDS", "8")))
+    max_wait_seconds = int(float(os.environ.get("OUTBOX_MAX_WAIT_SECONDS", "10")))
     max_attempts = int(os.environ.get("OUTBOX_MAX_ATTEMPTS", "5"))
     retry_backoff_seconds = float(os.environ.get("OUTBOX_RETRY_BACKOFF_SECONDS", "2"))
     stale_seconds = int(float(os.environ.get("OUTBOX_STALE_PROCESSING_SECONDS", "120")))
     stale_seconds = max(stale_seconds, 0)
-    return interval_seconds, limit, idle_seconds, max_attempts, retry_backoff_seconds, stale_seconds
+    max_wait_seconds = max(max_wait_seconds, 0)
+    return (
+        interval_seconds,
+        limit,
+        idle_seconds,
+        max_wait_seconds,
+        max_attempts,
+        retry_backoff_seconds,
+        stale_seconds,
+    )
 
 
 async def _outbox_worker_loop() -> None:
@@ -101,6 +111,7 @@ async def _outbox_worker_loop() -> None:
                 interval_seconds,
                 limit,
                 idle_seconds,
+                max_wait_seconds,
                 max_attempts,
                 retry_backoff_seconds,
                 stale_seconds,
@@ -121,7 +132,12 @@ async def _outbox_worker_loop() -> None:
                         "Outbox stale processing released",
                         extra={"context": {**released, "stale_seconds": stale_seconds}},
                     )
-                rows = claim_pending_outbox_batches(db, limit=limit, idle_seconds=idle_seconds)
+                rows = claim_pending_outbox_batches(
+                    db,
+                    limit=limit,
+                    idle_seconds=idle_seconds,
+                    max_wait_seconds=max_wait_seconds,
+                )
                 if rows:
                     results = await webhook._process_outbox_rows(
                         db,

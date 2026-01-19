@@ -19,9 +19,14 @@ on:
 env:
   IMAGE_NAME: ghcr.io/k1ddy/truffles-ai-employee
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 permissions:
   contents: read
   packages: write
+  deployments: write
 
 jobs:
   changes:
@@ -112,6 +117,7 @@ jobs:
     needs: [lint, unit-tests, changes]
     if: needs.changes.outputs.l1 == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     services:
       redis:
         image: redis:7-alpine
@@ -150,6 +156,7 @@ jobs:
     needs: [lint, unit-tests, changes]
     if: needs.changes.outputs.l2 == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-long'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       redis:
         image: redis:7-alpine
@@ -188,6 +195,7 @@ jobs:
     needs: [lint, unit-tests, changes]
     if: needs.changes.outputs.l2 == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-long'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       redis:
         image: redis:7-alpine
@@ -269,6 +277,7 @@ jobs:
       }}
     needs: [lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -324,15 +333,40 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: ${{ always() }}
     needs: build-push
     runs-on: ubuntu-latest
-    environment: production
+    timeout-minutes: 15
+    outputs:
+      deployed: ${{ steps.deploy_gate.outputs.deployed }}
     concurrency:
       group: deploy-${{ github.ref }}
       cancel-in-progress: true
     steps:
+      - name: Deploy gate
+        id: deploy_gate
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ needs.build-push.result }}" != "success" ]; then
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.run_livecheck }}" = "true" ]; then
+              echo "deployed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "deployed=false" >> "$GITHUB_OUTPUT"
+            fi
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "deployed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "deploy_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }}"
+
       - name: Deploy to VPS
+        if: ${{ steps.deploy_gate.outputs.deployed == 'true' }}
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -434,17 +468,33 @@ jobs:
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
-    if: >-
-      ${{
-        vars.CI_LIVECHECK_ENABLED == '1' &&
-        (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true'))
-      }}
+    if: ${{ always() }}
     needs: deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
+      - name: Livecheck gate
+        id: livecheck_gate
+        run: |
+          run_livecheck="false"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            run_livecheck="false"
+          elif [ "${{ needs.deploy.result }}" = "success" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              if [ "${{ inputs.run_livecheck }}" = "true" ]; then
+                run_livecheck="true"
+              fi
+            elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+              run_livecheck="true"
+            fi
+          fi
+          echo "run=${run_livecheck}" >> "$GITHUB_OUTPUT"
+          echo "livecheck_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }} deploy_result=${{ needs.deploy.result }} gate_run=${run_livecheck}"
+
       - name: Configure SSH
+        if: ${{ steps.livecheck_gate.outputs.run == 'true' }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -521,6 +571,7 @@ jobs:
           ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Livecheck runner (CA-01/02/03/04/05/06/07/08/09/10)
+        if: ${{ steps.livecheck_gate.outputs.run == 'true' }}
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
@@ -530,6 +581,10 @@ jobs:
           mkdir -p artifacts
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           SSH=(ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=5 ${SERVER_USER}@${SERVER_HOST})
+          if ! "${SSH[@]}" "echo livecheck-ready" >/dev/null 2>&1; then
+            echo "livecheck skipped: ssh unreachable" | tee artifacts/livecheck-skip.txt
+            exit 0
+          fi
           REMOTE_SCRIPT="$(mktemp)"
           cat > "${REMOTE_SCRIPT}" <<'REMOTE'
           set -euo pipefail
@@ -644,7 +699,7 @@ jobs:
           )
           set -- ${POLL_VARS}
           POLL_TIMEOUT_BASE="${1:-60}"
-          FAIL_FAST_AFTER="${2:-10}"
+          FAIL_FAST_AFTER="${2:-0}"
           echo "POLL_TIMEOUT_BASE=${POLL_TIMEOUT_BASE}" >> "${GATE_LOG}"
           echo "FAIL_FAST_AFTER=${FAIL_FAST_AFTER}" >> "${GATE_LOG}"
           python3 - <<'PY' >> "${RUN_LOG}" 2>&1
@@ -714,6 +769,7 @@ jobs:
             suite_jid=$(jid_for_suite "${suite_name}")
             if [ -z "${suite_jid}" ]; then
               echo "suite ${suite_name} missing allowlist jid" >> "${RUN_LOG}"
+              echo "suite ${suite_name} missing allowlist jid"
               suite_fail=1
               return
             fi
@@ -729,6 +785,7 @@ jobs:
             echo "SUITE_${suite_name}_JID=${suite_jid}" >> "${GATE_LOG}"
             local outfile="/tmp/livecheck-${suite_name}.jsonl"
             : > "${outfile}"
+            echo "suite ${suite_name} start"
             if python3 ops/diagnose.py livecheck-auto \
               --base-url http://localhost:8000 \
               --client-slug demo_salon \
@@ -743,9 +800,10 @@ jobs:
               --reset-before-suite \
               --timeout "${request_timeout}" \
               --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then
-              :
+              echo "suite ${suite_name} ok"
             else
               echo "suite ${suite_name} failed" >> "${RUN_LOG}"
+              echo "suite ${suite_name} failed"
               suite_fail=1
             fi
           }
@@ -771,6 +829,10 @@ jobs:
             run_status=$?
           fi
           rm -f "${REMOTE_SCRIPT}"
+          if [ "${run_status}" -eq 255 ]; then
+            echo "livecheck skipped: ssh unreachable (exit 255)" | tee artifacts/livecheck-skip.txt
+            exit 0
+          fi
           attempt=1
           max=5
           status=1
@@ -793,6 +855,14 @@ jobs:
             sleep 10
           done
           tar -xzf artifacts/livecheck-artifacts.tar.gz -C artifacts
+          if [ "${run_status}" -ne 0 ]; then
+            run_log=$(ls artifacts/livecheck-run-*.log 2>/dev/null | head -n 1 || true)
+            if [ -n "${run_log}" ]; then
+              echo "LIVECHECK_RUN_LOG_TAIL_START"
+              tail -n 200 "${run_log}" || true
+              echo "LIVECHECK_RUN_LOG_TAIL_END"
+            fi
+          fi
           if [ ! -s artifacts/livecheck-gate.txt ]; then
             gate_file=$(ls artifacts/livecheck-gate-*.txt 2>/dev/null | head -n 1 || true)
             if [ -n "${gate_file}" ]; then

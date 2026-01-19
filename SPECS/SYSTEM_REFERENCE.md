@@ -17,7 +17,7 @@
 2) Определи роль и Task Package (если нет — STOP и вопрос владельцу).
 3) Для CA‑аудита открой `STRATEGY/TECH_ROADMAP.md` (CA‑plan) и раздел 4.3 (Live‑check SOP).
 4) Отдели аудит от фикса: аудит = evidence, фикс = отдельный Task Package с CA‑ID.
-5) Если `STATE.md` NOW не помещается в 1 экран или нет следующих шагов — STOP и запросить Brain обновление брифа.
+5) Если `STATE.md` NOW не помещается в 1 экран или нет следующих шагов — STOP и запросить Brain или Top Architect обновление брифа.
 
 **Правила evidence:**
 - Единственный источник фактов — `STATE.md` (PASS/FAIL с conv_id/trace/SQL/CI).
@@ -33,7 +33,7 @@
 - SQL evidence: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "<SQL>"`.
 
 **Где фиксировать изменения:**
-- Статус/evidence → `STATE.md` (Brain; для core/поведенческих изменений — до merge в рамках PR, плюс финальная запись в конце сессии).
+- Статус/evidence → `STATE.md` (Brain или Top Architect; для core/поведенческих изменений — до merge в рамках PR, плюс финальная запись в конце сессии).
 - Статус аудита → `STRATEGY/TECH_ROADMAP.md` (Top Architect, со ссылкой на `STATE.md`).
 - Процессы/инварианты → `SPECS/*` или `STRATEGY/*` (owner‑docs).
 
@@ -193,7 +193,7 @@ ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/health"
 3) **Деплой** по разделу 4 (GHCR → `PULL_IMAGE=1`; fallback build допустим).
 4) **Проверка версии**: `/admin/version` + `/admin/health` (если version unknown → STOP).
 5) **Live-check** (если указан в DoD): реальный inbound → conv_id + decision_trace/meta.
-6) **STATE.md** обновляет Brain с evidence **до merge** для core/поведенческих изменений; финальная запись — в конце сессии.
+6) **STATE.md** обновляет Brain или Top Architect с evidence **до merge** для core/поведенческих изменений; финальная запись — в конце сессии.
 
 **Запрещено:** `docker cp`, `docker run -v`, “локальные” фиксы без CI/перезапуска.
 
@@ -232,7 +232,7 @@ python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
 
 **Кто делает:**
 - **Hands/OPS:** запускают live‑check runner.
-- **Brain:** снимает evidence из БД и фиксирует в `STATE.md` (для core/поведенческих изменений — до merge).
+- **Brain или Top Architect:** снимает evidence из БД и фиксирует в `STATE.md` (для core/поведенческих изменений — до merge).
 - **Top Architect:** обновляет статус аудита в `STRATEGY/TECH_ROADMAP.md` (CA‑plan) только со ссылкой на `STATE.md`.
 
 **Перед запуском (обязательно):**
@@ -295,8 +295,8 @@ python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
 **Как проверяем (процесс):**
 1) Выбрать CA‑suite (например, `ca01-core`) и окно запуска.
 2) Запустить runner (реальный inbound через ChatFlow → `/webhook/{client_slug}`), suite→JID фиксирован.
-3) Brain снимает evidence в БД по marker‑логам (decision_meta + decision_trace).
-4) Brain фиксирует PASS/FAIL в `STATE.md` с ссылкой на CA‑ID и артефактами.
+3) Brain или Top Architect снимает evidence в БД по marker‑логам (decision_meta + decision_trace).
+4) Brain или Top Architect фиксирует PASS/FAIL в `STATE.md` с ссылкой на CA‑ID и артефактами.
 5) Top Architect обновляет статус CA‑пункта в `STRATEGY/TECH_ROADMAP.md` с ссылкой на `STATE.md`.
 6) Если runner/БД недоступны → статус **BLOCKED**, без фиктивных проверок.
 
