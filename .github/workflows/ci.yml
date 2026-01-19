@@ -19,6 +19,10 @@ on:
 env:
   IMAGE_NAME: ghcr.io/k1ddy/truffles-ai-employee
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 permissions:
   contents: read
   packages: write
@@ -113,6 +117,7 @@ jobs:
     needs: [lint, unit-tests, changes]
     if: needs.changes.outputs.l1 == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     services:
       redis:
         image: redis:7-alpine
@@ -151,6 +156,7 @@ jobs:
     needs: [lint, unit-tests, changes]
     if: needs.changes.outputs.l2 == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-long'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       redis:
         image: redis:7-alpine
@@ -189,6 +195,7 @@ jobs:
     needs: [lint, unit-tests, changes]
     if: needs.changes.outputs.l2 == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-long'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       redis:
         image: redis:7-alpine
@@ -270,6 +277,7 @@ jobs:
       }}
     needs: [lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -328,6 +336,7 @@ jobs:
     if: ${{ always() }}
     needs: build-push
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       deployed: ${{ steps.deploy_gate.outputs.deployed }}
     concurrency:
@@ -462,6 +471,7 @@ jobs:
     if: ${{ always() }}
     needs: deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -755,6 +765,7 @@ jobs:
             suite_jid=$(jid_for_suite "${suite_name}")
             if [ -z "${suite_jid}" ]; then
               echo "suite ${suite_name} missing allowlist jid" >> "${RUN_LOG}"
+              echo "suite ${suite_name} missing allowlist jid"
               suite_fail=1
               return
             fi
@@ -770,6 +781,7 @@ jobs:
             echo "SUITE_${suite_name}_JID=${suite_jid}" >> "${GATE_LOG}"
             local outfile="/tmp/livecheck-${suite_name}.jsonl"
             : > "${outfile}"
+            echo "suite ${suite_name} start"
             if python3 ops/diagnose.py livecheck-auto \
               --base-url http://localhost:8000 \
               --client-slug demo_salon \
@@ -784,9 +796,10 @@ jobs:
               --reset-before-suite \
               --timeout "${request_timeout}" \
               --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then
-              :
+              echo "suite ${suite_name} ok"
             else
               echo "suite ${suite_name} failed" >> "${RUN_LOG}"
+              echo "suite ${suite_name} failed"
               suite_fail=1
             fi
           }
