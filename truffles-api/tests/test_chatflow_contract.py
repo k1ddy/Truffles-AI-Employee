@@ -14,7 +14,7 @@ import pytest
 import respx
 from httpx import Response
 
-from app.contracts import Result, IntegrationError, ConfigError, ErrorCodes
+from app.contracts import ConfigError, ErrorCodes, IntegrationError, Result
 
 
 class TestSendMessageSafeContract:
@@ -27,7 +27,7 @@ class TestSendMessageSafeContract:
         os.environ["CHATFLOW_TOKEN"] = "test-token"
         os.environ["TEST_MODE"] = "0"
         
-        from app.services.chatflow_service import send_message_safe, MessageSent
+        from app.services.chatflow_service import MessageSent, send_message_safe
         
         # Mock ChatFlow API
         respx.get("https://app.chatflow.kz/api/v1/send-text").mock(
@@ -71,6 +71,7 @@ class TestSendMessageSafeContract:
     def test_timeout_returns_timeout_error(self):
         """When ChatFlow times out, should return CHATFLOW_TIMEOUT error."""
         import os
+
         import httpx
         os.environ["CHATFLOW_TOKEN"] = "test-token"
         os.environ["TEST_MODE"] = "0"
@@ -98,6 +99,7 @@ class TestSendMessageSafeContract:
         
         # Force module reload to pick up env change
         import importlib
+
         import app.services.chatflow_service as chatflow_module
         importlib.reload(chatflow_module)
         
@@ -116,6 +118,7 @@ class TestSendMessageSafeContract:
         monkeypatch.setenv("TEST_MODE", "0")
         
         import importlib
+
         import app.services.chatflow_service as chatflow_module
         importlib.reload(chatflow_module)
         

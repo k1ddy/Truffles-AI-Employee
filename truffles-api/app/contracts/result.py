@@ -6,7 +6,7 @@ Result pattern для безопасной обработки успехов и 
 """
 
 from dataclasses import dataclass
-from typing import Generic, TypeVar, Callable, Any
+from typing import Any, Callable, Generic, TypeVar
 
 from app.contracts.errors import TrufflesError
 

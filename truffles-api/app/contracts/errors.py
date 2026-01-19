@@ -66,7 +66,7 @@ class StateError(TrufflesError):
             self.context["target_state"] = self.target_state
 
 
-@dataclass  
+@dataclass
 class AuthError(TrufflesError):
     """Ошибка аутентификации/авторизации."""
     pass

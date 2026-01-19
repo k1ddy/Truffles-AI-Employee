@@ -4,8 +4,9 @@ Contract tests for Shield module.
 Tests behavioral shield (spam/toxic filtering) contracts.
 """
 
-import pytest
 from datetime import datetime, timezone
+
+import pytest
 
 
 class TestShieldContract:
@@ -99,8 +100,9 @@ class TestTraceContract:
     def test_record_decision_trace_accepts_dict(self):
         """_record_decision_trace should accept conversation and dict."""
         # This is a contract test - we verify the function signature
-        from app.routers.webhook.trace import _record_decision_trace
         import inspect
+
+        from app.routers.webhook.trace import _record_decision_trace
         
         sig = inspect.signature(_record_decision_trace)
         params = list(sig.parameters.keys())
@@ -136,7 +138,7 @@ class TestTraceContract:
 
     def test_retain_decision_trace_limits_size(self):
         """_retain_decision_trace should limit trace list size."""
-        from app.routers.webhook.trace import _retain_decision_trace, DECISION_TRACE_MAX
+        from app.routers.webhook.trace import DECISION_TRACE_MAX, _retain_decision_trace
         
         # Create oversized trace
         oversized = [{"stage": f"stage_{i}", "decision": "test"} for i in range(DECISION_TRACE_MAX + 20)]
@@ -152,7 +154,7 @@ class TestResultContract:
 
     def test_result_chain_operations(self):
         """Result should support and_then chaining."""
-        from app.contracts import Ok, Err, TrufflesError
+        from app.contracts import Err, Ok, TrufflesError
         
         def double(x: int):
             return Ok(x * 2)
@@ -167,8 +169,9 @@ class TestResultContract:
 
     def test_result_to_dict_serialization(self):
         """Result.to_dict() should return serializable dict."""
-        from app.contracts import Ok, Err, TrufflesError
         import json
+
+        from app.contracts import Err, Ok, TrufflesError
         
         ok_result = Ok({"key": "value"})
         ok_dict = ok_result.to_dict()
