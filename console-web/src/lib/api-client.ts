@@ -5,8 +5,8 @@
  * Generated types from OpenAPI spec with runtime error handling from errors.v1.json.
  */
 
-import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
-import type { components, operations, paths } from "@/types/api.generated";
+import axios, { AxiosError, AxiosInstance } from "axios";
+import type { components, operations } from "@/types/api.generated";
 
 // ═══════════════════════════════════════════════════════════════════
 // ERROR TYPES & HANDLING
