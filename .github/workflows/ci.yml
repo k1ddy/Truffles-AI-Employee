@@ -89,6 +89,9 @@ jobs:
       - name: Lint (ruff)
         run: ruff check app tests
 
+      - name: Smoke test (catches ImportError)
+        run: python -c "from app.main import app; print('✓ App imports OK')"
+
   unit-tests:
     runs-on: ubuntu-latest
     defaults:
@@ -110,8 +113,8 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-cov ruff
 
-      - name: Unit tests (webhook helpers)
-        run: pytest -q tests/test_webhook_*.py
+      - name: Unit tests
+        run: pytest -q tests/test_webhook_*.py tests/test_health_service.py
 
   core-eval:
     needs: [lint, unit-tests, changes]
