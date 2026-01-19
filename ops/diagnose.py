@@ -15,6 +15,7 @@ import os
 import random
 import re
 import shlex
+import socket
 import subprocess
 import sys
 import time
@@ -418,12 +419,15 @@ def _parse_livecheck_auto_args(argv):
     parser.add_argument("--jid-mode", choices=["unique", "allowlist"], default="allowlist")
     parser.add_argument("--remote-jid", default=None)
     parser.add_argument("--allowlist-jids", default=None)
+    parser.add_argument("--allow-non-allowlist", action="store_true")
     parser.add_argument("--webhook-secret", default=None)
     parser.add_argument("--admin-token", default=None)
     parser.add_argument("--instance-id", default=None)
     parser.add_argument("--ack-text", default="ок")
     parser.add_argument("--poll-interval", type=float, default=1.0)
     parser.add_argument("--poll-timeout", type=float, default=20.0)
+    parser.add_argument("--fail-fast-after", type=float, default=8.0)
+    parser.add_argument("--reset-before-suite", action="store_true")
     parser.add_argument("--timeout", type=float, default=15.0)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
@@ -1012,11 +1016,19 @@ def _fetch_message_meta(db_user, message_id):
         meta = None
     return conversation_id, meta, None
 
-def _poll_decision_meta(db_user, message_id, timeout, interval, require_action=True):
+def _poll_decision_meta(
+    db_user,
+    message_id,
+    timeout,
+    interval,
+    require_action=True,
+    fail_fast_after=None,
+):
     deadline = time.time() + max(timeout, 0)
     last_meta = None
     last_conv_id = None
     last_error = None
+    missing_action_since = None
     while time.time() <= deadline:
         conversation_id, meta, error = _fetch_message_meta(db_user, message_id)
         if error:
@@ -1031,6 +1043,16 @@ def _poll_decision_meta(db_user, message_id, timeout, interval, require_action=T
             policy_gate = meta.get("policy_gate")
             if action or policy_gate:
                 return last_conv_id, last_meta, None
+            if fail_fast_after is not None:
+                if missing_action_since is None:
+                    missing_action_since = time.time()
+                elif time.time() - missing_action_since >= fail_fast_after:
+                    meta_keys = sorted(k for k in meta.keys() if isinstance(k, str))
+                    return (
+                        last_conv_id,
+                        last_meta,
+                        f"missing_action (meta_keys={meta_keys})",
+                    )
         time.sleep(max(interval, 0.2))
     return last_conv_id, last_meta, last_error or "timeout"
 
@@ -1128,6 +1150,10 @@ def _post_admin_outbox(url, admin_token, timeout):
         body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
         return exc.code, body, str(exc)
     except urllib.error.URLError as exc:
+        return None, "", str(exc)
+    except (TimeoutError, socket.timeout) as exc:
+        return None, "", f"timeout: {exc}"
+    except Exception as exc:
         return None, "", str(exc)
 
 def _post_admin_outbox_with_wait(url, admin_token, timeout, wait_seconds):
@@ -1441,12 +1467,14 @@ def _run_livecheck_ca05_booking(args, context):
     remote_jid = context["remote_jid"]
     db_user = context["db_user"]
     allowlist_jids = context["allowlist_jids"]
+    allow_non_allowlist = context.get("allow_non_allowlist")
+    fail_fast_after = context.get("fail_fast_after")
     outbox_url = f"{base_url}/admin/outbox/process"
     outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
     min_wait = max(min(args.min_wait, args.max_wait), outbox_wait_seconds)
     max_wait = max(max(args.min_wait, args.max_wait), outbox_wait_seconds)
 
-    if not remote_jid or remote_jid not in allowlist_jids:
+    if not remote_jid or (remote_jid not in allowlist_jids and not allow_non_allowlist):
         raise SystemExit("livecheck-auto: CA05 remote_jid not in allowlist")
 
     results = []
@@ -1591,7 +1619,11 @@ def _run_livecheck_ca05_booking(args, context):
                 outbox_wait_seconds,
             )
             conv_id, meta, error = _poll_decision_meta(
-                db_user, message_id, args.poll_timeout, args.poll_interval
+                db_user,
+                message_id,
+                args.poll_timeout,
+                args.poll_interval,
+                fail_fast_after=fail_fast_after,
             )
             if error:
                 raise SystemExit(f"livecheck-auto: CA05 decision_meta poll failed ({error})")
@@ -1675,10 +1707,12 @@ def _run_livecheck_ca06_reset(args, context, *, suite_label="CA06"):
     remote_jid = context["remote_jid"]
     db_user = context["db_user"]
     allowlist_jids = context["allowlist_jids"]
+    allow_non_allowlist = context.get("allow_non_allowlist")
+    fail_fast_after = context.get("fail_fast_after")
     outbox_url = f"{base_url}/admin/outbox/process"
     outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
 
-    if not remote_jid or remote_jid not in allowlist_jids:
+    if not remote_jid or (remote_jid not in allowlist_jids and not allow_non_allowlist):
         raise SystemExit(f"livecheck-auto: {suite_label} remote_jid not in allowlist")
 
     reset_text = "начнем сначала"
@@ -1731,6 +1765,7 @@ def _run_livecheck_ca06_reset(args, context, *, suite_label="CA06"):
         args.poll_timeout,
         args.poll_interval,
         require_action=False,
+        fail_fast_after=fail_fast_after,
     )
     if reset_meta_error:
         raise SystemExit(f"livecheck-auto: CA06 reset meta poll failed ({reset_meta_error})")
@@ -1764,9 +1799,11 @@ def _run_livecheck_ca08_state(args, context):
     db_user = context["db_user"]
     outbox_url = f"{base_url}/admin/outbox/process"
     allowlist_jids = context["allowlist_jids"]
+    allow_non_allowlist = context.get("allow_non_allowlist")
+    fail_fast_after = context.get("fail_fast_after")
     outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
 
-    if not remote_jid or remote_jid not in allowlist_jids:
+    if not remote_jid or (remote_jid not in allowlist_jids and not allow_non_allowlist):
         raise SystemExit("livecheck-auto: CA08 remote_jid not in allowlist")
 
     text, marker, message = _build_livecheck_message(
@@ -1826,7 +1863,11 @@ def _run_livecheck_ca08_state(args, context):
             outbox_wait_seconds,
         )
         conv_id, meta, error = _poll_decision_meta(
-            db_user, message_id, args.poll_timeout, args.poll_interval
+            db_user,
+            message_id,
+            args.poll_timeout,
+            args.poll_interval,
+            fail_fast_after=fail_fast_after,
         )
         if error:
             raise SystemExit(f"livecheck-auto: CA08 decision_meta poll failed ({error})")
@@ -1870,7 +1911,11 @@ def _run_livecheck_ca08_state(args, context):
             outbox_wait_seconds,
         )
         _, ack_meta, ack_meta_error = _poll_decision_meta(
-            db_user, ack_message_id, args.poll_timeout, args.poll_interval
+            db_user,
+            ack_message_id,
+            args.poll_timeout,
+            args.poll_interval,
+            fail_fast_after=fail_fast_after,
         )
         if ack_meta_error:
             raise SystemExit(f"livecheck-auto: CA08 ACK poll failed ({ack_meta_error})")
@@ -1933,10 +1978,12 @@ def _run_livecheck_ca09_manager(args, context):
     learning_env = context["learning_env"]
     outbox_url = f"{base_url}/admin/outbox/process"
     allowlist_jids = context["allowlist_jids"]
+    allow_non_allowlist = context.get("allow_non_allowlist")
+    fail_fast_after = context.get("fail_fast_after")
     qdrant_env = context["qdrant_env"]
     outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
 
-    if not remote_jid or remote_jid not in allowlist_jids:
+    if not remote_jid or (remote_jid not in allowlist_jids and not allow_non_allowlist):
         raise SystemExit("livecheck-auto: CA09 remote_jid not in allowlist")
 
     text, marker, message = _build_livecheck_message(
@@ -1990,7 +2037,11 @@ def _run_livecheck_ca09_manager(args, context):
             outbox_wait_seconds,
         )
         conv_id, meta, error = _poll_decision_meta(
-            db_user, message_id, args.poll_timeout, args.poll_interval
+            db_user,
+            message_id,
+            args.poll_timeout,
+            args.poll_interval,
+            fail_fast_after=fail_fast_after,
         )
         if error:
             raise SystemExit(f"livecheck-auto: CA09 decision_meta poll failed ({error})")
@@ -2131,10 +2182,11 @@ def _run_livecheck_ca10_outbox(args, context):
     db_user = context["db_user"]
     client_id = context["client_meta"].get("client_id") if context.get("client_meta") else None
     allowlist_jids = context["allowlist_jids"]
+    allow_non_allowlist = context.get("allow_non_allowlist")
 
     if not client_id:
         raise SystemExit("livecheck-auto: CA10 missing client_id")
-    if not remote_jid or remote_jid not in allowlist_jids:
+    if not remote_jid or (remote_jid not in allowlist_jids and not allow_non_allowlist):
         raise SystemExit("livecheck-auto: CA10 remote_jid not in allowlist")
 
     text, marker, message = _build_livecheck_message(
@@ -2238,6 +2290,7 @@ def _run_livecheck_auto(args):
         raise SystemExit("livecheck-auto: allowlist-jids is empty")
     if not test_mode_enabled:
         raise SystemExit("livecheck-auto: TEST_MODE disabled; refusing to run")
+    allow_non_allowlist = bool(args.allow_non_allowlist)
 
     webhook_secret = _resolve_webhook_secret(client_slug, args.webhook_secret)
     if not webhook_secret:
@@ -2291,7 +2344,7 @@ def _run_livecheck_auto(args):
         remote_jid = args.remote_jid or _select_allowlist_jid(
             allowlist_jids, args.suite, args.seed
         )
-        if remote_jid not in allowlist_jids:
+        if remote_jid not in allowlist_jids and not allow_non_allowlist:
             raise SystemExit(
                 f"livecheck-auto: remote-jid {remote_jid} not in allowlist; refusing to send"
             )
@@ -2309,6 +2362,7 @@ def _run_livecheck_auto(args):
         "jid_mode": args.jid_mode,
         "remote_jid": remote_jid,
         "allowlist_jids": allowlist_jids,
+        "allow_non_allowlist": allow_non_allowlist,
         "test_mode": test_mode_enabled,
         "learning_mode": learning_env.get("learning_mode"),
         "qdrant_collection": learning_env.get("qdrant_collection_effective"),
@@ -2325,6 +2379,7 @@ def _run_livecheck_auto(args):
         "instance_id": instance_id,
         "allowlist_jids": allowlist_jids,
         "remote_jid": remote_jid,
+        "allow_non_allowlist": allow_non_allowlist,
         "db_user": db_user,
         "client_slug": client_slug,
         "client_meta": client_meta,
@@ -2332,8 +2387,10 @@ def _run_livecheck_auto(args):
         "qdrant_env": qdrant_env,
         "container_name": container_name,
         "outbox_wait_seconds": _resolve_outbox_wait_seconds(container_name),
+        "fail_fast_after": args.fail_fast_after if args.fail_fast_after > 0 else None,
     }
     outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
+    fail_fast_after = context.get("fail_fast_after")
     sleep_min = max(min_wait, outbox_wait_seconds)
     sleep_max = max(max_wait, outbox_wait_seconds)
 
@@ -2352,7 +2409,11 @@ def _run_livecheck_auto(args):
         _ensure_bot_active_before_suite(args, context)
 
     reset_summary = None
-    if args.suite == "ca06-consult":
+    if args.reset_before_suite and args.suite not in {"ca06-consult", "ca07-ood"}:
+        reset_summary = _run_livecheck_ca06_reset(
+            args, context, suite_label=f"PRE-{args.suite.upper()}"
+        )
+    elif args.suite == "ca06-consult":
         reset_summary = _run_livecheck_ca06_reset(args, context, suite_label="CA06")
     elif args.suite == "ca07-ood":
         reset_summary = _run_livecheck_ca06_reset(args, context, suite_label="CA07")
@@ -2397,7 +2458,7 @@ def _run_livecheck_auto(args):
         sent_at = datetime.now(timezone.utc).isoformat()
         if args.jid_mode == "unique":
             remote_jid = _logic_jid_for_index(idx)
-        if remote_jid not in allowlist_jids:
+        if remote_jid not in allowlist_jids and not allow_non_allowlist:
             raise SystemExit(
                 f"livecheck-auto: remote-jid {remote_jid} not in allowlist; refusing to send"
             )
@@ -2469,7 +2530,11 @@ def _run_livecheck_auto(args):
                 outbox_wait_seconds,
             )
             conv_id, meta, error = _poll_decision_meta(
-                db_user, message_id, args.poll_timeout, args.poll_interval
+                db_user,
+                message_id,
+                args.poll_timeout,
+                args.poll_interval,
+                fail_fast_after=fail_fast_after,
             )
             if error:
                 raise SystemExit(f"livecheck-auto: decision_meta poll failed ({error})")

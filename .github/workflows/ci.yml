@@ -560,6 +560,10 @@ jobs:
           TEST_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"')
           ALLOWLIST=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"')
           LEARNING_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${LEARNING_MODE:-}"')
+          ALERTS_ADMIN_TOKEN=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${ALERTS_ADMIN_TOKEN:-}"')
+          OUTBOX_WORKER_ENABLED=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_WORKER_ENABLED:-}"')
+          OUTBOX_WORKER_INTERVAL_SECONDS=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_WORKER_INTERVAL_SECONDS:-}"')
+          OUTBOX_COALESCE_SECONDS=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_COALESCE_SECONDS:-}"')
           QDRANT_COLLECTION=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${QDRANT_COLLECTION:-}"')
           QDRANT_COLLECTION_EFFECTIVE="${QDRANT_COLLECTION}"
           if [ -z "${QDRANT_COLLECTION_EFFECTIVE}" ]; then
@@ -571,10 +575,22 @@ jobs:
             echo "LEARNING_MODE=${LEARNING_MODE}"
             echo "QDRANT_COLLECTION=${QDRANT_COLLECTION}"
             echo "QDRANT_COLLECTION_EFFECTIVE=${QDRANT_COLLECTION_EFFECTIVE}"
+            if [ -n "${ALERTS_ADMIN_TOKEN}" ]; then
+              echo "ALERTS_ADMIN_TOKEN_SET=1"
+            else
+              echo "ALERTS_ADMIN_TOKEN_SET=0"
+            fi
+            echo "OUTBOX_WORKER_ENABLED=${OUTBOX_WORKER_ENABLED}"
+            echo "OUTBOX_WORKER_INTERVAL_SECONDS=${OUTBOX_WORKER_INTERVAL_SECONDS}"
+            echo "OUTBOX_COALESCE_SECONDS=${OUTBOX_COALESCE_SECONDS}"
           } > "${GATE_LOG}"
           gate_ok=1
           if [ "${TEST_MODE}" != "1" ]; then
             echo "TEST_MODE_NOT_ENABLED" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
+          if [ -z "${ALERTS_ADMIN_TOKEN}" ]; then
+            echo "ALERTS_ADMIN_TOKEN_MISSING" >> "${GATE_LOG}"
             gate_ok=0
           fi
           ALLOWLIST_CLEAN="${ALLOWLIST// /}"
@@ -609,6 +625,28 @@ jobs:
             echo "GATE_FAILED" >> "${RUN_LOG}"
             exit 1
           fi
+          POLL_VARS=$(python3 - <<'PY'
+          import math
+          import os
+
+          def parse(value, default):
+              try:
+                  return float(value)
+              except (TypeError, ValueError):
+                  return default
+
+          coalesce = parse(os.environ.get("OUTBOX_COALESCE_SECONDS"), 8.0)
+          interval = parse(os.environ.get("OUTBOX_WORKER_INTERVAL_SECONDS"), 2.0)
+          poll_timeout = max(60.0, coalesce + interval * 5 + 10.0)
+          fail_fast_after = max(10.0, min(30.0, poll_timeout / 3))
+          print(f"{poll_timeout:.0f} {fail_fast_after:.0f}")
+          PY
+          )
+          set -- ${POLL_VARS}
+          POLL_TIMEOUT_BASE="${1:-60}"
+          FAIL_FAST_AFTER="${2:-10}"
+          echo "POLL_TIMEOUT_BASE=${POLL_TIMEOUT_BASE}" >> "${GATE_LOG}"
+          echo "FAIL_FAST_AFTER=${FAIL_FAST_AFTER}" >> "${GATE_LOG}"
           python3 - <<'PY' >> "${RUN_LOG}" 2>&1
           import time
           import urllib.request
@@ -679,9 +717,9 @@ jobs:
               suite_fail=1
               return
             fi
-            local poll_timeout=60
+            local poll_timeout="${POLL_TIMEOUT_BASE}"
             if [ "${suite_name}" = "ca06-consult" ]; then
-              poll_timeout=120
+              poll_timeout=$((poll_timeout + 60))
             fi
             local request_timeout=30
             local noise_level="low"
@@ -701,6 +739,8 @@ jobs:
               --remote-jid "${suite_jid}" \
               --allowlist-jids "${ALLOWLIST_CLEAN}" \
               --poll-timeout "${poll_timeout}" \
+              --fail-fast-after "${FAIL_FAST_AFTER}" \
+              --reset-before-suite \
               --timeout "${request_timeout}" \
               --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then
               :
