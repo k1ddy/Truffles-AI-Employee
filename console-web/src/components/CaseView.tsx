@@ -7,6 +7,7 @@ import { Case, Message } from "@/types";
 import ChatInterface from "./ChatInterface";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import { getStatusLabel, getSlaLabel } from "@/utils/labels";
 
 interface CaseViewProps {
     caseId: string;
@@ -32,26 +33,6 @@ async function resolveCase(caseId: string): Promise<void> {
 }
 
 // sendMessage moved to ChatInterface component
-
-// Status translation
-function getStatusLabel(status: string): string {
-    const labels: Record<string, string> = {
-        pending: "ожидает",
-        active: "в работе",
-        resolved: "закрыта",
-    };
-    return labels[status] || status;
-}
-
-// SLA translation
-function getSlaLabel(status?: string): string {
-    const labels: Record<string, string> = {
-        ok: "норма",
-        warning: "внимание",
-        breached: "просрочено",
-    };
-    return labels[status || "ok"] || status || "норма";
-}
 
 // Loading skeleton
 function CaseViewSkeleton() {
@@ -301,9 +282,9 @@ export default function CaseView({ caseId }: CaseViewProps) {
                                     .map((trace, idx) => (
                                         <div key={idx} className="flex items-center gap-2 text-xs">
                                             <span className={`px-1.5 py-0.5 rounded ${trace.stage === "policy_gate" ? "bg-purple-100 text-purple-700" :
-                                                    trace.stage === "escalation" ? "bg-red-100 text-red-700" :
-                                                        trace.stage === "booking" ? "bg-green-100 text-green-700" :
-                                                            "bg-blue-100 text-blue-700"
+                                                trace.stage === "escalation" ? "bg-red-100 text-red-700" :
+                                                    trace.stage === "booking" ? "bg-green-100 text-green-700" :
+                                                        "bg-blue-100 text-blue-700"
                                                 }`}>
                                                 {trace.stage}
                                             </span>
@@ -331,6 +312,72 @@ export default function CaseView({ caseId }: CaseViewProps) {
                                     ))}
                                 </div>
                             </details>
+                        </div>
+                    )}
+
+                    {/* Telegram Trail Section (TG-01) */}
+                    {caseDetail.telegram_trail && (
+                        <div className="border-t pt-4">
+                            <h3 className="font-medium text-gray-600 mb-2">📨 Telegram</h3>
+                            <div className="space-y-2 text-sm">
+                                {/* Delivery status badge */}
+                                <div className="flex items-center gap-2">
+                                    <span className="text-gray-500">Статус:</span>
+                                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${caseDetail.telegram_trail.delivery_status === "sent"
+                                        ? "bg-green-100 text-green-800"
+                                        : caseDetail.telegram_trail.delivery_status === "failed"
+                                            ? "bg-red-100 text-red-800"
+                                            : "bg-yellow-100 text-yellow-800"
+                                        }`}>
+                                        {caseDetail.telegram_trail.delivery_status === "sent" ? "✓ Доставлено" :
+                                            caseDetail.telegram_trail.delivery_status === "failed" ? "✗ Ошибка" :
+                                                "⏳ Ожидает"}
+                                    </span>
+                                </div>
+
+                                {/* Message ID */}
+                                {caseDetail.telegram_trail.message_id && (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500">Message ID:</span>
+                                        <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">
+                                            {caseDetail.telegram_trail.message_id}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {/* Topic ID */}
+                                {caseDetail.telegram_trail.topic_id && (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500">Topic ID:</span>
+                                        <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">
+                                            {caseDetail.telegram_trail.topic_id}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {/* Delivered at */}
+                                {caseDetail.telegram_trail.delivered_at && (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-500">Отправлено:</span>
+                                        <span className="text-xs">
+                                            {new Date(caseDetail.telegram_trail.delivered_at).toLocaleString("ru-RU")}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {/* Open in Telegram link */}
+                                {caseDetail.telegram_trail.telegram_link && (
+                                    <a
+                                        href={caseDetail.telegram_trail.telegram_link}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition-colors"
+                                    >
+                                        <span>📲</span>
+                                        Открыть в Telegram
+                                    </a>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>

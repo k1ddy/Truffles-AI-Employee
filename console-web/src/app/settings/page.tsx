@@ -10,6 +10,7 @@ interface Branch {
     slug: string;
     name: string;
     is_active: boolean;
+    telegram_chat_id?: string | null;
 }
 
 interface Agent {
@@ -191,7 +192,7 @@ export default function SettingsPage() {
                     )}
                 </div>
 
-                {/* Branches */}
+                {/* Branches (TG-02) */}
                 <div className="bg-white border rounded-lg p-5">
                     <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                         🏢 Филиалы
@@ -200,20 +201,37 @@ export default function SettingsPage() {
                         {data?.branches.map((branch) => (
                             <div
                                 key={branch.id}
-                                className="flex items-center justify-between p-2 bg-gray-50 rounded"
+                                className="flex items-center justify-between p-3 bg-gray-50 rounded"
                             >
-                                <div>
-                                    <span className="font-medium">{branch.name}</span>
-                                    <span className="text-sm text-gray-500 ml-2">({branch.slug})</span>
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-medium">{branch.name}</span>
+                                        <span className="text-sm text-gray-500">({branch.slug})</span>
+                                    </div>
+                                    {/* Telegram status */}
+                                    <div className="flex items-center gap-1 mt-1">
+                                        {branch.telegram_chat_id ? (
+                                            <>
+                                                <span className="text-blue-500 text-xs">📨</span>
+                                                <span className="text-xs text-gray-500 font-mono">
+                                                    {branch.telegram_chat_id.slice(0, 15)}...
+                                                </span>
+                                            </>
+                                        ) : (
+                                            <span className="text-xs text-gray-400">Telegram не настроен</span>
+                                        )}
+                                    </div>
                                 </div>
-                                <span
-                                    className={`px-2 py-0.5 rounded text-xs ${branch.is_active
-                                        ? "bg-green-100 text-green-800"
-                                        : "bg-gray-100 text-gray-800"
-                                        }`}
-                                >
-                                    {branch.is_active ? "Активен" : "Неактивен"}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                    <span
+                                        className={`px-2 py-0.5 rounded text-xs ${branch.is_active
+                                            ? "bg-green-100 text-green-800"
+                                            : "bg-gray-100 text-gray-800"
+                                            }`}
+                                    >
+                                        {branch.is_active ? "Активен" : "Неактивен"}
+                                    </span>
+                                </div>
                             </div>
                         ))}
                         {data?.branches.length === 0 && (

@@ -1,8 +1,11 @@
 import base64
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import Request
 from sqlalchemy.orm import Session
@@ -103,17 +106,19 @@ def _decode_verified_payload(token: str) -> dict[str, Any]:
 
 
 def _decode_token(token: str) -> dict[str, Any]:
-    print(f"DEBUG: Decoding token. JWKS_URL={os.environ.get('CONSOLE_OIDC_JWKS_URL')}, ALLOW_UNVERIFIED={os.environ.get('CONSOLE_OIDC_ALLOW_UNVERIFIED')}")
+    logger.debug("Decoding token. JWKS_URL=%s, ALLOW_UNVERIFIED=%s",
+                 os.environ.get('CONSOLE_OIDC_JWKS_URL'),
+                 os.environ.get('CONSOLE_OIDC_ALLOW_UNVERIFIED'))
     if os.environ.get("CONSOLE_OIDC_JWKS_URL"):
         return _decode_verified_payload(token)
     if os.environ.get("CONSOLE_OIDC_ALLOW_UNVERIFIED", "0") == "1":
         try:
             payload = _decode_unverified_payload(token)
-            print(f"DEBUG: Unverified payload: {payload}")
+            logger.debug("Unverified payload decoded successfully")
             _verify_expected_claims(payload)
             return payload
         except Exception as e:
-            print(f"DEBUG: Error in unverified decoding: {e}")
+            logger.warning("Error in unverified token decoding: %s", e)
             raise
     raise ConsoleAPIError(
         500,

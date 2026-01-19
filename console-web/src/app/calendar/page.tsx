@@ -6,6 +6,7 @@ import api from "@/lib/api";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import toast from "react-hot-toast";
+import { getBookingStatusLabel, getBookingStatusColor } from "@/utils/labels";
 
 interface Specialist {
     id: string;
@@ -60,28 +61,6 @@ async function createBooking(data: any): Promise<any> {
 
 function formatDate(date: Date): string {
     return date.toISOString().split("T")[0];
-}
-
-function getStatusLabel(status: string): string {
-    const labels: Record<string, string> = {
-        pending: "ожидает",
-        confirmed: "подтверждена",
-        cancelled: "отменена",
-        completed: "завершена",
-        no_show: "не пришёл",
-    };
-    return labels[status] || status;
-}
-
-function getStatusColor(status: string): string {
-    const colors: Record<string, string> = {
-        pending: "bg-yellow-100 text-yellow-800",
-        confirmed: "bg-green-100 text-green-800",
-        cancelled: "bg-gray-100 text-gray-800",
-        completed: "bg-blue-100 text-blue-800",
-        no_show: "bg-red-100 text-red-800",
-    };
-    return colors[status] || "bg-gray-100 text-gray-800";
 }
 
 export default function CalendarPage() {
@@ -454,8 +433,8 @@ export default function CalendarPage() {
                                                 {" - "}
                                                 {new Date(booking.end_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
                                             </span>
-                                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(booking.status)}`}>
-                                                {getStatusLabel(booking.status)}
+                                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${getBookingStatusColor(booking.status)}`}>
+                                                {getBookingStatusLabel(booking.status)}
                                             </span>
                                         </div>
                                         <div className="text-sm text-gray-600">

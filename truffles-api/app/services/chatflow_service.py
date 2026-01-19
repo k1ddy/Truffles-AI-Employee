@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import os
 import time
+from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import quote
 from uuid import UUID
@@ -9,6 +10,7 @@ from uuid import UUID
 import httpx
 from sqlalchemy.orm import Session
 
+from app.contracts import Result, Ok, Err, IntegrationError, ConfigError, ErrorCodes
 from app.logging_config import get_logger
 from app.models import Client
 from app.services.alert_service import alert_critical
@@ -232,3 +234,121 @@ def send_bot_response(
     else:
         logger.info(f"Delivered via ChatFlow: jid={remote_jid}")
     return ok
+
+
+# ============================================================================
+# Result-based API (новый контракт)
+# ============================================================================
+
+@dataclass
+class MessageSent:
+    """Результат успешной отправки сообщения."""
+    remote_jid: str
+    instance_id: str
+
+
+def send_message_safe(
+    instance_id: str,
+    remote_jid: str,
+    message: str,
+    idempotency_key: Optional[str] = None,
+) -> Result[MessageSent]:
+    """
+    Отправить сообщение через ChatFlow с Result-контрактом.
+    
+    Возвращает Result.ok(MessageSent) или Result.fail(IntegrationError).
+    """
+    if _should_skip_outbound(remote_jid, action="message"):
+        return Ok(MessageSent(remote_jid=remote_jid, instance_id=instance_id))
+
+    if not CHATFLOW_TOKEN:
+        logger.error("ChatFlow token is missing (CHATFLOW_TOKEN env var not set)")
+        alert_critical("WhatsApp send failed", {"jid": remote_jid, "error": "missing_chatflow_token"})
+        return Err(ConfigError(
+            code=ErrorCodes.CONFIG_MISSING,
+            message="CHATFLOW_TOKEN not configured",
+            context={"remote_jid": remote_jid},
+        ))
+
+    if not instance_id or not message:
+        return Err(IntegrationError(
+            code=ErrorCodes.INVALID_PAYLOAD,
+            message="Missing instance_id or message",
+            service="chatflow",
+            context={"instance_id": instance_id, "has_message": bool(message)},
+        ))
+
+    try:
+        logger.debug(f"Sending to ChatFlow: jid={remote_jid}, instance_id={instance_id[:20]}...")
+        params = {
+            "token": CHATFLOW_TOKEN,
+            "instance_id": instance_id,
+            "jid": remote_jid,
+            "msg": message,
+        }
+        if idempotency_key:
+            params["msg_id"] = idempotency_key
+            
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(CHATFLOW_API_URL, params=params)
+            logger.info(
+                f"ChatFlow response: status={response.status_code}, jid={remote_jid}, body={response.text[:200]}"
+            )
+            if response.status_code == 200:
+                return Ok(MessageSent(remote_jid=remote_jid, instance_id=instance_id))
+            else:
+                return Err(IntegrationError(
+                    code=ErrorCodes.CHATFLOW_ERROR,
+                    message=f"ChatFlow returned {response.status_code}",
+                    service="chatflow",
+                    context={"status_code": response.status_code, "body": response.text[:200]},
+                ))
+    except httpx.TimeoutException as e:
+        logger.error(f"ChatFlow timeout: {e}")
+        alert_critical("WhatsApp send timeout", {"jid": remote_jid})
+        return Err(IntegrationError(
+            code=ErrorCodes.CHATFLOW_TIMEOUT,
+            message="ChatFlow request timed out",
+            service="chatflow",
+            context={"remote_jid": remote_jid, "timeout": 30.0},
+        ))
+    except Exception as e:
+        logger.error(f"Error sending WhatsApp message: {e}")
+        alert_critical("WhatsApp send failed", {"jid": remote_jid, "error": str(e)})
+        return Err(IntegrationError(
+            code=ErrorCodes.CHATFLOW_ERROR,
+            message=str(e),
+            service="chatflow",
+            context={"remote_jid": remote_jid, "exception": type(e).__name__},
+        ))
+
+
+def send_bot_response_safe(
+    db: Session,
+    client_id: UUID,
+    remote_jid: str,
+    message: str,
+    *,
+    idempotency_key: Optional[str] = None,
+) -> Result[MessageSent]:
+    """
+    Отправить ответ бота через WhatsApp с Result-контрактом.
+    
+    Возвращает Result.ok(MessageSent) или Result.fail(IntegrationError).
+    """
+    instance_id = get_instance_id(db, client_id)
+    if not instance_id:
+        logger.warning(f"No instance_id found for client {client_id}, jid={remote_jid}")
+        return Err(ConfigError(
+            code=ErrorCodes.CLIENT_NOT_FOUND,
+            message="No instance_id configured for client",
+            context={"client_id": str(client_id), "remote_jid": remote_jid},
+        ))
+
+    result = send_message_safe(instance_id, remote_jid, message, idempotency_key)
+    if result.is_ok():
+        logger.info(f"Delivered via ChatFlow: jid={remote_jid}")
+    else:
+        logger.warning(f"Failed to deliver via ChatFlow: jid={remote_jid}, error={result.error}")
+    
+    return result

@@ -12,6 +12,8 @@ from app.schemas.console import (
     ConsoleAuditEvent,
     ConsoleAuditListResponse,
     ConsoleBranch,
+    ConsoleBranchTelegramResponse,
+    ConsoleBranchTelegramUpdate,
     ConsoleCase,
     ConsoleCaseActionResponse,
     ConsoleCaseListResponse,
@@ -375,10 +377,14 @@ async def get_case(
     # Get customer info from User table via Conversation
     from app.models import Conversation as ConvModel
     from app.models import User
+    from app.models import ClientSettings
+    from app.schemas.console import ConsoleTelegramTrail
+    
     customer_name = None
     customer_phone = None
     customer_remote_jid = None
     decision_trace = None
+    telegram_trail = None
     
     conversation = db.query(ConvModel).filter(ConvModel.id == case.conversation_id).first()
     if conversation:
@@ -391,10 +397,56 @@ async def get_case(
                 customer_remote_jid = user.remote_jid
         
         # Get decision trace from context
-        context = conversation.context or {}
-        raw_trace = context.get("decision_trace")
+        conv_context = conversation.context or {}
+        raw_trace = conv_context.get("decision_trace")
         if isinstance(raw_trace, list):
             decision_trace = raw_trace
+        
+        # Build telegram_trail (TG-01)
+        telegram_message_id = case.telegram_message_id
+        telegram_topic_id = conversation.telegram_topic_id
+        
+        # Get chat_id from branch or client_settings
+        chat_id = None
+        if conversation.branch_id:
+            branch = db.query(Branch).filter(Branch.id == conversation.branch_id).first()
+            if branch and branch.telegram_chat_id:
+                chat_id = branch.telegram_chat_id
+        
+        if not chat_id:
+            settings = db.query(ClientSettings).filter(ClientSettings.client_id == context.client.id).first()
+            if settings:
+                chat_id = settings.telegram_chat_id
+        
+        # Build Telegram deep link
+        telegram_link = None
+        if chat_id and telegram_message_id:
+            # Format: https://t.me/c/{chat_id_without_-100}/{topic_id}/{message_id}
+            chat_id_clean = chat_id.lstrip("-100") if chat_id.startswith("-100") else chat_id.lstrip("-")
+            if telegram_topic_id:
+                telegram_link = f"https://t.me/c/{chat_id_clean}/{telegram_topic_id}/{telegram_message_id}"
+            else:
+                telegram_link = f"https://t.me/c/{chat_id_clean}/{telegram_message_id}"
+        
+        # Determine delivery status
+        delivery_status = None
+        delivered_at = None
+        if telegram_message_id:
+            delivery_status = "sent"
+            if case.notified_at:
+                delivered_at = case.notified_at.isoformat()
+        elif case.status in ("pending", "active"):
+            delivery_status = "pending"
+        
+        if telegram_message_id or telegram_topic_id or chat_id:
+            telegram_trail = ConsoleTelegramTrail(
+                message_id=telegram_message_id,
+                topic_id=telegram_topic_id,
+                chat_id=chat_id,
+                telegram_link=telegram_link,
+                delivery_status=delivery_status,
+                delivered_at=delivered_at,
+            )
     
     return ConsoleCase(
         id=case.id,
@@ -413,6 +465,7 @@ async def get_case(
         customer_phone=customer_phone,
         customer_remote_jid=customer_remote_jid,
         decision_trace=decision_trace,
+        telegram_trail=telegram_trail,
     )
 
 
@@ -674,6 +727,7 @@ async def get_settings(
                 slug=b.slug,
                 name=b.name,
                 is_active=b.is_active,
+                telegram_chat_id=b.telegram_chat_id,
             )
             for b in branches
         ],
@@ -818,5 +872,265 @@ async def update_settings(
     )
 
 
+# ============================================================================
+# TG-02: Branch Telegram Settings
+# ============================================================================
+
+@router.patch(
+    "/branches/{branch_id}/telegram",
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def update_branch_telegram(
+    branch_id: UUID,
+    body: ConsoleBranchTelegramUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Update Telegram chat_id for a branch (admin/owner only)."""
+    
+    context = get_console_context(request, db)
+    
+    if context.agent.role not in ("owner", "admin"):
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin can update branch settings")
+    
+    branch = db.query(Branch).filter(
+        Branch.id == branch_id,
+        Branch.client_id == context.client.id
+    ).first()
+    
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    
+    if body.telegram_chat_id is not None:
+        branch.telegram_chat_id = body.telegram_chat_id
+    
+    db.commit()
+    db.refresh(branch)
+    
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="branch_telegram_updated",
+        entity_type="branch",
+        entity_id=branch.id,
+        payload={"telegram_chat_id": branch.telegram_chat_id}
+    )
+    
+    return ConsoleBranchTelegramResponse(
+        id=branch.id,
+        slug=branch.slug,
+        name=branch.name,
+        telegram_chat_id=branch.telegram_chat_id,
+        telegram_verified=False,
+    )
 
 
+@router.post(
+    "/branches/{branch_id}/telegram/verify",
+    responses={400: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def verify_branch_telegram(
+    branch_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Verify bot can send messages to the branch's Telegram chat."""
+    from app.models import ClientSettings
+    from app.schemas.console import ConsoleTelegramVerifyResponse
+    from app.services.telegram_service import TelegramService
+    
+    context = get_console_context(request, db)
+    
+    branch = db.query(Branch).filter(
+        Branch.id == branch_id,
+        Branch.client_id == context.client.id
+    ).first()
+    
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    
+    if not branch.telegram_chat_id:
+        return ConsoleTelegramVerifyResponse(
+            verified=False,
+            error="No telegram_chat_id configured for this branch"
+        )
+    
+    # Get bot token from client settings
+    settings = db.query(ClientSettings).filter(
+        ClientSettings.client_id == context.client.id
+    ).first()
+    
+    if not settings or not settings.telegram_bot_token:
+        return ConsoleTelegramVerifyResponse(
+            verified=False,
+            error="Telegram bot not configured"
+        )
+    
+    try:
+        telegram = TelegramService(settings.telegram_bot_token)
+        # Try to get chat info
+        result = telegram._make_request("getChat", {"chat_id": branch.telegram_chat_id})
+        
+        if result and result.get("ok"):
+            chat = result.get("result", {})
+            return ConsoleTelegramVerifyResponse(
+                verified=True,
+                chat_title=chat.get("title"),
+                chat_type=chat.get("type"),
+                is_forum=chat.get("is_forum", False),
+            )
+        else:
+            return ConsoleTelegramVerifyResponse(
+                verified=False,
+                error=result.get("description", "Failed to access chat")
+            )
+    except Exception as e:
+        return ConsoleTelegramVerifyResponse(
+            verified=False,
+            error=str(e)
+        )
+
+
+@router.post(
+    "/branches/{branch_id}/telegram/test",
+    responses={400: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def test_branch_telegram(
+    branch_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Send a test message to the branch's Telegram chat."""
+    from app.models import ClientSettings
+    from app.schemas.console import ConsoleTelegramTestResponse
+    from app.services.telegram_service import TelegramService
+    
+    context = get_console_context(request, db)
+    
+    branch = db.query(Branch).filter(
+        Branch.id == branch_id,
+        Branch.client_id == context.client.id
+    ).first()
+    
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    
+    if not branch.telegram_chat_id:
+        return ConsoleTelegramTestResponse(
+            success=False,
+            error="No telegram_chat_id configured"
+        )
+    
+    settings = db.query(ClientSettings).filter(
+        ClientSettings.client_id == context.client.id
+    ).first()
+    
+    if not settings or not settings.telegram_bot_token:
+        return ConsoleTelegramTestResponse(
+            success=False,
+            error="Telegram bot not configured"
+        )
+    
+    try:
+        telegram = TelegramService(settings.telegram_bot_token)
+        message_id = telegram.send_message(
+            chat_id=branch.telegram_chat_id,
+            text=f"🔔 Тестовое сообщение от Truffles Console\n\nФилиал: {branch.name}\nОтправил: {context.agent.name}",
+        )
+        
+        return ConsoleTelegramTestResponse(
+            success=message_id is not None,
+            message_id=message_id,
+        )
+    except Exception as e:
+        return ConsoleTelegramTestResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+# ============================================================================
+# TG-03: Telegram Health
+# ============================================================================
+
+@router.get(
+    "/telegram/health",
+)
+async def get_telegram_health(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Get Telegram integration health status."""
+    from app.models import ClientSettings, Handover
+    from app.schemas.console import ConsoleTelegramHealthResponse
+    from app.services.telegram_service import TelegramService
+    
+    context = get_console_context(request, db)
+    
+    settings = db.query(ClientSettings).filter(
+        ClientSettings.client_id == context.client.id
+    ).first()
+    
+    # Check if Telegram is configured
+    if not settings or not settings.telegram_bot_token:
+        return ConsoleTelegramHealthResponse(
+            status="error",
+            webhook_alive=False,
+            last_error_message="Telegram bot not configured"
+        )
+    
+    # Check webhook/connectivity
+    webhook_alive = False
+    last_error_message = None
+    
+    try:
+        telegram = TelegramService(settings.telegram_bot_token)
+        result = telegram._make_request("getMe", {})
+        webhook_alive = result and result.get("ok", False)
+    except Exception as e:
+        last_error_message = str(e)
+    
+    # Get delivery stats from recent handovers
+    from datetime import timedelta
+    one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+    
+    recent_handovers = db.query(Handover).filter(
+        Handover.client_id == context.client.id,
+        Handover.created_at >= one_day_ago
+    ).all()
+    
+    total_notifications = len(recent_handovers)
+    sent_count = sum(1 for h in recent_handovers if h.telegram_message_id)
+    pending_count = sum(1 for h in recent_handovers if not h.telegram_message_id and h.status in ("pending", "active"))
+    
+    error_rate = (total_notifications - sent_count) / total_notifications if total_notifications > 0 else 0.0
+    
+    # Find last success/error times
+    last_success = None
+    last_error = None
+    
+    for h in sorted(recent_handovers, key=lambda x: x.created_at, reverse=True):
+        if h.telegram_message_id and not last_success:
+            last_success = h.notified_at or h.created_at
+        if not h.telegram_message_id and h.status in ("pending", "active") and not last_error:
+            last_error = h.created_at
+        if last_success and last_error:
+            break
+    
+    # Determine overall status
+    if not webhook_alive:
+        status = "error"
+    elif error_rate > 0.1:  # More than 10% errors
+        status = "degraded"
+    else:
+        status = "ok"
+    
+    return ConsoleTelegramHealthResponse(
+        status=status,
+        webhook_alive=webhook_alive,
+        last_success_at=last_success.isoformat() if last_success else None,
+        last_error_at=last_error.isoformat() if last_error else None,
+        last_error_message=last_error_message,
+        error_rate_24h=round(error_rate, 3),
+        pending_messages=pending_count,
+    )

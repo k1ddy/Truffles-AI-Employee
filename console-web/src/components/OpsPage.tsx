@@ -22,6 +22,17 @@ interface MetricsData {
     avg_resolution_hours: number | null;
 }
 
+// TG-03: Telegram Health
+interface TelegramHealthData {
+    status: string;  // ok, degraded, error
+    webhook_alive: boolean;
+    last_success_at: string | null;
+    last_error_at: string | null;
+    last_error_message: string | null;
+    error_rate_24h: number;
+    pending_messages: number;
+}
+
 async function fetchHealth(): Promise<HealthData> {
     const response = await api.get("/health");
     return response.data;
@@ -32,16 +43,12 @@ async function fetchMetrics(): Promise<MetricsData> {
     return response.data;
 }
 
-function getStatusLabel(status: string): string {
-    const labels: Record<string, string> = {
-        ok: "норма",
-        connected: "подключено",
-        degraded: "ухудшено",
-        error: "ошибка",
-        unknown: "неизвестно",
-    };
-    return labels[status] || status;
+async function fetchTelegramHealth(): Promise<TelegramHealthData> {
+    const response = await api.get("/telegram/health");
+    return response.data;
 }
+
+import { getSystemStatusLabel } from "@/utils/labels";
 
 function StatusBadge({ status }: { status: string }) {
     const styles: Record<string, string> = {
@@ -52,7 +59,7 @@ function StatusBadge({ status }: { status: string }) {
     };
     return (
         <span className={`px-2 py-1 rounded text-xs font-medium ${styles[status] || "bg-gray-100 text-gray-800"}`}>
-            {getStatusLabel(status)}
+            {getSystemStatusLabel(status)}
         </span>
     );
 }
@@ -82,6 +89,14 @@ export default function OpsPage() {
         queryFn: fetchMetrics,
         enabled: !!session,
         refetchInterval: 60000,
+    });
+
+    // TG-03: Telegram Health
+    const { data: telegramHealth } = useQuery({
+        queryKey: ["telegram-health"],
+        queryFn: fetchTelegramHealth,
+        enabled: !!session,
+        refetchInterval: 30000,
     });
 
     const isLoading = healthLoading || metricsLoading;
@@ -171,6 +186,49 @@ export default function OpsPage() {
                         <StatusBadge status={health?.redis || "unknown"} />
                     </div>
                 </div>
+            </div>
+
+            {/* TG-03: Telegram Health */}
+            <div className="bg-white border rounded-lg p-6 mb-6">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold flex items-center gap-2">
+                        📨 Telegram
+                    </h2>
+                    <StatusBadge status={telegramHealth?.status || "unknown"} />
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-gray-50 rounded-lg p-3 text-center">
+                        <div className={`text-lg font-bold ${telegramHealth?.webhook_alive ? "text-green-600" : "text-red-600"}`}>
+                            {telegramHealth?.webhook_alive ? "✓" : "✗"}
+                        </div>
+                        <div className="text-xs text-gray-600">Webhook</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3 text-center">
+                        <div className={`text-lg font-bold ${(telegramHealth?.error_rate_24h || 0) > 0.1 ? "text-red-600" : "text-green-600"}`}>
+                            {((telegramHealth?.error_rate_24h || 0) * 100).toFixed(1)}%
+                        </div>
+                        <div className="text-xs text-gray-600">Ошибки 24ч</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3 text-center">
+                        <div className={`text-lg font-bold ${(telegramHealth?.pending_messages || 0) > 5 ? "text-yellow-600" : "text-gray-900"}`}>
+                            {telegramHealth?.pending_messages ?? 0}
+                        </div>
+                        <div className="text-xs text-gray-600">В ожидании</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3 text-center">
+                        <div className="text-xs text-gray-900">
+                            {telegramHealth?.last_success_at
+                                ? new Date(telegramHealth.last_success_at).toLocaleTimeString("ru-RU")
+                                : "—"}
+                        </div>
+                        <div className="text-xs text-gray-600">Посл. успех</div>
+                    </div>
+                </div>
+                {telegramHealth?.last_error_message && (
+                    <div className="mt-3 p-2 bg-red-50 rounded text-xs text-red-700">
+                        ⚠️ {telegramHealth.last_error_message}
+                    </div>
+                )}
             </div>
 
             {/* Message Queue */}

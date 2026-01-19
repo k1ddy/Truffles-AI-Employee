@@ -1,0 +1,92 @@
+# Truffles Platform — Prometheus Alerting Rules
+# Add to your Prometheus configuration
+
+groups:
+  - name: truffles_outbox
+    rules:
+      - alert: OutboxBacklogHigh
+        expr: outbox_backlog_total > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High outbox backlog"
+          description: "Outbox has {{ $value }} pending messages for more than 5 minutes."
+
+      - alert: OutboxBacklogCritical
+        expr: outbox_backlog_total > 100
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical outbox backlog"
+          description: "Outbox has {{ $value }} pending messages. Check worker status."
+
+  - name: truffles_escalations
+    rules:
+      - alert: HighEscalationRate
+        expr: rate(escalation_total[5m]) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High escalation rate"
+          description: "Escalation rate is {{ $value | humanizePercentage }}. Review LLM/knowledge quality."
+
+      - alert: EscalationsNotProcessed
+        expr: increase(handovers_pending_total[30m]) > 10 and handovers_pending_total > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pending escalations not being processed"
+          description: "{{ $value }} new handovers in 30min without resolution."
+
+  - name: truffles_health
+    rules:
+      - alert: APIHealthDegraded
+        expr: up{job="truffles-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Truffles API is down"
+          description: "API health check failing for 1 minute."
+
+      - alert: QdrantUnavailable
+        expr: health_check_qdrant_status == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Qdrant vector DB unavailable"
+          description: "Qdrant health check failing. RAG may be degraded."
+
+      - alert: DatabaseConnectionIssue
+        expr: health_check_database_status == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connection failed"
+          description: "PostgreSQL connection check failing."
+
+  - name: truffles_llm
+    rules:
+      - alert: LLMTimeoutHigh
+        expr: rate(llm_timeout_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High LLM timeout rate"
+          description: "LLM timeout rate is {{ $value | humanizePercentage }}. Check OpenAI status."
+
+      - alert: LLMFallbackHigh
+        expr: rate(llm_fallback_total[5m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High LLM fallback rate"
+          description: "LLM fallback rate is {{ $value | humanizePercentage }}. Responses may be degraded."

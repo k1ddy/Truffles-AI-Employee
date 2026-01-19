@@ -6,6 +6,7 @@ import api from "@/lib/api";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Case } from "@/types";
+import { getStatusLabel, getSlaIndicator } from "@/utils/labels";
 
 // Filter state interface
 interface CaseFilters {
@@ -27,33 +28,6 @@ interface CasesResponse {
     items: Case[];
     cursor?: string;
     has_more?: boolean;
-}
-
-// SLA helper function
-function getSlaIndicator(createdAt: string): { label: string; className: string; minutes: number } {
-    const created = new Date(createdAt);
-    const now = new Date();
-    const diffMs = now.getTime() - created.getTime();
-    const diffMinutes = Math.floor(diffMs / 60000);
-
-    if (diffMinutes < 30) {
-        return { label: `${diffMinutes}м`, className: "bg-green-100 text-green-800", minutes: diffMinutes };
-    } else if (diffMinutes < 60) {
-        return { label: `${diffMinutes}м`, className: "bg-yellow-100 text-yellow-800", minutes: diffMinutes };
-    } else {
-        const hours = Math.floor(diffMinutes / 60);
-        return { label: `${hours}ч+`, className: "bg-red-100 text-red-800", minutes: diffMinutes };
-    }
-}
-
-// Status translation
-function getStatusLabel(status: string): string {
-    const labels: Record<string, string> = {
-        pending: "ожидает",
-        active: "в работе",
-        resolved: "закрыта",
-    };
-    return labels[status] || status;
 }
 
 // Loading skeleton component

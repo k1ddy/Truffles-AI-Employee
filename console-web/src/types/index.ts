@@ -6,6 +6,15 @@ export interface DecisionTraceEntry {
     [key: string]: unknown;
 }
 
+export interface TelegramTrail {
+    message_id?: number | null;
+    topic_id?: number | null;
+    chat_id?: string | null;
+    telegram_link?: string | null;
+    delivery_status?: string | null;  // sent, failed, pending
+    delivered_at?: string | null;
+}
+
 export interface Case {
     id: string;
     conversation_id: string;
@@ -24,6 +33,8 @@ export interface Case {
     customer_name?: string | null;
     customer_phone?: string | null;
     customer_remote_jid?: string | null;
+    // Telegram trail (TG-01)
+    telegram_trail?: TelegramTrail | null;
 }
 
 export interface Message {
