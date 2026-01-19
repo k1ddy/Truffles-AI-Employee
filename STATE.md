@@ -1797,6 +1797,39 @@ curl -s -H "api-key: ${QDRANT_KEY}" "http://${QDRANT_IP}:6333/collections/servic
 - PR #214 https://github.com/k1ddy/Truffles-AI-Employee/pull/214 (merge commit `f914641b9cb9e1cb09c892865dbf196faad400a7`), CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21121717504 (success).
 - PR #215 https://github.com/k1ddy/Truffles-AI-Employee/pull/215 (merge commit `f9c0529aea4108112a4a1064c1f1f19bb8386473`), CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21121724198 (success).
 
+### 2026-01-19 — CI livecheck harden (PR #219)
+
+Отчёт для Brain (копируй как есть):
+
+```text
+PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/219
+
+git status -sb
+## ci-livecheck-harden...origin/ci-livecheck-harden
+
+git diff --stat origin/main...HEAD
+ .github/workflows/ci.yml | 44 +++++++++++++++++++++--
+ ops/diagnose.py          | 93 ++++++++++++++++++++++++++++++++++++++++--------
+ 2 files changed, 121 insertions(+), 16 deletions(-)
+
+Что изменили
+- Harden livecheck runner: fail-fast по missing action, reset-before-suite, allow_non_allowlist и безопасные таймауты polling.
+- CI livecheck gate: логируем admin token/outbox timing env, адаптивный poll_timeout + fail_fast_after, reset-before-suite в runner.
+
+Как проверили
+- CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21124965776
+  - lint/unit/core: pass
+  - long/asr: skipped (нет триггеров)
+  - build/deploy/livecheck: не запускаются на PR
+
+Evidence
+- CI run URL выше (артефактов livecheck нет, потому что это PR).
+
+Файлы
+- .github/workflows/ci.yml
+- ops/diagnose.py
+```
+
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**
