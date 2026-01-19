@@ -1278,7 +1278,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
 from app.logging_config import (
@@ -1649,7 +1649,10 @@ def _find_message_by_message_id(db: Session, client_id: UUID, message_id: str) -
         db.query(Message)
         .filter(
             Message.client_id == client_id,
-            Message.message_metadata["message_id"].astext == message_id,
+            or_(
+                Message.message_metadata["message_id"].astext == message_id,
+                Message.message_metadata["messageId"].astext == message_id,
+            ),
         )
         .order_by(Message.created_at.desc())
         .first()
