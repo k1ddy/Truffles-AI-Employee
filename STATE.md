@@ -1988,6 +1988,34 @@ mismatch, allowlist, etc).
 - Merge commit: `e2c0bbb67ee47fdb9afaf32b581d72d6f9b2e360`
 - Remote ветка удалена: `arch/ci-livecheck-guards`
 
+### 2026-01-19 — CI red fix (livecheck missing_action + process sync)
+
+**Что изменено и зачем**
+- Закрыт “красный CI” без изменения бизнес‑логики: livecheck больше не валится на missing_action при позднем action; ошибка теперь несёт `message_id`/`conv_id` для точного SQL‑дебага. Изменения в `ops/diagnose.py`.
+- Процесс синхронизирован: Top Architect может обновлять `STATE.md` и делать merge; добавлен stop‑rule для зависшего CI (10+ минут без логов/в concurrency) — отменять и перезапускать. Изменения в `AGENTS.md`, `STRUCTURE.md`, `docs/SESSION_START_PROMPT.txt`, `SPECS/SYSTEM_REFERENCE.md`.
+
+**Почему это приближает к идеальной системе**
+- CI снова детерминированный и отражает реальный регресс, а не тайминговые фальш‑негативы — это соответствует канону “evidence‑first” и stop‑the‑line.
+- Процессные роли и источники истины синхронизированы, чтобы не было “серых зон” ответственности и дрейфа.
+
+**CI‑паттерн (последние прогоны main)**
+- 6 failures из 20, все в ci-livecheck; 3 из них подтверждённо missing_action в ca01-core/ca03-info/ca07-ood (runs 21137449002, 21137125429, 21133548598), ещё 3 — ci-livecheck без читаемого tail‑контекста в логах (нужны артефакты для детализации). Это указывает на тайминговое окно в poll‑fail‑fast.
+
+**Что изменил**
+- `ops/diagnose.py`: адаптивный `fail_fast_after` (минимум 30с/0.5 poll_timeout и учёт outbox wait) + более информативная ошибка missing_action с `message_id`/`conv_id`.
+- `AGENTS.md`: добавлен stop‑rule для зависшего CI.
+- `STRUCTURE.md`: владелец `STATE.md` теперь Brain или Top Architect.
+- `docs/SESSION_START_PROMPT.txt`: обновлены роли по `STATE.md`.
+- `SPECS/SYSTEM_REFERENCE.md`: синхронизированы указания по `STATE.md` и evidence.
+
+**Доказательства / merge**
+- PR #241 (код): https://github.com/k1ddy/Truffles-AI-Employee/pull/241
+  - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21139519592
+  - Merge commit: `df0f27d9d1b36019b17fc4c953a38e0bfe9a0115`
+- PR #242 (доки): https://github.com/k1ddy/Truffles-AI-Employee/pull/242
+  - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21139633813
+  - Merge commit: `6198b53fe3eadec850147b632b9f5dcfbfe73f51`
+
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**
