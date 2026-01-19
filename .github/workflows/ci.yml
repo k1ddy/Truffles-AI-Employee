@@ -459,10 +459,13 @@ jobs:
   ci-livecheck:
     if: >-
       ${{
-        vars.CI_LIVECHECK_ENABLED == '1' &&
         needs.deploy.result == 'success' &&
         (
           github.ref == 'refs/heads/main' ||
+          (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true')
+        ) &&
+        (
+          vars.CI_LIVECHECK_ENABLED == '1' ||
           (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true')
         )
       }}
