@@ -98,19 +98,25 @@ def claim_pending_outbox_batches(
     *,
     limit: int = 10,
     idle_seconds: int = 8,
+    max_wait_seconds: int = 0,
 ) -> list[dict[str, Any]]:
+    max_wait_seconds = max(int(max_wait_seconds or 0), 0)
     rows = (
         db.execute(
             text(
                 """
                 WITH candidates AS (
-                    SELECT conversation_id, MAX(created_at) AS last_created_at
+                    SELECT conversation_id,
+                           MAX(created_at) AS last_created_at,
+                           MIN(created_at) AS first_created_at
                     FROM outbox_messages
                     WHERE status = 'PENDING'
                       AND conversation_id IS NOT NULL
                       AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
                     GROUP BY conversation_id
                     HAVING MAX(created_at) <= NOW() - (:idle_seconds * INTERVAL '1 second')
+                       OR (:max_wait_seconds > 0
+                           AND MIN(created_at) <= NOW() - (:max_wait_seconds * INTERVAL '1 second'))
                     ORDER BY last_created_at
                     LIMIT :limit
                 ),
@@ -135,7 +141,11 @@ def claim_pending_outbox_batches(
                           outbox_messages.created_at
                 """
             ),
-            {"limit": limit, "idle_seconds": idle_seconds},
+            {
+                "limit": limit,
+                "idle_seconds": idle_seconds,
+                "max_wait_seconds": max_wait_seconds,
+            },
         )
         .mappings()
         .all()

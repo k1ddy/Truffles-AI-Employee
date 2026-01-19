@@ -392,17 +392,24 @@ async def process_outbox(
     _require_admin_token(x_admin_token)
     limit = int(os.environ.get("OUTBOX_PROCESS_LIMIT", "10"))
     idle_seconds = int(float(os.environ.get("OUTBOX_COALESCE_SECONDS", "8")))
+    max_wait_seconds = int(float(os.environ.get("OUTBOX_MAX_WAIT_SECONDS", "10")))
     max_attempts = int(os.environ.get("OUTBOX_MAX_ATTEMPTS", "5"))
     retry_backoff_seconds = float(os.environ.get("OUTBOX_RETRY_BACKOFF_SECONDS", "2"))
     stale_seconds = int(float(os.environ.get("OUTBOX_STALE_PROCESSING_SECONDS", "120")))
     stale_seconds = max(stale_seconds, 0)
+    max_wait_seconds = max(max_wait_seconds, 0)
     released = release_stale_processing(
         db,
         stale_seconds=stale_seconds,
         max_attempts=max_attempts,
         retry_backoff_seconds=retry_backoff_seconds,
     )
-    rows = claim_pending_outbox_batches(db, limit=limit, idle_seconds=idle_seconds)
+    rows = claim_pending_outbox_batches(
+        db,
+        limit=limit,
+        idle_seconds=idle_seconds,
+        max_wait_seconds=max_wait_seconds,
+    )
 
     from app.routers.webhook import _process_outbox_rows
 
