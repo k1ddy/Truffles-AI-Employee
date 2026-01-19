@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import api from "@/lib/api";
 import { useSession } from "next-auth/react";
+import { useAuthenticatedApi } from "@/hooks/useAuthenticatedApi";
 import Link from "next/link";
 import { Case } from "@/types";
 import { getStatusLabel, getSlaIndicator } from "@/utils/labels";
@@ -47,27 +47,10 @@ function TableSkeleton() {
     );
 }
 
-async function fetchCases(filters: CaseFilters, cursor?: string): Promise<CasesResponse> {
-    const params = new URLSearchParams();
-    if (filters.status) params.append("status", filters.status);
-    if (filters.branchId) params.append("branch_id", filters.branchId);
-    if (filters.assignedToMe) params.append("assigned_to_me", "true");
-    if (filters.dateFrom) params.append("date_from", filters.dateFrom);
-    if (filters.dateTo) params.append("date_to", filters.dateTo);
-    if (cursor) params.append("cursor", cursor);
-    params.append("limit", "20");
-
-    const response = await api.get(`/cases?${params.toString()}`);
-    return response.data;
-}
-
-async function fetchBranches(): Promise<{ branches: Branch[] }> {
-    const response = await api.get("/settings");
-    return response.data;
-}
-
 export default function CaseList() {
     const { data: session } = useSession();
+    const api = useAuthenticatedApi();
+
     const [filters, setFilters] = useState<CaseFilters>({
         status: undefined,
         branchId: undefined,
@@ -80,20 +63,38 @@ export default function CaseList() {
     const [cursor, setCursor] = useState<string | undefined>(undefined);
     const [hasMore, setHasMore] = useState(false);
 
+    // Check if we have a valid token
+    const hasToken = !!(session as { accessToken?: string } | null)?.accessToken;
+
     // Fetch branches for filter dropdown
     const { data: settingsData } = useQuery({
         queryKey: ["settings"],
-        queryFn: fetchBranches,
-        enabled: !!session,
+        queryFn: async () => {
+            const response = await api.get("/settings");
+            return response.data;
+        },
+        enabled: hasToken,
     });
 
-    const branches = settingsData?.branches ?? [];
-    const branchMap = new Map(branches.map(b => [b.id, b.name]));
+    const branches: Branch[] = settingsData?.branches ?? [];
+    const branchMap = new Map<string, string>(branches.map((b) => [b.id, b.name]));
 
     const { data, isLoading, error, refetch, isFetching } = useQuery({
         queryKey: ["cases", filters, cursor],
-        queryFn: () => fetchCases(filters, cursor),
-        enabled: !!session,
+        queryFn: async (): Promise<CasesResponse> => {
+            const params = new URLSearchParams();
+            if (filters.status) params.append("status", filters.status);
+            if (filters.branchId) params.append("branch_id", filters.branchId);
+            if (filters.assignedToMe) params.append("assigned_to_me", "true");
+            if (filters.dateFrom) params.append("date_from", filters.dateFrom);
+            if (filters.dateTo) params.append("date_to", filters.dateTo);
+            if (cursor) params.append("cursor", cursor);
+            params.append("limit", "20");
+
+            const response = await api.get(`/cases?${params.toString()}`);
+            return response.data;
+        },
+        enabled: hasToken,
         refetchInterval: 30000, // Auto-refresh every 30 seconds
         refetchIntervalInBackground: false, // Only refresh when tab is active
     });
@@ -184,7 +185,7 @@ export default function CaseList() {
                         className="px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                         <option value="">Все филиалы</option>
-                        {branches.map((b) => (
+                        {branches.map((b: Branch) => (
                             <option key={b.id} value={b.id}>{b.name}</option>
                         ))}
                     </select>

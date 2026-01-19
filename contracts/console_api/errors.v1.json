@@ -1,0 +1,267 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Truffles Console API Error Codes v1",
+    "description": "Registry of error codes with HTTP status and UI behavior for frontend handling",
+    "version": "1.0.0",
+    "errors": {
+        "AUTH_REQUIRED": {
+            "http_status": 401,
+            "message_template": "Authentication required",
+            "ui_behavior": {
+                "action": "redirect_login",
+                "toast": false,
+                "description": "Redirect to login page, clear local tokens"
+            },
+            "retryable": false
+        },
+        "TOKEN_EXPIRED": {
+            "http_status": 401,
+            "message_template": "Session expired, please login again",
+            "ui_behavior": {
+                "action": "redirect_login",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Show toast, then redirect to login"
+            },
+            "retryable": false
+        },
+        "ACCESS_DENIED": {
+            "http_status": 403,
+            "message_template": "You do not have permission to perform this action",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "error",
+                "description": "Show error toast, keep user on current page"
+            },
+            "retryable": false
+        },
+        "TENANT_MISMATCH": {
+            "http_status": 403,
+            "message_template": "Access denied: resource belongs to another organization",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "error",
+                "description": "Critical security boundary - log and alert"
+            },
+            "retryable": false,
+            "severity": "critical"
+        },
+        "BRANCH_ACCESS_DENIED": {
+            "http_status": 403,
+            "message_template": "You do not have access to this branch",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "error",
+                "description": "Show toast, optionally suggest accessible branches"
+            },
+            "retryable": false
+        },
+        "NOT_FOUND": {
+            "http_status": 404,
+            "message_template": "{entity} not found",
+            "ui_behavior": {
+                "action": "navigate_back",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Show toast, navigate to list view (Inbox)"
+            },
+            "retryable": false
+        },
+        "CASE_ALREADY_TAKEN": {
+            "http_status": 409,
+            "message_template": "Case is already assigned to {assigned_to}",
+            "ui_behavior": {
+                "action": "refresh_item",
+                "toast": true,
+                "toast_type": "info",
+                "description": "Refresh case data, show who took it, disable Take button"
+            },
+            "retryable": false
+        },
+        "CASE_ALREADY_RESOLVED": {
+            "http_status": 409,
+            "message_template": "Case has already been resolved",
+            "ui_behavior": {
+                "action": "refresh_item",
+                "toast": true,
+                "toast_type": "info",
+                "description": "Refresh case, update status badge"
+            },
+            "retryable": false
+        },
+        "NOT_ASSIGNED": {
+            "http_status": 403,
+            "message_template": "You must take the case before performing this action",
+            "ui_behavior": {
+                "action": "prompt_take",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Show toast with 'Take Case' button in-line"
+            },
+            "retryable": false
+        },
+        "CASE_NOT_ACTIVE": {
+            "http_status": 400,
+            "message_template": "Cannot send message: case is not active",
+            "ui_behavior": {
+                "action": "refresh_item",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Refresh case status, disable send input"
+            },
+            "retryable": false
+        },
+        "VALIDATION_ERROR": {
+            "http_status": 422,
+            "message_template": "Invalid request: {details}",
+            "ui_behavior": {
+                "action": "show_field_errors",
+                "toast": false,
+                "description": "Highlight invalid fields from details.field_errors"
+            },
+            "retryable": false
+        },
+        "MESSAGE_TOO_LONG": {
+            "http_status": 422,
+            "message_template": "Message exceeds maximum length of {max_length} characters",
+            "ui_behavior": {
+                "action": "show_field_errors",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Highlight input field, show character count"
+            },
+            "retryable": false
+        },
+        "OUTBOX_FAILED": {
+            "http_status": 502,
+            "message_template": "Message could not be sent. It has been saved and will retry automatically.",
+            "ui_behavior": {
+                "action": "show_pending_state",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Mark message as 'pending', show retry indicator"
+            },
+            "retryable": true,
+            "auto_retry": true
+        },
+        "INTEGRATION_UNAVAILABLE": {
+            "http_status": 503,
+            "message_template": "{integration} is temporarily unavailable",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Show degraded integration status in Ops panel"
+            },
+            "retryable": true,
+            "retry_after_seconds": 30
+        },
+        "RATE_LIMITED": {
+            "http_status": 429,
+            "message_template": "Too many requests. Please wait {retry_after} seconds.",
+            "ui_behavior": {
+                "action": "disable_actions",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Disable buttons, show countdown timer"
+            },
+            "retryable": true,
+            "use_retry_after_header": true
+        },
+        "SERVER_ERROR": {
+            "http_status": 500,
+            "message_template": "An unexpected error occurred. Reference: {trace_id}",
+            "ui_behavior": {
+                "action": "error_modal",
+                "toast": false,
+                "description": "Show modal with trace_id for support, offer retry"
+            },
+            "retryable": true
+        },
+        "DATABASE_ERROR": {
+            "http_status": 503,
+            "message_template": "Database temporarily unavailable",
+            "ui_behavior": {
+                "action": "maintenance_mode",
+                "toast": true,
+                "toast_type": "error",
+                "description": "Show maintenance banner, disable mutations"
+            },
+            "retryable": true,
+            "retry_after_seconds": 10
+        },
+        "IDEMPOTENCY_CONFLICT": {
+            "http_status": 409,
+            "message_template": "Request already processed",
+            "ui_behavior": {
+                "action": "ignore",
+                "toast": false,
+                "description": "Silent ignore - previous request succeeded"
+            },
+            "retryable": false
+        },
+        "OIDC_NOT_CONFIGURED": {
+            "http_status": 503,
+            "message_template": "Authentication service not configured",
+            "ui_behavior": {
+                "action": "error_page",
+                "toast": false,
+                "description": "Show 'Contact Administrator' page"
+            },
+            "retryable": false,
+            "severity": "critical"
+        },
+        "IDENTITY_NOT_LINKED": {
+            "http_status": 403,
+            "message_template": "Your identity is not linked to any agent account",
+            "ui_behavior": {
+                "action": "error_page",
+                "toast": false,
+                "description": "Show 'Contact Administrator to get access' page"
+            },
+            "retryable": false
+        }
+    },
+    "ui_actions": {
+        "redirect_login": {
+            "description": "Clear tokens, redirect to /login"
+        },
+        "toast": {
+            "description": "Show toast notification (type from toast_type)",
+            "default_duration_ms": 5000
+        },
+        "navigate_back": {
+            "description": "Navigate to previous list view (e.g., Inbox)"
+        },
+        "refresh_item": {
+            "description": "Re-fetch current entity from API, update UI"
+        },
+        "prompt_take": {
+            "description": "Show in-line 'Take Case' action button"
+        },
+        "show_field_errors": {
+            "description": "Map details.field_errors to form field highlights"
+        },
+        "show_pending_state": {
+            "description": "Mark message with pending indicator, auto-refresh"
+        },
+        "disable_actions": {
+            "description": "Temporarily disable action buttons"
+        },
+        "error_modal": {
+            "description": "Show modal with error details and trace_id"
+        },
+        "error_page": {
+            "description": "Navigate to full-page error view"
+        },
+        "maintenance_mode": {
+            "description": "Show global maintenance banner"
+        },
+        "ignore": {
+            "description": "No UI action needed"
+        }
+    }
+}

@@ -1,19 +1,23 @@
-import axios from "axios";
-import { getSession } from "next-auth/react";
+import axios, { AxiosInstance } from "axios";
 
+// Use Next.js API proxy route to avoid CORS issues.
+// All requests go through /api/proxy/* which forwards to the actual API server-side.
 const api = axios.create({
-    baseURL: process.env.NEXT_PUBLIC_API_URL,
+    baseURL: "/api/proxy",
     headers: {
         "Content-Type": "application/json",
     },
 });
 
-api.interceptors.request.use(async (config) => {
-    const session = await getSession();
-    if (session?.accessToken) {
-        config.headers.Authorization = `Bearer ${session.accessToken}`;
-    }
-    return config;
-});
+// Factory function to create an authenticated axios instance
+// Note: Auth is now handled server-side in the proxy route
+export function createAuthenticatedApi(accessToken: string | undefined): AxiosInstance {
+    return axios.create({
+        baseURL: "/api/proxy",
+        headers: {
+            "Content-Type": "application/json",
+        },
+    });
+}
 
 export default api;
