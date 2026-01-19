@@ -406,6 +406,12 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
     """Handle callback query (button click): take, resolve, skip."""
     callback = update.callback_query
 
+    # Dedup: prevent double processing of same callback
+    from app.services.callback_dedup import is_callback_processed
+    if is_callback_processed(callback.id):
+        logger.info(f"Duplicate callback ignored: {callback.id}")
+        return TelegramWebhookResponse(success=True, message="Already processed")
+
     if not callback.data:
         return TelegramWebhookResponse(success=False, message="No callback data")
 

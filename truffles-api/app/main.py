@@ -65,7 +65,9 @@ app.include_router(console.router)
 app.include_router(calendar.router, prefix="/console/v1")
 
 outbox_logger = get_logger("outbox_worker")
+sentinel_logger = get_logger("sentinel_worker")
 _outbox_worker_task: asyncio.Task | None = None
+_sentinel_worker_task: asyncio.Task | None = None
 
 
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
@@ -163,6 +165,132 @@ async def stop_outbox_worker() -> None:
     except asyncio.CancelledError:
         pass
     _outbox_worker_task = None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# SENTINEL WORKER (Health Check + Self-Heal)
+# ═══════════════════════════════════════════════════════════════════
+
+def _get_sentinel_settings() -> tuple[float, bool]:
+    """Get sentinel worker settings from environment."""
+    interval = float(os.environ.get("SENTINEL_INTERVAL_SECONDS", "300"))  # 5 min default
+    interval = max(interval, 60)  # Minimum 1 minute
+    heal_enabled = os.environ.get("SENTINEL_HEAL_ENABLED", "1").lower() not in ("0", "false", "no")
+    return interval, heal_enabled
+
+
+async def _run_sentinel_health_checks(db: Session) -> dict:
+    """Run health checks for sentinel (reuses logic from /admin/health/check)."""
+    import time
+    import httpx
+    from app.models import OutboxMessage
+    
+    checks = {}
+    
+    # Database check
+    try:
+        db.execute(text("SELECT 1"))
+        checks["database"] = {"status": "healthy"}
+    except Exception as e:
+        checks["database"] = {"status": "unhealthy", "error": str(e)[:100]}
+    
+    # Qdrant check
+    qdrant_url = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
+    qdrant_key = os.environ.get("QDRANT_API_KEY")
+    try:
+        headers = {"api-key": qdrant_key} if qdrant_key else {}
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{qdrant_url}/collections", headers=headers)
+            if resp.status_code == 200:
+                checks["qdrant"] = {"status": "healthy"}
+            else:
+                checks["qdrant"] = {"status": "unhealthy", "error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        checks["qdrant"] = {"status": "unhealthy", "error": str(e)[:100]}
+    
+    # Outbox check
+    try:
+        pending = db.query(OutboxMessage).filter(OutboxMessage.status == "PENDING").count()
+        failed = db.query(OutboxMessage).filter(OutboxMessage.status == "FAILED").count()
+        checks["outbox"] = {"pending": pending, "failed": failed}
+    except Exception:
+        pass
+    
+    # Handovers check
+    try:
+        active = db.query(Handover).filter(Handover.status.in_(["pending", "active"])).count()
+        checks["handovers"] = {"active": active}
+    except Exception:
+        pass
+    
+    return checks
+
+
+async def _sentinel_worker_loop() -> None:
+    """Periodic health check and self-heal loop."""
+    while True:
+        try:
+            interval, heal_enabled = _get_sentinel_settings()
+            await asyncio.sleep(interval)
+            
+            db = SessionLocal()
+            try:
+                # Run health checks
+                checks = await _run_sentinel_health_checks(db)
+                
+                # Send alerts for critical issues
+                from app.services.health_service import check_and_alert_health, check_and_heal_conversations
+                alerts = check_and_alert_health(checks)
+                if alerts:
+                    sentinel_logger.warning(
+                        "Sentinel alerts sent",
+                        extra={"context": {"alerts": alerts, "checks": checks}},
+                    )
+                
+                # Self-heal invariant violations
+                if heal_enabled:
+                    result = check_and_heal_conversations(db)
+                    if result["healed_count"] > 0:
+                        sentinel_logger.info(
+                            "Sentinel healed conversations",
+                            extra={"context": result},
+                        )
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            sentinel_logger.error(
+                "Sentinel worker loop failed",
+                extra={"context": {"error": str(exc)}},
+            )
+
+
+@app.on_event("startup")
+async def start_sentinel_worker() -> None:
+    """Start sentinel worker on app startup."""
+    global _sentinel_worker_task
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+    if not _is_env_enabled(os.environ.get("SENTINEL_ENABLED"), default=True):
+        return
+    if _sentinel_worker_task is None or _sentinel_worker_task.done():
+        _sentinel_worker_task = asyncio.create_task(_sentinel_worker_loop())
+        sentinel_logger.info("Sentinel worker started")
+
+
+@app.on_event("shutdown")
+async def stop_sentinel_worker() -> None:
+    """Stop sentinel worker on app shutdown."""
+    global _sentinel_worker_task
+    if _sentinel_worker_task is None:
+        return
+    _sentinel_worker_task.cancel()
+    try:
+        await _sentinel_worker_task
+    except asyncio.CancelledError:
+        pass
+    _sentinel_worker_task = None
 
 
 @app.get("/health")
@@ -268,11 +396,14 @@ async def health_check(db: Session = Depends(get_db)):
         overall_healthy = False
     
     # Qdrant check
-    qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+    qdrant_url = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
+    qdrant_key = os.environ.get("QDRANT_API_KEY")
+    print(f"DEBUG: Qdrant key present: {bool(qdrant_key)}")
     try:
         start = time.time()
+        headers = {"api-key": qdrant_key} if qdrant_key else {}
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{qdrant_url}/collections")
+            resp = await client.get(f"{qdrant_url}/collections", headers=headers)
             if resp.status_code == 200:
                 checks["qdrant"] = {"status": "healthy", "latency_ms": int((time.time() - start) * 1000)}
             else:
@@ -302,10 +433,18 @@ async def health_check(db: Session = Depends(get_db)):
     
     total_latency = int((time.time() - start_total) * 1000)
     
-    return {
+    # Send alerts for critical issues
+    from app.services.health_service import check_and_alert_health
+    alerts_sent = check_and_alert_health(checks)
+    
+    response = {
         "status": "healthy" if overall_healthy else "unhealthy",
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "latency_ms": total_latency,
         "checks": checks,
     }
-
+    
+    if alerts_sent:
+        response["alerts_sent"] = alerts_sent
+    
+    return response
