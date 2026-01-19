@@ -182,7 +182,9 @@ def _get_sentinel_settings() -> tuple[float, bool]:
 async def _run_sentinel_health_checks(db: Session) -> dict:
     """Run health checks for sentinel (reuses logic from /admin/health/check)."""
     import time
+
     import httpx
+
     from app.models import OutboxMessage
     
     checks = {}
