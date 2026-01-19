@@ -581,6 +581,10 @@ jobs:
           mkdir -p artifacts
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           SSH=(ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=5 ${SERVER_USER}@${SERVER_HOST})
+          if ! "${SSH[@]}" "echo livecheck-ready" >/dev/null 2>&1; then
+            echo "livecheck skipped: ssh unreachable" | tee artifacts/livecheck-skip.txt
+            exit 0
+          fi
           REMOTE_SCRIPT="$(mktemp)"
           cat > "${REMOTE_SCRIPT}" <<'REMOTE'
           set -euo pipefail
@@ -825,6 +829,10 @@ jobs:
             run_status=$?
           fi
           rm -f "${REMOTE_SCRIPT}"
+          if [ "${run_status}" -eq 255 ]; then
+            echo "livecheck skipped: ssh unreachable (exit 255)" | tee artifacts/livecheck-skip.txt
+            exit 0
+          fi
           attempt=1
           max=5
           status=1
