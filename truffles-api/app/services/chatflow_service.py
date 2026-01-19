@@ -10,7 +10,7 @@ from uuid import UUID
 import httpx
 from sqlalchemy.orm import Session
 
-from app.contracts import Result, Ok, Err, IntegrationError, ConfigError, ErrorCodes
+from app.contracts import ConfigError, Err, ErrorCodes, IntegrationError, Ok, Result
 from app.logging_config import get_logger
 from app.models import Client
 from app.services.alert_service import alert_critical

@@ -11,28 +11,27 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
+# Import contracts from centralized module
+from app.contracts.decision import (
+    DECISION_GRAPH_STAGES,
+    DecisionOutcome,
+    DecisionPlan,
+    DecisionSignals,
+    DecisionStage,
+    ExpectedReplyState,
+    IntentDecompositionState,
+    IntentRoutingState,
+    build_action_contract,
+    build_context_contract,
+    build_decision_plan,
+    build_fact_contract,
+    build_intent_contract,
+    build_response_contract,
+)
 from app.models import ClientSettings, Conversation, Message
 from app.schemas.webhook import WebhookRequest
 from app.services.demo_salon_knowledge import DemoSalonDecision
 from app.services.intent_service import Intent
-
-# Import contracts from centralized module
-from app.contracts.decision import (
-    DecisionStage,
-    DECISION_GRAPH_STAGES,
-    DecisionPlan,
-    DecisionSignals,
-    DecisionOutcome,
-    ExpectedReplyState,
-    IntentDecompositionState,
-    IntentRoutingState,
-    build_decision_plan,
-    build_context_contract,
-    build_intent_contract,
-    build_fact_contract,
-    build_action_contract,
-    build_response_contract,
-)
 
 
 def _normalize_message_text(message_text: str | None) -> str:

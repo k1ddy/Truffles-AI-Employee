@@ -251,6 +251,7 @@ def db_check(db: Session = Depends(get_db)):
 async def health_check(db: Session = Depends(get_db)):
     """Comprehensive health check for monitoring."""
     import time
+
     import httpx
     
     checks = {}
