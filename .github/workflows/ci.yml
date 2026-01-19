@@ -328,7 +328,6 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
     needs: build-push
     runs-on: ubuntu-latest
-    environment: production
     outputs:
       deployed: ${{ steps.deploy_gate.outputs.deployed }}
     concurrency:
