@@ -1,0 +1,755 @@
+openapi: "3.1.0"
+info:
+  title: Truffles Console API
+  version: "1.0.0"
+  description: |
+    BFF API for Truffles Internal Console.
+    - All endpoints require OIDC Bearer token
+    - Tenant/branch isolation enforced server-side
+    - Cursor-based pagination on all list endpoints
+    - Idempotent mutations via optimistic locking
+
+servers:
+  - url: /console/v1
+    description: Console API v1
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+    description: Authentication and context
+  - name: cases
+    description: Case management (Inbox)
+  - name: messages
+    description: Messages within cases
+  - name: settings
+    description: Client/branch settings
+  - name: ops
+    description: Operations and health
+  - name: audit
+    description: Audit log
+
+paths:
+  # ──────────────────────────────────────────────────────────────────
+  # AUTH
+  # ──────────────────────────────────────────────────────────────────
+  /me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current agent context
+      description: Returns authenticated agent info, client, and accessible branches
+      responses:
+        "200":
+          description: Agent context
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ──────────────────────────────────────────────────────────────────
+  # CASES (INBOX)
+  # ──────────────────────────────────────────────────────────────────
+  /cases:
+    get:
+      operationId: listCases
+      tags: [cases]
+      summary: List cases (Inbox)
+      description: Cursor-paginated list of handover cases with filters
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, active, resolved]
+        - name: branch_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: assigned_to_me
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: Case list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaseListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /cases/{case_id}:
+    get:
+      operationId: getCase
+      tags: [cases]
+      summary: Get case details
+      parameters:
+        - $ref: "#/components/parameters/case_id"
+      responses:
+        "200":
+          description: Case details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Case"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /cases/{case_id}/take:
+    post:
+      operationId: takeCase
+      tags: [cases]
+      summary: Take ownership of a case
+      description: |
+        Assigns case to current agent. Returns 409 if already taken.
+        Idempotent: re-taking own case returns success.
+      parameters:
+        - $ref: "#/components/parameters/case_id"
+      responses:
+        "200":
+          description: Case taken successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaseActionResponse"
+        "409":
+          $ref: "#/components/responses/CaseAlreadyTaken"
+
+  /cases/{case_id}/resolve:
+    post:
+      operationId: resolveCase
+      tags: [cases]
+      summary: Resolve and close a case
+      description: Marks case as resolved. Must be assigned to current agent or owner/admin.
+      parameters:
+        - $ref: "#/components/parameters/case_id"
+      responses:
+        "200":
+          description: Case resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaseActionResponse"
+        "403":
+          $ref: "#/components/responses/NotAssigned"
+
+  # ──────────────────────────────────────────────────────────────────
+  # MESSAGES
+  # ──────────────────────────────────────────────────────────────────
+  /cases/{case_id}/messages:
+    get:
+      operationId: getCaseMessages
+      tags: [messages]
+      summary: Get messages for a case
+      parameters:
+        - $ref: "#/components/parameters/case_id"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: Message list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageListResponse"
+
+  /conversations/{conversation_id}/messages:
+    post:
+      operationId: sendManagerMessage
+      tags: [messages]
+      summary: Send message from manager to customer
+      description: |
+        Sends via outbox → WhatsApp. Case must be active and assigned.
+        Idempotent via Idempotency-Key header.
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "200":
+          description: Message queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendMessageResponse"
+        "403":
+          $ref: "#/components/responses/NotAssigned"
+
+  # ──────────────────────────────────────────────────────────────────
+  # OPS / HEALTH
+  # ──────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      operationId: getHealth
+      tags: [ops]
+      summary: System health check
+      security: []  # Public endpoint
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /metrics/daily:
+    get:
+      operationId: getMetricsDaily
+      tags: [ops]
+      summary: Daily case metrics
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Defaults to today
+      responses:
+        "200":
+          description: Daily metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsDailyResponse"
+
+  # ──────────────────────────────────────────────────────────────────
+  # SETTINGS
+  # ──────────────────────────────────────────────────────────────────
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get client settings
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsResponse"
+    patch:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update client settings
+      description: Owner/admin only
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsUpdateRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsUpdateResponse"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ──────────────────────────────────────────────────────────────────
+  # AUDIT
+  # ──────────────────────────────────────────────────────────────────
+  /audit:
+    get:
+      operationId: listAuditEvents
+      tags: [audit]
+      summary: List audit events
+      parameters:
+        - name: entity_type
+          in: query
+          schema:
+            type: string
+            enum: [case, conversation, settings, agent]
+        - name: entity_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: Audit events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditListResponse"
+
+# ════════════════════════════════════════════════════════════════════
+# COMPONENTS
+# ════════════════════════════════════════════════════════════════════
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    case_id:
+      name: case_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+      description: Pagination cursor (opaque)
+    limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid auth token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: AUTH_REQUIRED
+              message: Authentication required
+              trace_id: abc123
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: ACCESS_DENIED
+              message: You do not have permission to perform this action
+              trace_id: abc123
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: NOT_FOUND
+              message: Case not found
+              trace_id: abc123
+    CaseAlreadyTaken:
+      description: Case already assigned to another agent
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: CASE_ALREADY_TAKEN
+              message: Case is already assigned to another agent
+              details:
+                assigned_to: John Doe
+              trace_id: abc123
+    NotAssigned:
+      description: Case not assigned to current agent
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: NOT_ASSIGNED
+              message: You must take the case before performing this action
+              trace_id: abc123
+
+  schemas:
+    # ── Errors ──
+    Error:
+      type: object
+      required: [code, message, trace_id]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+        message:
+          type: string
+          description: Human-readable message
+        details:
+          type: object
+          additionalProperties: true
+        trace_id:
+          type: string
+          description: Correlation ID for debugging
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/Error"
+
+    # ── Auth ──
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        role:
+          type: string
+          enum: [owner, admin, manager, support]
+        client_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        is_active:
+          type: boolean
+
+    Client:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+
+    Branch:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        is_active:
+          type: boolean
+
+    MeResponse:
+      type: object
+      properties:
+        agent:
+          $ref: "#/components/schemas/Agent"
+        client:
+          $ref: "#/components/schemas/Client"
+        branches:
+          type: array
+          items:
+            $ref: "#/components/schemas/Branch"
+
+    # ── Cases ──
+    Case:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, active, resolved]
+        trigger_type:
+          type: string
+        trigger_value:
+          type: string
+          nullable: true
+        context_summary:
+          type: string
+          nullable: true
+        user_message:
+          type: string
+          nullable: true
+        assigned_to_name:
+          type: string
+          nullable: true
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        channel:
+          type: string
+          enum: [whatsapp, telegram]
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        sla_status:
+          type: string
+          enum: [ok, warning, breached]
+        customer_name:
+          type: string
+          nullable: true
+        customer_phone:
+          type: string
+          nullable: true
+        customer_remote_jid:
+          type: string
+          nullable: true
+        decision_trace:
+          type: array
+          items:
+            type: object
+          nullable: true
+
+    CaseListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Case"
+        cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+
+    CaseActionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        case:
+          $ref: "#/components/schemas/Case"
+
+    # ── Messages ──
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant, manager, system]
+        content:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          nullable: true
+
+    MessageListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+        cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+
+    SendMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 4096
+
+    SendMessageResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          $ref: "#/components/schemas/Message"
+
+    # ── Ops ──
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        version:
+          type: string
+        database:
+          type: string
+          enum: [ok, error]
+        redis:
+          type: string
+          enum: [ok, error]
+        outbox_backlog:
+          type: integer
+
+    MetricsDailyResponse:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        total_cases:
+          type: integer
+        pending_cases:
+          type: integer
+        active_cases:
+          type: integer
+        resolved_cases:
+          type: integer
+        avg_resolution_hours:
+          type: number
+          nullable: true
+
+    # ── Settings ──
+    BotConfig:
+      type: object
+      properties:
+        reminder_timeout_1:
+          type: integer
+          nullable: true
+        reminder_timeout_2:
+          type: integer
+          nullable: true
+        auto_close_timeout:
+          type: integer
+          nullable: true
+        quiet_hours_enabled:
+          type: boolean
+        quiet_hours_start:
+          type: string
+          nullable: true
+        quiet_hours_end:
+          type: string
+          nullable: true
+        tone:
+          type: string
+          nullable: true
+        autolearn_enabled:
+          type: boolean
+        booking_enabled:
+          type: boolean
+        enable_reminders:
+          type: boolean
+        enable_owner_escalation:
+          type: boolean
+
+    SettingsResponse:
+      type: object
+      properties:
+        branches:
+          type: array
+          items:
+            $ref: "#/components/schemas/Branch"
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+        bot_config:
+          $ref: "#/components/schemas/BotConfig"
+          nullable: true
+
+    SettingsUpdateRequest:
+      type: object
+      properties:
+        reminder_1_minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+        reminder_2_minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+        escalation_timeout_minutes:
+          type: integer
+          minimum: 1
+          maximum: 10080
+
+    SettingsUpdateResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+
+    # ── Audit ──
+    AuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        event_type:
+          type: string
+        actor_name:
+          type: string
+          nullable: true
+        entity_type:
+          type: string
+          nullable: true
+        entity_id:
+          type: string
+          format: uuid
+          nullable: true
+        payload:
+          type: object
+          nullable: true
+
+    AuditListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
