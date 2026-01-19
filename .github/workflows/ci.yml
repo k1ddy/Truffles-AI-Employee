@@ -325,7 +325,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ always() }}
     needs: build-push
     runs-on: ubuntu-latest
     outputs:
@@ -337,7 +337,11 @@ jobs:
       - name: Deploy gate
         id: deploy_gate
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ needs.build-push.result }}" != "success" ]; then
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             if [ "${{ inputs.run_livecheck }}" = "true" ]; then
               echo "deployed=true" >> "$GITHUB_OUTPUT"
             else
