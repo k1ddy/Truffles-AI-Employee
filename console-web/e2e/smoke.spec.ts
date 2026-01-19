@@ -9,7 +9,8 @@ test.describe('Smoke Test: Login Flow', () => {
         await expect(page.getByText('Truffles Console')).toBeVisible();
         await page.getByRole('button', { name: /войти/i }).click();
         await expect(page).toHaveURL(/localhost:8080|192\.168\.5\.27:8080/);
-        await expect(page.getByText(/sign in|login/i)).toBeVisible();
+        // Keycloak login page title
+        await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible();
     });
 
     test('should login and see inbox', async ({ page }) => {
@@ -19,7 +20,7 @@ test.describe('Smoke Test: Login Flow', () => {
         await page.fill('#username', 'admin');
         await page.fill('#password', 'admin');
         await page.click('#kc-login');
-        await page.waitForURL(/192\.168\.5\.27:3000/);
+        await page.waitForURL(/localhost:3000|192\.168\.5\.27:3000/);
         await expect(page.getByText('Truffles Console')).toBeVisible();
         await expect(page.getByText('Заявки')).toBeVisible({ timeout: 10000 });
     });
@@ -31,7 +32,7 @@ test.describe('Smoke Test: Login Flow', () => {
         await page.fill('#username', 'admin');
         await page.fill('#password', 'admin');
         await page.click('#kc-login');
-        await page.waitForURL(/192\.168\.5\.27:3000/);
+        await page.waitForURL(/localhost:3000|192\.168\.5\.27:3000/);
         await page.getByRole('button', { name: /выйти/i }).click();
         await expect(page.getByRole('button', { name: /войти/i })).toBeVisible({ timeout: 10000 });
     });
@@ -47,7 +48,7 @@ async function loginAsAdmin(page: import('@playwright/test').Page) {
     await page.fill('#username', 'admin');
     await page.fill('#password', 'admin');
     await page.click('#kc-login');
-    await page.waitForURL(/192\.168\.5\.27:3000/);
+    await page.waitForURL(/localhost:3000|192\.168\.5\.27:3000/);
     await expect(page.getByText('Заявки')).toBeVisible({ timeout: 10000 });
 }
 
