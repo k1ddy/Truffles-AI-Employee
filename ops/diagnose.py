@@ -1051,7 +1051,10 @@ def _poll_decision_meta(
                     return (
                         last_conv_id,
                         last_meta,
-                        f"missing_action (meta_keys={meta_keys})",
+                        (
+                            "missing_action (message_id="
+                            f"{message_id}, conv_id={last_conv_id}, meta_keys={meta_keys})"
+                        ),
                     )
         time.sleep(max(interval, 0.2))
     return last_conv_id, last_meta, last_error or "timeout"
@@ -1101,6 +1104,15 @@ def _resolve_outbox_coalesce_seconds(container_name):
 
 def _resolve_outbox_wait_seconds(container_name, extra_seconds=1.0):
     return max(0.0, _resolve_outbox_coalesce_seconds(container_name) + extra_seconds)
+
+def _resolve_fail_fast_after(args, outbox_wait_seconds):
+    if args.fail_fast_after <= 0:
+        return None
+    min_after = max(outbox_wait_seconds + 10.0, min(30.0, args.poll_timeout * 0.5))
+    fail_fast_after = max(args.fail_fast_after, min_after)
+    if fail_fast_after >= args.poll_timeout:
+        return None
+    return fail_fast_after
 
 def _resolve_remote_jid(explicit, rng, container_name=None):
     if explicit:
@@ -2368,6 +2380,8 @@ def _run_livecheck_auto(args):
         "qdrant_collection": learning_env.get("qdrant_collection_effective"),
     }
 
+    outbox_wait_seconds = _resolve_outbox_wait_seconds(container_name)
+    fail_fast_after = _resolve_fail_fast_after(args, outbox_wait_seconds)
     context = {
         "rng": rng,
         "cases": selected_cases,
@@ -2386,8 +2400,8 @@ def _run_livecheck_auto(args):
         "learning_env": learning_env,
         "qdrant_env": qdrant_env,
         "container_name": container_name,
-        "outbox_wait_seconds": _resolve_outbox_wait_seconds(container_name),
-        "fail_fast_after": args.fail_fast_after if args.fail_fast_after > 0 else None,
+        "outbox_wait_seconds": outbox_wait_seconds,
+        "fail_fast_after": fail_fast_after,
     }
     outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
     fail_fast_after = context.get("fail_fast_after")
