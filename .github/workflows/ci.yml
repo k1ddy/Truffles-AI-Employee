@@ -325,15 +325,34 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: ${{ github.event_name != 'pull_request' }}
     needs: build-push
     runs-on: ubuntu-latest
     environment: production
+    outputs:
+      deployed: ${{ steps.deploy_gate.outputs.deployed }}
     concurrency:
       group: deploy-${{ github.ref }}
       cancel-in-progress: true
     steps:
+      - name: Deploy gate
+        id: deploy_gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.run_livecheck }}" = "true" ]; then
+              echo "deployed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "deployed=false" >> "$GITHUB_OUTPUT"
+            fi
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "deployed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "deploy_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }}"
+
       - name: Deploy to VPS
+        if: ${{ steps.deploy_gate.outputs.deployed == 'true' }}
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -438,7 +457,7 @@ jobs:
     if: >-
       ${{
         vars.CI_LIVECHECK_ENABLED == '1' &&
-        (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true'))
+        needs.deploy.outputs.deployed == 'true'
       }}
     needs: deploy
     runs-on: ubuntu-latest
