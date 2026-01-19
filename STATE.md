@@ -1928,6 +1928,19 @@ mismatch, allowlist, etc).
 - Then open a targeted Task Package to fix that root cause and rerun CI.
 ```
 
+### 2026-01-19 — CI livecheck workflow guards (PR #235)
+
+**Что изменено и зачем**
+- `.github/workflows/ci.yml`: добавлен `concurrency` на уровне workflow (PR-прогоны можно отменять, `main` — нет).
+- `.github/workflows/ci.yml`: добавлены `timeout-minutes` для длинных jobs (core-eval, long-eval, asr-eval, build-push, deploy, ci-livecheck).
+- `.github/workflows/ci.yml`: в лог пишется прогресс ci-livecheck (suite start/ok/fail), чтобы видеть движение.
+
+**Доказательства**
+- PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/235
+- CI (PR): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21134857979 (success)
+- Merge commit: `e2c0bbb67ee47fdb9afaf32b581d72d6f9b2e360`
+- Remote ветка удалена: `arch/ci-livecheck-guards`
+
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**
