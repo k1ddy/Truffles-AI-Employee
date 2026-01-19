@@ -1786,6 +1786,17 @@ QDRANT_KEY=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "$QDRANT_API_KEY"
 curl -s -H "api-key: ${QDRANT_KEY}" "http://${QDRANT_IP}:6333/collections/truffles_knowledge"
 curl -s -H "api-key: ${QDRANT_KEY}" "http://${QDRANT_IP}:6333/collections/services_index"
 
+### 2026-01-19 — decision_meta coverage + livecheck reset meta
+
+**Что сделали:**
+- Добавили decision_meta для routing‑веток (smalltalk/status/style_reference/out_of_domain/escalation/pending/rejection/unknown).
+- При провале эскалации — fallback через `_handle_ai_response_action`, чтобы decision_meta/trace оставались валидными.
+- В livecheck reset‑poll допускается decision_meta без action/policy_gate.
+
+**Evidence:**
+- PR #214 https://github.com/k1ddy/Truffles-AI-Employee/pull/214 (merge commit `f914641b9cb9e1cb09c892865dbf196faad400a7`), CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21121717504 (success).
+- PR #215 https://github.com/k1ddy/Truffles-AI-Employee/pull/215 (merge commit `f9c0529aea4108112a4a1064c1f1f19bb8386473`), CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21121724198 (success).
+
 ### 2026-01-13 — Consult clarify short‑circuit live‑check (prod)
 
 **Что сделали:**
