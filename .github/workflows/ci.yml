@@ -459,7 +459,7 @@ jobs:
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ always() }}
     needs: deploy
     runs-on: ubuntu-latest
     steps:
@@ -469,7 +469,9 @@ jobs:
         id: livecheck_gate
         run: |
           run_livecheck="false"
-          if [ "${{ needs.deploy.result }}" = "success" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            run_livecheck="false"
+          elif [ "${{ needs.deploy.result }}" = "success" ]; then
             if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
               if [ "${{ inputs.run_livecheck }}" = "true" ]; then
                 run_livecheck="true"
