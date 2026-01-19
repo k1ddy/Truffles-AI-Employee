@@ -1830,6 +1830,15 @@ Evidence
 - ops/diagnose.py
 ```
 
+### 2026-01-19 — Outbox lookup for decision_meta (missing_action fix)
+
+**Что сделали:**
+- Восстановили поиск user‑сообщения по `messageId` (CamelCase) как fallback к `message_id`, чтобы outbox‑processing обновлял decision_meta нужного inbound и не оставлял `missing_action` в CA‑02/03/06/07.
+
+**Evidence:**
+- PR #237 https://github.com/k1ddy/Truffles-AI-Employee/pull/237 (merge commit `4b8a9b6f6ea222fd035d819f6261ddd207414277`)
+- CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21136937211 (success, livecheck pass)
+
 ### 2026-01-19 — CI livecheck gating report (arch/ci-livecheck-always)
 
 Отчёт для Brain (копируй как есть):
