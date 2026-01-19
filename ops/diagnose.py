@@ -1012,7 +1012,7 @@ def _fetch_message_meta(db_user, message_id):
         meta = None
     return conversation_id, meta, None
 
-def _poll_decision_meta(db_user, message_id, timeout, interval):
+def _poll_decision_meta(db_user, message_id, timeout, interval, require_action=True):
     deadline = time.time() + max(timeout, 0)
     last_meta = None
     last_conv_id = None
@@ -1025,6 +1025,8 @@ def _poll_decision_meta(db_user, message_id, timeout, interval):
             last_conv_id = conversation_id
         if meta:
             last_meta = meta
+            if not require_action:
+                return last_conv_id, last_meta, None
             action = meta.get("action") or meta.get("pending_action")
             policy_gate = meta.get("policy_gate")
             if action or policy_gate:
@@ -1497,7 +1499,11 @@ def _run_livecheck_ca05_booking(args, context):
             outbox_wait_seconds,
         )
         conv_id, reset_meta, reset_meta_error = _poll_decision_meta(
-            db_user, reset_message_id, args.poll_timeout, args.poll_interval
+            db_user,
+            reset_message_id,
+            args.poll_timeout,
+            args.poll_interval,
+            require_action=False,
         )
         if reset_meta_error:
             raise SystemExit(f"livecheck-auto: CA05 reset poll failed ({reset_meta_error})")
@@ -1720,7 +1726,11 @@ def _run_livecheck_ca06_reset(args, context, *, suite_label="CA06"):
         outbox_wait_seconds,
     )
     conv_id, reset_meta, reset_meta_error = _poll_decision_meta(
-        db_user, reset_message_id, args.poll_timeout, args.poll_interval
+        db_user,
+        reset_message_id,
+        args.poll_timeout,
+        args.poll_interval,
+        require_action=False,
     )
     if reset_meta_error:
         raise SystemExit(f"livecheck-auto: CA06 reset meta poll failed ({reset_meta_error})")
