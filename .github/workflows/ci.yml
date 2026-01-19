@@ -481,7 +481,7 @@ jobs:
             fi
           fi
           echo "run=${run_livecheck}" >> "$GITHUB_OUTPUT"
-          echo "livecheck_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }} deploy_result=${{ needs.deploy.result }} gate_run=${run_livecheck }}"
+          echo "livecheck_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }} deploy_result=${{ needs.deploy.result }} gate_run=${run_livecheck}"
 
       - name: Configure SSH
         if: ${{ steps.livecheck_gate.outputs.run == 'true' }}
