@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 
-const API_BASE_URL = process.env.API_URL || 'http://192.168.5.27:8001/console/v1';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.5.27:8001/console/v1';
 
 /**
  * Proxy API route to forward requests to the backend API.
