@@ -92,11 +92,29 @@ jobs:
       - name: Smoke test (catches ImportError)
         run: python -c "from app.main import app; print('✓ App imports OK')"
 
+      - name: Validate OpenAPI contracts
+        run: |
+          pip install openapi-spec-validator
+          python -m openapi_spec_validator ../contracts/console_api/openapi.v1.yaml
+          echo "✓ OpenAPI spec valid"
+
   unit-tests:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: truffles-api
+    env:
+      REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
 
@@ -114,7 +132,10 @@ jobs:
           pip install pytest pytest-cov ruff
 
       - name: Unit tests
-        run: pytest -q tests/test_webhook_*.py tests/test_health_service.py
+        run: |
+          pytest -v --tb=short \
+            --ignore=tests/test_demo_salon_eval.py \
+            --ignore=tests/test_message_endpoint.py
 
   core-eval:
     needs: [lint, unit-tests, changes]
