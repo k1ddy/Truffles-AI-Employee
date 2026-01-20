@@ -1733,6 +1733,21 @@
 - output: `177 | 9.53s | 9.20s | 15.26s | 27.52s`
 - Status: p90 still > 10s target; keep P0 outbox latency OPEN.
 
+### 2026-01-20 — CI livecheck gating + CA05/CA08 fail-fast tuning
+
+**Context (CI failure):**
+- CI run (main) failed in ci-livecheck with missing_action for CA05/CA08: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21160690985
+
+**What changed:**
+- PR #262: removed debug-livecheck-context job; livecheck gating now requires deploy_ok + `livecheck_required` (main) or `inputs.run_livecheck` (workflow_dispatch), with gate enforced inside the job.
+- PR #264: for suites `ca05-booking` and `ca08-state`, set `fail_fast_after = poll_timeout` to allow late action without false-negative missing_action.
+
+**Evidence:**
+- PR #262: https://github.com/k1ddy/Truffles-AI-Employee/pull/262 (merge commit `11619b8ce9f1bd768c11741f31e5484f0d873ef6`).
+- PR #264: https://github.com/k1ddy/Truffles-AI-Employee/pull/264 (merge commit `0e547d1d1370945eb613fce422990fa837dd5fd5`).
+- Manual livecheck: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21161572894 (success).
+- Main CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21162026950 (ci-livecheck success).
+
 ### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
 
 **CI:**
