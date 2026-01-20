@@ -1692,6 +1692,20 @@
 - output: `64 | 9.23s | 8.42s | 15.12s | 24.21s`
 - Status: p90 still > 10s target; keep P0 outbox latency OPEN.
 
+**Task Package (planned): P0 Outbox p90 < 10s**
+- Chosen issue (NOW): Outbox latency p90 remains >10s (SQL snapshot above) — violates SLA stability in `STRATEGY/REQUIREMENTS.md`.
+- Invariants protected: outbox idempotency + auto-heal; no behavior changes in routing/LLM/policy; `_legacy.py` stays adapter-only.
+- Scope: outbox queue/claim/worker timing and metrics; SQL-driven evidence; CI verification.
+- Out of scope: policy/intent/LLM logic, packs, routing order, DB edits for evidence.
+- Touch-list: `truffles-api/app/routers/webhook/outbox.py`, `truffles-api/app/services/outbox_service.py`, `truffles-api/app/main.py`, `truffles-api/app/routers/admin.py`, `ops/diagnose.py`, tests under `truffles-api/tests/` as needed.
+- Plan: (1) break down latency into queue wait vs processing using SQL + outbox latency records; (2) identify top contributors (coalesce window, claim batching, worker interval, retries); (3) implement smallest change to keep p90 <10s without lowering safety; (4) add/adjust tests; (5) CI + live-check or SQL evidence; (6) update `STATE.md` before merge.
+- DoD: SQL last-1h `status=SENT` shows p90 < 10s on prod; CI green; evidence recorded in `STATE.md`.
+- Checks: CI core + livecheck (if behavior change); local container tests if added.
+- Evidence plan: CI run URL + SQL snapshot + (if needed) `/admin/metrics` and outbox status counts; record in `STATE.md` before merge.
+- Rollback: revert merge commit(s).
+- No-go: no DB/trace edits for evidence; no `_legacy.py` orchestration changes.
+- Branch/Worktree/Base/Merge/Cleanup: `dev/outbox-p90`; `/home/zhan/truffles-main-wt/outbox-p90`; `origin/main`; PR + CI green, merge by Top Architect/Brain; cleanup by Top Architect.
+
 ### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
 
 **CI:**
