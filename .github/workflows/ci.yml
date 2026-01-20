@@ -512,6 +512,23 @@ jobs:
             done
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
+  debug-livecheck-context:
+    if: ${{ always() && github.event_name == 'workflow_dispatch' }}
+    needs: [changes, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump livecheck gating context
+        run: |
+          set -euo pipefail
+          echo "event_name=${{ github.event_name }}"
+          echo "inputs.run_livecheck=${{ inputs.run_livecheck }}"
+          echo "github.event.inputs.run_livecheck=${{ github.event.inputs.run_livecheck }}"
+          echo "changes.livecheck_required=${{ needs.changes.outputs.livecheck_required }}"
+          echo "deploy.result=${{ needs.deploy.result }}"
+          echo "expr_manual=${{ github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true' }}"
+          echo "expr_livecheck_required=${{ needs.changes.outputs.livecheck_required == 'true' && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped') }}"
+          echo "expr_combined=${{ (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true') || (needs.changes.outputs.livecheck_required == 'true' && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped')) }}"
+
   ci-livecheck:
     if: >-
       ${{

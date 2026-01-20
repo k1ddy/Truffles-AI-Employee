@@ -1920,7 +1920,9 @@ SELECT t FROM traces WHERE t->>'stage'='rag_retrieve';"
 
 **PLAN (fix in progress):**
 - Branch: `fix/branch-routing-instance` (instanceId overrides sticky branch + branch‑aware outbound instance selection).
-- Tests: локально blocked (missing `dateparser`), CI pending.
+- Tests: локально blocked (missing `dateparser`), CI rerun success.
+- CI run (rerun): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21159970877 (status: success, head `d862afdce9ee3c387e780f060f3032151a8c501a`).
+- Prev CI (failed lint): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21159836338 (ruff I001 import order).
 
 ### 2026-01-18 — CA-14 Onboarding readiness (validate + Qdrant + version)
 
