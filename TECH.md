@@ -203,6 +203,7 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - **Док‑изменения без поведения:** PR → проверяем lint/unit; остальные этапы будут skipped — это ожидаемо.
 - **Изменение поведения:** merge в main → полный CI + deploy + livecheck.
 - **Нужен полный прогон без мержа:** `workflow_dispatch` на `main` с `run_long`/`run_livecheck` (если есть доступ и гейты позволяют).
+- **Live‑check sender‑only:** используйте `clean_auto` как отправителя (ChatFlow send‑text) → receiver‑номер салона; если написать на `clean_auto`, ответа не будет. Подробности — `SPECS/SYSTEM_REFERENCE.md` §4.3.
 
 ---
 

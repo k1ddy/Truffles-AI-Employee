@@ -281,6 +281,7 @@ python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
   - `clean_auto` → `77785890765@s.whatsapp.net` (instanceId: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6IkNsZWFuIn0=`, ChatFlow send‑text).
   - `clean_manual` → `77015705555@s.whatsapp.net` (ручной отправитель).
   - Добавлять новые sender‑JID по мере появления (allowlist).
+- **Важно:** `clean_auto` — **sender‑only**. Если написать **на него**, бот не ответит. Используем его как **отправителя** в ChatFlow send‑text → **receiver‑номер** салона, затем проверяем inbound row в БД.
 - Inbound от branch‑номеров (sender совпал с `branches.phone`) игнорируется preflight‑гейтом — так мы исключаем bot‑to‑bot loop.
 - Используем **пул тестовых JID** (внешние номера). Один suite → один JID, чтобы не текло `pending/expected_reply_type`.
 - Self‑send в ChatFlow не гарантирует доставку на телефон. **Разрешена симуляция instance→instance**, если inbound реально записан в БД.
