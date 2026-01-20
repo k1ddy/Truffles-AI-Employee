@@ -280,3 +280,15 @@ gaps:
     acceptance_tests:
       - "\"Делаете депиляцию?\" -> \"Да, делаем депиляцию.\" (service_presence_reply)"
       - "No unrelated price items in response"
+
+  - id: "GAP-023"
+    title: "Chaos dialog robustness testing (noise/interruptions) missing"
+    status: "NOT_IMPLEMENTED"
+    why_it_matters: "Deterministic evals do not cover typos/word order/interruptions; regressions in slot carryover and booking completion go undetected."
+    evidence:
+      - "truffles-api/tests/test_demo_salon_eval.py (deterministic turns only; no noise injection)"
+      - "rg -n 'hypothesis|fuzz|property' truffles-api/tests (no matches)"
+    proposed_fix_mvp: "Add seeded chaos-eval tier: generate 10-15 turn dialogs with noise transforms (typos, word shuffle, fillers, topic interruptions) and assert booking completion + decision_meta invariants; run nightly or on EVAL/pack changes."
+    acceptance_tests:
+      - "EVAL_TIER=chaos runs deterministically with fixed seed and passes"
+      - "Chaos suite asserts booking completion and no unexpected escalation on noisy inputs"
