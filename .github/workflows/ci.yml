@@ -515,8 +515,9 @@ jobs:
   ci-livecheck:
     if: >-
       ${{
-        needs.changes.outputs.livecheck_required == 'true' &&
-        (needs.deploy.result == 'success' || needs.deploy.result == 'skipped')
+        (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true') ||
+        (needs.changes.outputs.livecheck_required == 'true' &&
+         (needs.deploy.result == 'success' || needs.deploy.result == 'skipped'))
       }}
     needs: [changes, deploy]
     runs-on: ubuntu-latest
