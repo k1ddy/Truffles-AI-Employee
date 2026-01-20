@@ -145,10 +145,13 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 
 ### Почему этапы пропускаются (skipped)
 **Path filters (changes):**
-- L1 включает: `truffles-api/app/**`, `truffles-api/tests/**`, `knowledge/**`, `SPECS/**`, `STRATEGY/**`, `ops/**`, `.github/workflows/**`.
+- L1 включает: `truffles-api/app/**`, `truffles-api/tests/**`, `knowledge/**`, `ops/**`, `.github/workflows/**`.
   - Нет L1‑изменений → `core-eval` skip.
 - L2 включает: `truffles-api/app/knowledge/**/EVAL.yaml`, `truffles-api/app/knowledge/**/SALON_TRUTH.yaml`, `truffles-api/tests/test_demo_salon_eval.py`.
   - Нет L2‑изменений → `long-eval` и `asr-eval` skip.
+**Doc‑only fast lane:**
+- Изменения в `SPECS/**`, `STRATEGY/**`, `docs/**`, `AGENTS.md`, `STRUCTURE.md`, `TECH.md`, `STATE.md` не считаются L1 → `core-eval` skip.
+- На main build/deploy/livecheck запускаются только если `deploy_required=true` (код/рантайм), иначе пропускаются.
 
 **Event gate (PR vs main):**
 - На PR `build-push`, `deploy`, `ci-livecheck` всегда skip.
