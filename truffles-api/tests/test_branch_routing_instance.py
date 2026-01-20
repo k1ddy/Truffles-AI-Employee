@@ -85,12 +85,16 @@ def test_preflight_rejects_missing_instance_id_by_instance():
     client_query.filter.return_value.first.return_value = client
     settings_query = Mock()
     settings_query.filter.return_value.first.return_value = settings
+    branch_query = Mock()
+    branch_query.filter.return_value.all.return_value = []
 
     def _query_side_effect(model):
         if model is Client:
             return client_query
         if model is ClientSettings:
             return settings_query
+        if model is Branch or getattr(model, "key", None) == "phone":
+            return branch_query
         return Mock()
 
     db = Mock()
@@ -132,6 +136,7 @@ def test_preflight_rejects_unknown_instance_id_hybrid():
     settings_query.filter.return_value.first.return_value = settings
     branch_query = Mock()
     branch_query.filter.return_value.first.return_value = None
+    branch_query.filter.return_value.all.return_value = []
 
     def _query_side_effect(model):
         if model is Client:
@@ -191,13 +196,14 @@ def test_preflight_resolves_branch_instance_id():
     settings_query.filter.return_value.first.return_value = settings
     branch_query = Mock()
     branch_query.filter.return_value.first.return_value = branch
+    branch_query.filter.return_value.all.return_value = []
 
     def _query_side_effect(model):
         if model is Client:
             return client_query
         if model is ClientSettings:
             return settings_query
-        if model is Branch:
+        if model is Branch or getattr(model, "key", None) == "phone":
             return branch_query
         return Mock()
 
@@ -256,7 +262,7 @@ def test_preflight_drops_branch_sender():
             return client_query
         if model is ClientSettings:
             return settings_query
-        if model is Branch:
+        if model is Branch or getattr(model, "key", None) == "phone":
             return branch_query
         return Mock()
 
