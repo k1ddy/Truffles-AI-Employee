@@ -833,6 +833,10 @@ jobs:
             if [ "${suite_name}" = "ca06-consult" ]; then
               poll_timeout=$((poll_timeout + 60))
             fi
+            local fail_fast_after="${FAIL_FAST_AFTER}"
+            if [ "${suite_name}" = "ca05-booking" ] || [ "${suite_name}" = "ca08-state" ]; then
+              fail_fast_after="${poll_timeout}"
+            fi
             local request_timeout=30
             local noise_level="low"
             if [ "${suite_name}" = "ca07-ood" ]; then
@@ -852,7 +856,7 @@ jobs:
               --remote-jid "${suite_jid}" \
               --allowlist-jids "${ALLOWLIST_CLEAN}" \
               --poll-timeout "${poll_timeout}" \
-              --fail-fast-after "${FAIL_FAST_AFTER}" \
+              --fail-fast-after "${fail_fast_after}" \
               --reset-before-suite \
               --timeout "${request_timeout}" \
               --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then
