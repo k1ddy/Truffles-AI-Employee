@@ -1918,11 +1918,23 @@ SELECT t FROM traces WHERE t->>'stage'='rag_retrieve';"
 - `SELECT id, client_id, branch_id, state, bot_status FROM conversations WHERE id='b8c559d1-f8cd-4173-ae70-0a9683833e48';`
 - `SELECT id, client_id, slug, instance_id FROM branches WHERE instance_id='eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6IlRydWZmbGVzQnJhbmNoIn0=';`
 
-**PLAN (fix in progress):**
-- Branch: `fix/branch-routing-instance` (instanceId overrides sticky branch + branch‑aware outbound instance selection).
-- Tests: локально blocked (missing `dateparser`), CI rerun success.
+**Fix (merged to main):**
+- Code: instanceId overrides existing conversation.branch_id when branch_mode allows; outbound uses branch.instance_id (branch-aware).
 - CI run (rerun): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21159970877 (status: success, head `d862afdce9ee3c387e780f060f3032151a8c501a`).
 - Prev CI (failed lint): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21159836338 (ruff I001 import order).
+
+**Live-check (real inbound, 2026-01-20 10:41):**
+- inbound: msg_id `9ce891c0-3aaa-4c6d-a1d2-2d8cc865d550`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, messageId `3EB080156F2F35B7B5E8C9`
+  - content `LC-BRANCH-OVERRIDE-20260120-<10:41>`, remoteJid `77015705555@s.whatsapp.net`
+  - metadata.instanceId = `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6IlRydWZmbGVzQnJhbmNoIn0=`
+  - decision_meta.action = `pending_wait`
+- conversation: conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48` now branch_id = `2e9f5a9d-50a2-4b07-8e54-da2cac2ac751` (branch_b)
+- outbox: id `9be21a2b-a109-492d-8d21-c880d9577d3e`, status `SENT`, out_instance_id = branch_b instanceId, remoteJid `77015705555@s.whatsapp.net`
+
+**SQL (post-fix live-check):**
+- `SELECT id, conversation_id, created_at, content, metadata->>'messageId', metadata->>'remoteJid', metadata->>'instanceId', metadata->'decision_meta'->>'action' FROM messages WHERE role='user' AND content ILIKE 'LC-BRANCH-OVERRIDE-20260120-%' ORDER BY created_at DESC LIMIT 1;`
+- `SELECT id, branch_id, state, bot_status FROM conversations WHERE id='b8c559d1-f8cd-4173-ae70-0a9683833e48';`
+- `SELECT id, status, created_at, payload_json->'body'->'metadata'->>'instanceId', payload_json->'body'->'metadata'->>'remoteJid', payload_json->'body'->'metadata'->>'messageId' FROM outbox_messages WHERE inbound_message_id='3EB080156F2F35B7B5E8C9' ORDER BY created_at DESC LIMIT 1;`
 
 ### 2026-01-18 — CA-14 Onboarding readiness (validate + Qdrant + version)
 
