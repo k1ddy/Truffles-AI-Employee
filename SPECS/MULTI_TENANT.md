@@ -45,6 +45,22 @@ _Любые статусы ниже — DERIVED; единственный ист
 | **User** | Конечный клиент (человек в WhatsApp) | Анна, +7 701 570 5555 |
 | **Conversation** | Диалог user ↔ bot/manager | conversations.id = UUID |
 
+## Идентификаторы в webhook (обязательная карта)
+
+| Поле | Где задаётся | Что означает | Правило |
+|------|-------------|--------------|---------|
+| `client_slug` | URL `/webhook/{client_slug}` | Клиент в БД (`clients.name`) | Должен совпадать с `clients.name` |
+| `instanceId` | query/metadata | Инстанс ChatFlow (receiver‑номер) | Должен совпадать с `branches.instance_id` |
+| `branch_id` | БД | Внутр. ID филиала | Выбирается по `instanceId` |
+
+**Важно:** `client_slug` и `instanceId` — разные сущности.  
+`client_slug` выбирает клиента, `instanceId` выбирает филиал внутри клиента.
+
+### Мини‑чек перед тестом
+1) `branches.instance_id` соответствует номеру.
+2) webhook URL содержит **тот же** instanceId.
+3) metadata.instanceId совпадает с query.
+
 ## Полная иерархия (КОНЕЧНОЕ ВИДЕНИЕ)
 
 ```

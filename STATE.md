@@ -44,6 +44,7 @@
 - **DONE:** GAP-017 Branch isolation evidence (branch_routing + RAG fallback + policy_gate + demo handover/Telegram) — см. запись 2026-01-14.
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **OPEN-1:** Branch routing stickiness: instanceId inbound не переопределяет existing conversation.branch_id; outbound уходит через client.config.instance_id (demo_salon). Evidence 2026-01-20 ниже.
+- **DONE:** Anti bot-to-bot loop guard (preflight ignores inbound from sender‑JID matching `branches.phone`) deployed. Evidence: clean sender `77785890765` → demo_salon main branch OK (conv_id `10049e90-5805-425f-841b-c0c9419c9c30`, msg_id `3EB07B249B69BBABF1FB13`, decision_meta action=match source=service_semantic_matcher, outbox SENT). Branch‑sender ignore exercised: trace stage `preflight` reason `sender_is_branch` recorded at `2026-01-20T13:06:36Z` in conv_id `4dd2e5ae-c287-4137-803a-18a89e277bf4` after branch→branch send (LC-BRANCH-LOOP-20260120-130633).
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
 - **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
