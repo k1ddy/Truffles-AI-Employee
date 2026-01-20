@@ -52,6 +52,7 @@ This document defines the **contracts** between all actors in the system: proces
             "remoteJid": str,     # Required: WhatsApp JID
             "messageId": str,     # Required: dedup key
             "timestamp": int,     # Unix timestamp
+            "instanceId": str,    # Required: branch routing key (must match branches.instance_id)
         }
     }
 }
@@ -63,6 +64,10 @@ This document defines the **contracts** between all actors in the system: proces
     "conversation_id": UUID | None
 }
 ```
+
+**Contract Notes**
+- `metadata.instanceId` is the canonical branch routing key.
+- If `instanceId` does not match any active branch, inbound must be blocked and alerted.
 
 ---
 
@@ -125,6 +130,62 @@ This document defines the **contracts** between all actors in the system: proces
 4. Update handover status
 5. If owner → auto-approve for learning
 ```
+
+---
+
+### 2.4 Onboarding Flow (Client + Branch)
+
+**Goal**
+- 1 phone = 1 branch (strict isolation).
+- Inbound replies must always come from the same phone and use branch-only data.
+
+**Inputs (from Owner/BA)**
+- Company name
+- Branch name
+- Phone number
+- `instanceId` (from ChatFlow)
+- Optional: manager contact (telegram_id / phone)
+
+**Mandatory branch data (required before go-live)**
+- Address + hours
+- Services + pricing
+- Policies (refund/reschedule/medical/payment)
+- Master full names (schedule slots later via CRM/calendar integration)
+
+**Process**
+1. Provision tenant + branch records.
+2. Map `branches.instance_id = instanceId` and `phone = number`.
+3. Validate uniqueness: one phone and one instanceId per branch.
+4. Load and validate branch data pack; index knowledge by `knowledge_tag`.
+5. Generate webhook URL and send it back for ChatFlow configuration.
+6. Live-check using an external sender number (not connected to any instance).
+7. Go-live + monitoring (outbox, SLA, delivery, loops).
+
+**Blocking rules (no-go)**
+- Missing mandatory branch data -> block go-live (safe mode only with explicit approval).
+- Unknown `instanceId` -> block inbound and alert.
+- Phone connected to multiple instances -> stop (loop risk).
+
+**Safe mode (explicit approval only)**
+- Allowed outcomes: `COLLECT` or `HANDOFF` only.
+- No `FACT` replies until branch data is complete.
+
+**Example**
+Company: "Mira Salon"
+
+Branches:
+- "Mira Salon - Zhandosova" -> phone `+7 701 111 1111`, instanceId `INST_AAA`
+- "Mira Salon - Zharokova" -> phone `+7 701 222 2222`, instanceId `INST_BBB`
+- "Mira Salon - Timiryazeva" -> phone `+7 701 333 3333`, instanceId `INST_CCC`
+
+Generated webhooks:
+- `https://api.truffles.kz/webhook/mira_salon?webhook_secret=...&instanceId=INST_AAA`
+- `https://api.truffles.kz/webhook/mira_salon?webhook_secret=...&instanceId=INST_BBB`
+- `https://api.truffles.kz/webhook/mira_salon?webhook_secret=...&instanceId=INST_CCC`
+
+**Policy**
+- If a company has multiple branches but only one phone, strict isolation is not supported.
+- Require one phone per branch to onboard.
 
 ---
 
