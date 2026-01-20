@@ -43,6 +43,7 @@ SESSION RITUAL (every session)
 
 TESTING CONTRACT (summary)
 - Source of truth: `SPECS/SYSTEM_REFERENCE.md` (Test design rules + LLM testing policy + CA-Matrix).
+- CI usage + skip rules: `TECH.md` → "CI / GitHub Actions (как запускать, зачем и когда)".
 - CI livecheck is allowed only with safety gates (TEST_MODE=1 + allowlist); evidence is `livecheck-evidence.md`.
 - Live-check uses JID pool (comma list). One suite -> one JID. Instance->instance simulation is valid only if inbound is recorded in DB with decision_meta/trace; **CA‑13** may use simulated inbound when allowlist is unavailable (mark as `simulated` in `STATE.md`).
 - Definitions for JID/instance_id/instance->instance are fixed in `SPECS/SYSTEM_REFERENCE.md`.
