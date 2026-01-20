@@ -332,6 +332,7 @@ def process_manager_message(
         client_id=conversation.client_id,
         remote_jid=remote_jid,
         message=message_text,
+        branch_id=conversation.branch_id,
     )
 
     if sent:
@@ -489,7 +490,12 @@ def process_manager_media(
     if saved_message:
         _update_media_metadata(saved_message, {"public_url": signed_url})
 
-    instance_id = get_instance_id(db, conversation.client_id)
+    instance_id = get_instance_id(
+        db,
+        conversation.client_id,
+        branch_id=conversation.branch_id,
+        remote_jid=remote_jid,
+    )
     if not instance_id:
         return False, "Instance ID not found", took_handover, handover
 

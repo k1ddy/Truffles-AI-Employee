@@ -20,13 +20,22 @@ def get_or_create_user(db: Session, client_id: UUID, remote_jid: str) -> User:
     return user
 
 
-def get_or_create_conversation(db: Session, client_id: UUID, user_id: UUID, channel: str) -> Conversation:
-    """Find active conversation or create new one."""
-    conversation = (
+def get_or_create_conversation(
+    db: Session,
+    client_id: UUID,
+    user_id: UUID,
+    channel: str,
+    *,
+    branch_id: UUID | None = None,
+) -> Conversation:
+    """Find active conversation for a branch or create a new one."""
+    query = (
         db.query(Conversation)
         .filter(Conversation.client_id == client_id, Conversation.user_id == user_id, Conversation.status == "active")
-        .first()
     )
+    if branch_id is not None:
+        query = query.filter(Conversation.branch_id == branch_id)
+    conversation = query.first()
 
     if not conversation:
         conversation = Conversation(
@@ -36,6 +45,7 @@ def get_or_create_conversation(db: Session, client_id: UUID, user_id: UUID, chan
             status="active",
             started_at=datetime.now(timezone.utc),
             state=ConversationState.BOT_ACTIVE.value,
+            branch_id=branch_id,
         )
         db.add(conversation)
         db.flush()

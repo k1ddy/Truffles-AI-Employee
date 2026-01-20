@@ -2842,9 +2842,15 @@ def _is_hygiene_context_text(text: str) -> bool:
     return any(keyword in normalized for keyword in HYGIENE_KEYWORDS)
 
 
-def find_active_conversation_by_channel_ref(db: Session, client_id, remote_jid: str) -> Conversation | None:
+def find_active_conversation_by_channel_ref(
+    db: Session,
+    client_id,
+    remote_jid: str,
+    *,
+    branch_id: UUID | None = None,
+) -> Conversation | None:
     """Reuse conversation if there is an active handover for this remote_jid."""
-    handover = (
+    query = (
         db.query(Handover)
         .filter(
             Handover.client_id == client_id,
@@ -2852,8 +2858,12 @@ def find_active_conversation_by_channel_ref(db: Session, client_id, remote_jid: 
             Handover.status.in_(["pending", "active"]),
         )
         .order_by(Handover.created_at.desc())
-        .first()
     )
+    if branch_id is not None:
+        query = query.join(Conversation, Conversation.id == Handover.conversation_id).filter(
+            Conversation.branch_id == branch_id
+        )
+    handover = query.first()
     if handover:
         return db.query(Conversation).filter(Conversation.id == handover.conversation_id).first()
     return None
@@ -3072,6 +3082,8 @@ async def _handle_webhook_payload(
     has_media = preflight_payload["has_media"]
     is_media_without_text = preflight_payload["is_media_without_text"]
     media_info = preflight_payload["media_info"]
+    resolved_branch_id = preflight_payload.get("resolved_branch_id")
+    resolved_knowledge_tag = preflight_payload.get("resolved_knowledge_tag")
 
     if not skip_persist:
         record_inbound_count(payload.client_slug)
@@ -3091,7 +3103,11 @@ async def _handle_webhook_payload(
         timing_context["client_config"] = client.config
     if outbox_ids:
         timing_context["outbox_ids"] = list(outbox_ids)
-        timing_context["outbox_id"] = outbox_ids[0] if len(outbox_ids) == 1 else outbox_ids[0]
+        timing_context["outbox_id"] = outbox_ids[0]
+    if resolved_branch_id:
+        timing_context["branch_id"] = str(resolved_branch_id)
+    if resolved_knowledge_tag:
+        timing_context["knowledge_tag"] = resolved_knowledge_tag
 
     outbound_idempotency_key = message_id or build_inbound_message_id(
         message_id,
@@ -3127,6 +3143,7 @@ async def _handle_webhook_payload(
             client.id,
             remote_jid,
             text,
+            branch_id=conversation.branch_id if conversation else None,
             idempotency_key=outbound_idempotency_key,
             raise_on_fail=skip_persist,
         )
@@ -3177,9 +3194,20 @@ async def _handle_webhook_payload(
         user = get_or_create_user(db, client.id, remote_jid)
 
         # 2. Find existing conversation by handover.channel_ref or create new
-        conversation = find_active_conversation_by_channel_ref(db, client.id, remote_jid)
+        conversation = find_active_conversation_by_channel_ref(
+            db,
+            client.id,
+            remote_jid,
+            branch_id=resolved_branch_id,
+        )
         if not conversation:
-            conversation = get_or_create_conversation(db, client.id, user.id, "whatsapp")
+            conversation = get_or_create_conversation(
+                db,
+                client.id,
+                user.id,
+                "whatsapp",
+                branch_id=resolved_branch_id,
+            )
         timing_context["conversation_id"] = str(conversation.id)
 
         if media_info and media_decision is None and media_policy:

@@ -57,6 +57,12 @@ def _run_preflight(
     resolve_trace_conversation,
     record_early_trace,
 ) -> tuple[WebhookResponse | None, dict]:
+    def _normalize_phone(value: str | None) -> str | None:
+        if not value:
+            return None
+        digits = re.sub(r"\D", "", value)
+        return digits or None
+
     client = db.query(Client).filter(Client.name == payload.client_slug).first()
     if not client:
         trace_conversation = resolve_trace_conversation(
@@ -150,6 +156,78 @@ def _run_preflight(
         media_label = message_type.lower() if message_type else "media"
         message_text = f"[{media_label}]"
 
+    remote_digits = _normalize_phone(remote_jid)
+    if remote_digits:
+        branch_phones = (
+            db.query(Branch.phone)
+            .filter(Branch.client_id == client.id, Branch.phone.isnot(None))
+            .all()
+        )
+        for (phone,) in branch_phones:
+            if remote_digits == _normalize_phone(phone):
+                trace_conversation = resolve_trace_conversation(
+                    trace_client=client,
+                    trace_conversation_id=conversation_id,
+                    trace_message_id=message_id,
+                    trace_remote_jid=remote_jid,
+                )
+                if record_early_trace(
+                    trace_conversation,
+                    stage="preflight",
+                    decision="drop",
+                    reason="remote_is_branch_phone",
+                ):
+                    db.commit()
+                return WebhookResponse(success=True, message="Ignored branch sender"), {}
+
+    branch_mode = settings.branch_resolution_mode if settings and settings.branch_resolution_mode else "hybrid"
+    instance_id = metadata.instanceId if metadata else None
+    resolved_branch = None
+    if branch_mode in {"by_instance", "hybrid"}:
+        if not instance_id:
+            if branch_mode == "by_instance":
+                trace_conversation = resolve_trace_conversation(
+                    trace_client=client,
+                    trace_conversation_id=conversation_id,
+                    trace_message_id=message_id,
+                    trace_remote_jid=remote_jid,
+                )
+                if record_early_trace(
+                    trace_conversation,
+                    stage="preflight",
+                    decision="reject",
+                    reason="missing_instance_id",
+                    meta={"branch_mode": branch_mode},
+                ):
+                    db.commit()
+                return WebhookResponse(success=False, message="Missing instanceId"), {}
+        else:
+            resolved_branch = (
+                db.query(Branch)
+                .filter(
+                    Branch.client_id == client.id,
+                    Branch.instance_id == instance_id,
+                    Branch.is_active == True,
+                )
+                .first()
+            )
+            if not resolved_branch:
+                trace_conversation = resolve_trace_conversation(
+                    trace_client=client,
+                    trace_conversation_id=conversation_id,
+                    trace_message_id=message_id,
+                    trace_remote_jid=remote_jid,
+                )
+                if record_early_trace(
+                    trace_conversation,
+                    stage="preflight",
+                    decision="reject",
+                    reason="unknown_instance_id",
+                    meta={"branch_mode": branch_mode, "instance_id": instance_id},
+                ):
+                    db.commit()
+                return WebhookResponse(success=False, message="Unknown instanceId"), {}
+
     return (
         None,
         {
@@ -164,6 +242,8 @@ def _run_preflight(
             "has_media": has_media,
             "is_media_without_text": is_media_without_text,
             "media_info": media_info,
+            "resolved_branch_id": resolved_branch.id if resolved_branch else None,
+            "resolved_knowledge_tag": resolved_branch.knowledge_tag if resolved_branch else None,
         },
     )
 

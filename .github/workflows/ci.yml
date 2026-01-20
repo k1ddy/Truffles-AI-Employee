@@ -34,6 +34,8 @@ jobs:
     outputs:
       l1: ${{ steps.manual.outputs.l1 || steps.filter.outputs.l1 }}
       l2: ${{ steps.manual.outputs.l2 || steps.filter.outputs.l2 }}
+      deploy_required: ${{ steps.manual.outputs.deploy_required || steps.filter.outputs.deploy_required }}
+      livecheck_required: ${{ steps.manual.outputs.livecheck_required || steps.filter.outputs.livecheck_required }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,6 +46,10 @@ jobs:
           echo "l1=true" >> "$GITHUB_OUTPUT"
           if [ "${{ inputs.run_long }}" = "true" ]; then
             echo "l2=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "${{ inputs.run_livecheck }}" = "true" ]; then
+            echo "deploy_required=true" >> "$GITHUB_OUTPUT"
+            echo "livecheck_required=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Path filter
@@ -56,14 +62,24 @@ jobs:
               - "truffles-api/app/**"
               - "truffles-api/tests/**"
               - "knowledge/**"
-              - "SPECS/**"
-              - "STRATEGY/**"
               - "ops/**"
               - ".github/workflows/**"
             l2:
               - "truffles-api/app/knowledge/**/EVAL.yaml"
               - "truffles-api/app/knowledge/**/SALON_TRUTH.yaml"
               - "truffles-api/tests/test_demo_salon_eval.py"
+            deploy_required:
+              - "truffles-api/app/**"
+              - "truffles-api/requirements.txt"
+              - "truffles-api/Dockerfile"
+              - "knowledge/**"
+            livecheck_required:
+              - "truffles-api/app/**"
+              - "truffles-api/requirements.txt"
+              - "truffles-api/Dockerfile"
+              - "knowledge/**"
+              - "ops/**"
+              - ".github/workflows/**"
 
   lint:
     runs-on: ubuntu-latest
@@ -293,6 +309,7 @@ jobs:
     if: >-
       ${{
         always() &&
+        needs.changes.outputs.deploy_required == 'true' &&
         (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') &&
         needs.lint.result == 'success' &&
         needs.unit-tests.result == 'success' &&
@@ -301,7 +318,7 @@ jobs:
         (needs.asr-eval.result == 'success' || needs.asr-eval.result == 'skipped') &&
         needs.secret-scan.result == 'success'
       }}
-    needs: [lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
+    needs: [changes, lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -359,8 +376,8 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    if: ${{ always() }}
-    needs: build-push
+    if: ${{ always() && needs.changes.outputs.deploy_required == 'true' }}
+    needs: [build-push, changes]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -494,8 +511,8 @@ jobs:
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
-    if: ${{ always() }}
-    needs: deploy
+    if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.deploy_required == 'true' }}
+    needs: [changes, deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -505,19 +522,23 @@ jobs:
         id: livecheck_gate
         run: |
           run_livecheck="false"
+          deploy_ok="false"
+          if [ "${{ needs.deploy.result }}" = "success" ] || [ "${{ needs.deploy.result }}" = "skipped" ]; then
+            deploy_ok="true"
+          fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             run_livecheck="false"
-          elif [ "${{ needs.deploy.result }}" = "success" ]; then
-            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-              if [ "${{ inputs.run_livecheck }}" = "true" ]; then
-                run_livecheck="true"
-              fi
-            elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.run_livecheck }}" = "true" ] && [ "${deploy_ok}" = "true" ]; then
+              run_livecheck="true"
+            fi
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            if [ "${{ needs.changes.outputs.livecheck_required }}" = "true" ] && [ "${deploy_ok}" = "true" ]; then
               run_livecheck="true"
             fi
           fi
           echo "run=${run_livecheck}" >> "$GITHUB_OUTPUT"
-          echo "livecheck_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }} deploy_result=${{ needs.deploy.result }} gate_run=${run_livecheck}"
+          echo "livecheck_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }} deploy_result=${{ needs.deploy.result }} livecheck_required=${{ needs.changes.outputs.livecheck_required }} gate_run=${run_livecheck}"
 
       - name: Configure SSH
         if: ${{ steps.livecheck_gate.outputs.run == 'true' }}
@@ -674,6 +695,10 @@ jobs:
             echo "ALERTS_ADMIN_TOKEN_MISSING" >> "${GATE_LOG}"
             gate_ok=0
           fi
+          if [ "${OUTBOX_WORKER_ENABLED}" != "1" ]; then
+            echo "OUTBOX_WORKER_DISABLED" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
           ALLOWLIST_CLEAN="${ALLOWLIST// /}"
           IFS=',' read -r -a ALLOWLIST_POOL <<< "${ALLOWLIST_CLEAN}"
           if [ -z "${ALLOWLIST_CLEAN}" ]; then
@@ -732,20 +757,23 @@ jobs:
           import time
           import urllib.request
 
-          url = "http://localhost:8000/health"
+          def check(url, deadline):
+              while True:
+                  try:
+                      with urllib.request.urlopen(url, timeout=5) as resp:
+                          if 200 <= resp.status < 300:
+                              print(f"healthcheck ok: {url} {resp.status}")
+                              return
+                          print(f"healthcheck status: {url} {resp.status}")
+                  except Exception as exc:
+                      print(f"healthcheck error: {url} {exc}")
+                  if time.time() >= deadline:
+                      raise SystemExit(f"healthcheck timeout: {url}")
+                  time.sleep(2)
+
           deadline = time.time() + 90
-          while True:
-              try:
-                  with urllib.request.urlopen(url, timeout=5) as resp:
-                      if 200 <= resp.status < 300:
-                          print(f"healthcheck ok: {resp.status}")
-                          break
-                      print(f"healthcheck status={resp.status}")
-              except Exception as exc:
-                  print(f"healthcheck error: {exc}")
-              if time.time() >= deadline:
-                  raise SystemExit("healthcheck timeout")
-              time.sleep(2)
+          check("http://localhost:8000/health", deadline)
+          check("http://localhost:8000/admin/health", deadline)
           PY
           SOURCE_REPO="${HOME}/truffles-main"
           git config --global --add safe.directory "${SOURCE_REPO}"
@@ -803,6 +831,10 @@ jobs:
             if [ "${suite_name}" = "ca06-consult" ]; then
               poll_timeout=$((poll_timeout + 60))
             fi
+            local fail_fast_after="${FAIL_FAST_AFTER}"
+            if [ "${suite_name}" = "ca05-booking" ] || [ "${suite_name}" = "ca08-state" ]; then
+              fail_fast_after="${poll_timeout}"
+            fi
             local request_timeout=30
             local noise_level="low"
             if [ "${suite_name}" = "ca07-ood" ]; then
@@ -822,7 +854,7 @@ jobs:
               --remote-jid "${suite_jid}" \
               --allowlist-jids "${ALLOWLIST_CLEAN}" \
               --poll-timeout "${poll_timeout}" \
-              --fail-fast-after "${FAIL_FAST_AFTER}" \
+              --fail-fast-after "${fail_fast_after}" \
               --reset-before-suite \
               --timeout "${request_timeout}" \
               --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then

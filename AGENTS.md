@@ -152,6 +152,9 @@
 - точная команда
 - матрица окружения (OS/runtime)
 
+**CI cheat (кратко):**
+- PR → без deploy/livecheck; main → полный пайплайн; manual → `workflow_dispatch` с `run_long/run_livecheck` (см. `TECH.md` → CI).
+
 **Запрещено:**
 - менять БД/trace ради evidence (например, чистка `decision_trace`).
 - подгонять поведение под тесты через хардкоды (EVAL = доказательство, не цель).
