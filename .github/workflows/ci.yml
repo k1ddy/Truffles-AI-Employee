@@ -376,8 +376,8 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    if: ${{ always() }}
-    needs: build-push
+    if: ${{ always() && needs.changes.outputs.deploy_required == 'true' }}
+    needs: [build-push, changes]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -511,7 +511,7 @@ jobs:
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
-    if: ${{ always() && github.event_name != 'pull_request' }}
+    if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.deploy_required == 'true' }}
     needs: [changes, deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 30
