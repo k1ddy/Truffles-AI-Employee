@@ -516,7 +516,8 @@ jobs:
     if: >-
       ${{
         (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true') ||
-        (needs.changes.outputs.livecheck_required == 'true' &&
+        (github.event_name != 'pull_request' &&
+         needs.changes.outputs.livecheck_required == 'true' &&
          (needs.deploy.result == 'success' || needs.deploy.result == 'skipped'))
       }}
     needs: [changes, deploy]
