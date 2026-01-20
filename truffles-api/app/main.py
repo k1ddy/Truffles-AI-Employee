@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request
@@ -118,7 +119,7 @@ async def _outbox_worker_loop() -> None:
             ) = (
                 _get_outbox_worker_settings()
             )
-            await asyncio.sleep(interval_seconds)
+            loop_start = time.monotonic()
             db = SessionLocal()
             try:
                 released = release_stale_processing(
@@ -132,13 +133,15 @@ async def _outbox_worker_loop() -> None:
                         "Outbox stale processing released",
                         extra={"context": {**released, "stale_seconds": stale_seconds}},
                     )
-                rows = claim_pending_outbox_batches(
-                    db,
-                    limit=limit,
-                    idle_seconds=idle_seconds,
-                    max_wait_seconds=max_wait_seconds,
-                )
-                if rows:
+                while True:
+                    rows = claim_pending_outbox_batches(
+                        db,
+                        limit=limit,
+                        idle_seconds=idle_seconds,
+                        max_wait_seconds=max_wait_seconds,
+                    )
+                    if not rows:
+                        break
                     results = await webhook._process_outbox_rows(
                         db,
                         rows,
@@ -149,8 +152,13 @@ async def _outbox_worker_loop() -> None:
                         "Outbox worker processed",
                         extra={"context": results},
                     )
+                    if time.monotonic() - loop_start >= interval_seconds:
+                        break
             finally:
                 db.close()
+            elapsed = time.monotonic() - loop_start
+            sleep_for = max(interval_seconds - elapsed, 0.1)
+            await asyncio.sleep(sleep_for)
         except asyncio.CancelledError:
             break
         except Exception as exc:
