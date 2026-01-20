@@ -1706,6 +1706,19 @@
 - No-go: no DB/trace edits for evidence; no `_legacy.py` orchestration changes.
 - Branch/Worktree/Base/Merge/Cleanup: `dev/outbox-p90`; `/home/zhan/truffles-main-wt/outbox-p90`; `origin/main`; PR + CI green, merge by Top Architect/Brain; cleanup by Top Architect.
 
+### 2026-01-20 — Outbox worker drain within interval (code change)
+
+**Что сделали:**
+- Outbox worker теперь обрабатывает несколько батчей в одном интервале, если успевает по времени — уменьшает очередь и tail при всплесках.
+
+**Evidence:**
+- PR #253: https://github.com/k1ddy/Truffles-AI-Employee/pull/253
+- CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21156037828 (success)
+- Merge commit: `18678bbf074052e6736ec69ccf6fb58e3027f43e`
+
+**Status:**
+- Требуется новый SQL‑срез outbox latency (last 1h, SENT) после деплоя; P0 outbox latency остаётся OPEN до evidence.
+
 ### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
 
 **CI:**
