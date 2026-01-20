@@ -530,13 +530,7 @@ jobs:
           echo "expr_combined=${{ (github.event_name == 'workflow_dispatch' && inputs.run_livecheck) || (needs.changes.outputs.livecheck_required == 'true' && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped')) }}"
 
   ci-livecheck:
-    if: >-
-      ${{
-        (github.event_name == 'workflow_dispatch' && inputs.run_livecheck) ||
-        (github.event_name != 'pull_request' &&
-         needs.changes.outputs.livecheck_required == 'true' &&
-         (needs.deploy.result == 'success' || needs.deploy.result == 'skipped'))
-      }}
+    if: ${{ always() && github.event_name != 'pull_request' }}
     needs: [changes, deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -547,17 +541,23 @@ jobs:
         id: livecheck_gate
         run: |
           run_livecheck="false"
+          deploy_ok="false"
+          if [ "${{ needs.deploy.result }}" = "success" ] || [ "${{ needs.deploy.result }}" = "skipped" ]; then
+            deploy_ok="true"
+          fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             run_livecheck="false"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ inputs.run_livecheck }}" = "true" ]; then
+            if [ "${{ inputs.run_livecheck }}" = "true" ] && [ "${deploy_ok}" = "true" ]; then
               run_livecheck="true"
             fi
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            run_livecheck="true"
+            if [ "${{ needs.changes.outputs.livecheck_required }}" = "true" ] && [ "${deploy_ok}" = "true" ]; then
+              run_livecheck="true"
+            fi
           fi
           echo "run=${run_livecheck}" >> "$GITHUB_OUTPUT"
-          echo "livecheck_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }} deploy_result=${{ needs.deploy.result }} gate_run=${run_livecheck}"
+          echo "livecheck_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }} deploy_result=${{ needs.deploy.result }} livecheck_required=${{ needs.changes.outputs.livecheck_required }} gate_run=${run_livecheck}"
 
       - name: Configure SSH
         if: ${{ steps.livecheck_gate.outputs.run == 'true' }}
