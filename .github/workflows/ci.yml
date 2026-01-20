@@ -62,8 +62,6 @@ jobs:
               - "truffles-api/app/**"
               - "truffles-api/tests/**"
               - "knowledge/**"
-              - "SPECS/**"
-              - "STRATEGY/**"
               - "ops/**"
               - ".github/workflows/**"
             l2:
