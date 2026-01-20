@@ -3103,7 +3103,7 @@ async def _handle_webhook_payload(
         timing_context["client_config"] = client.config
     if outbox_ids:
         timing_context["outbox_ids"] = list(outbox_ids)
-        timing_context["outbox_id"] = outbox_ids[0] if len(outbox_ids) == 1 else outbox_ids[0]
+        timing_context["outbox_id"] = outbox_ids[0]
     if resolved_branch_id:
         timing_context["branch_id"] = str(resolved_branch_id)
     if resolved_knowledge_tag:
