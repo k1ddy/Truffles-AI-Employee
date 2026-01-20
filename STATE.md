@@ -1685,6 +1685,13 @@
 - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21152805961
 - Local test: `docker build -t truffles-api-test truffles-api` + `docker run --rm truffles-api-test pytest tests/test_outbox_worker_settings.py -q` (2 passed; FastAPI on_event deprecation warnings).
 
+### 2026-01-20 — Outbox latency snapshot (post max_wait)
+
+**SQL (last 1h, status=SENT)**
+- `SELECT COUNT(*) AS sent_count, ROUND(AVG(EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS avg_s, ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS p50_s, ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS p90_s, ROUND(MAX(EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS max_s FROM outbox_messages WHERE status='SENT' AND updated_at >= NOW() - interval '1 hour';`
+- output: `64 | 9.23s | 8.42s | 15.12s | 24.21s`
+- Status: p90 still > 10s target; keep P0 outbox latency OPEN.
+
 ### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
 
 **CI:**
