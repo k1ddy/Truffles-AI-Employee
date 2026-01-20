@@ -137,8 +137,7 @@ jobs:
             --ignore=tests/test_demo_salon_eval.py \
             --ignore=tests/test_message_endpoint.py \
             --ignore=tests/test_chatflow_contract.py \
-            --ignore=tests/test_knowledge_service.py \
-            --ignore=tests/test_callback.py
+            --ignore=tests/test_knowledge_service.py
 
   core-eval:
     needs: [lint, unit-tests, changes]
