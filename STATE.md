@@ -30,7 +30,7 @@
 - DONE: Telegram→WhatsApp topic handover routing fix (PR #157 merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20948893145; live‑check в истории 2026‑01‑13).
 - DONE: Docs PR #158 (roadmap + tech status) merged; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20949202225.
 - DONE: P0 Legacy slice 5 — вынесены domain flows (booking/info/consult) без изменения поведения; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21050469012; live‑check (prod) conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48: msg_id cd3625fc-d16c-4c2b-832f-2d0b7c3e0dcd (info_bundle) decision_meta action=reply intent=location source=truth_gate info_sections=["address","hours","parking"]; msg_id 6d78cf61-cb15-4f4f-b121-6fb91d579658 (consult) decision_meta action=reply intent=consult_reply source=pack consult_playbook_id=hair_aftercolor; decision_trace stages truth_gate reply/location + consult_flow/consult reply consult_reply source=pack.
-- BLOCKED: P0 Legacy slice 6 — вынесены LLM/response + post‑hooks (llm_guard/ai_response/rewrite/budget_gate/llm_degradation + consult_return) без изменения поведения; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21051820513; live‑check consult_return conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48 msg_id 1d3515d6-9dbc-4dea-9479-a5532d011a93 decision_meta consult_return=true; live‑check LLM‑path conv_id 590848f8-423c-4118-9de0-5f830c643a46 msg_id 99087746-9dcb-4785-804c-e90a32f3c930 decision_meta action=ai_response llm_degradation_reason=llm_skip; decision_trace stages rewrite(timeout) + llm_degradation(llm_skip) + ai_response(low_confidence_retry); BLOCKED: llm_guard/budget_gate не сработали (нет условий).
+- DONE: P0 Legacy slice 6 — вынесены LLM/response + post‑hooks (llm_guard/ai_response/rewrite/budget_gate/llm_degradation + consult_return) без изменения поведения; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21051820513; live‑check consult_return conv_id b8c559d1-f8cd-4173-ae70-0a9683833e48 msg_id 1d3515d6-9dbc-4dea-9479-a5532d011a93 decision_meta consult_return=true; live‑check LLM‑path conv_id 590848f8-423c-4118-9de0-5f830c643a46 msg_id 99087746-9dcb-4785-804c-e90a32f3c930 decision_meta action=ai_response llm_degradation_reason=llm_skip; decision_trace stages rewrite(timeout) + llm_degradation(llm_skip) + ai_response(low_confidence_retry); llm_guard evidence — запись 2026‑01‑19 ниже; budget_gate evidence — запись 2026‑01‑18 (CA‑12).
 - DONE: P0 Legacy refactor S0–S6 — детальный лог ниже (CI+live‑check evidence).
 - FIX READY (CA-11): booking_interrupt/multi_truth retention при trace_len=40; PR #197 https://github.com/k1ddy/Truffles-AI-Employee/pull/197; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21110933209; SQL evidence conv_id da9519fd-bdab-4f22-966a-0c535f3ea6a1 msg_id ca11-3-1768735290143673848 trace_len=40 stages booking_interrupt+multi_truth present (simulated inbound via /webhook on local container, TEST_MODE=1) — см. запись 2026-01-18 ниже.
 - STOP‑LINE: были нарушения процесса (очистка decision_trace ради evidence, изменение STATE.md не ролью Brain) — зафиксировано ниже.
@@ -1736,6 +1736,38 @@ docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
 # /admin/metrics
 curl -s -H "X-Admin-Token: $ALERTS_ADMIN_TOKEN" \
 "http://localhost:8000/admin/metrics?client_slug=demo_salon&metric_date=2026-01-17"
+
+### 2026-01-19 — P0 llm_guard evidence (discount guard, simulated inbound)
+
+**Simulated inbound (TEST_MODE=1, outbound skipped for non‑allowlist JID):**
+- remote_jid: `79990001126@s.whatsapp.net`
+- msg_id: `LLMG-1768867073-4ee6de4b`
+- conv_id: `3a7b8163-79c7-418f-aae2-d3daf90a1266`
+
+**decision_trace llm_guard:**
+- recorded_at: `2026-01-19T23:58:09.126336+00:00`
+- blocked_topics: `["discount"]`
+
+**decision_meta (user message):**
+- action=`escalate`, intent=`llm_guard`, source=`llm_guard`
+- llm_used=true, llm_timeout=false, rag_confident=true
+
+**Temp env for evidence:**
+- `LLM_TIMEOUT_SECONDS` raised 4 → 12 to allow LLM response; reverted to 4 after.
+- truffles-api restarted via `/home/zhan/restart_api.sh` before and after.
+
+Команды для сверки (если нужно):
+
+# llm_guard trace
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"SELECT t->>'recorded_at', t->>'decision', t->'blocked_topics' \
+ FROM conversations c, LATERAL jsonb_array_elements(c.context->'decision_trace') t \
+ WHERE c.id='3a7b8163-79c7-418f-aae2-d3daf90a1266' AND t->>'stage'='llm_guard';"
+
+# decision_meta for inbound
+docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c \
+"SELECT id, conversation_id, metadata->'decision_meta' AS decision_meta \
+ FROM messages WHERE metadata->>'messageId'='LLMG-1768867073-4ee6de4b' ORDER BY created_at DESC LIMIT 1;"
 
 ### 2026-01-18 — CA-13 Branch routing isolation (simulated inbound)
 
