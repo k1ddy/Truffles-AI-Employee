@@ -155,6 +155,20 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - Отдельно: правки `STATE.md` не запускают deploy/livecheck и не требуют `core-eval` (если нет других L1 изменений).
  - При doc‑only deploy/ci-livecheck job полностью пропускаются (не просто “skipped” шаги).
 
+**deploy_required (точный список путей):**
+- `truffles-api/app/**`
+- `truffles-api/requirements.txt`
+- `truffles-api/Dockerfile`
+- `knowledge/**`
+
+**livecheck_required (точный список путей):**
+- `truffles-api/app/**`
+- `truffles-api/requirements.txt`
+- `truffles-api/Dockerfile`
+- `knowledge/**`
+- `ops/**`
+- `.github/workflows/**`
+
 **Event gate (PR vs main):**
 - На PR `build-push`, `deploy`, `ci-livecheck` всегда skip.
 - На main эти шаги выполняются только при успешных обязательных джобах (lint/unit/secret-scan + core/long/asr, если они не skipped).
