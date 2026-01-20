@@ -301,7 +301,8 @@ def test_get_or_create_conversation_sets_branch_id():
     branch_id = uuid4()
 
     query = Mock()
-    query.filter.return_value.first.return_value = None
+    query.filter.return_value = query
+    query.first.return_value = None
     db = Mock()
     db.query.return_value = query
     db.add = Mock()
