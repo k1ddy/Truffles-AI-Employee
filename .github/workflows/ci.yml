@@ -34,6 +34,7 @@ jobs:
     outputs:
       l1: ${{ steps.manual.outputs.l1 || steps.filter.outputs.l1 }}
       l2: ${{ steps.manual.outputs.l2 || steps.filter.outputs.l2 }}
+      deploy_required: ${{ steps.manual.outputs.deploy_required || steps.filter.outputs.deploy_required }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,6 +45,9 @@ jobs:
           echo "l1=true" >> "$GITHUB_OUTPUT"
           if [ "${{ inputs.run_long }}" = "true" ]; then
             echo "l2=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "${{ inputs.run_livecheck }}" = "true" ]; then
+            echo "deploy_required=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Path filter
@@ -64,6 +68,11 @@ jobs:
               - "truffles-api/app/knowledge/**/EVAL.yaml"
               - "truffles-api/app/knowledge/**/SALON_TRUTH.yaml"
               - "truffles-api/tests/test_demo_salon_eval.py"
+            deploy_required:
+              - "truffles-api/app/**"
+              - "truffles-api/requirements.txt"
+              - "truffles-api/Dockerfile"
+              - "knowledge/**"
 
   lint:
     runs-on: ubuntu-latest
@@ -293,6 +302,7 @@ jobs:
     if: >-
       ${{
         always() &&
+        needs.changes.outputs.deploy_required == 'true' &&
         (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') &&
         needs.lint.result == 'success' &&
         needs.unit-tests.result == 'success' &&
@@ -301,7 +311,7 @@ jobs:
         (needs.asr-eval.result == 'success' || needs.asr-eval.result == 'skipped') &&
         needs.secret-scan.result == 'success'
       }}
-    needs: [lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
+    needs: [changes, lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -359,7 +369,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    if: ${{ always() }}
+    if: ${{ needs.build-push.result == 'success' }}
     needs: build-push
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -494,7 +504,7 @@ jobs:
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
-    if: ${{ always() }}
+    if: ${{ needs.deploy.outputs.deployed == 'true' }}
     needs: deploy
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -674,6 +684,10 @@ jobs:
             echo "ALERTS_ADMIN_TOKEN_MISSING" >> "${GATE_LOG}"
             gate_ok=0
           fi
+          if [ "${OUTBOX_WORKER_ENABLED}" != "1" ]; then
+            echo "OUTBOX_WORKER_DISABLED" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
           ALLOWLIST_CLEAN="${ALLOWLIST// /}"
           IFS=',' read -r -a ALLOWLIST_POOL <<< "${ALLOWLIST_CLEAN}"
           if [ -z "${ALLOWLIST_CLEAN}" ]; then
@@ -732,20 +746,23 @@ jobs:
           import time
           import urllib.request
 
-          url = "http://localhost:8000/health"
+          def check(url, deadline):
+              while True:
+                  try:
+                      with urllib.request.urlopen(url, timeout=5) as resp:
+                          if 200 <= resp.status < 300:
+                              print(f"healthcheck ok: {url} {resp.status}")
+                              return
+                          print(f"healthcheck status: {url} {resp.status}")
+                  except Exception as exc:
+                      print(f"healthcheck error: {url} {exc}")
+                  if time.time() >= deadline:
+                      raise SystemExit(f"healthcheck timeout: {url}")
+                  time.sleep(2)
+
           deadline = time.time() + 90
-          while True:
-              try:
-                  with urllib.request.urlopen(url, timeout=5) as resp:
-                      if 200 <= resp.status < 300:
-                          print(f"healthcheck ok: {resp.status}")
-                          break
-                      print(f"healthcheck status={resp.status}")
-              except Exception as exc:
-                  print(f"healthcheck error: {exc}")
-              if time.time() >= deadline:
-                  raise SystemExit("healthcheck timeout")
-              time.sleep(2)
+          check("http://localhost:8000/health", deadline)
+          check("http://localhost:8000/admin/health", deadline)
           PY
           SOURCE_REPO="${HOME}/truffles-main"
           git config --global --add safe.directory "${SOURCE_REPO}"
