@@ -38,7 +38,7 @@
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
-- **Следующий шаг:** P1 follow-up — router_eligible sync с controller_attempted (CI + real inbound + SQL) — in progress.
+- **Следующий шаг:** P0 outbox latency tail — см. последние SQL‑срезы; p90 > 10s, нужен следующий минимальный fix + evidence.
 - **DONE:** P1 Router SLA <10% + controller_attempted evidence (post-deploy real inbound) — см. запись 2026-01-14.
 - **DONE:** P1 Category vs Service (services_overview guard) — см. запись 2026-01-14.
 - **DONE:** GAP-017 Branch isolation evidence (branch_routing + RAG fallback + policy_gate + demo handover/Telegram) — см. запись 2026-01-14.
