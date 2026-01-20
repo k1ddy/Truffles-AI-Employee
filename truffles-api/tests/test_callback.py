@@ -17,6 +17,7 @@ class MockConversation:
         self.id = uuid4()
         self.state = state
         self.human_operator_id = None
+        self.telegram_topic_id = 12345  # Required for state invariants
 
 
 class MockHandover:
