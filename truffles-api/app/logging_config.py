@@ -148,6 +148,27 @@ ESCALATION_COUNT = _get_or_create_metric(
     ("client_slug", "trigger"),
 )
 
+# HTTP request metrics
+HTTP_REQUEST_COUNT = _get_or_create_metric(
+    Counter,
+    "http_request_count",
+    "HTTP requests count.",
+    ("method", "path", "status"),
+)
+HTTP_REQUEST_LATENCY = _get_or_create_metric(
+    Histogram,
+    "http_request_latency",
+    "HTTP request latency in seconds.",
+    ("method", "path"),
+    buckets=_HISTOGRAM_BUCKETS,
+)
+HTTP_REQUEST_IN_PROGRESS = _get_or_create_metric(
+    Gauge,
+    "http_request_in_progress",
+    "HTTP requests currently in progress.",
+    ("method",),
+)
+
 
 def _normalize_client_slug(client_slug: str | None) -> str:
     if isinstance(client_slug, str) and client_slug.strip():
@@ -237,3 +258,43 @@ def get_trace_id() -> str | None:
     if not context or not context.is_valid:
         return None
     return f"{context.trace_id:032x}"
+
+
+# HTTP metrics helpers
+_PATH_NORMALIZATIONS = [
+    # Console API paths with UUIDs
+    (r"/console/v1/cases/[a-f0-9-]{36}", "/console/v1/cases/{id}"),
+    (r"/console/v1/conversations/[a-f0-9-]{36}", "/console/v1/conversations/{id}"),
+    # Webhook paths
+    (r"/webhook/inbound/[^/]+", "/webhook/inbound/{client}"),
+    (r"/callback/[^/]+", "/callback/{client}"),
+]
+
+
+def _normalize_path(path: str) -> str:
+    """Normalize path for grouping in metrics (remove IDs)."""
+    import re
+    for pattern, replacement in _PATH_NORMALIZATIONS:
+        path = re.sub(pattern, replacement, path)
+    return path
+
+
+def record_http_request(method: str, path: str, status: int, duration_seconds: float) -> None:
+    """Record HTTP request metrics."""
+    normalized_path = _normalize_path(path)
+    if HTTP_REQUEST_COUNT is not None:
+        HTTP_REQUEST_COUNT.labels(method=method, path=normalized_path, status=str(status)).inc()
+    if HTTP_REQUEST_LATENCY is not None:
+        HTTP_REQUEST_LATENCY.labels(method=method, path=normalized_path).observe(duration_seconds)
+
+
+def http_in_progress_inc(method: str) -> None:
+    """Increment in-progress counter."""
+    if HTTP_REQUEST_IN_PROGRESS is not None:
+        HTTP_REQUEST_IN_PROGRESS.labels(method=method).inc()
+
+
+def http_in_progress_dec(method: str) -> None:
+    """Decrement in-progress counter."""
+    if HTTP_REQUEST_IN_PROGRESS is not None:
+        HTTP_REQUEST_IN_PROGRESS.labels(method=method).dec()

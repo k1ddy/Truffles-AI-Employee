@@ -14,6 +14,9 @@ from app.logging_config import (
     CONTENT_TYPE_LATEST,
     generate_latest_metrics,
     get_logger,
+    http_in_progress_dec,
+    http_in_progress_inc,
+    record_http_request,
     set_outbox_backlog,
     setup_logging,
 )
@@ -46,6 +49,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Metrics middleware for HTTP request tracking
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """Track HTTP request metrics (count, latency, in-progress)."""
+    method = request.method
+    path = request.url.path
+    
+    # Skip metrics endpoint to avoid recursion
+    if path == "/metrics":
+        return await call_next(request)
+    
+    start_time = time.time()
+    http_in_progress_inc(method)
+    
+    try:
+        response = await call_next(request)
+        duration = time.time() - start_time
+        record_http_request(method, path, response.status_code, duration)
+        return response
+    except Exception:
+        duration = time.time() - start_time
+        record_http_request(method, path, 500, duration)
+        raise
+    finally:
+        http_in_progress_dec(method)
+
 
 @app.exception_handler(ConsoleAPIError)
 async def console_api_exception_handler(request: Request, exc: ConsoleAPIError):

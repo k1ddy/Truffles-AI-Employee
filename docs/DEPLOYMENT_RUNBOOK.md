@@ -101,3 +101,56 @@ After deploy:
 - [ ] `docker logs truffles-api` shows "Sentinel worker started"
 - [ ] `/admin/health/check` shows database: healthy
 - [ ] PM2 shows console-web online with 0 restarts
+
+## Monitoring
+
+### Stack Overview
+
+| Component | URL | Purpose |
+|-----------|-----|---------|
+| Prometheus | http://localhost:9090 | Metrics storage & alerting |
+| Grafana | http://localhost:3001 | Dashboards & visualization |
+| Alertmanager | http://localhost:9093 | Alert routing & notifications |
+
+### Grafana
+
+**Login:** `admin` / password from `GRAFANA_PASSWORD` env (default: `admin`)
+
+**Dashboards:**
+- Truffles API: `/d/truffles-api`
+
+### Alertmanager
+
+Alerts are sent to Telegram DevOps group.
+
+**Alert rules** (see `ops/alert_rules.yml`):
+
+| Alert | Condition | Severity |
+|-------|-----------|----------|
+| APIHealthDegraded | API down 1 min | 🔴 Critical |
+| DatabaseConnectionIssue | DB unavailable 1 min | 🔴 Critical |
+| OutboxBacklogCritical | backlog > 100 for 2 min | 🔴 Critical |
+| OutboxBacklogHigh | backlog > 50 for 5 min | 🟡 Warning |
+| QdrantUnavailable | Qdrant down 5 min | 🟡 Warning |
+| HighEscalationRate | rate > 0.3/5m for 10 min | 🟡 Warning |
+
+### Available Metrics
+
+Query at `/metrics` endpoint:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `http_request_count` | Counter | HTTP requests by method, path, status |
+| `http_request_latency` | Histogram | HTTP latency in seconds |
+| `http_request_in_progress` | Gauge | Concurrent requests |
+| `outbox_backlog` | Gauge | Pending outbox messages |
+| `outbox_latency` | Histogram | Outbox wait time |
+| `llm_time` | Histogram | LLM call latency |
+| `escalation_count` | Counter | Escalations triggered |
+
+### Restart Monitoring Stack
+
+```bash
+cd /home/zhan/infrastructure
+docker compose -f docker-compose.truffles.yml restart prometheus alertmanager grafana
+```
