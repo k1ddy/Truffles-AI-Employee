@@ -1748,6 +1748,21 @@
 - Manual livecheck: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21161572894 (success).
 - Main CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21162026950 (ci-livecheck success).
 
+### 2026-01-20 — CI doc-only fast lane (skip heavy jobs)
+
+**Что сделали:**
+- Док‑изменения (`SPECS/**`, `STRATEGY/**`, `docs/**`, `STATE.md` и др.) больше не запускают `core-eval`, `build-push`, `deploy`, `ci-livecheck`.
+- `deploy` и `ci-livecheck` теперь полностью пропускаются, если `deploy_required=false` (doc‑only коммит).
+
+**Зачем:**
+- Сокращаем время на документационные PR и уменьшаем флейк без потери проверки кода.
+
+**Evidence:**
+- PR #269 (doc-only L1 фильтр): https://github.com/k1ddy/Truffles-AI-Employee/pull/269
+  - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21168427540 (build/deploy/livecheck skipped).
+- PR #271 (skip deploy/livecheck jobs when doc-only): https://github.com/k1ddy/Truffles-AI-Employee/pull/271
+  - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21169183412 (deploy/livecheck jobs skipped).
+
 ### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
 
 **CI:**
