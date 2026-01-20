@@ -43,6 +43,7 @@
 - **DONE:** P1 Category vs Service (services_overview guard) — см. запись 2026-01-14.
 - **DONE:** GAP-017 Branch isolation evidence (branch_routing + RAG fallback + policy_gate + demo handover/Telegram) — см. запись 2026-01-14.
 - **OPEN:** Outbox latency (P0 tail) — в конце.
+- **OPEN-1:** Branch routing stickiness: instanceId inbound не переопределяет existing conversation.branch_id; outbound уходит через client.config.instance_id (demo_salon). Evidence 2026-01-20 ниже.
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
 - **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
@@ -1857,6 +1858,71 @@ SELECT t FROM traces WHERE t->>'stage'='rag_retrieve';"
 
 **Note:**
 - у demo_salon сейчас один branch; изоляция подтверждена через branch_filter_empty + branch_id в decision_meta. Для теста A/B нужен второй branch (отдельное согласование, это изменение данных).
+
+### 2026-01-20 — CA-13 Branch routing isolation A/B (simulated inbound, test branch)
+
+**Изменения данных (demo_salon):**
+- Добавлен тестовый филиал `branch_b`:
+  - branch_id `2e9f5a9d-50a2-4b07-8e54-da2cac2ac751`, instance_id `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6IlRydWZmbGVzQnJhbmNoIn0=`, knowledge_tag `demo_salon_branch_b`, phone `+77781658799`.
+- Qdrant backfill:
+  - Branch A: `python3 ops/sync_client.py demo_salon --branch-id b7f75692-951e-421a-aae6-f5db97394799`
+  - Branch B: `python3 ops/sync_client.py demo_salon /tmp/demo_salon_branch_b --branch-id 2e9f5a9d-50a2-4b07-8e54-da2cac2ac751 --knowledge-tag demo_salon_branch_b`
+  - Marker in branch B docs: `BRANCHB-UNIQ-7429`.
+
+**Simulated inbound (allowed by CA-13 exception, webhook_secret):**
+- Branch A: msg_id `sim-branch-a4-1768878520`, conv_id `aa49f151-9a61-4d1f-8039-0047184e830c`
+  - conversation.branch_id = `b7f75692-951e-421a-aae6-f5db97394799`
+  - decision_meta.rag_scores.bm25_filter = `{"branch_id":"b7f75692-951e-421a-aae6-f5db97394799","client_slug":"demo_salon","filter_mode":"branch","filter_reason":"branch_id","knowledge_tag":null}`
+  - rag_confident=false, bm25_max=0.0, bm25_count=0
+- Branch B: msg_id `sim-branch-b4-1768878534`, conv_id `724ce9d0-bf2f-4a55-8ef5-53abf322992e`
+  - conversation.branch_id = `2e9f5a9d-50a2-4b07-8e54-da2cac2ac751`
+  - decision_meta.rag_scores.bm25_filter = `{"branch_id":"2e9f5a9d-50a2-4b07-8e54-da2cac2ac751","client_slug":"demo_salon","filter_mode":"branch","filter_reason":"knowledge_tag","knowledge_tag":"demo_salon_branch_b"}`
+  - rag_confident=true, bm25_max=3.2212497572595638, bm25_count=1
+
+Команды для сверки (если нужно):
+- `SELECT id, branch_id FROM conversations WHERE id IN ('aa49f151-9a61-4d1f-8039-0047184e830c','724ce9d0-bf2f-4a55-8ef5-53abf322992e');`
+- `SELECT metadata->>'messageId', metadata->'decision_meta'->'rag_scores'->'bm25_filter' FROM messages WHERE metadata->>'messageId' IN ('sim-branch-a4-1768878520','sim-branch-b4-1768878534');`
+- `SELECT metadata->>'messageId', metadata->'decision_meta'->>'rag_confident', metadata->'decision_meta'->'rag_scores'->>'bm25_max', metadata->'decision_meta'->'rag_scores'->>'bm25_count' FROM messages WHERE metadata->>'messageId' IN ('sim-branch-a4-1768878520','sim-branch-b4-1768878534');`
+
+### 2026-01-20 — PROBLEM-001 Branch routing stickiness (instanceId vs conversation + outbound)
+
+**Симптом (реальный inbound):**
+- Пользователь отправил "asdfasdf" на новый receiver‑номер (+77781658799, branch_b). Ответ пришёл из основного чата (branch A).
+
+**Evidence (DB):**
+- messages (inbound):
+  - msg_id `4cfe9fbf-86a7-4064-b5f9-955c4a92b9de`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, created_at `2026-01-20 03:51:46.131221+00`
+  - content `asdfasdf`, messageId `3EB001D2FD16602B6B8AA2`, remoteJid `77015705555@s.whatsapp.net`
+  - metadata.instanceId = `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6IlRydWZmbGVzQnJhbmNoIn0=`
+  - decision_meta.action = `pending_wait`
+- conversations:
+  - conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, branch_id `b7f75692-951e-421a-aae6-f5db97394799` (branch A), state `pending`, bot_status `active`
+- branches:
+  - branch_b id `2e9f5a9d-50a2-4b07-8e54-da2cac2ac751`, instance_id matches inbound instanceId
+
+**Как пришли:**
+1) Подключили webhook demo_salon на ChatFlow instanceId для branch_b.
+2) Отправили сообщение с sender‑JID `77015705555@s.whatsapp.net`.
+3) В БД увидели, что inbound instanceId = branch_b, но conversation.branch_id остался за branch A.
+
+**Root cause (code):**
+- Conversation выбирается по (client_id, user_id, status=active) без instanceId → пользователь всегда попадает в один активный диалог (`truffles-api/app/services/conversation_service.py:23-28`).
+- В `branch_selection` instanceId используется только если conversation.branch_id пустой; при существующем branch_id gate возвращает early (`truffles-api/app/routers/webhook/branch_selection.py:174-187`).
+- Outbound идёт по client.config.instance_id, а не по branch.instance_id (`truffles-api/app/services/chatflow_service.py:50-55`; `truffles-api/app/models/client.py:23-25` — legacy).
+
+**Риск:**
+- Нарушение изоляции филиалов: вход на новый receiver остаётся в старом branch, ответы уходят с основного номера и могут тянуть неверные факты/эскалации.
+
+**SQL (снимок):**
+- `SELECT id, conversation_id, created_at, content, metadata FROM messages WHERE role='user' AND content ILIKE '%asdfasdf%' ORDER BY created_at DESC LIMIT 1;`
+- `SELECT id, client_id, branch_id, state, bot_status FROM conversations WHERE id='b8c559d1-f8cd-4173-ae70-0a9683833e48';`
+- `SELECT id, client_id, slug, instance_id FROM branches WHERE instance_id='eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6IlRydWZmbGVzQnJhbmNoIn0=';`
+
+**PLAN (fix in progress):**
+- Branch: `fix/branch-routing-instance` (instanceId overrides sticky branch + branch‑aware outbound instance selection).
+- Tests: локально blocked (missing `dateparser`), CI rerun success.
+- CI run (rerun): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21159970877 (status: success, head `d862afdce9ee3c387e780f060f3032151a8c501a`).
+- Prev CI (failed lint): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21159836338 (ruff I001 import order).
 
 ### 2026-01-18 — CA-14 Onboarding readiness (validate + Qdrant + version)
 
