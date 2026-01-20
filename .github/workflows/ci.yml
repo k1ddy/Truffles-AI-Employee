@@ -525,14 +525,14 @@ jobs:
           echo "github.event.inputs.run_livecheck=${{ github.event.inputs.run_livecheck }}"
           echo "changes.livecheck_required=${{ needs.changes.outputs.livecheck_required }}"
           echo "deploy.result=${{ needs.deploy.result }}"
-          echo "expr_manual=${{ github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true' }}"
+          echo "expr_manual=${{ github.event_name == 'workflow_dispatch' && inputs.run_livecheck }}"
           echo "expr_livecheck_required=${{ needs.changes.outputs.livecheck_required == 'true' && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped') }}"
-          echo "expr_combined=${{ (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true') || (needs.changes.outputs.livecheck_required == 'true' && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped')) }}"
+          echo "expr_combined=${{ (github.event_name == 'workflow_dispatch' && inputs.run_livecheck) || (needs.changes.outputs.livecheck_required == 'true' && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped')) }}"
 
   ci-livecheck:
     if: >-
       ${{
-        (github.event_name == 'workflow_dispatch' && inputs.run_livecheck == 'true') ||
+        (github.event_name == 'workflow_dispatch' && inputs.run_livecheck) ||
         (github.event_name != 'pull_request' &&
          needs.changes.outputs.livecheck_required == 'true' &&
          (needs.deploy.result == 'success' || needs.deploy.result == 'skipped'))
