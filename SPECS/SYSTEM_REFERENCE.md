@@ -746,7 +746,10 @@ LIMIT 3;
 - `instanceId` в payload должен совпадать с `branches.instance_id` (DB); рассинхрон с `clients.config.instance_id` фиксируем как GAP.
 - Малый объём (4–10 сообщений), фиксированный seed, без спама.
 
-**CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca04-service`, `ca05-booking`, `ca06-consult`, `ca07-ood`, `ca08-state`, `ca09-manager`, `ca10-outbox`, артефакты `livecheck-artifacts/*`.
+**CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca04-service`, `ca05-booking`, `ca06-consult`, `ca07-ood`, `ca08-state`, `ca09-manager`, `ca10-outbox`.
+- Запуск: 3 параллельные группы (`pool-a/b/c`), каждая со своим JID из allowlist (минимум 3 JID).
+- Артефакты: `livecheck-artifacts-<group>/*` + `livecheck-evidence-<group>.md`.
+- **Livecheck Only (workflow):** `.github/workflows/livecheck-only.yml` — ручной rerun без полного CI; делает `deploy-verify` и гоняет suites (параллельно).
 **Evidence artifact:** `livecheck-evidence.md` (генерируется из jsonl + gate через `ops/diagnose.py emit-evidence`).
 **CA‑03 (ca03-info):** truth‑first info_bundle → `decision_meta.fact_source=truth`, `info_sections`+`fact_intents`, `info_combined` (address+hours), `llm_used=false`, `source` ∈ {`truth_gate`,`class_router`}, trace `stage` ∈ {`truth_gate`,`info_class`}.
 **CA‑04 (ca04-service):** service matcher → `decision_meta.action=reply`, `intent` ∈ {`service_match`,`service_not_found`}, `fact_source=service_matcher`, `fact_intents` contains `service_match`/`service_not_found`, `source=service_matcher`, `llm_used=false`, trace `stage=service_matcher`, `decision` = intent, `fact_source=service_matcher`.
