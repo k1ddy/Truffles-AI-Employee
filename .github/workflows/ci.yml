@@ -35,6 +35,7 @@ jobs:
       l1: ${{ steps.manual.outputs.l1 || steps.filter.outputs.l1 }}
       l2: ${{ steps.manual.outputs.l2 || steps.filter.outputs.l2 }}
       deploy_required: ${{ steps.manual.outputs.deploy_required || steps.filter.outputs.deploy_required }}
+      livecheck_required: ${{ steps.manual.outputs.livecheck_required || steps.filter.outputs.livecheck_required }}
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +49,7 @@ jobs:
           fi
           if [ "${{ inputs.run_livecheck }}" = "true" ]; then
             echo "deploy_required=true" >> "$GITHUB_OUTPUT"
+            echo "livecheck_required=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Path filter
@@ -73,6 +75,13 @@ jobs:
               - "truffles-api/requirements.txt"
               - "truffles-api/Dockerfile"
               - "knowledge/**"
+            livecheck_required:
+              - "truffles-api/app/**"
+              - "truffles-api/requirements.txt"
+              - "truffles-api/Dockerfile"
+              - "knowledge/**"
+              - "ops/**"
+              - ".github/workflows/**"
 
   lint:
     runs-on: ubuntu-latest
@@ -369,7 +378,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    if: ${{ needs.build-push.result == 'success' }}
+    if: ${{ always() }}
     needs: build-push
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -504,8 +513,12 @@ jobs:
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
-    if: ${{ needs.deploy.outputs.deployed == 'true' }}
-    needs: deploy
+    if: >-
+      ${{
+        needs.changes.outputs.livecheck_required == 'true' &&
+        (needs.deploy.result == 'success' || needs.deploy.result == 'skipped')
+      }}
+    needs: [changes, deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -517,14 +530,12 @@ jobs:
           run_livecheck="false"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             run_livecheck="false"
-          elif [ "${{ needs.deploy.result }}" = "success" ]; then
-            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-              if [ "${{ inputs.run_livecheck }}" = "true" ]; then
-                run_livecheck="true"
-              fi
-            elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.run_livecheck }}" = "true" ]; then
               run_livecheck="true"
             fi
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            run_livecheck="true"
           fi
           echo "run=${run_livecheck}" >> "$GITHUB_OUTPUT"
           echo "livecheck_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }} deploy_result=${{ needs.deploy.result }} gate_run=${run_livecheck}"
