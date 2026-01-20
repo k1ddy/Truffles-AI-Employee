@@ -27,10 +27,40 @@
 **Карта инструментов (что запускать):**
 - `ops/diagnose.py livecheck` — реальный inbound через ChatFlow, маркеры для SQL evidence.
 - `ops/diagnose.py` — health/metrics/outbox snapshot.
+- `ops/diagnose.py send-text` — одноразовая отправка через ChatFlow send‑text.
+- `ops/diagnose.py send-and-explain` — отправка + быстрый `explain`.
+- `ops/chatflow_send.py` — минимальный sender‑скрипт (без diagnose).
+- `ops/diagnose.py explain` — быстрый разбор конкретного сообщения (decision_meta/trace + outbox).
 - `ops/diagnose.py deploy-verify` — проверка версии деплоя (`/admin/version`) и совпадения commit.
 - `ops/sync_client.py` — validate/sync client packs (truth → Qdrant).
 - `/home/zhan/restart_api.sh` — restart API контейнера.
 - SQL evidence: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "<SQL>"`.
+
+## 0.2 Fast Debug SOP (5 минут)
+
+**Цель:** быстро понять, где “молчит” бот и почему.
+
+1) **Проверить вход** (1 команда):
+   ```bash
+   python3 ops/diagnose.py explain --client-slug demo_salon --text "LC-MARKER" --minutes 120
+   ```
+   - Если `no inbound messages found` → webhook не дошёл.  
+   - If you do not know `client_slug`, use `--receiver-phone` to auto-resolve it from `branches.phone`.
+2) **Проверить outbox** (в выводе explain):
+   - `outbox_summary.status` = `SENT` → ответ ушёл.
+   - `outbox_summary.count = 0` → ответа не создавали (gate/skip/мьют).
+3) **Проверить трассу** (в выводе explain):
+   - `decision_meta.action/source` + `decision_trace` дают полный ход решения.
+
+**Если inbound не найден:**
+```bash
+python3 ops/diagnose.py explain --client-slug demo_salon --text "LC-MARKER" --traefik
+```
+
+**TL;DR**
+- Нет inbound → проблема между ChatFlow и API.  
+- Есть inbound, нет outbox → gate/мьют/эскалация.  
+- Outbox SENT, но ответа нет → проблема провайдера (ChatFlow/WA).
 
 **Где фиксировать изменения:**
 - Статус/evidence → `STATE.md` (Brain или Top Architect; для core/поведенческих изменений — до merge в рамках PR, плюс финальная запись в конце сессии).
@@ -50,6 +80,7 @@
 - **allowlist:** список sender‑JID, на которые разрешён outbox в `TEST_MODE`.
 
 **Правило:** instanceId хранится **в БД**, не в git; sender‑JID пул фиксируется в SOP и env allowlist.
+**Важно:** query‑param `instanceId` **переопределяет** `metadata.instanceId` при входе.
 
 ## 1. Репозиторий и процесс
 
@@ -246,9 +277,11 @@ python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
 - **CA‑13 исключение:** допускается simulated inbound (`/webhook` или instance→instance) **без allowlist**, если inbound записан в БД и outbound заблокирован; в `STATE.md` пометка `simulated`.
 - **Receiver (inbound номер салона):**
   - `demo_salon` → `77055740455@s.whatsapp.net` (instanceId берём из ChatFlow, может меняться).
-- **Sender JID‑пул (тестовые отправители):**
-  - `truffles` → `77759841926@s.whatsapp.net`
+- **Sender JID‑пул (тестовые отправители; sender‑only, не в `branches.phone`):**
+  - `clean_auto` → `77785890765@s.whatsapp.net` (instanceId: `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6IkNsZWFuIn0=`, ChatFlow send‑text).
+  - `clean_manual` → `77015705555@s.whatsapp.net` (ручной отправитель).
   - Добавлять новые sender‑JID по мере появления (allowlist).
+- Inbound от branch‑номеров (sender совпал с `branches.phone`) игнорируется preflight‑гейтом — так мы исключаем bot‑to‑bot loop.
 - Используем **пул тестовых JID** (внешние номера). Один suite → один JID, чтобы не текло `pending/expected_reply_type`.
 - Self‑send в ChatFlow не гарантирует доставку на телефон. **Разрешена симуляция instance→instance**, если inbound реально записан в БД.
 - Делаем короткий ping на тестовый номер. Если не дошло — **STOP**, чинить доставку.
@@ -257,6 +290,24 @@ python3 ops/diagnose.py deploy-verify --base-url https://api.truffles.kz \
   - `branches.instance_id` — routing token для branch.
   - `instanceId` в webhook query — routing token (должен совпадать с `branches.instance_id`).
 - Для симуляции instance→instance: **live считается валидным только при наличии inbound row** + `decision_meta/trace` в БД.
+
+**Быстрая отправка + explain (1 команда):**
+```bash
+python3 ops/diagnose.py send-and-explain \
+  --instance-id <CLEAN_INSTANCE_ID> \
+  --jid 77055740455@s.whatsapp.net \
+  --receiver-phone "+77055740455"
+```
+
+**Альтернатива (2 шага):**
+```bash
+python3 ops/chatflow_send.py \
+  --instance-id <CLEAN_INSTANCE_ID> \
+  --jid 77055740455@s.whatsapp.net \
+  --marker-prefix LC-QUICK
+
+python3 ops/diagnose.py explain --receiver-phone "+77055740455" --text "LC-QUICK"
+```
 
 **Операторская инструкция (без тех. знаний):**
 - Оператор **не** знает время/conv_id/msg_id/SQL. Это снимает Brain/OPS.

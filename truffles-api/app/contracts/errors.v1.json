@@ -1,0 +1,142 @@
+{
+    "errors": [
+        {
+            "code": "INVALID_PAYLOAD",
+            "description": "The request payload is invalid or malformed.",
+            "ui_behavior": "toast_error",
+            "retryable": false
+        },
+        {
+            "code": "MISSING_FIELD",
+            "description": "A required field is missing from the request.",
+            "ui_behavior": "form_error",
+            "retryable": false
+        },
+        {
+            "code": "INVALID_FORMAT",
+            "description": "A field has an invalid format (e.g., email, date).",
+            "ui_behavior": "form_error",
+            "retryable": false
+        },
+        {
+            "code": "CHATFLOW_TIMEOUT",
+            "description": "Timeout waiting for ChatFlow response.",
+            "ui_behavior": "toast_warning",
+            "retryable": true
+        },
+        {
+            "code": "CHATFLOW_ERROR",
+            "description": "Error from ChatFlow service.",
+            "ui_behavior": "toast_error",
+            "retryable": true
+        },
+        {
+            "code": "TELEGRAM_ERROR",
+            "description": "Error interacting with Telegram API.",
+            "ui_behavior": "toast_error",
+            "retryable": true
+        },
+        {
+            "code": "TELEGRAM_RATE_LIMIT",
+            "description": "Telegram rate limit exceeded.",
+            "ui_behavior": "toast_warning",
+            "retryable": true
+        },
+        {
+            "code": "QDRANT_ERROR",
+            "description": "Error interacting with Qdrant vector DB.",
+            "ui_behavior": "toast_error",
+            "retryable": true
+        },
+        {
+            "code": "LLM_TIMEOUT",
+            "description": "Timeout waiting for LLM response.",
+            "ui_behavior": "toast_warning",
+            "retryable": true
+        },
+        {
+            "code": "LLM_ERROR",
+            "description": "Error from LLM provider.",
+            "ui_behavior": "toast_error",
+            "retryable": true
+        },
+        {
+            "code": "INVALID_STATE_TRANSITION",
+            "description": "Invalid FSM state transition requested.",
+            "ui_behavior": "toast_error",
+            "retryable": false
+        },
+        {
+            "code": "CONVERSATION_NOT_FOUND",
+            "description": "The requested conversation does not exist.",
+            "ui_behavior": "redirect_404",
+            "retryable": false
+        },
+        {
+            "code": "HANDOVER_NOT_FOUND",
+            "description": "The requested handover/case does not exist.",
+            "ui_behavior": "redirect_404",
+            "retryable": false
+        },
+        {
+            "code": "AUTH_REQUIRED",
+            "description": "Authentication is required.",
+            "ui_behavior": "redirect_login",
+            "retryable": false
+        },
+        {
+            "code": "ACCESS_DENIED",
+            "description": "Access to the resource is denied.",
+            "ui_behavior": "toast_error",
+            "retryable": false
+        },
+        {
+            "code": "TOKEN_INVALID",
+            "description": "The provided authentication token is invalid.",
+            "ui_behavior": "redirect_login",
+            "retryable": false
+        },
+        {
+            "code": "CONFIG_MISSING",
+            "description": "Server configuration is missing.",
+            "ui_behavior": "toast_error",
+            "retryable": false
+        },
+        {
+            "code": "CLIENT_NOT_FOUND",
+            "description": "Client tenant not found.",
+            "ui_behavior": "full_page_error",
+            "retryable": false
+        },
+        {
+            "code": "RATE_LIMIT_EXCEEDED",
+            "description": "API rate limit exceeded.",
+            "ui_behavior": "toast_warning",
+            "retryable": true
+        },
+        {
+            "code": "MEDIA_LIMIT_EXCEEDED",
+            "description": "Media file size or count limit exceeded.",
+            "ui_behavior": "toast_error",
+            "retryable": false
+        },
+        {
+            "code": "CASE_ALREADY_TAKEN",
+            "description": "The case has already been taken by another agent.",
+            "ui_behavior": "toast_warning_reload",
+            "retryable": false
+        },
+        {
+            "code": "CASE_NOT_ACTIVE",
+            "description": "Action requires the case to be in 'active' status.",
+            "ui_behavior": "toast_error",
+            "retryable": false
+        },
+        {
+            "code": "NOT_ASSIGNED",
+            "description": "Action requires the agent to be assigned to the case.",
+            "ui_behavior": "toast_error",
+            "retryable": false
+        }
+    ]
+}

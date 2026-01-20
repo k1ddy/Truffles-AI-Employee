@@ -189,8 +189,10 @@
 - **Исключение CA‑13:** допускается симуляция inbound (`/webhook` или instance→instance) при наличии inbound row в БД (decision_meta/trace) и заблокированном outbound; в `STATE.md` пометка `simulated`.
 - Не просить Жанбола отправлять сообщения ради проверки.
 - Live-check выполняют Hands/OPS с тестовым JID из allowlist‑пула (один suite → один JID).
+- Sender‑JID для live‑check не должен совпадать с номером филиала; inbound от branch‑номеров игнорируется (анти bot‑to‑bot loop).
 - Разрешена симуляция instance→instance при live‑check, **только если inbound реально записан в БД** (decision_meta/trace) и соблюдён safety‑контур; для CA‑13 — см. исключение выше.
 - JID allowlist = тестовые WA‑номера; instance_id нужен только для ChatFlow send‑text (см. `SPECS/SYSTEM_REFERENCE.md`).
+- Быстрый запуск: `ops/diagnose.py send-and-explain` (или `ops/chatflow_send.py` + `ops/diagnose.py explain`).
 
 **Evidence live-check (минимум):**
 - `conversation_id`

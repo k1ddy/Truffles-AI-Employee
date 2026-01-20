@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from app.models import Branch, Client, ClientSettings
@@ -110,15 +110,16 @@ def test_preflight_rejects_missing_instance_id_by_instance():
         ),
     )
 
-    response, preflight_payload = _run_preflight(
-        payload,
-        db,
-        provided_secret=None,
-        enforce_secret=False,
-        conversation_id=None,
-        resolve_trace_conversation=lambda **_: None,
-        record_early_trace=lambda *args, **kwargs: False,
-    )
+    with patch("app.routers.webhook.http._lookup_sender_branch", return_value=None):
+        response, preflight_payload = _run_preflight(
+            payload,
+            db,
+            provided_secret=None,
+            enforce_secret=False,
+            conversation_id=None,
+            resolve_trace_conversation=lambda **_: None,
+            record_early_trace=lambda *args, **kwargs: False,
+        )
 
     assert response is not None
     assert response.success is False
@@ -223,15 +224,16 @@ def test_preflight_resolves_branch_instance_id():
         ),
     )
 
-    response, preflight_payload = _run_preflight(
-        payload,
-        db,
-        provided_secret=None,
-        enforce_secret=False,
-        conversation_id=None,
-        resolve_trace_conversation=lambda **_: None,
-        record_early_trace=lambda *args, **kwargs: False,
-    )
+    with patch("app.routers.webhook.http._lookup_sender_branch", return_value=None):
+        response, preflight_payload = _run_preflight(
+            payload,
+            db,
+            provided_secret=None,
+            enforce_secret=False,
+            conversation_id=None,
+            resolve_trace_conversation=lambda **_: None,
+            record_early_trace=lambda *args, **kwargs: False,
+        )
 
     assert response is None
     assert preflight_payload.get("resolved_branch_id") == branch.id
@@ -255,6 +257,7 @@ def test_preflight_drops_branch_sender():
     settings_query = Mock()
     settings_query.filter.return_value.first.return_value = settings
     branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = branch
     branch_query.filter.return_value.all.return_value = [(branch.phone,)]
 
     def _query_side_effect(model):
@@ -291,7 +294,7 @@ def test_preflight_drops_branch_sender():
 
     assert response is not None
     assert response.success is True
-    assert response.message == "Ignored branch sender"
+    assert response.message == "Ignored sender (branch number)"
     assert preflight_payload == {}
 
 

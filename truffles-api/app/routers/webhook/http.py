@@ -9,6 +9,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -25,6 +26,25 @@ from . import _legacy as legacy
 
 logger = get_logger("webhook")
 router = APIRouter()
+
+def _normalize_phone_digits(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"\D", "", value)
+
+def _lookup_sender_branch(db: Session, remote_jid: str | None) -> Branch | None:
+    digits = _normalize_phone_digits(remote_jid)
+    if not digits:
+        return None
+    return (
+        db.query(Branch)
+        .filter(
+            Branch.is_active.is_(True),
+            Branch.phone.isnot(None),
+            func.regexp_replace(Branch.phone, r"\D", "", "g") == digits,
+        )
+        .first()
+    )
 
 
 def _run_preflight(
@@ -89,6 +109,27 @@ def _run_preflight(
         return WebhookResponse(success=False, message="Missing metadata.remoteJid"), {}
 
     remote_jid = metadata.remoteJid
+    sender_branch = _lookup_sender_branch(db, remote_jid)
+    if sender_branch:
+        trace_conversation = resolve_trace_conversation(
+            trace_client=client,
+            trace_conversation_id=conversation_id,
+            trace_message_id=message_id,
+            trace_remote_jid=remote_jid,
+        )
+        if record_early_trace(
+            trace_conversation,
+            stage="preflight",
+            decision="ignore",
+            reason="sender_is_branch",
+            meta={
+                "sender_branch_id": str(sender_branch.id),
+                "sender_branch_client_id": str(sender_branch.client_id),
+                "sender_branch_phone": sender_branch.phone,
+            },
+        ):
+            db.commit()
+        return WebhookResponse(success=True, message="Ignored sender (branch number)"), {}
     message_text = body.message or ""
     media_info = _extract_media_info(body)
     if not message_text.strip() and media_info and media_info.caption:

@@ -158,7 +158,7 @@ async def _parse_webhook_request(
     )
     if query_instance_id:
         metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
-        metadata.setdefault("instanceId", query_instance_id)
+        metadata["instanceId"] = query_instance_id
         body["metadata"] = metadata
 
     metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}

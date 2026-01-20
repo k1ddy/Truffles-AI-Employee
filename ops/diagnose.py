@@ -432,11 +432,54 @@ def _parse_livecheck_auto_args(argv):
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
+def _parse_send_text_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py send-text",
+        description="Send one ChatFlow message.",
+    )
+    parser.add_argument("--text", default=None)
+    parser.add_argument("--marker-prefix", default=None)
+    parser.add_argument("--append-marker", action="store_true")
+    parser.add_argument("--token", default=None)
+    parser.add_argument("--instance-id", default=None)
+    parser.add_argument("--jid", default=None)
+    parser.add_argument("--api-url", default=None)
+    parser.add_argument("--timeout", type=float, default=None)
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args(argv)
+
+def _parse_send_and_explain_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py send-and-explain",
+        description="Send one ChatFlow message and run explain.",
+    )
+    parser.add_argument("--text", default=None)
+    parser.add_argument("--marker-prefix", default=None)
+    parser.add_argument("--token", default=None)
+    parser.add_argument("--instance-id", default=None)
+    parser.add_argument("--jid", default=None)
+    parser.add_argument("--api-url", default=None)
+    parser.add_argument("--timeout", type=float, default=None)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--receiver-phone", default=None)
+    parser.add_argument("--client-slug", default=None)
+    parser.add_argument("--remote-jid", default=None)
+    parser.add_argument("--minutes", type=int, default=120)
+    parser.add_argument("--limit", type=int, default=3)
+    parser.add_argument("--traefik", action="store_true")
+    parser.add_argument("--wait-seconds", type=float, default=5.0)
+    return parser.parse_args(argv)
+
 def _apply_noise(text, rng, level):
     if level == "none":
         return text
     suffix = rng.choice(NOISE_SUFFIXES)
     return f"{text} {suffix}"
+
+def _build_marker(prefix):
+    normalized = (prefix or "").strip().replace(" ", "_")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return f"{normalized}-{timestamp}"
 
 def _send_chatflow_message(api_url, token, instance_id, jid, message, timeout):
     params = {
@@ -451,6 +494,90 @@ def _send_chatflow_message(api_url, token, instance_id, jid, message, timeout):
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read().decode("utf-8", errors="replace")
         return resp.status, body
+
+def _resolve_send_text_config(args):
+    token = args.token or os.environ.get("CHATFLOW_TOKEN")
+    instance_id = args.instance_id or os.environ.get("CHATFLOW_INSTANCE_ID")
+    jid = args.jid or os.environ.get("CHATFLOW_JID")
+    api_url = args.api_url or os.environ.get("CHATFLOW_API_URL", "https://app.chatflow.kz/api/v1/send-text")
+    timeout = args.timeout
+    if timeout is None:
+        timeout = float(os.environ.get("CHATFLOW_TIMEOUT_SECONDS", "30"))
+    if not token or not instance_id or not jid:
+        raise SystemExit("send-text: missing token/instance-id/jid (use args or env)")
+
+    marker = None
+    text = args.text
+    if not text:
+        if not args.marker_prefix:
+            raise SystemExit("send-text: provide --text or --marker-prefix")
+        marker = _build_marker(args.marker_prefix)
+        text = marker
+    else:
+        if args.append_marker or args.marker_prefix:
+            marker = _build_marker(args.marker_prefix or "LC-MARKER")
+            text = f"{text} [{marker}]"
+
+    return token, instance_id, jid, api_url, timeout, text, marker
+
+def _run_send_text(args, *, return_result=False):
+    token, instance_id, jid, api_url, timeout, text, marker = _resolve_send_text_config(args)
+    sent_at = datetime.now(timezone.utc).isoformat()
+    status = "dry_run"
+    response_status = None
+    response_body = None
+    if not args.dry_run:
+        response_status, response_body = _send_chatflow_message(
+            api_url, token, instance_id, jid, text, timeout
+        )
+        status = "sent" if response_status == 200 else "error"
+    result = {
+        "instance_id": instance_id,
+        "jid": jid,
+        "marker": marker,
+        "text": text,
+        "sent_at": sent_at,
+        "status": status,
+        "http_status": response_status,
+        "response": (response_body or "")[:200] if response_body else None,
+    }
+    print(json.dumps({"send_text": result}, ensure_ascii=False))
+    if return_result:
+        return result
+    return None
+
+def _run_send_and_explain(args):
+    if not args.receiver_phone and not args.client_slug:
+        raise SystemExit("send-and-explain: provide --receiver-phone or --client-slug")
+    if not args.marker_prefix:
+        args.marker_prefix = "LC-EXPLAIN"
+    args.append_marker = True
+    send_result = _run_send_text(args, return_result=True)
+    marker = send_result.get("marker")
+    search_text = marker or args.text
+    if not search_text:
+        raise SystemExit("send-and-explain: missing marker/text for explain")
+    wait_seconds = float(args.wait_seconds or 0)
+    if wait_seconds > 0:
+        time.sleep(wait_seconds)
+    explain_argv = []
+    if args.client_slug:
+        explain_argv += ["--client-slug", args.client_slug]
+    if args.receiver_phone:
+        explain_argv += ["--receiver-phone", args.receiver_phone]
+    if args.remote_jid:
+        explain_argv += ["--remote-jid", args.remote_jid]
+    explain_argv += [
+        "--text",
+        search_text,
+        "--minutes",
+        str(int(args.minutes)),
+        "--limit",
+        str(int(args.limit)),
+    ]
+    if args.traefik:
+        explain_argv.append("--traefik")
+    _run_explain(_parse_explain_args(explain_argv))
 
 def _parse_webhook_fuzz_args(argv):
     parser = argparse.ArgumentParser(
@@ -481,6 +608,34 @@ def _parse_webhook_fuzz_args(argv):
     parser.add_argument("--skip-outbox", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
+
+def _parse_explain_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py explain",
+        description="Explain inbound processing by message marker/id.",
+    )
+    parser.add_argument(
+        "--client-slug",
+        default=None,
+    )
+    parser.add_argument(
+        "--receiver-phone",
+        default=None,
+        help="Receiver phone (branches.phone) to auto-resolve client_slug.",
+    )
+    parser.add_argument("--text", default=None, help="Substring of inbound message text.")
+    parser.add_argument("--message-id", default=None, help="ChatFlow metadata.messageId value.")
+    parser.add_argument("--message-uuid", default=None, help="messages.id UUID.")
+    parser.add_argument("--conversation-id", default=None)
+    parser.add_argument("--remote-jid", default=None)
+    parser.add_argument("--minutes", type=int, default=120)
+    parser.add_argument("--limit", type=int, default=3)
+    parser.add_argument("--traefik", action="store_true")
+    parser.add_argument("--traefik-minutes", type=int, default=120)
+    args = parser.parse_args(argv)
+    if not args.client_slug and not args.receiver_phone:
+        args.client_slug = os.environ.get("TRUFFLES_CLIENT_SLUG", "demo_salon")
+    return args
 
 def _pick_fuzz_cases(cases, count, rng):
     if count <= 0:
@@ -555,6 +710,11 @@ def _resolve_db_user_simple():
 
 def _escape_sql_literal(value):
     return str(value).replace("'", "''")
+
+def _normalize_phone_digits(value):
+    if not value:
+        return ""
+    return re.sub(r"\D", "", str(value))
 
 def _resolve_webhook_secret(client_slug, explicit):
     if explicit:
@@ -644,6 +804,38 @@ def _fetch_client_meta(db_user, client_slug):
         "telegram_chat_id": parts[4] if len(parts) > 4 and parts[4] else None,
         "owner_telegram_id": parts[5] if len(parts) > 5 and parts[5] else None,
     }, None
+
+def _fetch_client_by_branch_phone(db_user, phone):
+    digits = _normalize_phone_digits(phone)
+    if not digits:
+        return None, "receiver phone has no digits"
+    safe_phone = _escape_sql_literal(phone or "")
+    safe_digits = _escape_sql_literal(digits)
+    query = (
+        "SELECT json_build_object("
+        "'client_slug', c.name, "
+        "'client_id', c.id, "
+        "'branch_id', b.id, "
+        "'branch_phone', b.phone, "
+        "'instance_id', b.instance_id"
+        ") "
+        "FROM branches b "
+        "JOIN clients c ON c.id = b.client_id "
+        "WHERE b.is_active = TRUE AND ("
+        f"b.phone = '{safe_phone}' "
+        f"OR regexp_replace(b.phone, '\\\\D', '', 'g') = '{safe_digits}') "
+        "ORDER BY b.updated_at DESC NULLS LAST, b.created_at DESC NULLS LAST "
+        "LIMIT 1;"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not row:
+        return None, None
+    try:
+        return json.loads(row), None
+    except Exception:
+        return None, None
 
 def _fetch_conversation_meta(db_user, conversation_id):
     safe_id = _escape_sql_literal(conversation_id)
@@ -777,6 +969,70 @@ def _fetch_outbox_summary(db_user, client_id, inbound_message_id):
     status = parts[1] if len(parts) > 1 and parts[1] else None
     return {"count": count, "status": status}, None
 
+def _fetch_branch_meta(db_user, branch_id):
+    if not branch_id:
+        return None, None
+    safe_id = _escape_sql_literal(branch_id)
+    query = (
+        "SELECT json_build_object("
+        "'branch_id', b.id, "
+        "'phone', b.phone, "
+        "'instance_id', b.instance_id, "
+        "'name', b.name, "
+        "'slug', b.slug"
+        ") "
+        "FROM branches b "
+        f"WHERE b.id = '{safe_id}' LIMIT 1;"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not row:
+        return None, None
+    try:
+        return json.loads(row), None
+    except Exception:
+        return None, None
+
+def _fetch_message_rows(db_user, where_clause, limit):
+    query = (
+        "SELECT json_build_object("
+        "'message_uuid', m.id, "
+        "'content', m.content, "
+        "'created_at', m.created_at, "
+        "'remote_jid', u.remote_jid, "
+        "'instance_id', m.metadata->>'instanceId', "
+        "'message_id', m.metadata->>'messageId', "
+        "'conversation_id', c.id, "
+        "'branch_id', c.branch_id, "
+        "'conversation_state', c.state, "
+        "'client_slug', cl.name, "
+        "'decision_meta', m.metadata->'decision_meta'"
+        ") "
+        "FROM messages m "
+        "JOIN conversations c ON c.id = m.conversation_id "
+        "JOIN users u ON u.id = c.user_id "
+        "JOIN clients cl ON cl.id = c.client_id "
+        f"WHERE {where_clause} "
+        "ORDER BY m.created_at DESC "
+        f"LIMIT {int(max(limit, 1))};"
+    )
+    rows_raw, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not rows_raw:
+        return [], None
+    rows = []
+    for line in rows_raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            continue
+    return rows, None
+
 def _fetch_latest_outbox_for_conversation(db_user, conversation_id):
     safe_id = _escape_sql_literal(conversation_id)
     query = (
@@ -801,6 +1057,72 @@ def _fetch_latest_outbox_for_conversation(db_user, conversation_id):
         "status": parts[1] if len(parts) > 1 else None,
         "payload_json": payload,
     }, None
+
+def _summarize_decision_meta(meta):
+    if not isinstance(meta, dict):
+        return {}
+    keys = [
+        "action",
+        "intent",
+        "source",
+        "pending_action",
+        "shield_reason",
+        "policy_gate",
+        "policy_section",
+        "rag_reason",
+        "llm_used",
+        "llm_timeout",
+    ]
+    summary = {}
+    for key in keys:
+        value = meta.get(key)
+        if value is not None:
+            summary[key] = value
+    return summary
+
+def _summarize_trace(context, limit=12):
+    if not isinstance(context, dict):
+        return []
+    trace = context.get("decision_trace")
+    if not trace:
+        return []
+    items = []
+    for entry in _trace_as_list(trace):
+        stage = entry.get("stage")
+        decision = entry.get("decision")
+        if not stage:
+            continue
+        if decision:
+            items.append(f"{stage}:{decision}")
+        else:
+            items.append(stage)
+    if len(items) > limit:
+        return items[-limit:]
+    return items
+
+def _extract_outbox_payload_meta(payload):
+    if not isinstance(payload, dict):
+        return {}
+    body = payload.get("body")
+    if not isinstance(body, dict):
+        return {}
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    return {
+        "instance_id": metadata.get("instanceId"),
+        "remote_jid": metadata.get("remoteJid"),
+        "message_id": metadata.get("messageId"),
+    }
+
+def _fetch_traefik_hits(client_slug, minutes, limit):
+    if not client_slug:
+        return [], "missing client_slug"
+    since_value = f"{int(max(minutes, 1))}m"
+    result = run_command(["docker", "logs", "truffles-traefik", "--since", since_value])
+    if result.returncode != 0:
+        return [], result.stderr.strip()
+    target = f"/webhook/{client_slug}"
+    lines = [line for line in result.stdout.splitlines() if target in line]
+    return lines[-int(max(limit, 1)) :], None
 
 def _parse_owner_identity(raw_value):
     if not raw_value:
@@ -1463,6 +1785,153 @@ def _run_webhook_fuzz(args):
         "outbox_status": outbox_status,
     }
     print(json.dumps({"summary": summary}, ensure_ascii=False))
+
+def _run_explain(args):
+    db_user = _resolve_db_user_simple()
+    client_slug = args.client_slug
+    branch_id = None
+    if not client_slug and args.receiver_phone:
+        resolved_branch, error = _fetch_client_by_branch_phone(db_user, args.receiver_phone)
+        if error:
+            raise SystemExit(f"explain: receiver phone lookup failed ({error})")
+        if not resolved_branch:
+            raise SystemExit("explain: receiver phone not found; provide --client-slug")
+        client_slug = resolved_branch.get("client_slug")
+        branch_id = resolved_branch.get("branch_id")
+        print(f"resolved_client_slug={client_slug}")
+        if branch_id:
+            print(f"resolved_branch_id={branch_id}")
+        if resolved_branch.get("instance_id"):
+            print(f"resolved_instance_id={resolved_branch.get('instance_id')}")
+    clauses = ["m.role = 'user'"]
+    safe_slug = None
+    if client_slug:
+        safe_slug = _escape_sql_literal(client_slug)
+        clauses.append(f"cl.name = '{safe_slug}'")
+    if branch_id:
+        safe_branch = _escape_sql_literal(branch_id)
+        clauses.append(f"c.branch_id = '{safe_branch}'")
+    if args.remote_jid:
+        safe_jid = _escape_sql_literal(args.remote_jid)
+        clauses.append(f"u.remote_jid = '{safe_jid}'")
+
+    if args.message_uuid:
+        safe_uuid = _escape_sql_literal(args.message_uuid)
+        clauses.append(f"m.id = '{safe_uuid}'")
+    elif args.message_id:
+        safe_message = _escape_sql_literal(args.message_id)
+        clauses.append(f"m.metadata->>'messageId' = '{safe_message}'")
+    elif args.conversation_id:
+        safe_conv = _escape_sql_literal(args.conversation_id)
+        clauses.append(f"m.conversation_id = '{safe_conv}'")
+    elif args.text:
+        safe_text = _escape_sql_literal(args.text)
+        minutes = int(max(args.minutes, 1))
+        clauses.append(f"m.content ILIKE '%{safe_text}%'")
+        clauses.append(f"m.created_at > now() - interval '{minutes} minutes'")
+    else:
+        raise SystemExit("explain: provide --text, --message-id, --message-uuid, or --conversation-id")
+
+    where_clause = " AND ".join(clauses)
+    rows, error = _fetch_message_rows(db_user, where_clause, args.limit)
+    if error:
+        raise SystemExit(f"explain: db error ({error})")
+
+    if not rows:
+        print("explain: no inbound messages found.")
+        if args.traefik and client_slug:
+            hits, hit_error = _fetch_traefik_hits(client_slug, args.traefik_minutes, 10)
+            if hit_error:
+                print(f"traefik_error: {hit_error}")
+            if hits:
+                print("traefik_hits:")
+                for line in hits:
+                    print(line)
+        else:
+            print("hint: check ChatFlow webhook delivery and Traefik logs.")
+        return
+
+    client_meta = None
+    if client_slug:
+        client_meta, _ = _fetch_client_meta(db_user, client_slug)
+
+    for idx, row in enumerate(rows, start=1):
+        print("-" * 60)
+        print(f"match[{idx}] message_uuid={row.get('message_uuid')}")
+        print(f"message_id={row.get('message_id')}")
+        print(f"created_at={row.get('created_at')}")
+        print(f"client_slug={row.get('client_slug')}")
+        print(f"remote_jid={row.get('remote_jid')}")
+        print(f"instance_id={row.get('instance_id')}")
+        print(f"conversation_id={row.get('conversation_id')}")
+        print(f"branch_id={row.get('branch_id')}")
+        print(f"conversation_state={row.get('conversation_state')}")
+        content = row.get("content")
+        if content is not None:
+            print(f"content={content}")
+
+        decision_meta = row.get("decision_meta")
+        summary = _summarize_decision_meta(decision_meta)
+        if summary:
+            print(f"decision_meta={json.dumps(summary, ensure_ascii=False)}")
+
+        branch_meta, _ = _fetch_branch_meta(db_user, row.get("branch_id"))
+        if branch_meta:
+            print(
+                "branch_meta="
+                + json.dumps(
+                    {
+                        "phone": branch_meta.get("phone"),
+                        "slug": branch_meta.get("slug"),
+                        "instance_id": branch_meta.get("instance_id"),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            if row.get("instance_id") and branch_meta.get("instance_id"):
+                mismatch = row["instance_id"] != branch_meta["instance_id"]
+                print(f"instance_id_mismatch={str(mismatch).lower()}")
+
+        conversation_meta, _ = _fetch_conversation_meta(db_user, row.get("conversation_id"))
+        if conversation_meta:
+            trace = _summarize_trace(conversation_meta.get("context"))
+            if trace:
+                print(f"decision_trace={json.dumps(trace, ensure_ascii=False)}")
+
+        if client_meta and row.get("message_id"):
+            outbox_summary, _ = _fetch_outbox_summary(
+                db_user,
+                client_meta.get("client_id"),
+                row.get("message_id"),
+            )
+            print(f"outbox_summary={json.dumps(outbox_summary, ensure_ascii=False)}")
+
+        latest_outbox, _ = _fetch_latest_outbox_for_conversation(
+            db_user,
+            row.get("conversation_id"),
+        )
+        if latest_outbox:
+            payload_meta = _extract_outbox_payload_meta(latest_outbox.get("payload_json"))
+            print(
+                "outbox_latest="
+                + json.dumps(
+                    {
+                        "status": latest_outbox.get("status"),
+                        "inbound_message_id": latest_outbox.get("inbound_message_id"),
+                        "payload_meta": payload_meta,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+    if args.traefik and client_slug:
+        hits, hit_error = _fetch_traefik_hits(client_slug, args.traefik_minutes, 10)
+        if hit_error:
+            print(f"traefik_error: {hit_error}")
+        if hits:
+            print("traefik_hits:")
+            for line in hits:
+                print(line)
 
 def _run_livecheck_ca05_booking(args, context):
     rng = context["rng"]
@@ -3467,6 +3936,15 @@ def run_curl(url, headers=None):
 
 if len(sys.argv) > 1 and sys.argv[1] == "webhook-fuzz":
     _run_webhook_fuzz(_parse_webhook_fuzz_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "send-text":
+    _run_send_text(_parse_send_text_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "send-and-explain":
+    _run_send_and_explain(_parse_send_and_explain_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "explain":
+    _run_explain(_parse_explain_args(sys.argv[2:]))
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "emit-evidence":
     _run_emit_evidence(_parse_emit_evidence_args(sys.argv[2:]))
