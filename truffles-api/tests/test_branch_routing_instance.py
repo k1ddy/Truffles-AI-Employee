@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from uuid import uuid4
 from unittest.mock import Mock
+from uuid import uuid4
 
 from app.routers.webhook.branch_selection import _handle_branch_selection_gate
 from app.services.chatflow_service import get_instance_id
