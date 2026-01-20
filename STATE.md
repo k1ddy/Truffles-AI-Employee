@@ -1717,7 +1717,17 @@
 - Merge commit: `18678bbf074052e6736ec69ccf6fb58e3027f43e`
 
 **Status:**
-- Требуется новый SQL‑срез outbox latency (last 1h, SENT) после деплоя; P0 outbox latency остаётся OPEN до evidence.
+- Новый SQL‑срез после деплоя записан ниже; P0 outbox latency остаётся OPEN (p90 > 10s).
+
+### 2026-01-20 — Outbox latency snapshot (post drain deploy)
+
+**/admin/version**
+- `{"version":"main","git_commit":"d1ceb90c00a26051f135182170ad2f4aa4432471","build_time":"2026-01-20T01:20:01Z"}`
+
+**SQL (last 1h, status=SENT)**
+- `SELECT COUNT(*) AS sent_count, ROUND(AVG(EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS avg_s, ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS p50_s, ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS p90_s, ROUND(MAX(EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS max_s FROM outbox_messages WHERE status='SENT' AND updated_at >= NOW() - interval '1 hour';`
+- output: `177 | 9.53s | 9.20s | 15.26s | 27.52s`
+- Status: p90 still > 10s target; keep P0 outbox latency OPEN.
 
 ### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
 
