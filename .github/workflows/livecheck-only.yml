@@ -1,0 +1,485 @@
+name: Livecheck Only
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Base URL for deploy verification"
+        type: string
+        default: "https://api.truffles.kz"
+      expected_commit:
+        description: "Expected commit SHA on server (optional)"
+        type: string
+        default: ""
+      expected_version:
+        description: "Expected version label (default: main)"
+        type: string
+        default: "main"
+      min_allowlist_jids:
+        description: "Minimum allowlist JIDs required"
+        type: string
+        default: "3"
+
+env:
+  IMAGE_NAME: ghcr.io/k1ddy/truffles-ai-employee
+
+permissions:
+  contents: read
+
+jobs:
+  livecheck:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    name: livecheck-only (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - group: pool-a
+            jid_index: 0
+            suites: "ca01-core ca04-service ca07-ood ca10-outbox"
+          - group: pool-b
+            jid_index: 1
+            suites: "ca02-policy ca05-booking ca08-state"
+          - group: pool-c
+            jid_index: 2
+            suites: "ca03-info ca06-consult ca09-manager"
+    env:
+      BASE_URL: ${{ inputs.base_url }}
+      EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+      EXPECTED_VERSION: ${{ inputs.expected_version }}
+      MIN_ALLOWLIST_JIDS: ${{ inputs.min_allowlist_jids }}
+      LIVE_GIT_SHA: ${{ inputs.expected_commit != '' && inputs.expected_commit || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy verify (optional commit check)
+        run: |
+          set -euo pipefail
+          if [ -n "${EXPECTED_COMMIT}" ]; then
+            python3 ops/diagnose.py deploy-verify \
+              --base-url "${BASE_URL}" \
+              --expected-commit "${EXPECTED_COMMIT}" \
+              --expected-version "${EXPECTED_VERSION}"
+          else
+            python3 ops/diagnose.py deploy-verify \
+              --base-url "${BASE_URL}" \
+              --expected-version "${EXPECTED_VERSION}"
+          fi
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          KEY_RAW="${{ secrets.SSH_PRIVATE_KEY }}"
+          export KEY_RAW
+          python3 - <<'PY'
+          import base64
+          import os
+          import subprocess
+          from pathlib import Path
+
+          raw = os.environ.get("KEY_RAW", "")
+          key_path = Path.home() / ".ssh" / "id_rsa"
+
+          def normalize(content: str) -> str:
+              content = content.replace("\r", "")
+              if content.startswith('"') and content.endswith('"'):
+                  content = content[1:-1]
+              if not content.endswith("\n"):
+                  content += "\n"
+              return content
+
+          def try_write(content: str) -> bool:
+              key_path.write_text(normalize(content))
+              key_path.chmod(0o600)
+              try:
+                  subprocess.check_output(
+                      ["ssh-keygen", "-yf", str(key_path)],
+                      stderr=subprocess.STDOUT,
+                  )
+                  return True
+              except subprocess.CalledProcessError:
+                  return False
+
+          candidates = [raw, raw.replace("\r", "")]
+          if "\\n" in raw and "\n" not in raw:
+              candidates.append(raw.replace("\\n", "\n"))
+              candidates.append(raw.replace("\\n", "\n").replace("\r", ""))
+          if "\\n" in raw or "\\r" in raw:
+              try:
+                  candidates.append(raw.encode("utf-8").decode("unicode_escape"))
+              except Exception:
+                  pass
+          for b64 in {
+              raw,
+              raw.replace("\n", ""),
+              raw.replace("\r", ""),
+              raw.replace("\\n", ""),
+              raw.replace(" ", ""),
+          }:
+              try:
+                  decoded = base64.b64decode(b64)
+              except Exception:
+                  continue
+              try:
+                  candidates.append(decoded.decode("utf-8"))
+              except UnicodeDecodeError:
+                  candidates.append(decoded.decode("utf-8", errors="ignore"))
+
+          seen = set()
+          for candidate in candidates:
+              if not candidate or not candidate.strip():
+                  continue
+              if candidate in seen:
+                  continue
+              seen.add(candidate)
+              if try_write(candidate):
+                  print("KEY_OK")
+                  raise SystemExit(0)
+
+          print("KEY_INVALID")
+          raise SystemExit(1)
+          PY
+          ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Livecheck runner (matrix)
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.group }}"
+          SUITE_LIST="${{ matrix.suites }}"
+          JID_INDEX="${{ matrix.jid_index }}"
+          MIN_ALLOWLIST_JIDS="${MIN_ALLOWLIST_JIDS}"
+          GIT_SHA="${LIVE_GIT_SHA}"
+          SSH=(ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=5 ${SERVER_USER}@${SERVER_HOST})
+          if ! "${SSH[@]}" "echo livecheck-ready" >/dev/null 2>&1; then
+            echo "livecheck skipped: ssh unreachable" | tee artifacts/livecheck-skip.txt
+            exit 0
+          fi
+          REMOTE_SCRIPT="$(mktemp)"
+          cat > "${REMOTE_SCRIPT}" <<'REMOTE'
+          set -euo pipefail
+          RUN_ID="${RUN_ID:?}"
+          GIT_SHA="${GIT_SHA:?}"
+          SUITE_LIST="${SUITE_LIST:?}"
+          JID_INDEX="${JID_INDEX:?}"
+          MIN_ALLOWLIST_JIDS="${MIN_ALLOWLIST_JIDS:-1}"
+          GATE_LOG="/tmp/livecheck-gate-${RUN_ID}.txt"
+          RUN_LOG="/tmp/livecheck-run-${RUN_ID}.log"
+          ARTIFACT_TAR="/tmp/livecheck-artifacts-${RUN_ID}.tar.gz"
+          : > "${GATE_LOG}"
+          : > "${RUN_LOG}"
+          cleanup() {
+            tar -czf "${ARTIFACT_TAR}" -C /tmp \
+              "livecheck-gate-${RUN_ID}.txt" \
+              "livecheck-run-${RUN_ID}.log" \
+              "livecheck-ca01-core.jsonl" \
+              "livecheck-ca02-policy.jsonl" \
+              "livecheck-ca03-info.jsonl" \
+              "livecheck-ca04-service.jsonl" \
+              "livecheck-ca05-booking.jsonl" \
+              "livecheck-ca06-consult.jsonl" \
+              "livecheck-ca07-ood.jsonl" \
+              "livecheck-ca08-state.jsonl" \
+              "livecheck-ca09-manager.jsonl" \
+              "livecheck-ca10-outbox.jsonl" \
+              2>>"${RUN_LOG}" || true
+          }
+          trap cleanup EXIT
+          TEST_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"')
+          ALLOWLIST=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"')
+          LEARNING_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${LEARNING_MODE:-}"')
+          ALERTS_ADMIN_TOKEN=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${ALERTS_ADMIN_TOKEN:-}"')
+          OUTBOX_WORKER_ENABLED=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_WORKER_ENABLED:-}"')
+          OUTBOX_WORKER_INTERVAL_SECONDS=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_WORKER_INTERVAL_SECONDS:-}"')
+          OUTBOX_COALESCE_SECONDS=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_COALESCE_SECONDS:-}"')
+          QDRANT_COLLECTION=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${QDRANT_COLLECTION:-}"')
+          QDRANT_COLLECTION_EFFECTIVE="${QDRANT_COLLECTION}"
+          if [ -z "${QDRANT_COLLECTION_EFFECTIVE}" ]; then
+            QDRANT_COLLECTION_EFFECTIVE="truffles_knowledge_ci"
+          fi
+          {
+            echo "TEST_MODE=${TEST_MODE}"
+            echo "OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}"
+            echo "LEARNING_MODE=${LEARNING_MODE}"
+            echo "QDRANT_COLLECTION=${QDRANT_COLLECTION}"
+            echo "QDRANT_COLLECTION_EFFECTIVE=${QDRANT_COLLECTION_EFFECTIVE}"
+            if [ -n "${ALERTS_ADMIN_TOKEN}" ]; then
+              echo "ALERTS_ADMIN_TOKEN_SET=1"
+            else
+              echo "ALERTS_ADMIN_TOKEN_SET=0"
+            fi
+            echo "OUTBOX_WORKER_ENABLED=${OUTBOX_WORKER_ENABLED}"
+            echo "OUTBOX_WORKER_INTERVAL_SECONDS=${OUTBOX_WORKER_INTERVAL_SECONDS}"
+            echo "OUTBOX_COALESCE_SECONDS=${OUTBOX_COALESCE_SECONDS}"
+          } > "${GATE_LOG}"
+          gate_ok=1
+          if [ "${TEST_MODE}" != "1" ]; then
+            echo "TEST_MODE_NOT_ENABLED" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
+          if [ -z "${ALERTS_ADMIN_TOKEN}" ]; then
+            echo "ALERTS_ADMIN_TOKEN_MISSING" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
+          if [ "${OUTBOX_WORKER_ENABLED}" != "1" ]; then
+            echo "OUTBOX_WORKER_DISABLED" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
+          ALLOWLIST_CLEAN="${ALLOWLIST// /}"
+          IFS=',' read -r -a ALLOWLIST_POOL <<< "${ALLOWLIST_CLEAN}"
+          if [ -z "${ALLOWLIST_CLEAN}" ]; then
+            echo "ALLOWLIST_EMPTY" >> "${GATE_LOG}"
+            gate_ok=0
+          else
+            for jid in "${ALLOWLIST_POOL[@]}"; do
+              if [ -z "${jid}" ]; then
+                echo "ALLOWLIST_EMPTY_ITEM" >> "${GATE_LOG}"
+                gate_ok=0
+                continue
+              fi
+              case "${jid}" in
+                *@s.whatsapp.net) ;;
+                *)
+                  echo "ALLOWLIST_INVALID_JID" >> "${GATE_LOG}"
+                  gate_ok=0
+                  ;;
+              esac
+            done
+          fi
+          if [ "${#ALLOWLIST_POOL[@]}" -lt "${MIN_ALLOWLIST_JIDS}" ]; then
+            echo "ALLOWLIST_TOO_SHORT" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
+          if [ "${JID_INDEX}" -lt 0 ] || [ "${JID_INDEX}" -ge "${#ALLOWLIST_POOL[@]}" ]; then
+            echo "ALLOWLIST_INDEX_OUT_OF_RANGE" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
+          case "${QDRANT_COLLECTION_EFFECTIVE}" in
+            *_ci) ;;
+            *)
+              echo "QDRANT_COLLECTION_UNSAFE" >> "${GATE_LOG}"
+              gate_ok=0
+              ;;
+          esac
+          if [ "${gate_ok}" -ne 1 ]; then
+            echo "GATE_FAILED" >> "${RUN_LOG}"
+            exit 1
+          fi
+          POLL_VARS=$(python3 - <<'PY'
+          import os
+
+          def parse(value, default):
+              try:
+                  return float(value)
+              except (TypeError, ValueError):
+                  return default
+
+          coalesce = parse(os.environ.get("OUTBOX_COALESCE_SECONDS"), 8.0)
+          interval = parse(os.environ.get("OUTBOX_WORKER_INTERVAL_SECONDS"), 2.0)
+          poll_timeout = max(60.0, coalesce + interval * 5 + 10.0)
+          fail_fast_after = max(10.0, min(30.0, poll_timeout / 3))
+          print(f"{poll_timeout:.0f} {fail_fast_after:.0f}")
+          PY
+          )
+          set -- ${POLL_VARS}
+          POLL_TIMEOUT_BASE="${1:-60}"
+          FAIL_FAST_AFTER="${2:-0}"
+          echo "POLL_TIMEOUT_BASE=${POLL_TIMEOUT_BASE}" >> "${GATE_LOG}"
+          echo "FAIL_FAST_AFTER=${FAIL_FAST_AFTER}" >> "${GATE_LOG}"
+          python3 - <<'PY' >> "${RUN_LOG}" 2>&1
+          import time
+          import urllib.request
+
+          def check(url, deadline):
+              while True:
+                  try:
+                      with urllib.request.urlopen(url, timeout=5) as resp:
+                          if 200 <= resp.status < 300:
+                              print(f"healthcheck ok: {url} {resp.status}")
+                              return
+                          print(f"healthcheck status: {url} {resp.status}")
+                  except Exception as exc:
+                      print(f"healthcheck error: {url} {exc}")
+                  if time.time() >= deadline:
+                      raise SystemExit(f"healthcheck timeout: {url}")
+                  time.sleep(2)
+
+          deadline = time.time() + 90
+          check("http://localhost:8000/health", deadline)
+          check("http://localhost:8000/admin/health", deadline)
+          PY
+          SOURCE_REPO="${HOME}/truffles-main"
+          git config --global --add safe.directory "${SOURCE_REPO}"
+          git config --global --add safe.directory "${SOURCE_REPO}/.git"
+          if [ ! -d "${SOURCE_REPO}/.git" ]; then
+            echo "source repo missing: ${SOURCE_REPO}" >> "${RUN_LOG}"
+            exit 1
+          fi
+          SOURCE_ORIGIN_URL="$(git -C "${SOURCE_REPO}" config --get remote.origin.url || true)"
+          if [ -z "${SOURCE_ORIGIN_URL}" ]; then
+            echo "source repo missing origin url: ${SOURCE_REPO}" >> "${RUN_LOG}"
+            exit 1
+          fi
+          WORKDIR="/tmp/truffles-main-${GIT_SHA}-${RUN_ID}"
+          if [ ! -d "${WORKDIR}/.git" ]; then
+            rm -rf "${WORKDIR}"
+            git clone --no-checkout "${SOURCE_REPO}" "${WORKDIR}"
+          fi
+          cd "${WORKDIR}"
+          git config --global --add safe.directory "$(pwd)"
+          git remote set-url origin "${SOURCE_ORIGIN_URL}"
+          git fetch origin "${GIT_SHA}" --depth=1
+          git checkout -q "${GIT_SHA}"
+          suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca06-consult ca07-ood ca08-state ca09-manager ca10-outbox)
+          suite_jid="${ALLOWLIST_POOL[$JID_INDEX]}"
+          suite_fail=0
+          run_suite() {
+            local suite_name="$1"
+            local suite_seed="$2"
+            if [ -z "${suite_jid}" ]; then
+              echo "suite ${suite_name} missing allowlist jid" >> "${RUN_LOG}"
+              echo "suite ${suite_name} missing allowlist jid"
+              suite_fail=1
+              return
+            fi
+            local poll_timeout="${POLL_TIMEOUT_BASE}"
+            if [ "${suite_name}" = "ca06-consult" ]; then
+              poll_timeout=$((poll_timeout + 60))
+            fi
+            local fail_fast_after="${FAIL_FAST_AFTER}"
+            if [ "${suite_name}" = "ca05-booking" ] || [ "${suite_name}" = "ca08-state" ]; then
+              fail_fast_after="${poll_timeout}"
+            fi
+            local request_timeout=30
+            local noise_level="low"
+            if [ "${suite_name}" = "ca07-ood" ]; then
+              noise_level="none"
+            fi
+            echo "SUITE_${suite_name}_JID=${suite_jid}" >> "${GATE_LOG}"
+            local outfile="/tmp/livecheck-${suite_name}.jsonl"
+            : > "${outfile}"
+            echo "suite ${suite_name} start"
+            if python3 ops/diagnose.py livecheck-auto \
+              --base-url http://localhost:8000 \
+              --client-slug demo_salon \
+              --suite "${suite_name}" \
+              --seed "${suite_seed}" \
+              --noise "${noise_level}" \
+              --jid-mode allowlist \
+              --remote-jid "${suite_jid}" \
+              --allowlist-jids "${ALLOWLIST_CLEAN}" \
+              --poll-timeout "${poll_timeout}" \
+              --fail-fast-after "${fail_fast_after}" \
+              --reset-before-suite \
+              --timeout "${request_timeout}" \
+              --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then
+              echo "suite ${suite_name} ok"
+            else
+              echo "suite ${suite_name} failed" >> "${RUN_LOG}"
+              echo "suite ${suite_name} failed"
+              suite_fail=1
+            fi
+          }
+          seed_for_suite() {
+            case "$1" in
+              ca01-core) echo 777 ;;
+              ca02-policy) echo 776 ;;
+              ca03-info) echo 775 ;;
+              ca04-service) echo 774 ;;
+              ca05-booking) echo 773 ;;
+              ca06-consult) echo 772 ;;
+              ca07-ood) echo 771 ;;
+              ca08-state) echo 778 ;;
+              ca09-manager) echo 779 ;;
+              ca10-outbox) echo 780 ;;
+              *) echo 777 ;;
+            esac
+          }
+          IFS=' ' read -r -a SUITES <<< "${SUITE_LIST}"
+          for suite in "${SUITES[@]}"; do
+            run_suite "${suite}" "$(seed_for_suite "${suite}")"
+          done
+          if [ "${suite_fail}" -ne 0 ]; then
+            exit 1
+          fi
+          REMOTE
+          run_status=0
+          SCRIPT_PATH="/tmp/livecheck-${RUN_ID}.sh"
+          if "${SSH[@]}" "RUN_ID=${RUN_ID} GIT_SHA=${GIT_SHA} SUITE_LIST='${SUITE_LIST}' JID_INDEX='${JID_INDEX}' MIN_ALLOWLIST_JIDS='${MIN_ALLOWLIST_JIDS}' bash -c 'cat > ${SCRIPT_PATH} && chmod 700 ${SCRIPT_PATH} && bash ${SCRIPT_PATH} < /dev/null; status=\$?; rm -f ${SCRIPT_PATH}; exit \$status'" < "${REMOTE_SCRIPT}"; then
+            run_status=0
+          else
+            run_status=$?
+          fi
+          rm -f "${REMOTE_SCRIPT}"
+          if [ "${run_status}" -eq 255 ]; then
+            echo "livecheck skipped: ssh unreachable (exit 255)" | tee artifacts/livecheck-skip.txt
+            exit 0
+          fi
+          attempt=1
+          max=5
+          status=1
+          REMOTE_TAR="/tmp/livecheck-artifacts-${RUN_ID}.tar.gz"
+          while true; do
+            if "${SSH[@]}" "cat ${REMOTE_TAR}" > artifacts/livecheck-artifacts.tar.gz; then
+              if tar -tzf artifacts/livecheck-artifacts.tar.gz >/dev/null 2>&1; then
+                break
+              fi
+              echo "livecheck artifacts download incomplete, retrying..."
+              status=1
+            else
+              status=$?
+            fi
+            if [ "${attempt}" -ge "${max}" ]; then
+              exit "${status}"
+            fi
+            echo "livecheck artifacts download failed (attempt ${attempt}/${max}), retrying in 10s..."
+            attempt=$((attempt + 1))
+            sleep 10
+          done
+          tar -xzf artifacts/livecheck-artifacts.tar.gz -C artifacts
+          if [ "${run_status}" -ne 0 ]; then
+            run_log=$(ls artifacts/livecheck-run-*.log 2>/dev/null | head -n 1 || true)
+            if [ -n "${run_log}" ]; then
+              echo "LIVECHECK_RUN_LOG_TAIL_START"
+              tail -n 200 "${run_log}" || true
+              echo "LIVECHECK_RUN_LOG_TAIL_END"
+            fi
+          fi
+          if [ ! -s artifacts/livecheck-gate.txt ]; then
+            gate_file=$(ls artifacts/livecheck-gate-*.txt 2>/dev/null | head -n 1 || true)
+            if [ -n "${gate_file}" ]; then
+              mv "${gate_file}" artifacts/livecheck-gate.txt
+            fi
+          fi
+          test -s artifacts/livecheck-gate.txt
+          if [ "${run_status}" -ne 0 ]; then
+            exit "${run_status}"
+          fi
+
+      - name: Generate livecheck evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          if ls artifacts/livecheck-*.jsonl >/dev/null 2>&1; then
+            python3 ops/diagnose.py emit-evidence \
+              --input-dir artifacts \
+              --gate artifacts/livecheck-gate.txt \
+              --output artifacts/livecheck-evidence-${{ matrix.group }}.md
+          else
+            echo "No livecheck jsonl artifacts found; skipping evidence."
+          fi
+
+      - name: Upload livecheck artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: livecheck-artifacts-${{ matrix.group }}
+          path: artifacts
