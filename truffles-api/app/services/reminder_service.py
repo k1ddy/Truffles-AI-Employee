@@ -94,7 +94,13 @@ def _send_pending_user_message(
     remote_jid = user.remote_jid if user else None
     if not remote_jid:
         return False
-    ok = send_bot_response(db, conversation.client_id, remote_jid, text)
+    ok = send_bot_response(
+        db,
+        conversation.client_id,
+        remote_jid,
+        text,
+        branch_id=conversation.branch_id,
+    )
     save_message(
         db,
         conversation_id=conversation.id,
