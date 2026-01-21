@@ -181,8 +181,9 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 
 ### CI livecheck параллелизм
 - **Матрица групп:** `ci-livecheck` запускается в 3 параллельных группах (`pool-a/b/c`), каждая гоняет свой набор suite‑ов.
-- **Требование к allowlist:** минимум 3 JID в `OUTBOUND_ALLOWLIST_JIDS`, иначе gate падает (`ALLOWLIST_TOO_SHORT`).
+- **Требование к allowlist:** желательно минимум 3 JID в `OUTBOUND_ALLOWLIST_JIDS`; если меньше — фиксируется `ALLOWLIST_TOO_SHORT` и включается fallback.
 - **Артефакты:** на группу отдельные `livecheck-artifacts-<group>` и `livecheck-evidence-<group>.md`.
+- **Fallback:** если allowlist < 3, `pool-a` запускает все suite последовательно, `pool-b/c` пропускаются.
 
 ### Livecheck-only (быстрый rerun без полного CI)
 - **Когда:** если `ci-livecheck` красный и нужно проверить фикс без повторного lint/unit/build/deploy.
@@ -192,6 +193,7 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
   - `min_allowlist_jids` = 3 (должны быть 3 JID в allowlist для параллели).
 - **Что делает:** проверяет `/admin/version`, затем гоняет только livecheck suites (3 параллельных пула).
 - **Что НЕ делает:** не запускает lint/unit/core/long/asr и не деплоит.
+- **Fallback:** если allowlist меньше `min_allowlist_jids`, запускается один пул (`pool-a`) с полным набором suites.
 
 ### Гейты build/deploy/livecheck (важно понимать)
 - `build-push` запускается только на `main` или `workflow_dispatch`, и только если lint/unit/secret-scan ok.

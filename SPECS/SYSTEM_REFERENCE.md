@@ -750,7 +750,8 @@ LIMIT 3;
 - Малый объём (4–10 сообщений), фиксированный seed, без спама.
 
 **CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca04-service`, `ca05-booking`, `ca06-consult`, `ca07-ood`, `ca08-state`, `ca09-manager`, `ca10-outbox`.
-- Запуск: 3 параллельные группы (`pool-a/b/c`), каждая со своим JID из allowlist (минимум 3 JID).
+- Запуск: 3 параллельные группы (`pool-a/b/c`), каждая со своим JID из allowlist (желательно ≥3 JID).
+- Fallback: если allowlist < 3, `pool-a` запускает все suites последовательно, `pool-b/c` пропускаются.
 - Артефакты: `livecheck-artifacts-<group>/*` + `livecheck-evidence-<group>.md`.
 - **Livecheck Only (workflow):** `.github/workflows/livecheck-only.yml` — ручной rerun без полного CI; делает `deploy-verify` и гоняет suites (параллельно).
 **Evidence artifact:** `livecheck-evidence.md` (генерируется из jsonl + gate через `ops/diagnose.py emit-evidence`).
