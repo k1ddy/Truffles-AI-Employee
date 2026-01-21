@@ -2039,8 +2039,8 @@
 - Prod `/admin/version`: `{"version":"main","git_commit":"6e2cb98fa357f3becba424d6b8f8a17b47ff3440","build_time":"2026-01-21T09:20:14Z"}`
 - Temp `/admin/version` (`:8001`): `{"version":"main","git_commit":"6e2cb98fa357f3becba424d6b8f8a17b47ff3440","build_time":"2026-01-21T09:20:14Z"}`
 - Handover: `id=88704723-a8b5-4211-b732-fa2289068acb`, `conversation_id=ed32e365-f4d8-4862-bcf7-273b79133953`
-- HTTP (same key twice): `Idempotency-Key=idem-test-REDACTED` → оба ответа `200` с одинаковым body.
-- SQL: `select id, client_id, agent_id, scope, request_hash, response_status, created_at from console_idempotency_keys where idempotency_key='idem-test-REDACTED';`
+- HTTP (same key twice): `Idempotency-Key=<redacted>` → оба ответа `200` с одинаковым body.
+- SQL: `select id, client_id, agent_id, scope, request_hash, response_status, created_at from console_idempotency_keys where idempotency_key='<redacted>';`
   → `scope=console.case.take`, `response_status=200`.
 - SQL: `select count(*) from audit_events where event_type='case_taken' and entity_id='88704723-a8b5-4211-b732-fa2289068acb';` → `1`
 - Cleanup: `select count(*) from users where remote_jid like 'console-idem-%@local';` → `0` (user/conv/handovers/idempotency удалены).
