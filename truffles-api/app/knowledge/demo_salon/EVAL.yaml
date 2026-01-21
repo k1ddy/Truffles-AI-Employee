@@ -3996,6 +3996,19 @@ eval_cases:
       expected_reply_type: time
       answer_interpreter_used: true
       answer_slot: datetime
+- id: E361g
+  messages:
+  - хочу записаться на маникюр
+  - subbota vecherom
+  expected:
+    action: reply
+    must_include:
+    - как вас зовут
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: time
+      answer_interpreter_used: true
 - id: E362
   messages:
   - привет

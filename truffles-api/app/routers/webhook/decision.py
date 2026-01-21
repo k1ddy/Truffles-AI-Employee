@@ -323,7 +323,7 @@ def _apply_expected_reply_contract(
             deterministic_matched,
             deterministic_value,
             normalization_flags,
-        ) = legacy._match_expected_reply(
+        ) = _match_expected_reply_candidates(
             expected_reply_type=expected_reply_type,
             message_text=expected_reply_text,
             client_slug=client_slug,
@@ -346,8 +346,7 @@ def _apply_expected_reply_contract(
                 answer_value = ""
             matched = False
             value = None
-        if normalization_flags:
-            answer_meta["normalization_flags"] = normalization_flags
+        answer_meta["normalization_flags"] = normalization_flags
         answer_meta.update(
             {
                 "answer_confidence": answer_confidence,
@@ -2086,6 +2085,48 @@ DATE_MONTH_PATTERN = re.compile(
 NAME_PATTERN = re.compile(r"\bменя зовут\s+([a-zа-яё-]{2,})", re.IGNORECASE)
 PHONE_PATTERN = re.compile(r"\+?\d[\d\s\-\(\)]{8,}\d")
 NAME_NOISE_TOKENS = {"меня", "зовут", "это", "я", "имя"}
+LATIN_PATTERN = re.compile(r"[a-z]")
+CYRILLIC_PATTERN = re.compile(r"[а-яё]")
+
+LATIN_TO_CYRILLIC_DIGRAPHS = (
+    ("shch", "щ"),
+    ("yo", "ё"),
+    ("zh", "ж"),
+    ("kh", "х"),
+    ("ts", "ц"),
+    ("ch", "ч"),
+    ("sh", "ш"),
+    ("yu", "ю"),
+    ("ya", "я"),
+)
+LATIN_TO_CYRILLIC_MAP = {
+    "a": "а",
+    "b": "б",
+    "v": "в",
+    "g": "г",
+    "d": "д",
+    "e": "е",
+    "z": "з",
+    "i": "и",
+    "j": "й",
+    "k": "к",
+    "l": "л",
+    "m": "м",
+    "n": "н",
+    "o": "о",
+    "p": "п",
+    "r": "р",
+    "s": "с",
+    "t": "т",
+    "u": "у",
+    "f": "ф",
+    "h": "х",
+    "y": "ы",
+    "c": "с",
+    "q": "к",
+    "w": "в",
+    "x": "кс",
+}
 
 
 def _normalize_text(text: str) -> str:
@@ -2095,6 +2136,70 @@ def _normalize_text(text: str) -> str:
     normalized = re.sub(r"[^\w\s]", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized
+
+
+def _has_latin(text: str) -> bool:
+    return bool(LATIN_PATTERN.search(text))
+
+
+def _has_cyrillic(text: str) -> bool:
+    return bool(CYRILLIC_PATTERN.search(text))
+
+
+def _transliterate_latin_to_cyrillic(text: str) -> str | None:
+    if not text:
+        return None
+    lowered = text.casefold()
+    if not _has_latin(lowered) or _has_cyrillic(lowered):
+        return None
+    result: list[str] = []
+    idx = 0
+    while idx < len(lowered):
+        matched = False
+        for token, replacement in LATIN_TO_CYRILLIC_DIGRAPHS:
+            if lowered.startswith(token, idx):
+                result.append(replacement)
+                idx += len(token)
+                matched = True
+                break
+        if matched:
+            continue
+        char = lowered[idx]
+        result.append(LATIN_TO_CYRILLIC_MAP.get(char, char))
+        idx += 1
+    transliterated = "".join(result)
+    if transliterated == lowered:
+        return None
+    return transliterated
+
+
+def _match_expected_reply_candidates(
+    *,
+    expected_reply_type: str | None,
+    message_text: str,
+    client_slug: str | None,
+) -> tuple[bool, str | None, list[str]]:
+    matched, value, inner_flags = _match_expected_reply(
+        expected_reply_type=expected_reply_type,
+        message_text=message_text,
+        client_slug=client_slug,
+    )
+    if matched:
+        flags = list(inner_flags) if isinstance(inner_flags, list) else []
+        return True, value, flags
+    transliterated = _transliterate_latin_to_cyrillic(message_text)
+    if transliterated:
+        matched, value, inner_flags = _match_expected_reply(
+            expected_reply_type=expected_reply_type,
+            message_text=transliterated,
+            client_slug=client_slug,
+        )
+        if matched:
+            flags = list(inner_flags) if isinstance(inner_flags, list) else []
+            if "latin_to_cyrillic" not in flags:
+                flags.insert(0, "latin_to_cyrillic")
+            return True, value, flags
+    return False, None, []
 
 
 def _coerce_batch_messages(message_text: str, batch_messages: list[str] | None) -> list[str]:
