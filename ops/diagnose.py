@@ -391,6 +391,23 @@ WEBHOOK_FUZZ_CASES = [
             "как ухаживать после окраски?",
         ],
     },
+    {
+        "case_id": "CHAOS_RU_KZ_MIXED",
+        "expected_policy_section": None,
+        "turns": [
+            "салем, қандай қызметтер бар?",
+            "маникюр бағасы қанша?",
+            "қанша уақыт алады?",
+            "ертеңге жазылғым келеді",
+            "кешке 7-8 болады ма",
+            "адрес қайда?",
+            "жұмыс уақыты нешеге дейін?",
+            "жеңілдік бар ма?",
+            "жазып қойыңыз, имя Алия",
+            "номер 87770001122",
+            "спс",
+        ],
+    },
 ]
 
 NOISE_SUFFIXES = ["плз", "срочно", "спс"]
@@ -1685,67 +1702,85 @@ def _run_webhook_fuzz(args):
     remote_jids = []
 
     for idx, case in enumerate(selected_cases, start=1):
-        base_text = rng.choice(case["messages"])
-        text = _apply_noise(base_text, rng, args.noise)
-        marker = f"FZ:{case['case_id']}:{timestamp}:{idx:02d}"
-        message = f"{text} [{marker}]"
-        message_id = f"FZ-{timestamp}-{idx:02d}-{uuid.uuid4().hex[:8]}"
-        sent_at = datetime.now(timezone.utc).isoformat()
+        case_turns = case.get("turns")
+        if case_turns is None:
+            case_messages = case.get("messages") or []
+            if not case_messages:
+                raise SystemExit("webhook-fuzz: case missing messages")
+            case_turns = [rng.choice(case_messages)]
+        elif not isinstance(case_turns, list) or not case_turns:
+            raise SystemExit("webhook-fuzz: case turns must be non-empty list")
+
         if mode == "logic":
             remote_jid = _logic_jid_for_index(idx)
             if not skip_outbox and allowlist_jids and remote_jid not in allowlist_jids:
                 raise SystemExit(
                     f"webhook-fuzz: remote-jid {remote_jid} not in allowlist; refusing to send"
                 )
-        remote_jids.append(remote_jid)
-        metadata = {
-            "sender": "FuzzRunner",
-            "timestamp": int(time.time()),
-            "messageId": message_id,
-            "remoteJid": remote_jid,
-        }
-        if instance_id:
-            metadata["instanceId"] = instance_id
-        payload = {
-            "body": {
-                "messageType": "text",
-                "message": message,
-                "metadata": metadata,
-            }
-        }
 
-        status = "dry_run"
-        response_status = None
-        response_body = None
-        response_error = None
-        if not args.dry_run:
-            response_status, response_body, response_error = _send_webhook_payload(
-                webhook_url, payload, webhook_secret, args.timeout
-            )
-            if response_status and 200 <= response_status < 300:
-                status = "sent"
+        for turn_idx, base_text in enumerate(case_turns, start=1):
+            text = _apply_noise(base_text, rng, args.noise)
+            if len(case_turns) > 1:
+                marker = f"FZ:{case['case_id']}:{timestamp}:{idx:02d}:{turn_idx:02d}"
+                message_id = f"FZ-{timestamp}-{idx:02d}-{turn_idx:02d}-{uuid.uuid4().hex[:8]}"
             else:
-                status = "error"
+                marker = f"FZ:{case['case_id']}:{timestamp}:{idx:02d}"
+                message_id = f"FZ-{timestamp}-{idx:02d}-{uuid.uuid4().hex[:8]}"
+            message = f"{text} [{marker}]"
+            sent_at = datetime.now(timezone.utc).isoformat()
+            remote_jids.append(remote_jid)
+            metadata = {
+                "sender": "FuzzRunner",
+                "timestamp": int(time.time()),
+                "messageId": message_id,
+                "remoteJid": remote_jid,
+            }
+            if instance_id:
+                metadata["instanceId"] = instance_id
+            payload = {
+                "body": {
+                    "messageType": "text",
+                    "message": message,
+                    "metadata": metadata,
+                }
+            }
 
-        log = {
-            "case_id": case["case_id"],
-            "marker": marker,
-            "message_id": message_id,
-            "remote_jid": remote_jid,
-            "text": message,
-            "sent_at": sent_at,
-            "expected_policy_section": case["expected_policy_section"],
-            "status": status,
-            "http_status": response_status,
-        }
-        if response_error:
-            log["error"] = response_error
-        if response_body:
-            log["response"] = response_body[:200]
-        print(json.dumps(log, ensure_ascii=False))
+            status = "dry_run"
+            response_status = None
+            response_body = None
+            response_error = None
+            if not args.dry_run:
+                response_status, response_body, response_error = _send_webhook_payload(
+                    webhook_url, payload, webhook_secret, args.timeout
+                )
+                if response_status and 200 <= response_status < 300:
+                    status = "sent"
+                else:
+                    status = "error"
 
-        markers.append(marker)
-        message_ids.append(message_id)
+            log = {
+                "case_id": case["case_id"],
+                "marker": marker,
+                "message_id": message_id,
+                "remote_jid": remote_jid,
+                "text": message,
+                "sent_at": sent_at,
+                "expected_policy_section": case["expected_policy_section"],
+                "status": status,
+                "http_status": response_status,
+                "turn": turn_idx if len(case_turns) > 1 else None,
+            }
+            if response_error:
+                log["error"] = response_error
+            if response_body:
+                log["response"] = response_body[:200]
+            print(json.dumps(log, ensure_ascii=False))
+
+            markers.append(marker)
+            message_ids.append(message_id)
+
+            if turn_idx < len(case_turns):
+                time.sleep(rng.uniform(min_wait, max_wait))
 
         if idx < len(selected_cases):
             time.sleep(rng.uniform(min_wait, max_wait))
@@ -1783,6 +1818,7 @@ def _run_webhook_fuzz(args):
 
     summary = {
         "count": len(selected_cases),
+        "message_count": len(message_ids),
         "base_url": base_url,
         "client_slug": client_slug,
         "seed": args.seed,
