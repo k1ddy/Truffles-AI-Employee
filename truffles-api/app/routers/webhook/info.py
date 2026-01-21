@@ -215,6 +215,7 @@ def _build_info_intent_reply(
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=guest_signal,
+            client_slug=client_slug,
         )
         meta = _build_fact_meta(
             meta=meta,
@@ -226,6 +227,7 @@ def _build_info_intent_reply(
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=guest_signal,
+            client_slug=client_slug,
         )
         meta = _build_fact_meta(
             meta=meta,
@@ -233,13 +235,8 @@ def _build_info_intent_reply(
             fact_intents=[intent],
         )
         return reply, meta or None
-    if (
-        intent in {"pricing", "duration"}
-        and not service_query
-        and message_text
-        and client_slug == "demo_salon"
-    ):
-        service_query = get_demo_salon_service_hint(message_text)
+    if intent in {"pricing", "duration"} and not service_query and message_text:
+        service_query = get_demo_salon_service_hint(message_text, client_slug=client_slug)
     if intent == "pricing":
         question = f"Сколько стоит {service_query}?" if service_query else "Сколько стоит?"
     elif intent == "duration":
@@ -252,6 +249,7 @@ def _build_info_intent_reply(
         info_prefix, info_meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=guest_signal,
+            client_slug=client_slug,
         )
     decision = get_demo_salon_decision(question, client_slug=client_slug)
     if decision and decision.action == "reply" and decision.response:
@@ -267,7 +265,7 @@ def _build_info_intent_reply(
             fact_intents=[intent],
         )
         return reply_text, meta or None
-    fallback = format_reply_from_truth("duration_or_price_clarify")
+    fallback = format_reply_from_truth("duration_or_price_clarify", client_slug=client_slug)
     if info_prefix:
         fallback = f"{info_prefix} {fallback}".strip() if fallback else info_prefix
     meta = _build_fact_meta(
@@ -291,10 +289,7 @@ def _extract_truth_gate_info_intents(
     truth_gate = policy_handler.get("truth_gate")
     if not truth_gate:
         return []
-    if policy_type == "demo_salon":
-        decision = truth_gate(message_text, client_slug=client_slug, intent_decomp=intent_decomp)
-    else:
-        decision = truth_gate(message_text)
+    decision = truth_gate(message_text, client_slug=client_slug, intent_decomp=intent_decomp)
     if not decision or getattr(decision, "action", None) != "reply":
         return []
     intent = getattr(decision, "intent", None)
@@ -465,11 +460,10 @@ def _handle_info_flow(
     if (
         info_class
         and message_text
-        and client_slug == "demo_salon"
         and not info_class_intents
     ):
         normalized = legacy.normalize_for_matching(message_text)
-        service_hint = get_demo_salon_service_hint(message_text)
+        service_hint = get_demo_salon_service_hint(message_text, client_slug=client_slug)
         if service_hint:
             if legacy._contains_any(
                 normalized,
@@ -529,7 +523,7 @@ def _handle_info_flow(
         if message_text and client_slug:
             normalized_for_alias = legacy._normalize_service_text(message_text)
             if normalized_for_alias:
-                alias_match = legacy._match_service(normalized_for_alias)
+                alias_match = legacy._match_service(normalized_for_alias, client_slug=client_slug)
                 if isinstance(alias_match, dict):
                     alias_name = alias_match.get("name")
                     if isinstance(alias_name, str) and alias_name.strip():
@@ -660,6 +654,7 @@ def _handle_info_flow(
             base_bundle_reply, base_bundle_meta = build_info_combined_reply(
                 include_parking=include_parking,
                 include_guest=include_guest,
+                client_slug=client_slug,
             )
 
         replies: list[str] = []
@@ -783,6 +778,7 @@ def _handle_info_flow(
         base_bundle_reply, base_bundle_meta = build_info_combined_reply(
             include_parking=include_parking,
             include_guest=True,
+            client_slug=client_slug,
         )
         if base_bundle_meta:
             info_class_intents_for_reply.add("guest_policy")
@@ -1065,22 +1061,19 @@ def _handle_truth_gate_fallback(
     truth_gate = policy_handler.get("truth_gate") if policy_handler else None
     decision = None
     if truth_gate:
-        if policy_type == "demo_salon":
-            decision = truth_gate(
-                message_text,
-                client_slug=client_slug,
-                intent_decomp=intent_decomp_payload,
-            )
-        else:
-            decision = truth_gate(message_text)
+        decision = truth_gate(
+            message_text,
+            client_slug=client_slug,
+            intent_decomp=intent_decomp_payload,
+        )
     if decision:
         if decision.intent == "price_query":
             price_item_fn = policy_handler.get("price_item") if policy_handler else None
-            price_item = price_item_fn(message_text) if price_item_fn else None
+            price_item = price_item_fn(message_text, client_slug=client_slug) if price_item_fn else None
             if not price_item and price_item_fn and isinstance(getattr(decision, "meta", None), dict):
                 service_query = decision.meta.get("service_query")
                 if isinstance(service_query, str) and service_query.strip():
-                    price_item = price_item_fn(service_query)
+                    price_item = price_item_fn(service_query, client_slug=client_slug)
             if price_item:
                 context = legacy._get_conversation_context(conversation)
                 context = legacy._set_service_hint(context, price_item, now)
@@ -1302,6 +1295,7 @@ def _handle_offline_info_class(
     consult_return_prompt: str | None,
     consult_context: dict | None,
     consult_return_reason: str | None,
+    client_slug: str | None,
     maybe_apply_fact_guard: Callable[..., Any],
     send_and_save: Callable[..., tuple[str, bool]],
 ) -> WebhookResponse | None:
@@ -1359,6 +1353,7 @@ def _handle_offline_info_class(
         base_bundle_reply, base_bundle_meta = build_info_combined_reply(
             include_parking=include_parking,
             include_guest=include_guest,
+            client_slug=client_slug,
         )
         if isinstance(base_bundle_reply, str) and base_bundle_reply.strip():
             info_meta_combined: dict[str, Any] = {}

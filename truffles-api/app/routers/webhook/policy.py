@@ -116,24 +116,25 @@ def _should_escalate_to_pending(policy: dict[str, bool], intent: Intent) -> bool
     return bool(policy.get("allow_handover_create")) and legacy.should_escalate(intent)
 
 
-def _load_policy_pack(*, policy_type: str | None) -> dict | None:
-    if policy_type != "demo_salon":
-        return None
+def _load_policy_pack(*, policy_type: str | None, client_slug: str | None) -> dict | None:
     from app.services.demo_salon_knowledge import load_policy_pack
 
-    policy_pack = load_policy_pack()
+    slug = policy_type or client_slug
+    if not slug:
+        return None
+    policy_pack = load_policy_pack(slug)
     return policy_pack if isinstance(policy_pack, dict) and policy_pack else None
 
 
-def _get_policy_pack(client: Client | None) -> dict | None:
+def _get_policy_pack(client: Client | None, *, client_slug: str | None) -> dict | None:
     if not client or not isinstance(client.config, dict):
         return None
     policy_pack = _extract_policy_pack_from_config(client.config)
     if policy_pack:
         return policy_pack
-    policy_type = _get_policy_type(client)
+    policy_type = _get_policy_type(client, client_slug=client_slug)
     if policy_type:
-        return _load_policy_pack(policy_type=policy_type)
+        return _load_policy_pack(policy_type=policy_type, client_slug=client_slug)
     return None
 
 
@@ -311,6 +312,7 @@ def _is_hard_law_intent(
     *,
     policy_type: str | None = None,
     policy_pack: dict | None = None,
+    client_slug: str | None = None,
 ) -> bool:
     if not isinstance(intent, str):
         return False
@@ -318,7 +320,7 @@ def _is_hard_law_intent(
     policy_pack = (
         policy_pack
         if isinstance(policy_pack, dict)
-        else _load_policy_pack(policy_type=policy_type)
+        else _load_policy_pack(policy_type=policy_type, client_slug=client_slug)
     )
     hard_law = _get_policy_section(policy_pack, "hard_law")
     intents = _policy_str_list(hard_law.get("intents") if isinstance(hard_law, dict) else None)
@@ -332,11 +334,12 @@ def _looks_like_policy_topic(
     *,
     policy_type: str | None = None,
     policy_pack: dict | None = None,
+    client_slug: str | None = None,
 ) -> bool:
     policy_pack = (
         policy_pack
         if isinstance(policy_pack, dict)
-        else _load_policy_pack(policy_type=policy_type)
+        else _load_policy_pack(policy_type=policy_type, client_slug=client_slug)
     )
     hard_law_sections = set(_resolve_hard_law_sections(policy_pack))
     return bool(
@@ -353,6 +356,7 @@ def _detect_llm_guard_topics(
     *,
     policy_type: str | None = None,
     policy_pack: dict | None = None,
+    client_slug: str | None = None,
 ) -> list[str]:
     from . import _legacy as legacy
 
@@ -362,7 +366,7 @@ def _detect_llm_guard_topics(
     policy_pack = (
         policy_pack
         if isinstance(policy_pack, dict)
-        else _load_policy_pack(policy_type=policy_type)
+        else _load_policy_pack(policy_type=policy_type, client_slug=client_slug)
     )
     guard_topics = _get_guard_topics(policy_pack)
     hits: list[str] = []
@@ -379,6 +383,7 @@ def _looks_like_promotions_request(
     *,
     policy_type: str | None = None,
     policy_pack: dict | None = None,
+    client_slug: str | None = None,
 ) -> bool:
     from . import _legacy as legacy
 
@@ -390,7 +395,7 @@ def _looks_like_promotions_request(
     policy_pack = (
         policy_pack
         if isinstance(policy_pack, dict)
-        else _load_policy_pack(policy_type=policy_type)
+        else _load_policy_pack(policy_type=policy_type, client_slug=client_slug)
     )
     discounts = _get_policy_section(policy_pack, "discounts")
     keywords = _policy_str_list(discounts.get("keywords") if isinstance(discounts, dict) else None)
@@ -410,11 +415,12 @@ def _load_discount_policy_payload(
     *,
     policy_pack: dict | None = None,
     policy_type: str | None = None,
+    client_slug: str | None = None,
 ) -> dict | None:
     policy_pack = (
         policy_pack
         if isinstance(policy_pack, dict)
-        else _load_policy_pack(policy_type=policy_type)
+        else _load_policy_pack(policy_type=policy_type, client_slug=client_slug)
     )
     if not isinstance(policy_pack, dict):
         return None
@@ -488,13 +494,13 @@ def _format_discounts_policy_reply(
     return None
 
 
-def _demo_salon_escalation_gate(messages: list[str]):
+def _demo_salon_escalation_gate(messages: list[str], *, client_slug: str | None):
     from app.services.demo_salon_knowledge import get_demo_salon_decision
 
     from . import _legacy as legacy
 
     for message in messages:
-        decision = get_demo_salon_decision(message)
+        decision = get_demo_salon_decision(message, client_slug=client_slug)
         if not decision or decision.action != "escalate":
             continue
         if decision.intent in {"medical"} and legacy._is_hygiene_context_text(message):
@@ -503,17 +509,21 @@ def _demo_salon_escalation_gate(messages: list[str]):
     return None
 
 
-def _demo_salon_price_sidecar(messages: list[str]) -> tuple[str | None, str | None]:
+def _demo_salon_price_sidecar(
+    messages: list[str],
+    *,
+    client_slug: str | None,
+) -> tuple[str | None, str | None]:
     from app.services.demo_salon_knowledge import get_demo_salon_price_item, get_demo_salon_price_reply
 
     for message in messages:
-        price_reply = get_demo_salon_price_reply(message)
+        price_reply = get_demo_salon_price_reply(message, client_slug=client_slug)
         if price_reply:
-            return price_reply, get_demo_salon_price_item(message)
+            return price_reply, get_demo_salon_price_item(message, client_slug=client_slug)
     return None, None
 
 
-def _get_policy_type(client: Client | None) -> str | None:
+def _get_policy_type(client: Client | None, *, client_slug: str | None) -> str | None:
     if not client or not isinstance(client.config, dict):
         return None
     policy = client.config.get("policy")
@@ -524,20 +534,25 @@ def _get_policy_type(client: Client | None) -> str | None:
     legacy = client.config.get("policy_type")
     if isinstance(legacy, str) and legacy.strip():
         return legacy.strip()
+    if isinstance(client_slug, str) and client_slug.strip():
+        return client_slug.strip()
     return None
 
 
-def _get_policy_handler(client: Client | None) -> dict | None:
+def _get_policy_handler(client: Client | None, *, client_slug: str | None) -> dict | None:
     from . import _legacy as legacy
 
-    policy_type = _get_policy_type(client)
+    policy_type = _get_policy_type(client, client_slug=client_slug)
     if not policy_type:
         return None
     handler = legacy._POLICY_HANDLERS.get(policy_type)
+    if not handler and policy_type:
+        handler = legacy._POLICY_HANDLERS.get("demo_salon")
     if not handler:
         return None
-    policy_pack = _get_policy_pack(client)
+    policy_pack = _get_policy_pack(client, client_slug=client_slug)
     payload = dict(handler)
+    payload["policy_type"] = policy_type
     payload["policy_pack"] = policy_pack
     return payload
 

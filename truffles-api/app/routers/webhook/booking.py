@@ -101,25 +101,25 @@ def _clean_name_candidate(value: str) -> str:
     return cleaned
 
 
-@lru_cache(maxsize=1)
-def _load_datetime_lexicon() -> dict:
+@lru_cache(maxsize=16)
+def _load_datetime_lexicon(client_slug: str | None) -> dict:
     from app.services.demo_salon_knowledge import load_yaml_truth
 
-    truth = load_yaml_truth()
+    truth = load_yaml_truth(client_slug)
     domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
     lexicon = domain_pack.get("datetime_lexicon") if isinstance(domain_pack, dict) else None
     return lexicon if isinstance(lexicon, dict) else {}
 
 
-@lru_cache(maxsize=1)
-def _build_datetime_variant_index() -> tuple[
+@lru_cache(maxsize=16)
+def _build_datetime_variant_index(client_slug: str | None) -> tuple[
     dict[str, str],
     set[str],
     list[tuple[tuple[str, ...], str, str]],
 ]:
     from . import _legacy as legacy
 
-    lexicon = _load_datetime_lexicon()
+    lexicon = _load_datetime_lexicon(client_slug)
     variant_map: dict[str, str] = {}
     canonical_set: set[str] = set()
     entries: list[tuple[tuple[str, ...], str, str]] = []
@@ -157,14 +157,18 @@ def _build_datetime_variant_index() -> tuple[
     return variant_map, canonical_set, entries
 
 
-def _canonicalize_datetime_text(message_text: str) -> tuple[str, list[dict[str, Any]]]:
+def _canonicalize_datetime_text(
+    message_text: str,
+    *,
+    client_slug: str | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
     from . import _legacy as legacy
 
     normalized = legacy._normalize_text(message_text)
     if not normalized:
         return "", []
 
-    variant_map, canonical_set, entries = _build_datetime_variant_index()
+    variant_map, canonical_set, entries = _build_datetime_variant_index(client_slug)
     if not variant_map:
         return normalized, []
 
@@ -217,12 +221,16 @@ def _canonicalize_datetime_text(message_text: str) -> tuple[str, list[dict[str, 
     return " ".join(replaced_tokens), matches
 
 
-def _resolve_datetime_offline(message_text: str) -> dict[str, Any]:
+def _resolve_datetime_offline(
+    message_text: str,
+    *,
+    client_slug: str | None = None,
+) -> dict[str, Any]:
     result: dict[str, Any] = {"value": None, "confidence": 0.0, "evidence": {}}
     if not message_text:
         return result
 
-    normalized, matches = _canonicalize_datetime_text(message_text)
+    normalized, matches = _canonicalize_datetime_text(message_text, client_slug=client_slug)
     if not normalized:
         return result
 
@@ -686,14 +694,11 @@ def _handle_booking_interrupt(
                 if not info_decision:
                     truth_gate = policy_handler.get("truth_gate")
                     if truth_gate:
-                        if policy_type == "demo_salon":
-                            info_decision = truth_gate(
-                                booking_interrupt_text,
-                                client_slug=client_slug,
-                                intent_decomp=intent_decomp_payload,
-                            )
-                        else:
-                            info_decision = truth_gate(booking_interrupt_text)
+                        info_decision = truth_gate(
+                            booking_interrupt_text,
+                            client_slug=client_slug,
+                            intent_decomp=intent_decomp_payload,
+                        )
                         if info_decision:
                             info_source = "truth_gate"
             if not info_decision and batch_non_booking_message and not booking_info_intents:
@@ -709,14 +714,11 @@ def _handle_booking_interrupt(
                 if not info_decision:
                     truth_gate = policy_handler.get("truth_gate")
                     if truth_gate:
-                        if policy_type == "demo_salon":
-                            info_decision = truth_gate(
-                                booking_interrupt_text,
-                                client_slug=client_slug,
-                                intent_decomp=intent_decomp_payload,
-                            )
-                        else:
-                            info_decision = truth_gate(booking_interrupt_text)
+                        info_decision = truth_gate(
+                            booking_interrupt_text,
+                            client_slug=client_slug,
+                            intent_decomp=intent_decomp_payload,
+                        )
                         if info_decision:
                             info_source = "truth_gate"
             if not info_decision and booking_time_service_candidate:
@@ -733,14 +735,11 @@ def _handle_booking_interrupt(
                 if not info_decision:
                     truth_gate = policy_handler.get("truth_gate")
                     if truth_gate:
-                        if policy_type == "demo_salon":
-                            candidate = truth_gate(
-                                booking_interrupt_text,
-                                client_slug=client_slug,
-                                intent_decomp=intent_decomp_payload,
-                            )
-                        else:
-                            candidate = truth_gate(booking_interrupt_text)
+                        candidate = truth_gate(
+                            booking_interrupt_text,
+                            client_slug=client_slug,
+                            intent_decomp=intent_decomp_payload,
+                        )
                         if legacy._is_booking_time_service_decision(candidate):
                             info_decision = candidate
                             info_source = "truth_gate"
@@ -1072,7 +1071,10 @@ def _handle_booking_flow(
     ):
         price_sidecar = policy_handler.get("price_sidecar")
         if price_sidecar:
-            policy_price_sidecar, price_item = price_sidecar(booking_messages)
+            policy_price_sidecar, price_item = price_sidecar(
+                booking_messages,
+                client_slug=client_slug,
+            )
             if price_item:
                 booking_context = (
                     booking_context
