@@ -1957,6 +1957,25 @@
 
 **Status:** DONE (OTel endpoint reachable from workers; no behavior change).
 
+### 2026-01-21 — Console contracts baseline (events + integrations + runbooks)
+
+**Что сделали (doc-only):**
+- Добавили контракты событий и интеграций:
+  - `contracts/events/outbox.v1.jsonschema`
+  - `contracts/integrations/messaging_port.v1.md`
+  - `contracts/integrations/llm_port.v1.md`
+  - `contracts/integrations/crm_port.v1.md`
+  - `contracts/integrations/calendar_port.v1.md`
+- Добавили runbooks:
+  - `docs/runbooks/OUTBOX.md`
+  - `docs/runbooks/SENTINEL.md`
+  - `docs/runbooks/INCIDENTS.md`
+- Обновили карту проекта: `STRUCTURE.md`.
+
+**Evidence:**
+- `git diff --stat` (doc-only, без изменения runtime).
+
+**Status:** DONE (контрактный baseline, без runtime изменений).
 ### 2026-01-21 — Console plan inventory (UI + contracts) — context + remaining work
 
 **Контекст (из ТЗ 2026‑01‑17):**
