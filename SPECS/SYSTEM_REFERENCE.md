@@ -813,6 +813,59 @@ decision graph (state/LAW/policy/booking/info/consult)
 chatflow_service → WhatsApp
 ```
 
+### Decision pipeline (code-accurate, webhook → response)
+**Источник правды (код):**
+- `truffles-api/app/routers/webhook/http.py` (HTTP ingress + preflight)
+- `truffles-api/app/routers/webhook/decision.py` (оркестрация)
+- `truffles-api/app/routers/webhook/outbox.py` (enqueue + outbox worker helpers)
+- `truffles-api/app/contracts/decision.py` (Decision Graph stages)
+- `truffles-api/app/services/chatflow_service.py` (outbound send-text)
+- `truffles-api/app/main.py` (outbox worker loop, если воркер внутри API процесса)
+
+**Шаги (по факту кода):**
+1) **HTTP ingress** → `legacy._handle_webhook_payload(... enqueue_only=True)`  
+   Эффект: ACK-first всегда включен для входящего webhook.
+2) **Preflight** → `http._run_preflight`  
+   Эффект: reject/drop с `stage=preflight` при client/secret/remote_jid/branch/instanceId ошибке.
+3) **Dedupe** → `dedup._handle_dedup_gate`  
+   Эффект: `stage=dedupe` + early return при duplicate message_id.
+4) **Persist user message** → `save_message`  
+   Эффект: user-message в БД; decision_meta.trace_id сохраняется.
+5) **Enqueue-only** → `outbox._handle_enqueue_only_accept`  
+   Эффект: fast-forward в Telegram при pending/manager + `outbox_messages` enqueue + `stage=outbox`.
+6) **Outbox worker** → `main._outbox_worker_loop`  
+   Эффект: обработка outbox, вызов `_handle_webhook_payload(skip_persist=True)`.
+7) **Skip-persist prep** → `outbox._prepare_skip_persist`  
+   Эффект: early return + `stage=skip_persist` если нет данных.
+8) **Decision plan + contracts** → `build_context_contract` + `build_decision_plan`  
+   Эффект: `stage=contract` + `stage=decision_graph` (plan_id + stages).
+9) **Gate stack (по порядку decision.py)** → см. Gate Ledger ниже.  
+10) **Send + finalize** → `_send_and_save` → `send_bot_response`  
+    Эффект: assistant message в БД, outbound в ChatFlow.
+11) **Outbox status** → `mark_outbox_status`  
+    Эффект: `SENT/FAILED` + backoff (idempotency/auto-heal).
+
+### Gate Ledger (условие → эффект → trace/meta)
+| Order | Gate / function (file) | Condition (summary) | Effect / next step | Trace / meta |
+| --- | --- | --- | --- | --- |
+| 1 | **Branch selection** (`branch_selection._handle_branch_selection_gate`) | branch_mode ask_user/hybrid, >1 branch | Prompt/select branch and return | `stage=branch_selection`, decision=prompt/selected |
+| 2 | **Shield** (`shield._handle_shield_gate`) | spam/too_long OR toxic/nonsense | Drop or escalate; early return | `stage=shield`, decision=drop/escalate |
+| 3 | **Session timeout reset** (`guards._apply_session_timeout_reset`) | last_message_at > SESSION_TIMEOUT_HOURS | Reset mute/context | (no stage; log only) |
+| 4 | **Manager active gate** (`decision._handle_manager_active_gate`) | state=MANAGER_ACTIVE | Early return (no bot reply) | (no stage) |
+| 5 | **Reengage/mute** (`guards._handle_reengage_and_mute_gate`) | reengage confirmation or muted | Resume or skip | `stage=routing`, decision=reengage_confirmed/muted_skip/... |
+| 6 | **ASR confirm** (`decision` ASR block) | voice + low confidence | Ask confirm; early return | `stage=media`, decision=asr_confirm_* |
+| 7 | **Pending gate** (`pending._handle_pending_gate`) | state=PENDING/manager | SLA ping/ack/close/wait | `stage=pending_sla/pending_resume/pending_wait/pending_status` |
+| 8 | **Media gate** (`decision` media checks) | unsupported/rejected media | Early reply | `stage=media`, decision=unsupported/rejected |
+| 9 | **Debounce gate** (`dedup._handle_debounce_gate`) | bursty inputs | Skip intermediates | `stage=debounce`, decision=skip/manager_active |
+| 10 | **Handover confirm** (`pending._handle_handover_confirmation_gate`) | pending confirmation | Escalate or clarify | `stage=handover_confirmation`, decision=confirmed/declined |
+| 11 | **Hard‑LAW** (`policy._handle_hard_law_gate`) | hard_law match | Escalate/reply | `stage=policy_gate`, policy_gate=hard_law |
+| 12 | **Policy gate** (`policy._handle_policy_escalation_gate`) | policy_pack match | Escalate/reply | `stage=policy_gate`, policy_gate={...} |
+| 13 | **Opt‑out mute** (`guards._handle_opt_out_mute_gate`) | opt_out_in_batch | Mute (first/second) | `stage=rejection`, decision=muted_first/muted_second |
+| 14 | **Fast intent / smalltalk** (`decision` fast intent) | greeting/thanks/ack | Short reply | `stage=fast_intent` / `stage=smalltalk` |
+| 15 | **Consult flow** (`response._handle_consult_flow`) | consult_intent or consult_context | Reply/clarify/escalate | `stage=consult_flow`, `stage=consult_context`, `stage=consult` |
+| 16 | **Info flow** (`info._handle_info_flow`) | info_class intents | Reply / truth‑gate | `stage=info_class`, `stage=truth_gate` |
+| 17 | **Booking flow** (`booking._handle_booking_flow`) | booking_signal/booking_active | Reply/interrupt | `stage=booking`, `stage=booking_interrupt`, `stage=truth_gate` |
+
 ### Эскалация
 ```
 Low confidence (RAG score < MID_CONFIDENCE_THRESHOLD, сейчас 0.5) ИЛИ intent=HUMAN_REQUEST/FRUSTRATION
