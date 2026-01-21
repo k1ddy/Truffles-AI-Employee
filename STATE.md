@@ -1783,6 +1783,25 @@
 
 **Status:** BLOCKED — нужен образ с `app.workers` (PR/CI build + deploy), иначе внешние воркеры не стартуют.
 
+### 2026-01-21 — Worker cutover success (sha image deploy)
+
+**Что сделали (prod host):**
+- Деплой образа ветки `feat/decouple-workers` (GHCR tag `sha-e93d04e9...`) через `/home/zhan/restart_api.sh` с verify по commit/version.
+- Перезапустили воркеры `truffles-outbox` и `truffles-sentinel` через `scripts/restart_workers.sh` с тем же образом.
+
+**Evidence:**
+- CI run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21192857190 (workflow_dispatch; build-push OK; deploy gate=false; livecheck gate=false).
+- `/admin/version`: `{"version":"feat/decouple-workers","git_commit":"e93d04e9165537c1a67a1dd3c88010ac60d66f5d","build_time":"2026-01-21T00:59:42Z"}`
+- `docker ps`:
+  - `truffles-api` image `ghcr.io/k1ddy/truffles-ai-employee:sha-e93d04e9165537c1a67a1dd3c88010ac60d66f5d`
+  - `truffles-outbox` image `ghcr.io/k1ddy/truffles-ai-employee:sha-e93d04e9165537c1a67a1dd3c88010ac60d66f5d`
+  - `truffles-sentinel` image `ghcr.io/k1ddy/truffles-ai-employee:sha-e93d04e9165537c1a67a1dd3c88010ac60d66f5d`
+- Worker logs:
+  - outbox: `Starting Outbox Worker...`
+  - sentinel: `Starting Sentinel Worker...`
+
+**Status:** DONE (prod running branch image; no live-check run).
+
 ### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
 
 **CI:**
