@@ -2115,6 +2115,17 @@
 
 **Status:** DONE (OIDC login работает).
 
+### 2026-01-21 — Merge housekeeping (console login + outbox triage)
+
+**Что сделали:**
+- Слили в `main` ветки с фиксом OIDC audience и записью outbox triage.
+- Удалили удаленные ветки после мержа.
+
+**Evidence:**
+- `main` merge commits: `261bbb94` (ops/keycloak-audience-mapper), `eaa93277` (docs/state-outbox-console-login-triage).
+
+**Status:** DONE.
+
 ### 2026-01-21 — CI livecheck reset meta timeout (branch sender JIDs)
 
 **Симптом:**
