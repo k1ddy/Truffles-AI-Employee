@@ -2126,6 +2126,41 @@
 
 **Status:** DONE.
 
+### 2026-01-21 — Task Package (active): CI quality gates (Console)
+
+- Название/цель: внедрить CI‑гейты качества для Console (Playwright smoke, Schemathesis contract, k6 load) + правило “новая фича = новый тест”.
+- Canon refs: `STATE.md` (Console plan inventory), `TECH.md` (CI/инструменты), `SPECS/SYSTEM_REFERENCE.md` (test design rules), `AGENTS.md` (process).
+- Invariant: не трогать runtime‑логику; не запускать мутационные тесты против prod; CI не должен ломать текущий deploy/livecheck поток.
+- Scope: CI jobs + Playwright конфиг/теги + k6 сценарий + инструкции в docs/AGENTS.
+- Out of scope: любые изменения API/БД, staging‑инфра, full E2E с записью/резолвом.
+- Touch-list: `.github/workflows/ci.yml`, `console-web/playwright.config.ts`, `console-web/e2e/smoke.spec.ts`, `console-web/package.json`, `ops/**` (k6 script), `TECH.md`, `AGENTS.md`, `docs/SESSION_START_PROMPT.txt`, `STRUCTURE.md`.
+- Plan:
+  1) Настроить Playwright smoke (env‑baseURL, теги, исключить мутации).
+  2) Добавить Schemathesis GET‑only gate.
+  3) Добавить k6 сценарий + manual/scheduled gate.
+  4) Обновить docs/AGENTS с правилом “feature → test”.
+  5) Запустить CI или зафиксировать GAP, если CI недоступен.
+- DoD: новые jobs есть в CI; smoke/contract/load имеют команды; документы обновлены; evidence в `STATE.md`.
+- Checks: CI workflow (PR) + manual `workflow_dispatch` для k6.
+- Evidence: CI run URL + артефакты (если нет — отметить GAP).
+- Rollback: revert PR commits.
+- No-go: не писать в prod data plane, не добавлять обходы security/auth в рантайм.
+- Риски/блокеры: нет test‑DB/стейджинга → делаем только read‑only smoke/contract.
+- Branch: `ops/ci-quality-gates`; Worktree: `/home/zhan/truffles-main-wt/ci-quality-gates`; Base: `origin/main`; Merge policy: merge; Cleanup: удалить ветку + worktree после merge.
+
+### 2026-01-21 — Console CI quality gates (Playwright/Schemathesis/k6)
+
+**Что сделали (код/доки):**
+- Playwright: добавили env‑конфиг, smoke‑теги и safe‑skip для мутаций.
+- CI: новые jobs `console-e2e`, `console-contract`, `console-k6` (manual).
+- k6: добавлен `ops/k6/console_smoke.js` (GET‑only).
+- Docs/Process: обновлены `AGENTS.md`, `docs/SESSION_START_PROMPT.txt`, `TECH.md`, `docs/DEV_SETUP.md`, `STRUCTURE.md`.
+
+**Checks:**
+- CI не запускался (нужен PR/CI run).
+
+**Status:** PLAN/GAP (ожидает CI evidence).
+
 ### 2026-01-21 — CI livecheck reset meta timeout (branch sender JIDs)
 
 **Симптом:**
