@@ -1416,6 +1416,10 @@ def _filter_cases(cases: list[dict]) -> list[dict]:
         asr_cases = [case for case in cases if "asr" in _extract_tiers(case)]
         assert asr_cases, "ASR eval set is empty"
         return asr_cases
+    if EVAL_TIER == "chaos":
+        chaos_cases = [case for case in cases if "chaos" in _extract_tiers(case)]
+        assert chaos_cases, "Chaos eval set is empty"
+        return chaos_cases
     if EVAL_TIER == "long":
         long_cases = [case for case in cases if "long" in _extract_tiers(case)]
         assert long_cases, "Long eval set is empty"

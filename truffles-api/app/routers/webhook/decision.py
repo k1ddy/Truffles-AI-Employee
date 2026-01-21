@@ -319,7 +319,11 @@ def _apply_expected_reply_contract(
         )
         answer_used = answer_confidence_ok or answer_valid
         answer_value_validated = True
-        deterministic_matched, deterministic_value = legacy._match_expected_reply(
+        (
+            deterministic_matched,
+            deterministic_value,
+            normalization_flags,
+        ) = legacy._match_expected_reply(
             expected_reply_type=expected_reply_type,
             message_text=expected_reply_text,
             client_slug=client_slug,
@@ -342,6 +346,8 @@ def _apply_expected_reply_contract(
                 answer_value = ""
             matched = False
             value = None
+        if normalization_flags:
+            answer_meta["normalization_flags"] = normalization_flags
         answer_meta.update(
             {
                 "answer_confidence": answer_confidence,
