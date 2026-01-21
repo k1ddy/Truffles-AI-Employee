@@ -123,7 +123,7 @@ npm run test:e2e:smoke
 ```bash
 SCHEMATHESIS_TOKEN="<bearer token>" \
 schemathesis run /home/zhan/truffles-main/contracts/console_api/openapi.v1.yaml \
-  --base-url https://api.truffles.kz/console/v1 \
+  --url https://api.truffles.kz/console/v1 \
   --method GET \
   --checks all \
   --request-timeout 10 \

@@ -264,7 +264,7 @@ jobs:
       - name: Schemathesis GET-only smoke
         run: |
           schemathesis run contracts/console_api/openapi.v1.yaml \
-            --base-url https://api.truffles.kz/console/v1 \
+            --url https://api.truffles.kz/console/v1 \
             --method GET \
             --checks all \
             --request-timeout 10 \

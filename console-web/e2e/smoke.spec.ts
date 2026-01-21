@@ -76,7 +76,7 @@ test.describe('Inbox Features', () => {
     test('should filter by status @smoke', async ({ page }) => {
         await page.locator('select').first().selectOption('Ожидает');
         await page.waitForTimeout(1000);
-        await expect(page.getByText(/заявк/i)).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Заявки' })).toBeVisible();
     });
 
     test('should navigate to case detail @smoke', async ({ page }) => {
