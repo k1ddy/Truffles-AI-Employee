@@ -13,6 +13,8 @@
 | `STRUCTURE.md` | Этот файл — карта проекта | Оба (каждую сессию) |
 | `TECH.md` | Доступы, команды, данные сервера | Кодер |
 | `contracts/` | Канон контрактов (Console API, ошибки) | Архитектор/Frontend |
+| `contracts/events/` | Контракты событий (outbox) | Архитектор/Backend |
+| `contracts/integrations/` | Контракты портов/адаптеров | Архитектор/Backend |
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
@@ -43,7 +45,7 @@
 - Поведение/архитектура: `SPECS/*` (кроме `SPECS/ACTIVE_LEARNING_PLAN.md`; ключевые: `CONSULTANT.md`, `ESCALATION.md`, `ARCHITECTURE.md`).
 - Процесс/инструменты (entrypoint): `SPECS/SYSTEM_REFERENCE.md` → section "Start Here — Process Map".
 - План/приоритеты: `STRATEGY/TECH_ROADMAP.md`.
-- Операционные SOP: `SPECS/SYSTEM_REFERENCE.md` (deploy/knowledge update) + `TECH.md`.
+- Операционные SOP: `SPECS/SYSTEM_REFERENCE.md` (deploy/knowledge update) + `TECH.md` + `docs/runbooks/*`.
 - Решения/GAP: `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml`.
 - Runtime pack: `truffles-api/app/knowledge/demo_salon/*`; RAG docs: `knowledge/demo_salon/*`.
 - Derived/статусы: `docs/TECH_STATUS.md`, `SUMMARY.md`, `docs/IMPERIUM_CONTEXT.yaml` (не канон).
@@ -88,6 +90,7 @@
 - `SPECS/*` (кроме `SPECS/ACTIVE_LEARNING_PLAN.md`) — поведение/архитектура (норматив).
 - `docs/SESSION_START_PROMPT.txt` — протокол старта.
 - `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml` — решения и GAP.
+- `docs/runbooks/*` — операционные runbooks (outbox/sentinel/incidents).
 - `truffles-api/app/knowledge/<client_slug>/*` — runtime pack (truth/policy/eval).
 - `knowledge/<client_slug>/*` — канон RAG‑контента клиента.
 

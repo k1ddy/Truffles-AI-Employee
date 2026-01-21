@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/events/outbox.v1.jsonschema",
+  "title": "Outbox Event Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_type",
+    "idempotency_key",
+    "client_id",
+    "created_at",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "outbox.v1"
+    },
+    "event_type": {
+      "type": "string",
+      "description": "Logical event name, e.g. whatsapp.send_text, telegram.notify, crm.upsert_lead."
+    },
+    "idempotency_key": {
+      "type": "string",
+      "description": "Stable key for deduplication across retries and replays."
+    },
+    "client_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "branch_id": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "conversation_id": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "message_id": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "channel": {
+      "type": "string",
+      "description": "Target integration channel.",
+      "enum": ["whatsapp", "telegram", "crm", "calendar", "llm", "qdrant", "other"]
+    },
+    "payload": {
+      "type": "object",
+      "description": "Event-specific payload.",
+      "additionalProperties": true
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["PENDING", "PROCESSING", "SENT", "FAILED"]
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_attempts": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "next_attempt_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "last_error": {
+      "type": ["string", "null"]
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trace_id": {"type": "string"},
+        "request_id": {"type": "string"}
+      }
+    }
+  }
+}
