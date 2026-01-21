@@ -15,6 +15,11 @@ services:
       - .env
     environment:
       - DEBUG=false
+      - CONSOLE_OIDC_JWKS_URL=https://auth.truffles.kz/realms/truffles/protocol/openid-connect/certs
+      - CONSOLE_OIDC_ISSUER=https://auth.truffles.kz/realms/truffles
+      - CONSOLE_OIDC_AUDIENCE=console-web
+    extra_hosts:
+      - "auth.truffles.kz:172.20.0.2"
     networks:
       - truffles_internal-net
       - proxy-net
@@ -56,6 +61,41 @@ services:
     restart: unless-stopped
     deploy:
       replicas: 1
+
+  console-web:
+    build:
+      context: ../console-web
+      dockerfile: Dockerfile
+    container_name: truffles-console-web
+    restart: unless-stopped
+    env_file:
+      - ../console-web/.env.local
+    networks:
+      - truffles_internal-net
+      - proxy-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.console-web.rule=Host(`console.truffles.kz`)"
+      - "traefik.http.routers.console-web.entrypoints=websecure"
+      - "traefik.http.routers.console-web.tls.certresolver=myresolver"
+      - "traefik.http.services.console-web.loadbalancer.server.port=3000"
+      - "traefik.docker.network=proxy-net"
+
+  landing-page:
+    build:
+      context: ../../landing-website
+      dockerfile: Dockerfile
+    container_name: truffles-landing-page
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.landing-page.rule=Host(`truffles.kz`, `www.truffles.kz`)"
+      - "traefik.http.routers.landing-page.entrypoints=websecure"
+      - "traefik.http.routers.landing-page.tls.certresolver=myresolver"
+      - "traefik.http.services.landing-page.loadbalancer.server.port=80"
+      - "traefik.docker.network=proxy-net"
 
 networks:
   truffles_internal-net:
