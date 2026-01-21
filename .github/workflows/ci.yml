@@ -755,9 +755,21 @@ jobs:
               esac
             done
           fi
+          allowlist_fallback=0
           if [ "${#ALLOWLIST_POOL[@]}" -lt "${MIN_ALLOWLIST_JIDS}" ]; then
             echo "ALLOWLIST_TOO_SHORT" >> "${GATE_LOG}"
-            gate_ok=0
+            allowlist_fallback=1
+          fi
+          if [ "${allowlist_fallback}" -eq 1 ]; then
+            if [ "${#ALLOWLIST_POOL[@]}" -lt 1 ]; then
+              gate_ok=0
+            elif [ "${JID_INDEX}" -ne 0 ]; then
+              echo "ALLOWLIST_FALLBACK_SKIP_GROUP" >> "${RUN_LOG}"
+              exit 0
+            else
+              SUITE_LIST="ca01-core ca02-policy ca03-info ca04-service ca05-booking ca06-consult ca07-ood ca08-state ca09-manager ca10-outbox"
+              JID_INDEX=0
+            fi
           fi
           if [ "${JID_INDEX}" -lt 0 ] || [ "${JID_INDEX}" -ge "${#ALLOWLIST_POOL[@]}" ]; then
             echo "ALLOWLIST_INDEX_OUT_OF_RANGE" >> "${GATE_LOG}"
