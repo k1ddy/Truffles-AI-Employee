@@ -268,7 +268,7 @@ jobs:
             --include-method=GET \
             --checks all \
             --request-timeout 10 \
-            --hypothesis-max-examples=3 \
+            --max-examples=3 \
             --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"
 
   console-k6:
