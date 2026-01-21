@@ -1934,6 +1934,29 @@
 
 **Conclusion:** p90 latency улучшилась ~5.5x при добавлении одного воркера → доказанная горизонтальная масштабируемость outbox.
 
+### 2026-01-21 — OTel collector (Tempo) + worker tracing enabled
+
+**Что сделали (prod host / infra):**
+- Добавили Tempo в `/home/zhan/infrastructure/docker-compose.truffles.yml` + конфиг `/home/zhan/infrastructure/tempo.yml` (OTLP http/grpc endpoint = `0.0.0.0:4318`/`0.0.0.0:4317`).
+- Добавили datasource Tempo в `/home/zhan/infrastructure/grafana/provisioning/datasources/tempo.yml`.
+- Перезапустили `grafana` для подхвата datasource.
+- Включили OTel в `/home/zhan/truffles-main/truffles-api/.env`:
+  - `OTEL_ENABLED=1`
+  - `OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318/v1/traces`
+  - `OTEL_SERVICE_NAME=truffles-api`
+- Перезапустили воркеры через `scripts/restart_workers.sh`.
+
+**Evidence:**
+- `curl -fsS http://localhost:3200/ready` → `READY`
+- `docker logs truffles-tempo-1 --tail 5` → `Starting HTTP server ... endpoint=[::]:4318`
+- `docker exec truffles-outbox python -c '...connect...'` → `connected`
+- `docker logs truffles-outbox --tail 2` → `OTel enabled` + `Starting Outbox Worker...`
+- `docker logs truffles-sentinel --tail 2` → `OTel enabled` + `Starting Sentinel Worker...`
+- `docker logs truffles-grafana-1 --tail 200 | rg -i "tempo|datasource"` → `inserting datasource ... Tempo`
+- `curl -sS http://localhost:3200/metrics | rg -n "tempo_distributor_spans_received_total"` → `... 988`
+
+**Status:** DONE (OTel endpoint reachable from workers; no behavior change).
+
 ### 2026-01-21 — CI livecheck reset meta timeout (branch sender JIDs)
 
 **Симптом:**
