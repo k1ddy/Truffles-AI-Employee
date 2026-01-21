@@ -192,6 +192,11 @@ docker logs truffles-sentinel --tail 5 | rg -i 'otel enabled'
 ---
 
 ## Console quality gates (Playwright / Schemathesis / k6)
+CI uses GitHub secrets for auth and skips jobs if they are missing:
+- `CONSOLE_E2E_USERNAME`, `CONSOLE_E2E_PASSWORD`
+- `CONSOLE_KEYCLOAK_TOKEN_URL`, `CONSOLE_KEYCLOAK_CLIENT_ID`, `CONSOLE_KEYCLOAK_CLIENT_SECRET`,
+  `CONSOLE_KEYCLOAK_USERNAME`, `CONSOLE_KEYCLOAK_PASSWORD`
+- optional: `CONSOLE_API_TOKEN` (bypass Keycloak for contract/k6)
 
 **Playwright (smoke, read-only):**
 ```bash

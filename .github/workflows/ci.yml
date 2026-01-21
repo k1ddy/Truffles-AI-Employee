@@ -179,7 +179,7 @@ jobs:
 
   console-e2e:
     needs: [changes]
-    if: needs.changes.outputs.console_web == 'true'
+    if: needs.changes.outputs.console_web == 'true' && secrets.CONSOLE_E2E_USERNAME != '' && secrets.CONSOLE_E2E_PASSWORD != ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -188,13 +188,13 @@ jobs:
     env:
       NEXTAUTH_URL: http://localhost:3000
       NEXTAUTH_SECRET: ci-console-secret
-      KEYCLOAK_CLIENT_ID: console-web
-      KEYCLOAK_CLIENT_SECRET: console-client-secret
-      KEYCLOAK_ISSUER: https://auth.truffles.kz/realms/truffles
+      KEYCLOAK_CLIENT_ID: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_ID || 'console-web' }}
+      KEYCLOAK_CLIENT_SECRET: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET }}
+      KEYCLOAK_ISSUER: ${{ secrets.CONSOLE_KEYCLOAK_ISSUER || 'https://auth.truffles.kz/realms/truffles' }}
       NEXT_PUBLIC_API_URL: https://api.truffles.kz/console/v1
       PLAYWRIGHT_BASE_URL: http://localhost:3000
-      E2E_USERNAME: admin
-      E2E_PASSWORD: admin
+      E2E_USERNAME: ${{ secrets.CONSOLE_E2E_USERNAME }}
+      E2E_PASSWORD: ${{ secrets.CONSOLE_E2E_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -216,15 +216,16 @@ jobs:
 
   console-contract:
     needs: [changes]
-    if: needs.changes.outputs.console_contracts == 'true'
+    if: needs.changes.outputs.console_contracts == 'true' && (secrets.CONSOLE_API_TOKEN != '' || (secrets.CONSOLE_KEYCLOAK_USERNAME != '' && secrets.CONSOLE_KEYCLOAK_PASSWORD != '' && secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET != ''))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      KEYCLOAK_TOKEN_URL: https://auth.truffles.kz/realms/truffles/protocol/openid-connect/token
-      KEYCLOAK_CLIENT_ID: console-web
-      KEYCLOAK_CLIENT_SECRET: console-client-secret
-      KEYCLOAK_USERNAME: admin
-      KEYCLOAK_PASSWORD: admin
+      CONSOLE_API_TOKEN: ${{ secrets.CONSOLE_API_TOKEN }}
+      KEYCLOAK_TOKEN_URL: ${{ secrets.CONSOLE_KEYCLOAK_TOKEN_URL || 'https://auth.truffles.kz/realms/truffles/protocol/openid-connect/token' }}
+      KEYCLOAK_CLIENT_ID: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_ID || 'console-web' }}
+      KEYCLOAK_CLIENT_SECRET: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET }}
+      KEYCLOAK_USERNAME: ${{ secrets.CONSOLE_KEYCLOAK_USERNAME }}
+      KEYCLOAK_PASSWORD: ${{ secrets.CONSOLE_KEYCLOAK_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -236,7 +237,12 @@ jobs:
       - name: Install Schemathesis
         run: pip install schemathesis
 
+      - name: Use pre-provisioned token
+        if: env.CONSOLE_API_TOKEN != ''
+        run: echo "SCHEMATHESIS_TOKEN=${CONSOLE_API_TOKEN}" >> $GITHUB_ENV
+
       - name: Fetch console token
+        if: env.CONSOLE_API_TOKEN == ''
         run: |
           python - <<'PY'
           import json
@@ -272,19 +278,25 @@ jobs:
             --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"
 
   console-k6:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_k6 == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_k6 == 'true' && (secrets.CONSOLE_API_TOKEN != '' || (secrets.CONSOLE_KEYCLOAK_USERNAME != '' && secrets.CONSOLE_KEYCLOAK_PASSWORD != '' && secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET != '')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      KEYCLOAK_TOKEN_URL: https://auth.truffles.kz/realms/truffles/protocol/openid-connect/token
-      KEYCLOAK_CLIENT_ID: console-web
-      KEYCLOAK_CLIENT_SECRET: console-client-secret
-      KEYCLOAK_USERNAME: admin
-      KEYCLOAK_PASSWORD: admin
+      CONSOLE_API_TOKEN: ${{ secrets.CONSOLE_API_TOKEN }}
+      KEYCLOAK_TOKEN_URL: ${{ secrets.CONSOLE_KEYCLOAK_TOKEN_URL || 'https://auth.truffles.kz/realms/truffles/protocol/openid-connect/token' }}
+      KEYCLOAK_CLIENT_ID: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_ID || 'console-web' }}
+      KEYCLOAK_CLIENT_SECRET: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET }}
+      KEYCLOAK_USERNAME: ${{ secrets.CONSOLE_KEYCLOAK_USERNAME }}
+      KEYCLOAK_PASSWORD: ${{ secrets.CONSOLE_KEYCLOAK_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Use pre-provisioned token
+        if: env.CONSOLE_API_TOKEN != ''
+        run: echo "CONSOLE_API_TOKEN=${CONSOLE_API_TOKEN}" >> $GITHUB_ENV
+
       - name: Fetch console token
+        if: env.CONSOLE_API_TOKEN == ''
         run: |
           python - <<'PY'
           import json
