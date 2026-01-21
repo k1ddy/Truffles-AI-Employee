@@ -1853,12 +1853,19 @@
   - `livecheck-artifacts-pool-c` → `livecheck-ca03-info.jsonl` (reset response: `Ignored sender (branch number)` для `77781658799@s.whatsapp.net`)
 - SQL: `select phone from branches;` → `+77781658799`, `+77055740455`, `+77759841926`
 
-**Fix (PR):**
+**Fix (PRs):**
 - PR #280: https://github.com/k1ddy/Truffles-AI-Employee/pull/280
   - OUTBOUND allowlist → только test JID (`77015705555`, `77785890765`)
   - CI livecheck JID pool → отдельный список с безопасным synthetic JID (`77000000001`)
+- PR #282: https://github.com/k1ddy/Truffles-AI-Employee/pull/282
+  - CA05 livecheck вынесен в отдельный pool (без наследования pending от policy/state)
+  - CI livecheck JID pool расширен до 4 JID (`77000000002`)
 
-**Status:** PLAN (ожидаем merge + main CI livecheck).
+**Evidence:**
+- workflow_dispatch livecheck PASS (branch `feat/http-metrics-middleware`): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21196025722
+- PR #282 CI green: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21196249823
+
+**Status:** DONE (PR #280/#282 merged; livecheck PASS in workflow_dispatch).
 
 ### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
 
