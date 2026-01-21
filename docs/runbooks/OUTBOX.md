@@ -26,7 +26,29 @@ Recovery steps
 docker restart truffles-outbox
 ```
 
-2) If PROCESSING is stuck (use only for recovery, not for evidence)
+2) Scale out workers (safe horizontal add)
+```bash
+# Use the same image as API to avoid behavior drift
+IMAGE_NAME="$(docker inspect truffles-api --format '{{.Config.Image}}')"
+docker run -d --name truffles-outbox-2 \
+  --env-file /home/zhan/truffles-main/truffles-api/.env \
+  --network truffles_internal-net \
+  --restart unless-stopped \
+  "$IMAGE_NAME" python -m app.workers.outbox
+```
+
+Verify:
+```bash
+docker ps | rg 'truffles-outbox'
+curl -s http://localhost:8000/admin/health | rg outbox
+```
+
+Rollback (remove extra worker):
+```bash
+docker rm -f truffles-outbox-2
+```
+
+3) If PROCESSING is stuck (use only for recovery, not for evidence)
 ```bash
 docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "\
 UPDATE outbox_messages\
@@ -34,7 +56,7 @@ SET status='PENDING', last_error='manual_release', next_attempt_at=NOW(), update
 WHERE status='PROCESSING' AND updated_at < NOW() - INTERVAL '2 minutes';"
 ```
 
-3) If FAILED spikes, inspect reasons
+4) If FAILED spikes, inspect reasons
 ```bash
 docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "\
 SELECT last_error, COUNT(*)\

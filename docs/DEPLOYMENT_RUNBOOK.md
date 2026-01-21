@@ -14,10 +14,14 @@
           ↓ port 8000
     Traefik → api.truffles.kz
           
-┌─────────────────────┐
-│  PM2: console-web   │  ← Next.js frontend only
-│  :3000              │
-└─────────────────────┘
+┌──────────────────────────┐
+│  console-web (Docker)    │  ← preferred (Traefik → console.truffles.kz)
+│  :3000                   │
+└──────────────────────────┘
+┌──────────────────────────┐
+│  console-keycloak        │  ← auth.truffles.kz (OIDC)
+│  :8080                   │
+└──────────────────────────┘
 ```
 
 ## What runs where
@@ -25,11 +29,30 @@
 | Component | Runtime | Reason |
 |-----------|---------|--------|
 | truffles-api | Docker | Needs internal network for qdrant, postgres |
-| console-web | PM2 | Standalone Next.js, no internal deps |
+| console-web | Docker (preferred) / PM2 (legacy) | Next.js Console UI |
+| console-keycloak | Docker | OIDC (auth.truffles.kz) |
 | qdrant | Docker | Persistent vector storage |
 | postgres | Docker | Persistent relational storage |
 
-## PM2 Rules
+## Console Web (preferred: Docker + Traefik)
+
+**Keycloak:**
+```bash
+docker compose -f /home/zhan/truffles-main/docker-compose.console.yml up -d console-postgres console-redis console-keycloak
+```
+
+**Console UI:**
+```bash
+docker compose -f /home/zhan/truffles-main/truffles-api/docker-compose.yml up -d console-web
+```
+
+**Config:**
+- `console-web/.env.local` must match `console.truffles.kz` + `auth.truffles.kz`.
+- `truffles-api/docker-compose.yml` sets `CONSOLE_OIDC_*`.
+
+---
+
+## PM2 Rules (legacy)
 
 **DO:**
 - `pm2 start npm --name console-web -- run start` (production mode)

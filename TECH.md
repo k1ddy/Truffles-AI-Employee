@@ -122,6 +122,61 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 
 ---
 
+## Console Web + Keycloak (Control Plane)
+
+**Домены:**
+- `https://console.truffles.kz` — Console UI
+- `https://auth.truffles.kz` — Keycloak (OIDC)
+
+**Где живёт конфигурация:**
+- `docker-compose.console.yml` — Keycloak + console‑postgres + console‑redis (Traefik routing).
+- `truffles-api/docker-compose.yml` — сервис `console-web` (Traefik routing).
+- `console-web/.env.local` — `NEXTAUTH_URL`, `KEYCLOAK_ISSUER`, `NEXT_PUBLIC_API_URL`.
+- `truffles-api/docker-compose.yml` — `CONSOLE_OIDC_JWKS_URL`, `CONSOLE_OIDC_ISSUER`, `CONSOLE_OIDC_AUDIENCE`.
+
+**Запуск (docker‑вариант, preferred):**
+```bash
+docker compose -f /home/zhan/truffles-main/docker-compose.console.yml up -d console-postgres console-redis console-keycloak
+docker compose -f /home/zhan/truffles-main/truffles-api/docker-compose.yml up -d console-web
+```
+
+**Legacy (если console‑web ещё на PM2):**
+- см. `docs/DEPLOYMENT_RUNBOOK.md` (раздел PM2).
+
+---
+
+## Console API Idempotency (мутации)
+
+- Все мутации `/console/v1/*` должны идти с idempotency‑key в заголовке.
+- Ответ сохраняется в `console_idempotency_keys` по ключу `(client_id, idempotency_key, scope)` и переиспользуется.
+- Для диагностики: `console_idempotency_keys` + `audit_events` (дубликаты не должны появляться).
+
+---
+
+## Console API Contracts
+
+- Источник истины: `contracts/console_api/openapi.v1.yaml` + `contracts/console_api/errors.v1.json`.
+- Генерация: `truffles-api/scripts/generate_openapi.py` (обновлять после изменений в `console` роутерах).
+- Любые breaking изменения — через новую версию контракта.
+
+---
+
+## Observability (OTel/Tempo)
+
+**Включение:**
+- `OTEL_ENABLED=1`
+- `OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318/v1/traces`
+- `OTEL_SERVICE_NAME` — разный для `truffles-api`, `truffles-outbox`, `truffles-sentinel`.
+
+**Проверки:**
+```bash
+curl -fsS http://localhost:3200/ready
+docker logs truffles-outbox --tail 5 | rg -i 'otel enabled'
+docker logs truffles-sentinel --tail 5 | rg -i 'otel enabled'
+```
+
+---
+
 ## Quality toolchain (OSS стандарт)
 
 **Цель:** повторяемые проверки без “самописных” велосипедов.
