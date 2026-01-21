@@ -35,6 +35,7 @@
 - FIX READY (CA-11): booking_interrupt/multi_truth retention при trace_len=40; PR #197 https://github.com/k1ddy/Truffles-AI-Employee/pull/197; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21110933209; SQL evidence conv_id da9519fd-bdab-4f22-966a-0c535f3ea6a1 msg_id ca11-3-1768735290143673848 trace_len=40 stages booking_interrupt+multi_truth present (simulated inbound via /webhook on local container, TEST_MODE=1) — см. запись 2026-01-18 ниже.
 - STOP‑LINE: были нарушения процесса (очистка decision_trace ради evidence, изменение STATE.md не ролью Brain) — зафиксировано ниже.
 - DONE: Onboarding contract добавлен в `docs/PROCESSES.md` (instanceId обязателен; 1 номер=1 филиал; mandatory data + safe-mode + no-go). Evidence: commit `f3b29e40`.
+- DONE: Response Composer v1 (ack+CTA из pack, response_variant_id в meta) — PR #299 https://github.com/k1ddy/Truffles-AI-Employee/pull/299; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21208785389.
 - TODO: Определить схему обязательных данных филиала + валидацию (поля, формат, чек‑лист).
 - TODO: Автоматизация онбординга (provisioning API/console): создание tenant+branch, mapping instanceId/phone, генерация webhook, go/no‑go gate.
 - BLOCKERS: нет.
