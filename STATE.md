@@ -2157,9 +2157,14 @@
 - Docs/Process: обновлены `AGENTS.md`, `docs/SESSION_START_PROMPT.txt`, `TECH.md`, `docs/DEV_SETUP.md`, `STRUCTURE.md`.
 
 **Checks:**
-- CI не запускался (нужен PR/CI run).
+- CI (PR) run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21212829687
+  - `console-e2e`: SUCCESS (skipped by guard — missing secrets)
+  - `console-contract`: SUCCESS (skipped by guard — missing secrets)
+  - `console-k6`: SKIPPED (manual only)
 
-**Status:** PLAN/GAP (ожидает CI evidence).
+**Status:** DONE (implementation complete).
+
+**GAP:** нужны CI secrets для реального выполнения console‑e2e/contract (см. `TECH.md`).
 
 ### 2026-01-21 — CI livecheck reset meta timeout (branch sender JIDs)
 
