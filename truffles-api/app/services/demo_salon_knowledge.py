@@ -17,9 +17,36 @@ import yaml
 from app.logging_config import get_logger
 from app.services.knowledge_service import get_embedding
 
-_DEMO_SALON_DIR = Path(__file__).resolve().parents[1] / "knowledge" / "demo_salon"
-_TRUTH_PATH = _DEMO_SALON_DIR / "SALON_TRUTH.yaml"
-_INTENTS_PATH = _DEMO_SALON_DIR / "INTENTS_PHRASES_DEMO_SALON.yaml"
+_KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parents[1] / "knowledge"
+_DEFAULT_CLIENT_SLUG = "demo_salon"
+
+
+def _normalize_client_slug(client_slug: str | None) -> str:
+    slug = str(client_slug or _DEFAULT_CLIENT_SLUG).strip()
+    return slug or _DEFAULT_CLIENT_SLUG
+
+
+def _client_knowledge_dir(client_slug: str | None) -> Path:
+    return _KNOWLEDGE_BASE_DIR / _normalize_client_slug(client_slug)
+
+
+def _truth_path(client_slug: str | None) -> Path:
+    return _client_knowledge_dir(client_slug) / "SALON_TRUTH.yaml"
+
+
+def _intents_path(client_slug: str | None) -> Path:
+    base = _client_knowledge_dir(client_slug)
+    slug = _normalize_client_slug(client_slug)
+    candidates = [
+        base / f"INTENTS_PHRASES_{slug.upper()}.yaml",
+        base / f"INTENTS_PHRASES_{slug}.yaml",
+        base / "INTENTS_PHRASES.yaml",
+        base / "INTENTS_PHRASES_DEMO_SALON.yaml",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[-1]
 _SERVICES_COLLECTION = "services_index"
 
 _SERVICE_MATCH_THRESHOLD = float(os.environ.get("SERVICE_SEMANTIC_MATCH_THRESHOLD", "0.40"))
@@ -226,12 +253,12 @@ def _load_yaml(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def load_yaml_truth() -> dict:
-    return _load_yaml(_TRUTH_PATH)
+def load_yaml_truth(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
+    return _load_yaml(_truth_path(client_slug))
 
 
-def load_policy_pack() -> dict:
-    truth = load_yaml_truth()
+def load_policy_pack(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
+    truth = load_yaml_truth(client_slug)
     client_pack = truth.get("client_pack") if isinstance(truth, dict) else None
     policy = client_pack.get("policy") if isinstance(client_pack, dict) else None
     return policy if isinstance(policy, dict) else {}
@@ -240,8 +267,12 @@ def load_policy_pack() -> dict:
 _TIME_PATTERN = re.compile(r"^(\d{1,2})[:.](\d{2})$")
 
 
-def get_salon_timezone(truth: dict | None = None) -> str | None:
-    truth = truth if isinstance(truth, dict) else load_yaml_truth()
+def get_salon_timezone(
+    truth: dict | None = None,
+    *,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
+) -> str | None:
+    truth = truth if isinstance(truth, dict) else load_yaml_truth(client_slug)
     salon = truth.get("salon") if isinstance(truth, dict) else None
     if not isinstance(salon, dict):
         return None
@@ -294,8 +325,9 @@ def build_quiet_hours_notice(
     *,
     now_utc: datetime | None = None,
     now_local: datetime | None = None,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
 ) -> str | None:
-    truth = load_yaml_truth()
+    truth = load_yaml_truth(client_slug)
     salon = truth.get("salon") if isinstance(truth, dict) else None
     if not isinstance(salon, dict):
         return None
@@ -306,7 +338,7 @@ def build_quiet_hours_notice(
     close_time = _parse_hours_time(hours.get("close"))
     if not open_time or not close_time:
         return None
-    timezone_name = get_salon_timezone(truth)
+    timezone_name = get_salon_timezone(truth, client_slug=client_slug)
     if not timezone_name:
         return None
     now_local = _resolve_local_now(
@@ -335,8 +367,9 @@ def build_info_combined_reply(
     *,
     include_parking: bool = False,
     include_guest: bool = False,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
 ) -> tuple[str | None, dict[str, Any]]:
-    truth = load_yaml_truth()
+    truth = load_yaml_truth(client_slug)
     salon = truth.get("salon") if isinstance(truth, dict) else None
     if not isinstance(salon, dict):
         return None, {}
@@ -416,14 +449,20 @@ def build_info_combined_reply(
     return reply, meta
 
 
-def load_intents_phrases() -> dict:
-    data = _load_yaml(_INTENTS_PATH)
-    intents = data.get("demo_salon_intents") if isinstance(data, dict) else None
-    return intents if isinstance(intents, dict) else {}
+def load_intents_phrases(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
+    data = _load_yaml(_intents_path(client_slug))
+    if not isinstance(data, dict):
+        return {}
+    slug = _normalize_client_slug(client_slug)
+    for key in (f"{slug}_intents", "intents", "demo_salon_intents"):
+        intents = data.get(key)
+        if isinstance(intents, dict):
+            return intents
+    return {}
 
 
-def _load_consult_playbooks() -> list[dict[str, Any]]:
-    truth = load_yaml_truth()
+def _load_consult_playbooks(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> list[dict[str, Any]]:
+    truth = load_yaml_truth(client_slug)
     domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
     playbooks = domain_pack.get("consult_playbooks") if isinstance(domain_pack, dict) else None
     if not isinstance(playbooks, list):
@@ -431,9 +470,9 @@ def _load_consult_playbooks() -> list[dict[str, Any]]:
     return [item for item in playbooks if isinstance(item, dict)]
 
 
-@lru_cache(maxsize=2)
-def _build_phrase_index() -> dict[str, list[str]]:
-    intents = load_intents_phrases()
+@lru_cache(maxsize=16)
+def _build_phrase_index(client_slug: str) -> dict[str, list[str]]:
+    intents = load_intents_phrases(client_slug)
     index: dict[str, list[str]] = {}
     for intent, phrases in intents.items():
         if isinstance(phrases, list):
@@ -442,12 +481,13 @@ def _build_phrase_index() -> dict[str, list[str]]:
     return index
 
 
-def phrase_match_intent(text: str) -> set[str]:
+def phrase_match_intent(text: str, client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> set[str]:
     normalized = _normalize_text(text)
     if not normalized:
         return set()
     matches: set[str] = set()
-    for intent, phrases in _build_phrase_index().items():
+    slug = _normalize_client_slug(client_slug)
+    for intent, phrases in _build_phrase_index(slug).items():
         for phrase in phrases:
             if not phrase:
                 continue
@@ -462,8 +502,8 @@ def phrase_match_intent(text: str) -> set[str]:
     return matches
 
 
-def _flatten_offtopic_phrases() -> list[str]:
-    intents = load_intents_phrases()
+def _flatten_offtopic_phrases(client_slug: str | None) -> list[str]:
+    intents = load_intents_phrases(client_slug)
     offtopic = intents.get("offtopic_examples") if isinstance(intents, dict) else None
     if not isinstance(offtopic, dict):
         return []
@@ -475,9 +515,9 @@ def _flatten_offtopic_phrases() -> list[str]:
     return [p for p in normalized if p]
 
 
-@lru_cache(maxsize=2)
-def _offtopic_phrases() -> list[str]:
-    return _flatten_offtopic_phrases()
+@lru_cache(maxsize=16)
+def _offtopic_phrases(client_slug: str) -> list[str]:
+    return _flatten_offtopic_phrases(client_slug)
 
 
 def _format_money(value: Any) -> str:
@@ -526,9 +566,9 @@ def _normalize_alias_tokens(text: str) -> list[str]:
     return [token for token in tokens if token and token not in _SERVICE_STOPWORDS]
 
 
-@lru_cache(maxsize=2)
-def _build_price_index() -> list[dict[str, Any]]:
-    truth = load_yaml_truth()
+@lru_cache(maxsize=16)
+def _build_price_index(client_slug: str) -> list[dict[str, Any]]:
+    truth = load_yaml_truth(client_slug)
     items: list[dict[str, Any]] = []
     for category in truth.get("price_list", []) if isinstance(truth, dict) else []:
         for item in category.get("items", []) if isinstance(category, dict) else []:
@@ -548,9 +588,9 @@ def _build_price_index() -> list[dict[str, Any]]:
     return items
 
 
-@lru_cache(maxsize=2)
-def _build_price_name_index() -> dict[str, dict[str, Any]]:
-    truth = load_yaml_truth()
+@lru_cache(maxsize=16)
+def _build_price_name_index(client_slug: str) -> dict[str, dict[str, Any]]:
+    truth = load_yaml_truth(client_slug)
     index: dict[str, dict[str, Any]] = {}
     for category in truth.get("price_list", []) if isinstance(truth, dict) else []:
         for item in category.get("items", []) if isinstance(category, dict) else []:
@@ -561,9 +601,9 @@ def _build_price_name_index() -> dict[str, dict[str, Any]]:
     return index
 
 
-@lru_cache(maxsize=2)
-def _build_service_index() -> list[dict[str, Any]]:
-    truth = load_yaml_truth()
+@lru_cache(maxsize=16)
+def _build_service_index(client_slug: str) -> list[dict[str, Any]]:
+    truth = load_yaml_truth(client_slug)
     catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
     services = catalog.get("services") if isinstance(catalog, dict) else None
     if not isinstance(services, list):
@@ -605,40 +645,40 @@ def _build_service_index() -> list[dict[str, Any]]:
     return index
 
 
-@lru_cache(maxsize=2)
-def _service_tokens() -> set[str]:
+@lru_cache(maxsize=16)
+def _service_tokens(client_slug: str) -> set[str]:
     tokens: set[str] = set()
-    for entry in _build_service_index():
+    for entry in _build_service_index(client_slug):
         for alias in entry.get("aliases", []):
             tokens.update(alias)
     return tokens
 
 
-def _message_has_service_token(normalized: str) -> bool:
+def _message_has_service_token(normalized: str, client_slug: str) -> bool:
     if not normalized:
         return False
     message_tokens = normalized.split()
-    for token in _service_tokens():
+    for token in _service_tokens(client_slug):
         if _token_matches(token, message_tokens):
             return True
     return False
 
 
-def _is_offtopic_message(normalized: str) -> bool:
+def _is_offtopic_message(normalized: str, client_slug: str) -> bool:
     if not normalized:
         return False
-    if any(phrase and phrase in normalized for phrase in _offtopic_phrases()):
+    if any(phrase and phrase in normalized for phrase in _offtopic_phrases(client_slug)):
         return True
     return _contains_any(normalized, _OFFTOPIC_KEYWORDS)
 
 
-def _match_service(normalized: str) -> dict[str, Any] | None:
+def _match_service(normalized: str, client_slug: str) -> dict[str, Any] | None:
     if not normalized:
         return None
     message_tokens = normalized.split()
     best = None
     best_len = 0
-    for entry in _build_service_index():
+    for entry in _build_service_index(client_slug):
         for alias_tokens in entry.get("aliases", []):
             if not alias_tokens:
                 continue
@@ -660,14 +700,14 @@ def _token_matches(token: str, message_tokens: list[str]) -> bool:
     return False
 
 
-def _find_best_price_item(message: str) -> dict[str, Any] | None:
+def _find_best_price_item(message: str, client_slug: str) -> dict[str, Any] | None:
     normalized = _normalize_text(message)
     if not normalized:
         return None
     message_tokens = normalized.split()
     best = None
     best_len = 0
-    for entry in _build_price_index():
+    for entry in _build_price_index(client_slug):
         tokens = entry["tokens"]
         if not tokens:
             continue
@@ -828,21 +868,26 @@ def _format_consult_reply(
     return reply, selected_questions, selected_options
 
 
-def _should_skip_consult(normalized: str, raw_text: str | None = None) -> bool:
+def _should_skip_consult(
+    normalized: str,
+    raw_text: str | None = None,
+    *,
+    client_slug: str | None = None,
+) -> bool:
     if not normalized:
         return True
     if _has_price_signal(normalized, raw_text):
         return True
     if _has_duration_signal(normalized, raw_text):
         return True
-    if _looks_like_hours_question(normalized):
+    if _looks_like_hours_question(normalized, client_slug=client_slug):
         return True
     if _contains_any(normalized, ["адрес", "где вы", "как добрат", "как доехать", "как пройти", "остановк"]):
         return True
     return False
 
 
-def _looks_like_hours_question(normalized: str) -> bool:
+def _looks_like_hours_question(normalized: str, *, client_slug: str | None = None) -> bool:
     if not normalized:
         return False
     if _contains_any(
@@ -865,7 +910,7 @@ def _looks_like_hours_question(normalized: str) -> bool:
     ):
         return True
     if _contains_any_words(normalized, ["часы", "часов"]):
-        return not _message_has_service_token(normalized)
+        return not _message_has_service_token(normalized, _normalize_client_slug(client_slug))
     if "работаете" in normalized:
         return True
     if "работает" in normalized and _contains_any(normalized, ["вы", "салон"]):
@@ -964,10 +1009,10 @@ def _format_price_reply(item: dict[str, Any]) -> str:
     return f"{name} — уточните цену у администратора."
 
 
-def _format_service_price_items(item_names: list[str]) -> str | None:
+def _format_service_price_items(item_names: list[str], client_slug: str) -> str | None:
     if not item_names:
         return None
-    index = _build_price_name_index()
+    index = _build_price_name_index(client_slug)
     replies: list[str] = []
     for name in item_names:
         item = index.get(_normalize_text(name))
@@ -978,14 +1023,14 @@ def _format_service_price_items(item_names: list[str]) -> str | None:
     return None
 
 
-def _format_service_reply(service: dict[str, Any], truth: dict) -> str | None:
+def _format_service_reply(service: dict[str, Any], truth: dict, client_slug: str) -> str | None:
     quick_key = service.get("quick_price_key")
     if quick_key:
         quick_answer = truth.get("price_quick_answers", {}).get(quick_key)
         if quick_answer:
             return quick_answer
     price_items = service.get("price_items") if isinstance(service, dict) else None
-    reply = _format_service_price_items(price_items or [])
+    reply = _format_service_price_items(price_items or [], client_slug)
     if reply:
         return reply
     description = service.get("description") if isinstance(service, dict) else None
@@ -994,8 +1039,7 @@ def _format_service_reply(service: dict[str, Any], truth: dict) -> str | None:
     return None
 
 
-def _format_service_not_found_reply() -> str | None:
-    truth = load_yaml_truth()
+def _format_service_not_found_reply(truth: dict) -> str | None:
     catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
     template = None
     suggestions: list[str] = []
@@ -1014,8 +1058,7 @@ def _format_service_not_found_reply() -> str | None:
     return template
 
 
-def _format_service_suggestions_reply(suggestions: list[str]) -> str | None:
-    truth = load_yaml_truth()
+def _format_service_suggestions_reply(suggestions: list[str], truth: dict) -> str | None:
     catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
     template = None
     if isinstance(catalog, dict):
@@ -1030,9 +1073,9 @@ def _format_service_suggestions_reply(suggestions: list[str]) -> str | None:
     return template
 
 
-@lru_cache(maxsize=2)
-def _question_type_examples() -> dict[str, list[str]]:
-    truth = load_yaml_truth()
+@lru_cache(maxsize=16)
+def _question_type_examples(client_slug: str) -> dict[str, list[str]]:
+    truth = load_yaml_truth(client_slug)
     domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
     typical = domain_pack.get("typical_questions") if isinstance(domain_pack, dict) else None
     if not isinstance(typical, dict):
@@ -1089,9 +1132,9 @@ def _local_text_embedding(text: str, dim: int = 64) -> list[float]:
     return vector
 
 
-@lru_cache(maxsize=4)
-def _question_type_embeddings(use_fallback: bool) -> dict[str, list[list[float]]]:
-    examples = _question_type_examples()
+@lru_cache(maxsize=32)
+def _question_type_embeddings(client_slug: str, use_fallback: bool) -> dict[str, list[list[float]]]:
+    examples = _question_type_examples(client_slug)
     embeddings: dict[str, list[list[float]]] = {}
     for kind, phrases in examples.items():
         vectors: list[list[float]] = []
@@ -1127,15 +1170,17 @@ def semantic_question_type(
     *,
     include_kinds: set[str] | None = None,
     return_multi: bool = False,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
 ) -> SemanticQuestionType | list[SemanticQuestionType] | None:
     normalized = _normalize_text(text)
     if not normalized or len(normalized) < 3:
         return [] if return_multi else None
 
+    slug = _normalize_client_slug(client_slug)
     if include_kinds is None:
         include_kinds = {"pricing", "duration"}
 
-    if "duration" in include_kinds and _message_has_service_token(normalized):
+    if "duration" in include_kinds and _message_has_service_token(normalized, slug):
         duration_hint = _has_duration_signal(normalized, text)
         if not duration_hint and "сколько" in normalized:
             duration_hint = _contains_any_words(
@@ -1161,11 +1206,11 @@ def semantic_question_type(
             extra={"context": {"error": error_detail or "embedding_unavailable"}},
         )
 
-    examples = _question_type_embeddings(use_fallback)
+    examples = _question_type_embeddings(slug, use_fallback)
     if not examples and not use_fallback:
         use_fallback = True
         query_vector = _local_text_embedding(text)
-        examples = _question_type_embeddings(True)
+        examples = _question_type_embeddings(slug, True)
         logger.warning(
             "question_type fallback to local embedding",
             extra={"context": {"error": "no_examples_with_bge"}},
@@ -1215,7 +1260,7 @@ def semantic_question_type(
 
     if not use_fallback:
         fallback_vector = _local_text_embedding(text)
-        fallback_examples = _question_type_embeddings(True)
+        fallback_examples = _question_type_embeddings(slug, True)
         fallback_scores: dict[str, float] = {}
         for kind, vectors in fallback_examples.items():
             if kind not in include_kinds:
@@ -1239,8 +1284,9 @@ def _format_service_duration_reply(
     *,
     message: str | None = None,
     service_label: str | None = None,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
 ) -> str:
-    truth = load_yaml_truth()
+    truth = load_yaml_truth(client_slug)
     catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
     if service:
         duration_text = service.get("duration_text") if isinstance(service, dict) else None
@@ -1250,7 +1296,7 @@ def _format_service_duration_reply(
             if message:
                 price_items = service.get("price_items")
                 if isinstance(price_items, list) and price_items:
-                    price_item = _find_best_price_item(message)
+                    price_item = _find_best_price_item(message, _normalize_client_slug(client_slug))
                     if isinstance(price_item, dict):
                         candidate = price_item.get("name")
                         if isinstance(candidate, str) and candidate.strip():
@@ -1275,7 +1321,11 @@ def _format_service_duration_reply(
     return "По времени зависит от услуги. Какая именно?"
 
 
-def _select_presence_service_name(message: str, candidates: list[str]) -> str | None:
+def _select_presence_service_name(
+    message: str,
+    candidates: list[str],
+    client_slug: str,
+) -> str | None:
     if not message or not candidates:
         return None
     query_vector = _local_text_embedding(message)
@@ -1284,7 +1334,7 @@ def _select_presence_service_name(message: str, candidates: list[str]) -> str | 
     best_name = None
     best_score = 0.0
     for candidate in candidates:
-        service = _find_catalog_service_by_name(candidate)
+        service = _find_catalog_service_by_name(candidate, client_slug)
         if not service:
             continue
         name = service.get("name") if isinstance(service, dict) else None
@@ -1297,7 +1347,11 @@ def _select_presence_service_name(message: str, candidates: list[str]) -> str | 
     return best_name
 
 
-def _format_service_presence_reply(message: str, match: SemanticServiceMatch | None) -> str | None:
+def _format_service_presence_reply(
+    message: str,
+    match: SemanticServiceMatch | None,
+    client_slug: str,
+) -> str | None:
     if not message or not match:
         return None
     candidates: list[str] = []
@@ -1313,10 +1367,10 @@ def _format_service_presence_reply(message: str, match: SemanticServiceMatch | N
                 if cleaned and cleaned not in seen:
                     candidates.append(cleaned)
                     seen.add(cleaned)
-    service_name = _select_presence_service_name(message, candidates)
+    service_name = _select_presence_service_name(message, candidates, client_slug)
     if not service_name:
         return None
-    truth = load_yaml_truth()
+    truth = load_yaml_truth(client_slug)
     catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
     template = catalog.get("service_presence_reply") if isinstance(catalog, dict) else None
     if not isinstance(template, str) or not template.strip():
@@ -1327,10 +1381,13 @@ def _format_service_presence_reply(message: str, match: SemanticServiceMatch | N
     return f"{template} {service_name}."
 
 
-def _format_service_presence_reply_for_name(service_name: str) -> str | None:
+def _format_service_presence_reply_for_name(
+    service_name: str,
+    client_slug: str,
+) -> str | None:
     if not isinstance(service_name, str) or not service_name.strip():
         return None
-    truth = load_yaml_truth()
+    truth = load_yaml_truth(client_slug)
     catalog = truth.get("services_catalog") if isinstance(truth, dict) else None
     template = catalog.get("service_presence_reply") if isinstance(catalog, dict) else None
     if not isinstance(template, str) or not template.strip():
@@ -1342,25 +1399,25 @@ def _format_service_presence_reply_for_name(service_name: str) -> str | None:
     return f"{template} {cleaned}."
 
 
-def _find_catalog_service_by_name(name: str) -> dict[str, Any] | None:
+def _find_catalog_service_by_name(name: str, client_slug: str) -> dict[str, Any] | None:
     if not name:
         return None
     needle = _normalize_text(name)
-    for entry in _build_service_index():
+    for entry in _build_service_index(client_slug):
         if _normalize_text(entry.get("name") or "") == needle:
             return entry
     return None
 
 
-def _format_semantic_service_reply(payload: dict) -> str | None:
+def _format_semantic_service_reply(payload: dict, client_slug: str) -> str | None:
     canonical_name = payload.get("canonical_name") if isinstance(payload, dict) else None
     if isinstance(canonical_name, str) and canonical_name.strip():
-        service = _find_catalog_service_by_name(canonical_name)
+        service = _find_catalog_service_by_name(canonical_name, client_slug)
         if service:
-            reply = _format_service_reply(service, load_yaml_truth())
+            reply = _format_service_reply(service, load_yaml_truth(client_slug), client_slug)
             if reply:
                 return reply
-        price_item = _build_price_name_index().get(_normalize_text(canonical_name))
+        price_item = _build_price_name_index(client_slug).get(_normalize_text(canonical_name))
         if price_item:
             return _format_price_reply(price_item)
 
@@ -1567,14 +1624,17 @@ def _resolve_service_query_meta(
                 meta["service_query_source"] = "semantic_match"
                 meta["service_query_score"] = match.score
         if not meta.get("service_query"):
-            fallback_service = _match_service(_normalize_text(message))
+            fallback_service = _match_service(
+                _normalize_text(message),
+                _normalize_client_slug(client_slug),
+            )
             if isinstance(fallback_service, dict):
                 fallback_name = _clean_service_query(fallback_service.get("name"))
                 if fallback_name:
                     meta["service_query"] = fallback_name
                     meta["service_query_source"] = "semantic_match"
                     meta["service_query_score"] = 1.0
-        price_item = _find_best_price_item(message)
+        price_item = _find_best_price_item(message, _normalize_client_slug(client_slug))
         if isinstance(price_item, dict):
             fallback_name = _clean_service_query(price_item.get("name"))
             if fallback_name:
@@ -1595,13 +1655,16 @@ def _resolve_service_query_meta(
     return meta
 
 
-def _resolve_service_from_query(service_query: str | None) -> dict[str, Any] | None:
+def _resolve_service_from_query(
+    service_query: str | None,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
+) -> dict[str, Any] | None:
     if not service_query:
         return None
     normalized = _normalize_text(service_query)
     if not normalized:
         return None
-    return _match_service(normalized)
+    return _match_service(normalized, _normalize_client_slug(client_slug))
 
 
 def compose_multi_truth_reply(
@@ -1613,19 +1676,20 @@ def compose_multi_truth_reply(
 ) -> str | tuple[str, dict[str, Any]] | None:
     if not message or not client_slug:
         return None
+    slug = _normalize_client_slug(client_slug)
     segments = _split_question_segments(message)
     if not segments:
         return None
     replies: list[str] = []
     seen: set[str] = set()
     resolved_intents: list[str] = []
-    truth = load_yaml_truth()
+    truth = load_yaml_truth(slug)
     intent_kinds, service_query = _extract_intent_decomp(intent_decomp)
     intent_kinds = {kind for kind in intent_kinds if kind in {"hours", "pricing", "duration"}}
     normalized_message = _normalize_text(message)
     if not intent_kinds and len(segments) < 2:
         signal_count = 0
-        if _looks_like_hours_question(normalized_message):
+        if _looks_like_hours_question(normalized_message, client_slug=slug):
             signal_count += 1
         if _has_price_signal(normalized_message, message):
             signal_count += 1
@@ -1635,7 +1699,9 @@ def compose_multi_truth_reply(
             return None
     if intent_kinds:
         if "hours" in intent_kinds:
-            hours_like = any(_looks_like_hours_question(_normalize_text(seg)) for seg in segments)
+            hours_like = any(
+                _looks_like_hours_question(_normalize_text(seg), client_slug=slug) for seg in segments
+            )
             if not hours_like:
                 intent_kinds.discard("hours")
         if "pricing" in intent_kinds and not _has_price_signal(normalized_message, message):
@@ -1648,7 +1714,7 @@ def compose_multi_truth_reply(
     )
     service_query_meta = _resolve_service_query_meta(
         message,
-        client_slug,
+        slug,
         intent_decomp,
         require_query=needs_service_query,
     )
@@ -1657,8 +1723,8 @@ def compose_multi_truth_reply(
     service_from_query = None
     fallback_service_name_from_query = None
     if service_query:
-        service_match_from_query = semantic_service_match(service_query, client_slug)
-        service_from_query = _resolve_service_from_query(service_query)
+        service_match_from_query = semantic_service_match(service_query, slug)
+        service_from_query = _resolve_service_from_query(service_query, slug)
         if isinstance(service_from_query, dict):
             name = service_from_query.get("name")
             if isinstance(name, str) and name.strip():
@@ -1671,6 +1737,7 @@ def compose_multi_truth_reply(
             segment,
             include_kinds={"hours", "pricing", "duration"},
             return_multi=True,
+            client_slug=slug,
         )
         if question_types is None:
             question_types = []
@@ -1683,20 +1750,20 @@ def compose_multi_truth_reply(
         }
         if intent_kinds:
             kinds |= intent_kinds
-        if "hours" in kinds and not _looks_like_hours_question(normalized_segment):
+        if "hours" in kinds and not _looks_like_hours_question(normalized_segment, client_slug=slug):
             kinds.discard("hours")
         if "pricing" in kinds and not _has_price_signal(normalized_segment, segment):
             kinds.discard("pricing")
         if "duration" in kinds and not _has_duration_signal(normalized_segment, segment):
             kinds.discard("duration")
-        if _looks_like_hours_question(normalized_segment):
+        if _looks_like_hours_question(normalized_segment, client_slug=slug):
             kinds.add("hours")
         if _has_price_signal(normalized_segment, segment):
             kinds.add("pricing")
         if _has_duration_signal(normalized_segment, segment):
             kinds.add("duration")
-        service_match = semantic_service_match(segment, client_slug)
-        fallback_service = _match_service(normalized_segment) if not service_match else None
+        service_match = semantic_service_match(segment, slug)
+        fallback_service = _match_service(normalized_segment, slug) if not service_match else None
         fallback_service_name = None
         if isinstance(fallback_service, dict):
             name = fallback_service.get("name")
@@ -1721,35 +1788,36 @@ def compose_multi_truth_reply(
             seen.add(cleaned)
 
         if "hours" in kinds:
-            _add_reply(format_reply_from_truth("hours"))
+            _add_reply(format_reply_from_truth("hours", client_slug=slug, truth=truth))
             _mark_intent("hours")
         if len(replies) >= 2:
             break
         if "pricing" in kinds:
             if not service_query:
-                _add_reply(format_reply_from_truth("service_clarify"))
+                _add_reply(format_reply_from_truth("service_clarify", client_slug=slug, truth=truth))
             elif service_match_from_query and service_match_from_query.action == "match":
                 _add_reply(service_match_from_query.response)
             else:
                 fallback_reply = None
                 if isinstance(service_from_query, dict):
-                    fallback_reply = _format_service_reply(service_from_query, truth)
+                    fallback_reply = _format_service_reply(service_from_query, truth, slug)
                 if fallback_reply:
                     _add_reply(fallback_reply)
                 else:
-                    _add_reply(format_reply_from_truth("service_clarify"))
+                    _add_reply(format_reply_from_truth("service_clarify", client_slug=slug, truth=truth))
             _mark_intent("pricing")
         if len(replies) >= 2:
             break
         if "duration" in kinds:
             if not service_query:
-                _add_reply(_format_service_duration_reply(None, message=segment))
+                _add_reply(_format_service_duration_reply(None, message=segment, client_slug=slug))
             else:
                 _add_reply(
                     _format_service_duration_reply(
                         service_from_query,
                         message=segment,
                         service_label=service_query,
+                        client_slug=slug,
                     )
                 )
             _mark_intent("duration")
@@ -1761,9 +1829,9 @@ def compose_multi_truth_reply(
             and service_match.action == "match"
             and not {"pricing", "duration"} & kinds
         ):
-            _add_reply(_format_service_presence_reply(segment, service_match))
+            _add_reply(_format_service_presence_reply(segment, service_match, slug))
         elif not needs_service_query and fallback_service_name and not {"pricing", "duration"} & kinds:
-            _add_reply(_format_service_presence_reply_for_name(fallback_service_name))
+            _add_reply(_format_service_presence_reply_for_name(fallback_service_name, slug))
         if len(replies) >= 2:
             break
 
@@ -1787,10 +1855,14 @@ def compose_multi_truth_reply(
     return reply
 
 
-def _looks_like_service_question(normalized: str, raw_text: str | None = None) -> bool:
+def _looks_like_service_question(
+    normalized: str,
+    raw_text: str | None = None,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
+) -> bool:
     if not normalized:
         return False
-    if not _message_has_service_token(normalized):
+    if not _message_has_service_token(normalized, _normalize_client_slug(client_slug)):
         return False
     if _has_price_signal(normalized, raw_text):
         return True
@@ -1861,6 +1933,7 @@ def build_consult_reply(
     allow_service_query: bool = False,
 ) -> DemoSalonDecision | None:
     normalized = _normalize_text(message)
+    slug = _normalize_client_slug(client_slug)
     consult_intent = False
     consult_topic = None
     consult_question = None
@@ -1874,10 +1947,12 @@ def build_consult_reply(
             intent_service_query = service_query.strip() or None
 
     has_service_query = bool(intent_service_query) or allow_service_query
-    if not normalized or (_should_skip_consult(normalized, message) and not has_service_query):
+    if not normalized or (
+        _should_skip_consult(normalized, message, client_slug=slug) and not has_service_query
+    ):
         return None
 
-    playbooks = _load_consult_playbooks()
+    playbooks = _load_consult_playbooks(client_slug)
     if not playbooks:
         return None
 
@@ -1946,13 +2021,22 @@ def build_consult_reply(
     )
 
 
-def format_reply_from_truth(intent: str, slots: dict | None = None) -> str | None:
-    truth = load_yaml_truth()
+def format_reply_from_truth(
+    intent: str,
+    slots: dict | None = None,
+    *,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
+    truth: dict | None = None,
+) -> str | None:
+    truth = truth if isinstance(truth, dict) else load_yaml_truth(client_slug)
     slots = slots or {}
 
     if intent in {"location", "hours", "parking"}:
         include_parking = intent == "parking"
-        reply, _meta = build_info_combined_reply(include_parking=include_parking)
+        reply, _meta = build_info_combined_reply(
+            include_parking=include_parking,
+            client_slug=client_slug,
+        )
         if reply:
             return reply
         # Fallback to legacy shape if combined reply is not available.
@@ -2257,8 +2341,9 @@ def _detect_policy_intent(
     phrase_intents: set[str],
     *,
     policy_pack: dict | None = None,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
 ) -> str | None:
-    policy_pack = policy_pack if isinstance(policy_pack, dict) else load_policy_pack()
+    policy_pack = policy_pack if isinstance(policy_pack, dict) else load_policy_pack(client_slug)
     if not policy_pack:
         return None
 
@@ -2298,7 +2383,7 @@ def _detect_policy_intent(
     ):
         return "policy_legal"
 
-    hours_like = _looks_like_hours_question(normalized)
+    hours_like = _looks_like_hours_question(normalized, client_slug=client_slug)
     if (
         _matches_policy_section(
             normalized,
@@ -2327,8 +2412,11 @@ def get_demo_salon_service_decision(
     normalized = _normalize_text(message)
     if not normalized:
         return None
+    slug = _normalize_client_slug(client_slug)
     segments = _split_question_segments(message)
-    has_hours_signal = any(_looks_like_hours_question(_normalize_text(segment)) for segment in segments)
+    has_hours_signal = any(
+        _looks_like_hours_question(_normalize_text(segment), client_slug=slug) for segment in segments
+    )
     has_price_signal = any(_has_price_signal(_normalize_text(segment), segment) for segment in segments)
     has_duration_signal = any(_has_duration_signal(_normalize_text(segment), segment) for segment in segments)
     if has_hours_signal and (has_price_signal or has_duration_signal):
@@ -2341,25 +2429,25 @@ def get_demo_salon_service_decision(
     if consult_intent:
         service_query_meta = _resolve_service_query_meta(
             message,
-            client_slug,
+            slug,
             intent_decomp,
             require_query=True,
         )
         allow_consult_short_circuit = bool(service_query_meta.get("service_query"))
-    if not _looks_like_service_question(normalized, message) and not allow_consult_short_circuit:
+    if not _looks_like_service_question(normalized, message, slug) and not allow_consult_short_circuit:
         return None
 
     if service_query_meta is None:
         service_query_meta = _resolve_service_query_meta(
             message,
-            client_slug,
+            slug,
             intent_decomp,
             require_query=True,
         )
-    service = _match_service(normalized)
-    truth = load_yaml_truth()
+    service = _match_service(normalized, slug)
+    truth = load_yaml_truth(slug)
     if service:
-        reply = _format_service_reply(service, truth)
+        reply = _format_service_reply(service, truth, slug)
         if reply:
             meta = _build_fact_meta(
                 meta=service_query_meta,
@@ -2374,7 +2462,7 @@ def get_demo_salon_service_decision(
                 meta=meta,
             )
 
-    reply = _format_service_not_found_reply()
+    reply = _format_service_not_found_reply(truth)
     if reply:
         meta = _build_fact_meta(
             meta=service_query_meta,
@@ -2400,18 +2488,19 @@ def get_demo_salon_decision(
     if not normalized:
         return None
 
-    truth = load_yaml_truth()
-    phrase_intents = phrase_match_intent(message)
-    policy_pack = load_policy_pack()
+    slug = _normalize_client_slug(client_slug)
+    truth = load_yaml_truth(slug)
+    phrase_intents = phrase_match_intent(message, slug)
+    policy_pack = load_policy_pack(slug)
     parking_signal = _has_parking_signal(normalized)
     guest_signal = _has_guest_waiting_signal(normalized)
     location_signal = _contains_any(normalized, ["адрес", "где вы", "где наход"])
     price_signal = _has_price_signal(normalized, message)
     duration_signal = _has_duration_signal(normalized, message)
-    price_item = _find_best_price_item(message)
+    price_item = _find_best_price_item(message, slug)
     price_item_payload = _price_item_payload(price_item)
     if "отмен" in normalized and "за сколько" in normalized:
-        reply = format_reply_from_truth("cancel_policy")
+        reply = format_reply_from_truth("cancel_policy", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="cancel_policy")
 
@@ -2419,6 +2508,7 @@ def get_demo_salon_decision(
         normalized,
         phrase_intents,
         policy_pack=policy_pack,
+        client_slug=slug,
     )
 
     if policy_intent == "policy_payment":
@@ -2479,13 +2569,13 @@ def get_demo_salon_decision(
 
     consult_decision = build_consult_reply(
         message,
-        client_slug=client_slug,
+        client_slug=slug,
         intent_decomp=intent_decomp,
     )
     if consult_decision:
         service_decision = get_demo_salon_service_decision(
             message,
-            client_slug=client_slug,
+            client_slug=slug,
             intent_decomp=intent_decomp,
         )
         if service_decision and service_decision.intent == "service_match":
@@ -2493,18 +2583,23 @@ def get_demo_salon_decision(
         return consult_decision
 
     if "скидки сумм" in normalized or "скидк" in normalized and "сумм" in normalized:
-        reply = format_reply_from_truth("promotions_rules")
+        reply = format_reply_from_truth("promotions_rules", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="promotions_rules")
 
     promotion_intent = _detect_promotion_intent(normalized)
     if promotion_intent:
-        reply = format_reply_from_truth("promotions", {"promotion_intent": promotion_intent})
+        reply = format_reply_from_truth(
+            "promotions",
+            {"promotion_intent": promotion_intent},
+            client_slug=slug,
+            truth=truth,
+        )
         if reply:
             return _build_truth_decision(response=reply, intent="promotions")
 
     if policy_intent == "policy_discount":
-        reply = _format_promotions(load_yaml_truth())
+        reply = _format_promotions(truth)
         policy_meta = _build_policy_meta(
             "discounts",
             _get_policy_section(policy_pack, "discounts"),
@@ -2516,12 +2611,12 @@ def get_demo_salon_decision(
         )
 
     if "почему" in normalized and "от" in normalized and ("цена" in normalized or "стоим" in normalized):
-        reply = format_reply_from_truth("why_price_from")
+        reply = format_reply_from_truth("why_price_from", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="why_price_from")
 
     if "дороже" in normalized or ("дорог" in normalized and "скид" not in normalized):
-        reply = format_reply_from_truth("objection_price")
+        reply = format_reply_from_truth("objection_price", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="objection_price")
 
@@ -2529,10 +2624,11 @@ def get_demo_salon_decision(
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=guest_signal,
+            client_slug=slug,
         )
         intent_name = "location"
         if price_signal:
-            clarify = format_reply_from_truth("duration_or_price_clarify")
+            clarify = format_reply_from_truth("duration_or_price_clarify", client_slug=slug, truth=truth)
             if clarify:
                 reply = f"{reply} {clarify}".strip() if reply else clarify
             intent_name = "duration_or_price_clarify"
@@ -2540,12 +2636,12 @@ def get_demo_salon_decision(
             return _build_truth_decision(response=reply, intent=intent_name, meta=meta)
 
     if "остановк" in normalized or "как пройти" in normalized or "как добрат" in normalized or "как доехать" in normalized:
-        reply = format_reply_from_truth("location_directions")
+        reply = format_reply_from_truth("location_directions", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="location_directions")
 
     if "вывеск" in normalized:
-        reply = format_reply_from_truth("location_signage")
+        reply = format_reply_from_truth("location_signage", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="location_signage")
 
@@ -2553,18 +2649,19 @@ def get_demo_salon_decision(
         reply, meta = build_info_combined_reply(
             include_parking=True,
             include_guest=guest_signal,
+            client_slug=slug,
         )
         if reply:
             return _build_truth_decision(response=reply, intent="parking", meta=meta)
 
     if "последняя запись" in normalized or "до какого времени можно запис" in normalized:
-        reply = format_reply_from_truth("last_appointment")
+        reply = format_reply_from_truth("last_appointment", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="last_appointment")
 
     multi_result = compose_multi_truth_reply(
         message,
-        client_slug or "demo_salon",
+        slug,
         intent_decomp=intent_decomp,
         return_meta=True,
     )
@@ -2579,7 +2676,7 @@ def get_demo_salon_decision(
 
     if "опозда" in normalized:
         minutes = _extract_minutes(message)
-        tolerated = load_yaml_truth().get("booking", {}).get("lateness_policy", {}).get("tolerated_minutes", 15)
+        tolerated = truth.get("booking", {}).get("lateness_policy", {}).get("tolerated_minutes", 15)
         try:
             tolerated = int(tolerated)
         except (TypeError, ValueError):
@@ -2590,11 +2687,11 @@ def get_demo_salon_decision(
                 response="Если опоздание больше 15 минут — передам администратору, чтобы уточнить.",
                 intent="lateness_over",
             )
-        reply = format_reply_from_truth("lateness_ok")
+        reply = format_reply_from_truth("lateness_ok", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="lateness_ok")
 
-    hours_like = _looks_like_hours_question(normalized) or _contains_any(
+    hours_like = _looks_like_hours_question(normalized, client_slug=slug) or _contains_any(
         normalized,
         ["ашык", "ашық", "бугин", "бүгін"],
     )
@@ -2602,6 +2699,7 @@ def get_demo_salon_decision(
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=guest_signal,
+            client_slug=slug,
         )
         if reply:
             return _build_truth_decision(response=reply, intent="hours", meta=meta)
@@ -2618,7 +2716,7 @@ def get_demo_salon_decision(
             "что можно сделать",
         ],
     ) or _has_services_overview_signal(normalized, truth):
-        reply = format_reply_from_truth("services_overview")
+        reply = format_reply_from_truth("services_overview", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="services_overview")
 
@@ -2626,36 +2724,36 @@ def get_demo_salon_decision(
         "гель лак" in normalized
         and _contains_any(normalized, ["ухаж", "продл", "держ", "нос", "срок"])
     ):
-        reply = format_reply_from_truth("aftercare_gel_lac")
+        reply = format_reply_from_truth("aftercare_gel_lac", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="aftercare_gel_lac")
 
     if "prep_brows_lashes" in phrase_intents or (
         "подготов" in normalized and _contains_any(normalized, ["бров", "ресниц"])
     ):
-        reply = format_reply_from_truth("prep_brows_lashes")
+        reply = format_reply_from_truth("prep_brows_lashes", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="prep_brows_lashes")
 
     if "procedure_combo" in phrase_intents or (
         _contains_any(normalized, ["совмещ", "в один день"]) and _contains_any(normalized, ["чистк", "пилинг"])
     ):
-        reply = format_reply_from_truth("procedure_combo")
+        reply = format_reply_from_truth("procedure_combo", client_slug=slug, truth=truth)
         if reply:
             return DemoSalonDecision(action="escalate", response=reply, intent="procedure_combo")
 
     if "style_reference" in phrase_intents:
-        reply = format_reply_from_truth("style_reference")
+        reply = format_reply_from_truth("style_reference", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="style_reference")
 
     if "system_error" in phrase_intents or "ошибка вызова вебхука" in normalized:
-        reply = format_reply_from_truth("system_error")
+        reply = format_reply_from_truth("system_error", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="system_error")
 
     if "service_clarify" in phrase_intents or ("классическ" in normalized and "интерес" in normalized):
-        reply = format_reply_from_truth("service_clarify")
+        reply = format_reply_from_truth("service_clarify", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="service_clarify")
 
@@ -2663,16 +2761,17 @@ def get_demo_salon_decision(
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=True,
+            client_slug=slug,
         )
         if reply:
             return _build_truth_decision(response=reply, intent="guest_policy", meta=meta)
 
     if _contains_any(normalized, ["собак", "животн", "питом"]):
-        reply = format_reply_from_truth("guest_animals")
+        reply = format_reply_from_truth("guest_animals", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="guest_policy")
 
-    question_type = semantic_question_type(message)
+    question_type = semantic_question_type(message, client_slug=slug)
     question_meta: dict[str, Any] | None = None
     duration_meta: dict[str, Any] | None = None
     if question_type:
@@ -2687,15 +2786,16 @@ def get_demo_salon_decision(
     if duration_meta:
         service_query_meta = _resolve_service_query_meta(
             message,
-            client_slug,
+            slug,
             intent_decomp,
             require_query=True,
         )
-        service = _resolve_service_from_query(service_query_meta.get("service_query"))
+        service = _resolve_service_from_query(service_query_meta.get("service_query"), slug)
         reply = _format_service_duration_reply(
             service,
             message=message,
             service_label=service_query_meta.get("service_query"),
+            client_slug=slug,
         )
         duration_item = service_query_meta.get("service_query")
         meta = {**duration_meta, **service_query_meta} if duration_meta else service_query_meta
@@ -2709,28 +2809,27 @@ def get_demo_salon_decision(
     if not price_item and isinstance(intent_decomp, dict):
         price_service_meta = _resolve_service_query_meta(
             message,
-            client_slug,
+            slug,
             intent_decomp,
             require_query=False,
         )
         service_query = price_service_meta.get("service_query") if isinstance(price_service_meta, dict) else None
         if isinstance(service_query, str) and service_query.strip():
-            price_item = _find_best_price_item(service_query)
+            price_item = _find_best_price_item(service_query, slug)
             price_item_payload = _price_item_payload(price_item)
     if question_type is None and price_signal and not price_item:
         if not location_signal and not parking_signal and not guest_signal:
             service_query_meta = _resolve_service_query_meta(
                 message,
-                client_slug,
+                slug,
                 intent_decomp,
                 require_query=True,
             )
             service_query_value = service_query_meta.get("service_query")
             if service_query_value:
-                service = _resolve_service_from_query(service_query_value)
+                service = _resolve_service_from_query(service_query_value, slug)
                 if service:
-                    truth = load_yaml_truth()
-                    service_reply = _format_service_reply(service, truth)
+                    service_reply = _format_service_reply(service, truth, slug)
                     if service_reply:
                         return _build_truth_decision(
                             response=service_reply,
@@ -2738,12 +2837,14 @@ def get_demo_salon_decision(
                             meta=service_query_meta,
                             price_item=price_item_payload,
                         )
-                price_item = _find_best_price_item(service_query_value)
+                price_item = _find_best_price_item(service_query_value, slug)
                 price_item_payload = _price_item_payload(price_item)
                 if price_item:
                     reply = format_reply_from_truth(
                         "price_query",
                         {"price_item": price_item["item"]},
+                        client_slug=slug,
+                        truth=truth,
                     )
                     if reply:
                         return _build_truth_decision(
@@ -2758,12 +2859,13 @@ def get_demo_salon_decision(
             info_reply, info_meta = build_info_combined_reply(
                 include_parking=parking_signal,
                 include_guest=guest_signal,
+                client_slug=slug,
             )
-        if _is_offtopic_message(normalized):
-            reply = format_reply_from_truth("off_topic")
+        if _is_offtopic_message(normalized, slug):
+            reply = format_reply_from_truth("off_topic", client_slug=slug, truth=truth)
             if reply:
                 return _build_truth_decision(response=reply, intent="off_topic")
-        clarify_reply = format_reply_from_truth("duration_or_price_clarify")
+        clarify_reply = format_reply_from_truth("duration_or_price_clarify", client_slug=slug, truth=truth)
         reply_parts = [part for part in [info_reply, clarify_reply] if part]
         reply_text = " ".join(reply_parts) if reply_parts else clarify_reply
         if reply_text:
@@ -2779,12 +2881,12 @@ def get_demo_salon_decision(
     ):
         service_query_meta = _resolve_service_query_meta(
             message,
-            client_slug,
+            slug,
             intent_decomp,
             require_query=True,
         )
         if service_query_meta.get("service_query"):
-            reply = format_reply_from_truth("price_manicure")
+            reply = format_reply_from_truth("price_manicure", client_slug=slug, truth=truth)
             if reply:
                 meta = {**question_meta_for_price, **service_query_meta} if question_meta_for_price else service_query_meta
                 return _build_truth_decision(
@@ -2795,42 +2897,42 @@ def get_demo_salon_decision(
                 )
 
     if _contains_any(normalized, ["стерилиз", "инструмент", "обрабатываете", "дез", "сухожар"]):
-        reply = format_reply_from_truth("hygiene")
+        reply = format_reply_from_truth("hygiene", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="hygiene")
 
     if _contains_any(normalized, ["сухожар"]):
-        reply = format_reply_from_truth("hygiene_dry_heat")
+        reply = format_reply_from_truth("hygiene_dry_heat", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="hygiene")
 
     if _contains_any(normalized, ["пилк", "однораз"]):
-        reply = format_reply_from_truth("hygiene_disposables")
+        reply = format_reply_from_truth("hygiene_disposables", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="hygiene")
 
     if _contains_any(normalized, ["какой космет", "материал", "бренд", "марки"]):
-        reply = format_reply_from_truth("brands")
+        reply = format_reply_from_truth("brands", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="brands")
 
     if _contains_any(normalized, ["wifi", "вайфай", "вай фай", "wi fi"]):
-        reply = format_reply_from_truth("amenities_wifi")
+        reply = format_reply_from_truth("amenities_wifi", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="amenities")
 
     if _contains_any(normalized, ["кофе", "чай"]):
-        reply = format_reply_from_truth("amenities_drinks")
+        reply = format_reply_from_truth("amenities_drinks", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="amenities")
 
     if _contains_any(normalized, ["туалет", "санузел"]):
-        reply = format_reply_from_truth("amenities_toilet")
+        reply = format_reply_from_truth("amenities_toilet", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="amenities")
 
     if "сертификат" in normalized:
-        reply = format_reply_from_truth("gift_certificate")
+        reply = format_reply_from_truth("gift_certificate", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="gift_certificate")
 
@@ -2838,33 +2940,33 @@ def get_demo_salon_decision(
         "order_booking" in phrase_intents
         or _contains_any(normalized, ["запис", "запиш", "окошк", "свободн"])
     ):
-        reply = format_reply_from_truth("booking_intake")
+        reply = format_reply_from_truth("booking_intake", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="booking_intake")
 
     service_decision = get_demo_salon_service_decision(
         message,
-        client_slug=client_slug or "demo_salon",
+        client_slug=slug,
         intent_decomp=intent_decomp,
     )
     if service_decision:
         return service_decision
 
-    if _is_offtopic_message(normalized):
-        reply = format_reply_from_truth("off_topic")
+    if _is_offtopic_message(normalized, slug):
+        reply = format_reply_from_truth("off_topic", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="off_topic")
 
     if price_item or price_signal:
         service_query_meta = _resolve_service_query_meta(
             message,
-            client_slug,
+            slug,
             intent_decomp,
             require_query=True,
         )
         service_query_value = service_query_meta.get("service_query")
         if not service_query_value:
-            reply = format_reply_from_truth("service_clarify")
+            reply = format_reply_from_truth("service_clarify", client_slug=slug, truth=truth)
             if reply:
                 return _build_truth_decision(
                     response=reply,
@@ -2872,10 +2974,9 @@ def get_demo_salon_decision(
                     meta=service_query_meta,
                 )
         if not price_item and isinstance(service_query_value, str):
-            service = _resolve_service_from_query(service_query_value)
+            service = _resolve_service_from_query(service_query_value, slug)
             if service:
-                truth = load_yaml_truth()
-                service_reply = _format_service_reply(service, truth)
+                service_reply = _format_service_reply(service, truth, slug)
                 if service_reply:
                     meta = (
                         {**question_meta_for_price, **service_query_meta}
@@ -2888,7 +2989,12 @@ def get_demo_salon_decision(
                         meta=meta,
                         price_item=price_item_payload,
                     )
-        reply = format_reply_from_truth("price_query", {"price_item": price_item["item"]} if price_item else {})
+        reply = format_reply_from_truth(
+            "price_query",
+            {"price_item": price_item["item"]} if price_item else {},
+            client_slug=slug,
+            truth=truth,
+        )
         if reply:
             meta = {**question_meta_for_price, **service_query_meta} if question_meta_for_price else service_query_meta
             return _build_truth_decision(
@@ -2905,22 +3011,27 @@ def get_demo_salon_price_reply(message: str, client_slug: str | None = "demo_sal
     normalized = _normalize_text(message)
     if not normalized:
         return None
+    slug = _normalize_client_slug(client_slug)
     service_query_meta = _resolve_service_query_meta(
         message,
-        client_slug,
+        slug,
         intent_decomp=None,
         require_query=True,
     )
     if not service_query_meta.get("service_query"):
         return None
-    price_item = _find_best_price_item(message)
+    price_item = _find_best_price_item(message, slug)
     if not price_item:
         return None
-    return format_reply_from_truth("price_query", {"price_item": price_item["item"]})
+    return format_reply_from_truth(
+        "price_query",
+        {"price_item": price_item["item"]},
+        client_slug=slug,
+    )
 
 
-def get_demo_salon_price_item(message: str) -> str | None:
-    price_item = _find_best_price_item(message)
+def get_demo_salon_price_item(message: str, client_slug: str | None = "demo_salon") -> str | None:
+    price_item = _find_best_price_item(message, _normalize_client_slug(client_slug))
     if not price_item:
         return None
     item = price_item.get("item")
@@ -2929,16 +3040,17 @@ def get_demo_salon_price_item(message: str) -> str | None:
     return str(item).strip() or None
 
 
-def get_demo_salon_service_hint(message: str) -> str | None:
+def get_demo_salon_service_hint(message: str, client_slug: str | None = "demo_salon") -> str | None:
     normalized = _normalize_text(message)
     if not normalized:
         return None
-    service = _match_service(normalized)
+    slug = _normalize_client_slug(client_slug)
+    service = _match_service(normalized, slug)
     if isinstance(service, dict):
         name = service.get("name")
         if isinstance(name, str) and name.strip():
             return name.strip()
-    price_item = _find_best_price_item(message)
+    price_item = _find_best_price_item(message, slug)
     if isinstance(price_item, dict):
         name = price_item.get("name")
         if isinstance(name, str) and name.strip():
@@ -2946,8 +3058,8 @@ def get_demo_salon_service_hint(message: str) -> str | None:
     return None
 
 
-def get_truth_reply(message: str) -> str | None:
-    decision = get_demo_salon_decision(message)
+def get_truth_reply(message: str, client_slug: str | None = "demo_salon") -> str | None:
+    decision = get_demo_salon_decision(message, client_slug=client_slug)
     if decision and decision.action == "reply":
         return decision.response
     return None

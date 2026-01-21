@@ -662,7 +662,7 @@ def _run_intent_decomposition(
             message_text,
             intent_decomp_set=intent_decomp_set,
         )
-        if client_slug == "demo_salon" and legacy._matches_guest_policy_lexicon(message_text):
+        if legacy._matches_guest_policy_lexicon(message_text, client_slug=client_slug):
             if not isinstance(info_class_meta, dict):
                 info_class_meta = {}
             info_signals = info_class_meta.get("info_signals")
@@ -1533,7 +1533,6 @@ from app.services.demo_salon_knowledge import (
     _has_price_signal,
     _match_service,
     build_consult_reply,
-    build_info_combined_reply,
     build_quiet_hours_notice,
     compose_multi_truth_reply,
     format_reply_from_truth,
@@ -2111,13 +2110,17 @@ def _contains_any(normalized: str, keywords: list[str]) -> bool:
     return any(keyword in normalized for keyword in keywords)
 
 
-def _matches_guest_policy_lexicon(message_text: str | None) -> bool:
+def _matches_guest_policy_lexicon(
+    message_text: str | None,
+    *,
+    client_slug: str | None,
+) -> bool:
     if not message_text:
         return False
     normalized = normalize_for_matching(message_text)
     if not normalized:
         return False
-    truth = load_yaml_truth()
+    truth = load_yaml_truth(client_slug)
     domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
     lexicon = domain_pack.get("guest_policy_lexicon") if isinstance(domain_pack, dict) else None
     if not isinstance(lexicon, dict):
@@ -2147,8 +2150,9 @@ def _is_booking_cancel(text: str, *, policy_pack: dict | None) -> bool:
 
 
 def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
-    if not text or not client_slug:
+    if not text:
         return None
+    slug = client_slug or "demo_salon"
     normalized_text = _normalize_text(text)
     booking_like = _is_booking_request(text)
     if not booking_like:
@@ -2159,12 +2163,11 @@ def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
             or DATE_NUMERIC_PATTERN.search(text)
             or DATE_MONTH_PATTERN.search(text)
         )
-    match = semantic_service_match(text, client_slug)
+    match = semantic_service_match(text, slug)
     if not match or match.action != "match":
-        if client_slug == "demo_salon":
-            fallback = get_demo_salon_service_hint(text)
-            if fallback:
-                return fallback
+        fallback = get_demo_salon_service_hint(text, client_slug=slug)
+        if fallback:
+            return fallback
         return None
     canonical_name = match.canonical_name
     if isinstance(canonical_name, str) and canonical_name.strip():
@@ -2178,10 +2181,10 @@ def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
     return None
 
 
-def _extract_datetime(text: str) -> str | None:
+def _extract_datetime(text: str, *, client_slug: str | None = None) -> str | None:
     if not text:
         return None
-    resolved = _resolve_datetime_offline(text)
+    resolved = _resolve_datetime_offline(text, client_slug=client_slug)
     if isinstance(resolved, dict):
         value = resolved.get("value")
         if isinstance(value, str) and value.strip():
@@ -2268,14 +2271,18 @@ def _evaluate_booking_signal(
     if any(_is_booking_request(message) for message in messages):
         return True, None
     has_service = any(_extract_service_hint(message, client_slug) for message in messages)
-    has_datetime = any(_extract_datetime(message) for message in messages)
+    has_datetime = any(_extract_datetime(message, client_slug=client_slug) for message in messages)
     booking_signal = has_service and has_datetime
     if booking_signal and message_text:
         segments = [segment.strip() for segment in re.split(r"[?!\.,;]+", message_text) if segment.strip()]
         if not segments:
             segments = [message_text.strip()]
         for segment in segments:
-            question_type = semantic_question_type(segment, include_kinds=BOOKING_INFO_QUESTION_TYPES)
+            question_type = semantic_question_type(
+                segment,
+                include_kinds=BOOKING_INFO_QUESTION_TYPES,
+                client_slug=client_slug,
+            )
             if question_type and question_type.kind in BOOKING_INFO_QUESTION_TYPES:
                 return (
                     False,
@@ -3355,15 +3362,18 @@ async def _handle_webhook_payload(
 
     # 4. Update last_message_at (keep previous for session timeout check)
     now = datetime.now(timezone.utc)
-    policy_type = _get_policy_type(client)
-    policy_pack = _get_policy_pack(client)
+    policy_type = _get_policy_type(client, client_slug=payload.client_slug)
+    policy_pack = _get_policy_pack(client, client_slug=payload.client_slug)
     policy_pack_missing = not isinstance(policy_pack, dict)
     policy_source = "policy_pack" if not policy_pack_missing else "policy_gate"
-    policy_handler = _get_policy_handler(client)
+    policy_handler = _get_policy_handler(client, client_slug=payload.client_slug)
     hard_law_sections = set(_resolve_hard_law_sections(policy_pack))
     quiet_hours_notice: str | None = None
-    if conversation.state == ConversationState.BOT_ACTIVE.value and policy_type == "demo_salon":
-        quiet_hours_notice = build_quiet_hours_notice(now_utc=now)
+    if conversation.state == ConversationState.BOT_ACTIVE.value:
+        quiet_hours_notice = build_quiet_hours_notice(
+            now_utc=now,
+            client_slug=payload.client_slug,
+        )
 
     _finalize_bot_response = functools.partial(
         _finalize_bot_response_helper,
@@ -4711,6 +4721,7 @@ async def _handle_webhook_payload(
         message_text,
         policy_type=policy_type,
         policy_pack=policy_pack,
+        client_slug=payload.client_slug,
     )
     promotions_trigger = False
     if router_used and promotions_router_class in {"promotions", "discounts"}:
@@ -4744,14 +4755,13 @@ async def _handle_webhook_payload(
                 in_signals.append("promotions_signal")
             class_router_result["in_signals"] = in_signals
 
-        promotion_intent = None
-        if policy_type == "demo_salon":
-            promotion_intent = _detect_promotion_intent(_normalize_text(message_text))
+        promotion_intent = _detect_promotion_intent(_normalize_text(message_text))
         promo_reply = None
         if promotion_intent == "promotion_birthday":
             promo_reply = format_reply_from_truth(
                 "promotions",
                 {"promotion_intent": promotion_intent},
+                client_slug=payload.client_slug,
             )
         if promo_reply:
             decision = DemoSalonDecision(
@@ -5130,7 +5140,6 @@ async def _handle_webhook_payload(
         and routing["allow_truth_gate_reply"]
         and not bypass_domain_flows
         and message_text
-        and policy_type == "demo_salon"
     ):
         combined_intents: list[str] = []
         seen_intents: set[str] = set()
@@ -5710,6 +5719,7 @@ async def _handle_webhook_payload(
         consult_return_prompt=consult_return_prompt,
         consult_context=consult_context,
         consult_return_reason=consult_return_reason,
+        client_slug=payload.client_slug,
         maybe_apply_fact_guard=_maybe_apply_fact_guard,
         send_and_save=_send_and_save,
     )

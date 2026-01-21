@@ -385,8 +385,8 @@ def _handle_consult_flow(
         consult_blocked = True
     service_hint = None
     service_hint_reason = None
-    if client_slug == "demo_salon" and message_text and (consult_intent or consult_context_active):
-        service_hint = get_demo_salon_service_hint(message_text)
+    if message_text and (consult_intent or consult_context_active):
+        service_hint = get_demo_salon_service_hint(message_text, client_slug=client_slug)
         if service_hint:
             service_hint_reason = "service_hint"
     service_query_for_consult = intent_decomp_service_query or service_hint
@@ -433,8 +433,8 @@ def _handle_consult_flow(
         consult_candidate.meta if consult_candidate and isinstance(consult_candidate.meta, dict) else None
     )
     if consult_intent_signal:
-        if not service_hint and client_slug == "demo_salon" and message_text:
-            service_hint = get_demo_salon_service_hint(message_text)
+        if not service_hint and message_text:
+            service_hint = get_demo_salon_service_hint(message_text, client_slug=client_slug)
             if service_hint:
                 service_hint_reason = "service_hint"
         consult_short_circuit_service = intent_decomp_service_query or service_hint
