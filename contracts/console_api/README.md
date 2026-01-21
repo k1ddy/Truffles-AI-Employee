@@ -7,6 +7,7 @@ This directory contains the **contract-first** specifications for the Truffles C
 | File | Purpose |
 |------|---------|
 | `openapi.v1.yaml` | OpenAPI 3.1 specification for all Console API endpoints |
+| `openapi.generated.yaml` | Generated artifact for drift checks (not canonical) |
 | `errors.v1.json` | Error codes registry with HTTP status and UI behavior mappings |
 
 ## Usage
@@ -25,6 +26,12 @@ npx orval --input contracts/console_api/openapi.v1.yaml --output console-web/src
 
 ```bash
 npx @redocly/cli lint contracts/console_api/openapi.v1.yaml
+```
+
+### Optional Drift Check (Paths/Methods)
+
+```bash
+python3 truffles-api/scripts/generate_openapi.py --check
 ```
 
 ### Frontend Error Handling

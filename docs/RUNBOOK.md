@@ -33,7 +33,10 @@ GROUP BY status;"
 ```bash
 docker exec truffles_postgres_1 psql -U $DB_USER -d chatbot -c "
 UPDATE outbox_messages 
-SET status = 'PENDING', attempt_count = attempt_count 
+SET status = 'PENDING',
+    last_error = 'manual_release',
+    next_attempt_at = NOW(),
+    updated_at = NOW()
 WHERE status = 'PROCESSING' 
 AND updated_at < NOW() - INTERVAL '2 minutes';"
 ```
@@ -42,14 +45,14 @@ AND updated_at < NOW() - INTERVAL '2 minutes';"
 ```bash
 # Check failure reasons
 docker exec truffles_postgres_1 psql -U $DB_USER -d chatbot -c "
-SELECT error_message, COUNT(*) 
+SELECT last_error, COUNT(*) 
 FROM outbox_messages WHERE status = 'FAILED'
-GROUP BY error_message ORDER BY 2 DESC LIMIT 10;"
+GROUP BY last_error ORDER BY 2 DESC LIMIT 10;"
 ```
 
 **Restart outbox worker:**
 ```bash
-docker restart truffles-api
+docker restart truffles-outbox
 ```
 
 ---
@@ -195,7 +198,70 @@ curl https://api.truffles.kz/admin/health/check
 
 ---
 
-## 8. Database Emergency
+## 8. Worker Cutover (API + Outbox/Sentinel split)
+
+### Goal
+Stop old combined worker loops, start dedicated containers, avoid double sending.
+
+### Steps
+1) **Stop old API container** (removes embedded workers):
+```bash
+ssh -p 222 zhan@5.188.241.234 "docker stop truffles-api && docker rm truffles-api"
+```
+2) **Start new API container** (no embedded workers):
+```bash
+ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
+```
+3) **Start workers**:
+```bash
+ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env bash /home/zhan/truffles-main/scripts/restart_workers.sh"
+```
+4) **Verify only one outbox processor**:
+```bash
+ssh -p 222 zhan@5.188.241.234 "docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}' | rg 'truffles-api|truffles-outbox|truffles-sentinel'"
+```
+
+### Guardrails
+- If running an old image that still starts workers inside API, set `OUTBOX_WORKER_ENABLED=0` for API and keep `OUTBOX_WORKER_ENABLED=1` for worker containers.
+- Ensure the `.env` file exists; missing env will make worker containers fail to start (or exit immediately).
+- `OTEL_SERVICE_NAME` should be different per container (API/outbox/sentinel) to keep traces clean.
+
+## 8. Worker Containers (Outbox/Sentinel)
+
+### Restart workers
+```bash
+docker restart truffles-outbox
+docker restart truffles-sentinel
+```
+Или:
+```bash
+ENV_FILE=/home/zhan/truffles-main/truffles-api/.env bash /home/zhan/truffles-main/scripts/restart_workers.sh
+```
+
+### Validate workers are alive
+```bash
+docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "truffles-outbox|truffles-sentinel"
+```
+
+### Rollout checklist (decoupled workers)
+1. Deploy new API image (`restart_api.sh`).
+2. Ensure no in-process workers (new image removes them).
+3. Start `truffles-outbox` and `truffles-sentinel` containers.
+4. Verify outbox latency p90 and no stuck PROCESSING (SQL + `/admin/metrics`).
+5. Confirm alerts/health via `/admin/health/check`.
+
+---
+
+## 9. Console OpenAPI Drift Check
+
+```bash
+cd /home/zhan/truffles-main
+python3 truffles-api/scripts/generate_openapi.py --check
+```
+
+---
+
+## 10. Database Emergency
 
 ### Symptoms
 - `/admin/health/check` shows `database.status = unhealthy`

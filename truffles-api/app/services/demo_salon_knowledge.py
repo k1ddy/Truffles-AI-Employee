@@ -2114,9 +2114,9 @@ def _detect_promotion_intent(normalized: str) -> str | None:
         return "promotion_birthday"
     if "до после" in normalized and _contains_any_words(normalized, ["дней", "дня", "день"]):
         return "promotion_birthday"
-    if "будн" in normalized:
-        return "promotion_student"
     if "студент" in normalized or "пенсион" in normalized:
+        return "promotion_student"
+    if "будн" in normalized and _contains_any(normalized, ["скидк", "акци", "льгот", "промо"]):
         return "promotion_student"
     return None
 
@@ -2658,7 +2658,7 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="service_clarify")
 
-    if guest_signal:
+    if guest_signal and not price_signal:
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=True,

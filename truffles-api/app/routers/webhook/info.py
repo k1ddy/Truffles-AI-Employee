@@ -96,20 +96,20 @@ def _detect_info_class_intents(
             "машину",
         ]
     ) or ("мест" in normalized and ("авто" in normalized or "машин" in normalized or "машины" in normalized))
+    guest_prefixes = (
+        "гост",
+        "ребен",
+        "ребён",
+        "дет",
+        "коляс",
+        "ожидан",
+        "подожд",
+        "пораньше",
+        "раньше",
+        "подруг",
+    )
     guest_signal = any(
-        token in normalized
-        for token in [
-            "гост",
-            "ребен",
-            "ребён",
-            "дет",
-            "коляс",
-            "ожидан",
-            "подожд",
-            "пораньше",
-            "раньше",
-            "подруг",
-        ]
+        token.startswith(prefix) for token in tokens for prefix in guest_prefixes
     )
     location_signal = parking_signal or guest_signal or any(
         token in normalized

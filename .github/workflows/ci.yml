@@ -114,6 +114,10 @@ jobs:
           python -m openapi_spec_validator ../contracts/console_api/openapi.v1.yaml
           echo "✓ OpenAPI spec valid"
 
+      - name: OpenAPI drift check (console)
+        run: |
+          python scripts/generate_openapi.py --check
+
   unit-tests:
     runs-on: ubuntu-latest
     services:

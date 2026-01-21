@@ -699,6 +699,7 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
                 return fixed_now if tz is None else fixed_now.astimezone(tz)
 
         patches.append(patch("app.routers.webhook._legacy.datetime", _FixedDateTime))
+        patches.append(patch("app.routers.webhook.decision.datetime", _FixedDateTime))
         patches.append(patch("app.services.demo_salon_knowledge.datetime", _FixedDateTime))
 
     with ExitStack() as stack:
@@ -789,6 +790,7 @@ def _run_webhook_conversation_turns(
                 return fixed_now if tz is None else fixed_now.astimezone(tz)
 
         patches.append(patch("app.routers.webhook._legacy.datetime", _FixedDateTime))
+        patches.append(patch("app.routers.webhook.decision.datetime", _FixedDateTime))
         patches.append(patch("app.services.demo_salon_knowledge.datetime", _FixedDateTime))
 
     responses: list[str] = []

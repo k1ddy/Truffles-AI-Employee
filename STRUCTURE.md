@@ -12,8 +12,10 @@
 | `AGENTS.md` | Принципы работы, роли, ошибки | Архитектор (каждую сессию) |
 | `STRUCTURE.md` | Этот файл — карта проекта | Оба (каждую сессию) |
 | `TECH.md` | Доступы, команды, данные сервера | Кодер |
+| `contracts/` | Канон контрактов (Console API, ошибки) | Архитектор/Frontend |
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
+| `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 
@@ -37,6 +39,7 @@
 - Статус/evidence: `STATE.md` (единственный источник фактов с проверкой).
 - Бизнес-ограничения: `STRATEGY/REQUIREMENTS.md`.
 - Тарифы/обещания: `STRATEGY/PRODUCT.md` + `docs/SELLING_TRUTHS.md` (claim/proof/boundary).
+- Контракты Console API: `contracts/console_api/*` (OpenAPI + ошибки).
 - Поведение/архитектура: `SPECS/*` (кроме `SPECS/ACTIVE_LEARNING_PLAN.md`; ключевые: `CONSULTANT.md`, `ESCALATION.md`, `ARCHITECTURE.md`).
 - Процесс/инструменты (entrypoint): `SPECS/SYSTEM_REFERENCE.md` → section "Start Here — Process Map".
 - План/приоритеты: `STRATEGY/TECH_ROADMAP.md`.
