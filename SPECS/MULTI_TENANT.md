@@ -180,6 +180,117 @@ Python API:
 **Где лежит:** `truffles-api/app/knowledge/<client_slug>/SALON_TRUTH.yaml`  
 **Формат:** `domain_pack` + `client_pack`, при этом старые ключи остаются для обратной совместимости.
 
+---
+
+# ЧАСТЬ 3: КАНАЛЫ / ПРОВАЙДЕРЫ / ИНТЕГРАЦИИ (TARGET)
+
+**Статус:** PLAN (реализация только через DEC)  
+**Цель:** полная изоляция бизнесов и ниш при подключении разных каналов, провайдеров и интеграций.
+
+## 3.1 Нормализованный контракт сообщений (ядро не знает провайдера)
+
+**Вход (InboundEnvelope):**
+```json
+{
+  "tenant": {"client_id": "...", "client_slug": "...", "domain_slug": "..."},
+  "branch": {"branch_id": "...", "instance_id": "..."},
+  "channel": "whatsapp|telegram|instagram|web",
+  "provider": "chatflow|wazzup|telegram_bot|ig_graph|websocket",
+  "direction": "inbound",
+  "message": {
+    "id": "...",
+    "remote_id": "...",
+    "conversation_id": "...",
+    "timestamp": "...",
+    "text": "...",
+    "media": [{"type": "...", "url": "..."}]
+  },
+  "metadata": {"raw_provider_payload_ref": "..."}
+}
+```
+
+**Выход (OutboundEnvelope):**
+```json
+{
+  "tenant": {"client_id": "...", "client_slug": "..."},
+  "branch": {"branch_id": "...", "instance_id": "..."},
+  "channel": "whatsapp|telegram|instagram|web",
+  "provider": "chatflow|wazzup|telegram_bot|ig_graph|websocket",
+  "direction": "outbound",
+  "message": {"id": "...", "text": "...", "media": [{"type": "...", "url": "..."}]},
+  "idempotency_key": "tenant+message_id"
+}
+```
+
+**Инвариант:** decision‑ядро принимает только этот контракт; любые vendor‑payload остаются в адаптере.
+
+## 3.2 Capability Matrix (конфиг клиента)
+
+**Хранить в** `clients.config.capabilities` (строгая схема, без "магии").
+
+```yaml
+capabilities:
+  domain_slug: "salon|retail|clinic|restaurant"
+  channels:
+    whatsapp:
+      providers: ["chatflow", "wazzup"]
+      default_provider: "chatflow"
+    telegram:
+      providers: ["telegram_bot"]
+  integrations:
+    crm: {type: "amo", enabled: true}
+    sheets: {type: "google", enabled: false}
+    payments: {type: "kaspi", enabled: true}
+    custom_scripts: {enabled: false, allowlist: []}
+  features:
+    booking_flow: true
+    consult_flow: true
+    handoff: true
+```
+
+**Инвариант:** выбор логики определяется capabilities, а не hardcode.
+
+## 3.3 Domain Packs (разные ниши)
+
+**Новый параметр:** `domain_slug` выбирает "семейство" правил.  
+**Принцип:** новая ниша подключается через packs, без изменения decision‑ядра.
+
+**Минимальные секции domain_pack:**
+- `intent_lexicon` (RU/KZ/mixed)
+- `typical_questions` (pricing/duration/hours/...)
+- `ood_anchors` (in/out/strict)
+- `policy_sections` (discounts/complaint/medical/etc.)
+- `examples` (eval seeds)
+
+## 3.4 Provider Adapters (контракт и требования)
+
+**Требования:**
+- Inbound → normalize to InboundEnvelope (client_slug/branch_id обязателен).
+- Outbound → send using provider API + idempotency.
+- Retry/backoff и rate‑limit — в адаптере, не в decision‑ядре.
+- Любая ошибка → decision_meta/trace с provider_error.
+
+## 3.5 Integration Hub (CRM/Sheets/Payments/Custom)
+
+**Модель:** асинхронные коннекторы по событиям (outbox/event).
+
+**Инварианты:**
+- Каждое событие содержит tenant/branch + idempotency_key.
+- Интеграции включаются через capabilities.
+- Не блокировать webhook‑ответы (async only).
+
+---
+
+# ЧАСТЬ 4: ОНБОРДИНГ НОВОЙ НИШИ (TARGET)
+
+**Статус:** PLAN (реализация через DEC)
+
+1) Создать `client` + `branch` (client_slug == clients.name, instanceId обязателен).  
+2) Создать packs под `domain_slug` + `client_slug`.  
+3) Заполнить capabilities (channels/providers/integrations/features).  
+4) Sync KB (`ops/sync_client.py --validate` → sync).  
+5) Подключить провайдеры и выполнить smoke‑suite (CA‑01/02/03/07 минимум).
+
 ### Классы интентов (канон)
 - `domain_pack` хранит **якоря и синонимы** как boost для классификатора, но **не** как единственный сигнал.
 - OOD определяется только при out‑signals без in‑signals; info‑класс не должен ломаться от перестановки слов.
