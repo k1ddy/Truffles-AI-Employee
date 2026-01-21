@@ -883,22 +883,21 @@ def _has_parking_signal(normalized: str) -> bool:
 def _has_guest_waiting_signal(normalized: str) -> bool:
     if not normalized:
         return False
-    if _contains_any(
-        normalized,
-        [
-            "гост",
-            "ребен",
-            "ребён",
-            "дет",
-            "коляс",
-            "ожидан",
-            "пораньше",
-            "раньше",
-            "подождать",
-            "заранее",
-            "сопровожд",
-        ],
-    ):
+    tokens = normalized.split()
+    prefixes = (
+        "гост",
+        "ребен",
+        "ребён",
+        "дет",
+        "коляс",
+        "ожидан",
+        "пораньше",
+        "раньше",
+        "подожд",
+        "заранее",
+        "сопровожд",
+    )
+    if any(token.startswith(prefix) for token in tokens for prefix in prefixes):
         return True
     return _contains_any_words(normalized, ["муж", "супруг", "подруг", "сопровожд"])
 
@@ -1804,6 +1803,8 @@ def _looks_like_service_question(normalized: str, raw_text: str | None = None) -
         "можно сделать",
     ]
     if _contains_any(normalized, service_keywords):
+        return True
+    if "цвет" in normalized and "волос" in normalized:
         return True
     return False
 

@@ -502,7 +502,7 @@ jobs:
               IMAGE_TAG=sha-${{ github.sha }}
             fi
             IMAGE_NAME=${{ env.IMAGE_NAME }}:${IMAGE_TAG} PULL_IMAGE=1 \
-            OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net,77759841926@s.whatsapp.net,77781658799@s.whatsapp.net \
+            OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net,77785890765@s.whatsapp.net \
             REQUIRE_GHCR=1 VERIFY_VERSION=1 \
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
             bash ~/restart_api.sh
@@ -649,6 +649,7 @@ jobs:
           SUITE_LIST="${{ matrix.suites }}"
           JID_INDEX="${{ matrix.jid_index }}"
           MIN_ALLOWLIST_JIDS=3
+          LIVECHECK_ALLOWLIST_JIDS="77015705555@s.whatsapp.net,77785890765@s.whatsapp.net,77000000001@s.whatsapp.net"
           SSH=(ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=5 ${SERVER_USER}@${SERVER_HOST})
           if ! "${SSH[@]}" "echo livecheck-ready" >/dev/null 2>&1; then
             echo "livecheck skipped: ssh unreachable" | tee artifacts/livecheck-skip.txt
@@ -662,6 +663,7 @@ jobs:
           SUITE_LIST="${SUITE_LIST:?}"
           JID_INDEX="${JID_INDEX:?}"
           MIN_ALLOWLIST_JIDS="${MIN_ALLOWLIST_JIDS:-1}"
+          LIVECHECK_ALLOWLIST_JIDS="${LIVECHECK_ALLOWLIST_JIDS:-}"
           GATE_LOG="/tmp/livecheck-gate-${RUN_ID}.txt"
           RUN_LOG="/tmp/livecheck-run-${RUN_ID}.log"
           ARTIFACT_TAR="/tmp/livecheck-artifacts-${RUN_ID}.tar.gz"
@@ -686,6 +688,10 @@ jobs:
           trap cleanup EXIT
           TEST_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${TEST_MODE:-}"')
           ALLOWLIST=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOUND_ALLOWLIST_JIDS:-}"')
+          LIVECHECK_ALLOWLIST="${LIVECHECK_ALLOWLIST_JIDS}"
+          if [ -z "${LIVECHECK_ALLOWLIST}" ]; then
+            LIVECHECK_ALLOWLIST="${ALLOWLIST}"
+          fi
           LEARNING_MODE=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${LEARNING_MODE:-}"')
           ALERTS_ADMIN_TOKEN=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${ALERTS_ADMIN_TOKEN:-}"')
           OUTBOX_WORKER_ENABLED=$(docker exec truffles-api /bin/sh -lc 'printf "%s" "${OUTBOX_WORKER_ENABLED:-}"')
@@ -699,6 +705,7 @@ jobs:
           {
             echo "TEST_MODE=${TEST_MODE}"
             echo "OUTBOUND_ALLOWLIST_JIDS=${ALLOWLIST}"
+            echo "LIVECHECK_ALLOWLIST_JIDS=${LIVECHECK_ALLOWLIST}"
             echo "LEARNING_MODE=${LEARNING_MODE}"
             echo "QDRANT_COLLECTION=${QDRANT_COLLECTION}"
             echo "QDRANT_COLLECTION_EFFECTIVE=${QDRANT_COLLECTION_EFFECTIVE}"
@@ -724,7 +731,7 @@ jobs:
             echo "OUTBOX_WORKER_DISABLED" >> "${GATE_LOG}"
             gate_ok=0
           fi
-          ALLOWLIST_CLEAN="${ALLOWLIST// /}"
+          ALLOWLIST_CLEAN="${LIVECHECK_ALLOWLIST// /}"
           IFS=',' read -r -a ALLOWLIST_POOL <<< "${ALLOWLIST_CLEAN}"
           if [ -z "${ALLOWLIST_CLEAN}" ]; then
             echo "ALLOWLIST_EMPTY" >> "${GATE_LOG}"
@@ -905,7 +912,7 @@ jobs:
           REMOTE
           run_status=0
           SCRIPT_PATH="/tmp/livecheck-${RUN_ID}.sh"
-          if "${SSH[@]}" "RUN_ID=${RUN_ID} GIT_SHA=${GITHUB_SHA} SUITE_LIST='${SUITE_LIST}' JID_INDEX='${JID_INDEX}' MIN_ALLOWLIST_JIDS='${MIN_ALLOWLIST_JIDS}' bash -c 'cat > ${SCRIPT_PATH} && chmod 700 ${SCRIPT_PATH} && bash ${SCRIPT_PATH} < /dev/null; status=\$?; rm -f ${SCRIPT_PATH}; exit \$status'" < "${REMOTE_SCRIPT}"; then
+          if "${SSH[@]}" "RUN_ID=${RUN_ID} GIT_SHA=${GITHUB_SHA} SUITE_LIST='${SUITE_LIST}' JID_INDEX='${JID_INDEX}' MIN_ALLOWLIST_JIDS='${MIN_ALLOWLIST_JIDS}' LIVECHECK_ALLOWLIST_JIDS='${LIVECHECK_ALLOWLIST_JIDS}' bash -c 'cat > ${SCRIPT_PATH} && chmod 700 ${SCRIPT_PATH} && bash ${SCRIPT_PATH} < /dev/null; status=\$?; rm -f ${SCRIPT_PATH}; exit \$status'" < "${REMOTE_SCRIPT}"; then
             run_status=0
           else
             run_status=$?
