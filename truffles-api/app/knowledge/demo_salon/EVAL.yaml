@@ -8123,3 +8123,41 @@ eval_cases:
       normalization_flags:
       - layout_swap
       - normalized
+- id: E903
+  tier: chaos
+  messages:
+  - сколько стоит?
+  - vfybr.h
+  expected:
+    action: reply
+    intent: pricing
+    must_include:
+    - маникюр
+    - ₸
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: service_choice
+      answer_interpreter_used: true
+      answer_slot: service
+      normalization_flags:
+      - layout_swap
+      - normalized
+- id: E904
+  tier: chaos
+  messages:
+  - хочу записаться на маникюр
+  - pfdnhf d 15:00
+  expected:
+    action: reply
+    must_include:
+    - как вас зовут
+    trace_contains:
+    - stage: question_contract
+      decision: matched
+      expected_reply_type: time
+      answer_interpreter_used: true
+      answer_slot: datetime
+      normalization_flags:
+      - layout_swap
+      - normalized
