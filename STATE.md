@@ -1730,6 +1730,59 @@
 - output: `177 | 9.53s | 9.20s | 15.26s | 27.52s`
 - Status: p90 still > 10s target; keep P0 outbox latency OPEN.
 
+### 2026-01-20 — Console contract canon + worker decouple guardrails
+
+**Что сделали:**
+- Канон Console OpenAPI закреплён в `contracts/console_api/openapi.v1.yaml`; добавлены calendar endpoints/schemas.
+- Удалён дублирующий автоген‑спек из `truffles-api/contracts/console_api/`.
+- Добавлен CI drift‑check (paths/methods) через `truffles-api/scripts/generate_openapi.py --check`.
+- Обновлены runbook/tech заметки по отдельным контейнерам воркеров + чек‑лист rollout.
+- Добавлен `scripts/restart_workers.sh` для перезапуска outbox/sentinel.
+- `console-web` теперь генерирует типы из канонического контракта.
+
+**Evidence (local):**
+- OpenAPI drift check:
+  - cmd: `python3 truffles-api/scripts/generate_openapi.py --check`
+  - output: `OpenAPI specification generated at: /home/zhan/truffles-decouple/contracts/console_api/openapi.generated.yaml` (drift отсутствует)
+- Tests:
+  - cmd: `cd truffles-api && pytest tests/test_outbox_worker_settings.py -v`
+  - output: `2 passed in 0.83s`
+
+### 2026-01-21 — Worker cutover guardrails (restart script + runbook)
+
+**Что сделали (local):**
+- `scripts/restart_workers.sh`: проверка наличия `.env` + явные overrides `OUTBOX_WORKER_ENABLED`/`SENTINEL_ENABLED` + отдельные `OTEL_SERVICE_NAME` для воркеров.
+- `docs/RUNBOOK.md`: добавлен раздел про cutover и защиту от дублей.
+
+**Evidence (local):**
+- cmd: `bash -n scripts/restart_workers.sh`
+- output: (no output, exit 0)
+
+**Status:** PLAN (без CI/deploy evidence).
+
+### 2026-01-21 — Worker cutover attempt (blocked by image)
+
+**Что сделали (prod host):**
+- Остановили и пересоздали `truffles-api` через `/home/zhan/restart_api.sh` (image `ghcr.io/k1ddy/truffles-ai-employee:main`).
+- Запустили `scripts/restart_workers.sh` с GHCR image и `.env` из `/home/zhan/truffles-main/truffles-api/.env`.
+
+**Результат:**
+- `truffles-outbox`/`truffles-sentinel` ушли в restart loop: `ModuleNotFoundError: No module named 'app.workers'`.
+- В `truffles-api` логах видно встроенный worker (`Outbox worker started`) — значит текущий образ **без** вынесенных воркеров.
+- Остановили внешние воркеры (`docker rm -f truffles-outbox truffles-sentinel`) чтобы избежать шума.
+
+**Evidence:**
+- cmd: `docker inspect truffles-api --format '{{.Config.Image}}'`
+  - output: `ghcr.io/k1ddy/truffles-ai-employee:main`
+- cmd: `docker logs truffles-outbox --tail 3`
+  - output: `ModuleNotFoundError: No module named 'app.workers'`
+- cmd: `docker logs truffles-api --tail 20 | rg -i 'outbox worker'`
+  - output: `Outbox worker started`
+- cmd: `curl -s http://localhost:8000/admin/version`
+  - output: `{"version":"main","git_commit":"284a358821486f4b2facbb3164b2cc7fe62c2816","build_time":"2026-01-20T14:48:31Z"}`
+
+**Status:** BLOCKED — нужен образ с `app.workers` (PR/CI build + deploy), иначе внешние воркеры не стартуют.
+
 ### 2026-01-18 — CA-12 evidence (router SLA + budget/degradation)
 
 **CI:**

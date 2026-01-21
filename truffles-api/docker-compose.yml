@@ -27,6 +27,36 @@ services:
       - "traefik.http.services.truffles-api.loadbalancer.server.port=8000"
       - "traefik.docker.network=proxy-net"
 
+  truffles-outbox:
+    build:
+      context: .
+    container_name: truffles-outbox
+    command: python -m app.workers.outbox
+    env_file:
+      - .env
+    environment:
+      - DEBUG=false
+    networks:
+      - truffles_internal-net
+    restart: unless-stopped
+    deploy:
+      replicas: 1
+
+  truffles-sentinel:
+    build:
+      context: .
+    container_name: truffles-sentinel
+    command: python -m app.workers.sentinel
+    env_file:
+      - .env
+    environment:
+      - DEBUG=false
+    networks:
+      - truffles_internal-net
+    restart: unless-stopped
+    deploy:
+      replicas: 1
+
 networks:
   truffles_internal-net:
     external: true

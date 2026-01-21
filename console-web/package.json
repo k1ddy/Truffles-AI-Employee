@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "test:e2e": "playwright test",
-    "generate:api": "openapi-typescript /home/zhan/truffles-main/contracts/console_api/openapi.v1.yaml -o src/types/api.generated.ts"
+    "generate:api": "openapi-typescript ../contracts/console_api/openapi.v1.yaml -o src/types/api.generated.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.18",

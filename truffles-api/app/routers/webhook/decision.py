@@ -1281,6 +1281,7 @@ import httpx
 from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
+from app.adapters.chatflow import ChatFlowAdapter
 from app.logging_config import (
     get_logger,
     get_trace_id,
@@ -1289,6 +1290,7 @@ from app.logging_config import (
     record_policy_count,
 )
 from app.models import Branch, Client, Handover, User
+from app.ports.messaging import MessageOptions
 from app.routers.webhook.booking import (
     BOOKING_SLOT_ORDER,
     _apply_booking_slot,
@@ -1520,7 +1522,7 @@ from app.services.ai_service import (
     rewrite_for_service_match,
     transcribe_audio_with_fallback,
 )
-from app.services.chatflow_service import send_bot_response
+from app.services.chatflow_service import get_instance_id
 from app.services.conversation_service import (
     get_or_create_conversation,
     get_or_create_user,
@@ -3122,14 +3124,27 @@ async def _handle_webhook_payload(
 
     def _send_response(text: str) -> bool:
         send_start = time.monotonic()
-        sent = send_bot_response(
-            db,
-            client.id,
-            remote_jid,
-            text,
-            idempotency_key=outbound_idempotency_key,
-            raise_on_fail=skip_persist,
-        )
+        
+        # Resolve instance_id
+        instance_id = get_instance_id(db, client.id)
+        if not instance_id:
+            logger.warning(f"No instance_id found for client {client.id}, jid={remote_jid}")
+            sent = False
+        else:
+            adapter = ChatFlowAdapter()
+            options = MessageOptions(
+                instance_id=instance_id,
+                idempotency_key=outbound_idempotency_key
+            )
+            result = adapter.send_text(remote_jid, text, options)
+            sent = result.is_ok()
+            
+            if not sent and skip_persist:
+                 # If we are skipping persist (e.g. testing/dry-run logic often implies we might want to know if it failed)
+                 # The original code raised RuntimeError if raise_on_fail=True (which was set to skip_persist)
+                 # "raise_on_fail=skip_persist"
+                 raise RuntimeError(f"ChatFlow delivery failed: {result.error}")
+
         _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": sent})
         return sent
 

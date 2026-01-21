@@ -17,3 +17,6 @@ __pycache__/
 .idea/
 .vscode/
 *.swp
+
+# Generated OpenAPI artifacts
+contracts/console_api/openapi.generated.yaml

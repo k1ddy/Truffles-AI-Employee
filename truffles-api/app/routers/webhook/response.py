@@ -84,17 +84,26 @@ def _send_response(
     skip_persist: bool,
     log_timing: Callable[[str, float, dict | None], None],
 ) -> bool:
-    from app.services.chatflow_service import send_bot_response
+    from app.adapters.chatflow import ChatFlowAdapter
+    from app.ports.messaging import MessageOptions
+    from app.services.chatflow_service import get_instance_id
 
     send_start = time.monotonic()
-    sent = send_bot_response(
-        db,
-        client_id,
-        remote_jid,
-        text,
-        idempotency_key=idempotency_key,
-        raise_on_fail=skip_persist,
-    )
+    # Resolve instance_id
+    instance_id = get_instance_id(db, client_id)
+    if not instance_id:
+        sent = False
+    else:
+        adapter = ChatFlowAdapter()
+        options = MessageOptions(
+            instance_id=instance_id,
+            idempotency_key=idempotency_key
+        )
+        result = adapter.send_text(remote_jid, text, options)
+        sent = result.is_ok()
+
+        if not sent and skip_persist:
+             raise RuntimeError(f"ChatFlow delivery failed: {result.error}")
     log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": sent})
     return sent
 
@@ -431,17 +440,36 @@ def _handle_consult_flow(
         consult_short_circuit_service = intent_decomp_service_query or service_hint
         if consult_short_circuit_service and not intent_decomp_service_query and service_hint_reason:
             consult_short_circuit_reason = service_hint_reason
-        if consult_short_circuit_service and explicit_info_intent:
+        color_hair_signal = "цвет" in normalized_message and "волос" in normalized_message
+        consult_playbook_id = None
+        if consult_candidate_meta:
+            consult_playbook_id = consult_candidate_meta.get("consult_playbook_id")
+        consult_service_short_circuit = consult_playbook_id in {
+            "brows_lashes_care",
+            "sensitive_skin",
+            "hair_color_choice",
+        }
+        if consult_short_circuit_service and (
+            explicit_info_intent or color_hair_signal or consult_service_short_circuit
+        ):
             consult_short_circuit = True
             if not consult_short_circuit_reason:
-                consult_short_circuit_reason = "explicit_info"
+                consult_short_circuit_reason = (
+                    "explicit_info"
+                    if explicit_info_intent
+                    else "service_hint"
+                    if consult_short_circuit_service
+                    else "consult_service"
+                )
             consult_flow_trace = {
                 "stage": "consult_flow",
                 "decision": "short_circuit",
                 "state": conversation.state,
                 "reason": consult_short_circuit_reason,
             }
-            consult_flow_trace["explicit_info"] = True
+            consult_flow_trace["explicit_info"] = explicit_info_intent
+            if color_hair_signal:
+                consult_flow_trace["color_hair_signal"] = True
             consult_flow_trace["service_query"] = consult_short_circuit_service
             if consult_topic:
                 consult_flow_trace["consult_topic"] = consult_topic

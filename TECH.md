@@ -20,6 +20,8 @@
 | Имя | Образ | Назначение |
 |-----|-------|------------|
 | truffles-api | truffles-api_truffles-api | Python API (FastAPI) |
+| truffles-outbox | truffles-api_truffles-api | Outbox worker (ACK-first delivery) |
+| truffles-sentinel | truffles-api_truffles-api | Sentinel worker (health/self-heal) |
 | truffles_postgres_1 | postgres:15-alpine | PostgreSQL |
 | truffles_redis_1 | redis:7-alpine | Redis |
 | truffles_qdrant_1 | qdrant/qdrant:latest | Vector DB |
@@ -167,6 +169,14 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 ```bash
 ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 ```
+**Важно:** воркеры (`truffles-outbox`, `truffles-sentinel`) запускаются отдельно; `restart_api.sh` их не перезапускает.
+```bash
+ssh -p 222 zhan@5.188.241.234 "docker restart truffles-outbox truffles-sentinel"
+```
+Или через скрипт:
+```bash
+ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env bash /home/zhan/truffles-main/scripts/restart_workers.sh"
+```
 
 ### Запрос к БД
 ```bash
@@ -187,7 +197,8 @@ ssh -p 222 zhan@5.188.241.234 "curl -s -H 'api-key: ${QDRANT_API_KEY}' 'http://l
 ## Outbox (ACK-first)
 
 - Входящие сообщения только кладутся в outbox (`/webhook*`), обработка идёт отдельным воркером.
-- Планировщик: `/etc/cron.d/truffles-outbox` (каждую минуту вызывает `POST /admin/outbox/process`).
+- Основной путь: контейнер `truffles-outbox` (loop + backoff).
+- Fallback: `/etc/cron.d/truffles-outbox` может вызывать `POST /admin/outbox/process`.
 - При ошибке отправки outbox планирует повтор с backoff (next_attempt_at) до `OUTBOX_MAX_ATTEMPTS`.
 - Зависшие `PROCESSING` (старше `OUTBOX_STALE_PROCESSING_SECONDS`) переводятся обратно в `PENDING` или в `FAILED` при исчерпании попыток.
 - Ручной запуск (на сервере):
