@@ -2046,6 +2046,23 @@
 
 **Status:** DONE (idempotency confirmed; no duplicate audit).
 
+### 2026-01-21 — Console Web + Keycloak live (Docker + Traefik)
+
+**Что проверили (prod host):**
+- `console-keycloak`, `console-web`, `console-postgres`, `console-redis` запущены.
+- OIDC discovery отвечает на `https://auth.truffles.kz/realms/truffles/.well-known/openid-configuration`.
+- Console health отвечает на `https://console.truffles.kz/api/health/full`.
+
+**Evidence:**
+- `docker ps`:
+  - `truffles-console-keycloak` (keycloak:23.0.0)
+  - `truffles-console-web` (console-web container)
+  - `truffles-console-postgres` / `truffles-console-redis`
+- OIDC discovery (first line): `{"issuer":"https://auth.truffles.kz/realms/truffles", ... }`
+- Console health: `{"status":"healthy", ... "api":{"version":"6e2cb98f"}, "outbox":{"pending":0,"failed":37}}`
+
+**Status:** DONE (runtime доступен).
+
 ### 2026-01-21 — CI livecheck reset meta timeout (branch sender JIDs)
 
 **Симптом:**
