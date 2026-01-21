@@ -866,6 +866,60 @@ chatflow_service → WhatsApp
 | 16 | **Info flow** (`info._handle_info_flow`) | info_class intents | Reply / truth‑gate | `stage=info_class`, `stage=truth_gate` |
 | 17 | **Booking flow** (`booking._handle_booking_flow`) | booking_signal/booking_active | Reply/interrupt | `stage=booking`, `stage=booking_interrupt`, `stage=truth_gate` |
 
+### Determinism Inventory (лексиконы + правила)
+**Rules‑as‑data (packs):**
+- `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`  
+  Policy keywords (payment/reschedule/cancel/medical/legal/complaint/discount), explicit/override keywords.
+- `truffles-api/app/knowledge/demo_salon/INTENTS_PHRASES_DEMO_SALON.yaml`  
+  Phrase intents + offtopic examples (используется в phrase_match_intent).
+
+**Code lexicons / regex (детерминированные списки):**
+- `truffles-api/app/routers/webhook/decision.py`  
+  `SHIELD_TOXIC_PATTERNS`, `SHIELD_MEANINGFUL_PATTERN`, `HYGIENE_KEYWORDS`,  
+  `BOOKING_REQUEST_KEYWORDS`, `SERVICE_KEYWORDS`, `DATE_KEYWORDS`,  
+  `is_handover_status_question` keywords.
+- `truffles-api/app/routers/webhook/shield.py`  
+  Использует `SHIELD_TOXIC_PATTERNS`/`SHIELD_MEANINGFUL_PATTERN`.
+- `truffles-api/app/services/ai_service.py`  
+  `BOT_STATUS_KEYWORDS`, `REFUSAL_PHRASES`, fallback intent keywords  
+  (booking/hours/price/duration/location).
+- `truffles-api/app/services/demo_salon_knowledge.py`  
+  `phrase_match_intent`, `_OFFTOPIC_KEYWORDS`, price/faq keywords,  
+  policy section matching by phrases/keywords.
+- `truffles-api/app/routers/webhook/policy.py`  
+  Keyword‑match по policy pack + guard overrides.
+
+**Deterministic gates (не лексиконы):**
+- Preflight: `http._run_preflight` (client/secret/instanceId/branch)  
+- Dedupe + Debounce: `dedup._handle_dedup_gate`, `dedup._handle_debounce_gate`  
+- Pending/mute/reengage: `pending._handle_pending_gate`, `guards._handle_reengage_and_mute_gate`  
+- Outbox idempotency: `outbox._handle_enqueue_only_accept`, `outbox_service.*`
+
+### RU/KZ/mixed: как улучшать без перебора всех комбинаций
+**Цель:** повысить устойчивость к смешанным языкам и опечаткам, не увеличивая словари “в лоб”.
+
+1) **Единая нормализация**  
+   - Канонизация пробелов/пунктуации + `casefold`.  
+   - Транслитерация KZ‑латиница↔кириллица.  
+   - Канон‑маппинг казахских букв (ә/а, ғ/г, қ/к, ң/н, ө/о, ұ/у, ү/у, һ/х) в одну форму.
+
+2) **Lexicon v2 в packs (rules‑as‑data)**  
+   - Вынести кодовые списки в pack: intent → aliases (ru/kz/mixed),  
+     weight/priority, optional regex.  
+   - В коде оставить только “движок” матчинга и порог score.
+
+3) **Лёгкая морфология (детерминированно)**  
+   - RU: стемминг/суффикс‑правила (офлайн расширение → packs).  
+   - KZ: минимальные суффикс‑шаблоны (также офлайн, фиксированный список).
+
+4) **Scoring вместо “точного совпадения”**  
+   - Токены/стемы/алиасы → score.  
+   - Пороговое решение (deterministic): score ≥ threshold.
+
+5) **Trace/meta для объяснимости**  
+   - decision_meta: `lexicon_hit`, `lexicon_score`, `lexicon_version`, `lang_detected`.  
+   - Это даёт воспроизводимость и контроль при изменениях.
+
 ### Эскалация
 ```
 Low confidence (RAG score < MID_CONFIDENCE_THRESHOLD, сейчас 0.5) ИЛИ intent=HUMAN_REQUEST/FRUSTRATION
