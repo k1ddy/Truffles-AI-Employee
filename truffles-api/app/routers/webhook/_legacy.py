@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.routers.webhook.context_manager import _apply_consult_return
-from app.routers.webhook.response import _apply_quiet_hours_notice
+from app.routers.webhook.response import _apply_quiet_hours_notice, _maybe_append_booking_cta
 from app.services.chatflow_service import send_bot_response
 
 from . import decision as _decision
