@@ -218,7 +218,7 @@ E2E_ALLOW_MUTATIONS=1 npm run test:e2e:mutating
 SCHEMATHESIS_TOKEN="<bearer token>" \
 schemathesis run contracts/console_api/openapi.v1.yaml \
   --url https://api.truffles.kz/console/v1 \
-  --method GET \
+  --include-method=GET \
   --checks all \
   --request-timeout 10 \
   --hypothesis-max-examples=3 \

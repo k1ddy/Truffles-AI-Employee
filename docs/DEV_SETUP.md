@@ -124,7 +124,7 @@ npm run test:e2e:smoke
 SCHEMATHESIS_TOKEN="<bearer token>" \
 schemathesis run /home/zhan/truffles-main/contracts/console_api/openapi.v1.yaml \
   --url https://api.truffles.kz/console/v1 \
-  --method GET \
+  --include-method=GET \
   --checks all \
   --request-timeout 10 \
   --hypothesis-max-examples=3 \
