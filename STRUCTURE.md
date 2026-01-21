@@ -160,12 +160,15 @@
 | `truffles-api/app/services/escalation_service.py`, `manager_message_service.py`, `reminder_service.py` | Эскалация/SLA |
 | `truffles-api/app/services/knowledge_service.py`, `demo_salon_knowledge.py`, `intent_service.py`, `ai_service.py` | Facts/Intent/LLM |
 | `truffles-api/app/services/outbox_service.py`, `alert_service.py`, `health_service.py` | Надежность/алерты |
+| `truffles-api/app/services/console_idempotency.py` | Идемпотентность мутаций Console API |
 
 **Данные и контракты:**
 | Узел | Назначение |
 |------|------------|
 | `truffles-api/app/schemas/*` | Pydantic‑контракты |
 | `truffles-api/app/models/*` | Модели БД |
+| `truffles-api/app/models/console_idempotency.py` | Idempotency keys для Console API |
+| `truffles-api/migrations/*.sql` | SQL миграции для app‑схемы |
 | `truffles-api/app/knowledge/<client_slug>/*` | Truth/policy/eval packs |
 | `knowledge/<client_slug>/*` | Канон RAG‑контента |
 

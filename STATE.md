@@ -564,6 +564,7 @@
 | **Мультитенант** | `SPECS/MULTI_TENANT.md` | онбординг, новые клиенты |
 | | | |
 | **Миграции** | `ops/migrations/*.sql` | при изменении схемы БД |
+| **Миграции (app)** | `truffles-api/migrations/*.sql` | при изменении схемы app/console |
 | **Миграции** | `ops/migrations/011_add_webhook_secret.sql` | webhook secret per tenant |
 | **Миграции** | `ops/migrations/014_add_branch_routing_settings.sql` | настройки branch routing + auto-approve |
 | **Требования** | `STRATEGY/REQUIREMENTS.md` | Требования Жанбола |

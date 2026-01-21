@@ -195,11 +195,11 @@
         },
         "IDEMPOTENCY_CONFLICT": {
             "http_status": 409,
-            "message_template": "Request already processed",
+            "message_template": "Request already processed or in progress",
             "ui_behavior": {
                 "action": "ignore",
                 "toast": false,
-                "description": "Silent ignore - previous request succeeded"
+                "description": "Silent ignore - previous request already handled"
             },
             "retryable": false
         },

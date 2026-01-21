@@ -68,11 +68,14 @@ export async function POST(
     const body = await request.text();
 
     try {
+        const idempotencyKey =
+            request.headers.get('Idempotency-Key') ?? request.headers.get('X-Idempotency-Key');
         const response = await fetch(targetUrl, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${session.accessToken}`,
                 'Content-Type': 'application/json',
+                ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
             },
             body,
         });

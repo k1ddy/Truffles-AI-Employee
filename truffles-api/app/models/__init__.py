@@ -4,6 +4,7 @@ from app.models.branch import Branch
 from app.models.client import Client
 from app.models.client_settings import ClientSettings
 from app.models.company import Company
+from app.models.console_idempotency import ConsoleIdempotencyKey
 from app.models.conversation import Conversation
 from app.models.handover import Handover
 from app.models.learned_response import LearnedResponse
@@ -23,6 +24,7 @@ __all__ = [
     "Message",
     "Handover",
     "ClientSettings",
+    "ConsoleIdempotencyKey",
     "Prompt",
     "OutboxMessage",
     "LearnedResponse",

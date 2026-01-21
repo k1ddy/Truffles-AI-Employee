@@ -3,6 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -30,8 +31,17 @@ from app.schemas.console import (
 from app.services.audit_service import record_audit_event
 from app.services.console_auth import ConsoleAuthContext, get_console_context
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
+from app.services.console_idempotency import (
+    finalize_idempotency,
+    release_idempotency,
+    start_idempotency,
+)
 
 router = APIRouter(prefix="/console/v1", tags=["console"])
+
+
+def _get_idempotency_key(request: Request) -> Optional[str]:
+    return request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key")
 
 
 def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
@@ -177,6 +187,20 @@ async def take_case(
     case_id: UUID, request: Request, db: Session = Depends(get_db)
 ) -> ConsoleCaseActionResponse:
     context = get_console_context(request, db)
+    idempotency_key = _get_idempotency_key(request)
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.case.take",
+        payload={"case_id": str(case_id)},
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
     
     # 1. Lock row for update
     case = (
@@ -187,15 +211,19 @@ async def take_case(
     )
     
     if not case:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
         raise ConsoleAPIError(404, "NOT_FOUND", "Case not found")
 
     # 2. Check if already taken
     if case.status == "active" and case.assigned_to_name and case.assigned_to_name != context.agent.name:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
         raise ConsoleAPIError(
             409,
             "CASE_ALREADY_TAKEN",
             "Case already taken",
-            details={"current_assignee": case.assigned_to_name}
+            details={"current_assignee": case.assigned_to_name},
         )
 
     # 3. Update
@@ -214,25 +242,37 @@ async def take_case(
         payload={"previous_status": case.status}
     )
     
-    db.commit()
-    db.refresh(case)
-    
-    # Fetch conversation for branch_id
+    # Fetch conversation for branch_id before commit to avoid extra failures later
     conversation = db.query(Conversation).filter(Conversation.id == case.conversation_id).first()
     branch_id = conversation.branch_id if conversation else None
 
-    return ConsoleCaseActionResponse(
-        success=True,
-        case=ConsoleCase(
-            id=case.id,
-            conversation_id=case.conversation_id,
-            status=case.status,
-            trigger_type=case.trigger_type,
-            created_at=case.created_at.isoformat(),
-            assigned_to_name=case.assigned_to_name,
-            branch_id=branch_id
+    try:
+        db.commit()
+        db.refresh(case)
+        response = ConsoleCaseActionResponse(
+            success=True,
+            case=ConsoleCase(
+                id=case.id,
+                conversation_id=case.conversation_id,
+                status=case.status,
+                trigger_type=case.trigger_type,
+                created_at=case.created_at.isoformat(),
+                assigned_to_name=case.assigned_to_name,
+                branch_id=branch_id,
+            ),
         )
-    )
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
 
 
 @router.post(
@@ -243,6 +283,7 @@ async def resolve_case(
     case_id: UUID, request: Request, db: Session = Depends(get_db)
 ) -> ConsoleCaseActionResponse:
     context = get_console_context(request, db)
+    idempotency = None
     
     case = (
         db.query(Handover)
@@ -252,6 +293,21 @@ async def resolve_case(
     
     if not case:
         raise ConsoleAPIError(404, "NOT_FOUND", "Case not found")
+
+    idempotency_key = _get_idempotency_key(request)
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.case.resolve",
+        payload={"case_id": str(case_id)},
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
 
     case.status = "resolved"
     case.resolved_at = datetime.now(timezone.utc)
@@ -266,23 +322,35 @@ async def resolve_case(
         entity_id=case.id
     )
     
-    db.commit()
-    
-    # Fetch conversation for branch_id
+    # Fetch conversation for branch_id before commit to avoid extra failures later
     conversation = db.query(Conversation).filter(Conversation.id == case.conversation_id).first()
     branch_id = conversation.branch_id if conversation else None
 
-    return ConsoleCaseActionResponse(
-        success=True,
-        case=ConsoleCase(
-            id=case.id,
-            conversation_id=case.conversation_id,
-            status=case.status,
-            trigger_type=case.trigger_type,
-            created_at=case.created_at.isoformat(),
-            branch_id=branch_id
+    try:
+        db.commit()
+        response = ConsoleCaseActionResponse(
+            success=True,
+            case=ConsoleCase(
+                id=case.id,
+                conversation_id=case.conversation_id,
+                status=case.status,
+                trigger_type=case.trigger_type,
+                created_at=case.created_at.isoformat(),
+                branch_id=branch_id,
+            ),
         )
-    )
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
 
 
 @router.get(
@@ -439,6 +507,8 @@ async def send_manager_message(
     logger = get_logger("console_send_message")
     
     context = get_console_context(request, db)
+    idempotency = None
+    idempotency_key = _get_idempotency_key(request)
     
     # Verify access to conversation via handover
     case = db.query(Handover).filter(
@@ -460,29 +530,53 @@ async def send_manager_message(
     conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
     if not conversation:
         raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.conversation.message",
+        payload={
+            "conversation_id": str(conversation_id),
+            "content": body.content,
+        },
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
     
     # Create the message
-    new_message = Message(
-        conversation_id=conversation_id,
-        client_id=context.client.id,
-        role="manager",
-        content=body.content,
-        created_at=datetime.now(timezone.utc),
-    )
-    db.add(new_message)
-    
-    # Audit
-    record_audit_event(
-        db,
-        actor=context.agent,
-        event_type="message_sent",
-        entity_type="conversation",
-        entity_id=conversation_id,
-        payload={"content_length": len(body.content), "source": "web_console"}
-    )
-    
-    db.commit()
-    db.refresh(new_message)
+    commit_done = False
+    try:
+        new_message = Message(
+            conversation_id=conversation_id,
+            client_id=context.client.id,
+            role="manager",
+            content=body.content,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(new_message)
+
+        # Audit
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="message_sent",
+            entity_type="conversation",
+            entity_id=conversation_id,
+            payload={"content_length": len(body.content), "source": "web_console"},
+        )
+
+        db.commit()
+        commit_done = True
+        db.refresh(new_message)
+    except Exception:
+        if idempotency and idempotency.record and not commit_done:
+            release_idempotency(db, record=idempotency.record)
+        raise
     
     # Send to WhatsApp
     delivery_status = "pending"
@@ -504,6 +598,7 @@ async def send_manager_message(
                 remote_jid=remote_jid,
                 message=body.content,
                 branch_id=conversation.branch_id,
+                idempotency_key=idempotency_key,
             )
             
             if sent:
@@ -518,7 +613,7 @@ async def send_manager_message(
         delivery_status = "failed"
         delivery_error = str(e)
     
-    return ConsoleManagerMessageResponse(
+    response = ConsoleManagerMessageResponse(
         success=delivery_status == "delivered",
         message=ConsoleMessage(
             id=new_message.id,
@@ -526,8 +621,16 @@ async def send_manager_message(
             content=new_message.content,
             created_at=new_message.created_at.isoformat(),
             metadata=new_message.message_metadata,
-        )
+        ),
     )
+    if idempotency and idempotency.record:
+        finalize_idempotency(
+            db,
+            record=idempotency.record,
+            response_status=200,
+            response_body=response.model_dump(mode="json"),
+        )
+    return response
 
 
 @router.get(
@@ -820,6 +923,3 @@ async def update_settings(
         success=True,
         message=f"Updated: {', '.join(updated_fields)}" if updated_fields else "No changes"
     )
-
-
-
