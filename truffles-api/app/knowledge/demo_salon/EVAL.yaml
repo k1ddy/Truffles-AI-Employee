@@ -8039,3 +8039,36 @@ eval_cases:
     must_include:
     - парикмахер
     - маникюр
+- id: E900
+  user: Маникюр бағасы қанша?
+  expected:
+    action: reply
+    intent: price_manicure
+    must_include_any:
+    - 2 500
+    - 3 500
+  tier: long
+- id: E901
+  user: Жұмыс уақыты нешеге дейін?
+  expected:
+    action: reply
+    intent: hours
+    must_include_any:
+    - ежедневно
+    - '9:00'
+    - '21:00'
+  tier: long
+- id: E902
+  user: Ертеңге жазылғым келеді, бос уақыт бар ма?
+  expected:
+    action: reply
+    intent: booking_intake
+    must_do:
+    - ask_fields_missing
+    collect:
+    - услуга
+    - точная дата
+    - точное время
+    - имя
+    - контактный номер
+  tier: long

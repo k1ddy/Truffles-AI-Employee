@@ -48,6 +48,7 @@
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **OPEN-1:** Branch routing stickiness: instanceId inbound не переопределяет existing conversation.branch_id; outbound уходит через client.config.instance_id (demo_salon). Evidence 2026-01-20 ниже.
 - **OPEN-2:** GAP-023 Chaos dialog testing (noise/interruptions) отсутствует — зафиксировано в `docs/IMPERIUM_GAPS.yaml`; нужен seeded chaos‑eval tier на 10–15 ходов.
+- **PLAN (no evidence):** P0 “бот не знает, что отвечать” → расширить RU/KZ/mixed лексиконы и диалоги в packs + покрыть детерминированным webhook‑fuzz (см. Task Package ниже).
 - **DONE:** Anti bot-to-bot loop guard (preflight ignores inbound from sender‑JID matching `branches.phone`) deployed. Evidence: clean sender `77785890765` → demo_salon main branch OK (conv_id `10049e90-5805-425f-841b-c0c9419c9c30`, msg_id `3EB07B249B69BBABF1FB13`, decision_meta action=match source=service_semantic_matcher, outbox SENT). Branch‑sender ignore exercised: trace stage `preflight` reason `sender_is_branch` recorded at `2026-01-20T13:06:36Z` in conv_id `4dd2e5ae-c287-4137-803a-18a89e277bf4` after branch→branch send (LC-BRANCH-LOOP-20260120-130633).
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
@@ -1697,6 +1698,56 @@
 - `SELECT COUNT(*) AS sent_count, ROUND(AVG(EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS avg_s, ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS p50_s, ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS p90_s, ROUND(MAX(EXTRACT(EPOCH FROM (updated_at - created_at)))::numeric, 2) AS max_s FROM outbox_messages WHERE status='SENT' AND updated_at >= NOW() - interval '1 hour';`
 - output: `64 | 9.23s | 8.42s | 15.12s | 24.21s`
 - Status: p90 still > 10s target; keep P0 outbox latency OPEN.
+
+### 2026-02-01 — Task Package (planned): P0 RU/KZ/mixed lexicon + dialog coverage
+
+- Chosen issue (NOW): бот “не знает что отвечать” в RU/KZ/mixed — отсутствуют нужные диалоги/лексиконы, ответы не детерминированы.
+- Invariants protected: truth-first; policy/hard‑LAW gates; no изменения порядка стадий; `_legacy.py` adapter-only; no DB edits for evidence.
+- Scope: обновить runtime packs для `demo_salon` (intent phrases + policy keywords + eval anchors) и добавить deterministic webhook‑fuzz suite для RU/KZ/mixed.
+- Out of scope: изменения pipeline/LLM логики, промптов, схем БД, routing.
+- Touch-list:
+  - `truffles-api/app/knowledge/demo_salon/INTENTS_PHRASES_DEMO_SALON.yaml`
+  - `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`
+  - `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
+  - `ops/diagnose.py` (webhook‑fuzz suite definitions)
+  - `SPECS/SYSTEM_REFERENCE.md` (если добавляем новую suite)
+- Plan:
+  1) Инвентарь дырок RU/KZ/mixed по intent/policy (booking/price/duration/hours/location/discount/complaint/hard‑law).
+  2) Расширить packs (RU/KZ/mixed фразы + anchors; без кода).
+  3) Добавить webhook‑fuzz suite (10–15 ходов, noise/typos/code‑switch).
+  4) Прогнать logic‑mode fuzz и собрать decision_meta/trace.
+  5) Зафиксировать evidence в `STATE.md` и закрыть GAP‑023 (chaos dialog testing).
+- DoD:
+  - Packs покрывают RU/KZ/mixed anchors по ключевым интентам.
+  - Webhook‑fuzz suite проходит в logic‑mode (seeded) и даёт ожидаемые trace/meta.
+  - Evidence (SQL + runner log) записано в `STATE.md`.
+- Checks:
+  - `python3 ops/diagnose.py webhook-fuzz --mode logic --client-slug demo_salon --count 10 --seed 42 --webhook-secret "$WEBHOOK_SECRET"`
+  - SQL evidence (см. `SPECS/SYSTEM_REFERENCE.md` §5.7).
+- Evidence plan: runner output + SQL snapshot по `LC:` markers; запись в `STATE.md` (Top Architect) до merge.
+- Rollback: revert pack + fuzz changes.
+- No-go: любые изменения в decision pipeline, LLM prompts, schema, DB manual edits.
+- Branch/Worktree/Base/Merge/Cleanup: `data/lexicon-ru-kz-mixed`; `/home/zhan/truffles-main-wt/lexicon-ru-kz-mixed`; `origin/main`; PR + CI green, merge by Top Architect/Brain; cleanup by Top Architect.
+
+### 2026-02-01 — P0 RU/KZ/mixed chaos webhook-fuzz (logic)
+
+- Suite: `webhook-fuzz` case `CHAOS_RU_KZ_MIXED` (11 turns, RU/KZ/mixed + noise).
+- Mode: `logic` (`TEST_MODE=1`, skip_outbox).
+- Conversation: `ddb78f59-2f75-42b1-a1a4-f2f9f5145280`.
+- Message IDs:
+  - `FZ-20260121-042323-01-01-24bfd979`
+  - `FZ-20260121-042323-01-02-b1b0a302`
+  - `FZ-20260121-042323-01-03-29cbb858`
+  - `FZ-20260121-042323-01-04-3fb8a3a7`
+  - `FZ-20260121-042323-01-05-d937f6a3`
+  - `FZ-20260121-042323-01-06-f9ada85b`
+  - `FZ-20260121-042323-01-07-fc18c9ea`
+  - `FZ-20260121-042323-01-08-a833d872`
+  - `FZ-20260121-042323-01-09-e75a19b4`
+  - `FZ-20260121-042323-01-10-87e27025`
+  - `FZ-20260121-042323-01-11-69a77b50`
+- SQL evidence (messages + decision_meta): query `m.content ILIKE '%FZ:CHAOS_RU_KZ_MIXED:20260121-042323%'` returned 11 rows with decision_meta present (rag_reason=overridden_by_gate, router_eligible=false).
+- Trace evidence (same conversation): recent stages include `class_carryover` → `fact_resolver` → `contract` (recorded_at `2026-01-21T04:23:59Z`).
 
 **Task Package (planned): P0 Outbox p90 < 10s**
 - Chosen issue (NOW): Outbox latency p90 remains >10s (SQL snapshot above) — violates SLA stability in `STRATEGY/REQUIREMENTS.md`.

@@ -583,6 +583,7 @@ Marker формат: `LC:<suite>:<case_id>:<timestamp>:<seq>`.
 **Режимы:**
 - `logic` (default): уникальный JID на кейс, `--skip-outbox` по умолчанию.
 - `state`: **JID‑pool** из allowlist; один JID на suite/запуск, outbox включён для проверки pending/manager.
+- Если кейс содержит `turns`, все ходы идут в один и тот же JID (диалог внутри кейса).
 
 **Safety gate:**
 - `--allowlist-jids` (comma list) обязателен при включённом outbox.
@@ -591,6 +592,7 @@ Marker формат: `LC:<suite>:<case_id>:<timestamp>:<seq>`.
 
 **Выбор кейсов:**
 - `--case-ids` = список case_id через запятую (например `LAW_MEDICAL,INFO_HOURS`).
+- Диалоговый кейс задаётся через `turns` (список сообщений); каждый ход получает отдельный `FZ:` marker.
 
 **Примеры:**
 ```bash
