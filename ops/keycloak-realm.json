@@ -35,7 +35,20 @@
             "standardFlowEnabled": true,
             "directAccessGrantsEnabled": true,
             "serviceAccountsEnabled": true,
-            "authorizationServicesEnabled": true
+            "authorizationServicesEnabled": true,
+            "protocolMappers": [
+                {
+                    "name": "console-web-audience",
+                    "protocol": "openid-connect",
+                    "protocolMapper": "oidc-audience-mapper",
+                    "config": {
+                        "included.client.audience": "console-web",
+                        "access.token.claim": "true",
+                        "id.token.claim": "false",
+                        "userinfo.token.claim": "false"
+                    }
+                }
+            ]
         }
     ]
 }

@@ -2063,6 +2063,20 @@
 
 **Status:** DONE (runtime доступен).
 
+### 2026-01-21 — Console OIDC audience mapper (login unblocked)
+
+**Что сделали:**
+- Добавили audience mapper `console-web-audience` для клиента `console-web` в Keycloak.
+- Проверили, что `aud` присутствует в access token.
+- `GET /console/v1/me` проходит с `200`.
+
+**Evidence:**
+- Keycloak mapper: `console-web-audience` (oidc-audience-mapper) добавлен через kcadm.
+- `aud` claim: `console-web`.
+- HTTP: `GET https://api.truffles.kz/console/v1/me` → `200` (ответ с agent/client/branches).
+
+**Status:** DONE (OIDC login работает).
+
 ### 2026-01-21 — CI livecheck reset meta timeout (branch sender JIDs)
 
 **Симптом:**
