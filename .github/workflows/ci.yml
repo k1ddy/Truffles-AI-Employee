@@ -179,7 +179,7 @@ jobs:
 
   console-e2e:
     needs: [changes]
-    if: ${{ needs.changes.outputs.console_web == 'true' && secrets.CONSOLE_E2E_USERNAME != '' && secrets.CONSOLE_E2E_PASSWORD != '' }}
+    if: needs.changes.outputs.console_web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -198,7 +198,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Guard console e2e secrets
+        id: guard
+        run: |
+          if [ -z "${E2E_USERNAME}" ] || [ -z "${E2E_PASSWORD}" ]; then
+            echo "Missing CONSOLE_E2E_USERNAME/CONSOLE_E2E_PASSWORD; skipping Playwright."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${KEYCLOAK_CLIENT_SECRET}" ]; then
+            echo "Missing CONSOLE_KEYCLOAK_CLIENT_SECRET; skipping Playwright."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
       - name: Set up Node.js
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -206,17 +222,20 @@ jobs:
           cache-dependency-path: console-web/package-lock.json
 
       - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
         run: npm ci
 
       - name: Install Playwright browsers
+        if: steps.guard.outputs.skip != 'true'
         run: npx playwright install --with-deps
 
       - name: Playwright smoke
+        if: steps.guard.outputs.skip != 'true'
         run: npm run test:e2e:smoke
 
   console-contract:
     needs: [changes]
-    if: ${{ needs.changes.outputs.console_contracts == 'true' && (secrets.CONSOLE_API_TOKEN != '' || (secrets.CONSOLE_KEYCLOAK_USERNAME != '' && secrets.CONSOLE_KEYCLOAK_PASSWORD != '' && secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET != '')) }}
+    if: needs.changes.outputs.console_contracts == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -229,20 +248,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Guard console contract auth
+        id: guard
+        run: |
+          if [ -n "${CONSOLE_API_TOKEN}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "${KEYCLOAK_USERNAME}" ] && [ -n "${KEYCLOAK_PASSWORD}" ] && [ -n "${KEYCLOAK_CLIENT_SECRET}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Missing console auth secrets; skipping Schemathesis."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+
       - name: Set up Python
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install Schemathesis
+        if: steps.guard.outputs.skip != 'true'
         run: pip install schemathesis
 
       - name: Use pre-provisioned token
-        if: env.CONSOLE_API_TOKEN != ''
+        if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN != ''
         run: echo "SCHEMATHESIS_TOKEN=${CONSOLE_API_TOKEN}" >> $GITHUB_ENV
 
       - name: Fetch console token
-        if: env.CONSOLE_API_TOKEN == ''
+        if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN == ''
         run: |
           python - <<'PY'
           import json
@@ -268,6 +303,7 @@ jobs:
           PY
 
       - name: Schemathesis GET-only smoke
+        if: steps.guard.outputs.skip != 'true'
         run: |
           schemathesis run contracts/console_api/openapi.v1.yaml \
             --url https://api.truffles.kz/console/v1 \
@@ -278,7 +314,7 @@ jobs:
             --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"
 
   console-k6:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_k6 == 'true' && (secrets.CONSOLE_API_TOKEN != '' || (secrets.CONSOLE_KEYCLOAK_USERNAME != '' && secrets.CONSOLE_KEYCLOAK_PASSWORD != '' && secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET != '')) }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_k6 == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -291,12 +327,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Guard console k6 auth
+        id: guard
+        run: |
+          if [ -n "${CONSOLE_API_TOKEN}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "${KEYCLOAK_USERNAME}" ] && [ -n "${KEYCLOAK_PASSWORD}" ] && [ -n "${KEYCLOAK_CLIENT_SECRET}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Missing console auth secrets; skipping k6."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+
       - name: Use pre-provisioned token
-        if: env.CONSOLE_API_TOKEN != ''
+        if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN != ''
         run: echo "CONSOLE_API_TOKEN=${CONSOLE_API_TOKEN}" >> $GITHUB_ENV
 
       - name: Fetch console token
-        if: env.CONSOLE_API_TOKEN == ''
+        if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN == ''
         run: |
           python - <<'PY'
           import json
@@ -322,6 +372,7 @@ jobs:
           PY
 
       - name: k6 console smoke
+        if: steps.guard.outputs.skip != 'true'
         uses: grafana/k6-action@v0.3.0
         with:
           filename: ops/k6/console_smoke.js
