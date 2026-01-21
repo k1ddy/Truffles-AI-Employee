@@ -1957,6 +1957,34 @@
 
 **Status:** DONE (OTel endpoint reachable from workers; no behavior change).
 
+### 2026-01-21 — Console plan inventory (UI + contracts) — context + remaining work
+
+**Контекст (из ТЗ 2026‑01‑17):**
+- Нужен Console UI (3‑колонки), BFF `/console/v1`, RBAC tenant/branch, Telegram только уведомления/fallback, стабильность как P0.
+- Контракты: OpenAPI + ошибки, ports/adapters, runbooks, E2E/contract/load gates.
+
+**Что уже есть (инвентарь кода; не runtime evidence):**
+- Console API `/console/v1` и RBAC/branch‑scope: `truffles-api/app/routers/console.py`, `truffles-api/app/services/console_auth.py`.
+- OpenAPI + ошибки: `contracts/console_api/openapi.v1.yaml`, `contracts/console_api/errors.v1.json`, генерация `truffles-api/scripts/generate_openapi.py`.
+- UI P0 модули: Inbox/Case/Ops/Settings/Audit/Calendar — `console-web/src/components/*`, `console-web/src/app/*`.
+- Audit log: `truffles-api/app/services/audit_service.py`.
+- Telegram callback dedup: `truffles-api/app/routers/telegram_webhook.py`.
+- MessagingPort + ChatFlow adapter: `truffles-api/app/ports/messaging.py`, `truffles-api/app/adapters/chatflow.py`.
+
+**Что отсутствует / GAP (по ТЗ):**
+- 3‑колоночный layout + right‑panels (Progress/Artifacts/Context/Connectors), Knowledge/Integrations UI.
+- Idempotency‑Key для console‑мутаций (контракт + реализация).
+- Контракты интеграций и событий: `contracts/events/outbox.v1.jsonschema`, `contracts/integrations/*`.
+- Runbooks: `docs/runbooks/OUTBOX.md`, `docs/runbooks/SENTINEL.md`, `docs/runbooks/INCIDENTS.md`.
+- CI gates: Playwright / Schemathesis / k6.
+- Индексы Inbox/Case (handovers/conversations/messages/audit_events).
+
+**Почему остановились:** нужен отдельный Task Package под Console‑план; параллельно закрывали P0 ops (outbox decouple, OTel, livecheck).
+
+**Следующий шаг:** зафиксировать Task Package и выбрать порядок работ (контракты → UI layout → runbooks/gates → индексы).
+
+**Status:** PLAN/GAP (код‑инвентарь без runtime evidence).
+
 ### 2026-01-21 — CI livecheck reset meta timeout (branch sender JIDs)
 
 **Симптом:**
