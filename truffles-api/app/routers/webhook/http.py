@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.logging_config import get_logger
-from app.models import Client, ClientSettings
+from app.models import Branch, Client, ClientSettings
 from app.routers.webhook.media import _extract_media_info
 from app.routers.webhook.parsing import _parse_webhook_request
 from app.routers.webhook.secrets import _get_client_webhook_secret, _get_request_webhook_secret
@@ -25,6 +27,25 @@ from . import _legacy as legacy
 logger = get_logger("webhook")
 router = APIRouter()
 
+def _normalize_phone_digits(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"\D", "", value)
+
+def _lookup_sender_branch(db: Session, remote_jid: str | None) -> Branch | None:
+    digits = _normalize_phone_digits(remote_jid)
+    if not digits:
+        return None
+    return (
+        db.query(Branch)
+        .filter(
+            Branch.is_active.is_(True),
+            Branch.phone.isnot(None),
+            func.regexp_replace(Branch.phone, r"\D", "", "g") == digits,
+        )
+        .first()
+    )
+
 
 def _run_preflight(
     payload: WebhookRequest,
@@ -36,6 +57,12 @@ def _run_preflight(
     resolve_trace_conversation,
     record_early_trace,
 ) -> tuple[WebhookResponse | None, dict]:
+    def _normalize_phone(value: str | None) -> str | None:
+        if not value:
+            return None
+        digits = re.sub(r"\D", "", value)
+        return digits or None
+
     client = db.query(Client).filter(Client.name == payload.client_slug).first()
     if not client:
         trace_conversation = resolve_trace_conversation(
@@ -82,6 +109,27 @@ def _run_preflight(
         return WebhookResponse(success=False, message="Missing metadata.remoteJid"), {}
 
     remote_jid = metadata.remoteJid
+    sender_branch = _lookup_sender_branch(db, remote_jid)
+    if sender_branch:
+        trace_conversation = resolve_trace_conversation(
+            trace_client=client,
+            trace_conversation_id=conversation_id,
+            trace_message_id=message_id,
+            trace_remote_jid=remote_jid,
+        )
+        if record_early_trace(
+            trace_conversation,
+            stage="preflight",
+            decision="ignore",
+            reason="sender_is_branch",
+            meta={
+                "sender_branch_id": str(sender_branch.id),
+                "sender_branch_client_id": str(sender_branch.client_id),
+                "sender_branch_phone": sender_branch.phone,
+            },
+        ):
+            db.commit()
+        return WebhookResponse(success=True, message="Ignored sender (branch number)"), {}
     message_text = body.message or ""
     media_info = _extract_media_info(body)
     if not message_text.strip() and media_info and media_info.caption:
@@ -108,6 +156,78 @@ def _run_preflight(
         media_label = message_type.lower() if message_type else "media"
         message_text = f"[{media_label}]"
 
+    remote_digits = _normalize_phone(remote_jid)
+    if remote_digits:
+        branch_phones = (
+            db.query(Branch.phone)
+            .filter(Branch.client_id == client.id, Branch.phone.isnot(None))
+            .all()
+        )
+        for (phone,) in branch_phones:
+            if remote_digits == _normalize_phone(phone):
+                trace_conversation = resolve_trace_conversation(
+                    trace_client=client,
+                    trace_conversation_id=conversation_id,
+                    trace_message_id=message_id,
+                    trace_remote_jid=remote_jid,
+                )
+                if record_early_trace(
+                    trace_conversation,
+                    stage="preflight",
+                    decision="drop",
+                    reason="remote_is_branch_phone",
+                ):
+                    db.commit()
+                return WebhookResponse(success=True, message="Ignored branch sender"), {}
+
+    branch_mode = settings.branch_resolution_mode if settings and settings.branch_resolution_mode else "hybrid"
+    instance_id = metadata.instanceId if metadata else None
+    resolved_branch = None
+    if branch_mode in {"by_instance", "hybrid"}:
+        if not instance_id:
+            if branch_mode == "by_instance":
+                trace_conversation = resolve_trace_conversation(
+                    trace_client=client,
+                    trace_conversation_id=conversation_id,
+                    trace_message_id=message_id,
+                    trace_remote_jid=remote_jid,
+                )
+                if record_early_trace(
+                    trace_conversation,
+                    stage="preflight",
+                    decision="reject",
+                    reason="missing_instance_id",
+                    meta={"branch_mode": branch_mode},
+                ):
+                    db.commit()
+                return WebhookResponse(success=False, message="Missing instanceId"), {}
+        else:
+            resolved_branch = (
+                db.query(Branch)
+                .filter(
+                    Branch.client_id == client.id,
+                    Branch.instance_id == instance_id,
+                    Branch.is_active == True,
+                )
+                .first()
+            )
+            if not resolved_branch:
+                trace_conversation = resolve_trace_conversation(
+                    trace_client=client,
+                    trace_conversation_id=conversation_id,
+                    trace_message_id=message_id,
+                    trace_remote_jid=remote_jid,
+                )
+                if record_early_trace(
+                    trace_conversation,
+                    stage="preflight",
+                    decision="reject",
+                    reason="unknown_instance_id",
+                    meta={"branch_mode": branch_mode, "instance_id": instance_id},
+                ):
+                    db.commit()
+                return WebhookResponse(success=False, message="Unknown instanceId"), {}
+
     return (
         None,
         {
@@ -122,6 +242,8 @@ def _run_preflight(
             "has_media": has_media,
             "is_media_without_text": is_media_without_text,
             "media_info": media_info,
+            "resolved_branch_id": resolved_branch.id if resolved_branch else None,
+            "resolved_knowledge_tag": resolved_branch.knowledge_tag if resolved_branch else None,
         },
     )
 

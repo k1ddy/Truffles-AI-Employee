@@ -34,6 +34,9 @@
 - DONE: P0 Legacy refactor S0–S6 — детальный лог ниже (CI+live‑check evidence).
 - FIX READY (CA-11): booking_interrupt/multi_truth retention при trace_len=40; PR #197 https://github.com/k1ddy/Truffles-AI-Employee/pull/197; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21110933209; SQL evidence conv_id da9519fd-bdab-4f22-966a-0c535f3ea6a1 msg_id ca11-3-1768735290143673848 trace_len=40 stages booking_interrupt+multi_truth present (simulated inbound via /webhook on local container, TEST_MODE=1) — см. запись 2026-01-18 ниже.
 - STOP‑LINE: были нарушения процесса (очистка decision_trace ради evidence, изменение STATE.md не ролью Brain) — зафиксировано ниже.
+- DONE: Onboarding contract добавлен в `docs/PROCESSES.md` (instanceId обязателен; 1 номер=1 филиал; mandatory data + safe-mode + no-go). Evidence: commit `f3b29e40`.
+- TODO: Определить схему обязательных данных филиала + валидацию (поля, формат, чек‑лист).
+- TODO: Автоматизация онбординга (provisioning API/console): создание tenant+branch, mapping instanceId/phone, генерация webhook, go/no‑go gate.
 - BLOCKERS: нет.
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
@@ -44,6 +47,8 @@
 - **DONE:** GAP-017 Branch isolation evidence (branch_routing + RAG fallback + policy_gate + demo handover/Telegram) — см. запись 2026-01-14.
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **OPEN-1:** Branch routing stickiness: instanceId inbound не переопределяет existing conversation.branch_id; outbound уходит через client.config.instance_id (demo_salon). Evidence 2026-01-20 ниже.
+- **OPEN-2:** GAP-023 Chaos dialog testing (noise/interruptions) отсутствует — зафиксировано в `docs/IMPERIUM_GAPS.yaml`; нужен seeded chaos‑eval tier на 10–15 ходов.
+- **DONE:** Anti bot-to-bot loop guard (preflight ignores inbound from sender‑JID matching `branches.phone`) deployed. Evidence: clean sender `77785890765` → demo_salon main branch OK (conv_id `10049e90-5805-425f-841b-c0c9419c9c30`, msg_id `3EB07B249B69BBABF1FB13`, decision_meta action=match source=service_semantic_matcher, outbox SENT). Branch‑sender ignore exercised: trace stage `preflight` reason `sender_is_branch` recorded at `2026-01-20T13:06:36Z` in conv_id `4dd2e5ae-c287-4137-803a-18a89e277bf4` after branch→branch send (LC-BRANCH-LOOP-20260120-130633).
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
 - **Автоматизация проверки:** `ops/diagnose.py` расширен (version/health/metrics/outbox/decision_meta), ссылка в `docs/TECH_STATUS.md`.
@@ -1748,6 +1753,36 @@
   - cmd: `cd truffles-api && pytest tests/test_outbox_worker_settings.py -v`
   - output: `2 passed in 0.83s`
 
+### 2026-01-20 — CI livecheck gating + CA05/CA08 fail-fast tuning
+
+**Context (CI failure):**
+- CI run (main) failed in ci-livecheck with missing_action for CA05/CA08: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21160690985
+
+**What changed:**
+- PR #262: removed debug-livecheck-context job; livecheck gating now requires deploy_ok + `livecheck_required` (main) or `inputs.run_livecheck` (workflow_dispatch), with gate enforced inside the job.
+- PR #264: for suites `ca05-booking` and `ca08-state`, set `fail_fast_after = poll_timeout` to allow late action without false-negative missing_action.
+
+**Evidence:**
+- PR #262: https://github.com/k1ddy/Truffles-AI-Employee/pull/262 (merge commit `11619b8ce9f1bd768c11741f31e5484f0d873ef6`).
+- PR #264: https://github.com/k1ddy/Truffles-AI-Employee/pull/264 (merge commit `0e547d1d1370945eb613fce422990fa837dd5fd5`).
+- Manual livecheck: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21161572894 (success).
+- Main CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21162026950 (ci-livecheck success).
+
+### 2026-01-20 — CI doc-only fast lane (skip heavy jobs)
+
+**Что сделали:**
+- Док‑изменения (`SPECS/**`, `STRATEGY/**`, `docs/**`, `STATE.md` и др.) больше не запускают `core-eval`, `build-push`, `deploy`, `ci-livecheck`.
+- `deploy` и `ci-livecheck` теперь полностью пропускаются, если `deploy_required=false` (doc‑only коммит).
+
+**Зачем:**
+- Сокращаем время на документационные PR и уменьшаем флейк без потери проверки кода.
+
+**Evidence:**
+- PR #269 (doc-only L1 фильтр): https://github.com/k1ddy/Truffles-AI-Employee/pull/269
+  - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21168427540 (build/deploy/livecheck skipped).
+- PR #271 (skip deploy/livecheck jobs when doc-only): https://github.com/k1ddy/Truffles-AI-Employee/pull/271
+  - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21169183412 (deploy/livecheck jobs skipped).
+
 ### 2026-01-21 — Worker cutover guardrails (restart script + runbook)
 
 **Что сделали (local):**
@@ -1990,12 +2025,23 @@ SELECT t FROM traces WHERE t->>'stage'='rag_retrieve';"
 - `SELECT id, client_id, branch_id, state, bot_status FROM conversations WHERE id='b8c559d1-f8cd-4173-ae70-0a9683833e48';`
 - `SELECT id, client_id, slug, instance_id FROM branches WHERE instance_id='eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6IlRydWZmbGVzQnJhbmNoIn0=';`
 
-**PLAN (fix in progress):**
-- Branch: `fix/branch-routing-instance` (instanceId overrides sticky branch + branch‑aware outbound instance selection).
-- Tests: локально blocked (missing `dateparser`), CI rerun success.
+**Fix (merged to main):**
+- Code: instanceId overrides existing conversation.branch_id when branch_mode allows; outbound uses branch.instance_id (branch-aware).
 - CI run (rerun): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21159970877 (status: success, head `d862afdce9ee3c387e780f060f3032151a8c501a`).
 - Prev CI (failed lint): https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21159836338 (ruff I001 import order).
 
+**Live-check (real inbound, 2026-01-20 10:41):**
+- inbound: msg_id `9ce891c0-3aaa-4c6d-a1d2-2d8cc865d550`, conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`, messageId `3EB080156F2F35B7B5E8C9`
+  - content `LC-BRANCH-OVERRIDE-20260120-<10:41>`, remoteJid `77015705555@s.whatsapp.net`
+  - metadata.instanceId = `eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6IlRydWZmbGVzQnJhbmNoIn0=`
+  - decision_meta.action = `pending_wait`
+- conversation: conv_id `b8c559d1-f8cd-4173-ae70-0a9683833e48` now branch_id = `2e9f5a9d-50a2-4b07-8e54-da2cac2ac751` (branch_b)
+- outbox: id `9be21a2b-a109-492d-8d21-c880d9577d3e`, status `SENT`, out_instance_id = branch_b instanceId, remoteJid `77015705555@s.whatsapp.net`
+
+**SQL (post-fix live-check):**
+- `SELECT id, conversation_id, created_at, content, metadata->>'messageId', metadata->>'remoteJid', metadata->>'instanceId', metadata->'decision_meta'->>'action' FROM messages WHERE role='user' AND content ILIKE 'LC-BRANCH-OVERRIDE-20260120-%' ORDER BY created_at DESC LIMIT 1;`
+- `SELECT id, branch_id, state, bot_status FROM conversations WHERE id='b8c559d1-f8cd-4173-ae70-0a9683833e48';`
+- `SELECT id, status, created_at, payload_json->'body'->'metadata'->>'instanceId', payload_json->'body'->'metadata'->>'remoteJid', payload_json->'body'->'metadata'->>'messageId' FROM outbox_messages WHERE inbound_message_id='3EB080156F2F35B7B5E8C9' ORDER BY created_at DESC LIMIT 1;`
 ### 2026-01-18 — CA-14 Onboarding readiness (validate + Qdrant + version)
 
 **Pack validate**

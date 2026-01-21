@@ -176,16 +176,6 @@ def _handle_branch_selection_gate(
     if not branch_id and remember_branch:
         branch_id = legacy._get_user_branch_preference(user)
 
-    if branch_id:
-        if conversation.branch_id != branch_id:
-            conversation.branch_id = branch_id
-        if context.get(BRANCH_CONTEXT_KEY) != str(branch_id):
-            context[BRANCH_CONTEXT_KEY] = str(branch_id)
-            _set_conversation_context(conversation, context)
-        if remember_branch and legacy._get_user_branch_preference(user) != branch_id:
-            legacy._set_user_branch_preference(user, branch_id)
-        return None
-
     instance_id = metadata.instanceId if metadata else None
     if branch_mode in {"by_instance", "hybrid"} and instance_id:
         branch = (
@@ -198,13 +188,26 @@ def _handle_branch_selection_gate(
             .first()
         )
         if branch:
-            _apply_branch_selection(
-                conversation=conversation,
-                user=user,
-                branch=branch,
-                context=context,
-                remember_branch=remember_branch,
-            )
+            if branch_id != branch.id:
+                _apply_branch_selection(
+                    conversation=conversation,
+                    user=user,
+                    branch=branch,
+                    context=context,
+                    remember_branch=remember_branch,
+                )
+                context = _get_conversation_context(conversation)
+            branch_id = branch.id
+
+    if branch_id:
+        if conversation.branch_id != branch_id:
+            conversation.branch_id = branch_id
+        if context.get(BRANCH_CONTEXT_KEY) != str(branch_id):
+            context[BRANCH_CONTEXT_KEY] = str(branch_id)
+            _set_conversation_context(conversation, context)
+        if remember_branch and legacy._get_user_branch_preference(user) != branch_id:
+            legacy._set_user_branch_preference(user, branch_id)
+        return None
 
     if not conversation.branch_id and branch_mode in {"ask_user", "hybrid"}:
         branches = _get_active_branches(db, client_id)

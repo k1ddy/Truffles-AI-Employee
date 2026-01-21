@@ -503,6 +503,7 @@ async def send_manager_message(
                 client_id=context.client.id,
                 remote_jid=remote_jid,
                 message=body.content,
+                branch_id=conversation.branch_id,
             )
             
             if sent:
@@ -819,7 +820,6 @@ async def update_settings(
         success=True,
         message=f"Updated: {', '.join(updated_fields)}" if updated_fields else "No changes"
     )
-
 
 
 

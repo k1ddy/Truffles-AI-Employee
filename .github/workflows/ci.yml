@@ -34,6 +34,8 @@ jobs:
     outputs:
       l1: ${{ steps.manual.outputs.l1 || steps.filter.outputs.l1 }}
       l2: ${{ steps.manual.outputs.l2 || steps.filter.outputs.l2 }}
+      deploy_required: ${{ steps.manual.outputs.deploy_required || steps.filter.outputs.deploy_required }}
+      livecheck_required: ${{ steps.manual.outputs.livecheck_required || steps.filter.outputs.livecheck_required }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,6 +46,10 @@ jobs:
           echo "l1=true" >> "$GITHUB_OUTPUT"
           if [ "${{ inputs.run_long }}" = "true" ]; then
             echo "l2=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "${{ inputs.run_livecheck }}" = "true" ]; then
+            echo "deploy_required=true" >> "$GITHUB_OUTPUT"
+            echo "livecheck_required=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Path filter
@@ -56,14 +62,24 @@ jobs:
               - "truffles-api/app/**"
               - "truffles-api/tests/**"
               - "knowledge/**"
-              - "SPECS/**"
-              - "STRATEGY/**"
               - "ops/**"
               - ".github/workflows/**"
             l2:
               - "truffles-api/app/knowledge/**/EVAL.yaml"
               - "truffles-api/app/knowledge/**/SALON_TRUTH.yaml"
               - "truffles-api/tests/test_demo_salon_eval.py"
+            deploy_required:
+              - "truffles-api/app/**"
+              - "truffles-api/requirements.txt"
+              - "truffles-api/Dockerfile"
+              - "knowledge/**"
+            livecheck_required:
+              - "truffles-api/app/**"
+              - "truffles-api/requirements.txt"
+              - "truffles-api/Dockerfile"
+              - "knowledge/**"
+              - "ops/**"
+              - ".github/workflows/**"
 
   lint:
     runs-on: ubuntu-latest
@@ -297,6 +313,7 @@ jobs:
     if: >-
       ${{
         always() &&
+        needs.changes.outputs.deploy_required == 'true' &&
         (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') &&
         needs.lint.result == 'success' &&
         needs.unit-tests.result == 'success' &&
@@ -305,7 +322,7 @@ jobs:
         (needs.asr-eval.result == 'success' || needs.asr-eval.result == 'skipped') &&
         needs.secret-scan.result == 'success'
       }}
-    needs: [lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
+    needs: [changes, lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -363,8 +380,8 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    if: ${{ always() }}
-    needs: build-push
+    if: ${{ always() && needs.changes.outputs.deploy_required == 'true' }}
+    needs: [build-push, changes]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -498,10 +515,25 @@ jobs:
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   ci-livecheck:
-    if: ${{ always() }}
-    needs: deploy
+    if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.livecheck_required == 'true' }}
+    needs: [changes, deploy]
+    name: ci-livecheck (${{ matrix.group }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - group: pool-a
+            jid_index: 0
+            suites: "ca01-core ca04-service ca07-ood ca10-outbox"
+          - group: pool-b
+            jid_index: 1
+            suites: "ca02-policy ca05-booking ca08-state"
+          - group: pool-c
+            jid_index: 2
+            suites: "ca03-info ca06-consult ca09-manager"
     steps:
       - uses: actions/checkout@v4
 
@@ -509,19 +541,23 @@ jobs:
         id: livecheck_gate
         run: |
           run_livecheck="false"
+          deploy_ok="false"
+          if [ "${{ needs.deploy.result }}" = "success" ] || [ "${{ needs.deploy.result }}" = "skipped" ]; then
+            deploy_ok="true"
+          fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             run_livecheck="false"
-          elif [ "${{ needs.deploy.result }}" = "success" ]; then
-            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-              if [ "${{ inputs.run_livecheck }}" = "true" ]; then
-                run_livecheck="true"
-              fi
-            elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.run_livecheck }}" = "true" ] && [ "${deploy_ok}" = "true" ]; then
+              run_livecheck="true"
+            fi
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            if [ "${{ needs.changes.outputs.livecheck_required }}" = "true" ] && [ "${deploy_ok}" = "true" ]; then
               run_livecheck="true"
             fi
           fi
           echo "run=${run_livecheck}" >> "$GITHUB_OUTPUT"
-          echo "livecheck_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }} deploy_result=${{ needs.deploy.result }} gate_run=${run_livecheck}"
+          echo "livecheck_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }} deploy_result=${{ needs.deploy.result }} livecheck_required=${{ needs.changes.outputs.livecheck_required }} gate_run=${run_livecheck}"
 
       - name: Configure SSH
         if: ${{ steps.livecheck_gate.outputs.run == 'true' }}
@@ -609,7 +645,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.group }}"
+          SUITE_LIST="${{ matrix.suites }}"
+          JID_INDEX="${{ matrix.jid_index }}"
+          MIN_ALLOWLIST_JIDS=3
           SSH=(ssh -i ~/.ssh/id_rsa -p ${SERVER_PORT} -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=3 -o ServerAliveInterval=30 -o ServerAliveCountMax=5 ${SERVER_USER}@${SERVER_HOST})
           if ! "${SSH[@]}" "echo livecheck-ready" >/dev/null 2>&1; then
             echo "livecheck skipped: ssh unreachable" | tee artifacts/livecheck-skip.txt
@@ -620,6 +659,9 @@ jobs:
           set -euo pipefail
           RUN_ID="${RUN_ID:?}"
           GIT_SHA="${GIT_SHA:?}"
+          SUITE_LIST="${SUITE_LIST:?}"
+          JID_INDEX="${JID_INDEX:?}"
+          MIN_ALLOWLIST_JIDS="${MIN_ALLOWLIST_JIDS:-1}"
           GATE_LOG="/tmp/livecheck-gate-${RUN_ID}.txt"
           RUN_LOG="/tmp/livecheck-run-${RUN_ID}.log"
           ARTIFACT_TAR="/tmp/livecheck-artifacts-${RUN_ID}.tar.gz"
@@ -678,6 +720,10 @@ jobs:
             echo "ALERTS_ADMIN_TOKEN_MISSING" >> "${GATE_LOG}"
             gate_ok=0
           fi
+          if [ "${OUTBOX_WORKER_ENABLED}" != "1" ]; then
+            echo "OUTBOX_WORKER_DISABLED" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
           ALLOWLIST_CLEAN="${ALLOWLIST// /}"
           IFS=',' read -r -a ALLOWLIST_POOL <<< "${ALLOWLIST_CLEAN}"
           if [ -z "${ALLOWLIST_CLEAN}" ]; then
@@ -698,6 +744,14 @@ jobs:
                   ;;
               esac
             done
+          fi
+          if [ "${#ALLOWLIST_POOL[@]}" -lt "${MIN_ALLOWLIST_JIDS}" ]; then
+            echo "ALLOWLIST_TOO_SHORT" >> "${GATE_LOG}"
+            gate_ok=0
+          fi
+          if [ "${JID_INDEX}" -lt 0 ] || [ "${JID_INDEX}" -ge "${#ALLOWLIST_POOL[@]}" ]; then
+            echo "ALLOWLIST_INDEX_OUT_OF_RANGE" >> "${GATE_LOG}"
+            gate_ok=0
           fi
           case "${QDRANT_COLLECTION_EFFECTIVE}" in
             *_ci) ;;
@@ -736,20 +790,23 @@ jobs:
           import time
           import urllib.request
 
-          url = "http://localhost:8000/health"
+          def check(url, deadline):
+              while True:
+                  try:
+                      with urllib.request.urlopen(url, timeout=5) as resp:
+                          if 200 <= resp.status < 300:
+                              print(f"healthcheck ok: {url} {resp.status}")
+                              return
+                          print(f"healthcheck status: {url} {resp.status}")
+                  except Exception as exc:
+                      print(f"healthcheck error: {url} {exc}")
+                  if time.time() >= deadline:
+                      raise SystemExit(f"healthcheck timeout: {url}")
+                  time.sleep(2)
+
           deadline = time.time() + 90
-          while True:
-              try:
-                  with urllib.request.urlopen(url, timeout=5) as resp:
-                      if 200 <= resp.status < 300:
-                          print(f"healthcheck ok: {resp.status}")
-                          break
-                      print(f"healthcheck status={resp.status}")
-              except Exception as exc:
-                  print(f"healthcheck error: {exc}")
-              if time.time() >= deadline:
-                  raise SystemExit("healthcheck timeout")
-              time.sleep(2)
+          check("http://localhost:8000/health", deadline)
+          check("http://localhost:8000/admin/health", deadline)
           PY
           SOURCE_REPO="${HOME}/truffles-main"
           git config --global --add safe.directory "${SOURCE_REPO}"
@@ -763,7 +820,7 @@ jobs:
             echo "source repo missing origin url: ${SOURCE_REPO}" >> "${RUN_LOG}"
             exit 1
           fi
-          WORKDIR="/tmp/truffles-main-${GIT_SHA}"
+          WORKDIR="/tmp/truffles-main-${GIT_SHA}-${RUN_ID}"
           if [ ! -d "${WORKDIR}/.git" ]; then
             rm -rf "${WORKDIR}"
             git clone --no-checkout "${SOURCE_REPO}" "${WORKDIR}"
@@ -774,29 +831,11 @@ jobs:
           git fetch origin "${GIT_SHA}" --depth=1
           git checkout -q "${GIT_SHA}"
           suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca06-consult ca07-ood ca08-state ca09-manager ca10-outbox)
-          jid_for_suite() {
-            local suite_name="$1"
-            local idx=0
-            for i in "${!suite_order[@]}"; do
-              if [ "${suite_order[$i]}" = "${suite_name}" ]; then
-                idx=$i
-                break
-              fi
-            done
-            local pool_size=${#ALLOWLIST_POOL[@]}
-            if [ "${pool_size}" -le 0 ]; then
-              echo ""
-              return
-            fi
-            local pool_idx=$((idx % pool_size))
-            echo "${ALLOWLIST_POOL[$pool_idx]}"
-          }
+          suite_jid="${ALLOWLIST_POOL[$JID_INDEX]}"
           suite_fail=0
           run_suite() {
             local suite_name="$1"
             local suite_seed="$2"
-            local suite_jid
-            suite_jid=$(jid_for_suite "${suite_name}")
             if [ -z "${suite_jid}" ]; then
               echo "suite ${suite_name} missing allowlist jid" >> "${RUN_LOG}"
               echo "suite ${suite_name} missing allowlist jid"
@@ -806,6 +845,10 @@ jobs:
             local poll_timeout="${POLL_TIMEOUT_BASE}"
             if [ "${suite_name}" = "ca06-consult" ]; then
               poll_timeout=$((poll_timeout + 60))
+            fi
+            local fail_fast_after="${FAIL_FAST_AFTER}"
+            if [ "${suite_name}" = "ca05-booking" ] || [ "${suite_name}" = "ca08-state" ]; then
+              fail_fast_after="${poll_timeout}"
             fi
             local request_timeout=30
             local noise_level="low"
@@ -826,7 +869,7 @@ jobs:
               --remote-jid "${suite_jid}" \
               --allowlist-jids "${ALLOWLIST_CLEAN}" \
               --poll-timeout "${poll_timeout}" \
-              --fail-fast-after "${FAIL_FAST_AFTER}" \
+              --fail-fast-after "${fail_fast_after}" \
               --reset-before-suite \
               --timeout "${request_timeout}" \
               --poll-interval 1 > "${outfile}" 2>>"${RUN_LOG}"; then
@@ -837,23 +880,32 @@ jobs:
               suite_fail=1
             fi
           }
-          run_suite ca01-core 777
-          run_suite ca02-policy 776
-          run_suite ca03-info 775
-          run_suite ca04-service 774
-          run_suite ca05-booking 773
-          run_suite ca06-consult 772
-          run_suite ca07-ood 771
-          run_suite ca08-state 778
-          run_suite ca09-manager 779
-          run_suite ca10-outbox 780
+          seed_for_suite() {
+            case "$1" in
+              ca01-core) echo 777 ;;
+              ca02-policy) echo 776 ;;
+              ca03-info) echo 775 ;;
+              ca04-service) echo 774 ;;
+              ca05-booking) echo 773 ;;
+              ca06-consult) echo 772 ;;
+              ca07-ood) echo 771 ;;
+              ca08-state) echo 778 ;;
+              ca09-manager) echo 779 ;;
+              ca10-outbox) echo 780 ;;
+              *) echo 777 ;;
+            esac
+          }
+          IFS=' ' read -r -a SUITES <<< "${SUITE_LIST}"
+          for suite in "${SUITES[@]}"; do
+            run_suite "${suite}" "$(seed_for_suite "${suite}")"
+          done
           if [ "${suite_fail}" -ne 0 ]; then
             exit 1
           fi
           REMOTE
           run_status=0
           SCRIPT_PATH="/tmp/livecheck-${RUN_ID}.sh"
-          if "${SSH[@]}" "RUN_ID=${RUN_ID} GIT_SHA=${GITHUB_SHA} bash -c 'cat > ${SCRIPT_PATH} && chmod 700 ${SCRIPT_PATH} && bash ${SCRIPT_PATH} < /dev/null; status=\$?; rm -f ${SCRIPT_PATH}; exit \$status'" < "${REMOTE_SCRIPT}"; then
+          if "${SSH[@]}" "RUN_ID=${RUN_ID} GIT_SHA=${GITHUB_SHA} SUITE_LIST='${SUITE_LIST}' JID_INDEX='${JID_INDEX}' MIN_ALLOWLIST_JIDS='${MIN_ALLOWLIST_JIDS}' bash -c 'cat > ${SCRIPT_PATH} && chmod 700 ${SCRIPT_PATH} && bash ${SCRIPT_PATH} < /dev/null; status=\$?; rm -f ${SCRIPT_PATH}; exit \$status'" < "${REMOTE_SCRIPT}"; then
             run_status=0
           else
             run_status=$?
@@ -912,7 +964,7 @@ jobs:
             python3 ops/diagnose.py emit-evidence \
               --input-dir artifacts \
               --gate artifacts/livecheck-gate.txt \
-              --output artifacts/livecheck-evidence.md
+              --output artifacts/livecheck-evidence-${{ matrix.group }}.md
           else
             echo "No livecheck jsonl artifacts found; skipping evidence."
           fi
@@ -921,5 +973,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: livecheck-artifacts
+          name: livecheck-artifacts-${{ matrix.group }}
           path: artifacts

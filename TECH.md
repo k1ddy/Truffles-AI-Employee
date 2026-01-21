@@ -136,6 +136,79 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 
 ---
 
+## CI / GitHub Actions (как запускать, зачем и когда)
+
+**Источник правды:** `.github/workflows/ci.yml`.
+
+### Когда CI запускается
+- **Pull Request → main:** lint + unit + core‑eval (если затронуты L1‑пути). long/asr только при L2‑изменениях или label `run-long`. build/push/deploy/livecheck не выполняются.
+- **Push → main:** полный пайплайн (lint/unit/core/long/asr → build-push → deploy → ci-livecheck), если гейты позволяют.
+- **workflow_dispatch:** ручной запуск с опциями `run_long` и `run_livecheck`.
+
+### Почему этапы пропускаются (skipped)
+**Path filters (changes):**
+- L1 включает: `truffles-api/app/**`, `truffles-api/tests/**`, `knowledge/**`, `ops/**`, `.github/workflows/**`.
+  - Нет L1‑изменений → `core-eval` skip.
+- L2 включает: `truffles-api/app/knowledge/**/EVAL.yaml`, `truffles-api/app/knowledge/**/SALON_TRUTH.yaml`, `truffles-api/tests/test_demo_salon_eval.py`.
+  - Нет L2‑изменений → `long-eval` и `asr-eval` skip.
+**Doc‑only fast lane:**
+- Изменения в `SPECS/**`, `STRATEGY/**`, `docs/**`, `AGENTS.md`, `STRUCTURE.md`, `TECH.md`, `STATE.md` не считаются L1 → `core-eval` skip.
+- На main build/deploy/livecheck запускаются только если `deploy_required=true` (код/рантайм), иначе пропускаются.
+- Отдельно: правки `STATE.md` не запускают deploy/livecheck и не требуют `core-eval` (если нет других L1 изменений).
+ - При doc‑only deploy/ci-livecheck job полностью пропускаются (не просто “skipped” шаги).
+
+**deploy_required (точный список путей):**
+- `truffles-api/app/**`
+- `truffles-api/requirements.txt`
+- `truffles-api/Dockerfile`
+- `knowledge/**`
+
+**livecheck_required (точный список путей):**
+- `truffles-api/app/**`
+- `truffles-api/requirements.txt`
+- `truffles-api/Dockerfile`
+- `knowledge/**`
+- `ops/**`
+- `.github/workflows/**`
+
+**Event gate (PR vs main):**
+- На PR `build-push`, `deploy`, `ci-livecheck` всегда skip.
+- На main эти шаги выполняются только при успешных обязательных джобах (lint/unit/secret-scan + core/long/asr, если они не skipped).
+
+### Как форсировать проверки
+- **long/asr:** label `run-long` на PR или `workflow_dispatch` с `run_long=true`.
+- **ci-livecheck:** только на `main` и только если `deploy` сработал; на `workflow_dispatch` нужно `run_livecheck=true`.
+
+### CI livecheck параллелизм
+- **Матрица групп:** `ci-livecheck` запускается в 3 параллельных группах (`pool-a/b/c`), каждая гоняет свой набор suite‑ов.
+- **Требование к allowlist:** минимум 3 JID в `OUTBOUND_ALLOWLIST_JIDS`, иначе gate падает (`ALLOWLIST_TOO_SHORT`).
+- **Артефакты:** на группу отдельные `livecheck-artifacts-<group>` и `livecheck-evidence-<group>.md`.
+
+### Livecheck-only (быстрый rerun без полного CI)
+- **Когда:** если `ci-livecheck` красный и нужно проверить фикс без повторного lint/unit/build/deploy.
+- **Как запустить:** GitHub → Actions → `Livecheck Only` → Run workflow.
+  - `expected_commit` = SHA, который уже задеплоен (если пусто — проверяется только `/admin/version`).
+  - `expected_version` = `main` (по умолчанию).
+  - `min_allowlist_jids` = 3 (должны быть 3 JID в allowlist для параллели).
+- **Что делает:** проверяет `/admin/version`, затем гоняет только livecheck suites (3 параллельных пула).
+- **Что НЕ делает:** не запускает lint/unit/core/long/asr и не деплоит.
+
+### Гейты build/deploy/livecheck (важно понимать)
+- `build-push` запускается только на `main` или `workflow_dispatch`, и только если lint/unit/secret-scan ok.
+- `deploy` внутри себя решает `deployed=true/false` (PR и не‑main → false).
+- `ci-livecheck` job всегда виден, но шаги выполняются только если `deploy` прошёл и событие допустимо.
+
+### Concurrency (почему бывают cancelled)
+- Для не‑main включён `cancel-in-progress`, поэтому новый PR‑пуш отменяет предыдущие run’ы. Это нормально.
+
+### Быстрый рецепт
+- **Док‑изменения без поведения:** PR → проверяем lint/unit; остальные этапы будут skipped — это ожидаемо.
+- **Изменение поведения:** merge в main → полный CI + deploy + livecheck.
+- **Нужен полный прогон без мержа:** `workflow_dispatch` на `main` с `run_long`/`run_livecheck` (если есть доступ и гейты позволяют).
+- **Live‑check sender‑only:** используйте `clean_auto` как отправителя (ChatFlow send‑text) → receiver‑номер салона; если написать на `clean_auto`, ответа не будет. Подробности — `SPECS/SYSTEM_REFERENCE.md` §4.3.
+
+---
+
 ## Telegram
 
 | Клиент | Bot username | Bot token |

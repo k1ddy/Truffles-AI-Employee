@@ -33,7 +33,7 @@ PRODUCT CONTRACT (do not debate; enforce)
 
 SESSION RITUAL (every session)
 1) Read `STATE.md` NOW (1 screen) and pick ONE issue; if NOW/next steps are missing or too long — STOP and ask Brain or Top Architect to update the brief.
-2) Run Question Gate (per `AGENTS.md`): check docs/code/env before asking questions.
+2) Run Question Gate (per `AGENTS.md`): check docs/code/env before asking questions. If debugging message flow, start with `ops/diagnose.py explain` (Fast Debug SOP) before logs/SQL.
 3) Produce a Task Package BEFORE coding. If Task Package is missing/ambiguous: STOP and write the missing pieces.
 4) Implement with one-issue flow: smallest change that satisfies the invariant + DoD.
 5) Verify: tests/CI/live-check/evidence + запись в `STATE.md` (Brain или Top Architect, до merge для core/поведенческих изменений). No evidence => PLAN/GAP.
@@ -43,6 +43,7 @@ SESSION RITUAL (every session)
 
 TESTING CONTRACT (summary)
 - Source of truth: `SPECS/SYSTEM_REFERENCE.md` (Test design rules + LLM testing policy + CA-Matrix).
+- CI usage + skip rules: `TECH.md` → "CI / GitHub Actions (как запускать, зачем и когда)".
 - CI livecheck is allowed only with safety gates (TEST_MODE=1 + allowlist); evidence is `livecheck-evidence.md`.
 - Live-check uses JID pool (comma list). One suite -> one JID. Instance->instance simulation is valid only if inbound is recorded in DB with decision_meta/trace; **CA‑13** may use simulated inbound when allowlist is unavailable (mark as `simulated` in `STATE.md`).
 - Definitions for JID/instance_id/instance->instance are fixed in `SPECS/SYSTEM_REFERENCE.md`.
@@ -82,6 +83,7 @@ STOP-THE-LINE (hard rules)
 SOP POINTERS (open when relevant)
 - `SPECS/SYSTEM_REFERENCE.md` → "Start Here — Process Map"
 - `SPECS/SYSTEM_REFERENCE.md` → "Термины и сущности (единый словарь)"
+- `SPECS/SYSTEM_REFERENCE.md` → "Fast Debug SOP (5 минут)"
 - `SPECS/SYSTEM_REFERENCE.md` → "Live-check SOP (CA audit)"
 - `SPECS/SYSTEM_REFERENCE.md` → "CA-Matrix (suite/mode/evidence)" + "Test design rules"
 - `SPECS/SYSTEM_REFERENCE.md` → "Onboarding Test SOP (CA-13/CA-14)" + "Known risks and fixes"

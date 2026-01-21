@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.contracts import ConfigError, Err, ErrorCodes, IntegrationError, Ok, Result
 from app.logging_config import get_logger
-from app.models import Client
+from app.models import Branch, Client, Conversation, User
 from app.services.alert_service import alert_critical
 
 logger = get_logger("chatflow_service")
@@ -47,8 +47,43 @@ def _should_skip_outbound(remote_jid: str, *, action: str) -> bool:
     return True
 
 
-def get_instance_id(db: Session, client_id: UUID) -> Optional[str]:
-    """Get ChatFlow instance_id for client."""
+def _get_branch_instance_id(db: Session, client_id: UUID, branch_id: UUID | None) -> Optional[str]:
+    if not branch_id:
+        return None
+    branch = (
+        db.query(Branch)
+        .filter(Branch.id == branch_id, Branch.client_id == client_id)
+        .first()
+    )
+    if branch and branch.instance_id:
+        return branch.instance_id
+    return None
+
+
+def get_instance_id(
+    db: Session,
+    client_id: UUID,
+    *,
+    branch_id: UUID | None = None,
+    remote_jid: str | None = None,
+) -> Optional[str]:
+    """Resolve ChatFlow instance_id (branch-aware, with client fallback)."""
+    instance_id = _get_branch_instance_id(db, client_id, branch_id)
+    if not instance_id and remote_jid:
+        conversation = (
+            db.query(Conversation)
+            .join(User, User.id == Conversation.user_id)
+            .filter(
+                Conversation.client_id == client_id,
+                Conversation.status == "active",
+                User.remote_jid == remote_jid,
+            )
+            .first()
+        )
+        if conversation and conversation.branch_id:
+            instance_id = _get_branch_instance_id(db, client_id, conversation.branch_id)
+    if instance_id:
+        return instance_id
     client = db.query(Client).filter(Client.id == client_id).first()
     if client and client.config:
         return client.config.get("instance_id")
@@ -217,11 +252,12 @@ def send_bot_response(
     remote_jid: str,
     message: str,
     *,
+    branch_id: UUID | None = None,
     idempotency_key: Optional[str] = None,
     raise_on_fail: bool = False,
 ) -> bool:
     """Send bot response to WhatsApp user."""
-    instance_id = get_instance_id(db, client_id)
+    instance_id = get_instance_id(db, client_id, branch_id=branch_id, remote_jid=remote_jid)
     if not instance_id:
         logger.warning(f"No instance_id found for client {client_id}, jid={remote_jid}")
         return False
@@ -329,6 +365,7 @@ def send_bot_response_safe(
     remote_jid: str,
     message: str,
     *,
+    branch_id: UUID | None = None,
     idempotency_key: Optional[str] = None,
 ) -> Result[MessageSent]:
     """
@@ -336,7 +373,7 @@ def send_bot_response_safe(
     
     Возвращает Result.ok(MessageSent) или Result.fail(IntegrationError).
     """
-    instance_id = get_instance_id(db, client_id)
+    instance_id = get_instance_id(db, client_id, branch_id=branch_id, remote_jid=remote_jid)
     if not instance_id:
         logger.warning(f"No instance_id found for client {client_id}, jid={remote_jid}")
         return Err(ConfigError(
