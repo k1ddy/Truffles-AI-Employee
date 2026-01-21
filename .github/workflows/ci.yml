@@ -179,7 +179,7 @@ jobs:
 
   console-e2e:
     needs: [changes]
-    if: needs.changes.outputs.console_web == 'true' && secrets.CONSOLE_E2E_USERNAME != '' && secrets.CONSOLE_E2E_PASSWORD != ''
+    if: ${{ needs.changes.outputs.console_web == 'true' && secrets.CONSOLE_E2E_USERNAME != '' && secrets.CONSOLE_E2E_PASSWORD != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -216,7 +216,7 @@ jobs:
 
   console-contract:
     needs: [changes]
-    if: needs.changes.outputs.console_contracts == 'true' && (secrets.CONSOLE_API_TOKEN != '' || (secrets.CONSOLE_KEYCLOAK_USERNAME != '' && secrets.CONSOLE_KEYCLOAK_PASSWORD != '' && secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET != ''))
+    if: ${{ needs.changes.outputs.console_contracts == 'true' && (secrets.CONSOLE_API_TOKEN != '' || (secrets.CONSOLE_KEYCLOAK_USERNAME != '' && secrets.CONSOLE_KEYCLOAK_PASSWORD != '' && secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET != '')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
