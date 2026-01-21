@@ -467,6 +467,8 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 **Цель:** быстрые и правильные проверки без “лишнего” прогонов, но с обязательным качеством.
 
 **Правило:** тесты запускаются **по влиянию изменения**, а не “всегда всё”.
+**Применение:** правило распространяется **на все** наборы (eval/livecheck/fuzz/perf). Любой новый suite обязан
+сразу указать уровень (L1‑L4) + триггеры/labels в Task Package.
 
 **Триггеры:**
 - **L0** — всегда на PR и на main (любые изменения).
@@ -478,6 +480,8 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 - **L4** — nightly (планируется; не блокирует релиз).
 
 **Release gate:** L0 + L1 обязательны; L2 обязателен, если затронуты файлы из L2; L3 выполняется по DoD/CA‑audit.
+**Livecheck‑harness:** любые изменения в `.github/workflows/ci.yml` или `ops/diagnose.py` требуют L3 (livecheck)
+или явного waiver в Task Package с причиной.
 
 ### 5.1.2 Контракт eval‑тестов (без хрупкости)
 
@@ -489,6 +493,8 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 - Для LLM: проверять `llm_used` и policy/trace, не текст ответа.
 
 **Запрещено:** “пристрелка” к одному `source`, если канон допускает несколько.
+**LLM‑ключи:** CI‑eval не должен зависеть от `OPENAI_API_KEY`. Нужные LLM‑проверки переносятся в L4/nightly или
+стабятся так, чтобы trace/meta фиксировали ожидаемую стадию без внешнего API.
 
 ### 5.1.3 Redis в CI (детерминизм против скорости)
 
@@ -496,12 +502,17 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 
 **Fallback:** если L1/L2 становятся слишком медленными — включаем детерминированный режим без Redis
 (`REDIS_DISABLED=1` или аналогичный флаг) и фиксируем это в DoD задачи.
+**Решение:** выбор режима (Redis on/off) фиксируется в Task Package и подтверждается CI‑таймингами.
 
 ### 5.1.4 Nightly gauntlet (planned)
 
 **Цель:** “суровая” проверка устойчивости (10–15 ходов, максимальные вариации, LLM‑тесты).
 
 **Статус:** planned; запуск и DoD — отдельный Task Package.
+**Требования (черновик):**
+- 10–15 ходов + шум/опечатки/перефразы/ASR‑мусор.
+- Минимум 3 варианта на класс (booking/info/consult/OOD).
+- LLM‑тесты разрешены, но проверка через meta/trace + агрегаты, не текст.
 
 ### 5.2 Fuzz/Soak (симуляция “живого” человека)
 
@@ -747,9 +758,24 @@ LIMIT 3;
 - `instanceId` в payload должен совпадать с `branches.instance_id` (DB); рассинхрон с `clients.config.instance_id` фиксируем как GAP.
 - Малый объём (4–10 сообщений), фиксированный seed, без спама.
 
+**Детерминизм suites:**
+- **One suite → one JID:** для параллели нужен allowlist ≥ 4; иначе фиксируем `ALLOWLIST_TOO_SHORT` и включаем fallback.
+- **Reset перед suite:** каждый suite обязан пройти reset/clear‑meta шаг; без reset → STOP.
+- **Adaptive poll_timeout:** минимум =
+  `OUTBOX_COALESCE_SECONDS + OUTBOX_WORKER_INTERVAL_SECONDS + (CHATFLOW_RETRY_ATTEMPTS * CHATFLOW_RETRY_BACKOFF_SECONDS) + 10s`.
+  Значение и входные параметры логируются в `livecheck-run-*.log`.
+
+**Fail‑fast gate (контур готовности):**
+- `/admin/health` OK, `OUTBOX_WORKER_ENABLED=1` **или** активен cron‑контур (явно).
+- `ALERTS_ADMIN_TOKEN` доступен; `/admin/metrics` отвечает.
+- При провале — CI прекращается с причиной `ENV_NOT_READY` (без “таймаутов”).
+
+**Диагностика падений:**
+- В артефактах должны быть `remote_jid`, `conversation_id`, `last_decision_meta` и последний `decision_trace` stage.
+
 **CI job:** `ci-livecheck` в `.github/workflows/ci.yml` → `ops/diagnose.py livecheck-auto` suites: `ca01-core`, `ca02-policy`, `ca03-info`, `ca04-service`, `ca05-booking`, `ca06-consult`, `ca07-ood`, `ca08-state`, `ca09-manager`, `ca10-outbox`.
-- Запуск: 3 параллельные группы (`pool-a/b/c`), каждая со своим JID из allowlist (желательно ≥3 JID).
-- Fallback: если allowlist < 3, `pool-a` запускает все suites последовательно, `pool-b/c` пропускаются.
+- Запуск: 4 параллельные группы (`pool-a/b/c/d`), каждая со своим JID из allowlist (желательно ≥4 JID).
+- Fallback: если allowlist < 4, `pool-a` запускает все suites последовательно, `pool-b/c/d` пропускаются.
 - Артефакты: `livecheck-artifacts-<group>/*` + `livecheck-evidence-<group>.md`.
 - **Livecheck Only (workflow):** `.github/workflows/livecheck-only.yml` — ручной rerun без полного CI; делает `deploy-verify` и гоняет suites (параллельно).
 **Evidence artifact:** `livecheck-evidence.md` (генерируется из jsonl + gate через `ops/diagnose.py emit-evidence`).
@@ -842,7 +868,7 @@ chatflow_service → WhatsApp
    - Trace: `stage=outbox`, `decision=enqueue_only`.  
    - Эффект: HTTP ответ сразу, тяжелая логика уходит в outbox.
 
-5) **Outbox worker** (`main._outbox_worker_loop`)  
+5) **Outbox worker** (`app/workers/outbox.py` → `run_worker`)  
    - `claim_pending_outbox_batches` → `webhook._process_outbox_rows`.  
    - Эффект: каждое outbox-сообщение вызывает `_handle_webhook_payload(skip_persist=True)`.
 
@@ -878,6 +904,81 @@ chatflow_service → WhatsApp
 - Для каждого `return WebhookResponse` → это ранний выход и смысл gate-а.  
 - Для каждого `_record_decision_trace` → это “смысл” стадии (что именно доказано).  
 - Для каждого `_record_message_decision_meta` → это контракт фактов на user-message.
+
+### Gate Ledger (условие → эффект → trace/meta)
+| Order | Gate / function (file) | Condition (summary) | Effect / next step | Trace / meta |
+| --- | --- | --- | --- | --- |
+| 1 | **Question contract / expected reply** (`decision._apply_expected_reply_contract`) | expected_reply_type present | Match/short‑circuit or continue | `stage=question_contract`, `expected_reply_*` in meta |
+| 2 | **Branch selection** (`branch_selection._handle_branch_selection_gate`) | branch_mode ask_user/hybrid, >1 branch | Prompt/select branch and return | `stage=branch_selection`, decision=prompt/selected |
+| 3 | **Shield** (`shield._handle_shield_gate`) | spam/too_long or toxic/nonsense | Drop or escalate; early return | `stage=shield`, decision=drop/escalate |
+| 4 | **Session timeout reset** (`dedup._apply_session_timeout_reset`) | last_message_at > SESSION_TIMEOUT_HOURS | Reset mute/context | (no stage; log only) |
+| 5 | **Manager active** (`pending._handle_manager_active_gate`) | state=MANAGER_ACTIVE | Early return (no bot reply) | (no stage) |
+| 6 | **Reengage/mute** (`guards._handle_reengage_and_mute_gate`) | reengage confirmation or muted | Resume or skip | `stage=routing`, decision=reengage_confirmed/muted_skip/... |
+| 7 | **Pending gate** (`pending._handle_pending_gate`) | state=PENDING/manager | SLA ping/ack/close/wait | `stage=pending_sla/pending_resume/pending_wait/pending_status` |
+| 8 | **Media gate** (`decision` media checks) | unsupported/rejected media | Early reply | `stage=media`, decision=unsupported/rejected |
+| 9 | **Debounce gate** (`dedup._handle_debounce_gate`) | bursty inputs | Skip intermediates | `stage=debounce`, decision=skip/manager_active |
+| 10 | **Handover confirm** (`pending._handle_handover_confirmation_gate`) | pending confirmation | Escalate or clarify | `stage=handover_confirmation`, decision=confirmed/declined |
+| 11 | **Hard‑LAW** (`policy._handle_hard_law_gate`) | hard_law match | Escalate/reply | `stage=policy_gate`, policy_gate=hard_law |
+| 12 | **Policy gate** (`policy._handle_policy_escalation_gate`) | policy_pack match | Escalate/reply | `stage=policy_gate`, policy_gate={...} |
+| 13 | **Opt‑out mute** (`guards._handle_opt_out_mute_gate`) | opt_out_in_batch | Mute (first/second) | `stage=rejection`, decision=muted_first/muted_second |
+| 14 | **Fast intent / smalltalk** (`decision` fast intent) | greeting/thanks/ack | Short reply | `stage=fast_intent` / `stage=smalltalk` |
+| 15 | **Consult flow** (`response._handle_consult_flow`) | consult_intent or consult_context | Reply/clarify/escalate | `stage=consult_flow`, `stage=consult_context`, `stage=consult` |
+| 16 | **Info flow** (`info._handle_info_flow`) | info_class intents | Reply / truth‑gate | `stage=info_class`, `stage=truth_gate` |
+| 17 | **Booking flow** (`booking._handle_booking_flow`) | booking_signal/booking_active | Reply/interrupt | `stage=booking`, `stage=booking_interrupt`, `stage=truth_gate` |
+| 18 | **LLM primary + fallback** (`response._handle_llm_primary`) | LLM path enabled | ai_response/clarify/escalate | `stage=llm_guard`, `stage=ai_response`, `stage=llm_degradation` |
+
+### Determinism Inventory (лексиконы + правила)
+**Rules‑as‑data (packs):**
+- `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`  
+  Policy keywords (payment/reschedule/cancel/medical/legal/complaint/discount), explicit/override keywords.
+- `truffles-api/app/knowledge/demo_salon/INTENTS_PHRASES_DEMO_SALON.yaml`  
+  Phrase intents + offtopic examples (используется в `phrase_match_intent`).
+
+**Code lexicons / regex (детерминированные списки):**
+- `truffles-api/app/routers/webhook/decision.py`  
+  `SHIELD_TOXIC_PATTERNS`, `SHIELD_MEANINGFUL_PATTERN`, `HYGIENE_KEYWORDS`,  
+  `BOOKING_REQUEST_KEYWORDS`, `SERVICE_KEYWORDS`, `DATE_KEYWORDS`,  
+  `is_handover_status_question` keywords.
+- `truffles-api/app/routers/webhook/shield.py`  
+  Использует `SHIELD_TOXIC_PATTERNS`/`SHIELD_MEANINGFUL_PATTERN`.
+- `truffles-api/app/services/ai_service.py`  
+  `BOT_STATUS_KEYWORDS`, `REFUSAL_PHRASES`, fallback intent keywords.
+- `truffles-api/app/services/demo_salon_knowledge.py`  
+  `phrase_match_intent`, `_OFFTOPIC_KEYWORDS`, price/faq keywords,  
+  policy section matching by phrases/keywords.
+- `truffles-api/app/routers/webhook/policy.py`  
+  Keyword‑match по policy pack + guard overrides.
+
+**Deterministic gates (не лексиконы):**
+- Preflight: `http._run_preflight` (client/secret/instanceId/branch)  
+- Dedupe + Debounce: `dedup._handle_dedup_gate`, `dedup._handle_debounce_gate`  
+- Pending/mute/reengage: `pending._handle_pending_gate`, `guards._handle_reengage_and_mute_gate`  
+- Outbox idempotency: `outbox._handle_enqueue_only_accept`, `outbox_service.*`
+
+### RU/KZ/mixed: как улучшать без перебора всех комбинаций
+**Цель:** повысить устойчивость к смешанным языкам и опечаткам, не увеличивая словари “в лоб”.
+
+1) **Единая нормализация**  
+   - Канонизация пробелов/пунктуации + `casefold`.  
+   - Транслитерация KZ‑латиница↔кириллица.  
+   - Канон‑маппинг казахских букв (ә/а, ғ/г, қ/к, ң/н, ө/о, ұ/у, ү/у, һ/х) в одну форму.
+
+2) **Lexicon v2 в packs (rules‑as‑data)**  
+   - Вынести кодовые списки в pack: intent → aliases (ru/kz/mixed),  
+     weight/priority, optional regex.  
+   - В коде оставить только “движок” матчинга и порог score.
+
+3) **Лёгкая морфология (детерминированно)**  
+   - RU: стемминг/суффикс‑правила (офлайн расширение → packs).  
+   - KZ: минимальные суффикс‑шаблоны (также офлайн, фиксированный список).
+
+4) **Scoring вместо “точного совпадения”**  
+   - Токены/стемы/алиасы → score.  
+   - Пороговое решение (deterministic): score ≥ threshold.
+
+5) **Trace/meta для объяснимости**  
+   - decision_meta: `lexicon_hit`, `lexicon_score`, `lexicon_version`, `lang_detected`.  
+   - Это даёт воспроизводимость и контроль при изменениях.
 
 ### Эскалация
 ```

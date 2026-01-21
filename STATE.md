@@ -48,6 +48,7 @@
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **OPEN-1:** Branch routing stickiness: instanceId inbound не переопределяет existing conversation.branch_id; outbound уходит через client.config.instance_id (demo_salon). Evidence 2026-01-20 ниже.
 - **OPEN-2:** GAP-023 Chaos dialog testing (noise/interruptions) отсутствует — зафиксировано в `docs/IMPERIUM_GAPS.yaml`; нужен seeded chaos‑eval tier на 10–15 ходов.
+- **PLAN (no evidence):** P0 “бот не знает, что отвечать” → расширить RU/KZ/mixed лексиконы и диалоги в packs + покрыть детерминированным webhook‑fuzz (см. Task Package ниже).
 - **DONE:** Anti bot-to-bot loop guard (preflight ignores inbound from sender‑JID matching `branches.phone`) deployed. Evidence: clean sender `77785890765` → demo_salon main branch OK (conv_id `10049e90-5805-425f-841b-c0c9419c9c30`, msg_id `3EB07B249B69BBABF1FB13`, decision_meta action=match source=service_semantic_matcher, outbox SENT). Branch‑sender ignore exercised: trace stage `preflight` reason `sender_is_branch` recorded at `2026-01-20T13:06:36Z` in conv_id `4dd2e5ae-c287-4137-803a-18a89e277bf4` after branch→branch send (LC-BRANCH-LOOP-20260120-130633).
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
@@ -1782,6 +1783,33 @@
   - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21168427540 (build/deploy/livecheck skipped).
 - PR #271 (skip deploy/livecheck jobs when doc-only): https://github.com/k1ddy/Truffles-AI-Employee/pull/271
   - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21169183412 (deploy/livecheck jobs skipped).
+
+### 2026-01-21 — Task Package (planned): P0 RU/KZ/mixed lexicon + dialog coverage
+
+- Chosen issue (NOW): бот “не знает что отвечать” в RU/KZ/mixed — отсутствуют нужные диалоги/лексиконы, ответы не детерминированы.
+- Invariants protected: truth-first; policy/hard‑LAW gates; no изменения порядка стадий; `_legacy.py` adapter-only; no DB edits for evidence.
+- Scope: обновить runtime packs для `demo_salon` (intent phrases + policy keywords + eval anchors) и добавить deterministic webhook‑fuzz suite для RU/KZ/mixed.
+- Out of scope: изменения pipeline/LLM логики, промптов, схем БД, routing.
+- Touch-list:
+  - `truffles-api/app/knowledge/demo_salon/INTENTS_PHRASES_DEMO_SALON.yaml`
+  - `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`
+  - `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
+  - `ops/diagnose.py` (webhook‑fuzz suite definitions)
+  - `SPECS/SYSTEM_REFERENCE.md` (если добавляем новую suite)
+- Plan:
+  1) Инвентарь дырок RU/KZ/mixed по intent/policy (booking/price/duration/hours/location/discount/complaint/hard‑law).
+  2) Расширить packs (RU/KZ/mixed фразы + anchors; без кода).
+  3) Добавить webhook‑fuzz suite (10–15 ходов, noise/typos/code‑switch).
+  4) Прогнать logic‑mode fuzz и собрать decision_meta/trace.
+  5) Зафиксировать evidence в `STATE.md` и закрыть GAP‑023 (chaos dialog testing).
+- DoD:
+  - Packs покрывают RU/KZ/mixed anchors по ключевым интентам.
+  - Webhook‑fuzz suite проходит в logic‑mode (seeded) и даёт ожидаемые trace/meta.
+  - Evidence (SQL + runner log) записано в `STATE.md`.
+- Checks:
+  - `python3 ops/diagnose.py webhook-fuzz --mode logic --client-slug demo_salon --count 10 --seed 42 --webhook-secret "$WEBHOOK_SECRET"`
+  - SQL evidence (см. `SPECS/SYSTEM_REFERENCE.md` §5.7).
+- Evidence plan: runner output + SQL snapshot по `LC:` markers; запись в `STATE.md` (Top Architect) до merge.
 
 ### 2026-01-21 — Worker cutover guardrails (restart script + runbook)
 

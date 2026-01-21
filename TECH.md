@@ -180,18 +180,18 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - **ci-livecheck:** только на `main` и только если `deploy` сработал; на `workflow_dispatch` нужно `run_livecheck=true`.
 
 ### CI livecheck параллелизм
-- **Матрица групп:** `ci-livecheck` запускается в 3 параллельных группах (`pool-a/b/c`), каждая гоняет свой набор suite‑ов.
-- **Требование к allowlist:** желательно минимум 3 JID в `OUTBOUND_ALLOWLIST_JIDS`; если меньше — фиксируется `ALLOWLIST_TOO_SHORT` и включается fallback.
+- **Матрица групп:** `ci-livecheck` запускается в 4 параллельных группах (`pool-a/b/c/d`), каждая гоняет свой набор suite‑ов.
+- **Требование к allowlist:** желательно минимум 4 JID в `OUTBOUND_ALLOWLIST_JIDS`; если меньше — фиксируется `ALLOWLIST_TOO_SHORT` и включается fallback.
 - **Артефакты:** на группу отдельные `livecheck-artifacts-<group>` и `livecheck-evidence-<group>.md`.
-- **Fallback:** если allowlist < 3, `pool-a` запускает все suite последовательно, `pool-b/c` пропускаются.
+- **Fallback:** если allowlist < 4, `pool-a` запускает все suite последовательно, `pool-b/c/d` пропускаются.
 
 ### Livecheck-only (быстрый rerun без полного CI)
 - **Когда:** если `ci-livecheck` красный и нужно проверить фикс без повторного lint/unit/build/deploy.
 - **Как запустить:** GitHub → Actions → `Livecheck Only` → Run workflow.
   - `expected_commit` = SHA, который уже задеплоен (если пусто — проверяется только `/admin/version`).
   - `expected_version` = `main` (по умолчанию).
-  - `min_allowlist_jids` = 3 (должны быть 3 JID в allowlist для параллели).
-- **Что делает:** проверяет `/admin/version`, затем гоняет только livecheck suites (3 параллельных пула).
+  - `min_allowlist_jids` = 4 (должны быть 4 JID в allowlist для параллели).
+- **Что делает:** проверяет `/admin/version`, затем гоняет только livecheck suites (4 параллельных пула).
 - **Что НЕ делает:** не запускает lint/unit/core/long/asr и не деплоит.
 - **Fallback:** если allowlist меньше `min_allowlist_jids`, запускается один пул (`pool-a`) с полным набором suites.
 
