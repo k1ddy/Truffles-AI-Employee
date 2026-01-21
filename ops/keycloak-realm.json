@@ -24,11 +24,13 @@
             "secret": "console-client-secret",
             "redirectUris": [
                 "http://localhost:3000/*",
-                "http://192.168.5.27:3000/*"
+                "http://192.168.5.27:3000/*",
+                "https://console.truffles.kz/*"
             ],
             "webOrigins": [
                 "http://localhost:3000",
-                "http://192.168.5.27:3000"
+                "http://192.168.5.27:3000",
+                "https://console.truffles.kz"
             ],
             "standardFlowEnabled": true,
             "directAccessGrantsEnabled": true,

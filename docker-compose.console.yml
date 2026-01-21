@@ -22,12 +22,22 @@ services:
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: auth.truffles.kz
+      KC_PROXY: edge
     ports:
       - "8080:8080"
     volumes:
       - ./ops/keycloak-realm.json:/opt/keycloak/data/import/realm.json
     networks:
       - truffles-console-net
+      - proxy-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.console-keycloak.rule=Host(`auth.truffles.kz`)"
+      - "traefik.http.routers.console-keycloak.entrypoints=web,websecure"
+      - "traefik.http.routers.console-keycloak.tls.certresolver=myresolver"
+      - "traefik.http.services.console-keycloak.loadbalancer.server.port=8080"
+      - "traefik.docker.network=proxy-net"
 
   console-redis:
     image: redis:7-alpine
@@ -40,6 +50,9 @@ services:
 volumes:
   console_postgres_data:
 
+
 networks:
   truffles-console-net:
     driver: bridge
+  proxy-net:
+    external: true

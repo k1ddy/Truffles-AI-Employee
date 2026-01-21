@@ -20,6 +20,8 @@
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
+| `truffles-api/` | Backend API + workers | Backend |
+| `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 
 ---
 
