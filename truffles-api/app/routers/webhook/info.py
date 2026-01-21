@@ -384,10 +384,15 @@ def _handle_info_flow(
                     db.commit()
                     return InfoFlowResult(response=guard_response, force_truth_gate=force_truth_gate)
                 bot_response = multi_reply
-                bot_response = legacy._maybe_append_booking_cta(
+                composer_meta = None
+                bot_response, composer_meta = legacy._compose_fact_response(
                     bot_response,
+                    client_slug=client_slug,
+                    conversation_id=str(conversation.id),
+                    response_tag="multi_truth",
                     conversation_state=conversation.state,
                     allow_booking_flow=routing["allow_booking_flow"],
+                    has_followup=False,
                 )
                 legacy._reset_low_confidence_retry(conversation)
 
@@ -401,6 +406,8 @@ def _handle_info_flow(
                 }
                 if isinstance(multi_meta, dict):
                     trace_payload.update(multi_meta)
+                if composer_meta:
+                    trace_payload.update(composer_meta)
                 legacy._record_decision_trace(conversation, trace_payload)
                 legacy._record_message_decision_meta(
                     saved_message,
@@ -411,6 +418,8 @@ def _handle_info_flow(
                 )
                 if saved_message and isinstance(multi_meta, dict):
                     legacy._update_message_decision_metadata(saved_message, multi_meta)
+                if saved_message and composer_meta:
+                    legacy._update_message_decision_metadata(saved_message, composer_meta)
                 legacy._maybe_store_class_carryover(
                     conversation=conversation,
                     class_name="info_bundle",
@@ -699,8 +708,12 @@ def _handle_info_flow(
                 db.commit()
                 return InfoFlowResult(response=guard_response, force_truth_gate=force_truth_gate)
             bot_response = "\n\n".join(replies)
-            bot_response = legacy._maybe_append_booking_cta(
+            composer_meta = None
+            bot_response, composer_meta = legacy._compose_fact_response(
                 bot_response,
+                client_slug=client_slug,
+                conversation_id=str(conversation.id),
+                response_tag="info_class",
                 conversation_state=conversation.state,
                 allow_booking_flow=routing["allow_booking_flow"],
                 has_followup=False,
@@ -715,6 +728,8 @@ def _handle_info_flow(
                 "class_router": class_router_result,
             }
             trace_payload.update(info_meta_combined)
+            if composer_meta:
+                trace_payload.update(composer_meta)
             legacy._record_decision_trace(conversation, trace_payload)
             legacy._record_message_decision_meta(
                 saved_message,
@@ -734,6 +749,8 @@ def _handle_info_flow(
                     legacy._router_observability_updates_from_class_router(class_router_result)
                 )
                 legacy._update_message_decision_metadata(saved_message, meta_updates)
+            if saved_message and composer_meta:
+                legacy._update_message_decision_metadata(saved_message, composer_meta)
             legacy._maybe_store_class_carryover(
                 conversation=conversation,
                 class_name="info_bundle",
@@ -793,8 +810,12 @@ def _handle_info_flow(
                 db.commit()
                 return InfoFlowResult(response=guard_response, force_truth_gate=force_truth_gate)
             bot_response = base_bundle_reply.strip()
-            bot_response = legacy._maybe_append_booking_cta(
+            composer_meta = None
+            bot_response, composer_meta = legacy._compose_fact_response(
                 bot_response,
+                client_slug=client_slug,
+                conversation_id=str(conversation.id),
+                response_tag="info_class",
                 conversation_state=conversation.state,
                 allow_booking_flow=routing["allow_booking_flow"],
                 has_followup=bool(multi_intent_other_followup),
@@ -810,6 +831,8 @@ def _handle_info_flow(
             }
             if isinstance(base_bundle_meta, dict) and base_bundle_meta:
                 trace_payload.update(base_bundle_meta)
+            if composer_meta:
+                trace_payload.update(composer_meta)
             legacy._record_decision_trace(conversation, trace_payload)
             legacy._record_message_decision_meta(
                 saved_message,
@@ -829,6 +852,8 @@ def _handle_info_flow(
                     legacy._router_observability_updates_from_class_router(class_router_result)
                 )
                 legacy._update_message_decision_metadata(saved_message, meta_updates)
+            if saved_message and composer_meta:
+                legacy._update_message_decision_metadata(saved_message, composer_meta)
             legacy._maybe_store_class_carryover(
                 conversation=conversation,
                 class_name="info_bundle",
@@ -889,17 +914,21 @@ def _handle_info_flow(
                 source="service_matcher",
                 allow_handover=routing.get("allow_handover_create", False),
             )
-            if guard_response:
-                db.commit()
-                return InfoFlowResult(response=guard_response, force_truth_gate=force_truth_gate)
+        if guard_response:
+            db.commit()
+            return InfoFlowResult(response=guard_response, force_truth_gate=force_truth_gate)
         bot_response = service_decision.response
         bot_response = legacy._combine_sidecar(bot_response, multi_intent_other_followup)
+        composer_meta = None
         if (
             service_decision.action == "reply"
             and service_decision.intent in legacy.BOOKING_CTA_SERVICE_INTENTS
         ):
-            bot_response = legacy._maybe_append_booking_cta(
+            bot_response, composer_meta = legacy._compose_fact_response(
                 bot_response,
+                client_slug=client_slug,
+                conversation_id=str(conversation.id),
+                response_tag="service_matcher",
                 conversation_state=conversation.state,
                 allow_booking_flow=routing["allow_booking_flow"],
                 has_followup=bool(multi_intent_other_followup),
@@ -989,6 +1018,8 @@ def _handle_info_flow(
         }
         if isinstance(getattr(service_decision, "meta", None), dict):
             trace_payload.update(service_decision.meta)
+        if composer_meta:
+            trace_payload.update(composer_meta)
         legacy._record_decision_trace(conversation, trace_payload)
         legacy._record_message_decision_meta(
             saved_message,
@@ -999,6 +1030,8 @@ def _handle_info_flow(
         )
         if saved_message and isinstance(getattr(service_decision, "meta", None), dict):
             legacy._update_message_decision_metadata(saved_message, service_decision.meta)
+        if saved_message and composer_meta:
+            legacy._update_message_decision_metadata(saved_message, composer_meta)
         if saved_message and clarify_reason:
             legacy._update_message_decision_metadata(saved_message, {"clarify_reason": clarify_reason})
         legacy._maybe_store_service_carryover(
@@ -1369,8 +1402,12 @@ def _handle_offline_info_class(
                 db.commit()
                 return guard_response
             bot_response = base_bundle_reply.strip()
-            bot_response = legacy._maybe_append_booking_cta(
+            composer_meta = None
+            bot_response, composer_meta = legacy._compose_fact_response(
                 bot_response,
+                client_slug=client_slug,
+                conversation_id=str(conversation.id),
+                response_tag="info_class",
                 conversation_state=conversation.state,
                 allow_booking_flow=routing["allow_booking_flow"],
                 has_followup=False,
@@ -1386,6 +1423,8 @@ def _handle_offline_info_class(
             }
             if info_meta_combined:
                 trace_payload.update(info_meta_combined)
+            if composer_meta:
+                trace_payload.update(composer_meta)
             legacy._record_decision_trace(conversation, trace_payload)
             legacy._record_message_decision_meta(
                 saved_message,
@@ -1405,6 +1444,8 @@ def _handle_offline_info_class(
                     legacy._router_observability_updates_from_class_router(class_router_result)
                 )
                 legacy._update_message_decision_metadata(saved_message, meta_updates)
+            if saved_message and composer_meta:
+                legacy._update_message_decision_metadata(saved_message, composer_meta)
             legacy._maybe_store_class_carryover(
                 conversation=conversation,
                 class_name="info_bundle",

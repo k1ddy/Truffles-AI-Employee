@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
@@ -26,18 +28,160 @@ def _maybe_append_booking_cta(
     allow_booking_flow: bool,
     has_followup: bool = False,
 ) -> str | None:
-    if not bot_response:
+    if not _should_append_booking_cta(
+        bot_response,
+        conversation_state=conversation_state,
+        allow_booking_flow=allow_booking_flow,
+        has_followup=has_followup,
+    ):
         return bot_response
     from . import _legacy as legacy
 
+    return f"{bot_response}\n\n{legacy.MSG_BOOKING_CTA}"
+
+
+def _collect_response_items(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _merge_response_composer_dicts(base: dict | None, override: dict | None) -> dict[str, Any]:
+    merged = dict(base) if isinstance(base, dict) else {}
+    if not isinstance(override, dict):
+        return merged
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_response_composer_dicts(merged.get(key), value)
+        else:
+            merged[key] = value
+    return merged
+
+
+@lru_cache(maxsize=16)
+def _load_response_composer_config(client_slug: str | None) -> dict[str, Any]:
+    from app.services.demo_salon_knowledge import load_yaml_truth
+
+    truth = load_yaml_truth(client_slug)
+    if not isinstance(truth, dict):
+        return {}
+    domain_pack = truth.get("domain_pack") if isinstance(truth.get("domain_pack"), dict) else {}
+    client_pack = truth.get("client_pack") if isinstance(truth.get("client_pack"), dict) else {}
+    domain_config = domain_pack.get("response_composer") if isinstance(domain_pack, dict) else None
+    client_config = client_pack.get("response_composer") if isinstance(client_pack, dict) else None
+    return _merge_response_composer_dicts(domain_config, client_config)
+
+
+def _resolve_response_composer_section(config: dict[str, Any], response_tag: str) -> dict[str, Any]:
+    defaults = config.get("defaults") if isinstance(config.get("defaults"), dict) else {}
+    variants = config.get("variants") if isinstance(config.get("variants"), dict) else {}
+    selected = variants.get(response_tag) if isinstance(variants, dict) else None
+    return _merge_response_composer_dicts(defaults, selected)
+
+
+def _build_response_variant_seed(
+    *,
+    conversation_id: str | None,
+    response_tag: str,
+) -> tuple[str, int]:
+    base = conversation_id or "conversation"
+    key = f"{base}:{response_tag}"
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    variant_id = digest[:8]
+    return variant_id, int(variant_id, 16)
+
+
+def _select_response_variant(items: list[str], seed: int, offset: int = 0) -> str | None:
+    if not items:
+        return None
+    if len(items) == 1:
+        return items[0]
+    index = (seed + offset) % len(items)
+    return items[index]
+
+
+def _should_append_booking_cta(
+    bot_response: str | None,
+    *,
+    conversation_state: str,
+    allow_booking_flow: bool,
+    has_followup: bool,
+) -> bool:
+    if not bot_response:
+        return False
+    from . import _legacy as legacy
+
     if conversation_state != legacy.ConversationState.BOT_ACTIVE.value:
-        return bot_response
+        return False
     if not allow_booking_flow or has_followup:
-        return bot_response
+        return False
     normalized = legacy._normalize_text(bot_response)
     if not normalized or "запис" in normalized:
-        return bot_response
-    return f"{bot_response}\n\n{legacy.MSG_BOOKING_CTA}"
+        return False
+    return True
+
+
+def _compose_fact_response(
+    bot_response: str | None,
+    *,
+    client_slug: str | None,
+    conversation_id: str | None,
+    response_tag: str,
+    conversation_state: str,
+    allow_booking_flow: bool,
+    has_followup: bool,
+    include_ack: bool = True,
+    include_next_step: bool = True,
+) -> tuple[str | None, dict[str, Any] | None]:
+    if not bot_response:
+        return bot_response, None
+    config = _load_response_composer_config(client_slug)
+    if not config:
+        return bot_response, None
+    response_tag = response_tag.strip() if isinstance(response_tag, str) else ""
+    if not response_tag:
+        response_tag = "response"
+    section = _resolve_response_composer_section(config, response_tag)
+    ack_items = _collect_response_items(section.get("ack"))
+    next_steps = _collect_response_items(section.get("next_steps"))
+    if not ack_items and not next_steps:
+        return bot_response, None
+
+    variant_id, seed = _build_response_variant_seed(
+        conversation_id=str(conversation_id) if conversation_id else None,
+        response_tag=response_tag,
+    )
+    parts: list[str] = []
+    ack_text = None
+    if include_ack and ack_items:
+        ack_text = _select_response_variant(ack_items, seed, offset=0)
+        if ack_text:
+            parts.append(ack_text)
+    parts.append(bot_response.strip())
+
+    next_step = None
+    if include_next_step and _should_append_booking_cta(
+        bot_response,
+        conversation_state=conversation_state,
+        allow_booking_flow=allow_booking_flow,
+        has_followup=has_followup,
+    ):
+        next_step = _select_response_variant(next_steps, seed, offset=7)
+        if not next_step:
+            from . import _legacy as legacy
+
+            next_step = legacy.MSG_BOOKING_CTA
+        if next_step:
+            parts.append(next_step)
+
+    composed = "\n\n".join([part for part in parts if part])
+    if not composed:
+        return bot_response, None
+    if composed == bot_response and not ack_text and not next_step:
+        return bot_response, None
+    return composed, {"response_variant_id": variant_id, "response_variant_tag": response_tag}
 
 
 def _apply_quiet_hours_notice(text: str, notice: str | None) -> str:
@@ -1612,6 +1756,7 @@ __all__ = [
     "ConsultFlowResult",
     "LlmPrimaryOutcome",
     "_apply_quiet_hours_notice",
+    "_compose_fact_response",
     "_ensure_rag_rewrite",
     "_finalize_bot_response",
     "_handle_ai_response_action",
