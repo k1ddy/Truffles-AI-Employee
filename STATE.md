@@ -2025,6 +2025,27 @@
 
 **Status:** DONE (migration applied; CI green).
 
+### 2026-01-21 — Console idempotency proof (take_case)
+
+**Что сделали:**
+- Обновили `truffles-api` на `main` (commit `6e2cb98f...`) через `/home/zhan/restart_api.sh` (prod host).
+- Добавили OIDC‑identity для admin (agent_id `aaaaaaaa-0000-0000-0000-000000000001`, `external_id=04990c21-1fbb-4b91-921b-b35cf9502cb8`).
+- Создали синтетический handover в БД (без вебхука).
+- Из‑за OIDC (prod настроен на `auth.truffles.kz`) проверку делали на временном контейнере `:8001` с `CONSOLE_OIDC_*` override на локальный Keycloak.
+- `POST /console/v1/cases/{id}/take` вызван дважды с одним idempotency‑key (значение опущено).
+- После проверки удалили синтетические записи (user/conversation/handover/idempotency row).
+
+**Evidence:**
+- Prod `/admin/version`: `{"version":"main","git_commit":"6e2cb98fa357f3becba424d6b8f8a17b47ff3440","build_time":"2026-01-21T09:20:14Z"}`
+- Temp `/admin/version` (`:8001`): `{"version":"main","git_commit":"6e2cb98fa357f3becba424d6b8f8a17b47ff3440","build_time":"2026-01-21T09:20:14Z"}`
+- Handover: `id=88704723-a8b5-4211-b732-fa2289068acb`, `conversation_id=ed32e365-f4d8-4862-bcf7-273b79133953`
+- HTTP: один и тот же idempotency‑key использован дважды → оба ответа `200` с одинаковым body (значение ключа опущено).
+- SQL: запрос по `console_idempotency_keys` с фильтром по ключу (значение опущено) → `scope=console.case.take`, `response_status=200`.
+- SQL: `select count(*) from audit_events where event_type='case_taken' and entity_id='88704723-a8b5-4211-b732-fa2289068acb';` → `1`
+- Cleanup: `select count(*) from users where remote_jid like 'console-idem-%@local';` → `0` (user/conv/handovers/idempotency удалены).
+
+**Status:** DONE (idempotency confirmed; no duplicate audit).
+
 ### 2026-01-21 — CI livecheck reset meta timeout (branch sender JIDs)
 
 **Симптом:**
