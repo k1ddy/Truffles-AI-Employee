@@ -35,3 +35,4 @@ Evidence to capture
 
 Notes
 - Sentinel should not be the only signal; confirm with SQL or admin health.
+- Keep a single sentinel instance to avoid duplicate alerts.
