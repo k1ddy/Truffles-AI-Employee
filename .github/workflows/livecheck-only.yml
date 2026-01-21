@@ -18,7 +18,7 @@ on:
       min_allowlist_jids:
         description: "Minimum allowlist JIDs required"
         type: string
-        default: "3"
+        default: "4"
 
 env:
   IMAGE_NAME: ghcr.io/k1ddy/truffles-ai-employee
@@ -42,10 +42,13 @@ jobs:
             suites: "ca01-core ca04-service ca07-ood ca10-outbox"
           - group: pool-b
             jid_index: 1
-            suites: "ca02-policy ca05-booking ca08-state"
+            suites: "ca02-policy ca08-state"
           - group: pool-c
             jid_index: 2
             suites: "ca03-info ca06-consult ca09-manager"
+          - group: pool-d
+            jid_index: 3
+            suites: "ca05-booking"
     env:
       BASE_URL: ${{ inputs.base_url }}
       EXPECTED_COMMIT: ${{ inputs.expected_commit }}
