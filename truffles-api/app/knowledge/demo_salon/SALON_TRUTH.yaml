@@ -1017,6 +1017,14 @@ domain_pack:
         - зарарсыздандыру
         - құрал өңдеу
         - қауіпсіздік
+  response_composer:
+    defaults:
+      ack:
+        - Сейчас подскажу.
+        - Сейчас отвечу.
+        - Конечно.
+      next_steps:
+        - Хотите записаться?
   guest_policy_lexicon:
     ru:
       - вдвоем

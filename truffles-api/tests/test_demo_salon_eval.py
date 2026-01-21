@@ -918,6 +918,20 @@ def test_truth_first_info_bundle():
         )
 
 
+def test_response_composer_variant_meta():
+    case_id = "CA03_RESPONSE_VARIANT"
+    _response, _conversation, saved_message = _run_webhook_conversation(
+        ["Сколько стоит маникюр?"],
+        case_id,
+        None,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    variant_id = meta.get("response_variant_id")
+    assert isinstance(variant_id, str) and variant_id, f"{case_id}: response_variant_id missing"
+    variant_tag = meta.get("response_variant_tag")
+    assert isinstance(variant_tag, str) and variant_tag, f"{case_id}: response_variant_tag missing"
+
+
 def test_service_matcher_core():
     cases = [
         {

@@ -1458,11 +1458,11 @@ from app.routers.webhook.policy import (
     _should_run_truth_gate,
 )
 from app.routers.webhook.response import (
+    _compose_fact_response,
     _ensure_rag_rewrite,
     _handle_ai_response_action,
     _handle_consult_flow,
     _handle_llm_primary,
-    _maybe_append_booking_cta,
     _maybe_apply_consult_return,
     _record_rag_meta,
 )
@@ -4988,8 +4988,12 @@ async def _handle_webhook_payload(
             bot_response = info_reply
             if followup:
                 bot_response = f"{bot_response}\n\n{followup}"
-            bot_response = _maybe_append_booking_cta(
+            composer_meta = None
+            bot_response, composer_meta = _compose_fact_response(
                 bot_response,
+                client_slug=payload.client_slug,
+                conversation_id=str(conversation.id),
+                response_tag="intent_queue",
                 conversation_state=conversation.state,
                 allow_booking_flow=routing["allow_booking_flow"],
                 has_followup=bool(followup),
@@ -5014,6 +5018,8 @@ async def _handle_webhook_payload(
             }
             if isinstance(info_meta, dict) and info_meta:
                 trace_payload.update(info_meta)
+            if composer_meta:
+                trace_payload.update(composer_meta)
             _record_decision_trace(conversation, trace_payload)
             _record_message_decision_meta(
                 saved_message,
@@ -5024,6 +5030,8 @@ async def _handle_webhook_payload(
             )
             if saved_message and isinstance(info_meta, dict) and info_meta:
                 _update_message_decision_metadata(saved_message, info_meta)
+            if saved_message and composer_meta:
+                _update_message_decision_metadata(saved_message, composer_meta)
             _maybe_store_class_carryover(
                 conversation=conversation,
                 class_name="info_bundle",
