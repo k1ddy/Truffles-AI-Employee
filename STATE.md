@@ -1974,7 +1974,7 @@
 
 **Что отсутствует / GAP (по ТЗ):**
 - 3‑колоночный layout + right‑panels (Progress/Artifacts/Context/Connectors), Knowledge/Integrations UI.
-- Idempotency‑Key для console‑мутаций (контракт + реализация).
+- Idempotency‑Key для console‑мутаций (контракт + реализация) — DONE в PR #293 (см. запись 2026‑01‑21 ниже).
 - Контракты интеграций и событий: `contracts/events/outbox.v1.jsonschema`, `contracts/integrations/*`.
 - Runbooks: `docs/runbooks/OUTBOX.md`, `docs/runbooks/SENTINEL.md`, `docs/runbooks/INCIDENTS.md`.
 - CI gates: Playwright / Schemathesis / k6.
@@ -1985,6 +1985,26 @@
 **Следующий шаг:** зафиксировать Task Package и выбрать порядок работ (контракты → UI layout → runbooks/gates → индексы).
 
 **Status:** PLAN/GAP (код‑инвентарь без runtime evidence).
+
+### 2026-01-21 — Console idempotency for mutations (PR #293)
+
+**Что сделали:**
+- Добавили таблицу idempotency keys + сервисы записи/повтора ответа для console‑мутаций.
+- Включили генерацию `Idempotency-Key` на фронте и прокидывание через proxy.
+- Обновили OpenAPI + registry ошибок.
+
+**CI:**
+- PR #293: https://github.com/k1ddy/Truffles-AI-Employee/pull/293
+- CI run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21202662199
+  - core‑eval PASS (4m54s), lint/unit/secret PASS; long/asr skipped.
+
+**DB migration (prod):**
+- Applied: `truffles-api/migrations/004_add_console_idempotency.sql`
+- Evidence:
+  - `SELECT to_regclass('public.console_idempotency_keys');` → `console_idempotency_keys`
+  - Columns: `id, client_id, agent_id, idempotency_key, scope, request_hash, response_status, response_body, created_at, updated_at`
+
+**Status:** DONE (migration applied; CI green).
 
 ### 2026-01-21 — CI livecheck reset meta timeout (branch sender JIDs)
 
