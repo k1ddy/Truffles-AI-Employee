@@ -1915,6 +1915,25 @@
 
 **Status:** DONE (prod running branch image; no live-check run).
 
+### 2026-01-21 — Outbox scale proof (2 workers)
+
+**Goal:** доказать влияние decoupled outbox workers на throughput/latency (performance + scalability).
+
+**Setup:**
+- `TEST_MODE=1`, allowlist count=3 (JIDs не выводим).
+- Webhook-fuzz state mode (direct `/webhook`), outbox обрабатывается воркерами (`--skip-outbox`).
+- Batch params: `--count 20 --seed 42 --min-wait 0.1 --max-wait 0.2 --noise none --skip-outbox` + `--instance-id` и `--webhook-secret` из БД.
+- Workers:
+  - Baseline: только `truffles-outbox`.
+  - Scale-out: добавлен `truffles-outbox-2` (same image/env/network), затем удалён.
+
+**Evidence (SQL):**
+- Batch1 prefix `FZ-20260121-050702-%` (30 сообщений): avg 48.78s, p50 49.13s, p90 53.48s, max 54.51s.
+- Batch2 prefix `FZ-20260121-051009-%` (30 сообщений, 2 workers): avg 7.11s, p50 7.21s, p90 9.71s, max 11.21s.
+- Query: `SELECT COUNT(*), AVG/percentile/max(updated_at-created_at) FROM outbox_messages WHERE status='SENT' AND inbound_message_id LIKE 'FZ-<prefix>-%';`
+
+**Conclusion:** p90 latency улучшилась ~5.5x при добавлении одного воркера → доказанная горизонтальная масштабируемость outbox.
+
 ### 2026-01-21 — OTel collector (Tempo) + worker tracing enabled
 
 **Что сделали (prod host / infra):**
