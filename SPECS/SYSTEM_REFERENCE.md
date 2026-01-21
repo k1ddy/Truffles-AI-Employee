@@ -813,6 +813,71 @@ decision graph (state/LAW/policy/booking/info/consult)
 chatflow_service → WhatsApp
 ```
 
+### Decision pipeline (code-accurate, webhook → response)
+**Источник правды (код):**
+- `truffles-api/app/routers/webhook/http.py` (HTTP вход, preflight)
+- `truffles-api/app/routers/webhook/decision.py` (оркестрация)
+- `truffles-api/app/routers/webhook/outbox.py` (enqueue + outbox worker helpers)
+- `truffles-api/app/contracts/decision.py` (Decision Graph stages)
+- `truffles-api/app/services/chatflow_service.py` (outbound send-text)
+- `truffles-api/app/workers/outbox.py` (outbox worker loop; legacy loop был в `app/main.py`)
+
+**Пошаговый поток (с эффектом каждого шага):**
+1) **HTTP ingress** (`handle_webhook` / `handle_webhook_direct`)  
+   - Вызывает `legacy._handle_webhook_payload(... enqueue_only=True)`.  
+   - Эффект: ACK-first режим всегда включен для входящего webhook.
+
+2) **Preflight** (`http._run_preflight`)  
+   - Проверки: клиент, секрет, remote_jid, пустой текст, sender=branch phone, instanceId/branch routing.  
+   - Эффект: ранний `WebhookResponse` при reject/drop + trace `stage=preflight` (если разговор можно разрешить).
+
+3) **Dedupe + persist user message** (`decision._handle_dedup_gate`, `save_message`)  
+   - Dedupe по `message_id`/`inbound_message_id`.  
+   - Эффект: нет дублей, user-message сохранен, `decision_meta.trace_id` записан.
+
+4) **ACK-first enqueue** (`outbox._handle_enqueue_only_accept`)  
+   - При PENDING/MANAGER_ACTIVE — fast-forward в Telegram (если настроено).  
+   - `enqueue_outbox_message` -> `outbox_messages` (PENDING).  
+   - Trace: `stage=outbox`, `decision=enqueue_only`.  
+   - Эффект: HTTP ответ сразу, тяжелая логика уходит в outbox.
+
+5) **Outbox worker** (`main._outbox_worker_loop`)  
+   - `claim_pending_outbox_batches` → `webhook._process_outbox_rows`.  
+   - Эффект: каждое outbox-сообщение вызывает `_handle_webhook_payload(skip_persist=True)`.
+
+6) **Skip-persist prep** (`outbox._prepare_skip_persist`)  
+   - Загружает conversation/user/saved_message, media policy.  
+   - Эффект: если данных нет → ранний return + trace `stage=skip_persist`.
+
+7) **Decision plan trace** (`build_context_contract`, `build_decision_plan`)  
+   - Trace: `stage=contract` (context) + `stage=decision_graph` для каждой стадии  
+     (`state/risk/expected/semantic/data/action/response/update`).  
+   - Эффект: фиксируем “план” как доказательство хода.
+
+8) **Основные gate-ы (порядок в коде)**  
+   - expected reply → branch selection → shield → session timeout  
+   - forward pending to Telegram → manager_active → reengage/mute  
+   - ASR confirmation → pending gate → media gate → debounce  
+   - handover confirmation → booking signal → hard_law gate  
+   - intent decomposition → opt_out mute → policy escalation  
+   - fast_intent/smalltalk → class router → domain flows (consult/info/booking)  
+   - LLM primary + truth gate fallback  
+   - Эффект: ранние `WebhookResponse` при каждом gate, с trace/meta.
+
+9) **Ответ и фиксация** (`_send_and_save`)  
+   - `_finalize_bot_response` (quiet hours), contracts (fact/action/response).  
+   - `save_message(role="assistant")` + `send_bot_response` (ChatFlow).  
+   - Эффект: запись ответа в БД и отправка наружу; trace/meta закрывают доказательство.
+
+10) **Outbox status** (`mark_outbox_status`)  
+    - `SENT`/`FAILED` + backoff retries.  
+    - Эффект: idempotency + auto-heal (P0 фитнес‑функция).
+
+**Как читать роль каждого шага “по строкам”:**
+- Для каждого `return WebhookResponse` → это ранний выход и смысл gate-а.  
+- Для каждого `_record_decision_trace` → это “смысл” стадии (что именно доказано).  
+- Для каждого `_record_message_decision_meta` → это контракт фактов на user-message.
+
 ### Эскалация
 ```
 Low confidence (RAG score < MID_CONFIDENCE_THRESHOLD, сейчас 0.5) ИЛИ intent=HUMAN_REQUEST/FRUSTRATION
