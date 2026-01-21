@@ -257,8 +257,8 @@ export function createApiClient(): AxiosInstance {
     client.interceptors.request.use((config) => {
         // Add idempotency key for mutations
         if (config.method && ["post", "put", "patch", "delete"].includes(config.method)) {
-            if (!config.headers["X-Idempotency-Key"]) {
-                config.headers["X-Idempotency-Key"] = crypto.randomUUID();
+            if (!config.headers["Idempotency-Key"]) {
+                config.headers["Idempotency-Key"] = crypto.randomUUID();
             }
         }
         return config;
@@ -326,7 +326,7 @@ export const messagesApi = {
         apiClient.post<components["schemas"]["SendMessageResponse"]>(
             `/conversations/${conversationId}/messages`,
             { content },
-            idempotencyKey ? { headers: { "X-Idempotency-Key": idempotencyKey } } : undefined
+            idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined
         ),
 };
 
