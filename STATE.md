@@ -2064,6 +2064,43 @@
 
 **Status:** DONE (runtime доступен).
 
+### 2026-01-21 — Outbox FAILED triage (no retry)
+
+**Что проверили:**
+- `outbox.failed=37` (из console health) → разбор по `last_error` и датам.
+- Последние FAILED записи старше 24h, поэтому автоповтор не запускали.
+
+**Evidence (SQL):**
+- `SELECT last_error, COUNT(*), MIN(updated_at) AS oldest, MAX(updated_at) AS newest FROM outbox_messages WHERE status='FAILED' GROUP BY last_error ORDER BY count DESC;`
+  - `ChatFlow delivery failed` → 20 (newest `2026-01-20 10:20:13Z`)
+  - `manual_cleanup:stale_processing` → 5 (2025-12-26)
+  - `_legacy._apply_consult_return` missing → 4 (2026-01-17)
+  - OpenAI 400 unsupported temperature → 4 (2025-12-28..29)
+  - `send_bot_response() got unexpected keyword argument 'idempotency_key'` → 2 (2025-12-23)
+  - Pydantic WebhookResponse validation → 1 (2025-12-29)
+  - `answer_result` unbound → 1 (2026-01-16)
+- `SELECT COUNT(*) FROM outbox_messages WHERE status='FAILED' AND last_error='ChatFlow delivery failed' AND updated_at > NOW() - INTERVAL '24 hours';` → `0`
+
+**Status:** DONE (triage complete, no retry due to age).
+
+### 2026-01-21 — Console E2E login check (BLOCKED by audience)
+
+**Что проверили:**
+- Получили access token от `auth.truffles.kz` (Keycloak direct grant).
+- `GET https://api.truffles.kz/console/v1/me` → `401 TOKEN_INVALID`.
+- В логах API: `Token is missing the "aud" claim`.
+
+**Evidence:**
+- HTTP: `{"error":{"code":"TOKEN_INVALID","message":"Token validation failed","details":null,"trace_id":"9cd3e213178e19c309e78acf99c58950"}}`
+- `docker logs truffles-api --tail 50 | rg -i "token|audience"`:
+  - `DEBUG: JWT Validation Error: Token is missing the "aud" claim`
+
+**Fix options:**
+1) Add `aud` claim to Keycloak access tokens (audience mapper for client `console-web`).
+2) Remove/empty `CONSOLE_OIDC_AUDIENCE` in API env (less strict).
+
+**Status:** BLOCKED (audience mismatch; choose fix).
+
 ### 2026-01-21 — Console OIDC audience mapper (login unblocked)
 
 **Что сделали:**
