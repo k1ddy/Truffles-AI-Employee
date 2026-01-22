@@ -113,6 +113,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Case"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -181,6 +183,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessageListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /conversations/{conversation_id}/messages:
     post:
@@ -252,6 +258,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MetricsDailyResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   # ──────────────────────────────────────────────────────────────────
   # SETTINGS
@@ -268,6 +278,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SettingsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
     patch:
       operationId: updateSettings
       tags: [settings]
@@ -317,6 +331,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
 # ════════════════════════════════════════════════════════════════════
 # COMPONENTS
@@ -442,8 +460,10 @@ components:
           type: string
           description: Human-readable message
         details:
-          type: object
-          additionalProperties: true
+          anyOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
         trace_id:
           type: string
           description: Correlation ID for debugging
