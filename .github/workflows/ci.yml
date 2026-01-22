@@ -214,6 +214,23 @@ jobs:
           fi
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
+      - name: Preflight Keycloak discovery
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          issuer="${KEYCLOAK_ISSUER%/}"
+          url="${issuer}/.well-known/openid-configuration"
+          echo "Checking Keycloak discovery endpoint..."
+          for i in 1 2 3 4 5; do
+            if curl -fsS --connect-timeout 5 --max-time 10 "$url" >/dev/null; then
+              echo "Keycloak discovery OK"
+              exit 0
+            fi
+            echo "Keycloak discovery retry $i/5 failed; sleeping 3s"
+            sleep 3
+          done
+          echo "Keycloak discovery failed after retries"
+          exit 1
+
       - name: Set up Node.js
         if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-node@v4
@@ -231,6 +248,71 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Playwright smoke
+        if: steps.guard.outputs.skip != 'true'
+        run: npm run test:e2e:smoke
+
+  console-e2e-live:
+    needs: [changes]
+    if: needs.changes.outputs.console_web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: console-web
+    env:
+      PLAYWRIGHT_BASE_URL: https://console.truffles.kz
+      PLAYWRIGHT_WEB_SERVER: "0"
+      KEYCLOAK_ISSUER: ${{ secrets.CONSOLE_KEYCLOAK_ISSUER || 'https://auth.truffles.kz/realms/truffles' }}
+      E2E_USERNAME: ${{ secrets.CONSOLE_E2E_USERNAME }}
+      E2E_PASSWORD: ${{ secrets.CONSOLE_E2E_PASSWORD }}
+      E2E_USE_STORAGE_STATE: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard live e2e secrets
+        id: guard
+        run: |
+          if [ -z "${E2E_USERNAME}" ] || [ -z "${E2E_PASSWORD}" ]; then
+            echo "Missing CONSOLE_E2E_USERNAME/CONSOLE_E2E_PASSWORD; skipping Playwright."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Preflight Keycloak discovery
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          issuer="${KEYCLOAK_ISSUER%/}"
+          url="${issuer}/.well-known/openid-configuration"
+          echo "Checking Keycloak discovery endpoint..."
+          for i in 1 2 3 4 5; do
+            if curl -fsS --connect-timeout 5 --max-time 10 "$url" >/dev/null; then
+              echo "Keycloak discovery OK"
+              exit 0
+            fi
+            echo "Keycloak discovery retry $i/5 failed; sleeping 3s"
+            sleep 3
+          done
+          echo "Keycloak discovery failed after retries"
+          exit 1
+
+      - name: Set up Node.js
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: console-web/package-lock.json
+
+      - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
+        run: npm ci
+
+      - name: Install Playwright browsers
+        if: steps.guard.outputs.skip != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright smoke (live)
         if: steps.guard.outputs.skip != 'true'
         run: npm run test:e2e:smoke
 
