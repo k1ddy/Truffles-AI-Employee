@@ -1,6 +1,7 @@
 import { chromium, type FullConfig } from "@playwright/test";
 
 const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
+const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
 
 export default async function globalSetup(config: FullConfig) {
     if (process.env.E2E_USE_STORAGE_STATE !== "1") {
@@ -18,9 +19,10 @@ export default async function globalSetup(config: FullConfig) {
     const page = await browser.newPage();
 
     await page.goto(baseURL, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector('[data-testid="login-button"]', { timeout: 10000 });
+    await page.waitForSelector('[data-testid="login-button"]', { timeout: 15000 });
     await page.click('[data-testid="login-button"]');
-    await page.waitForSelector("#username", { timeout: 10000 });
+    await page.waitForURL(keycloakHostPattern, { timeout: 20000 });
+    await page.waitForSelector("#username", { timeout: 20000 });
     await page.fill("#username", username);
     await page.fill("#password", password);
     await page.click("#kc-login");
