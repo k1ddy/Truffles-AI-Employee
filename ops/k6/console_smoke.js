@@ -1,6 +1,11 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 
+// k6 smoke for Console API (read-only).
+// Purpose: quick perf regression check (p95 + error rate) on hot endpoints.
+// Safety: no mutations; keep low VUs/iterations; prefer staging when possible.
+// Env: CONSOLE_API_URL, CONSOLE_API_TOKEN (bearer).
+
 const baseUrl = __ENV.CONSOLE_API_URL || 'https://api.truffles.kz/console/v1';
 const token = __ENV.CONSOLE_API_TOKEN;
 
