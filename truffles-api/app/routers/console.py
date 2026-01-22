@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import date as dt_date
+from datetime import datetime, time, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -95,6 +96,34 @@ def _calculate_sla_status(created_at: datetime) -> str:
     return "ok"
 
 
+def _reject_unknown_query_params(request: Request, allowed: set[str]) -> None:
+    unknown = sorted(set(request.query_params.keys()) - allowed)
+    if unknown:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"Unknown query parameter(s): {', '.join(unknown)}",
+        )
+
+
+def _validate_limit(limit: int) -> None:
+    if limit < 1 or limit > 100:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "limit must be between 1 and 100")
+
+
+def _parse_date_param(name: str, value: Optional[str]) -> Optional[dt_date]:
+    if value is None:
+        return None
+    try:
+        return dt_date.fromisoformat(value)
+    except ValueError as exc:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"Invalid {name} (expected YYYY-MM-DD)",
+        ) from exc
+
+
 @router.get(
     "/me",
     response_model=ConsoleMeResponse,
@@ -124,6 +153,19 @@ async def list_cases(
     db: Session = Depends(get_db),
 ) -> ConsoleCaseListResponse:
     context = get_console_context(request, db)
+    _reject_unknown_query_params(
+        request,
+        {
+            "status",
+            "branch_id",
+            "assigned_to_me",
+            "date_from",
+            "date_to",
+            "cursor",
+            "limit",
+        },
+    )
+    _validate_limit(limit)
     
     # Base query
     query = (
@@ -158,22 +200,20 @@ async def list_cases(
     
     # Status filter
     if status:
+        if status not in {"pending", "active", "resolved"}:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
         query = query.filter(Handover.status == status)
     
     # Date range filter
     if date_from:
-        try:
-            from_date = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
-            query = query.filter(Handover.created_at >= from_date)
-        except ValueError:
-            pass
+        from_date = _parse_date_param("date_from", date_from)
+        start_of_day = datetime.combine(from_date, time.min).replace(tzinfo=timezone.utc)
+        query = query.filter(Handover.created_at >= start_of_day)
     
     if date_to:
-        try:
-            to_date = datetime.fromisoformat(date_to).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
-            query = query.filter(Handover.created_at <= to_date)
-        except ValueError:
-            pass
+        to_date = _parse_date_param("date_to", date_to)
+        end_of_day = datetime.combine(to_date, time.max).replace(tzinfo=timezone.utc)
+        query = query.filter(Handover.created_at <= end_of_day)
     
     # Assigned to me
     if assigned_to_me:
@@ -412,6 +452,8 @@ async def get_case_messages(
     db: Session = Depends(get_db)
 ) -> ConsoleMessageListResponse:
     context = get_console_context(request, db)
+    _reject_unknown_query_params(request, {"cursor", "limit"})
+    _validate_limit(limit)
     
     case = db.query(Handover).filter(Handover.id == case_id, Handover.client_id == context.client.id).first()
     if not case:
@@ -727,9 +769,14 @@ async def list_audit_events(
     
     context = get_console_context(request, db)
     
+    _reject_unknown_query_params(request, {"entity_type", "entity_id", "cursor", "limit"})
+    _validate_limit(limit)
+
     query = db.query(AuditEvent).filter(AuditEvent.client_id == context.client.id)
     
     if entity_type:
+        if entity_type not in {"case", "conversation", "settings", "agent"}:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid entity_type")
         query = query.filter(AuditEvent.entity_type == entity_type)
     
     if entity_id:
@@ -737,7 +784,7 @@ async def list_audit_events(
             eid = UUID(entity_id)
             query = query.filter(AuditEvent.entity_id == eid)
         except ValueError:
-            pass
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid entity_id")
     
     query = query.order_by(AuditEvent.created_at.desc())
     
@@ -854,12 +901,11 @@ async def get_metrics_daily(
     
     context = get_console_context(request, db)
     
+    _reject_unknown_query_params(request, {"date"})
+
     # Parse date or use today
     if date:
-        try:
-            target_date = datetime.fromisoformat(date).date()
-        except ValueError:
-            target_date = datetime.now(timezone.utc).date()
+        target_date = _parse_date_param("date", date)
     else:
         target_date = datetime.now(timezone.utc).date()
     
