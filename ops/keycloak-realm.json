@@ -1,9 +1,25 @@
 {
     "realm": "truffles",
     "enabled": true,
+    "loginTheme": "truffles",
     "users": [
         {
+            "id": "4c00053e-51da-45ec-88fe-752f138818aa",
             "username": "admin",
+            "enabled": true,
+            "credentials": [
+                {
+                    "type": "password",
+                    "value": "admin"
+                }
+            ],
+            "realmRoles": [
+                "admin"
+            ]
+        },
+        {
+            "id": "642dc576-e4c2-44bb-b017-f72701aabac8",
+            "username": "ci-console",
             "enabled": true,
             "credentials": [
                 {

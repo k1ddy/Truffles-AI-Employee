@@ -8,15 +8,23 @@ export default function LoginButton() {
     if (session) {
         return (
             <div className="flex gap-4 items-center">
-                <p className="text-sm text-gray-600">Вы вошли</p>
-                <button onClick={() => signOut()} className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600">
+                <p className="text-sm text-muted-foreground">Вы вошли</p>
+                <button
+                    onClick={() => signOut()}
+                    className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
+                    data-testid="logout-button"
+                >
                     Выйти
                 </button>
             </div>
         )
     }
     return (
-        <button onClick={() => signIn("keycloak")} className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+        <button
+            onClick={() => signIn("keycloak")}
+            className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90"
+            data-testid="login-button"
+        >
             Войти через SSO
         </button>
     )

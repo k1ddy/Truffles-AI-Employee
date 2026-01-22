@@ -28,6 +28,7 @@ services:
       - "8080:8080"
     volumes:
       - ./ops/keycloak-realm.json:/opt/keycloak/data/import/realm.json
+      - ./ops/keycloak-theme/truffles:/opt/keycloak/themes/truffles
     networks:
       - truffles-console-net
       - proxy-net

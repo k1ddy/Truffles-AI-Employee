@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.5.27:8001/console/v1';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+
+function missingApiBaseResponse() {
+    return NextResponse.json(
+        { error: { code: 'CONFIG_ERROR', message: 'NEXT_PUBLIC_API_URL is not set' } },
+        { status: 500 }
+    );
+}
 
 /**
  * Proxy API route to forward requests to the backend API.
@@ -22,6 +29,10 @@ export async function GET(
             { error: { code: 'AUTH_REQUIRED', message: 'Not authenticated' } },
             { status: 401 }
         );
+    }
+
+    if (!API_BASE_URL) {
+        return missingApiBaseResponse();
     }
 
     const apiPath = path.join('/');
@@ -61,6 +72,10 @@ export async function POST(
             { error: { code: 'AUTH_REQUIRED', message: 'Not authenticated' } },
             { status: 401 }
         );
+    }
+
+    if (!API_BASE_URL) {
+        return missingApiBaseResponse();
     }
 
     const apiPath = path.join('/');

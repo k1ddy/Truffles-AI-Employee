@@ -54,7 +54,7 @@ async function fetchBookings(date?: string): Promise<{ items: Booking[] }> {
     return response.data;
 }
 
-async function createBooking(data: any): Promise<any> {
+async function createBooking(data: Record<string, unknown>): Promise<Record<string, unknown>> {
     const response = await api.post("/calendar/bookings", data);
     return response.data;
 }
@@ -78,7 +78,7 @@ export default function CalendarPage() {
     const [showForm, setShowForm] = useState(false);
 
     // Queries
-    const { data: specialistsData, isLoading: specialistsLoading, isError: specialistsError, error: specialistsErrorData } = useQuery({
+    const { data: specialistsData, isError: specialistsError, error: specialistsErrorData } = useQuery({
         queryKey: ["specialists"],
         queryFn: fetchSpecialists,
         enabled: !!session,
@@ -99,7 +99,7 @@ export default function CalendarPage() {
     const currentSpecialist = specialists.find(s => s.id === selectedSpecialist);
     const duration = selectedService?.duration_min || 60;
 
-    const { data: slotsData, isLoading: slotsLoading, refetch: refetchSlots } = useQuery({
+    const { data: slotsData, isLoading: slotsLoading } = useQuery({
         queryKey: ["slots", selectedSpecialist, selectedDate, duration],
         queryFn: () => fetchSlots(selectedSpecialist, selectedDate, duration),
         enabled: !!session && !!selectedSpecialist && !!selectedDate,
@@ -124,8 +124,8 @@ export default function CalendarPage() {
             queryClient.invalidateQueries({ queryKey: ["bookings"] });
             resetForm();
         },
-        onError: (error: any) => {
-            const code = error?.response?.data?.error?.code;
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
             if (code === "BOOKING_CONFLICT") {
                 toast.error("Это время уже занято. Выберите другой слот.");
             } else {
@@ -168,7 +168,7 @@ export default function CalendarPage() {
 
     if (!session) {
         return (
-            <div className="p-8 text-center text-gray-500">
+            <div className="p-8 text-center text-muted-foreground">
                 Войдите в систему для просмотра календаря.
             </div>
         );
@@ -179,7 +179,7 @@ export default function CalendarPage() {
             {/* Header */}
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-2xl font-bold">Записи</h1>
-                <Link href="/" className="text-blue-600 hover:underline">
+                <Link href="/" className="text-primary hover:text-primary/80">
                     ← Назад к заявкам
                 </Link>
             </div>
@@ -189,7 +189,7 @@ export default function CalendarPage() {
                 <div className="lg:col-span-2 space-y-6">
                     {/* Debug/Error info */}
                     {specialistsError && (
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
+                        <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 text-destructive">
                             <h3 className="font-semibold mb-2">Ошибка загрузки мастеров</h3>
                             <pre className="text-xs overflow-auto">
                                 {JSON.stringify(specialistsErrorData, null, 2)}
@@ -198,13 +198,13 @@ export default function CalendarPage() {
                     )}
 
                     {/* Filters */}
-                    <div className="bg-white border rounded-lg p-4 space-y-4">
+                    <div className="bg-card border border-border/60 rounded-lg p-4 space-y-4">
                         <h2 className="font-semibold text-lg">Выберите мастера и дату</h2>
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             {/* Specialist */}
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                <label className="block text-sm font-medium text-muted-foreground mb-1">
                                     Мастер
                                 </label>
                                 <select
@@ -214,7 +214,7 @@ export default function CalendarPage() {
                                         setSelectedSlot(null);
                                         setSelectedService(null);
                                     }}
-                                    className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
                                 >
                                     <option value="">Выберите мастера</option>
                                     {specialists.map((s) => (
@@ -228,7 +228,7 @@ export default function CalendarPage() {
                             {/* Service */}
                             {currentSpecialist && currentSpecialist.services.length > 0 && (
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    <label className="block text-sm font-medium text-muted-foreground mb-1">
                                         Услуга
                                     </label>
                                     <select
@@ -238,7 +238,7 @@ export default function CalendarPage() {
                                             setSelectedService(service || null);
                                             setSelectedSlot(null);
                                         }}
-                                        className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
                                     >
                                         <option value="">Любая услуга</option>
                                         {currentSpecialist.services.map((s, i) => (
@@ -252,7 +252,7 @@ export default function CalendarPage() {
 
                             {/* Date */}
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                <label className="block text-sm font-medium text-muted-foreground mb-1">
                                     Дата
                                 </label>
                                 <input
@@ -263,7 +263,7 @@ export default function CalendarPage() {
                                         setSelectedSlot(null);
                                     }}
                                     min={formatDate(new Date())}
-                                    className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
                                 />
                             </div>
                         </div>
@@ -271,7 +271,7 @@ export default function CalendarPage() {
 
                     {/* Slots Grid */}
                     {selectedSpecialist && (
-                        <div className="bg-white border rounded-lg p-4">
+                        <div className="bg-card border border-border/60 rounded-lg p-4">
                             <h2 className="font-semibold text-lg mb-4">
                                 Доступные слоты на {new Date(selectedDate).toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}
                             </h2>
@@ -279,11 +279,11 @@ export default function CalendarPage() {
                             {slotsLoading ? (
                                 <div className="animate-pulse grid grid-cols-4 md:grid-cols-6 gap-2">
                                     {[...Array(12)].map((_, i) => (
-                                        <div key={i} className="h-12 bg-gray-200 rounded"></div>
+                                        <div key={i} className="h-12 bg-muted/70 rounded"></div>
                                     ))}
                                 </div>
                             ) : slots.length === 0 ? (
-                                <p className="text-gray-500 text-center py-8">
+                                <p className="text-muted-foreground text-center py-8">
                                     Нет доступных слотов на выбранную дату. Возможно, это выходной день.
                                 </p>
                             ) : (
@@ -297,9 +297,9 @@ export default function CalendarPage() {
                                                 py-3 px-2 rounded-lg text-sm font-medium transition-colors
                                                 ${slot.available
                                                     ? selectedSlot?.start === slot.start
-                                                        ? "bg-blue-600 text-white"
+                                                        ? "bg-primary text-primary-foreground"
                                                         : "bg-green-50 text-green-800 hover:bg-green-100 border border-green-200"
-                                                    : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                                                    : "bg-muted text-muted-foreground cursor-not-allowed"
                                                 }
                                             `}
                                         >
@@ -309,17 +309,17 @@ export default function CalendarPage() {
                                 </div>
                             )}
 
-                            <div className="mt-4 flex gap-4 text-xs text-gray-500">
+                            <div className="mt-4 flex gap-4 text-xs text-muted-foreground">
                                 <span className="flex items-center gap-1">
                                     <span className="w-3 h-3 bg-green-100 border border-green-200 rounded"></span>
                                     Свободно
                                 </span>
                                 <span className="flex items-center gap-1">
-                                    <span className="w-3 h-3 bg-gray-100 rounded"></span>
+                                    <span className="w-3 h-3 bg-muted rounded"></span>
                                     Занято
                                 </span>
                                 <span className="flex items-center gap-1">
-                                    <span className="w-3 h-3 bg-blue-600 rounded"></span>
+                                    <span className="w-3 h-3 bg-primary rounded"></span>
                                     Выбрано
                                 </span>
                             </div>
@@ -328,11 +328,11 @@ export default function CalendarPage() {
 
                     {/* Booking Form */}
                     {showForm && selectedSlot && (
-                        <div className="bg-white border rounded-lg p-4">
+                        <div className="bg-card border border-border/60 rounded-lg p-4">
                             <h2 className="font-semibold text-lg mb-4">Данные клиента</h2>
 
                             <form onSubmit={handleSubmit} className="space-y-4">
-                                <div className="bg-blue-50 p-3 rounded-lg text-sm">
+                                <div className="bg-muted p-3 rounded-lg text-sm">
                                     <strong>Мастер:</strong> {currentSpecialist?.name}<br />
                                     <strong>Время:</strong> {selectedSlot.start_time} - {selectedSlot.end_time}<br />
                                     {selectedService && (
@@ -344,7 +344,7 @@ export default function CalendarPage() {
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        <label className="block text-sm font-medium text-muted-foreground mb-1">
                                             Имя клиента
                                         </label>
                                         <input
@@ -352,11 +352,11 @@ export default function CalendarPage() {
                                             value={customerName}
                                             onChange={(e) => setCustomerName(e.target.value)}
                                             placeholder="Иван Иванов"
-                                            className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        <label className="block text-sm font-medium text-muted-foreground mb-1">
                                             Телефон
                                         </label>
                                         <input
@@ -364,13 +364,13 @@ export default function CalendarPage() {
                                             value={customerPhone}
                                             onChange={(e) => setCustomerPhone(e.target.value)}
                                             placeholder="+7 777 123 4567"
-                                            className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
                                         />
                                     </div>
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    <label className="block text-sm font-medium text-muted-foreground mb-1">
                                         Примечания
                                     </label>
                                     <textarea
@@ -378,7 +378,7 @@ export default function CalendarPage() {
                                         onChange={(e) => setNotes(e.target.value)}
                                         placeholder="Дополнительная информация..."
                                         rows={2}
-                                        className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
                                     />
                                 </div>
 
@@ -386,14 +386,14 @@ export default function CalendarPage() {
                                     <button
                                         type="submit"
                                         disabled={createMutation.isPending}
-                                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                        className="px-6 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
                                     >
                                         {createMutation.isPending ? "Создаём..." : "Записать клиента"}
                                     </button>
                                     <button
                                         type="button"
                                         onClick={resetForm}
-                                        className="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+                                        className="px-6 py-2 bg-muted text-foreground/80 rounded-lg hover:bg-muted/80"
                                     >
                                         Отмена
                                     </button>
@@ -405,7 +405,7 @@ export default function CalendarPage() {
 
                 {/* Right: Today's Bookings */}
                 <div className="space-y-6">
-                    <div className="bg-white border rounded-lg p-4">
+                    <div className="bg-card border border-border/60 rounded-lg p-4">
                         <h2 className="font-semibold text-lg mb-4">
                             Записи на {new Date(selectedDate).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
                         </h2>
@@ -413,11 +413,11 @@ export default function CalendarPage() {
                         {bookingsLoading ? (
                             <div className="animate-pulse space-y-3">
                                 {[...Array(3)].map((_, i) => (
-                                    <div key={i} className="h-16 bg-gray-200 rounded"></div>
+                                    <div key={i} className="h-16 bg-muted/70 rounded"></div>
                                 ))}
                             </div>
                         ) : bookings.length === 0 ? (
-                            <p className="text-gray-500 text-center py-4">
+                            <p className="text-muted-foreground text-center py-4">
                                 Нет записей на эту дату
                             </p>
                         ) : (
@@ -425,7 +425,7 @@ export default function CalendarPage() {
                                 {bookings.map((booking) => (
                                     <div
                                         key={booking.id}
-                                        className="p-3 border rounded-lg hover:bg-gray-50"
+                                        className="p-3 border border-border/60 rounded-lg hover:bg-muted/60"
                                     >
                                         <div className="flex justify-between items-start mb-1">
                                             <span className="font-medium text-sm">
@@ -437,19 +437,19 @@ export default function CalendarPage() {
                                                 {getBookingStatusLabel(booking.status)}
                                             </span>
                                         </div>
-                                        <div className="text-sm text-gray-600">
+                                        <div className="text-sm text-muted-foreground">
                                             {booking.specialist_name}
                                         </div>
                                         {booking.customer_name && (
                                             <div className="text-sm">
                                                 {booking.customer_name}
                                                 {booking.customer_phone && (
-                                                    <span className="text-gray-500"> • {booking.customer_phone}</span>
+                                                    <span className="text-muted-foreground"> • {booking.customer_phone}</span>
                                                 )}
                                             </div>
                                         )}
                                         {booking.service_type && (
-                                            <div className="text-xs text-gray-500 mt-1">
+                                            <div className="text-xs text-muted-foreground mt-1">
                                                 {booking.service_type}
                                             </div>
                                         )}
