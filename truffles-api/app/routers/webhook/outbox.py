@@ -11,14 +11,20 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger, record_outbox_latency
-from app.models import Conversation, User
+from app.models import Conversation, OutboxMessage, User
 from app.routers.webhook.media import (
     _build_media_caption,
     _send_telegram_media,
     _store_media_locally,
     _update_message_media_metadata,
 )
-from app.routers.webhook.trace import _merge_message_timing, _record_decision_trace
+from app.routers.webhook.trace import (
+    _merge_message_timing,
+    _record_decision_trace,
+    _record_message_decision_meta,
+    _update_message_decision_metadata,
+)
+from app.schemas.outbox_payload import validate_outbox_payload
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.escalation_service import get_telegram_credentials
 from app.services.outbox_service import (
@@ -75,6 +81,15 @@ def _split_outbox_batches(batch_sorted: list[dict], window_seconds: float) -> li
     if current:
         groups.append(current)
     return groups
+
+
+def _merge_nested_dict(base: dict, updates: dict) -> dict:
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            base[key] = {**base[key], **value}
+        else:
+            base[key] = value
+    return base
 
 
 async def _prepare_skip_persist(
@@ -274,6 +289,38 @@ async def _handle_enqueue_only_accept(
         message_id, remote_jid, metadata.timestamp if metadata else None, message_text
     )
     payload_json = payload.model_dump(exclude_none=True)
+    validated_payload, payload_error = validate_outbox_payload(
+        payload_json,
+        expected_client_slug=client.name,
+    )
+    if payload_error:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "outbox_payload_guard",
+                "decision": "reject",
+                "reason": payload_error,
+                "state": conversation.state,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="error",
+            intent=None,
+            source="outbox_payload_guard",
+            fast_intent=False,
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "action_error": "outbox_payload_invalid",
+                    "outbox_payload_error": payload_error,
+                },
+            )
+        db.commit()
+        return WebhookResponse(success=False, message="Invalid outbox payload")
+    payload_json = validated_payload.model_dump(exclude_none=True)
     enqueued = enqueue_outbox_message(
         db,
         client_id=client.id,
@@ -367,21 +414,14 @@ async def _process_outbox_rows(
                     "outbox_id": outbox_id_str,
                     "conversation_id": str(conversation_id) if conversation_id else None,
                     "client_slug": payload_json.get("client_slug"),
+                    "inbound_message_id": inbound_message_id,
                     "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
                     "outbox_picked_at": picked_at.isoformat(),
                 }
             },
         )
 
-    def _persist_outbox_timing(
-        *,
-        outbox_id: str,
-        done_at: datetime,
-        wait_ms: float | None,
-        process_ms: float | None,
-        total_ms: float | None,
-        error: str | None,
-    ) -> None:
+    def _resolve_outbox_message(outbox_id: str):
         info = pick_info.get(outbox_id, {})
         inbound_message_id = info.get("inbound_message_id")
         client_id = info.get("client_id")
@@ -395,6 +435,117 @@ async def _process_outbox_rows(
                 info.get("created_at"),
                 message_text=info.get("message_text"),
             )
+        return message
+
+    def _merge_outbox_meta(outbox_id: str, meta_update: dict[str, object]) -> None:
+        try:
+            outbox_uuid = UUID(outbox_id)
+        except (TypeError, ValueError):
+            return
+        outbox_row = db.query(OutboxMessage).filter(OutboxMessage.id == outbox_uuid).first()
+        if not outbox_row:
+            return
+        existing = dict(outbox_row.meta or {})
+        outbox_row.meta = _merge_nested_dict(existing, meta_update)
+
+    def _record_outbox_payload_error(
+        *,
+        outbox_id: str,
+        reason: str,
+        stage: str = "outbox_payload_guard",
+    ) -> None:
+        info = pick_info.get(outbox_id, {})
+        conversation = None
+        if info.get("conversation_id"):
+            conversation = (
+                db.query(Conversation)
+                .filter(Conversation.id == info.get("conversation_id"))
+                .first()
+            )
+        if conversation:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": stage,
+                    "decision": "reject",
+                    "reason": reason,
+                    "state": conversation.state,
+                },
+            )
+        message = _resolve_outbox_message(outbox_id)
+        if message:
+            _record_message_decision_meta(
+                message,
+                action="error",
+                intent=None,
+                source=stage,
+                fast_intent=False,
+            )
+            _update_message_decision_metadata(
+                message,
+                {
+                    "action_error": "outbox_payload_invalid",
+                    "outbox_payload_error": reason,
+                },
+            )
+        _merge_outbox_meta(
+            outbox_id,
+            {"contract_error": reason},
+        )
+
+    def _record_outbox_action_error(*, outbox_id: str, error: str) -> None:
+        info = pick_info.get(outbox_id, {})
+        conversation = None
+        if info.get("conversation_id"):
+            conversation = (
+                db.query(Conversation)
+                .filter(Conversation.id == info.get("conversation_id"))
+                .first()
+            )
+        message = _resolve_outbox_message(outbox_id)
+        if message and isinstance(message.message_metadata, dict):
+            decision_meta = message.message_metadata.get("decision_meta")
+            if isinstance(decision_meta, dict) and decision_meta.get("action"):
+                return
+        if conversation:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "action_gate",
+                    "decision": "error",
+                    "reason": "pipeline_exception",
+                    "error": error,
+                    "state": conversation.state,
+                },
+            )
+        if message:
+            _record_message_decision_meta(
+                message,
+                action="error",
+                intent=None,
+                source="action_gate",
+                fast_intent=False,
+            )
+            _update_message_decision_metadata(
+                message,
+                {
+                    "action_error": "pipeline_exception",
+                    "action_error_detail": error,
+                },
+            )
+
+    def _persist_outbox_timing(
+        *,
+        outbox_id: str,
+        done_at: datetime,
+        wait_ms: float | None,
+        process_ms: float | None,
+        total_ms: float | None,
+        error: str | None,
+    ) -> None:
+        info = pick_info.get(outbox_id, {})
+        inbound_message_id = info.get("inbound_message_id")
+        message = _resolve_outbox_message(outbox_id)
         if not message:
             logger.warning(
                 "Outbox timing message not found",
@@ -426,6 +577,21 @@ async def _process_outbox_rows(
             payload["outbox"]["error"] = error
         _merge_message_timing(message, payload)
 
+        decision_meta = {}
+        if isinstance(message.message_metadata, dict):
+            decision_meta = message.message_metadata.get("decision_meta") or {}
+        trace_id = None
+        if isinstance(decision_meta, dict):
+            trace_id = decision_meta.get("trace_id")
+        outbox_meta_update = {
+            "timing": payload["outbox"],
+            "correlation": {
+                "inbound_message_id": str(inbound_message_id) if inbound_message_id else None,
+                "trace_id": trace_id,
+            },
+        }
+        _merge_outbox_meta(outbox_id, outbox_meta_update)
+
     def _log_outbox_done(
         outbox_id: str,
         *,
@@ -436,6 +602,12 @@ async def _process_outbox_rows(
         done_at = datetime.now(timezone.utc)
         created_at = info.get("created_at")
         picked_at_info = info.get("picked_at")
+        trace_id = None
+        message = _resolve_outbox_message(outbox_id)
+        if message and isinstance(message.message_metadata, dict):
+            decision_meta = message.message_metadata.get("decision_meta")
+            if isinstance(decision_meta, dict):
+                trace_id = decision_meta.get("trace_id")
         wait_ms = None
         process_ms = None
         if isinstance(created_at, datetime) and isinstance(picked_at_info, datetime):
@@ -446,8 +618,10 @@ async def _process_outbox_rows(
             record_outbox_latency(info.get("client_slug"), wait_ms)
         context = {
             "outbox_id": outbox_id,
+            "inbound_message_id": info.get("inbound_message_id"),
             "conversation_id": str(info.get("conversation_id")) if info.get("conversation_id") else None,
             "client_slug": info.get("client_slug"),
+            "trace_id": trace_id,
             "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
             "outbox_picked_at": picked_at_info.isoformat()
             if isinstance(picked_at_info, datetime)
@@ -482,18 +656,21 @@ async def _process_outbox_rows(
         if not outbox_id:
             return
         payload_json = row.get("payload_json") or {}
-        try:
-            payload = WebhookRequest.model_validate(payload_json)
-        except Exception as exc:
+        outbox_id_str = str(outbox_id)
+        validated_payload, payload_error = validate_outbox_payload(payload_json)
+        if payload_error:
+            _record_outbox_payload_error(outbox_id=outbox_id_str, reason=payload_error)
             mark_outbox_status(
                 db,
                 outbox_id=outbox_id,
                 status="FAILED",
-                last_error=f"invalid_payload:{exc}"[:500],
+                last_error=f"invalid_payload:{payload_error}"[:500],
                 next_attempt_at=None,
             )
             results["failed"] += 1
             return
+        payload_json = validated_payload.model_dump(exclude_none=True)
+        payload = WebhookRequest.model_validate(payload_json)
 
         try:
             outbox_ids = [str(outbox_id)]
@@ -515,15 +692,16 @@ async def _process_outbox_rows(
                 "Outbox timing",
                 extra={
                     "context": {
-                        "outbox_id": str(outbox_id),
+                        "outbox_id": outbox_id_str,
                         "outbox_ids": outbox_ids,
                         "conversation_id": conversation_id,
                         "client_slug": payload.client_slug,
+                        "inbound_message_id": row.get("inbound_message_id"),
                         "outbox_total_ms": outbox_total_ms,
                     }
                 },
             )
-            _log_outbox_done(str(outbox_id), total_ms=outbox_total_ms)
+            _log_outbox_done(outbox_id_str, total_ms=outbox_total_ms)
             mark_outbox_status(
                 db,
                 outbox_id=outbox_id,
@@ -565,16 +743,18 @@ async def _process_outbox_rows(
                 "Outbox timing",
                 extra={
                     "context": {
-                        "outbox_id": str(outbox_id),
-                        "outbox_ids": [str(outbox_id)],
+                        "outbox_id": outbox_id_str,
+                        "outbox_ids": [outbox_id_str],
                         "conversation_id": conversation_id,
                         "client_slug": payload.client_slug,
+                        "inbound_message_id": row.get("inbound_message_id"),
                         "outbox_total_ms": outbox_total_ms,
                         "error": str(exc),
                     }
                 },
             )
-            _log_outbox_done(str(outbox_id), error=str(exc), total_ms=outbox_total_ms)
+            _record_outbox_action_error(outbox_id=outbox_id_str, error=str(exc))
+            _log_outbox_done(outbox_id_str, error=str(exc), total_ms=outbox_total_ms)
             now = datetime.now(timezone.utc)
             attempts = int(row.get("attempts") or 0)
             if attempts >= max_attempts:
@@ -624,16 +804,33 @@ async def _process_outbox_rows(
         window_seconds = _get_outbox_window_merge_seconds()
         grouped_batches = _split_outbox_batches(batch_sorted, window_seconds)
         for group in grouped_batches:
-            outbox_ids = [row.get("id") for row in group]
+            outbox_ids = []
             message_texts = []
             forwarded_in_batch = False
             group_created_at = None
+            valid_rows: list[tuple[dict, WebhookRequest]] = []
+            invalid_count = 0
             for row in group:
                 payload_json = row.get("payload_json") or {}
-                try:
-                    payload = WebhookRequest.model_validate(payload_json)
-                except Exception:
+                outbox_id = row.get("id")
+                outbox_id_str = str(outbox_id) if outbox_id else None
+                validated_payload, payload_error = validate_outbox_payload(payload_json)
+                if payload_error:
+                    if outbox_id_str:
+                        _record_outbox_payload_error(outbox_id=outbox_id_str, reason=payload_error)
+                        mark_outbox_status(
+                            db,
+                            outbox_id=outbox_id,
+                            status="FAILED",
+                            last_error=f"invalid_payload:{payload_error}"[:500],
+                            next_attempt_at=None,
+                        )
+                        results["failed"] += 1
+                    invalid_count += 1
                     continue
+                payload_json = validated_payload.model_dump(exclude_none=True)
+                payload = WebhookRequest.model_validate(payload_json)
+                valid_rows.append((row, payload))
                 created_at = _coerce_outbox_created_at(row.get("created_at"))
                 if created_at and (group_created_at is None or created_at > group_created_at):
                     group_created_at = created_at
@@ -643,7 +840,21 @@ async def _process_outbox_rows(
                 if text.strip():
                     message_texts.append(text.strip())
 
-            base_payload = WebhookRequest.model_validate(group[-1].get("payload_json") or {})
+            if not valid_rows:
+                logger.warning(
+                    "Outbox batch skipped (invalid payloads)",
+                    extra={
+                        "context": {
+                            "conversation_id": conversation_id,
+                            "invalid_count": invalid_count,
+                        }
+                    },
+                )
+                continue
+
+            outbox_ids = [row.get("id") for row, _ in valid_rows]
+            inbound_message_ids = [row.get("inbound_message_id") for row, _ in valid_rows]
+            base_payload = valid_rows[-1][1]
             combined_text = " ".join(message_texts).strip()
             if combined_text:
                 base_payload.body.message = combined_text
@@ -655,9 +866,11 @@ async def _process_outbox_rows(
                 extra={
                     "context": {
                         "outbox_ids": [str(oid) for oid in outbox_ids if oid],
+                        "inbound_message_ids": inbound_message_ids,
                         "conversation_id": conversation_id,
-                        "attempts": group[-1].get("attempts"),
-                        "coalesced_count": len(group),
+                        "attempts": valid_rows[-1][0].get("attempts"),
+                        "coalesced_count": len(valid_rows),
+                        "invalid_count": invalid_count,
                         "window_merge_seconds": window_seconds,
                     }
                 },
@@ -682,13 +895,14 @@ async def _process_outbox_rows(
                 logger.info(
                     "Outbox timing",
                     extra={
-                        "context": {
-                            "outbox_ids": [str(oid) for oid in outbox_ids if oid],
-                            "conversation_id": conversation_id,
-                            "client_slug": base_payload.client_slug,
-                            "outbox_total_ms": outbox_total_ms,
-                        }
-                    },
+                    "context": {
+                        "outbox_ids": [str(oid) for oid in outbox_ids if oid],
+                        "inbound_message_ids": inbound_message_ids,
+                        "conversation_id": conversation_id,
+                        "client_slug": base_payload.client_slug,
+                        "outbox_total_ms": outbox_total_ms,
+                    }
+                },
                 )
                 for outbox_id in outbox_ids:
                     if outbox_id:
@@ -708,7 +922,7 @@ async def _process_outbox_rows(
                     extra={
                         "context": {
                             "conversation_id": conversation_id,
-                            "coalesced_count": len(group),
+                            "coalesced_count": len(valid_rows),
                         }
                     },
                 )
@@ -724,15 +938,19 @@ async def _process_outbox_rows(
                 logger.info(
                     "Outbox timing",
                     extra={
-                        "context": {
-                            "outbox_ids": [str(oid) for oid in outbox_ids if oid],
-                            "conversation_id": conversation_id,
-                            "client_slug": base_payload.client_slug,
-                            "outbox_total_ms": outbox_total_ms,
-                            "error": str(exc),
-                        }
+                    "context": {
+                        "outbox_ids": [str(oid) for oid in outbox_ids if oid],
+                        "inbound_message_ids": inbound_message_ids,
+                        "conversation_id": conversation_id,
+                        "client_slug": base_payload.client_slug,
+                        "outbox_total_ms": outbox_total_ms,
+                        "error": str(exc),
+                    }
                     },
                 )
+                for outbox_id in outbox_ids:
+                    if outbox_id:
+                        _record_outbox_action_error(outbox_id=str(outbox_id), error=str(exc))
                 for outbox_id in outbox_ids:
                     if outbox_id:
                         _log_outbox_done(
@@ -741,7 +959,7 @@ async def _process_outbox_rows(
                             total_ms=outbox_total_ms,
                         )
                 now = datetime.now(timezone.utc)
-                for row in group:
+                for row, _ in valid_rows:
                     outbox_id = row.get("id")
                     if not outbox_id:
                         continue

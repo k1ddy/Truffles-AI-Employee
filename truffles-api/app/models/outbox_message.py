@@ -15,6 +15,7 @@ class OutboxMessage(Base):
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True)
     inbound_message_id = Column(Text, nullable=False)
     payload_json = Column(JSONB, nullable=False)
+    meta = Column(JSONB)
     status = Column(Text, nullable=False, default="PENDING")
     attempts = Column(Integer, nullable=False, default=0)
     next_attempt_at = Column(TIMESTAMP(timezone=True))

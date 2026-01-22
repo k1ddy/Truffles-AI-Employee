@@ -36,6 +36,7 @@
 - `ops/sync_client.py` — validate/sync client packs (truth → Qdrant).
 - `/home/zhan/restart_api.sh` — restart API контейнера.
 - SQL evidence: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "<SQL>"`.
+- `docs/runbooks/TRACE_BUNDLE.md` — как читать trace‑bundle (timing + correlation).
 
 ## 0.2 Fast Debug SOP (5 минут)
 
@@ -82,6 +83,11 @@ python3 ops/diagnose.py explain --client-slug demo_salon --text "LC-MARKER" --tr
 
 **Правило:** instanceId хранится **в БД**, не в git; sender‑JID пул фиксируется в SOP и env allowlist.
 **Важно:** query‑param `instanceId` **переопределяет** `metadata.instanceId` при входе.
+
+## 0.1.1 Correlation keys (log contract)
+- `message_id` (ChatFlow) → `messages.metadata.messageId` и `outbox_messages.inbound_message_id`.
+- `outbox_id` → `outbox_messages.id`.
+- `trace_id` → `decision_meta.trace_id` (прокидывается в логи timing/outbox).
 
 ## 1. Репозиторий и процесс
 

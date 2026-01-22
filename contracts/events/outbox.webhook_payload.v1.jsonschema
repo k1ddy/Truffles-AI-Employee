@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/events/outbox.webhook_payload.v1.jsonschema",
+  "title": "Outbox Webhook Payload",
+  "type": "object",
+  "required": ["client_slug", "body"],
+  "properties": {
+    "client_slug": {
+      "type": "string",
+      "minLength": 1
+    },
+    "body": {
+      "type": "object",
+      "required": ["metadata"],
+      "properties": {
+        "messageType": {
+          "type": "string",
+          "description": "text or media type"
+        },
+        "message": {
+          "type": ["string", "null"]
+        },
+        "mediaData": {
+          "description": "Media payload (optional; required when message empty)."
+        },
+        "metadata": {
+          "type": "object",
+          "required": ["remoteJid"],
+          "properties": {
+            "sender": {"type": ["string", "null"]},
+            "timestamp": {"type": ["integer", "null"]},
+            "messageId": {"type": ["string", "null"]},
+            "remoteJid": {"type": "string", "minLength": 1},
+            "instanceId": {"type": ["string", "null"]},
+            "forwarded_to_telegram": {"type": ["boolean", "null"]},
+            "forwardedToTelegram": {"type": ["boolean", "null"]}
+          }
+        }
+      }
+    }
+  }
+}
