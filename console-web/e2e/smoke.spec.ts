@@ -76,11 +76,23 @@ async function loginThroughKeycloak(page: import('@playwright/test').Page) {
 }
 
 async function ensureLoggedIn(page: import('@playwright/test').Page) {
+    const initClientId = process.env.E2E_CLIENT_ID;
+    if (initClientId) {
+        await page.addInitScript((id) => {
+            if (window.location.host.includes('console')) {
+                window.localStorage.setItem('console:client_id', id);
+            }
+        }, initClientId);
+    }
     await page.goto('/');
     await expect(page.getByTestId('console-header')).toBeVisible();
     const casesTitle = page.getByTestId('cases-title');
     if (useStorageState) {
         await expect(casesTitle, 'Expected logged-in UI with storage state.').toBeVisible({ timeout: 15000 });
+        const resolved = await ensureClientSelection(page);
+        if (resolved) {
+            await page.reload({ waitUntil: 'domcontentloaded' });
+        }
         return;
     }
     try {
@@ -94,6 +106,47 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
         await page.goto('/');
         await expect(casesTitle).toBeVisible({ timeout: 10000 });
     }
+
+    const resolved = await ensureClientSelection(page);
+    if (resolved) {
+        await page.reload({ waitUntil: 'domcontentloaded' });
+    }
+}
+
+async function ensureClientSelection(page: import('@playwright/test').Page): Promise<boolean> {
+    const stored = await page.evaluate(() => window.localStorage.getItem('console:client_id'));
+    if (stored) {
+        return false;
+    }
+
+    const envClientId = process.env.E2E_CLIENT_ID;
+    if (envClientId) {
+        await page.evaluate((id) => {
+            window.localStorage.setItem('console:client_id', id);
+        }, envClientId);
+        return true;
+    }
+
+    const picked = await page.evaluate(async () => {
+        const response = await fetch('/api/proxy/me');
+        if (!response.ok) {
+            return null;
+        }
+        const data = await response.json();
+        if (!data?.clients?.length) {
+            return null;
+        }
+        return data.clients[0].id as string;
+    });
+
+    if (picked) {
+        await page.evaluate((id) => {
+            window.localStorage.setItem('console:client_id', id);
+        }, picked);
+        return true;
+    }
+
+    return false;
 }
 
 // =========================================

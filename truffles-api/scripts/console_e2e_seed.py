@@ -229,16 +229,20 @@ def main() -> None:
     )
 
     session.commit()
+    ids = {
+        "company_id": company.id,
+        "client_id": client.id,
+        "branch_id": branch.id,
+        "agent_id": agent.id,
+        "identity_external_id": subject,
+        "conversation_id": conversation.id,
+        "handover_id": handover.id,
+    }
     session.close()
 
     print("E2E seed complete:")
-    print(f"- company_id={company.id}")
-    print(f"- client_id={client.id}")
-    print(f"- branch_id={branch.id}")
-    print(f"- agent_id={agent.id}")
-    print(f"- identity_external_id={subject}")
-    print(f"- conversation_id={conversation.id}")
-    print(f"- handover_id={handover.id}")
+    for key, value in ids.items():
+        print(f"- {key}={value}")
 
 
 if __name__ == "__main__":

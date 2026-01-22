@@ -39,7 +39,11 @@
 - DONE: Response Composer v1 (ack+CTA из pack, response_variant_id в meta) — PR #299 https://github.com/k1ddy/Truffles-AI-Employee/pull/299; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21208785389.
 - TODO: Определить схему обязательных данных филиала + валидацию (поля, формат, чек‑лист).
 - TODO: Автоматизация онбординга (provisioning API/console): создание tenant+branch, mapping instanceId/phone, генерация webhook, go/no‑go gate.
-- BLOCKERS: нет.
+- DONE: Console DB миграция `005_add_agent_memberships.sql` на проде (CREATE TABLE + 4 индекса + backfill). Evidence: `docker exec -i truffles_postgres_1 psql "$DATABASE_URL" < 005_add_agent_memberships.sql` → `CREATE TABLE` + `CREATE INDEX` + `INSERT 0 6`.
+- DONE: Console E2E seed (stable IDs) через `console_e2e_seed.py` с `E2E_SUBJECT` из JWT. Evidence: output IDs (company/client/branch/agent/handover).
+- DONE: `/console/v1/me` теперь возвращает `selection_required=true`, `clients_count=2` для E2E. Evidence: curl + jq.
+- BLOCKERS: Playwright smoke на prod UI падает из‑за `CLIENT_SELECTION_REQUIRED` (prod console-web не отправляет `X-Client-Id`). Evidence: `npm run test:e2e:smoke` + docker logs `ConsoleAPIError: CLIENT_SELECTION_REQUIRED`.
+- GAP: Schemathesis GET‑smoke с `X-Client-Id` падает: API принимает invalid query params и возвращает `INVALID_PARAM` для branch_id, не отражено в контракте. Evidence: schemathesis run (failures for `/audit`, `/metrics/daily`, `/cases`, `/cases/{id}/messages`).
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.

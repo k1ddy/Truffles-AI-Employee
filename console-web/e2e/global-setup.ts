@@ -31,6 +31,30 @@ export default async function globalSetup(config: FullConfig) {
     await page.click("#kc-login");
     await page.waitForURL(consoleHostPattern, { timeout: 15000 });
 
+    const clientId = process.env.E2E_CLIENT_ID;
+    if (clientId) {
+        await page.evaluate((id) => {
+            window.localStorage.setItem("console:client_id", id);
+        }, clientId);
+    } else {
+        const selected = await page.evaluate(async () => {
+            const response = await fetch("/api/proxy/me");
+            if (!response.ok) {
+                return null;
+            }
+            const data = await response.json();
+            if (!data?.clients?.length) {
+                return null;
+            }
+            return data.clients[0].id as string;
+        });
+        if (selected) {
+            await page.evaluate((id) => {
+                window.localStorage.setItem("console:client_id", id);
+            }, selected);
+        }
+    }
+
     await page.context().storageState({ path: "e2e/.auth/state.json" });
     await browser.close();
 }
