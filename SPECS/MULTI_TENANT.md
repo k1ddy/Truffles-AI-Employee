@@ -20,6 +20,8 @@ _Любые статусы ниже — DERIVED; единственный ист
 | Компонент | Статус |
 |-----------|--------|
 | Таблица companies | ✅ СУЩЕСТВУЕТ (не используется) |
+| Org-level RBAC (company memberships/roles) | 📋 ПЛАН |
+| Console org-level selection (company/client/branch) | 📋 ПЛАН |
 | Таблица clients | ✅ РАБОТАЕТ |
 | Таблица branches | ⚠️ ПОДКЛЮЧЕНА: routing/Telegram по branch есть; RAG strict branch‑filter (без fallback), нужен backfill |
 | Таблица client_settings | ✅ РАБОТАЕТ |
@@ -107,20 +109,22 @@ Company
 | Knowledge | client_slug + branch filter (knowledge_tag/branch_id; без fallback) | Branch.knowledge_tag |
 | Conversation привязан к | branch_id (сохраняется + используется в routing) | branch_id |
 | Каналы (WhatsApp/Instagram) | 1 на client | через Channel (backlog) |
-| Console access | Один `sub` → один client (исторически); сейчас доступен multi‑client через `X-Client-Id` | Org‑уровень с membership и RBAC |
+| Console access | Исторически: один `sub` → один client; сейчас доступен multi‑client через `X-Client-Id` и membership/RBAC | Org‑уровень с membership/RBAC и выбором company/client/branch |
 
 ## Console tenancy (текущее, промежуточное)
 
 **DEC‑011:** орг‑уровень Company → Client → Branch (roles/RBAC) — целевой, не реализован полностью.
 
-**Что уже есть (без membership):**
+**Что уже есть:**
 - Один OIDC `sub` может быть привязан к нескольким `agents` (по клиентам).
+- Таблица `agent_memberships` + RBAC в console auth.
 - `/console/v1/me` возвращает `clients[]` и `selection_required`.
 - При нескольких клиентах обязателен заголовок `X-Client-Id`; иначе `CLIENT_SELECTION_REQUIRED`.
 - UI хранит выбор в `localStorage` (`console:client_id`) и очищает на logout.
+- Non‑admin/owner пользователи ограничены branch‑scoped доступом.
 
 **Что ещё нужно:**
-- Модель membership (company/client/branch) + роли.
+- Company/client/branch selection в UI (не только client).
 - Явный `tenant_context` (company_id/client_id/branch_id) в событиях/аудите/метриках.
 
 ---

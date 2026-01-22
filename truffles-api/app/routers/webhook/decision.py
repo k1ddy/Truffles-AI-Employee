@@ -1502,6 +1502,7 @@ from app.routers.webhook.session_memory import (
 from app.routers.webhook.shield import _handle_shield_gate
 from app.routers.webhook.trace import (
     _attach_llm_cache_flag,
+    _merge_message_timing,
     _record_decision_trace,
     _record_message_decision_meta,
     _update_message_decision_metadata,
@@ -1567,7 +1568,7 @@ from app.services.intent_service import (
     should_escalate,
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
-from app.services.outbox_service import build_inbound_message_id
+from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.state_machine import ConversationState
 from app.services.state_service import escalate_to_pending, manager_resolve, transition_state
 from app.services.telegram_service import TelegramService
@@ -3119,6 +3120,8 @@ async def _handle_webhook_payload(
 ) -> WebhookResponse:
     """Shared webhook processing for inbound ChatFlow payloads."""
     logger.info(f"Webhook received: client_slug={payload.client_slug}")
+    pipeline_started_at = datetime.now(timezone.utc)
+    pipeline_start = time.monotonic()
 
     def _resolve_trace_conversation(
         *,
@@ -3228,6 +3231,7 @@ async def _handle_webhook_payload(
         timing_context["branch_id"] = str(resolved_branch_id)
     if resolved_knowledge_tag:
         timing_context["knowledge_tag"] = resolved_knowledge_tag
+    timing_context["timing_persisted"] = False
 
     outbound_idempotency_key = message_id or build_inbound_message_id(
         message_id,
@@ -3252,6 +3256,52 @@ async def _handle_webhook_payload(
         context["stage"] = stage
         context["elapsed_ms"] = round(elapsed_ms, 2)
         logger.info("Timing", extra={"context": context})
+        timing = timing_context.get("timing")
+        if not isinstance(timing, dict):
+            timing = {}
+        stages = timing.get("stages")
+        if not isinstance(stages, dict):
+            stages = {}
+        stages[stage] = context["elapsed_ms"]
+        timing["stages"] = stages
+        timing_context["timing"] = timing
+
+    def _persist_timing_snapshot() -> None:
+        if not saved_message or timing_context.get("timing_persisted"):
+            return
+        snapshot = dict(timing_context.get("timing") or {})
+        snapshot["pipeline_started_at"] = pipeline_started_at.isoformat()
+        snapshot["pipeline_finished_at"] = datetime.now(timezone.utc).isoformat()
+        snapshot["pipeline_ms"] = round((time.monotonic() - pipeline_start) * 1000, 2)
+        _merge_message_timing(saved_message, snapshot)
+        timing_context["timing_persisted"] = True
+
+    def _ensure_action_gate() -> None:
+        if not saved_message:
+            return
+        metadata = saved_message.message_metadata if isinstance(saved_message.message_metadata, dict) else {}
+        decision_meta = metadata.get("decision_meta") if isinstance(metadata, dict) else {}
+        action = decision_meta.get("action") if isinstance(decision_meta, dict) else None
+        if action:
+            return
+        intent_value = getattr(intent, "value", None)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "action_gate",
+                "decision": "error",
+                "reason": "missing_action",
+                "state": conversation.state,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="error",
+            intent=intent_value if isinstance(intent_value, str) else None,
+            source="action_gate",
+            fast_intent=False,
+        )
+        _update_message_decision_metadata(saved_message, {"action_error": "missing_action"})
 
     def _record_escalation_metric(trigger: str) -> None:
         record_escalation_count(payload.client_slug, trigger)
@@ -3268,16 +3318,54 @@ async def _handle_webhook_payload(
             logger.warning(f"No instance_id found for client {client.id}, jid={remote_jid}")
             sent = False
         else:
-            adapter = ChatFlowAdapter()
-            options = MessageOptions(
-                instance_id=instance_id,
-                idempotency_key=outbound_idempotency_key,
-            )
-            result = adapter.send_text(remote_jid, text, options)
-            sent = result.is_ok()
-            if not sent and skip_persist:
-                # Preserve legacy behavior when raise_on_fail=True (skip_persist path).
-                raise RuntimeError(f"ChatFlow delivery failed: {result.error}")
+            use_outbox_send = _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False)
+            if use_outbox_send and conversation:
+                outbox_payload = {
+                    "schema_version": "outbox.v1",
+                    "event_type": "whatsapp.send_text",
+                    "idempotency_key": outbound_idempotency_key,
+                    "client_id": str(client.id),
+                    "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
+                    "conversation_id": str(conversation.id),
+                    "channel": "whatsapp",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "payload": {
+                        "remote_jid": remote_jid,
+                        "text": text,
+                        "instance_id": instance_id,
+                        "idempotency_key": outbound_idempotency_key,
+                    },
+                }
+                sent = enqueue_outbox_message(
+                    db,
+                    client_id=client.id,
+                    conversation_id=conversation.id,
+                    inbound_message_id=outbound_idempotency_key,
+                    payload_json=outbox_payload,
+                )
+                if not sent:
+                    logger.info(
+                        "Outbox send skipped (duplicate)",
+                        extra={
+                            "context": {
+                                "conversation_id": str(conversation.id),
+                                "remote_jid": remote_jid,
+                                "idempotency_key": outbound_idempotency_key,
+                            }
+                        },
+                    )
+                    sent = True
+            else:
+                adapter = ChatFlowAdapter()
+                options = MessageOptions(
+                    instance_id=instance_id,
+                    idempotency_key=outbound_idempotency_key,
+                )
+                result = adapter.send_text(remote_jid, text, options)
+                sent = result.is_ok()
+                if not sent and skip_persist:
+                    # Preserve legacy behavior when raise_on_fail=True (skip_persist path).
+                    raise RuntimeError(f"ChatFlow delivery failed: {result.error}")
         _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": sent})
         return sent
 
@@ -3726,6 +3814,7 @@ async def _handle_webhook_payload(
         _record_contract_traces()
         save_message(db, conversation.id, client.id, role="assistant", content=final_text)
         sent = _send_response(final_text)
+        _persist_timing_snapshot()
         return final_text, sent
     previous_last_message_at = conversation.last_message_at
     conversation.last_message_at = now
@@ -5861,6 +5950,19 @@ async def _handle_webhook_payload(
         out_of_domain_signal=out_of_domain_signal,
         rag_confident=rag_confident,
     )
+    if saved_message:
+        metadata = saved_message.message_metadata if isinstance(saved_message.message_metadata, dict) else {}
+        decision_meta = metadata.get("decision_meta") if isinstance(metadata, dict) else {}
+        if not (isinstance(decision_meta, dict) and decision_meta.get("action")):
+            intent_value = getattr(intent, "value", None)
+            _record_message_decision_meta(
+                saved_message,
+                action=decision.action,
+                intent=intent_value if isinstance(intent_value, str) else None,
+                source="action_resolve",
+                fast_intent=False,
+            )
+            db.commit()
 
     if decision.action == "smalltalk":
         bot_response = GREETING_RESPONSE if intent == Intent.GREETING else THANKS_RESPONSE
@@ -6242,6 +6344,8 @@ async def _handle_webhook_payload(
         )
         result_message = f"Unknown state: {conversation.state}"
 
+    _ensure_action_gate()
+    _persist_timing_snapshot()
     db.commit()
 
     return WebhookResponse(

@@ -17,7 +17,9 @@ from app.logging_config import (
     http_in_progress_dec,
     http_in_progress_inc,
     record_http_request,
+    set_database_health,
     set_outbox_backlog,
+    set_qdrant_health,
     setup_logging,
 )
 from app.models import Conversation, Handover, Message, User
@@ -35,6 +37,7 @@ app = FastAPI(
 )
 
 otel_logger = get_logger("otel")
+metrics_logger = get_logger("metrics")
 
 cors_env = os.environ.get("CORS_ALLOW_ORIGINS", "*")
 cors_origins = [origin.strip() for origin in cors_env.split(",") if origin.strip()]
@@ -149,23 +152,68 @@ _setup_otel(app)
 
 @app.get("/metrics")
 def metrics(db: Session = Depends(get_db)):
-    rows = (
-        db.execute(
-            text(
-                """
-                SELECT c.name AS client_slug, COUNT(*) AS backlog
-                FROM outbox_messages o
-                JOIN clients c ON c.id = o.client_id
-                WHERE o.status = 'PENDING'
-                GROUP BY c.name
-                """
-            )
+    db_healthy = True
+    db_latency_ms = None
+    try:
+        start = time.time()
+        db.execute(text("SELECT 1"))
+        db_latency_ms = int((time.time() - start) * 1000)
+    except Exception as exc:
+        db_healthy = False
+        metrics_logger.warning(
+            "Database health check failed",
+            extra={"context": {"error": str(exc)[:200]}},
         )
-        .mappings()
-        .all()
-    )
-    backlog_counts = {row["client_slug"]: int(row.get("backlog") or 0) for row in rows}
-    set_outbox_backlog(backlog_counts)
+    set_database_health(db_healthy, db_latency_ms)
+
+    try:
+        rows = (
+            db.execute(
+                text(
+                    """
+                    SELECT c.name AS client_slug, COUNT(*) AS backlog
+                    FROM outbox_messages o
+                    JOIN clients c ON c.id = o.client_id
+                    WHERE o.status = 'PENDING'
+                    GROUP BY c.name
+                    """
+                )
+            )
+            .mappings()
+            .all()
+        )
+        backlog_counts = {row["client_slug"]: int(row.get("backlog") or 0) for row in rows}
+        set_outbox_backlog(backlog_counts)
+    except Exception as exc:
+        metrics_logger.warning(
+            "Outbox backlog query failed",
+            extra={"context": {"error": str(exc)[:200]}},
+        )
+        set_outbox_backlog({})
+
+    qdrant_healthy = True
+    qdrant_latency_ms = None
+    qdrant_url = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
+    qdrant_key = os.environ.get("QDRANT_API_KEY")
+    try:
+        import httpx
+
+        start = time.time()
+        headers = {"api-key": qdrant_key} if qdrant_key else {}
+        with httpx.Client(timeout=2.0) as client:
+            resp = client.get(f"{qdrant_url}/collections", headers=headers)
+        if resp.status_code == 200:
+            qdrant_latency_ms = int((time.time() - start) * 1000)
+        else:
+            qdrant_healthy = False
+    except Exception as exc:
+        qdrant_healthy = False
+        metrics_logger.warning(
+            "Qdrant health check failed",
+            extra={"context": {"error": str(exc)[:200]}},
+        )
+    set_qdrant_health(qdrant_healthy, qdrant_latency_ms)
+
     payload = generate_latest_metrics()
     return Response(content=payload, media_type=CONTENT_TYPE_LATEST)
 

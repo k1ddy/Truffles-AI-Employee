@@ -48,12 +48,12 @@ async function fetchSettings(): Promise<SettingsData> {
 function RoleBadge({ role }: { role: string }) {
     const styles: Record<string, string> = {
         owner: "bg-purple-100 text-purple-800",
-        admin: "bg-blue-100 text-blue-800",
+        admin: "bg-secondary text-secondary-foreground",
         manager: "bg-green-100 text-green-800",
-        support: "bg-gray-100 text-gray-800",
+        support: "bg-muted text-muted-foreground",
     };
     return (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${styles[role] || "bg-gray-100 text-gray-800"}`}>
+        <span className={`px-2 py-1 rounded text-xs font-medium ${styles[role] || "bg-muted text-muted-foreground"}`}>
             {role}
         </span>
     );
@@ -66,17 +66,17 @@ function ConfigCard({ label, value, type = "text" }: { label: string; value: str
         displayValue = value ? (
             <span className="text-green-600 font-medium">✓ Включено</span>
         ) : (
-            <span className="text-gray-400">Выключено</span>
+            <span className="text-muted-foreground">Выключено</span>
         );
     } else if (type === "minutes" && typeof value === "number") {
         displayValue = `${value} мин`;
     } else if (value === null || value === undefined) {
-        displayValue = <span className="text-gray-400">—</span>;
+        displayValue = <span className="text-muted-foreground">—</span>;
     }
 
     return (
-        <div className="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
-            <span className="text-gray-600">{label}</span>
+        <div className="flex justify-between items-center py-2 border-b border-border/60 last:border-0">
+            <span className="text-muted-foreground">{label}</span>
             <span className="font-medium">{displayValue}</span>
         </div>
     );
@@ -93,7 +93,7 @@ export default function SettingsPage() {
 
     if (!session) {
         return (
-            <div className="p-8 text-center text-gray-500">
+            <div className="p-8 text-center text-muted-foreground">
                 Пожалуйста, войдите для просмотра настроек.
             </div>
         );
@@ -101,13 +101,13 @@ export default function SettingsPage() {
 
     if (isLoading) {
         return (
-            <div className="max-w-5xl mx-auto p-6">
-                <h1 className="text-2xl font-bold mb-6">Настройки</h1>
+            <div className="max-w-5xl mx-auto p-6" data-testid="settings-page">
+                <h1 className="text-2xl font-bold mb-6" data-testid="settings-title">Настройки</h1>
                 <div className="animate-pulse grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="h-48 bg-gray-200 rounded-lg"></div>
-                    <div className="h-48 bg-gray-200 rounded-lg"></div>
-                    <div className="h-48 bg-gray-200 rounded-lg"></div>
-                    <div className="h-48 bg-gray-200 rounded-lg"></div>
+                    <div className="h-48 bg-muted/70 rounded-lg"></div>
+                    <div className="h-48 bg-muted/70 rounded-lg"></div>
+                    <div className="h-48 bg-muted/70 rounded-lg"></div>
+                    <div className="h-48 bg-muted/70 rounded-lg"></div>
                 </div>
             </div>
         );
@@ -115,13 +115,14 @@ export default function SettingsPage() {
 
     if (error) {
         return (
-            <div className="max-w-5xl mx-auto p-6">
-                <h1 className="text-2xl font-bold mb-6">Настройки</h1>
-                <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-                    <p className="text-red-600 mb-4">Не удалось загрузить настройки</p>
+            <div className="max-w-5xl mx-auto p-6" data-testid="settings-page">
+                <h1 className="text-2xl font-bold mb-6" data-testid="settings-title">Настройки</h1>
+                <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center" data-testid="settings-error">
+                    <p className="text-destructive mb-4">Не удалось загрузить настройки</p>
                     <button
                         onClick={() => refetch()}
-                        className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                        className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
+                        data-testid="settings-retry"
                     >
                         Повторить
                     </button>
@@ -133,17 +134,17 @@ export default function SettingsPage() {
     const config = data?.bot_config;
 
     return (
-        <div className="max-w-5xl mx-auto p-6">
+        <div className="max-w-5xl mx-auto p-6" data-testid="settings-page">
             <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold">Настройки</h1>
-                <Link href="/" className="text-blue-600 hover:underline">
+                <h1 className="text-2xl font-bold" data-testid="settings-title">Настройки</h1>
+                <Link href="/" className="text-primary hover:text-primary/80">
                     ← Назад в Inbox
                 </Link>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* SLA & Reminders */}
-                <div className="bg-white border rounded-lg p-5">
+                <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-sla">
                     <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                         ⏱️ SLA и напоминания
                     </h2>
@@ -156,12 +157,12 @@ export default function SettingsPage() {
                             <ConfigCard label="Эскалация на владельца" value={config.enable_owner_escalation} type="boolean" />
                         </div>
                     ) : (
-                        <p className="text-gray-400 text-center py-4">Нет данных</p>
+                        <p className="text-muted-foreground text-center py-4">Нет данных</p>
                     )}
                 </div>
 
                 {/* Quiet Hours */}
-                <div className="bg-white border rounded-lg p-5">
+                <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-quiet-hours">
                     <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                         🌙 Тихие часы
                     </h2>
@@ -172,12 +173,12 @@ export default function SettingsPage() {
                             <ConfigCard label="Конец" value={config.quiet_hours_end} />
                         </div>
                     ) : (
-                        <p className="text-gray-400 text-center py-4">Нет данных</p>
+                        <p className="text-muted-foreground text-center py-4">Нет данных</p>
                     )}
                 </div>
 
                 {/* Bot Behavior */}
-                <div className="bg-white border rounded-lg p-5">
+                <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-bot">
                     <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                         🤖 Поведение бота
                     </h2>
@@ -188,12 +189,12 @@ export default function SettingsPage() {
                             <ConfigCard label="Бронирование" value={config.booking_enabled} type="boolean" />
                         </div>
                     ) : (
-                        <p className="text-gray-400 text-center py-4">Нет данных</p>
+                        <p className="text-muted-foreground text-center py-4">Нет данных</p>
                     )}
                 </div>
 
                 {/* Branches (TG-02) */}
-                <div className="bg-white border rounded-lg p-5">
+                <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-branches">
                     <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                         🏢 Филиалы
                     </h2>
@@ -201,24 +202,25 @@ export default function SettingsPage() {
                         {data?.branches.map((branch) => (
                             <div
                                 key={branch.id}
-                                className="flex items-center justify-between p-3 bg-gray-50 rounded"
+                                className="flex items-center justify-between p-3 bg-muted rounded"
+                                data-testid="settings-branch-row"
                             >
                                 <div className="flex-1">
                                     <div className="flex items-center gap-2">
                                         <span className="font-medium">{branch.name}</span>
-                                        <span className="text-sm text-gray-500">({branch.slug})</span>
+                                        <span className="text-sm text-muted-foreground">({branch.slug})</span>
                                     </div>
                                     {/* Telegram status */}
                                     <div className="flex items-center gap-1 mt-1">
                                         {branch.telegram_chat_id ? (
                                             <>
-                                                <span className="text-blue-500 text-xs">📨</span>
-                                                <span className="text-xs text-gray-500 font-mono">
+                                                <span className="text-primary text-xs">📨</span>
+                                                <span className="text-xs text-muted-foreground font-mono">
                                                     {branch.telegram_chat_id.slice(0, 15)}...
                                                 </span>
                                             </>
                                         ) : (
-                                            <span className="text-xs text-gray-400">Telegram не настроен</span>
+                                            <span className="text-xs text-muted-foreground">Telegram не настроен</span>
                                         )}
                                     </div>
                                 </div>
@@ -226,7 +228,7 @@ export default function SettingsPage() {
                                     <span
                                         className={`px-2 py-0.5 rounded text-xs ${branch.is_active
                                             ? "bg-green-100 text-green-800"
-                                            : "bg-gray-100 text-gray-800"
+                                            : "bg-muted text-muted-foreground"
                                             }`}
                                     >
                                         {branch.is_active ? "Активен" : "Неактивен"}
@@ -235,14 +237,14 @@ export default function SettingsPage() {
                             </div>
                         ))}
                         {data?.branches.length === 0 && (
-                            <p className="text-gray-400 text-center py-2">Нет филиалов</p>
+                            <p className="text-muted-foreground text-center py-2" data-testid="settings-branches-empty">Нет филиалов</p>
                         )}
                     </div>
                 </div>
             </div>
 
             {/* Team Members - Full Width */}
-            <div className="bg-white border rounded-lg p-5 mt-6">
+            <div className="bg-card border border-border/60 rounded-lg p-5 mt-6" data-testid="settings-team">
                 <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                     👥 Команда
                 </h2>
@@ -250,10 +252,11 @@ export default function SettingsPage() {
                     {data?.agents.map((agent) => (
                         <div
                             key={agent.id}
-                            className="flex items-center justify-between p-3 bg-gray-50 rounded"
+                            className="flex items-center justify-between p-3 bg-muted rounded"
+                            data-testid="settings-team-row"
                         >
                             <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-medium">
+                                <div className="w-9 h-9 bg-secondary rounded-full flex items-center justify-center text-secondary-foreground font-medium">
                                     {agent.name?.charAt(0).toUpperCase() || "?"}
                                 </div>
                                 <span className="font-medium">{agent.name || "Без имени"}</span>
@@ -261,14 +264,16 @@ export default function SettingsPage() {
                             <div className="flex items-center gap-2">
                                 <RoleBadge role={agent.role} />
                                 <span
-                                    className={`w-2 h-2 rounded-full ${agent.is_active ? "bg-green-500" : "bg-gray-300"
+                                    className={`w-2 h-2 rounded-full ${agent.is_active ? "bg-green-500" : "bg-muted"
                                         }`}
                                 ></span>
                             </div>
                         </div>
                     ))}
                     {data?.agents.length === 0 && (
-                        <p className="text-gray-400 text-center py-4 col-span-3">Нет участников команды</p>
+                        <p className="text-muted-foreground text-center py-4 col-span-3" data-testid="settings-team-empty">
+                            Нет участников команды
+                        </p>
                     )}
                 </div>
             </div>

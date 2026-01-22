@@ -9,21 +9,22 @@ export default function ToastProvider() {
             toastOptions={{
                 duration: 4000,
                 style: {
-                    background: "#333",
-                    color: "#fff",
+                    background: "hsl(var(--foreground))",
+                    color: "hsl(var(--background))",
+                    borderRadius: "12px",
                 },
                 success: {
                     duration: 3000,
                     iconTheme: {
                         primary: "#22c55e",
-                        secondary: "#fff",
+                        secondary: "hsl(var(--background))",
                     },
                 },
                 error: {
                     duration: 5000,
                     iconTheme: {
-                        primary: "#ef4444",
-                        secondary: "#fff",
+                        primary: "hsl(var(--destructive))",
+                        secondary: "hsl(var(--background))",
                     },
                 },
             }}

@@ -136,11 +136,35 @@ behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → p
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
 ```
 
+#### Outbox payload contract + action gate
+- **Контракт payload:** валидируем перед enqueue (см. `contracts/events/outbox.webhook_payload.v1.jsonschema` и `truffles-api/app/schemas/outbox_payload.py`).  
+- **Поведение при ошибке:** `decision_trace.stage=outbox_payload_guard`, `decision_meta.action=error`, outbox не ставится в очередь.  
+- **Timing в БД:** `decision_meta.timing.outbox` + `outbox_messages.meta.timing` (корреляция по `outbox_id`/`inbound_message_id`/`trace_id`).  
+- **Action gate:** если `decision_meta.action` не записан — фиксируем `action_gate` и `action=error` перед commit.  
+
+#### Stage order snapshot
+- Каноничный порядок стадий фиксируется в `DECISION_STAGE_ORDER_SNAPSHOT` (`truffles-api/app/routers/webhook/trace.py`) и защищён hash‑тестом.  
+- Любая смена порядка стадий → обновить список + test hash (сознательное изменение).  
+
+#### Observability roadmap (Phase 2; DEC required for external trace store)
+1) Trace retention / external trace store  
+   - Подготовить DEC: варианты (Postgres JSONB bump vs отдельный trace‑store), срок хранения, безопасность.  
+   - Ввести единую схему `trace_event` + экспортер из decision_trace.  
+   - Добавить trace‑viewer и правила retention (L0/L1/L2).  
+   - CI‑гейт: критические стадии не теряются.  
+2) Unified log contract + alerts  
+   - Лог‑схема: обязательные ключи `message_id`, `outbox_id`, `trace_id`, `stage`, `elapsed_ms`.  
+   - Внедрить wrapper в API + outbox + console, добавить алерты (missing_action, outbox_p90, error_rate).  
+   - Обновить `docs/runbooks/INCIDENTS.md` + `docs/runbooks/OUTBOX.md`.  
+3) Stage order snapshot + SOP  
+   - Snapshot уже в коде (Phase 1), добавить SOP “изменение порядка стадий” в `docs/runbooks/TRACE_BUNDLE.md`.  
+   - Любая правка → обновление snapshot hash + запись причины.  
+
 ### Decision Graph (legacy map, `_legacy.py`)
 Фактическая карта стадий и ранних return в `_handle_webhook_payload` (legacy pipeline). Это **не** целевой оркестратор `decision.py`, а снимок текущего поведения. Целевой канон добавляет стадии `semantic_resolver`, `tool_fact_resolver`, `response_guard`.
 
 #### Stage order (gates/early returns)
-1) Preflight rejects и outbox-only путь → early return с `preflight`/`outbox` trace (если conversation резолвится; иначе trace не пишется).
+1) Preflight rejects и outbox-only путь → early return с `preflight`/`outbox`/`outbox_payload_guard` trace (если conversation резолвится; иначе trace не пишется).
 2) Контракт + план Decision Graph → `contract`, `decision_graph`.
 3) Session memory + re-entry + carryover cleanup → `session_memory`, `re_entry`, `class_carryover`, `service_carryover`, `consult_context`.
 4) Expected reply (answer interpreter) → `question_contract`.
@@ -156,11 +180,13 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 14) LLM response/fallback → `llm_guard`, `ai_response`, `rewrite`, `budget_gate`, `llm_degradation`.
 15) Post-response hooks (summary/consult return) → `context_manager`, `consult_return`.
 16) Escalation/state updates → `escalation`, `state_transition`.
+17) Action gate (missing action) → `action_gate`.
 
 #### Legacy stage map (stage → condition → action → trace)
 | Stage | Condition | Action | Trace |
 | --- | --- | --- | --- |
 | `preflight` | Missing client/remoteJid/empty message | Фиксируем причину reject | decision_trace.stage=`preflight` (`truffles-api/app/routers/webhook/_legacy.py:1777`) |
+| `outbox_payload_guard` | Invalid outbox payload contract | Reject enqueue, action=error | decision_trace.stage=`outbox_payload_guard` (`truffles-api/app/routers/webhook/outbox.py`) |
 | `skip_persist` | skip_persist: missing conversation/user | Фиксируем причину skip_persist | decision_trace.stage=`skip_persist` (`truffles-api/app/routers/webhook/_legacy.py:2026`) |
 | `dedupe` | Duplicate message_id | Фиксируем dedupe skip | decision_trace.stage=`dedupe` (`truffles-api/app/routers/webhook/_legacy.py:2097`) |
 | `outbox` | enqueue_only accept | Фиксируем outbox accept | decision_trace.stage=`outbox` (`truffles-api/app/routers/webhook/_legacy.py:2277`) |
@@ -218,9 +244,10 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 | `style_reference` | Style reference без медиа | Prompt media | decision_trace.stage=`style_reference` (`truffles-api/app/routers/webhook/_legacy.py:8179`) |
 | `time_only_guard` | Время без услуги | Уточнение услуги | decision_trace.stage=`time_only_guard` (`truffles-api/app/routers/webhook/_legacy.py:8499`) |
 | `service_semantic_matcher` | Семантический сервис‑match | Reply/suggestions | decision_trace.stage=`service_semantic_matcher` (`truffles-api/app/routers/webhook/_legacy.py:8608`) |
+| `action_gate` | Missing decision_meta.action | Action=error + trace | decision_trace.stage=`action_gate` (`truffles-api/app/routers/webhook/decision.py`) |
 
 #### Critical trace-stages (must-have)
-- `preflight`, `skip_persist`, `dedupe`, `outbox`, `branch_selection`, `debounce`, `handover_confirmation` — ранние возвраты (trace при резолве conversation).
+- `preflight`, `outbox_payload_guard`, `skip_persist`, `dedupe`, `outbox`, `branch_selection`, `debounce`, `handover_confirmation` — ранние возвраты (trace при резолве conversation).
 - `contract`, `decision_graph` — обязательны для аудита плана и контрактов.
 - `session_memory`, `re_entry`, `question_contract` — устойчивость expected_reply и reset.
 - `shield`, `policy_gate` — safety-гейты (spam/toxic/Hard‑LAW).
@@ -231,6 +258,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - `consult_flow`, `consult`, `clarify_guard`, `consult_return` — consult‑playbooks, follow-up, эскалация.
 - `out_of_domain` — строгий OOD guard.
 - `llm_guard`, `ai_response`, `budget_gate`, `llm_degradation`, `rewrite` — LLM path + деградации.
+- `action_gate` — обязательность `decision_meta.action`.
 - `escalation`, `state_transition` — handover + стейт‑машина.
 
 #### Trace coverage exceptions

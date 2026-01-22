@@ -2,28 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --font-body: "IBM Plex Sans", sans-serif;
-  --font-heading: "Space Grotesk", sans-serif;
-  --color-ink: #1f2937;
-  --color-mist: #f6f1e8;
-  --color-accent: #0f766e;
-  --color-glow: #f7a54a;
-  --color-surface: #ffffff;
-  --color-border: rgba(15, 23, 42, 0.12);
-}
+@layer base {
+  :root {
+    --background: 40 33% 98%;
+    --foreground: 30 10% 10%;
 
-body {
-  font-family: var(--font-body);
-  background: var(--color-mist);
-  color: var(--color-ink);
+    --card: 40 20% 99%;
+    --card-foreground: 30 10% 10%;
+
+    --popover: 40 20% 99%;
+    --popover-foreground: 30 10% 10%;
+
+    --primary: 30 10% 12%;
+    --primary-foreground: 40 20% 99%;
+
+    --secondary: 40 15% 96%;
+    --secondary-foreground: 30 10% 12%;
+
+    --muted: 40 15% 96%;
+    --muted-foreground: 30 5% 45%;
+
+    --accent: 40 12% 94%;
+    --accent-foreground: 30 10% 12%;
+
+    --destructive: 0 0% 30%;
+    --destructive-foreground: 40 20% 98%;
+
+    --border: 40 10% 90%;
+    --input: 40 10% 90%;
+    --ring: 30 10% 12%;
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 0 0% 6%;
+    --foreground: 0 0% 95%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
 }
 
 @layer components {
-  .font-heading {
-    font-family: var(--font-heading);
-  }
-
   .fade-up {
     animation: fade-up 0.6s ease-out both;
   }
@@ -41,19 +71,19 @@ body {
   }
 
   .card-surface {
-    @apply rounded-3xl border border-[color:var(--color-border)] bg-white/70 shadow-soft backdrop-blur;
+    @apply rounded-2xl border border-border/60 bg-card shadow-soft;
   }
 
   .badge {
-    @apply inline-flex items-center gap-2 rounded-full border border-[color:var(--color-border)] bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.18em];
+    @apply inline-flex items-center gap-2 rounded-full border border-border/60 bg-card px-3 py-1 text-xs uppercase tracking-[0.18em];
   }
 
   .btn-primary {
-    @apply rounded-full bg-[color:var(--color-accent)] px-5 py-3 text-sm font-semibold text-white shadow-soft transition hover:translate-y-[-1px];
+    @apply rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-soft transition hover:translate-y-[-1px];
   }
 
   .btn-ghost {
-    @apply rounded-full border border-[color:var(--color-border)] px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white/70;
+    @apply rounded-full border border-border/60 px-5 py-3 text-sm font-semibold text-foreground transition hover:bg-muted;
   }
 }
 
@@ -75,4 +105,15 @@ body {
   .fade-up-delay-3 {
     animation: none;
   }
+}
+
+/* Subtle noise texture to match landing */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.02;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
 }

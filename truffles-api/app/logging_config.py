@@ -147,6 +147,30 @@ ESCALATION_COUNT = _get_or_create_metric(
     "Escalations triggered.",
     ("client_slug", "trigger"),
 )
+DATABASE_HEALTH_STATUS = _get_or_create_metric(
+    Gauge,
+    "health_check_database_status",
+    "Database health status (1=healthy, 0=unhealthy).",
+    (),
+)
+DATABASE_HEALTH_LATENCY_MS = _get_or_create_metric(
+    Gauge,
+    "health_check_database_latency_ms",
+    "Database health check latency in ms.",
+    (),
+)
+QDRANT_HEALTH_STATUS = _get_or_create_metric(
+    Gauge,
+    "health_check_qdrant_status",
+    "Qdrant health status (1=healthy, 0=unhealthy).",
+    (),
+)
+QDRANT_HEALTH_LATENCY_MS = _get_or_create_metric(
+    Gauge,
+    "health_check_qdrant_latency_ms",
+    "Qdrant health check latency in ms.",
+    (),
+)
 
 # HTTP request metrics
 HTTP_REQUEST_COUNT = _get_or_create_metric(
@@ -237,6 +261,28 @@ def record_escalation_count(client_slug: str | None, trigger: str) -> None:
         client_slug=_normalize_client_slug(client_slug),
         trigger=trigger,
     ).inc()
+
+
+def set_database_health(status: bool, latency_ms: int | None) -> None:
+    if DATABASE_HEALTH_STATUS is not None:
+        DATABASE_HEALTH_STATUS.set(1 if status else 0)
+    if DATABASE_HEALTH_LATENCY_MS is None:
+        return
+    if latency_ms is None or latency_ms < 0:
+        DATABASE_HEALTH_LATENCY_MS.set(0)
+        return
+    DATABASE_HEALTH_LATENCY_MS.set(latency_ms)
+
+
+def set_qdrant_health(status: bool, latency_ms: int | None) -> None:
+    if QDRANT_HEALTH_STATUS is not None:
+        QDRANT_HEALTH_STATUS.set(1 if status else 0)
+    if QDRANT_HEALTH_LATENCY_MS is None:
+        return
+    if latency_ms is None or latency_ms < 0:
+        QDRANT_HEALTH_LATENCY_MS.set(0)
+        return
+    QDRANT_HEALTH_LATENCY_MS.set(latency_ms)
 
 
 def set_outbox_backlog(counts: dict[str, int]) -> None:

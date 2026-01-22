@@ -668,6 +668,31 @@ def _parse_explain_args(argv):
         args.client_slug = os.environ.get("TRUFFLES_CLIENT_SLUG", "demo_salon")
     return args
 
+def _parse_trace_bundle_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py trace-bundle",
+        description="Collect decision_meta/trace + outbox timing for a message.",
+    )
+    parser.add_argument("--client-slug", default=None)
+    parser.add_argument(
+        "--receiver-phone",
+        default=None,
+        help="Receiver phone (branches.phone) to auto-resolve client_slug.",
+    )
+    parser.add_argument("--text", default=None, help="Substring of inbound message text.")
+    parser.add_argument("--message-id", default=None, help="ChatFlow metadata.messageId value.")
+    parser.add_argument("--message-uuid", default=None, help="messages.id UUID.")
+    parser.add_argument("--conversation-id", default=None)
+    parser.add_argument("--remote-jid", default=None)
+    parser.add_argument("--minutes", type=int, default=120)
+    parser.add_argument("--limit", type=int, default=1)
+    parser.add_argument("--outbox-limit", type=int, default=3)
+    parser.add_argument("--output", default="-", help="Output path (use '-' for stdout).")
+    args = parser.parse_args(argv)
+    if not args.client_slug and not args.receiver_phone:
+        args.client_slug = os.environ.get("TRUFFLES_CLIENT_SLUG", "demo_salon")
+    return args
+
 def _pick_fuzz_cases(cases, count, rng):
     if count <= 0:
         return []
@@ -808,6 +833,19 @@ def _run_psql_query(db_user, query):
     if result.returncode != 0:
         return None, result.stderr.strip()
     return result.stdout.strip(), None
+
+def _parse_iso_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = str(value)
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
 
 def _fetch_client_meta(db_user, client_slug):
     safe_slug = _escape_sql_literal(client_slug)
@@ -1000,6 +1038,45 @@ def _fetch_outbox_summary(db_user, client_id, inbound_message_id):
     status = parts[1] if len(parts) > 1 and parts[1] else None
     return {"count": count, "status": status}, None
 
+def _fetch_outbox_rows(db_user, client_id, inbound_message_id, limit=5):
+    safe_client = _escape_sql_literal(client_id)
+    safe_id = _escape_sql_literal(inbound_message_id)
+    query = (
+        "SELECT json_build_object("
+        "'id', id, "
+        "'status', status, "
+        "'attempts', attempts, "
+        "'created_at', created_at, "
+        "'updated_at', updated_at, "
+        "'last_error', last_error, "
+        "'meta', meta, "
+        "'payload_json', payload_json"
+        ") "
+        "FROM outbox_messages "
+        f"WHERE client_id = '{safe_client}' AND inbound_message_id = '{safe_id}' "
+        "ORDER BY created_at DESC "
+        f"LIMIT {int(max(limit, 1))};"
+    )
+    rows_raw, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not rows_raw:
+        return [], None
+    rows = []
+    for line in rows_raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        payload_meta = _extract_outbox_payload_meta(row.get("payload_json"))
+        row["payload_meta"] = payload_meta
+        row.pop("payload_json", None)
+        rows.append(row)
+    return rows, None
+
 def _fetch_branch_meta(db_user, branch_id):
     if not branch_id:
         return None, None
@@ -1064,10 +1141,50 @@ def _fetch_message_rows(db_user, where_clause, limit):
             continue
     return rows, None
 
+def _fetch_message_bundle_rows(db_user, where_clause, limit):
+    query = (
+        "SELECT json_build_object("
+        "'message_uuid', m.id, "
+        "'content', m.content, "
+        "'created_at', m.created_at, "
+        "'remote_jid', u.remote_jid, "
+        "'instance_id', m.metadata->>'instanceId', "
+        "'message_id', m.metadata->>'messageId', "
+        "'conversation_id', c.id, "
+        "'branch_id', c.branch_id, "
+        "'conversation_state', c.state, "
+        "'client_slug', cl.name, "
+        "'decision_meta', m.metadata->'decision_meta', "
+        "'metadata', m.metadata"
+        ") "
+        "FROM messages m "
+        "JOIN conversations c ON c.id = m.conversation_id "
+        "JOIN users u ON u.id = c.user_id "
+        "JOIN clients cl ON cl.id = c.client_id "
+        f"WHERE {where_clause} "
+        "ORDER BY m.created_at DESC "
+        f"LIMIT {int(max(limit, 1))};"
+    )
+    rows_raw, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not rows_raw:
+        return [], None
+    rows = []
+    for line in rows_raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            continue
+    return rows, None
+
 def _fetch_latest_outbox_for_conversation(db_user, conversation_id):
     safe_id = _escape_sql_literal(conversation_id)
     query = (
-        "SELECT inbound_message_id, status, payload_json::text "
+        "SELECT inbound_message_id, status, payload_json::text, meta::text "
         f"FROM outbox_messages WHERE conversation_id = '{safe_id}' "
         "ORDER BY created_at DESC LIMIT 1;"
     )
@@ -1076,18 +1193,47 @@ def _fetch_latest_outbox_for_conversation(db_user, conversation_id):
         return None, error
     if not row:
         return None, None
-    parts = row.split("\t", 2)
+    parts = row.split("\t", 3)
     payload = None
     if len(parts) > 2 and parts[2]:
         try:
             payload = json.loads(parts[2])
         except Exception:
             payload = None
+    meta = None
+    if len(parts) > 3 and parts[3]:
+        try:
+            meta = json.loads(parts[3])
+        except Exception:
+            meta = None
     return {
         "inbound_message_id": parts[0] if len(parts) > 0 else None,
         "status": parts[1] if len(parts) > 1 else None,
         "payload_json": payload,
+        "meta": meta,
     }, None
+
+def _compute_outbox_latency(message_created_at, outbox_rows):
+    if not message_created_at or not outbox_rows:
+        return {}
+    message_ts = _parse_iso_datetime(message_created_at)
+    if not message_ts:
+        return {}
+    first_row = outbox_rows[0] if outbox_rows else None
+    if not isinstance(first_row, dict):
+        return {}
+    created_at = _parse_iso_datetime(first_row.get("created_at"))
+    updated_at = _parse_iso_datetime(first_row.get("updated_at"))
+    if not created_at:
+        return {}
+    inbound_to_outbox_ms = (created_at - message_ts).total_seconds() * 1000
+    outbox_total_ms = None
+    if updated_at:
+        outbox_total_ms = (updated_at - created_at).total_seconds() * 1000
+    return {
+        "inbound_to_outbox_ms": round(inbound_to_outbox_ms, 2),
+        "outbox_total_ms": round(outbox_total_ms, 2) if outbox_total_ms is not None else None,
+    }
 
 def _summarize_decision_meta(meta):
     if not isinstance(meta, dict):
@@ -1982,6 +2128,150 @@ def _run_explain(args):
             print("traefik_hits:")
             for line in hits:
                 print(line)
+
+def _run_trace_bundle(args):
+    db_user = _resolve_db_user_simple()
+    client_slug = args.client_slug
+    branch_id = None
+    if not client_slug and args.receiver_phone:
+        resolved_branch, error = _fetch_client_by_branch_phone(db_user, args.receiver_phone)
+        if error:
+            raise SystemExit(f"trace-bundle: receiver phone lookup failed ({error})")
+        if not resolved_branch:
+            raise SystemExit("trace-bundle: receiver phone not found; provide --client-slug")
+        client_slug = resolved_branch.get("client_slug")
+        branch_id = resolved_branch.get("branch_id")
+
+    clauses = ["m.role = 'user'"]
+    safe_slug = None
+    if client_slug:
+        safe_slug = _escape_sql_literal(client_slug)
+        clauses.append(f"cl.name = '{safe_slug}'")
+    if branch_id:
+        safe_branch = _escape_sql_literal(branch_id)
+        clauses.append(f"c.branch_id = '{safe_branch}'")
+    if args.remote_jid:
+        safe_jid = _escape_sql_literal(args.remote_jid)
+        clauses.append(f"u.remote_jid = '{safe_jid}'")
+
+    if args.message_uuid:
+        safe_uuid = _escape_sql_literal(args.message_uuid)
+        clauses.append(f"m.id = '{safe_uuid}'")
+    elif args.message_id:
+        safe_message = _escape_sql_literal(args.message_id)
+        clauses.append(f"m.metadata->>'messageId' = '{safe_message}'")
+    elif args.conversation_id:
+        safe_conv = _escape_sql_literal(args.conversation_id)
+        clauses.append(f"m.conversation_id = '{safe_conv}'")
+    elif args.text:
+        safe_text = _escape_sql_literal(args.text)
+        minutes = int(max(args.minutes, 1))
+        clauses.append(f"m.content ILIKE '%{safe_text}%'")
+        clauses.append(f"m.created_at > now() - interval '{minutes} minutes'")
+    else:
+        raise SystemExit(
+            "trace-bundle: provide --text, --message-id, --message-uuid, or --conversation-id"
+        )
+
+    where_clause = " AND ".join(clauses)
+    rows, error = _fetch_message_bundle_rows(db_user, where_clause, args.limit)
+    if error:
+        raise SystemExit(f"trace-bundle: db error ({error})")
+    if not rows:
+        print("trace-bundle: no inbound messages found.")
+        return
+
+    client_meta = None
+    if client_slug:
+        client_meta, _ = _fetch_client_meta(db_user, client_slug)
+
+    bundles = []
+    for row in rows:
+        conv_id = row.get("conversation_id")
+        decision_meta = row.get("decision_meta") if isinstance(row.get("decision_meta"), dict) else {}
+        conversation_meta, _ = _fetch_conversation_meta(db_user, conv_id)
+        context = conversation_meta.get("context") if isinstance(conversation_meta, dict) else None
+        decision_trace = _trace_as_list(context.get("decision_trace")) if isinstance(context, dict) else []
+
+        outbox_summary = None
+        outbox_rows = []
+        outbox_latest = None
+        if client_meta and row.get("message_id"):
+            outbox_summary, _ = _fetch_outbox_summary(
+                db_user,
+                client_meta.get("client_id"),
+                row.get("message_id"),
+            )
+            outbox_rows, _ = _fetch_outbox_rows(
+                db_user,
+                client_meta.get("client_id"),
+                row.get("message_id"),
+                limit=args.outbox_limit,
+            )
+        if not outbox_rows and conv_id:
+            outbox_latest, _ = _fetch_latest_outbox_for_conversation(db_user, conv_id)
+            if outbox_latest:
+                outbox_latest["payload_meta"] = _extract_outbox_payload_meta(
+                    outbox_latest.get("payload_json")
+                )
+                outbox_latest.pop("payload_json", None)
+
+        latency = _compute_outbox_latency(row.get("created_at"), outbox_rows)
+
+        bundles.append(
+            {
+                "message": {
+                    "message_uuid": row.get("message_uuid"),
+                    "message_id": row.get("message_id"),
+                    "created_at": row.get("created_at"),
+                    "remote_jid": row.get("remote_jid"),
+                    "instance_id": row.get("instance_id"),
+                    "conversation_id": conv_id,
+                    "branch_id": row.get("branch_id"),
+                    "client_slug": row.get("client_slug"),
+                    "conversation_state": row.get("conversation_state"),
+                    "content": row.get("content"),
+                },
+                "decision_meta": decision_meta,
+                "decision_trace": decision_trace,
+                "conversation": {
+                    "state": conversation_meta.get("state") if isinstance(conversation_meta, dict) else None,
+                    "telegram_topic_id": conversation_meta.get("telegram_topic_id")
+                    if isinstance(conversation_meta, dict)
+                    else None,
+                },
+                "outbox": {
+                    "summary": outbox_summary,
+                    "rows": outbox_rows,
+                    "latest": outbox_latest,
+                    "latency_ms": latency,
+                },
+            }
+        )
+
+    payload = {
+        "query": {
+            "client_slug": client_slug,
+            "receiver_phone": args.receiver_phone,
+            "remote_jid": args.remote_jid,
+            "message_id": args.message_id,
+            "message_uuid": args.message_uuid,
+            "conversation_id": args.conversation_id,
+            "text": args.text,
+            "minutes": args.minutes,
+        },
+        "bundles": bundles,
+    }
+    output = json.dumps(payload, ensure_ascii=False, indent=2)
+    if args.output == "-":
+        print(output)
+        return
+    output_dir = os.path.dirname(args.output)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(args.output, "w", encoding="utf-8") as handle:
+        handle.write(output + "\n")
+    print(json.dumps({"output": args.output, "count": len(bundles)}, ensure_ascii=False))
 
 def _run_livecheck_ca05_booking(args, context):
     rng = context["rng"]
@@ -3995,6 +4285,9 @@ if len(sys.argv) > 1 and sys.argv[1] == "send-and-explain":
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "explain":
     _run_explain(_parse_explain_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "trace-bundle":
+    _run_trace_bundle(_parse_trace_bundle_args(sys.argv[2:]))
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "emit-evidence":
     _run_emit_evidence(_parse_emit_evidence_args(sys.argv[2:]))

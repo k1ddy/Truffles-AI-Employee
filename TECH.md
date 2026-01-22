@@ -115,6 +115,7 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `OUTBOX_MAX_ATTEMPTS` — максимум попыток outbox перед статусом FAILED (default: 5).
 - `OUTBOX_RETRY_BACKOFF_SECONDS` — базовый backoff (сек) для повторов outbox (default: 2).
 - `OUTBOX_STALE_PROCESSING_SECONDS` — через сколько секунд PROCESSING считается зависшим и переходит обратно в очередь (default: 120).
+- `CONSOLE_IDEMPOTENCY_TTL_SECONDS` — TTL незавершённых console idempotency ключей (default: 600).
 - `ALERTS_ADMIN_TOKEN` — токен для admin/outbox эндпойнтов.
 - `CHATFLOW_RETRY_ATTEMPTS` — количество попыток отправки в ChatFlow (default: 3).
 - `CHATFLOW_RETRY_BACKOFF_SECONDS` — базовый backoff (сек) для ChatFlow (default: 0.5).
@@ -372,6 +373,9 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 100"
 
 ### Деплой API (prod)
 ```bash
+# Обновить APP_VERSION (используется в /admin/version и livecheck deploy-verify)
+ssh -p 222 zhan@5.188.241.234 "sed -i 's/^APP_VERSION=.*/APP_VERSION=main/' /home/zhan/truffles-main/truffles-api/.env"
+
 # CI build/push → pull image
 ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main bash ~/restart_api.sh"
 
@@ -380,6 +384,11 @@ ssh -p 222 zhan@5.188.241.234 "docker build -t truffles-api_truffles-api /home/z
 ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 ```
 `restart_api.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`.
+
+После деплоя обязательно перезапустить воркеры на том же образе, чтобы не было дрейфа:
+```bash
+ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env bash /home/zhan/truffles-main/scripts/restart_workers.sh"
+```
 
 ### Перезапуск API (без обновления кода)
 ```bash

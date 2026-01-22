@@ -16,6 +16,7 @@ logger = get_logger("webhook")
 DECISION_TRACE_KEY = "decision_trace"
 DECISION_TRACE_MAX = 40
 DECISION_TRACE_CRITICAL_STAGES = {
+    "action_gate",
     "booking",
     "booking_interrupt",
     "consult_flow",
@@ -25,6 +26,7 @@ DECISION_TRACE_CRITICAL_STAGES = {
     "fast_intent",
     "multi_truth",
     "out_of_domain",
+    "outbox_payload_guard",
     "pending_resume",
     "pending_sla",
     "pending_wait",
@@ -42,6 +44,62 @@ DECISION_TRACE_PRIORITY_STAGES = {
     "booking_interrupt",
     "multi_truth",
 }
+
+DECISION_STAGE_ORDER_SNAPSHOT = [
+    "preflight",
+    "outbox_payload_guard",
+    "outbox",
+    "contract",
+    "decision_graph",
+    "session_memory",
+    "re_entry",
+    "class_carryover",
+    "service_carryover",
+    "consult_context",
+    "question_contract",
+    "branch_selection",
+    "shield",
+    "policy_gate",
+    "routing",
+    "rejection",
+    "pending_sla",
+    "pending_resume",
+    "pending_status",
+    "pending_wait",
+    "media",
+    "debounce",
+    "handover_confirmation",
+    "intent_decomposition",
+    "class_router",
+    "intent",
+    "carryover_guard",
+    "booking_gate",
+    "complaint_guard",
+    "out_of_domain",
+    "consult_flow",
+    "intent_queue",
+    "booking",
+    "consult",
+    "clarify_guard",
+    "booking_interrupt",
+    "service_matcher",
+    "truth_gate",
+    "multi_truth",
+    "service_semantic_matcher",
+    "time_only_guard",
+    "info_class",
+    "fast_intent",
+    "llm_guard",
+    "ai_response",
+    "rewrite",
+    "budget_gate",
+    "llm_degradation",
+    "context_manager",
+    "consult_return",
+    "escalation",
+    "state_transition",
+    "action_gate",
+]
 
 
 def _is_critical_trace(payload: dict[str, Any]) -> bool:
@@ -116,6 +174,25 @@ def _update_message_decision_metadata(message: Message, updates: dict[str, Any])
     metadata = dict(message.message_metadata or {})
     decision_meta = dict(metadata.get("decision_meta") or {})
     decision_meta.update(updates)
+    metadata["decision_meta"] = decision_meta
+    message.message_metadata = metadata
+
+
+def _merge_message_timing(message: Message | None, timing_updates: dict[str, Any] | None) -> None:
+    if not message or not isinstance(timing_updates, dict):
+        return
+    metadata = dict(message.message_metadata or {})
+    decision_meta = dict(metadata.get("decision_meta") or {})
+    existing = decision_meta.get("timing")
+    merged: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+    for key, value in timing_updates.items():
+        if value is None:
+            continue
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = {**merged[key], **value}
+        else:
+            merged[key] = value
+    decision_meta["timing"] = merged
     metadata["decision_meta"] = decision_meta
     message.message_metadata = metadata
 
@@ -200,8 +277,10 @@ __all__ = [
     "DECISION_TRACE_CRITICAL_STAGES",
     "DECISION_TRACE_KEY",
     "DECISION_TRACE_MAX",
+    "DECISION_STAGE_ORDER_SNAPSHOT",
     "_attach_llm_cache_flag",
     "_record_decision_trace",
     "_record_message_decision_meta",
+    "_merge_message_timing",
     "_update_message_decision_metadata",
 ]

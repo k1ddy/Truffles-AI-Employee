@@ -38,13 +38,12 @@ Console uses `agent_identities` to map OIDC `sub` → `agents` → `client_id`.
 - `/console/v1/me` возвращает `clients[]` и `selection_required`.
 - API требует заголовок `X-Client-Id`, если клиентов > 1.
 - UI хранит выбор в `localStorage` (`console:client_id`) и очищает на logout.
-
 **Access scope is enforced here:**
 `truffles-api/app/services/console_auth.py` → `get_console_context()`
 
 **Note (current limitation):**
 Org-level access реализован частично: есть `agent_memberships` и RBAC, но company/branch selection в UI
-ограничен выбором клиента. Полная модель Company → Client → Branch — по DEC‑011.
+ограничен выбором клиента. Полная модель Company → Client → Branch — по DEC-011.
 
 Rules:
 - `sub` must exist in `agent_identities` (channel=`oidc`).
@@ -138,6 +137,7 @@ Set `users[].id` in `ops/keycloak-realm.json` to avoid `sub` changes on re‑cre
 
 **Defaults:**
 - Smoke tests are read-only. Mutating checks require `E2E_ALLOW_MUTATIONS=1`.
+- CI uses `E2E_USE_STORAGE_STATE=1` to log in once per run (faster, less flaky).
 - Login flow uses NextAuth sign-in to reach Keycloak (more stable than clicking UI).
 - Playwright uses storageState via setup project (one login per run).
 
@@ -148,7 +148,7 @@ Set `users[].id` in `ops/keycloak-realm.json` to avoid `sub` changes on re‑cre
 - Contract/k6: `/home/zhan/secrets/console-contract.env`.
 - Template: `console-web/.env.e2e.example` (no secrets).
 - CI: GitHub Secrets (`CONSOLE_E2E_USERNAME`, `CONSOLE_E2E_PASSWORD`, `CONSOLE_KEYCLOAK_CLIENT_SECRET`).
-- `CONSOLE_API_TOKEN` is short‑lived; do not store in repo. If used locally, keep only in
+- `CONSOLE_API_TOKEN` is short-lived; do not store in repo. If used locally, keep only in
   `/home/zhan/secrets/console-contract.env` and rotate.
 
 **Seed (stable E2E data):**
@@ -156,7 +156,7 @@ Set `users[].id` in `ops/keycloak-realm.json` to avoid `sub` changes on re‑cre
 - Requires DB + Keycloak admin, gated by `E2E_SEED_ALLOW=1`.
 - If `sub` is known, pass `E2E_SUBJECT` to skip Keycloak admin.
 
-**E2E note (multi‑client):**
+**E2E note (multi-client):**
 - E2E user should map to **one** client, or storageState must include `console:client_id`.
 - Otherwise tests will see `CLIENT_SELECTION_REQUIRED`.
 
@@ -166,12 +166,11 @@ Set `users[].id` in `ops/keycloak-realm.json` to avoid `sub` changes on re‑cre
 KEYCLOAK_TOKEN_URL="https://auth.truffles.kz/realms/truffles/protocol/openid-connect/token"
 curl -s -X POST "$KEYCLOAK_TOKEN_URL" \
   -d "client_id=console-web" \
-  -d "client_secret=$KEYCLOAK_CLIENT_SECRET" \
+  -d "client_secret=$CONSOLE_KEYCLOAK_CLIENT_SECRET" \
   -d "grant_type=password" \
   -d "username=$CONSOLE_KEYCLOAK_USERNAME" \
   -d "password=$CONSOLE_KEYCLOAK_PASSWORD" | jq -r '.access_token'
 ```
-
 ---
 
 ## 7) Debug & Troubleshooting

@@ -113,6 +113,7 @@ curl http://localhost:3000/api/health/full
 - Шаблон переменных: `console-web/.env.e2e.example`.
 
 **Playwright smoke (read-only):**
+`E2E_USE_STORAGE_STATE=1` включает один логин на весь прогон (быстрее и стабильнее).
 ```bash
 cd /home/zhan/truffles-main/console-web
 
@@ -140,6 +141,7 @@ KEYCLOAK_ISSUER=$KEYCLOAK_ISSUER \
 KEYCLOAK_CLIENT_ID=$KEYCLOAK_CLIENT_ID \
 KEYCLOAK_CLIENT_SECRET=$KEYCLOAK_CLIENT_SECRET \
 NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+E2E_USE_STORAGE_STATE=1 \
 npm run test:e2e:smoke
 ```
 

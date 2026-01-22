@@ -12,12 +12,37 @@ Quick checks
 curl -s http://localhost:8000/admin/health
 ```
 
+Contract guardrails
+- Outbox payload types:
+  - `schema_version=outbox.v1` + `event_type=whatsapp.send_text` for send-only delivery.
+  - Legacy webhook payloads validated by `app.schemas.outbox_payload.OutboxPayloadContract`.
+- Invalid payload → `decision_trace.stage=outbox_payload_guard`, `decision_meta.action=error`, no outbox enqueue.
+- Timing evidence: `decision_meta.timing.outbox` + `outbox_messages.meta.timing`.
+
+```bash
+curl -sG http://localhost:9090/api/v1/query --data-urlencode \
+  'query=histogram_quantile(0.95, sum by (le, client_slug) (rate(outbox_latency_bucket[5m])))' \
+  | python3 - <<'PY'
+import json, sys
+data = json.load(sys.stdin)
+for item in data.get("data", {}).get("result", []):
+    slug = item.get("metric", {}).get("client_slug", "all")
+    value = item.get("value", [None, None])[1]
+    print(f"outbox_p95 {slug}: {value}s")
+PY
+```
+
 ```bash
 docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "\
 SELECT status, COUNT(*), MIN(created_at) AS oldest\
 FROM outbox_messages\
 WHERE status IN ('PENDING','PROCESSING','FAILED')\
 GROUP BY status;"
+```
+
+```bash
+# Bundle timings for a specific inbound message.
+python3 ops/diagnose.py trace-bundle --client-slug demo_salon --message-id "<CHATFLOW_MESSAGE_ID>"
 ```
 
 Recovery steps
@@ -72,3 +97,4 @@ Evidence to capture
 
 Notes
 - Do not modify DB/trace to fabricate evidence. Use DB updates only for recovery.
+- `WEBHOOK_ENQUEUE_ONLY=1` forces `/webhook` to enqueue-only (bypasses full decision pipeline).

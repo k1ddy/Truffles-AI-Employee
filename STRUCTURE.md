@@ -20,12 +20,14 @@
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
+| `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
-| `console-web/e2e/` | Playwright smoke/login/setup тесты | Frontend/QA |
+| `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
 | `console-web/eslint.config.js` | ESLint flat config для console-web | Frontend |
 | `console-web/.env.e2e.example` | Шаблон env для console‑e2e | Frontend/QA |
+| `console-web/public/brand/` | Бренд‑ассеты консоли (логотипы) | Frontend |
 | `docs/CONSOLE_GUIDE.md` | Guide по Console (API, тесты, дебаг) | Frontend/Backend |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 
@@ -56,6 +58,7 @@
 - План/приоритеты: `STRATEGY/TECH_ROADMAP.md`.
 - Операционные SOP: `SPECS/SYSTEM_REFERENCE.md` (deploy/knowledge update) + `TECH.md` + `docs/runbooks/*`.
 - Решения/GAP: `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml`.
+- Outbox payload contract: `contracts/events/outbox.webhook_payload.v1.jsonschema`.
 - Runtime pack: `truffles-api/app/knowledge/demo_salon/*`; RAG docs: `knowledge/demo_salon/*`.
 - Derived/статусы: `docs/TECH_STATUS.md`, `SUMMARY.md`, `docs/IMPERIUM_CONTEXT.yaml` (не канон).
 
@@ -100,6 +103,7 @@
 - `docs/SESSION_START_PROMPT.txt` — протокол старта.
 - `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml` — решения и GAP.
 - `docs/runbooks/*` — операционные runbooks (outbox/sentinel/incidents).
+- `docs/runbooks/TRACE_BUNDLE.md` — bundle диагностика (trace/meta/outbox latency).
 - `truffles-api/app/knowledge/<client_slug>/*` — runtime pack (truth/policy/eval).
 - `knowledge/<client_slug>/*` — канон RAG‑контента клиента.
 
@@ -353,6 +357,7 @@ truffles-api/
 - `ops/migrations/015_add_metrics_daily.sql` — дневные метрики (SLA/LLM/эскалации).
 - `ops/migrations/016_add_asr_metrics.sql` — метрики ASR (fail rate + totals).
 - `ops/migrations/017_add_knowledge_backlog.sql` — backlog пропусков (low_confidence/out_of_domain/llm_timeout/clarify).
+- `ops/migrations/018_add_outbox_meta.sql` — JSONB meta в `outbox_messages` для таймингов/метаданных.
 
 **Старые скрипты:** `.archive/ops_old/` — не в git.
 

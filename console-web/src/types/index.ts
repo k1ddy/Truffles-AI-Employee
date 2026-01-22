@@ -42,5 +42,5 @@ export interface Message {
     role: string;
     content: string;
     created_at: string;
-    metadata?: Record<string, unknown>;
+    metadata?: Record<string, unknown> | null;
 }
