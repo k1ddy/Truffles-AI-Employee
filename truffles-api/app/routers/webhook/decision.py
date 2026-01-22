@@ -5916,9 +5916,7 @@ async def _handle_webhook_payload(
         metadata = saved_message.message_metadata if isinstance(saved_message.message_metadata, dict) else {}
         decision_meta = metadata.get("decision_meta") if isinstance(metadata, dict) else {}
         if not (isinstance(decision_meta, dict) and decision_meta.get("action")):
-            intent_value = decision.intent if isinstance(decision.intent, str) else None
-            if not intent_value:
-                intent_value = getattr(intent, "value", None)
+            intent_value = getattr(intent, "value", None)
             _record_message_decision_meta(
                 saved_message,
                 action=decision.action,
