@@ -2,6 +2,7 @@ import ast
 import hashlib
 from pathlib import Path
 
+
 def _stage_order_hash(stage_order):
     joined = "\n".join(stage_order)
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
