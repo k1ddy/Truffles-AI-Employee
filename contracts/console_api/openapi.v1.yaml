@@ -49,6 +49,8 @@ paths:
                 $ref: "#/components/schemas/MeResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
         "403":
           $ref: "#/components/responses/Forbidden"
 
@@ -98,6 +100,8 @@ paths:
                 $ref: "#/components/schemas/CaseListResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
 
   /cases/{case_id}:
     get:
@@ -115,6 +119,8 @@ paths:
                 $ref: "#/components/schemas/Case"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -185,6 +191,8 @@ paths:
                 $ref: "#/components/schemas/MessageListResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -262,6 +270,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
 
   # ──────────────────────────────────────────────────────────────────
   # SETTINGS
@@ -335,6 +345,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
 
 # ════════════════════════════════════════════════════════════════════
 # COMPONENTS
@@ -446,6 +458,12 @@ components:
               code: IDEMPOTENCY_CONFLICT
               message: Request already processed
               trace_id: abc123
+    ValidationError:
+      description: Request validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationError"
 
   schemas:
     # ── Errors ──
@@ -474,6 +492,19 @@ components:
       properties:
         error:
           $ref: "#/components/schemas/Error"
+
+    ValidationErrorItem:
+      type: object
+      additionalProperties: true
+
+    ValidationError:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationErrorItem"
 
     # ── Auth ──
     Agent:
@@ -663,7 +694,7 @@ components:
       properties:
         status:
           type: string
-          enum: [healthy, degraded, unhealthy]
+          enum: [ok, healthy, degraded, unhealthy]
         version:
           type: string
         database:
