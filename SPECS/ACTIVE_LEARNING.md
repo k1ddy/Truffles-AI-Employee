@@ -3,7 +3,7 @@ SOURCE OF TRUTH: canonical active learning spec; status/evidence live in `STATE.
 
 **Статус:** CANON (P2)  
 **Owner:** Top Architect  
-**Обновлено:** 2026-01-15  
+**Обновлено:** 2026-01-22  
 **Scope:** active learning, модерация, knowledge backlog, wiring.  
 **Out of scope:** реализация кода, тарифы.  
 **Links:** `SPECS/ESCALATION.md`, `SPECS/ARCHITECTURE.md`, `STATE.md`.
@@ -103,6 +103,12 @@ _Любые статусы ниже — DERIVED; единственный ист
 ---
 
 ## АРХИТЕКТУРА ACTIVE LEARNING
+
+### L1/L2/L3 auto‑learning (LLM‑assisted, no facts)
+- **L1 (tenant, online):** LLM классифицирует intent/slot‑гипотезы и нормализует формулировки; пишет кандидаты, не меняет факты.
+- **L2 (tenant, offline):** кластеризация `knowledge_backlog` + `handovers` → PR в `client_pack` + EVAL/chaos до merge.
+- **L3 (domain, opt‑in):** агрегированные, обезличенные кластеры → PR в `domain_pack` (без PII).
+- **LLM provider:** OpenAI‑совместимые модели; локальные LLM не используются.
 
 ### Источник данных: `handovers` (как есть)
 

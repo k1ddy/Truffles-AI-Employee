@@ -2,7 +2,7 @@
 
 **Статус:** CANON  
 **Owner:** Top Architect  
-**Обновлено:** 2026-01-15  
+**Обновлено:** 2026-01-22  
 **Scope:** архитектура рантайма, decision graph, компоненты и потоки.  
 **Out of scope:** тарифы/продажи, evidence/CI.  
 **Links:** `SPECS/CONSULTANT.md`, `SPECS/INFRASTRUCTURE.md`, `STATE.md`.
@@ -130,14 +130,14 @@ outbox worker (тик 2s) или POST /admin/outbox/process (cron)
 _handle_webhook_payload(skip_persist=True)
     ↓
 behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → policy‑gates (скидки/оплата info)
-→ answer‑interpreter (expected_reply_type) → LLM Dialogue Controller (intent+slots) → early OOD (только при out‑signals без in‑signals)
-→ info bundle / consult / booking flow / service matcher → fast intent (smalltalk) → LLM формулировка (RAG) → truth gate fallback → low‑confidence handling
+→ answer‑interpreter (expected_reply_type) → LLM‑first понимание (intent/slots JSON) + semantic resolver → early OOD (только при out‑signals без in‑signals)
+→ tools/packs fact‑resolver (info/consult/booking/service) → fast intent (smalltalk) → LLM‑формулировка поверх фактов → Response Guard → truth gate fallback → low‑confidence handling
     ↓
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
 ```
 
 ### Decision Graph (legacy map, `_legacy.py`)
-Фактическая карта стадий и ранних return в `_handle_webhook_payload` (legacy pipeline). Это **не** целевой оркестратор `decision.py`, а снимок текущего поведения.
+Фактическая карта стадий и ранних return в `_handle_webhook_payload` (legacy pipeline). Это **не** целевой оркестратор `decision.py`, а снимок текущего поведения. Целевой канон добавляет стадии `semantic_resolver`, `tool_fact_resolver`, `response_guard`.
 
 #### Stage order (gates/early returns)
 1) Preflight rejects и outbox-only путь → early return с `preflight`/`outbox` trace (если conversation резолвится; иначе trace не пишется).
@@ -245,20 +245,20 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - **Safety Guard** → pending/opt‑out/Hard‑LAW escalation + policy‑gates (скидки/оплата info).
 - **OOD Guard** → early OOD (только если нет in‑signals).
 - **Booking Guard** → booking guard/flow + expected_reply_type контракт.
-- **Info/RAG Specialist** → info bundle / consult / service matcher → LLM‑формулировка (RAG) → truth gate fallback.
+- **Info/RAG Specialist** → tools/packs fact‑resolver → LLM‑формулировка → Response Guard → truth gate fallback.
 - **Host Persona** → формулировка ответа (шаблоны/LLM) по `SPECS/CONSULTANT.md`, CTA/quiet hours в response‑слое.
 - **Observability** → decision_trace/meta на каждом сообщении.
 
-### LLM Dialogue Controller (single arbiter) — канон
-- Цель: **единый арбитр смысла**. Ни один другой слой не меняет `intent`/`slots`.
-- Выход (IntentContract): `intent`, `slots`, `language`, `emotion`, `confidence`, `risk_signals`.
-- `intent` соответствует классу решения; `active_goal` вычисляется детерминированно после router.
-- Доп. поля (`goal`, `followups`, `reason`, `safety_flags`) допускаются только в trace/meta, не в контракте.
-- Контракт полей = `truffles-api/app/schemas/webhook.py`; расхождения считаются GAP.
+### LLM‑first Understanding + Deterministic Commit — канон
+- Цель: **LLM даёт смысл**, но commit решения проходит через deterministic validators.
+- Выход LLM (IntentContract): `intent`, `slots`, `language`, `emotion`, `confidence`, `risk_signals`.
+- Semantic resolver подтверждает/опровергает; расхождения фиксируются в trace/meta (proposed vs committed).
+- Факты извлекаются **только** через tools/packs; LLM не создаёт факты.
+- Response Guard обязателен: текст = ack + facts + next_step, иначе fallback.
 - Классы (по приоритету): Hard‑LAW → policy → opt‑out → human/frustration → booking → info‑bundle → consult → greeting → OOD.
-- Anchors/лексика/эвристики — **только fallback/boost**, не основной источник смысла.
+- Anchors/лексика/эвристики — **fallback/boost**, не основной источник смысла.
 - OOD допустим **только** если есть out‑signals и **нет** in‑signals (strict‑in).
-- Если confidence ниже порога/LLM недоступен → fallback на детерминированный router; **обязательная фиксация** в trace.
+- Если confidence ниже порога/LLM недоступен → fallback на semantic resolver/детерминированный router; фиксация в trace.
 - Multi‑intent: сильный класс отвечает первым, остальные идут в очередь (intent_queue) с возвратом к цели.
 - `info_bundle` — **отдельный класс**, не “схлопывается” в `info`.
 
@@ -270,6 +270,88 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - ResponseContract: `tone`, `must_include`, `must_not_include`, `language`.
 - MemoryContract: `mode`, `slots`, `summary`, `last_updated`, `ttl`, `last_updated_at`, `ttl_hours`, `active_goal`, `last_question_type`, `goal_stack`, `pending_slots`, `unanswered_questions`.
 - TraceContract: `stage`, `decision`, `reason`, `meta`.
+
+### Tool Fact Contracts (P0)
+**Цель:** единственный источник фактов; LLM не создаёт факты.
+
+**Слои:**
+1) **Semantic resolver** → выбирает intent/service кандидаты (embeddings + thresholds).
+2) **Tool resolver** → собирает факты из packs/инструментов.
+3) **Response Guard** → проверяет финальный текст на допустимые секции.
+
+**Tools (deterministic):**
+- `fact.info_bundle` → address/hours/parking/guest_policy.
+- `fact.pricing` → price_item + price_text.
+- `fact.duration` → duration_item + duration_text.
+- `fact.service_match` → service_id + service_text (presence/availability).
+- `fact.consult_playbook` → playbook_id + lead/questions/options/next_step.
+- `fact.policy` → policy_section + rule_text (discounts/payment_info).
+- `fact.booking_prompt` → next_slot + prompt_text (expected_reply_type).
+- `fact.handoff` → escalation_text (pending/manager_active status).
+
+**Tool output contract (minimum):**
+```json
+{
+  "fact_source": "truth|service_matcher|consult_playbook|policy|booking|handoff",
+  "fact_payload": {"info_sections": [], "service_query": "", "price_item": "", "duration_item": ""},
+  "fact_text": "string"
+}
+```
+
+**Trace/meta requirements:**
+- decision_trace: `stage=tool_fact_resolver`, `tool_name`, `tool_decision`.
+- decision_meta: `fact_source`, `fact_payload` keys, `tool_used`.
+
+### Semantic Resolver (P0)
+**Цель:** устойчивость RU/KZ/mixed без раздувания ключевых слов; детерминированный commit.
+
+**Вход:**
+- `user_text`, `expected_reply_type`, `client_slug`, `branch_id`
+- LLM proposal: `intent/slots/confidence` (если есть)
+- Intent/Service cards (packs/Qdrant)
+
+**Cards (rules‑as‑data):**
+- `domain_pack.intent_cards`: id, title, description, examples (ru/kk/mixed), risk_flags
+- `client_pack.service_cards`: service_id, name, category, description, examples (ru/kk/mixed)
+- Индексация: `ops/sync_client.py --sync` → Qdrant, metadata `{client_slug, branch_id, card_type, id}`
+
+**Scoring (deterministic):**
+- Embeddings (BGE‑M3), top‑k=5.
+- Пороги: `intent_threshold`, `service_threshold` (глобальные + per‑card override).
+
+**Commit rules:**
+- Если `semantic_score >= threshold` → commit semantic result (может override LLM).
+- Если `semantic_score < threshold` и LLM `confidence` высокий → commit LLM result, но метка `semantic_low_confidence`.
+- Иначе → clarify или handoff (по правилам).
+
+**Output (meta):**
+- `semantic_used`, `semantic_intent`, `semantic_service_id`
+- `semantic_score`, `semantic_threshold`, `semantic_candidates` (top‑3)
+- `semantic_version` (для воспроизводимости)
+
+**Trace:**
+- `decision_trace.stage=semantic_resolver` с кандидатом, score, threshold, decision.
+- `decision_meta` включает все output‑поля.
+
+**Fallback:**
+- При недоступных embeddings/ошибках → deterministic anchors (record `semantic_fallback_reason`).
+
+### Response Guard (P0)
+**Цель:** ноль галлюцинаций и строгое соответствие фактам.
+
+**Правила:**
+- Финальный текст может содержать только `ack` + `fact_text` + `next_step`.
+- Если `fact_payload` пустой → clarify или handoff (по правилам).
+- Запрещены новые факты/советы/обещания вне `fact_payload`.
+- Для booking: разрешён только slot‑echo из валидированных слотов.
+- Для handoff: только эскалационные шаблоны.
+
+**Fallback:**
+- Нарушение → deterministic шаблон или clarify/escalate, записать guard‑решение.
+
+**Trace/meta:**
+- decision_trace: `stage=response_guard`, `decision=pass|fallback`, `reason`.
+- decision_meta: `response_guard`, `guard_reason`, `guard_fallback`.
 
 **Живой хост — канон (in-domain):**
 - **3 исхода:** факт‑ответ (info/consult), booking intake, эскалация.

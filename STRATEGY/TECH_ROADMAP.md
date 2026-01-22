@@ -2,7 +2,7 @@
 
 **Статус:** CANON  
 **Owner:** Жанбол  
-**Обновлено:** 2026-01-15  
+**Обновлено:** 2026-01-22  
 **Scope:** приоритеты и фазы развития технической части.  
 **Out of scope:** реализация задач, evidence.  
 **Links:** `STATE.md`, `SPECS/ARCHITECTURE.md`, `SPECS/INFRASTRUCTURE.md`.
@@ -14,14 +14,15 @@
 ## КАНОН (не меняется)
 
 1. **Safety/Policy выше смысла; LAW‑гейты и truth‑first всегда.**
-2. **Deterministic Core** для фактов и решений (часы, адрес, услуги, цены, правила).
-3. **LLM — для смысла, подачи и консультации**, не для бизнес‑решений.
-4. **Гибрид обязателен.** Семантика — LLM, слоты/факты — resolver‑слой (offline‑first).
-5. **Факты только из data packs.** Иначе уточнение → эскалация.
+2. **Deterministic Core** для безопасности/состояний и факт‑коммита (tools/packs).
+3. **LLM‑first понимание** (intent/slots/summary) с детерминированным commit и валидацией.
+4. **Гибрид обязателен.** Семантический resolver (embeddings) + tools; ключевые слова — только fallback.
+5. **Факты только из tools/packs.** Response Guard блокирует “лишнее”.
 6. **Один Decision Graph.** Решения идут по фиксированной цепочке, без “долгих размышлений”.
 7. **Память явная.** Старые факты требуют подтверждения.
 8. **Trace/meta на всё.** Иначе решение считается “не существующим”.
 9. **CI‑tiers (L0–L3) обязательны по правилам `SPECS/SYSTEM_REFERENCE.md`**: L0+L1 всегда, L2 по триггерам, L3 по DoD/CA.
+10. **No local LLM.** Используем OpenAI‑совместимые модели.
 
 ---
 
@@ -116,9 +117,10 @@
 
 ## ПРИОРИТЕТЫ
 
-### P0 — Детерминизм и релизная стабильность
-- Base‑80 CORE: часы/адрес/услуги/цены/скидки/парковка/guest_policy без OpenAI.
-- Taxonomy → Alias Expansion: ServiceSample расширяет aliases **только** для услуг салона.
+### P0 — LLM‑first понимание + tool‑only факты
+- Зафиксировать DEC + канон‑доки (Vision/Requirements/Architecture/Consultant/Active‑Learning/Multi‑Tenant).
+- Tool‑контракты фактов + Response Guard (ноль галлюцинаций).
+- Semantic resolver (embeddings + thresholds) для RU/KZ/mixed, keywords → fallback.
 - CI deploy без конфликтов; `/admin/version` всегда = HEAD.
 - Core/long в CI раздельно; локальные тесты не являются gate.
 
@@ -158,9 +160,9 @@ _Сводка для ориентира; актуальный статус и ev
 
 ## БЛИЖАЙШИЕ ЗАДАЧИ (P0)
 
-1. Закрыть Base‑80 CORE без OpenAI.
-2. Авто‑обогащение aliases из ServiceSample для услуг салона.
-3. Проверить стабильность CI‑deploy (без конфликтов контейнера).
+1. DEC + синхронизация канон‑доков под LLM‑first + tool‑only facts.
+2. Спецификация tool‑контрактов и Response Guard.
+3. Спецификация semantic resolver (embeddings + thresholds) + RU/KZ/mixed стратегия.
 
 ## БЛИЖАЙШИЕ ЗАДАЧИ (P1)
 

@@ -40,3 +40,7 @@ decisions:
     area: "branch_routing"
     choice: "CONFIGURABLE"
     statement: "Branch resolution is configurable: by_instance/ask_user/hybrid; branch required for pricing; admins may auto-approve only within their branch when enabled"
+  - id: "DEC-010"
+    area: "decision_model"
+    choice: "LLM_FIRST_UNDERSTANDING"
+    statement: "LLM-first understanding (intent/slots/summary) with deterministic commit; facts only via tools/packs; response guard required; Hard-LAW/policy/state remain deterministic; no local LLM"

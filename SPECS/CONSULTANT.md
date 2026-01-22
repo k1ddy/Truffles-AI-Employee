@@ -2,7 +2,7 @@
 
 **Статус:** CANON  
 **Owner:** Top Architect  
-**Обновлено:** 2026-01-15  
+**Обновлено:** 2026-01-22  
 **Scope:** поведение бота (info/consult/booking), LAW/policy/clarify, формат ответа.  
 **Out of scope:** реализация, evidence/CI.  
 **Links:** `SPECS/ARCHITECTURE.md`, `SPECS/ESCALATION.md`, `docs/SESSION_START_PROMPT.txt`, `STATE.md`.
@@ -183,17 +183,18 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Порядок слов не влияет на класс ответа.
 - Класс ответа всегда `info_bundle`, даже при перефразе или follow‑up без явной услуги.
 
-## LLM как смысловой контроллер + язык с жёсткими правилами [P0]
+## LLM‑first понимание + Response Guard [P0]
 
-- **LLM‑контроллер** выбирает класс/цель/слоты (structured JSON) — арбитр смысла.
-- **Enforcement‑гейты** (state/policy/LAW) могут перекрывать решение смысла ради безопасности.
-- Router — **единственный источник класса**; fast/anchor/heuristic — только fallback при низкой уверенности/ошибке.
-- LLM не меняет решение класса и не создаёт факты.
-- LLM формулирует ответ (RAG) **только** на фактах из `client_pack` (truth/service matcher) и может лишь перефразировать их. Нет факта → максимум 2 уточнения (`clarify_limit=2`) → эскалация.
+- **LLM‑контроллер** отдаёт intent/slots (structured JSON), но commit — детерминированный (validators + semantic resolver).
+- **Enforcement‑гейты** (state/policy/LAW) выше смысла и могут перекрывать решение ради безопасности.
+- Semantic resolver (embeddings) подтверждает смысл; ключевые слова/якоря — только fallback.
+- LLM **не создаёт факты**. Факты берутся только из tools/packs.
+- LLM формулирует ответ **только** на фактах из `client_pack`/`consult_playbooks` и может лишь перефразировать их.
+- Response Guard обязателен: ответ = ack + facts + next_step; лишнее → fallback/clarify.
 - Валидатор ответа:
   - оплата (подтверждение/проверка/возвраты)/медицинка/жалобы/переносы → **override на эскалацию**;
   - скидки/способы оплаты → **только** если policy‑gate разрешён и правило совпало, иначе эскалация.
-- Truth gate и fast-intent — только fallback, если LLM low-confidence/timeout/без знаний.
+- Truth gate и fast-intent — только fallback при low-confidence/timeout/без знаний.
 - Fast-intent оставляем только для greeting/thanks/ok, чтобы не тратить LLM.
 - Decision Graph порядок: State → Risk → Expected → Semantic → Data → Action → Response → Update.
 

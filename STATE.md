@@ -1702,6 +1702,58 @@
 - output: `64 | 9.23s | 8.42s | 15.12s | 24.21s`
 - Status: p90 still > 10s target; keep P0 outbox latency OPEN.
 
+### 2026-01-22 — Plan #1 (proposed): Canon shift to LLM‑first understanding + tool‑only facts (no hallucinations)
+
+- **Context / problem:**
+  - Бот “не знает что отвечать” из‑за детерминизма на ключевых словах, особенно RU/KZ/mixed.
+  - Автоматизации (словари/диалоги) не дают устойчивости — правим пост‑фактум после CI fail.
+  - Нужны “живые” ответы и полноценная консультация без выдумки фактов.
+- **Goal (invariants first):**
+  - **Ноль галлюцинаций фактов**: факты только через packs/tools.
+  - **Живое общение**: LLM = понимание + формулировка, без права менять факты.
+  - **Открытая воспроизводимость**: decision_meta/trace обязательны.
+  - **No local LLM**: используем OpenAI GPT‑5 и совместимые модели.
+- **Canon decisions (фиксируем DEC):**
+  - LLM‑first **понимание** (intent/slots/confidence) → deterministic commit.
+  - Facts‑only из tools/packs (truth/policy/price/duration/consult_playbook).
+  - Response Guard обязателен: текст = ack + facts + next_step; лишнее → fallback.
+  - Hard‑LAW/policy/state остаются deterministic, выше LLM.
+  - Multi‑tenant isolation сохраняется (tenant/branch‑scoped tools/RAG).
+- **Scope:**
+  - Обновить канон‑доки (DEC + owner‑docs).
+  - Ввести tool‑контракты фактов + response guard.
+  - Semantic resolver по intent/service cards (embeddings + thresholds).
+  - LLM‑перефразирование только поверх tool‑секций.
+  - Active learning L1‑L3 (tenant‑only → opt‑in domain).
+- **Out of scope:**
+  - Локальные LLM, fine‑tune моделей, факты вне packs/tools.
+  - Удаление Hard‑LAW/policy/trace.
+  - Cross‑tenant обучение без opt‑in.
+- **Touch‑list (план):**
+  - `docs/IMPERIUM_DECISIONS.yaml`
+  - `STRATEGY/VISION.md`, `STRATEGY/REQUIREMENTS.md`, `STRATEGY/TECH_ROADMAP.md`
+  - `SPECS/ARCHITECTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/ACTIVE_LEARNING.md`, `SPECS/MULTI_TENANT.md`
+  - (реализация) `truffles-api/app/routers/webhook/decision.py`, `response.py`, `info.py`, `booking.py`
+  - (реализация) `truffles-api/app/services/ai_service.py`, `knowledge_service.py`, `learning_service.py`
+  - `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`, `EVAL.yaml`
+- **Plan (steps):**
+  1) Записать DEC: “LLM‑first understanding + tool‑only facts + response guard; no local LLM”.
+  2) Обновить owner‑docs (Vision/Requirements/Architecture/Consultant/Active‑Learning/Multi‑Tenant).
+  3) Специфицировать tool‑контракты фактов и Response Guard (валидатор секций).
+  4) Специфицировать semantic resolver (intent/service cards + thresholds + meta/trace).
+  5) Дизайн L1‑L3 auto‑learning (tenant‑only → opt‑in domain packs).
+  6) Подготовить Task Package #2 (код) с CI/EVAL и evidence‑требованиями.
+- **DoD (для этапа Plan #1):**
+  - DEC записан, канон‑доки синхронизированы.
+  - Описаны tool‑контракты, response guard и semantic resolver.
+  - Обновлён roadmap с приоритетом “LLM‑first understanding”.
+- **Checks/Evidence:**
+  - Doc‑diff + CI (если затронуты тесты/код) + запись в `STATE.md` от Top Architect.
+- **Risks:**
+  - LLM‑ошибки в intent/slots → mitigate guard + thresholds + fallback.
+  - Sem‑resolver false positives → строгие пороги + trace/meta.
+  - UX деградация без facts → fallback на clarify/escalate.
+
 ### 2026-02-01 — Task Package (planned): P0 RU/KZ/mixed lexicon + dialog coverage
 
 - Chosen issue (NOW): бот “не знает что отвечать” в RU/KZ/mixed — отсутствуют нужные диалоги/лексиконы, ответы не детерминированы.
