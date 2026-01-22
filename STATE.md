@@ -13,6 +13,7 @@
 - DONE: PR #109 (diagnose + smalltalk) и PR #111 (docs sync) merged; CI main зелёный.
 - DONE: P0 offline устойчивость без `OPENAI_API_KEY` (offline controller fixed + test; PR #112 merged; CI main зелёный).
 - DONE: Session Memory v1.1 reset на pending/manager (PR #114 merged; CI main зелёный).
+- DONE: Answer-Interpreter v2 noise robustness (layout swap + Latin→Cyrillic + chaos eval; PR #297 https://github.com/k1ddy/Truffles-AI-Employee/pull/297; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21214271836).
 - DONE: A1 shadow Decision Graph plan + roadmap hybrid/tools pinned (PR #117 https://github.com/k1ddy/Truffles-AI-Employee/pull/117; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20890721660).
 - DONE: Decision Graph stage trace skeleton (PR #118 https://github.com/k1ddy/Truffles-AI-Employee/pull/118; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20890910843).
 - DONE: A2 Decision Graph contract schemas (PR #119 https://github.com/k1ddy/Truffles-AI-Employee/pull/119; CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/20890983862).

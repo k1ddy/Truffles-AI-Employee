@@ -21,6 +21,118 @@ if TYPE_CHECKING:
     from app.services.demo_salon_knowledge import DemoSalonDecision
 
 BOOKING_SLOT_ORDER = ("service", "datetime", "name")
+_LAYOUT_SWAP_MAP = str.maketrans(
+    {
+        "q": "й",
+        "w": "ц",
+        "e": "у",
+        "r": "к",
+        "t": "е",
+        "y": "н",
+        "u": "г",
+        "i": "ш",
+        "o": "щ",
+        "p": "з",
+        "[": "х",
+        "]": "ъ",
+        "a": "ф",
+        "s": "ы",
+        "d": "в",
+        "f": "а",
+        "g": "п",
+        "h": "р",
+        "j": "о",
+        "k": "л",
+        "l": "д",
+        ";": "ж",
+        "'": "э",
+        "z": "я",
+        "x": "ч",
+        "c": "с",
+        "v": "м",
+        "b": "и",
+        "n": "т",
+        "m": "ь",
+        ",": "б",
+        ".": "ю",
+    }
+)
+
+
+@dataclass(frozen=True)
+class SlotCandidate:
+    text: str
+    flags: tuple[str, ...]
+
+
+def _looks_like_layout_swap(text: str) -> bool:
+    if not text or not text.strip():
+        return False
+    has_cyrillic = bool(re.search(r"[а-яё]", text, flags=re.IGNORECASE))
+    has_latin = bool(re.search(r"[a-z]", text, flags=re.IGNORECASE))
+    if not has_latin or has_cyrillic:
+        return False
+    return len(re.findall(r"[a-z]", text, flags=re.IGNORECASE)) >= 3
+
+
+def _swap_keyboard_layout(text: str) -> str:
+    return (text or "").translate(_LAYOUT_SWAP_MAP)
+
+
+def _collapse_repeats(text: str, *, max_repeats: int = 2) -> str:
+    if not text:
+        return ""
+    if max_repeats < 1:
+        return text
+    pattern = re.compile(rf"(.)\1{{{max_repeats},}}")
+
+    def _replace(match: re.Match[str]) -> str:
+        return match.group(1) * max_repeats
+
+    return pattern.sub(_replace, text)
+
+
+def _build_slot_candidates(
+    message_text: str, *, expected_reply_type: str | None
+) -> list[SlotCandidate]:
+    from . import _legacy as legacy
+
+    raw = (message_text or "").strip()
+    if not raw:
+        return []
+    seen: set[str] = set()
+    candidates: list[SlotCandidate] = []
+
+    def _push(text: str, flags: tuple[str, ...]) -> None:
+        cleaned = (text or "").strip()
+        if not cleaned or cleaned in seen:
+            return
+        seen.add(cleaned)
+        candidates.append(SlotCandidate(cleaned, flags))
+
+    _push(raw, ())
+
+    normalized = legacy._normalize_text(raw)
+    if normalized and normalized != raw:
+        _push(normalized, ("normalized",))
+    collapsed = _collapse_repeats(normalized)
+    if collapsed and collapsed != normalized:
+        _push(collapsed, ("normalized", "repeat_collapse"))
+
+    allow_layout_swap = expected_reply_type in {
+        legacy.EXPECTED_REPLY_SERVICE,
+        legacy.EXPECTED_REPLY_TIME,
+    }
+    if allow_layout_swap and _looks_like_layout_swap(raw):
+        swapped = _swap_keyboard_layout(raw)
+        swapped_normalized = legacy._normalize_text(swapped)
+        if swapped_normalized and swapped_normalized != normalized:
+            _push(swapped_normalized, ("layout_swap", "normalized"))
+        swapped_collapsed = _collapse_repeats(swapped_normalized)
+        if swapped_collapsed and swapped_collapsed != swapped_normalized:
+            _push(swapped_collapsed, ("layout_swap", "normalized", "repeat_collapse"))
+
+    return candidates
 
 
 def _get_booking_context(context: dict) -> dict:
@@ -360,22 +472,33 @@ def _match_expected_reply(
     expected_reply_type: str | None,
     message_text: str,
     client_slug: str | None,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, list[str]]:
     if not expected_reply_type or not message_text:
-        return False, None
+        return False, None, []
+    if _is_blocked_slot_message(message_text):
+        return False, None, []
     from . import _legacy as legacy
 
-    if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
-        value = _validate_service_slot(message_text, allow_freeform=True, client_slug=client_slug)
-    elif expected_reply_type == legacy.EXPECTED_REPLY_TIME:
-        value = _validate_datetime_slot(message_text, allow_freeform=True, client_slug=client_slug)
-    elif expected_reply_type == legacy.EXPECTED_REPLY_NAME:
-        value = _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug)
-    else:
-        return False, None
-    if not value:
-        return False, None
-    return True, value
+    for candidate in _build_slot_candidates(
+        message_text, expected_reply_type=expected_reply_type
+    ):
+        if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
+            value = _validate_service_slot(
+                candidate.text, allow_freeform=True, client_slug=client_slug
+            )
+        elif expected_reply_type == legacy.EXPECTED_REPLY_TIME:
+            value = _validate_datetime_slot(
+                candidate.text, allow_freeform=True, client_slug=client_slug
+            )
+        elif expected_reply_type == legacy.EXPECTED_REPLY_NAME:
+            value = _validate_name_slot(
+                candidate.text, allow_freeform=True, client_slug=client_slug
+            )
+        else:
+            return False, None, []
+        if value:
+            return True, value, list(candidate.flags)
+    return False, None, []
 
 
 def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None, value: str) -> dict:
@@ -454,7 +577,7 @@ def _select_expected_reply_message(
             break
     if not last_message:
         return None
-    matched, _ = _match_expected_reply(
+    matched, _, _ = _match_expected_reply(
         expected_reply_type=expected_reply_type,
         message_text=last_message,
         client_slug=client_slug,
