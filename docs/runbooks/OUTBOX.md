@@ -6,6 +6,7 @@ Purpose
 Symptoms
 - Messages stuck in PENDING/PROCESSING
 - Outbox backlog grows, SLA breached
+- Livecheck red with `missing_action` or `TimeoutError`
 
 Quick checks
 ```bash
@@ -85,3 +86,5 @@ Evidence to capture
 
 Notes
 - Do not modify DB/trace to fabricate evidence. Use DB updates only for recovery.
+- If livecheck is red with `missing_action`, confirm `/webhook` runs the full pipeline (action written before outbox).
+- `WEBHOOK_ENQUEUE_ONLY=1` forces `/webhook` to enqueue-only (use only when explicitly needed).

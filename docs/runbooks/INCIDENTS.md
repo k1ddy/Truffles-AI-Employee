@@ -37,6 +37,17 @@ for a in alerts:
 PY
 ```
 
+Livecheck red (missing_action / timeout)
+1) Confirm deploy drift: `/admin/version` must match the merged commit.
+2) Extract failing `message_id` from livecheck artifacts (CI run).
+3) Verify action gate:
+   - SQL: `SELECT metadata->'decision_meta' FROM messages WHERE metadata->>'message_id' = '<ID>';`
+   - `decision_meta.action` or `pending_action` must be present.
+4) If action missing or delayed:
+   - Ensure `/webhook` runs full pipeline (default). `WEBHOOK_ENQUEUE_ONLY=1` is only for explicit enqueue-only mode.
+   - Check outbox logs for slow `outbox_total_ms` / long `wait_ms` (pipeline replay inside outbox will delay action).
+5) Fix by moving send to outbox events (send-only), not by increasing livecheck timeouts.
+
 Minimum evidence
 - Time window + symptom
 - 5-15 log lines or SQL output
