@@ -13,7 +13,9 @@ curl -s http://localhost:8000/admin/health
 ```
 
 Contract guardrails
-- Payload must pass `contracts/events/outbox.webhook_payload.v1.jsonschema` (enforced before enqueue).
+- Outbox payload types:
+  - `schema_version=outbox.v1` + `event_type=whatsapp.send_text` for send-only delivery.
+  - Legacy webhook payloads validated by `app.schemas.outbox_payload.OutboxPayloadContract`.
 - Invalid payload → `decision_trace.stage=outbox_payload_guard`, `decision_meta.action=error`, no outbox enqueue.
 - Timing evidence: `decision_meta.timing.outbox` + `outbox_messages.meta.timing`.
 
@@ -95,3 +97,4 @@ Evidence to capture
 
 Notes
 - Do not modify DB/trace to fabricate evidence. Use DB updates only for recovery.
+- `WEBHOOK_ENQUEUE_ONLY=1` forces `/webhook` to enqueue-only (bypasses full decision pipeline).

@@ -27,6 +27,9 @@ from . import _legacy as legacy
 logger = get_logger("webhook")
 router = APIRouter()
 
+def _should_enqueue_only() -> bool:
+    return legacy._is_env_enabled(os.environ.get("WEBHOOK_ENQUEUE_ONLY"), default=False)
+
 def _normalize_phone_digits(value: str | None) -> str:
     if not value:
         return ""
@@ -306,7 +309,7 @@ async def handle_webhook_direct(client_slug: str, request: Request, db: Session 
         db,
         provided_secret=provided_secret,
         enforce_secret=False,
-        enqueue_only=True,
+        enqueue_only=_should_enqueue_only(),
     )
 
 
@@ -325,7 +328,7 @@ async def handle_webhook(payload: WebhookRequest, http_request: Request, db: Ses
         db,
         provided_secret=provided_secret,
         enforce_secret=True,
-        enqueue_only=True,
+        enqueue_only=_should_enqueue_only(),
     )
 
 
