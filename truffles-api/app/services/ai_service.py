@@ -233,6 +233,7 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
 POLICY_VERSION = os.environ.get("POLICY_VERSION", "v1")
 LLM_BUDGET_PREFIX = "truffles:llm_budget"
 LLM_BUDGET_SOCKET_TIMEOUT_SECONDS = float(os.environ.get("LLM_BUDGET_SOCKET_TIMEOUT_SECONDS", "0.3"))
+RAG_SEARCH_MIN_BUDGET_MS = 500.0
 
 # Global LLM provider instance
 _llm_provider = None
@@ -269,6 +270,85 @@ def _log_timing(
     elif stage_key == "rag_ms":
         record_rag_time(client_slug, elapsed_ms)
     logger.info("Timing", extra={"context": context})
+
+
+def _remaining_pipeline_budget_ms(timing_context: dict | None) -> float | None:
+    if not isinstance(timing_context, dict):
+        return None
+    deadline = timing_context.get("pipeline_deadline")
+    if not isinstance(deadline, (int, float)):
+        return None
+    remaining_ms = (deadline - time.monotonic()) * 1000
+    return max(0.0, remaining_ms)
+
+
+def _record_pipeline_budget_skip(
+    *,
+    timing_context: dict | None,
+    stage: str,
+    required_ms: float,
+    remaining_ms: float,
+) -> None:
+    if not isinstance(timing_context, dict):
+        return
+    timing = timing_context.get("timing")
+    if not isinstance(timing, dict):
+        timing = {}
+    budget = timing.get("budget")
+    if not isinstance(budget, dict):
+        budget = {}
+    skips = budget.get("skips")
+    if not isinstance(skips, list):
+        skips = []
+    skips.append(
+        {
+            "stage": stage,
+            "required_ms": round(required_ms, 2),
+            "remaining_ms": round(remaining_ms, 2),
+        }
+    )
+    budget["skips"] = skips
+    budget["budget_ms"] = timing_context.get("pipeline_budget_ms")
+    budget["remaining_ms"] = round(remaining_ms, 2)
+    timing["budget"] = budget
+    timing_context["timing"] = timing
+
+
+def _should_attempt_stage(
+    timing_context: dict | None,
+    *,
+    required_ms: float,
+    stage: str,
+    degrade_reason: str | None = "deadline_exceeded",
+) -> bool:
+    remaining_ms = _remaining_pipeline_budget_ms(timing_context)
+    if remaining_ms is None:
+        return True
+    if remaining_ms >= required_ms:
+        return True
+    _record_pipeline_budget_skip(
+        timing_context=timing_context,
+        stage=stage,
+        required_ms=required_ms,
+        remaining_ms=remaining_ms,
+    )
+    if isinstance(timing_context, dict) and degrade_reason:
+        timing_context["llm_degradation_reason"] = degrade_reason
+    return False
+
+
+def _should_attempt_llm(
+    timing_context: dict | None,
+    *,
+    timeout_seconds: float,
+    stage: str,
+) -> bool:
+    required_ms = max(float(timeout_seconds) * 1000, 0.0)
+    return _should_attempt_stage(
+        timing_context,
+        required_ms=required_ms,
+        stage=stage,
+    )
 
 
 def get_llm_provider() -> OpenAIProvider:
@@ -808,6 +888,12 @@ def rewrite_for_service_match(
     if not OPENAI_API_KEY:
         logger.warning("Service rewrite skipped: OPENAI_API_KEY missing")
         return None
+    if not _should_attempt_llm(
+        timing_context,
+        timeout_seconds=SERVICE_REWRITE_TIMEOUT_SECONDS,
+        stage="service_rewrite_llm",
+    ):
+        return None
 
     budget_meta = consume_llm_budget(
         client_slug=client_slug,
@@ -915,6 +1001,12 @@ def rewrite_query_for_retrieval(
     if not OPENAI_API_KEY:
         logger.warning("RAG rewrite skipped: OPENAI_API_KEY missing")
         return {"rewrite_used": False, "rewrite_text": "", "reason": "missing_api_key"}
+    if not _should_attempt_llm(
+        timing_context,
+        timeout_seconds=RAG_REWRITE_TIMEOUT_SECONDS,
+        stage="rag_rewrite_llm",
+    ):
+        return {"rewrite_used": False, "rewrite_text": "", "reason": "deadline_exceeded"}
 
     budget_meta = consume_llm_budget(
         client_slug=client_slug or "unknown",
@@ -1015,7 +1107,11 @@ def rewrite_query_for_retrieval(
     return {"rewrite_used": True, "rewrite_text": rewrite_text, "reason": "rewritten"}
 
 
-def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | None:
+def detect_multi_intent(
+    text: str,
+    client_slug: str | None = None,
+    timing_context: dict | None = None,
+) -> dict | None:
     def _clean_service_query(value: str | None) -> str:
         if not isinstance(value, str):
             return ""
@@ -1173,6 +1269,12 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
     if not OPENAI_API_KEY:
         logger.warning("Multi-intent detection skipped: OPENAI_API_KEY missing")
         return _fallback_payload()
+    if not _should_attempt_llm(
+        timing_context,
+        timeout_seconds=MULTI_INTENT_TIMEOUT_SECONDS,
+        stage="multi_intent_llm",
+    ):
+        return _fallback_payload()
 
     system_prompt = (
         "Разложи сообщение клиента на интенты. Верни ТОЛЬКО JSON строго вида "
@@ -1215,6 +1317,7 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
         _log_timing(
             "multi_intent_llm_ms",
             (time.monotonic() - llm_start) * 1000,
+            timing_context=timing_context,
             extra={
                 "model_name": FAST_MODEL,
                 "model_tier": "fast",
@@ -1228,6 +1331,7 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
         _log_timing(
             "multi_intent_llm_ms",
             (time.monotonic() - llm_start) * 1000,
+            timing_context=timing_context,
             extra={"model_name": FAST_MODEL, "model_tier": "fast", "timeout": False, "error": str(exc)},
         )
         logger.warning(f"Multi-intent failed: {exc}")
@@ -1236,6 +1340,7 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
     _log_timing(
         "multi_intent_llm_ms",
         (time.monotonic() - llm_start) * 1000,
+        timing_context=timing_context,
         extra={"model_name": FAST_MODEL, "model_tier": "fast", "timeout": False},
     )
 
@@ -1308,7 +1413,11 @@ def detect_multi_intent(text: str, client_slug: str | None = None) -> dict | Non
 
     service_query = _clean_service_query(service_query_raw if isinstance(service_query_raw, str) else None)
     if not service_query and {"pricing", "duration", "booking"} & set(cleaned_intents):
-        rewrite_query = rewrite_for_service_match(text, client_slug or "unknown")
+        rewrite_query = rewrite_for_service_match(
+            text,
+            client_slug or "unknown",
+            timing_context=timing_context,
+        )
         service_query = _clean_service_query(rewrite_query)
 
     consult_intent = consult_intent_raw is True
@@ -1609,6 +1718,12 @@ def get_rag_confidence(
 
     query_for_rag = _resolve_rag_query(user_message, timing_context)
     branch_id, knowledge_tag = _extract_branch_filter(timing_context)
+    if not _should_attempt_stage(
+        timing_context,
+        required_ms=RAG_SEARCH_MIN_BUDGET_MS,
+        stage="rag_search",
+    ):
+        return False, 0.0
     try:
         rag_start = time.monotonic()
         vector_results = search_knowledge(
@@ -1660,6 +1775,12 @@ def get_rag_confidence(
             if contextual_query and contextual_query != user_message:
                 contextual_query = _sanitize_query_for_rag(contextual_query)
                 try:
+                    if not _should_attempt_stage(
+                        timing_context,
+                        required_ms=RAG_SEARCH_MIN_BUDGET_MS,
+                        stage="rag_search_retry",
+                    ):
+                        return False, max_score
                     rag_start = time.monotonic()
                     vector_results = search_knowledge(
                         contextual_query,
@@ -1766,6 +1887,12 @@ def generate_ai_response(
         # 2. Search knowledge base
         knowledge_results = []
         max_score = 0.0
+        if not _should_attempt_stage(
+            timing_context,
+            required_ms=RAG_SEARCH_MIN_BUDGET_MS,
+            stage="rag_search",
+        ):
+            return Result.success((None, "low_confidence"))
         query_for_rag = _resolve_rag_query(user_message, timing_context)
         branch_id, knowledge_tag = _extract_branch_filter(timing_context)
 
@@ -1826,6 +1953,12 @@ def generate_ai_response(
                 if contextual_query and contextual_query != user_message:
                     contextual_query = _sanitize_query_for_rag(contextual_query)
                     try:
+                        if not _should_attempt_stage(
+                            timing_context,
+                            required_ms=RAG_SEARCH_MIN_BUDGET_MS,
+                            stage="rag_search_retry",
+                        ):
+                            return Result.success((None, "low_confidence"))
                         rag_start = time.monotonic()
                         vector_results = search_knowledge(
                             contextual_query,
