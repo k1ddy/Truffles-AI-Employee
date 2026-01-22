@@ -10,8 +10,10 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.adapters.chatflow import ChatFlowAdapter
 from app.logging_config import get_logger, record_outbox_latency
 from app.models import Conversation, OutboxMessage, User
+from app.ports.messaging import MessageOptions
 from app.routers.webhook.media import (
     _build_media_caption,
     _send_telegram_media,
@@ -56,6 +58,12 @@ def _coerce_outbox_created_at(value: datetime | None) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value
+
+def _is_outbox_event(payload_json: dict | None) -> bool:
+    return isinstance(payload_json, dict) and payload_json.get("schema_version") == "outbox.v1"
+
+def _is_send_text_event(payload_json: dict | None) -> bool:
+    return _is_outbox_event(payload_json) and payload_json.get("event_type") == "whatsapp.send_text"
 
 
 def _split_outbox_batches(batch_sorted: list[dict], window_seconds: float) -> list[list[dict]]:
@@ -644,6 +652,8 @@ async def _process_outbox_rows(
 
     def _row_has_media(row: dict) -> bool:
         payload_json = row.get("payload_json") or {}
+        if _is_outbox_event(payload_json):
+            return False
         try:
             payload = WebhookRequest.model_validate(payload_json)
         except Exception:
@@ -657,36 +667,77 @@ async def _process_outbox_rows(
             return
         payload_json = row.get("payload_json") or {}
         outbox_id_str = str(outbox_id)
-        validated_payload, payload_error = validate_outbox_payload(payload_json)
-        if payload_error:
-            _record_outbox_payload_error(outbox_id=outbox_id_str, reason=payload_error)
-            mark_outbox_status(
-                db,
-                outbox_id=outbox_id,
-                status="FAILED",
-                last_error=f"invalid_payload:{payload_error}"[:500],
-                next_attempt_at=None,
-            )
-            results["failed"] += 1
-            return
-        payload_json = validated_payload.model_dump(exclude_none=True)
-        payload = WebhookRequest.model_validate(payload_json)
+        client_slug = payload_json.get("client_slug")
+        outbox_ids = [outbox_id_str]
 
         try:
-            outbox_ids = [str(outbox_id)]
             timing_start = time.monotonic()
-            response = await legacy._handle_webhook_payload(
-                payload,
-                db,
-                provided_secret=None,
-                enforce_secret=False,
-                skip_persist=True,
-                conversation_id=UUID(conversation_id),
-                outbox_ids=outbox_ids,
-                outbox_created_at=row.get("created_at"),
-            )
-            if not response.success:
-                raise RuntimeError(response.message)
+            if _is_outbox_event(payload_json):
+                event_type = payload_json.get("event_type")
+                if event_type != "whatsapp.send_text":
+                    _record_outbox_payload_error(outbox_id=outbox_id_str, reason=f"event:{event_type}")
+                    mark_outbox_status(
+                        db,
+                        outbox_id=outbox_id,
+                        status="FAILED",
+                        last_error=f"invalid_payload:unsupported_event:{event_type}"[:500],
+                        next_attempt_at=None,
+                    )
+                    results["failed"] += 1
+                    return
+                payload = payload_json.get("payload") or {}
+                remote_jid = payload.get("remote_jid")
+                text = payload.get("text")
+                instance_id = payload.get("instance_id")
+                idempotency_key = payload.get("idempotency_key") or payload_json.get("idempotency_key")
+                if not remote_jid or not text or not instance_id:
+                    _record_outbox_payload_error(outbox_id=outbox_id_str, reason="event:missing_fields")
+                    mark_outbox_status(
+                        db,
+                        outbox_id=outbox_id,
+                        status="FAILED",
+                        last_error="invalid_payload:missing_fields",
+                        next_attempt_at=None,
+                    )
+                    results["failed"] += 1
+                    return
+                adapter = ChatFlowAdapter()
+                options = MessageOptions(
+                    instance_id=instance_id,
+                    idempotency_key=idempotency_key,
+                )
+                result = adapter.send_text(remote_jid, text, options)
+                if not result.is_ok():
+                    raise RuntimeError(f"ChatFlow delivery failed: {result.error}")
+            else:
+                validated_payload, payload_error = validate_outbox_payload(payload_json)
+                if payload_error:
+                    _record_outbox_payload_error(outbox_id=outbox_id_str, reason=payload_error)
+                    mark_outbox_status(
+                        db,
+                        outbox_id=outbox_id,
+                        status="FAILED",
+                        last_error=f"invalid_payload:{payload_error}"[:500],
+                        next_attempt_at=None,
+                    )
+                    results["failed"] += 1
+                    return
+                payload_json = validated_payload.model_dump(exclude_none=True)
+                payload = WebhookRequest.model_validate(payload_json)
+                client_slug = payload.client_slug
+                response = await legacy._handle_webhook_payload(
+                    payload,
+                    db,
+                    provided_secret=None,
+                    enforce_secret=False,
+                    skip_persist=True,
+                    conversation_id=UUID(conversation_id),
+                    outbox_ids=outbox_ids,
+                    outbox_created_at=row.get("created_at"),
+                )
+                if not response.success:
+                    raise RuntimeError(response.message)
+
             outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
             logger.info(
                 "Outbox timing",
@@ -695,7 +746,7 @@ async def _process_outbox_rows(
                         "outbox_id": outbox_id_str,
                         "outbox_ids": outbox_ids,
                         "conversation_id": conversation_id,
-                        "client_slug": payload.client_slug,
+                        "client_slug": client_slug,
                         "inbound_message_id": row.get("inbound_message_id"),
                         "outbox_total_ms": outbox_total_ms,
                     }
@@ -746,7 +797,7 @@ async def _process_outbox_rows(
                         "outbox_id": outbox_id_str,
                         "outbox_ids": [outbox_id_str],
                         "conversation_id": conversation_id,
-                        "client_slug": payload.client_slug,
+                        "client_slug": client_slug,
                         "inbound_message_id": row.get("inbound_message_id"),
                         "outbox_total_ms": outbox_total_ms,
                         "error": str(exc),
@@ -777,6 +828,26 @@ async def _process_outbox_rows(
                 next_attempt_at=next_attempt_at,
             )
             results["retry_scheduled"] += 1
+
+    event_rows: list[dict] = []
+    webhook_rows: list[dict] = []
+    for row in rows:
+        payload_json = row.get("payload_json") or {}
+        if _is_outbox_event(payload_json):
+            event_rows.append(row)
+        else:
+            webhook_rows.append(row)
+
+    for row in event_rows:
+        conversation_id = row.get("conversation_id")
+        await _process_single_row(
+            row,
+            conversation_id=str(conversation_id) if conversation_id else "",
+        )
+
+    rows = webhook_rows
+    if not rows:
+        return results
 
     batches: dict[str, list[dict]] = {}
     for row in rows:

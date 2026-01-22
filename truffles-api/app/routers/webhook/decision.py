@@ -1568,7 +1568,7 @@ from app.services.intent_service import (
     should_escalate,
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
-from app.services.outbox_service import build_inbound_message_id
+from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.state_machine import ConversationState
 from app.services.state_service import escalate_to_pending, manager_resolve, transition_state
 from app.services.telegram_service import TelegramService
@@ -3318,16 +3318,54 @@ async def _handle_webhook_payload(
             logger.warning(f"No instance_id found for client {client.id}, jid={remote_jid}")
             sent = False
         else:
-            adapter = ChatFlowAdapter()
-            options = MessageOptions(
-                instance_id=instance_id,
-                idempotency_key=outbound_idempotency_key,
-            )
-            result = adapter.send_text(remote_jid, text, options)
-            sent = result.is_ok()
-            if not sent and skip_persist:
-                # Preserve legacy behavior when raise_on_fail=True (skip_persist path).
-                raise RuntimeError(f"ChatFlow delivery failed: {result.error}")
+            use_outbox_send = _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False)
+            if use_outbox_send and conversation:
+                outbox_payload = {
+                    "schema_version": "outbox.v1",
+                    "event_type": "whatsapp.send_text",
+                    "idempotency_key": outbound_idempotency_key,
+                    "client_id": str(client.id),
+                    "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
+                    "conversation_id": str(conversation.id),
+                    "channel": "whatsapp",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "payload": {
+                        "remote_jid": remote_jid,
+                        "text": text,
+                        "instance_id": instance_id,
+                        "idempotency_key": outbound_idempotency_key,
+                    },
+                }
+                sent = enqueue_outbox_message(
+                    db,
+                    client_id=client.id,
+                    conversation_id=conversation.id,
+                    inbound_message_id=outbound_idempotency_key,
+                    payload_json=outbox_payload,
+                )
+                if not sent:
+                    logger.info(
+                        "Outbox send skipped (duplicate)",
+                        extra={
+                            "context": {
+                                "conversation_id": str(conversation.id),
+                                "remote_jid": remote_jid,
+                                "idempotency_key": outbound_idempotency_key,
+                            }
+                        },
+                    )
+                    sent = True
+            else:
+                adapter = ChatFlowAdapter()
+                options = MessageOptions(
+                    instance_id=instance_id,
+                    idempotency_key=outbound_idempotency_key,
+                )
+                result = adapter.send_text(remote_jid, text, options)
+                sent = result.is_ok()
+                if not sent and skip_persist:
+                    # Preserve legacy behavior when raise_on_fail=True (skip_persist path).
+                    raise RuntimeError(f"ChatFlow delivery failed: {result.error}")
         _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": sent})
         return sent
 
