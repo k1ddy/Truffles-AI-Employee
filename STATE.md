@@ -2058,6 +2058,17 @@ git diff --stat:
  truffles-api/app/services/console_idempotency.py | 35 ++++++++++
  36 files changed, 703 insertions(+), 364 deletions(-)
 
+### 2026-01-22 — Console CI/E2E стабилизация + live E2E
+
+DONE (evidence):
+- Console E2E стабилизирован (login flow/SSR/proxy waits); `console-e2e` зелёный.
+- Добавлен Keycloak preflight (discovery) и live Playwright прогон против `https://console.truffles.kz`.
+- Увеличен OIDC timeout для Keycloak в NextAuth до 10s.
+
+Evidence:
+- CI run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21246479083
+- Jobs: `console-e2e` success, `console-e2e-live` success, `console-contract` success, `core-eval` success.
+
 Notes:
 - npm install eslint-config-next@15.5.9 updated lockfile and reported 2 vulnerabilities (npm audit if you want to
   review).

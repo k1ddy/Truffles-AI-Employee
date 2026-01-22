@@ -44,3 +44,7 @@ decisions:
     area: "decision_model"
     choice: "LLM_FIRST_UNDERSTANDING"
     statement: "LLM-first understanding (intent/slots/summary) with deterministic commit; facts only via tools/packs; response guard required; Hard-LAW/policy/state remain deterministic; no local LLM"
+  - id: "DEC-011"
+    area: "org_level_tenancy"
+    choice: "COMPANY_CLIENT_BRANCH"
+    statement: "Company -> Client -> Branch hierarchy with explicit memberships/roles; console supports company-level access and client/branch selection; all API/events require tenant_context (company_id/client_id/branch_id)."

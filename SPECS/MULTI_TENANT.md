@@ -20,6 +20,8 @@ _Любые статусы ниже — DERIVED; единственный ист
 | Компонент | Статус |
 |-----------|--------|
 | Таблица companies | ✅ СУЩЕСТВУЕТ (не используется) |
+| Org-level RBAC (company memberships/roles) | 📋 ПЛАН |
+| Console org-level selection (company/client/branch) | 📋 ПЛАН |
 | Таблица clients | ✅ РАБОТАЕТ |
 | Таблица branches | ⚠️ ПОДКЛЮЧЕНА: routing/Telegram по branch есть; RAG strict branch‑filter (без fallback), нужен backfill |
 | Таблица client_settings | ✅ РАБОТАЕТ |
@@ -105,6 +107,11 @@ Company
 | Knowledge | client_slug + branch filter (knowledge_tag/branch_id; без fallback) | Branch.knowledge_tag |
 | Conversation привязан к | branch_id (сохраняется + используется в routing) | branch_id |
 | Каналы (WhatsApp/Instagram) | 1 на client | через Channel (backlog) |
+| Console tenancy | 1 login = 1 client | Company-level access + выбор client/branch |
+
+**GAP (must close for full org-level):**
+- Company-level memberships/roles are not implemented; agents map to a single client only.
+- Console API and UI assume single-client context (no company/client selector).
 
 ---
 
