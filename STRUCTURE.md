@@ -20,8 +20,11 @@
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
+| `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
+| `console-web/public/brand/` | Бренд‑ассеты консоли (логотипы) | Frontend |
+| `docs/CONSOLE_GUIDE.md` | Архитектура/логика консоли + гайд по изменениям | Frontend/Backend |
 
 ---
 

@@ -50,23 +50,23 @@ export default class ErrorBoundary extends React.Component<Props, State> {
             }
 
             return (
-                <div className="flex flex-col items-center justify-center min-h-[400px] p-8 bg-red-50 rounded-lg border border-red-200">
-                    <div className="text-red-500 text-6xl mb-4">⚠️</div>
-                    <h2 className="text-xl font-bold text-red-700 mb-2">Что-то пошло не так</h2>
-                    <p className="text-red-600 mb-4 text-center max-w-md">
+                <div className="flex flex-col items-center justify-center min-h-[400px] p-8 bg-destructive/10 rounded-lg border border-destructive/30">
+                    <div className="text-destructive text-6xl mb-4">⚠️</div>
+                    <h2 className="text-xl font-bold text-destructive mb-2">Что-то пошло не так</h2>
+                    <p className="text-destructive/80 mb-4 text-center max-w-md">
                         {this.state.error?.message || "Произошла непредвиденная ошибка"}
                     </p>
 
                     <div className="flex gap-3">
                         <button
                             onClick={this.handleRetry}
-                            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                            className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
                         >
                             Повторить
                         </button>
                         <button
                             onClick={this.handleReload}
-                            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                            className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90"
                         >
                             Обновить страницу
                         </button>
@@ -75,10 +75,10 @@ export default class ErrorBoundary extends React.Component<Props, State> {
                     {/* Debug info for development */}
                     {process.env.NODE_ENV === 'development' && this.state.errorInfo && (
                         <details className="mt-4 w-full max-w-lg">
-                            <summary className="text-sm text-gray-500 cursor-pointer hover:text-gray-700">
+                            <summary className="text-sm text-muted-foreground cursor-pointer hover:text-foreground">
                                 Технические детали
                             </summary>
-                            <pre className="mt-2 p-3 bg-gray-100 rounded text-xs overflow-auto max-h-32">
+                            <pre className="mt-2 p-3 bg-card rounded text-xs overflow-auto max-h-32 border border-border/60">
                                 {this.state.errorInfo.componentStack}
                             </pre>
                         </details>

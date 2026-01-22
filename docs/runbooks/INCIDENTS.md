@@ -15,6 +15,28 @@ Process
 4) Verify: evidence via /admin/health, SQL, logs, trace.
 5) Record: update STATE.md with evidence and status.
 
+Monitoring quick checks
+```bash
+curl -s http://localhost:9090/api/v1/targets | python3 - <<'PY'
+import json, sys
+data = json.load(sys.stdin)
+for t in data.get("data", {}).get("activeTargets", []):
+    if t.get("labels", {}).get("job") == "truffles-api":
+        print("truffles-api:", t.get("health"), t.get("lastError", ""))
+PY
+```
+
+```bash
+curl -s http://localhost:9090/api/v1/alerts | python3 - <<'PY'
+import json, sys
+data = json.load(sys.stdin)
+alerts = data.get("data", {}).get("alerts", [])
+for a in alerts:
+    if a.get("state") == "firing":
+        print(a.get("labels", {}).get("alertname"), a.get("annotations", {}).get("summary", ""))
+PY
+```
+
 Minimum evidence
 - Time window + symptom
 - 5-15 log lines or SQL output
