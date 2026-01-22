@@ -1,14 +1,15 @@
 import base64
 import json
 import os
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import Request
 from sqlalchemy.orm import Session
 
-from app.models import Agent, AgentIdentity, Branch, Client
+from app.models import Agent, AgentIdentity, AgentMembership, Branch, Client
 from app.services.console_errors import ConsoleAPIError
 
 try:
@@ -27,11 +28,24 @@ class ConsoleAuthContext:
     branches: list[Branch]
     accessible_clients: list[Client]
     selection_required: bool
+    role: str
+    allowed_branch_ids: set[UUID]
+    branch_restricted: bool
+    effective_branch_id: Optional[UUID]
     subject: str
     token_payload: dict[str, Any]
 
 
 _jwks_client: Optional[PyJWKClient] = None
+_role_priority = {"owner": 0, "admin": 1, "manager": 2, "support": 3}
+
+
+@dataclass
+class _AccessEntry:
+    roles: set[str] = field(default_factory=set)
+    scopes: set[str] = field(default_factory=set)
+    branch_ids: set[UUID] = field(default_factory=set)
+    agent_ids: set[UUID] = field(default_factory=set)
 
 
 def _get_bearer_token(request: Request) -> str:
@@ -137,19 +151,84 @@ def _parse_client_header(request: Request) -> Optional[UUID]:
 
 
 def _pick_agent_for_client(agents: list[Agent], client_id: UUID) -> Agent:
-    role_priority = {"owner": 0, "admin": 1, "manager": 2, "support": 3}
     candidates = [agent for agent in agents if agent.client_id == client_id]
     if not candidates:
         raise ConsoleAPIError(403, "ACCESS_DENIED", "No agent for selected client")
     return sorted(
         candidates,
         key=lambda agent: (
-            role_priority.get(agent.role, 99),
+            _role_priority.get(agent.role, 99),
             0 if agent.branch_id is None else 1,
             agent.name or "",
             str(agent.id),
         ),
     )[0]
+
+
+def _pick_agent_for_access(agents: list[Agent]) -> Agent:
+    if not agents:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "No agent available for access")
+    return sorted(
+        agents,
+        key=lambda agent: (
+            _role_priority.get(agent.role, 99),
+            0 if agent.branch_id is None else 1,
+            agent.name or "",
+            str(agent.id),
+        ),
+    )[0]
+
+
+def _resolve_role(roles: set[str]) -> Optional[str]:
+    if not roles:
+        return None
+    return sorted(roles, key=lambda role: _role_priority.get(role, 99))[0]
+
+
+def _add_access_entry(
+    access_map: dict[UUID, _AccessEntry],
+    client_id: UUID,
+    role: str,
+    scope: str,
+    branch_id: Optional[UUID],
+    agent_id: UUID,
+) -> None:
+    entry = access_map.setdefault(client_id, _AccessEntry())
+    entry.roles.add(role)
+    entry.scopes.add(scope)
+    if branch_id:
+        entry.branch_ids.add(branch_id)
+    entry.agent_ids.add(agent_id)
+
+
+def _build_access_map(
+    memberships: list[AgentMembership],
+    legacy_agents: list[Agent],
+    branches_by_id: dict[UUID, Branch],
+    clients_by_company: dict[UUID, list[Client]],
+    clients_by_id: dict[UUID, Client],
+) -> dict[UUID, _AccessEntry]:
+    access_map: dict[UUID, _AccessEntry] = {}
+
+    for membership in memberships:
+        if membership.scope == "company":
+            for client in clients_by_company.get(membership.company_id, []):
+                _add_access_entry(access_map, client.id, membership.role, "company", None, membership.agent_id)
+        elif membership.scope == "client":
+            if membership.client_id in clients_by_id:
+                _add_access_entry(access_map, membership.client_id, membership.role, "client", None, membership.agent_id)
+        elif membership.scope == "branch":
+            branch = branches_by_id.get(membership.branch_id)
+            if branch:
+                _add_access_entry(access_map, branch.client_id, membership.role, "branch", branch.id, membership.agent_id)
+
+    for agent in legacy_agents:
+        if agent.branch_id:
+            _add_access_entry(access_map, agent.client_id, agent.role, "branch", agent.branch_id, agent.id)
+        else:
+            _add_access_entry(access_map, agent.client_id, agent.role, "client", None, agent.id)
+
+    return access_map
 
 
 def get_console_context(request: Request, db: Session, *, require_selection: bool = True) -> ConsoleAuthContext:
@@ -177,10 +256,63 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
     if not agents:
         raise ConsoleAPIError(403, "ACCOUNT_DISABLED", "Agent is disabled")
 
-    client_ids = {agent.client_id for agent in agents}
-    clients = db.query(Client).filter(Client.id.in_(client_ids)).all()
-    clients_by_id = {client.id: client for client in clients}
-    accessible_clients = sorted(clients_by_id.values(), key=lambda client: client.name)
+    agent_ids = list(agents_by_id.keys())
+    memberships = []
+    if agent_ids:
+        memberships = (
+            db.query(AgentMembership)
+            .filter(AgentMembership.agent_id.in_(agent_ids), AgentMembership.is_active == True)
+            .all()
+        )
+
+    memberships_by_agent: dict[UUID, list[AgentMembership]] = defaultdict(list)
+    for membership in memberships:
+        memberships_by_agent[membership.agent_id].append(membership)
+
+    legacy_agents = [agent for agent in agents if not memberships_by_agent.get(agent.id)]
+
+    membership_branch_ids = {m.branch_id for m in memberships if m.scope == "branch" and m.branch_id}
+    membership_client_ids = {m.client_id for m in memberships if m.scope == "client" and m.client_id}
+    membership_company_ids = {m.company_id for m in memberships if m.scope == "company" and m.company_id}
+
+    legacy_branch_ids = {agent.branch_id for agent in legacy_agents if agent.branch_id}
+    legacy_client_ids = {agent.client_id for agent in legacy_agents if agent.client_id}
+
+    branch_ids = membership_branch_ids | legacy_branch_ids
+    branches_by_id: dict[UUID, Branch] = {}
+    if branch_ids:
+        branches = db.query(Branch).filter(Branch.id.in_(branch_ids)).all()
+        branches_by_id = {branch.id: branch for branch in branches}
+
+    branch_client_ids = {branch.client_id for branch in branches_by_id.values()}
+
+    company_clients = []
+    if membership_company_ids:
+        company_clients = db.query(Client).filter(Client.company_id.in_(membership_company_ids)).all()
+
+    clients_by_company: dict[UUID, list[Client]] = defaultdict(list)
+    for client in company_clients:
+        if client.company_id:
+            clients_by_company[client.company_id].append(client)
+
+    client_ids = set(membership_client_ids) | legacy_client_ids | branch_client_ids | {client.id for client in company_clients}
+    clients_by_id: dict[UUID, Client] = {}
+    if client_ids:
+        clients = db.query(Client).filter(Client.id.in_(client_ids)).all()
+        clients_by_id = {client.id: client for client in clients}
+
+    access_map = _build_access_map(
+        memberships=memberships,
+        legacy_agents=legacy_agents,
+        branches_by_id=branches_by_id,
+        clients_by_company=clients_by_company,
+        clients_by_id=clients_by_id,
+    )
+
+    accessible_clients = sorted(
+        [clients_by_id[client_id] for client_id in access_map.keys() if client_id in clients_by_id],
+        key=lambda client: client.name,
+    )
     if not accessible_clients:
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Client not found for agent")
 
@@ -192,7 +324,7 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
         selected_client_id = None
     selection_required = False
     if selected_client_id:
-        if selected_client_id not in clients_by_id:
+        if selected_client_id not in access_map:
             if require_selection:
                 raise ConsoleAPIError(403, "TENANT_MISMATCH", "Client access denied")
             selected_client_id = None
@@ -204,12 +336,34 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
             raise ConsoleAPIError(400, "CLIENT_SELECTION_REQUIRED", "Client selection required")
 
     selected_client = clients_by_id.get(selected_client_id) if selected_client_id else accessible_clients[0]
-    selected_agent = _pick_agent_for_client(agents, selected_client.id)
+    access_entry = access_map.get(selected_client.id, _AccessEntry())
 
-    branch_query = db.query(Branch).filter(Branch.client_id == selected_client.id)
-    if selected_agent.branch_id:
-        branch_query = branch_query.filter(Branch.id == selected_agent.branch_id)
-    branches = branch_query.order_by(Branch.name.asc()).all()
+    candidate_agents = [
+        agents_by_id[agent_id] for agent_id in access_entry.agent_ids if agent_id in agents_by_id
+    ]
+    preferred_agents = [agent for agent in candidate_agents if agent.client_id == selected_client.id]
+    selected_agent = _pick_agent_for_access(preferred_agents or candidate_agents or agents)
+
+    effective_role = _resolve_role(access_entry.roles) or selected_agent.role
+
+    branches_for_client = (
+        db.query(Branch)
+        .filter(Branch.client_id == selected_client.id)
+        .order_by(Branch.name.asc())
+        .all()
+    )
+
+    branch_restricted = "client" not in access_entry.scopes and "company" not in access_entry.scopes
+    if branch_restricted:
+        allowed_branch_ids = set(access_entry.branch_ids)
+        branches = [branch for branch in branches_for_client if branch.id in allowed_branch_ids]
+    else:
+        allowed_branch_ids = {branch.id for branch in branches_for_client}
+        branches = branches_for_client
+
+    effective_branch_id = None
+    if branch_restricted and len(allowed_branch_ids) == 1:
+        effective_branch_id = next(iter(allowed_branch_ids))
 
     return ConsoleAuthContext(
         agent=selected_agent,
@@ -217,6 +371,10 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
         branches=branches,
         accessible_clients=accessible_clients,
         selection_required=selection_required,
+        role=effective_role,
+        allowed_branch_ids=allowed_branch_ids,
+        branch_restricted=branch_restricted,
+        effective_branch_id=effective_branch_id,
         subject=str(subject),
         token_payload=payload,
     )

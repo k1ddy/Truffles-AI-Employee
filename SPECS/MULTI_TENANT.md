@@ -27,6 +27,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 | RAG фильтрация по branch (knowledge_tag/branch_id) | ✅ РАБОТАЕТ (strict, без fallback; требует backfill Qdrant) |
 | Telegram группы на филиал | ✅ РАБОТАЕТ (manager_scope=branch → Branch.telegram_chat_id; fallback client_settings) |
 | Роутинг через branch_id | ✅ РАБОТАЕТ (branch_id сохраняется + trace/meta; RAG strict без fallback) |
+| Таблица agent_memberships | ✅ СУЩЕСТВУЕТ (используется для console RBAC) |
 | Онбординг скрипт | ⚠️ РУЧНОЙ (onboard_client.py отсутствует; sync_client.py только для KB) |
 | Счётчик сообщений | 📋 ПЛАН |
 | Dashboard для заказчика | 📋 ПЛАН |

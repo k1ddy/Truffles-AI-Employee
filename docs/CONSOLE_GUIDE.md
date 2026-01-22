@@ -59,6 +59,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 **Tables used:**
 - `agent_identities` (OIDC identity mapping)
 - `agents` (role, client, optional branch)
+- `agent_memberships` (org‑scope RBAC: company/client/branch)
 - `clients`, `branches` (tenant scope)
 - `handovers`, `conversations`, `users` (cases)
 - `specialists`, `bookings` (calendar)

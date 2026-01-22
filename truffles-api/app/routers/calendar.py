@@ -111,12 +111,15 @@ async def list_specialists(
         Specialist.is_active == True
     )
     
+    allowed_branch_ids = context.allowed_branch_ids
+
     if branch_id:
-        query = query.filter(Specialist.branch_id == UUID(branch_id))
-    elif context.agent.branch_id:
-        # Non-admin sees only their branch
-        if context.agent.role not in ("owner", "admin"):
-            query = query.filter(Specialist.branch_id == context.agent.branch_id)
+        requested_branch = UUID(branch_id)
+        if requested_branch not in allowed_branch_ids:
+            raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
+        query = query.filter(Specialist.branch_id == requested_branch)
+    elif context.branch_restricted:
+        query = query.filter(Specialist.branch_id.in_(allowed_branch_ids))
     
     specialists = query.order_by(Specialist.name).all()
     
@@ -300,7 +303,7 @@ async def list_bookings(
     bookings = service.get_bookings(
         client_id=context.client.id,
         specialist_id=UUID(specialist_id) if specialist_id else None,
-        branch_id=context.agent.branch_id if context.agent.role not in ("owner", "admin") else None,
+        branch_ids=list(context.allowed_branch_ids) if context.branch_restricted else None,
         date_from=parsed_from,
         date_to=parsed_to,
         status=status,
@@ -397,13 +400,16 @@ async def google_connect(
     context = get_console_context(request, db)
     
     # Only owner/admin can connect calendar
-    if context.agent.role not in ("owner", "admin"):
+    if context.role not in ("owner", "admin"):
         raise ConsoleAPIError(403, "FORBIDDEN", "Only admin can connect Google Calendar")
+
+    if context.branch_restricted and not context.effective_branch_id:
+        raise ConsoleAPIError(403, "FORBIDDEN", "Branch selection required for Google Calendar")
     
     service = GoogleCalendarService(db)
     auth_url = service.get_auth_url(
         client_id=context.client.id,
-        branch_id=context.agent.branch_id
+        branch_id=context.effective_branch_id
     )
     
     return RedirectResponse(url=auth_url)

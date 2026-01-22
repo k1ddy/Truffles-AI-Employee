@@ -73,9 +73,9 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
         agent={
             "id": context.agent.id,
             "name": context.agent.name,
-            "role": context.agent.role,
-            "client_id": context.agent.client_id,
-            "branch_id": context.agent.branch_id,
+            "role": context.role,
+            "client_id": context.client.id,
+            "branch_id": context.effective_branch_id or context.agent.branch_id,
             "is_active": context.agent.is_active,
         },
         client=active_client,
@@ -125,10 +125,12 @@ async def list_cases(
         try:
             bid = UUID(branch_id)
             if bid not in allowed_branch_ids:
-                 raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
+                raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
             query = query.filter(Conversation.branch_id == bid)
         except ValueError:
-             raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid branch_id")
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid branch_id")
+    elif context.branch_restricted:
+        query = query.filter(Conversation.branch_id.in_(allowed_branch_ids))
     
     # Status filter
     if status:
@@ -473,7 +475,7 @@ async def get_case(
 
     # Check branch access (skip if branch_id is None or agent is admin/owner)
     allowed_branch_ids = {b.id for b in context.branches}
-    if branch_id is not None and branch_id not in allowed_branch_ids and context.agent.role not in ("owner", "admin"):
+    if branch_id is not None and branch_id not in allowed_branch_ids:
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this case denied")
     
     # Calculate SLA status
@@ -537,10 +539,10 @@ async def send_manager_message(
         raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found or access denied")
     
     # Only allow if case is active and assigned to this agent, or agent is owner/admin
-    if case.status != "active" and context.agent.role not in ("owner", "admin"):
+    if case.status != "active" and context.role not in ("owner", "admin"):
         raise ConsoleAPIError(403, "CASE_NOT_ACTIVE", "Case must be active to send messages")
     
-    if case.assigned_to_name != context.agent.name and context.agent.role not in ("owner", "admin"):
+    if case.assigned_to_name != context.agent.name and context.role not in ("owner", "admin"):
         raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
     
     # Get conversation to find user
@@ -895,7 +897,7 @@ async def update_settings(
     context = get_console_context(request, db)
     
     # Only owner/admin can update settings
-    if context.agent.role not in ("owner", "admin"):
+    if context.role not in ("owner", "admin"):
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin can update settings")
     
     # Get client settings
