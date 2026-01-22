@@ -43,7 +43,7 @@
 - DONE: Console E2E seed (stable IDs) через `console_e2e_seed.py` с `E2E_SUBJECT` из JWT. Evidence: output IDs (company/client/branch/agent/handover).
 - DONE: `/console/v1/me` теперь возвращает `selection_required=true`, `clients_count=2` для E2E. Evidence: curl + jq.
 - BLOCKERS: Playwright smoke на prod UI падает из‑за `CLIENT_SELECTION_REQUIRED` (prod console-web не отправляет `X-Client-Id`). Evidence: `npm run test:e2e:smoke` + docker logs `ConsoleAPIError: CLIENT_SELECTION_REQUIRED`.
-- GAP: Schemathesis GET‑smoke с `X-Client-Id` падает: API принимает invalid query params и возвращает `INVALID_PARAM` для branch_id, не отражено в контракте. Evidence: schemathesis run (failures for `/audit`, `/metrics/daily`, `/cases`, `/cases/{id}/messages`).
+- FIX READY: Console query‑params validation (unknown params + enums + dates + limit) + OpenAPI 400/403 + `INVALID_PARAM` error registry обновлены. Требуется deploy + schemathesis evidence после выката.
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
