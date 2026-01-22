@@ -15,6 +15,17 @@
 
 ---
 
+## Перед SSH: проверка окружения
+
+Если `pwd` = `/home/zhan/truffles-main` и public IP совпадает с IP выше — ты уже на проде, SSH не нужен.
+
+Быстрая проверка:
+```bash
+hostname; whoami; pwd; curl -s https://ifconfig.me
+```
+
+---
+
 ## Docker контейнеры
 
 | Имя | Образ | Назначение |
