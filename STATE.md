@@ -2158,14 +2158,14 @@
 - Docs/Process: обновлены `AGENTS.md`, `docs/SESSION_START_PROMPT.txt`, `TECH.md`, `docs/DEV_SETUP.md`, `STRUCTURE.md`.
 
 **Checks:**
-- CI (PR) run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21212829687
-  - `console-e2e`: SUCCESS (skipped by guard — missing secrets)
-  - `console-contract`: SUCCESS (skipped by guard — missing secrets)
+- CI (PR) run: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21231552423
+  - `console-e2e`: SUCCESS
+  - `console-contract`: SUCCESS
   - `console-k6`: SKIPPED (manual only)
+- Manual k6 (prod, read‑only): 2026‑01‑21 — p95 ~59ms, http_req_failed 0%, checks passed (`/me`, `/cases?limit=5`).
 
 **Status:** DONE (implementation complete).
-
-**GAP:** нужны CI secrets для реального выполнения console‑e2e/contract (см. `TECH.md`).
+**Note:** `console-k6` остаётся manual gate (workflow_dispatch или локальный docker).
 
 ### 2026-01-21 — CI livecheck reset meta timeout (branch sender JIDs)
 
