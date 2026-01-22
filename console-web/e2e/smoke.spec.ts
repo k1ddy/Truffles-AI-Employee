@@ -6,6 +6,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
 const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
 const runMutations = process.env.E2E_ALLOW_MUTATIONS === '1';
+const useStorageState = process.env.E2E_USE_STORAGE_STATE === '1';
 const emptyStorageState = { cookies: [], origins: [] };
 
 function matchesPath(url: string, paths: string[]) {
@@ -76,15 +77,21 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
     await page.goto('/');
     await expect(page.getByTestId('console-header')).toBeVisible();
     const casesTitle = page.getByTestId('cases-title');
-    if (await casesTitle.isVisible().catch(() => false)) {
+    if (useStorageState) {
+        await expect(casesTitle, 'Expected logged-in UI with storage state.').toBeVisible({ timeout: 15000 });
         return;
     }
-    const loginButton = page.getByTestId('login-button');
-    if (await loginButton.isVisible().catch(() => false)) {
-        await loginThroughKeycloak(page);
+    try {
+        await expect(casesTitle).toBeVisible({ timeout: 10000 });
+        return;
+    } catch {
+        const loginButton = page.getByTestId('login-button');
+        if (await loginButton.isVisible().catch(() => false)) {
+            await loginThroughKeycloak(page);
+        }
+        await page.goto('/');
+        await expect(casesTitle).toBeVisible({ timeout: 10000 });
     }
-    await page.goto('/');
-    await expect(casesTitle).toBeVisible({ timeout: 10000 });
 }
 
 // =========================================
@@ -110,7 +117,9 @@ test.describe('Smoke Test: Login Flow', () => {
     });
 
     test('should logout successfully @smoke', async ({ page }) => {
-        await ensureLoggedIn(page);
+        await page.goto('/');
+        await loginThroughKeycloak(page);
+        await expect(page.getByTestId('cases-title')).toBeVisible();
         await page.getByTestId('logout-button').click();
         await expect(page.getByTestId('login-button')).toBeVisible({ timeout: 10000 });
     });
