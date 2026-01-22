@@ -1940,6 +1940,130 @@ PLAN/VERIFY:
 - list_cases теперь должен показывать `customer_*` + SLA и соблюдать branch‑scope; idempotency TTL (default 600s)
   + обязательный `NEXT_PUBLIC_API_URL` в console proxy — требуется проверка через консольный доступ/CI.
 
+### 2026-01-22 — Console brand alignment + Keycloak theme + lint/build
+
+Aligned console styling to the landing brand tokens (colors/Inter/neutral palette), added the shared logo, and
+wired a Keycloak theme so auth matches the console. Then fixed the ESLint config mismatch and reran lint/build,
+plus restarted Keycloak and console‑web.
+
+Details (where/why):
+- Centralized brand tokens + font to match landing in console-web/src/app/globals.css and console-web/
+  tailwind.config.cjs, switched layout to Inter in console-web/src/app/layout.tsx.
+- Replaced hardcoded gray/blue classes with theme tokens across the console UI in console-web/src/app/page.tsx,
+  console-web/src/app/calendar/page.tsx, console-web/src/app/audit/page.tsx, console-web/src/app/settings/
+  page.tsx, console-web/src/app/cases/[id]/page.tsx, console-web/src/components/CaseList.tsx, console-web/src/
+  components/CaseView.tsx, console-web/src/components/ChatInterface.tsx, console-web/src/components/OpsPage.tsx,
+  console-web/src/components/LoginButton.tsx, console-web/src/components/AccessDenied.tsx, console-web/src/
+  components/ErrorBoundary.tsx, console-web/src/components/ToastProvider.tsx, console-web/src/utils/labels.ts.
+- Added shared logo for console in console-web/public/brand/truffles-logo.png and used it in console-web/src/app/
+  page.tsx.
+- Added Keycloak theme assets and wiring in ops/keycloak-theme/truffles/login/theme.properties, ops/keycloak-
+  theme/truffles/login/resources/css/login.css, ops/keycloak-theme/truffles/login/resources/img/logo.png, mounted
+  in docker-compose.console.yml, and set realm loginTheme in ops/keycloak-realm.json.
+- Fixed lint circular error by aligning eslint-config-next to ^15.5.9 in console-web/package.json and refreshing
+  lockfile; cleaned up any and unused vars in console-web/src/app/audit/page.tsx, console-web/src/app/calendar/
+  page.tsx, console-web/src/components/CaseList.tsx, console-web/src/components/CaseView.tsx, console-web/src/
+  components/ChatInterface.tsx, console-web/src/components/OpsPage.tsx, console-web/src/lib/api-hooks.ts, console-
+  web/src/lib/api.ts, console-web/src/lib/auth.ts, console-web/src/types/index.ts, console-web/src/types/next-
+  auth.d.ts.
+
+Checks:
+- cd /home/zhan/truffles-main/console-web && npm run lint (pass)
+- cd /home/zhan/truffles-main/console-web && npm run build (pass)
+- docker restart truffles-console-keycloak
+- docker restart truffles-console-web
+- docker exec truffles-console-keycloak /opt/keycloak/bin/kcadm.sh update realms/truffles -s loginTheme=truffles
+- docker exec truffles-console-web node -e "fetch('http://127.0.0.1:3000/api/health/full')..." → status healthy
+
+Evidence:
+- Console health inside container: status: 'healthy', API/db/qdrant reachable.
+- Keycloak realm now has "loginTheme" : "truffles" (from kcadm.sh get realms/truffles).
+
+git status -sb:
+## main...origin/main
+ M TECH.md
+ M console-web/package-lock.json
+ M console-web/package.json
+ M console-web/src/app/api/proxy/[...path]/route.ts
+ M console-web/src/app/audit/page.tsx
+ M console-web/src/app/calendar/page.tsx
+ M console-web/src/app/cases/[id]/page.tsx
+ M console-web/src/app/globals.css
+ M console-web/src/app/layout.tsx
+ M console-web/src/app/page.tsx
+ M console-web/src/app/settings/page.tsx
+ M console-web/src/components/AccessDenied.tsx
+ M console-web/src/components/CaseList.tsx
+ M console-web/src/components/CaseView.tsx
+ M console-web/src/components/ChatInterface.tsx
+ M console-web/src/components/ErrorBoundary.tsx
+ M console-web/src/components/LoginButton.tsx
+ M console-web/src/components/OpsPage.tsx
+ M console-web/src/components/ToastProvider.tsx
+ M console-web/src/lib/api-hooks.ts
+ M console-web/src/lib/api.ts
+ M console-web/src/lib/auth.ts
+ M console-web/src/types/index.ts
+ M console-web/src/types/next-auth.d.ts
+ M console-web/src/utils/labels.ts
+ M console-web/tailwind.config.cjs
+ M docker-compose.console.yml
+ M docs/runbooks/INCIDENTS.md
+ M docs/runbooks/OUTBOX.md
+ M ops/keycloak-realm.json
+ M truffles-api/app/logging_config.py
+ M truffles-api/app/main.py
+ M truffles-api/app/models/conversation.py
+ M truffles-api/app/routers/console.py
+ M truffles-api/app/services/console_idempotency.py
+?? console-web/public/
+?? ops/keycloak-theme/
+?? truffles-api/migrations/005_add_conversations_branch_id_index.sql
+
+git diff --stat:
+ TECH.md                                          |  1 +
+ console-web/package-lock.json                    | 86 ++++++++++++++--
+ console-web/package.json                         |  2 +-
+ console-web/src/app/api/proxy/[...path]/route.ts | 17 ++++-
+ console-web/src/app/audit/page.tsx               | 37 +++++-----
+ console-web/src/app/calendar/page.tsx            | 70 +++++++++----------
+ console-web/src/app/cases/[id]/page.tsx          |  8 +--
+ console-web/src/app/globals.css                  | 74 ++++++++++++++------
+ console-web/src/app/layout.tsx                   | 17 ++---
+ console-web/src/app/page.tsx                     | 33 ++++++---
+ console-web/src/app/settings/page.tsx            | 68 +++++++++---------
+ console-web/src/components/AccessDenied.tsx      | 12 ++--
+ console-web/src/components/CaseList.tsx          | 79 ++++++++++----------
+ console-web/src/components/CaseView.tsx          | 88 ++++++++++++------------
+ console-web/src/components/ChatInterface.tsx     | 30 ++++----
+ console-web/src/components/ErrorBoundary.tsx     | 16 ++---
+ console-web/src/components/LoginButton.tsx       | 12 +++-
+ console-web/src/components/OpsPage.tsx           | 66 +++++++++---------
+ console-web/src/components/ToastProvider.tsx     | 11 +--
+ console-web/src/lib/api-hooks.ts                 |  9 --
+ console-web/src/lib/api.ts                       |  1 +
+ console-web/src/lib/auth.ts                      |  4 +-
+ console-web/src/types/index.ts                   |  2 +-
+ console-web/src/types/next-auth.d.ts             |  2 +-
+ console-web/src/utils/labels.ts                  |  7 +-
+ console-web/tailwind.config.cjs                  | 45 ++++++++++--
+ docker-compose.console.yml                       |  1 +
+ docs/runbooks/INCIDENTS.md                       | 22 ++++++
+ docs/runbooks/OUTBOX.md                          | 13 ++++
+ ops/keycloak-realm.json                          |  1 +
+ truffles-api/app/logging_config.py               | 46 +++++++++++++
+ truffles-api/app/main.py                         | 78 +++++++++++++++++----
+ truffles-api/app/models/conversation.py          |  2 +-
+ truffles-api/app/routers/console.py              | 48 +++++++++----
+ truffles-api/app/services/console_idempotency.py | 35 ++++++++++
+ 36 files changed, 703 insertions(+), 364 deletions(-)
+
+Notes:
+- npm install eslint-config-next@15.5.9 updated lockfile and reported 2 vulnerabilities (npm audit if you want to
+  review).
+- New assets under console-web/public/ and ops/keycloak-theme/ need to be added to STRUCTURE.md; STATE.md update
+  must be done by Brain.
+
 ### 2026-01-21 — Task Package (planned): P0 RU/KZ/mixed lexicon + dialog coverage
 
 - Chosen issue (NOW): бот “не знает что отвечать” в RU/KZ/mixed — отсутствуют нужные диалоги/лексиконы, ответы не детерминированы.
