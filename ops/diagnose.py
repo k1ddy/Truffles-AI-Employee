@@ -1146,7 +1146,6 @@ def _fetch_message_bundle_rows(db_user, where_clause, limit):
         "'message_uuid', m.id, "
         "'content', m.content, "
         "'created_at', m.created_at, "
-        "'updated_at', m.updated_at, "
         "'remote_jid', u.remote_jid, "
         "'instance_id', m.metadata->>'instanceId', "
         "'message_id', m.metadata->>'messageId', "
@@ -2217,7 +2216,6 @@ def _run_trace_bundle(args):
                     "message_uuid": row.get("message_uuid"),
                     "message_id": row.get("message_id"),
                     "created_at": row.get("created_at"),
-                    "updated_at": row.get("updated_at"),
                     "remote_jid": row.get("remote_jid"),
                     "instance_id": row.get("instance_id"),
                     "conversation_id": conv_id,
