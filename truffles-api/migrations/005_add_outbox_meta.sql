@@ -1,0 +1,2 @@
+ALTER TABLE outbox_messages
+ADD COLUMN IF NOT EXISTS meta JSONB;

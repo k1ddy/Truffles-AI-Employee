@@ -1049,6 +1049,7 @@ def _fetch_outbox_rows(db_user, client_id, inbound_message_id, limit=5):
         "'created_at', created_at, "
         "'updated_at', updated_at, "
         "'last_error', last_error, "
+        "'meta', meta, "
         "'payload_json', payload_json"
         ") "
         "FROM outbox_messages "
@@ -1183,7 +1184,7 @@ def _fetch_message_bundle_rows(db_user, where_clause, limit):
 def _fetch_latest_outbox_for_conversation(db_user, conversation_id):
     safe_id = _escape_sql_literal(conversation_id)
     query = (
-        "SELECT inbound_message_id, status, payload_json::text "
+        "SELECT inbound_message_id, status, payload_json::text, meta::text "
         f"FROM outbox_messages WHERE conversation_id = '{safe_id}' "
         "ORDER BY created_at DESC LIMIT 1;"
     )
@@ -1192,17 +1193,24 @@ def _fetch_latest_outbox_for_conversation(db_user, conversation_id):
         return None, error
     if not row:
         return None, None
-    parts = row.split("\t", 2)
+    parts = row.split("\t", 3)
     payload = None
     if len(parts) > 2 and parts[2]:
         try:
             payload = json.loads(parts[2])
         except Exception:
             payload = None
+    meta = None
+    if len(parts) > 3 and parts[3]:
+        try:
+            meta = json.loads(parts[3])
+        except Exception:
+            meta = None
     return {
         "inbound_message_id": parts[0] if len(parts) > 0 else None,
         "status": parts[1] if len(parts) > 1 else None,
         "payload_json": payload,
+        "meta": meta,
     }, None
 
 def _compute_outbox_latency(message_created_at, outbox_rows):

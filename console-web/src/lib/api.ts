@@ -24,7 +24,8 @@ const api = attachIdempotencyKey(axios.create({
 
 // Factory function to create an authenticated axios instance
 // Note: Auth is now handled server-side in the proxy route
-export function createAuthenticatedApi(accessToken: string | undefined): AxiosInstance {
+export function createAuthenticatedApi(_accessToken: string | undefined): AxiosInstance {
+    void _accessToken;
     return attachIdempotencyKey(axios.create({
         baseURL: "/api/proxy",
         headers: {

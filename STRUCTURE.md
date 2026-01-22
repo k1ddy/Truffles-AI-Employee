@@ -20,8 +20,12 @@
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
+| `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
+| `console-web/e2e/` | Playwright smoke тесты + global setup (storageState) | Frontend/QA |
+| `console-web/public/brand/` | Бренд‑ассеты консоли (логотипы) | Frontend |
+| `docs/CONSOLE_GUIDE.md` | Архитектура/логика консоли + гайд по изменениям | Frontend/Backend |
 
 ---
 
@@ -49,6 +53,7 @@
 - План/приоритеты: `STRATEGY/TECH_ROADMAP.md`.
 - Операционные SOP: `SPECS/SYSTEM_REFERENCE.md` (deploy/knowledge update) + `TECH.md` + `docs/runbooks/*`.
 - Решения/GAP: `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml`.
+- Outbox payload contract: `contracts/events/outbox.webhook_payload.v1.jsonschema`.
 - Runtime pack: `truffles-api/app/knowledge/demo_salon/*`; RAG docs: `knowledge/demo_salon/*`.
 - Derived/статусы: `docs/TECH_STATUS.md`, `SUMMARY.md`, `docs/IMPERIUM_CONTEXT.yaml` (не канон).
 

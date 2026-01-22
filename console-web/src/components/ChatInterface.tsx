@@ -69,12 +69,12 @@ export default function ChatInterface({
             queryClient.invalidateQueries({ queryKey: ["messages", caseId] });
             toast.success("Сообщение отправлено");
         },
-        onError: (error: any, _, context) => {
+        onError: (error: unknown, _, context) => {
             // Rollback on error
             if (context?.previousMessages) {
                 queryClient.setQueryData(["messages", caseId], context.previousMessages);
             }
-            const code = error?.response?.data?.error?.code;
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
             if (code === "NOT_ASSIGNED") {
                 toast.error("Вы не назначены на эту заявку");
             } else if (code === "CASE_NOT_ACTIVE") {
@@ -107,22 +107,22 @@ export default function ChatInterface({
 
     if (isLoading) {
         return (
-            <div className="flex flex-col gap-4 p-4 bg-gray-50 rounded-lg h-[500px] overflow-y-auto">
+            <div className="flex flex-col gap-4 p-4 bg-muted rounded-lg h-[500px] overflow-y-auto">
                 <div className="animate-pulse space-y-4">
-                    <div className="h-16 bg-gray-200 rounded-lg w-3/4"></div>
-                    <div className="h-16 bg-gray-200 rounded-lg w-2/3 self-end ml-auto"></div>
-                    <div className="h-16 bg-gray-200 rounded-lg w-3/4"></div>
+                    <div className="h-16 bg-muted/70 rounded-lg w-3/4"></div>
+                    <div className="h-16 bg-muted/70 rounded-lg w-2/3 self-end ml-auto"></div>
+                    <div className="h-16 bg-muted/70 rounded-lg w-3/4"></div>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="flex flex-col h-[500px] bg-gray-50 rounded-lg">
+        <div className="flex flex-col h-[500px] bg-muted rounded-lg border border-border/60">
             {/* Messages area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {sortedMessages.length === 0 ? (
-                    <div className="text-center text-gray-500 my-auto">
+                    <div className="text-center text-muted-foreground my-auto">
                         Нет сообщений
                     </div>
                 ) : (
@@ -133,22 +133,22 @@ export default function ChatInterface({
                                 key={msg.id}
                                 className={`flex flex-col max-w-[80%] ${msg.role === "user" ? "self-start" : "self-end items-end"} ${isOptimistic ? "opacity-70" : ""}`}
                             >
-                                <div className="text-xs text-gray-500 mb-1">
+                                <div className="text-xs text-muted-foreground mb-1">
                                     {msg.role === "user" ? "Клиент" :
                                         msg.role === "manager" ? "Менеджер" : "Бот"}
                                     {isOptimistic && " (отправка...)"}
                                 </div>
                                 <div
                                     className={`p-3 rounded-lg ${msg.role === "user"
-                                        ? "bg-white border border-gray-200"
+                                        ? "bg-card border border-border/60"
                                         : msg.role === "manager"
-                                            ? "bg-green-500 text-white"
-                                            : "bg-blue-500 text-white"
+                                            ? "bg-primary text-primary-foreground"
+                                            : "bg-foreground text-background"
                                         }`}
                                 >
                                     <p className="whitespace-pre-wrap">{msg.content}</p>
                                 </div>
-                                <span className="text-xs text-gray-400 mt-1">
+                                <span className="text-xs text-muted-foreground mt-1">
                                     {isOptimistic ? "..." : new Date(msg.created_at).toLocaleString("ru-RU")}
                                 </span>
                             </div>
@@ -160,7 +160,7 @@ export default function ChatInterface({
 
             {/* Input area */}
             {canSend && (
-                <form onSubmit={handleSubmit} className="border-t p-3 bg-white rounded-b-lg">
+                <form onSubmit={handleSubmit} className="border-t border-border/60 p-3 bg-card rounded-b-lg">
                     <div className="flex gap-2">
                         <textarea
                             value={inputValue}
@@ -169,12 +169,12 @@ export default function ChatInterface({
                             placeholder="Введите сообщение... (Enter для отправки)"
                             rows={2}
                             disabled={sendMutation.isPending}
-                            className="flex-1 px-3 py-2 border rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                            className="flex-1 px-3 py-2 border border-border/60 rounded-lg text-sm resize-none bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:bg-muted"
                         />
                         <button
                             type="submit"
                             disabled={!inputValue.trim() || sendMutation.isPending}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors"
                         >
                             {sendMutation.isPending ? (
                                 <span className="flex items-center gap-1">
@@ -192,7 +192,7 @@ export default function ChatInterface({
             )}
 
             {!canSend && (
-                <div className="border-t p-3 bg-gray-100 rounded-b-lg text-center text-sm text-gray-500">
+                <div className="border-t border-border/60 p-3 bg-muted rounded-b-lg text-center text-sm text-muted-foreground">
                     Возьмите заявку чтобы отправлять сообщения
                 </div>
             )}

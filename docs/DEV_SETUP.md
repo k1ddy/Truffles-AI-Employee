@@ -106,6 +106,7 @@ curl http://localhost:3000/api/health/full
 ## 6. Console tests (local)
 
 **Playwright smoke (read-only):**
+`E2E_USE_STORAGE_STATE=1` включает один логин на весь прогон (быстрее и стабильнее).
 ```bash
 cd /home/zhan/truffles-main/console-web
 PLAYWRIGHT_BASE_URL=http://localhost:3000 \
@@ -114,6 +115,7 @@ KEYCLOAK_ISSUER=https://auth.truffles.kz/realms/truffles \
 KEYCLOAK_CLIENT_ID=console-web \
 KEYCLOAK_CLIENT_SECRET=console-client-secret \
 NEXT_PUBLIC_API_URL=https://api.truffles.kz/console/v1 \
+E2E_USE_STORAGE_STATE=1 \
 E2E_USERNAME=admin \
 E2E_PASSWORD=admin \
 npm run test:e2e:smoke

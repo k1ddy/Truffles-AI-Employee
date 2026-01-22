@@ -4,10 +4,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Branch, Client, Conversation, Handover, Message
+from app.models import Branch, Client, Conversation, Handover, Message, User
 from app.schemas.console import (
     ConsoleAgentInfo,
     ConsoleAuditEvent,
@@ -68,6 +69,15 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
     )
 
 
+def _calculate_sla_status(created_at: datetime) -> str:
+    time_since_creation = (datetime.now(timezone.utc) - created_at).total_seconds()
+    if time_since_creation > 7200:  # 2 hours
+        return "breached"
+    if time_since_creation > 3600:  # 1 hour
+        return "warning"
+    return "ok"
+
+
 @router.get(
     "/me",
     response_model=ConsoleMeResponse,
@@ -99,15 +109,29 @@ async def list_cases(
     context = get_console_context(request, db)
     
     # Base query
-    query = db.query(Handover).join(Conversation, Handover.conversation_id == Conversation.id).filter(Handover.client_id == context.client.id)
+    query = (
+        db.query(Handover, Conversation, User)
+        .join(Conversation, Handover.conversation_id == Conversation.id)
+        .outerjoin(User, and_(User.id == Conversation.user_id, User.client_id == context.client.id))
+        .filter(
+            Handover.client_id == context.client.id,
+            Conversation.client_id == context.client.id,
+        )
+    )
 
     # Branch filter (RBAC + Request)
     allowed_branch_ids = {b.id for b in context.branches}
+    is_privileged = context.agent.role in ("owner", "admin")
+
+    if not is_privileged:
+        if not allowed_branch_ids:
+            return ConsoleCaseListResponse(items=[], cursor=None, has_more=False)
+        query = query.filter(Conversation.branch_id.in_(allowed_branch_ids))
     
     if branch_id:
         try:
             bid = UUID(branch_id)
-            if bid not in allowed_branch_ids:
+            if not is_privileged and bid not in allowed_branch_ids:
                  raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
             query = query.filter(Conversation.branch_id == bid)
         except ValueError:
@@ -146,8 +170,8 @@ async def list_cases(
         except ValueError:
              pass # Ignore invalid cursor
 
-    # Select both Handover and Conversation to access branch_id
-    items = query.with_entities(Handover, Conversation).limit(limit + 1).all()
+    # Select handover + conversation + customer
+    items = query.with_entities(Handover, Conversation, User).limit(limit + 1).all()
     
     has_more = len(items) > limit
     if has_more:
@@ -170,8 +194,12 @@ async def list_cases(
                 branch_id=conversation.branch_id,
                 channel=handover.channel,
                 created_at=handover.created_at.isoformat(),
+                sla_status=_calculate_sla_status(handover.created_at),
+                customer_name=user.name if user else None,
+                customer_phone=user.phone if user else None,
+                customer_remote_jid=user.remote_jid if user else None,
             )
-            for handover, conversation in items
+            for handover, conversation, user in items
         ],
         cursor=next_cursor,
         has_more=has_more,
@@ -459,13 +487,7 @@ async def get_case(
     if branch_id is not None and branch_id not in allowed_branch_ids and context.agent.role not in ("owner", "admin"):
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this case denied")
     
-    # Calculate SLA status
-    time_since_creation = (datetime.now(timezone.utc) - case.created_at).total_seconds()
-    sla_status = "ok"
-    if time_since_creation > 3600:  # 1 hour
-        sla_status = "warning"
-    if time_since_creation > 7200:  # 2 hours
-        sla_status = "breached"
+    sla_status = _calculate_sla_status(case.created_at)
     
     return ConsoleCase(
         id=case.id,

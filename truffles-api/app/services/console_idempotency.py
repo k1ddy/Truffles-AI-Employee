@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -18,6 +19,28 @@ class IdempotencyResult:
     response_status: Optional[int] = None
     response_body: Optional[dict[str, Any]] = None
     record: Optional[ConsoleIdempotencyKey] = None
+
+
+def _get_idempotency_ttl_seconds() -> int:
+    raw = os.environ.get("CONSOLE_IDEMPOTENCY_TTL_SECONDS", "600")
+    try:
+        return max(int(raw), 0)
+    except ValueError:
+        return 600
+
+
+_IDEMPOTENCY_TTL_SECONDS = _get_idempotency_ttl_seconds()
+
+
+def _is_stale(record: ConsoleIdempotencyKey, now: datetime) -> bool:
+    if _IDEMPOTENCY_TTL_SECONDS <= 0:
+        return False
+    created_at = record.created_at
+    if created_at is None:
+        return False
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return (now - created_at).total_seconds() > _IDEMPOTENCY_TTL_SECONDS
 
 
 def _hash_request(scope: str, agent_id: UUID, payload: dict[str, Any]) -> str:
@@ -72,6 +95,18 @@ def start_idempotency(
         if existing.request_hash != request_hash:
             raise ConsoleAPIError(409, "IDEMPOTENCY_CONFLICT", "Idempotency key reuse with different request")
         if existing.response_status is None:
+            now = datetime.now(timezone.utc)
+            if _is_stale(existing, now):
+                db.delete(existing)
+                db.commit()
+                return start_idempotency(
+                    db,
+                    client_id=client_id,
+                    agent_id=agent_id,
+                    idempotency_key=idempotency_key,
+                    scope=scope,
+                    payload=payload,
+                )
             raise ConsoleAPIError(409, "IDEMPOTENCY_CONFLICT", "Idempotency key is already in progress")
         return IdempotencyResult(
             replay=True,
