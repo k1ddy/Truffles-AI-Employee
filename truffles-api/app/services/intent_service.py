@@ -9,9 +9,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Tuple
 
-import yaml
-
 import httpx
+import yaml
 
 from app.logging_config import get_logger, record_llm_time
 from app.services.ai_service import (
