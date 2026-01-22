@@ -207,8 +207,8 @@ DERIVED: status/evidence only; does not define product scope.
 - Status: PARTIAL
 - Evidence: `docs/CONSOLE_GUIDE.md`, `contracts/console_api/openapi.v1.yaml`
 - Факт: `/console/v1/me` возвращает список клиентов и признак выбора; при нескольких клиентах требуется `X-Client-Id`.
-- Boundary: орг‑уровень (Company/Client/Branch) и membership/RBAC не реализованы; нет CI‑evidence.
-- Fix plan: добавить membership/RBAC, tenant‑scoping тесты, CI evidence в `STATE.md`.
+- Boundary: орг‑уровень (Company/Client/Branch) реализован частично; membership/RBAC есть, но нет CI‑evidence.
+- Fix plan: tenant‑scoping тесты + CI evidence в `STATE.md` (Brain/Top Architect).
 - Go‑to‑market impact: не обещать “мульти‑компания” до реализации орг‑уровня.
 
 ### Console E2E / contract checks
