@@ -132,6 +132,17 @@ def _record_message_decision_meta(
         return
     metadata = dict(message.message_metadata or {})
     decision_meta = dict(metadata.get("decision_meta") or {})
+    for key in (
+        "fact_source",
+        "fact_text",
+        "fact_intents",
+        "response_guard",
+        "response_guard_reason",
+        "response_guard_fallback",
+    ):
+        decision_meta.pop(key, None)
+    metadata["decision_meta"] = decision_meta
+    message.message_metadata = metadata
     defaults = {
         "controller_attempted": False,
         "controller_fallback_reason": None,
