@@ -699,10 +699,10 @@ components:
           type: string
         database:
           type: string
-          enum: [ok, error]
+          enum: [ok, error, connected]
         redis:
           type: string
-          enum: [ok, error]
+          enum: [ok, error, connected]
         outbox_backlog:
           type: integer
 
