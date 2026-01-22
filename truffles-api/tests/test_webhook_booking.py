@@ -50,7 +50,7 @@ def test_validate_name_slot_rejects_noise(message_text):
 
 
 def test_match_expected_reply_for_datetime():
-    matched, value = webhook._match_expected_reply(
+    matched, value, _flags = webhook._match_expected_reply(
         expected_reply_type=webhook.EXPECTED_REPLY_TIME,
         message_text="Запишите на 12:30",
         client_slug=None,
@@ -61,7 +61,7 @@ def test_match_expected_reply_for_datetime():
 
 
 def test_match_expected_reply_for_name():
-    matched, value = webhook._match_expected_reply(
+    matched, value, _flags = webhook._match_expected_reply(
         expected_reply_type=webhook.EXPECTED_REPLY_NAME,
         message_text="Меня зовут Лиза",
         client_slug=None,
