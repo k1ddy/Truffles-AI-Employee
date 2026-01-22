@@ -18,9 +18,12 @@ export default async function globalSetup(config: FullConfig) {
     const browser = await chromium.launch();
     const page = await browser.newPage();
 
-    await page.goto(baseURL, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector('[data-testid="login-button"]', { timeout: 15000 });
-    await page.click('[data-testid="login-button"]');
+    const signInUrl = `${baseURL}/api/auth/signin?callbackUrl=${encodeURIComponent(baseURL)}`;
+    await page.goto(signInUrl, { waitUntil: "domcontentloaded" });
+    const providerForm = page.locator('form[action*="keycloak"]');
+    await providerForm.first().waitFor({ state: "visible", timeout: 15000 });
+    const submitButton = providerForm.first().locator('button[type="submit"], input[type="submit"]').first();
+    await submitButton.click();
     await page.waitForURL(keycloakHostPattern, { timeout: 20000 });
     await page.waitForSelector("#username", { timeout: 20000 });
     await page.fill("#username", username);
