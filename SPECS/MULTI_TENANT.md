@@ -2,7 +2,7 @@
 
 **Статус:** CANON  
 **Owner:** Top Architect  
-**Обновлено:** 2026-01-15  
+**Обновлено:** 2026-01-22  
 **Scope:** мультитенант, онбординг, isolation, branch‑routing.  
 **Out of scope:** реализация, evidence/CI.  
 **Links:** `SPECS/ARCHITECTURE.md`, `SPECS/SYSTEM_REFERENCE.md`, `STATE.md`.
@@ -160,6 +160,8 @@ Python API:
 | Диалоги | conversations | WHERE client_id |
 | Сообщения | messages | через conversation → client_id |
 | Заявки | handovers | WHERE client_id |
+| Learning кандидаты | learned_responses/knowledge_backlog | WHERE client_id (+ branch_id при наличии) |
+| Semantic resolver cards | packs/Qdrant payload | tenant/branch filter, без cross‑tenant |
 
 ## Что общее для всех
 
@@ -169,12 +171,13 @@ Python API:
 | Webhook вход | Роутинг одинаковый |
 | PostgreSQL | Одна БД, разные записи |
 | Qdrant | Одна коллекция, разные фильтры |
-| LLM (OpenAI) | Один API key |
+| LLM (OpenAI) | Один API key; контекст/инструменты tenant‑scoped |
 
 ## Domain Pack / Client Pack (Knowledge)
 
 - **Domain Pack** — общие категории услуг, RU/KZ синонимы, типовые вопросы, OOD‑якоря. **Без фактов.**
 - **Client Pack** — факты конкретного салона: услуги, цены, адрес, часы, правила, акции и т.д.
+- **Intent/Service cards** — канонические описания интентов/услуг для semantic resolver (embeddings), без фактов клиента.
 - **demo_salon** — dummy Client Pack с вымышленными данными, используется только для демо/тестов.
 
 **Где лежит:** `truffles-api/app/knowledge/<client_slug>/SALON_TRUTH.yaml`  
