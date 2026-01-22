@@ -12,6 +12,7 @@ export default function LoginButton() {
                 <button
                     onClick={() => signOut()}
                     className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
+                    data-testid="logout-button"
                 >
                     Выйти
                 </button>
@@ -22,6 +23,7 @@ export default function LoginButton() {
         <button
             onClick={() => signIn("keycloak")}
             className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90"
+            data-testid="login-button"
         >
             Войти через SSO
         </button>

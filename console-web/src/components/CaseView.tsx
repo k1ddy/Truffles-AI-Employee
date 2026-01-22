@@ -132,11 +132,12 @@ export default function CaseView({ caseId }: CaseViewProps) {
     // Error state
     if (caseError) {
         return (
-            <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center">
+            <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center" data-testid="case-error">
                 <p className="text-destructive mb-4">Не удалось загрузить заявку</p>
                 <button
                     onClick={() => refetchCase()}
                     className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
+                    data-testid="case-retry"
                 >
                     Повторить
                 </button>
@@ -145,7 +146,11 @@ export default function CaseView({ caseId }: CaseViewProps) {
     }
 
     if (!caseDetail) {
-        return <div className="text-center p-8 text-muted-foreground">Заявка не найдена</div>;
+        return (
+            <div className="text-center p-8 text-muted-foreground" data-testid="case-missing">
+                Заявка не найдена
+            </div>
+        );
     }
 
     const messages = messagesData?.items ?? [];
@@ -154,12 +159,14 @@ export default function CaseView({ caseId }: CaseViewProps) {
     const canReply = isActive;
 
     return (
-        <div className="flex flex-col gap-6 h-full">
+        <div className="flex flex-col gap-6 h-full" data-testid="case-view">
             {/* Header */}
-            <div className="flex justify-between items-start border-b border-border/60 pb-4">
+            <div className="flex justify-between items-start border-b border-border/60 pb-4" data-testid="case-header">
                 <div>
                     <div className="flex items-center gap-3 mb-2">
-                        <h1 className="text-2xl font-bold">Заявка {caseDetail.id.slice(0, 8)}</h1>
+                        <h1 className="text-2xl font-bold" data-testid="case-title">
+                            Заявка {caseDetail.id.slice(0, 8)}
+                        </h1>
                         <SlaBadge status={caseDetail.sla_status} />
                     </div>
                     <div className="flex gap-2 text-sm flex-wrap">
@@ -208,9 +215,9 @@ export default function CaseView({ caseId }: CaseViewProps) {
             </div>
 
             {/* Content */}
-            <div className="grid grid-cols-3 gap-6 flex-1">
+            <div className="grid grid-cols-3 gap-6 flex-1" data-testid="case-content">
                 {/* Chat area */}
-                <div className="col-span-2 flex flex-col">
+                <div className="col-span-2 flex flex-col" data-testid="case-chat">
                     <h2 className="text-lg font-semibold mb-2">Диалог</h2>
                     <div className="flex-1 min-h-[400px]">
                         <ChatInterface

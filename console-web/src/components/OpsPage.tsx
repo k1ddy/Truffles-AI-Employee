@@ -111,8 +111,8 @@ export default function OpsPage() {
 
     if (isLoading) {
         return (
-            <div className="max-w-4xl mx-auto p-6">
-                <h1 className="text-2xl font-bold mb-6">Статус системы</h1>
+            <div className="max-w-4xl mx-auto p-6" data-testid="ops-page">
+                <h1 className="text-2xl font-bold mb-6" data-testid="ops-title">Статус системы</h1>
                 <div className="animate-pulse space-y-4">
                     <div className="h-32 bg-muted/70 rounded-lg"></div>
                     <div className="h-32 bg-muted/70 rounded-lg"></div>
@@ -122,9 +122,9 @@ export default function OpsPage() {
     }
 
     return (
-        <div className="max-w-4xl mx-auto p-6">
+        <div className="max-w-4xl mx-auto p-6" data-testid="ops-page">
             <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold">Статус системы</h1>
+                <h1 className="text-2xl font-bold" data-testid="ops-title">Статус системы</h1>
                 <div className="flex items-center gap-4">
                     <span className="text-sm text-muted-foreground">Авто-обновление: 30с</span>
                     <button
@@ -137,7 +137,7 @@ export default function OpsPage() {
             </div>
 
             {/* Overall Health */}
-            <div className="bg-card border border-border/60 rounded-lg p-6 mb-6">
+            <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-health-card">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold">Общее состояние</h2>
                     <StatusBadge status={health?.status || "unknown"} />
@@ -148,7 +148,7 @@ export default function OpsPage() {
             </div>
 
             {/* Daily Metrics */}
-            <div className="bg-card border border-border/60 rounded-lg p-6 mb-6">
+            <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-metrics-card">
                 <h2 className="text-lg font-semibold mb-4">
                     Метрики за сегодня
                     <span className="text-sm font-normal text-muted-foreground ml-2">
@@ -189,7 +189,7 @@ export default function OpsPage() {
             </div>
 
             {/* TG-03: Telegram Health */}
-            <div className="bg-card border border-border/60 rounded-lg p-6 mb-6">
+            <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-telegram-card">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold flex items-center gap-2">
                         📨 Telegram
@@ -232,16 +232,19 @@ export default function OpsPage() {
             </div>
 
             {/* Message Queue */}
-            <div className="bg-card border border-border/60 rounded-lg p-6 mb-6">
+            <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-queue-card">
                 <h2 className="text-lg font-semibold mb-4">Очередь сообщений</h2>
                 <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Ожидающих сообщений</span>
-                    <span className={`text-2xl font-bold ${(health?.outbox_backlog || 0) > 100
+                    <span
+                        className={`text-2xl font-bold ${(health?.outbox_backlog || 0) > 100
                         ? "text-red-600"
                         : (health?.outbox_backlog || 0) > 10
                             ? "text-yellow-600"
                             : "text-green-600"
-                        }`}>
+                        }`}
+                        data-testid="ops-queue-count"
+                    >
                         {health?.outbox_backlog ?? 0}
                     </span>
                 </div>

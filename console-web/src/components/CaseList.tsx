@@ -127,7 +127,7 @@ export default function CaseList() {
     if (isLoading && !cursor) {
         return (
             <div className="w-full">
-                <h2 className="text-xl font-semibold mb-4">Заявки</h2>
+                <h2 className="text-xl font-semibold mb-4" data-testid="cases-title">Заявки</h2>
                 <TableSkeleton />
             </div>
         );
@@ -135,11 +135,12 @@ export default function CaseList() {
 
     if (error) {
         return (
-            <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center">
+            <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center" data-testid="cases-error">
                 <p className="text-destructive mb-4">Не удалось загрузить заявки</p>
                 <button
                     onClick={() => refetch()}
                     className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
+                    data-testid="cases-retry"
                 >
                     Повторить
                 </button>
@@ -151,22 +152,24 @@ export default function CaseList() {
         <div className="w-full">
             {/* Header with filters */}
             <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-                <h2 className="text-xl font-semibold">Заявки</h2>
+                <h2 className="text-xl font-semibold" data-testid="cases-title">Заявки</h2>
                 <button
                     onClick={() => { resetPagination(); refetch(); }}
                     className="text-sm text-primary hover:text-primary/80"
+                    data-testid="cases-refresh"
                 >
                     Обновить
                 </button>
             </div>
 
             {/* Filter row */}
-            <div className="flex flex-wrap items-center gap-3 mb-4 p-3 bg-muted rounded-lg border border-border/60">
+            <div className="flex flex-wrap items-center gap-3 mb-4 p-3 bg-muted rounded-lg border border-border/60" data-testid="cases-filters">
                 {/* Status filter */}
                 <select
                     value={filters.status || ""}
                     onChange={(e) => { resetPagination(); setFilters({ ...filters, status: e.target.value || undefined }); }}
                     className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    data-testid="cases-filter-status"
                 >
                     <option value="">Все статусы</option>
                     <option value="pending">Ожидает</option>
@@ -180,6 +183,7 @@ export default function CaseList() {
                         value={filters.branchId || ""}
                         onChange={(e) => { resetPagination(); setFilters({ ...filters, branchId: e.target.value || undefined }); }}
                         className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        data-testid="cases-filter-branch"
                     >
                         <option value="">Все филиалы</option>
                         {branches.map((b: Branch) => (
@@ -193,6 +197,7 @@ export default function CaseList() {
                     value={filters.sortBy}
                     onChange={(e) => setFilters({ ...filters, sortBy: e.target.value as "created_at" | "sla" })}
                     className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    data-testid="cases-filter-sort"
                 >
                     <option value="created_at">Сортировка: Новые</option>
                     <option value="sla">Сортировка: Срочные</option>
@@ -206,6 +211,7 @@ export default function CaseList() {
                         value={filters.dateFrom || ""}
                         onChange={(e) => { resetPagination(); setFilters({ ...filters, dateFrom: e.target.value || undefined }); }}
                         className="px-2 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        data-testid="cases-filter-date-from"
                     />
                 </div>
 
@@ -217,6 +223,7 @@ export default function CaseList() {
                         value={filters.dateTo || ""}
                         onChange={(e) => { resetPagination(); setFilters({ ...filters, dateTo: e.target.value || undefined }); }}
                         className="px-2 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        data-testid="cases-filter-date-to"
                     />
                 </div>
 
@@ -227,6 +234,7 @@ export default function CaseList() {
                         checked={filters.assignedToMe}
                         onChange={(e) => { resetPagination(); setFilters({ ...filters, assignedToMe: e.target.checked }); }}
                         className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                        data-testid="cases-filter-assigned"
                     />
                     <span className="text-sm text-foreground/80">Мои заявки</span>
                 </label>
@@ -236,6 +244,7 @@ export default function CaseList() {
                     <button
                         onClick={() => { resetPagination(); setFilters({ assignedToMe: false, sortBy: "created_at" }); }}
                         className="text-xs text-muted-foreground hover:text-destructive"
+                        data-testid="cases-filter-clear"
                     >
                         Сбросить
                     </button>
@@ -243,13 +252,13 @@ export default function CaseList() {
             </div>
 
             {/* Results count */}
-            <div className="text-sm text-muted-foreground mb-2">
+            <div className="text-sm text-muted-foreground mb-2" data-testid="cases-count">
                 {sortedCases.length} {sortedCases.length === 1 ? "заявка" : sortedCases.length < 5 ? "заявки" : "заявок"}
                 {data?.has_more && " (есть ещё)"}
             </div>
 
             {/* Table */}
-            <div className="overflow-x-auto border border-border/60 rounded-lg bg-card">
+            <div className="overflow-x-auto border border-border/60 rounded-lg bg-card" data-testid="cases-table">
                 <table className="w-full text-left border-collapse">
                     <thead className="bg-muted">
                         <tr>
@@ -269,7 +278,7 @@ export default function CaseList() {
                             const sla = getSlaIndicator(c.created_at);
                             const branchName = branchMap.get(c.branch_id || "") || "-";
                             return (
-                                <tr key={c.id} className="border-b border-border/60 hover:bg-muted/60">
+                                <tr key={c.id} className="border-b border-border/60 hover:bg-muted/60" data-testid="cases-row">
                                     <td className="p-4 font-mono text-sm">{c.id.slice(0, 8)}...</td>
                                     <td className="p-4">
                                         <span
@@ -299,6 +308,7 @@ export default function CaseList() {
                                         <Link
                                             href={`/cases/${c.id}`}
                                             className="rounded-full bg-primary px-3 py-1 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90"
+                                            data-testid="case-open"
                                         >
                                             Открыть
                                         </Link>
@@ -308,7 +318,7 @@ export default function CaseList() {
                         })}
                         {sortedCases.length === 0 && (
                             <tr>
-                                <td colSpan={9} className="p-8 text-center text-muted-foreground">
+                                <td colSpan={9} className="p-8 text-center text-muted-foreground" data-testid="cases-empty">
                                     Заявки не найдены по указанным фильтрам.
                                 </td>
                             </tr>
@@ -324,6 +334,7 @@ export default function CaseList() {
                         onClick={loadMore}
                         disabled={isFetching}
                         className="px-6 py-2 bg-muted text-foreground/80 rounded-lg hover:bg-muted/80 disabled:opacity-50"
+                        data-testid="cases-load-more"
                     >
                         {isFetching ? "Загрузка..." : "Загрузить ещё"}
                     </button>

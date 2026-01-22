@@ -80,8 +80,8 @@ export default function AuditPage() {
 
     if (isLoading) {
         return (
-            <div className="max-w-6xl mx-auto p-6">
-                <h1 className="text-2xl font-bold mb-6">Журнал действий</h1>
+            <div className="max-w-6xl mx-auto p-6" data-testid="audit-page">
+                <h1 className="text-2xl font-bold mb-6" data-testid="audit-title">Журнал действий</h1>
                 <div className="animate-pulse space-y-3">
                     {[...Array(10)].map((_, i) => (
                         <div key={i} className="h-12 bg-muted/70 rounded"></div>
@@ -93,13 +93,14 @@ export default function AuditPage() {
 
     if (error) {
         return (
-            <div className="max-w-6xl mx-auto p-6">
-                <h1 className="text-2xl font-bold mb-6">Журнал действий</h1>
-                <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center">
+            <div className="max-w-6xl mx-auto p-6" data-testid="audit-page">
+                <h1 className="text-2xl font-bold mb-6" data-testid="audit-title">Журнал действий</h1>
+                <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center" data-testid="audit-error">
                     <p className="text-destructive mb-4">Не удалось загрузить журнал</p>
                     <button
                         onClick={() => refetch()}
                         className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
+                        data-testid="audit-retry"
                     >
                         Повторить
                     </button>
@@ -111,15 +112,15 @@ export default function AuditPage() {
     const events = data?.items ?? [];
 
     return (
-        <div className="max-w-6xl mx-auto p-6">
+        <div className="max-w-6xl mx-auto p-6" data-testid="audit-page">
             <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold">Журнал действий</h1>
+                <h1 className="text-2xl font-bold" data-testid="audit-title">Журнал действий</h1>
                 <Link href="/" className="text-primary hover:text-primary/80">
                     ← Назад к заявкам
                 </Link>
             </div>
 
-            <div className="bg-card border border-border/60 rounded-lg overflow-hidden">
+            <div className="bg-card border border-border/60 rounded-lg overflow-hidden" data-testid="audit-table">
                 <table className="w-full text-left">
                     <thead className="bg-muted">
                         <tr>
@@ -132,7 +133,7 @@ export default function AuditPage() {
                     </thead>
                     <tbody>
                         {events.map((event) => (
-                            <tr key={event.id} className="border-t border-border/60 hover:bg-muted/60">
+                            <tr key={event.id} className="border-t border-border/60 hover:bg-muted/60" data-testid="audit-row">
                                 <td className="p-4 text-sm text-muted-foreground">
                                     {new Date(event.created_at).toLocaleString("ru-RU")}
                                 </td>
@@ -156,7 +157,7 @@ export default function AuditPage() {
                         ))}
                         {events.length === 0 && (
                             <tr>
-                                <td colSpan={5} className="p-8 text-center text-muted-foreground">
+                                <td colSpan={5} className="p-8 text-center text-muted-foreground" data-testid="audit-empty">
                                     Записей в журнале пока нет.
                                 </td>
                             </tr>

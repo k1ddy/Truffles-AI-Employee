@@ -11,7 +11,10 @@ export default async function Home() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-10 border-b border-border/60 bg-background/80 backdrop-blur">
+      <header
+        className="sticky top-0 z-10 border-b border-border/60 bg-background/80 backdrop-blur"
+        data-testid="console-header"
+      >
         <div className="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-3">
@@ -21,27 +24,35 @@ export default async function Home() {
                 width={140}
                 height={40}
                 className="h-7 w-auto"
+                data-testid="console-logo"
                 priority
               />
-              <span className="text-xs uppercase tracking-[0.3em] text-muted-foreground hidden sm:inline">
+              <span
+                className="text-xs uppercase tracking-[0.3em] text-muted-foreground hidden sm:inline"
+                data-testid="console-title"
+              >
                 Truffles Console
               </span>
             </div>
             {session && (
               <nav className="flex gap-4 text-sm font-medium text-muted-foreground">
-                <Link href="/" className="text-foreground hover:text-foreground">
+                <Link
+                  href="/"
+                  className="text-foreground hover:text-foreground"
+                  data-testid="nav-cases"
+                >
                   Заявки
                 </Link>
-                <Link href="/calendar" className="hover:text-foreground">
+                <Link href="/calendar" className="hover:text-foreground" data-testid="nav-calendar">
                   Записи
                 </Link>
-                <Link href="/ops" className="hover:text-foreground">
+                <Link href="/ops" className="hover:text-foreground" data-testid="nav-ops">
                   Статус
                 </Link>
-                <Link href="/audit" className="hover:text-foreground">
+                <Link href="/audit" className="hover:text-foreground" data-testid="nav-audit">
                   Журнал
                 </Link>
-                <Link href="/settings" className="hover:text-foreground">
+                <Link href="/settings" className="hover:text-foreground" data-testid="nav-settings">
                   Настройки
                 </Link>
               </nav>
@@ -52,7 +63,7 @@ export default async function Home() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-6xl mx-auto px-6 py-8">
+      <main className="max-w-6xl mx-auto px-6 py-8" data-testid="console-main">
         {session ? (
           <CaseList />
         ) : (

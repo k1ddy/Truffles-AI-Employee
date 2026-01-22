@@ -23,6 +23,7 @@
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
+| `console-web/e2e/` | Playwright smoke тесты + global setup (storageState) | Frontend/QA |
 | `console-web/public/brand/` | Бренд‑ассеты консоли (логотипы) | Frontend |
 | `docs/CONSOLE_GUIDE.md` | Архитектура/логика консоли + гайд по изменениям | Frontend/Backend |
 
@@ -96,6 +97,7 @@
 - `docs/SESSION_START_PROMPT.txt` — протокол старта.
 - `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml` — решения и GAP.
 - `docs/runbooks/*` — операционные runbooks (outbox/sentinel/incidents).
+- `docs/runbooks/TRACE_BUNDLE.md` — bundle диагностика (trace/meta/outbox latency).
 - `truffles-api/app/knowledge/<client_slug>/*` — runtime pack (truth/policy/eval).
 - `knowledge/<client_slug>/*` — канон RAG‑контента клиента.
 
