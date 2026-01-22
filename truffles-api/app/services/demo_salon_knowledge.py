@@ -1512,7 +1512,7 @@ def semantic_service_match(text: str, client_slug: str) -> SemanticServiceMatch 
                 suggestions.append(cleaned)
 
     if score >= _SERVICE_MATCH_THRESHOLD:
-        reply = _format_semantic_service_reply(payload)
+        reply = _format_semantic_service_reply(payload, client_slug)
         if reply:
             return SemanticServiceMatch(
                 action="match",
