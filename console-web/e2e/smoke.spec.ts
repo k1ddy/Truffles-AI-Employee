@@ -71,11 +71,16 @@ async function loginThroughKeycloak(page: import('@playwright/test').Page) {
 async function ensureLoggedIn(page: import('@playwright/test').Page) {
     await page.goto('/');
     await expect(page.getByTestId('console-header')).toBeVisible();
-    const logoutButton = page.getByTestId('logout-button');
-    if (await logoutButton.isVisible().catch(() => false)) {
+    const casesTitle = page.getByTestId('cases-title');
+    if (await casesTitle.isVisible().catch(() => false)) {
         return;
     }
-    await loginThroughKeycloak(page);
+    const loginButton = page.getByTestId('login-button');
+    if (await loginButton.isVisible().catch(() => false)) {
+        await loginThroughKeycloak(page);
+    }
+    await page.goto('/');
+    await expect(casesTitle).toBeVisible({ timeout: 10000 });
 }
 
 // =========================================
