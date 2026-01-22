@@ -1889,6 +1889,57 @@
 - PR #271 (skip deploy/livecheck jobs when doc-only): https://github.com/k1ddy/Truffles-AI-Employee/pull/271
   - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21169183412 (deploy/livecheck jobs skipped).
 
+### 2026-01-22 — DB/Qdrant health gauges + Prometheus alert refresh (prod)
+
+**What done:**
+- Deployed API build with DB/Qdrant health gauges and refreshed Prometheus alerting so monitoring uses emitted metrics.
+
+**Evidence:**
+- `/metrics` now includes health gauges + latencies:
+  - `health_check_database_status 1.0`
+  - `health_check_database_latency_ms 22.0`
+  - `health_check_qdrant_status 1.0`
+  - `health_check_qdrant_latency_ms 20.0`
+- Prometheus query:
+  - `health_check_database_status` → `[1769050989.716, '1']`
+  - `health_check_qdrant_status` → `[1769050996.596, '1']`
+- `promtool check rules /etc/prometheus/alert_rules.yml` → `SUCCESS: 11 rules found`
+- Prometheus target `truffles-api` health = `up` (`/api/v1/targets`).
+
+**Actions run:**
+- `docker build -t truffles-api_truffles-api /home/zhan/truffles-main/truffles-api`
+- `bash /home/zhan/restart_api.sh`
+- `docker restart truffles-prometheus-1`
+- `curl -s -X POST http://localhost:9090/-/reload`
+
+**Files touched (existing in worktree/infra):**
+- `truffles-api/app/logging_config.py`
+- `truffles-api/app/main.py`
+- `docs/runbooks/INCIDENTS.md`
+- `docs/runbooks/OUTBOX.md`
+- `/home/zhan/infrastructure/alert_rules.yml`
+
+### 2026-01-22 — Ops/Console мониторинг + консольные фиксы
+
+DONE (evidence):
+- Prometheus alert rules обновлены/загружены (11 правил, включая DB/Qdrant health).
+  Evidence: `promtool check rules /etc/prometheus/alert_rules.yml` → `SUCCESS: 11 rules found`
+  Evidence: `/api/v1/rules` → `DatabaseHealthCheckFailed, ... , TrufflesAPIUnavailable`
+- Target `truffles-api` в Prometheus здоров.
+  Evidence: `/api/v1/targets` → `health up`, `lastScrape 2026-01-22T03:39:26Z`
+- DB/Qdrant health‑метрики отдаются в `/metrics` и видны в Prometheus.
+  Evidence: `/metrics` → `health_check_database_status 1.0`, `health_check_qdrant_status 1.0`
+  Evidence: `/api/v1/query` → `health_check_database_status=1`, `health_check_qdrant_status=1`
+- Индекс создан: `conversations.branch_id`.
+  Evidence (SQL): `ix_conversations_branch_id` exists (pg_indexes output)
+- console‑web пересобран/перезапущен.
+  Evidence: `GET /api/health/full` → `status=healthy`, `api.status=healthy`, `database=connected`,
+  `qdrant=reachable`.
+
+PLAN/VERIFY:
+- list_cases теперь должен показывать `customer_*` + SLA и соблюдать branch‑scope; idempotency TTL (default 600s)
+  + обязательный `NEXT_PUBLIC_API_URL` в console proxy — требуется проверка через консольный доступ/CI.
+
 ### 2026-01-21 — Task Package (planned): P0 RU/KZ/mixed lexicon + dialog coverage
 
 - Chosen issue (NOW): бот “не знает что отвечать” в RU/KZ/mixed — отсутствуют нужные диалоги/лексиконы, ответы не детерминированы.
