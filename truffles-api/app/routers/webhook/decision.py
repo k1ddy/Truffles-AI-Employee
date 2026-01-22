@@ -59,7 +59,7 @@ def _detect_fast_intent(
     return None
 
 
-def _detect_intent_signals(message_text: str) -> DecisionSignals:
+def _detect_intent_signals(message_text: str, *, timing_context: dict | None = None) -> DecisionSignals:
     from . import _legacy as legacy
 
     is_greeting = legacy.is_greeting_message(message_text)
@@ -78,7 +78,7 @@ def _detect_intent_signals(message_text: str) -> DecisionSignals:
         intent = Intent.OTHER
         legacy.logger.info("Intent shortcut: acknowledgement/low-signal -> other")
     else:
-        intent = legacy.classify_intent(message_text)
+        intent = legacy.classify_intent(message_text, timing_context=timing_context)
         legacy.logger.info(f"Intent classified: {intent.value}")
 
     return DecisionSignals(
@@ -499,6 +499,7 @@ def _run_intent_decomposition(
     message_count: int,
     now: datetime,
     client_slug: str | None,
+    timing_context: dict | None = None,
 ) -> IntentDecompositionState:
     from . import _legacy as legacy
 
@@ -522,7 +523,11 @@ def _run_intent_decomposition(
     consult_return_prompt = None
 
     if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
-        intent_decomp_payload = legacy.detect_multi_intent(message_text, client_slug=client_slug)
+        intent_decomp_payload = legacy.detect_multi_intent(
+            message_text,
+            client_slug=client_slug,
+            timing_context=timing_context,
+        )
         if isinstance(intent_decomp_payload, dict):
             intent_decomp_used = True
             raw_intents = intent_decomp_payload.get("intents")
@@ -1099,7 +1104,7 @@ def _run_class_router_stage(
 
     intent_t0 = time.monotonic()
     decision_text = _normalize_message_text(message_text)
-    signals = _detect_intent_signals(decision_text)
+    signals = _detect_intent_signals(decision_text, timing_context=timing_context)
     intent = signals.intent
     intent_contract, intent_error = build_intent_contract(signals, intent_decomp_payload)
     legacy._record_decision_trace(
@@ -1601,6 +1606,20 @@ ROUTER_SIGNAL_CONFIDENCE_FLOOR = 0.2
 CONTROLLER_CONFIDENCE_THRESHOLD = float(
     os.getenv("CONTROLLER_CONFIDENCE_THRESHOLD", "0.3") or 0.3
 )
+WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS = 7000
+
+
+def _get_pipeline_budget_ms() -> int:
+    raw = os.environ.get("WEBHOOK_PIPELINE_BUDGET_MS")
+    if raw is None or not str(raw).strip():
+        return WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS
+    try:
+        value = int(float(raw))
+    except (TypeError, ValueError):
+        return WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS
+    if value <= 0:
+        return WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS
+    return value
 
 
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
@@ -3122,6 +3141,8 @@ async def _handle_webhook_payload(
     logger.info(f"Webhook received: client_slug={payload.client_slug}")
     pipeline_started_at = datetime.now(timezone.utc)
     pipeline_start = time.monotonic()
+    pipeline_budget_ms = _get_pipeline_budget_ms()
+    pipeline_deadline = pipeline_start + (pipeline_budget_ms / 1000.0)
 
     def _resolve_trace_conversation(
         *,
@@ -3218,7 +3239,12 @@ async def _handle_webhook_payload(
         client_slug=payload.client_slug,
     )
 
-    timing_context: dict = {"client_slug": payload.client_slug, "remote_jid": remote_jid}
+    timing_context: dict = {
+        "client_slug": payload.client_slug,
+        "remote_jid": remote_jid,
+        "pipeline_budget_ms": pipeline_budget_ms,
+        "pipeline_deadline": pipeline_deadline,
+    }
     trace_id = get_trace_id()
     if trace_id:
         timing_context["trace_id"] = trace_id
@@ -3273,6 +3299,9 @@ async def _handle_webhook_payload(
         snapshot["pipeline_started_at"] = pipeline_started_at.isoformat()
         snapshot["pipeline_finished_at"] = datetime.now(timezone.utc).isoformat()
         snapshot["pipeline_ms"] = round((time.monotonic() - pipeline_start) * 1000, 2)
+        snapshot["pipeline_budget_ms"] = pipeline_budget_ms
+        remaining_ms = (pipeline_deadline - time.monotonic()) * 1000
+        snapshot["pipeline_budget_remaining_ms"] = round(max(remaining_ms, 0.0), 2)
         _merge_message_timing(saved_message, snapshot)
         timing_context["timing_persisted"] = True
 
@@ -4560,6 +4589,7 @@ async def _handle_webhook_payload(
         message_count=message_count,
         now=now,
         client_slug=payload.client_slug,
+        timing_context=timing_context,
     )
     intent_decomp_payload = intent_decomp_state.intent_decomp_payload
     intent_decomp_intents = intent_decomp_state.intent_decomp_intents
@@ -5614,7 +5644,11 @@ async def _handle_webhook_payload(
     ):
         multi_intent_payload = intent_decomp_payload
         if not multi_intent_payload:
-            multi_intent_payload = detect_multi_intent(message_text, client_slug=payload.client_slug)
+            multi_intent_payload = detect_multi_intent(
+                message_text,
+                client_slug=payload.client_slug,
+                timing_context=timing_context,
+            )
         if isinstance(multi_intent_payload, dict) and multi_intent_payload.get("multi_intent") is True:
             primary = multi_intent_payload.get("primary_intent")
             secondary = multi_intent_payload.get("secondary_intents") or []

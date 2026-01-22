@@ -14,6 +14,7 @@ from app.services.ai_service import (
     FAST_MODEL,
     INTENT_TIMEOUT_SECONDS,
     _append_llm_budget_event,
+    _should_attempt_llm,
     consume_llm_budget,
     get_llm_provider,
     normalize_for_matching,
@@ -429,7 +430,7 @@ def is_frustration_message(message: str) -> bool:
     return any(pattern.search(normalized) for pattern in FRUSTRATION_PATTERNS)
 
 
-def classify_intent(message: str) -> Intent:
+def classify_intent(message: str, *, timing_context: dict | None = None) -> Intent:
     """Classify user message intent using LLM."""
     try:
         if is_opt_out_message(message):
@@ -443,6 +444,12 @@ def classify_intent(message: str) -> Intent:
 
         if not os.environ.get("OPENAI_API_KEY"):
             logger.info("Intent classification skipped: OPENAI_API_KEY missing")
+            return Intent.OTHER
+        if not _should_attempt_llm(
+            timing_context,
+            timeout_seconds=INTENT_TIMEOUT_SECONDS,
+            stage="intent_llm",
+        ):
             return Intent.OTHER
 
         llm = get_llm_provider()
@@ -578,6 +585,19 @@ def route_dialogue_controller(
     if not prompt:
         result["error"] = "prompt_missing"
         result["payload"] = _build_payload(controller_error="prompt_missing")
+        return result
+    if not _should_attempt_llm(
+        timing_context,
+        timeout_seconds=CONTROLLER_TIMEOUT_SECONDS,
+        stage="controller_llm",
+    ):
+        result["error"] = "deadline_exceeded"
+        result["payload"] = _build_payload(
+            controller_error="deadline_exceeded",
+            controller_llm_ms=0.0,
+            reason="deadline_exceeded",
+            controller_retry_flag=False,
+        )
         return result
 
     controller_input = {
