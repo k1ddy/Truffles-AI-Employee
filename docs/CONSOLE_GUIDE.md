@@ -31,28 +31,34 @@ Keycloak issues JWT; NextAuth stores session; API validates JWT signature and ma
 
 ## 2) Tenancy and RBAC (Critical)
 
-**Key:** One login = one `client_id`.  
+**Key:** один OIDC login может соответствовать нескольким `client_id`.  
 Console uses `agent_identities` to map OIDC `sub` → `agents` → `client_id`.
 
+**Client selection (если клиентов несколько):**
+- `/console/v1/me` возвращает `clients[]` и `selection_required`.
+- API требует заголовок `X-Client-Id`, если клиентов > 1.
+- UI хранит выбор в `localStorage` (`console:client_id`) и очищает на logout.
 **Access scope is enforced here:**
 `truffles-api/app/services/console_auth.py` → `get_console_context()`
 
 **Note (current limitation):**
-Org-level access is not implemented yet. Company-level selection (company/client/branch) is planned per DEC-011
-and requires membership/RBAC changes.
+Org-level access реализован частично: есть `agent_memberships` и RBAC, но company/branch selection в UI
+ограничен выбором клиента. Полная модель Company → Client → Branch — по DEC-011.
 
 Rules:
 - `sub` must exist in `agent_identities` (channel=`oidc`).
 - Agent must be `is_active`.
 - All queries filter by `context.client.id`.
+- If multiple clients → `X-Client-Id` is mandatory.
 - Non‑admin/owner users are restricted to their branch.
 
 **Common symptom:** “Only 1–2 cases shown / no slots.”  
-Usually means the admin is mapped to the wrong `client_id`.
+Usually means the admin is mapped to the wrong `client_id` or the wrong client was selected.
 
 **Tables used:**
 - `agent_identities` (OIDC identity mapping)
 - `agents` (role, client, optional branch)
+- `agent_memberships` (org‑scope RBAC: company/client/branch)
 - `clients`, `branches` (tenant scope)
 - `handovers`, `conversations`, `users` (cases)
 - `specialists`, `bookings` (calendar)
@@ -133,9 +139,38 @@ Set `users[].id` in `ops/keycloak-realm.json` to avoid `sub` changes on re‑cre
 - Smoke tests are read-only. Mutating checks require `E2E_ALLOW_MUTATIONS=1`.
 - CI uses `E2E_USE_STORAGE_STATE=1` to log in once per run (faster, less flaky).
 - Login flow uses NextAuth sign-in to reach Keycloak (more stable than clicking UI).
+- Playwright uses storageState via setup project (one login per run).
 
 **Where to run:** `docs/DEV_SETUP.md` (Console tests section).
 
+**Credentials (do not commit):**
+- Prod host: `/home/zhan/secrets/console-e2e.env`.
+- Contract/k6: `/home/zhan/secrets/console-contract.env`.
+- Template: `console-web/.env.e2e.example` (no secrets).
+- CI: GitHub Secrets (`CONSOLE_E2E_USERNAME`, `CONSOLE_E2E_PASSWORD`, `CONSOLE_KEYCLOAK_CLIENT_SECRET`).
+- `CONSOLE_API_TOKEN` is short-lived; do not store in repo. If used locally, keep only in
+  `/home/zhan/secrets/console-contract.env` and rotate.
+
+**Seed (stable E2E data):**
+- Script: `truffles-api/scripts/console_e2e_seed.py` (idempotent, stable UUIDs).
+- Requires DB + Keycloak admin, gated by `E2E_SEED_ALLOW=1`.
+- If `sub` is known, pass `E2E_SUBJECT` to skip Keycloak admin.
+
+**E2E note (multi-client):**
+- E2E user should map to **one** client, or storageState must include `console:client_id`.
+- Otherwise tests will see `CLIENT_SELECTION_REQUIRED`.
+
+**CONSOLE_API_TOKEN (short-lived):**
+- Получать через Keycloak token endpoint; хранить только в env.
+```bash
+KEYCLOAK_TOKEN_URL="https://auth.truffles.kz/realms/truffles/protocol/openid-connect/token"
+curl -s -X POST "$KEYCLOAK_TOKEN_URL" \
+  -d "client_id=console-web" \
+  -d "client_secret=$CONSOLE_KEYCLOAK_CLIENT_SECRET" \
+  -d "grant_type=password" \
+  -d "username=$CONSOLE_KEYCLOAK_USERNAME" \
+  -d "password=$CONSOLE_KEYCLOAK_PASSWORD" | jq -r '.access_token'
+```
 ---
 
 ## 7) Debug & Troubleshooting
@@ -143,6 +178,10 @@ Set `users[].id` in `ops/keycloak-realm.json` to avoid `sub` changes on re‑cre
 **403 ACCESS_DENIED**
 - Check `agent_identities` mapping for `sub`.
 - Verify `agents.is_active = true`.
+
+**CLIENT_SELECTION_REQUIRED**
+- `/console/v1/me` вернул `selection_required=true` → выбрать клиента или передать `X-Client-Id`.
+- Очистить `localStorage` ключ `console:client_id`, если выбранный клиент удалён.
 
 **Empty “Cases”**
 - Check `handovers` count by `client_id`.

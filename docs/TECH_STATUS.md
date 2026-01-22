@@ -198,6 +198,24 @@ DERIVED: status/evidence only; does not define product scope.
 - Status: PARTIAL
 - Evidence: `truffles-api/app/services/manager_message_service.py`, `truffles-api/app/services/learning_service.py`,
   `truffles-api/app/models/learned_response.py`, `truffles-api/app/routers/webhook/_legacy.py`
+
+---
+
+## H) Console UI и авторизация
+
+### Console access & tenancy selection
+- Status: PARTIAL
+- Evidence: `docs/CONSOLE_GUIDE.md`, `contracts/console_api/openapi.v1.yaml`
+- Факт: `/console/v1/me` возвращает список клиентов и признак выбора; при нескольких клиентах требуется `X-Client-Id`.
+- Boundary: орг‑уровень (Company/Client/Branch) реализован частично; membership/RBAC есть, но нет CI‑evidence.
+- Fix plan: tenant‑scoping тесты + CI evidence в `STATE.md` (Brain/Top Architect).
+- Go‑to‑market impact: не обещать “мульти‑компания” до реализации орг‑уровня.
+
+### Console E2E / contract checks
+- Status: PARTIAL
+- Evidence: `TECH.md`, `docs/DEV_SETUP.md`
+- Boundary: CI evidence отсутствует.
+- Fix plan: прогон `console-e2e` и `console-contract` + фиксация evidence в `STATE.md`.
 - Факт: owner‑ответы могут автоматически попадать в Qdrant; очередь learned_responses и модерация не wired.
 - Boundary: автообучение не полное, нет гарантии “становится умнее” без участия владельца.
 - Fix plan: очередь learned_responses + модерация (P2), см. `SPECS/ACTIVE_LEARNING.md`.
@@ -212,6 +230,12 @@ DERIVED: status/evidence only; does not define product scope.
 - 5‑минутный smoke‑run успешен (см. ниже).
 
 ---
+
+## H) Console E2E (smoke)
+- Status: PARTIAL
+- Evidence: `console-web/e2e/*`, `console-web/playwright.config.ts`, `docs/DEV_SETUP.md`
+- Факт: локальный прогон `npm run test:e2e:smoke` проходит (14 tests, storageState setup).
+- Boundary: CI evidence не зафиксирован (нужен run URL).
 
 ## Pilot Readiness Checklist (5–10 min)
 - 1) Версия и билд актуальны (C1) — OK/Fail

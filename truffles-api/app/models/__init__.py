@@ -1,5 +1,6 @@
 from app.models.agent import Agent
 from app.models.agent_identity import AgentIdentity
+from app.models.agent_membership import AgentMembership
 from app.models.branch import Branch
 from app.models.client import Client
 from app.models.client_settings import ClientSettings
@@ -17,6 +18,7 @@ __all__ = [
     "Company",
     "Client",
     "Agent",
+    "AgentMembership",
     "AgentIdentity",
     "Branch",
     "User",

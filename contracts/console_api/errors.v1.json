@@ -36,6 +36,17 @@
             },
             "retryable": false
         },
+        "CLIENT_SELECTION_REQUIRED": {
+            "http_status": 400,
+            "message_template": "Client selection required",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Prompt to select a client before loading data"
+            },
+            "retryable": false
+        },
         "TENANT_MISMATCH": {
             "http_status": 403,
             "message_template": "Access denied: resource belongs to another organization",

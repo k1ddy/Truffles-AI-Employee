@@ -5,7 +5,7 @@
 **Обновлено:** 2026-01-22  
 **Scope:** мультитенант, онбординг, isolation, branch‑routing.  
 **Out of scope:** реализация, evidence/CI.  
-**Links:** `SPECS/ARCHITECTURE.md`, `SPECS/SYSTEM_REFERENCE.md`, `STATE.md`.
+**Links:** `SPECS/ARCHITECTURE.md`, `SPECS/SYSTEM_REFERENCE.md`, `docs/IMPERIUM_DECISIONS.yaml`, `STATE.md`.
 
 **Источник правды по архитектуре работы с несколькими заказчиками.**  
 **Создано:** 2025-12-07
@@ -29,9 +29,11 @@ _Любые статусы ниже — DERIVED; единственный ист
 | RAG фильтрация по branch (knowledge_tag/branch_id) | ✅ РАБОТАЕТ (strict, без fallback; требует backfill Qdrant) |
 | Telegram группы на филиал | ✅ РАБОТАЕТ (manager_scope=branch → Branch.telegram_chat_id; fallback client_settings) |
 | Роутинг через branch_id | ✅ РАБОТАЕТ (branch_id сохраняется + trace/meta; RAG strict без fallback) |
+| Таблица agent_memberships | ✅ СУЩЕСТВУЕТ (используется для console RBAC) |
 | Онбординг скрипт | ⚠️ РУЧНОЙ (onboard_client.py отсутствует; sync_client.py только для KB) |
 | Счётчик сообщений | 📋 ПЛАН |
 | Dashboard для заказчика | 📋 ПЛАН |
+| Console org‑уровень (Company/Client/Branch) | ⚠️ ЧАСТИЧНО: multi‑client selection есть, membership/RBAC нет |
 
 ---
 
@@ -107,11 +109,23 @@ Company
 | Knowledge | client_slug + branch filter (knowledge_tag/branch_id; без fallback) | Branch.knowledge_tag |
 | Conversation привязан к | branch_id (сохраняется + используется в routing) | branch_id |
 | Каналы (WhatsApp/Instagram) | 1 на client | через Channel (backlog) |
-| Console tenancy | 1 login = 1 client | Company-level access + выбор client/branch |
+| Console access | Исторически: один `sub` → один client; сейчас доступен multi‑client через `X-Client-Id` и membership/RBAC | Org‑уровень с membership/RBAC и выбором company/client/branch |
 
-**GAP (must close for full org-level):**
-- Company-level memberships/roles are not implemented; agents map to a single client only.
-- Console API and UI assume single-client context (no company/client selector).
+## Console tenancy (текущее, промежуточное)
+
+**DEC‑011:** орг‑уровень Company → Client → Branch (roles/RBAC) — целевой, не реализован полностью.
+
+**Что уже есть:**
+- Один OIDC `sub` может быть привязан к нескольким `agents` (по клиентам).
+- Таблица `agent_memberships` + RBAC в console auth.
+- `/console/v1/me` возвращает `clients[]` и `selection_required`.
+- При нескольких клиентах обязателен заголовок `X-Client-Id`; иначе `CLIENT_SELECTION_REQUIRED`.
+- UI хранит выбор в `localStorage` (`console:client_id`) и очищает на logout.
+- Non‑admin/owner пользователи ограничены branch‑scoped доступом.
+
+**Что ещё нужно:**
+- Company/client/branch selection в UI (не только client).
+- Явный `tenant_context` (company_id/client_id/branch_id) в событиях/аудите/метриках.
 
 ---
 

@@ -324,6 +324,7 @@ class BookingService:
         client_id: UUID,
         specialist_id: Optional[UUID] = None,
         branch_id: Optional[UUID] = None,
+        branch_ids: Optional[list[UUID]] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
         status: Optional[str] = None,
@@ -336,7 +337,9 @@ class BookingService:
         
         if specialist_id:
             query = query.filter(Booking.specialist_id == specialist_id)
-        if branch_id:
+        if branch_ids:
+            query = query.filter(Booking.branch_id.in_(branch_ids))
+        elif branch_id:
             query = query.filter(Booking.branch_id == branch_id)
         if date_from:
             query = query.filter(Booking.start_at >= date_from)

@@ -47,4 +47,4 @@ decisions:
   - id: "DEC-011"
     area: "org_level_tenancy"
     choice: "COMPANY_CLIENT_BRANCH"
-    statement: "Company -> Client -> Branch hierarchy with explicit memberships/roles; console supports company-level access and client/branch selection; all API/events require tenant_context (company_id/client_id/branch_id)."
+    statement: "Company -> Client -> Branch hierarchy with explicit memberships/roles; console supports client/branch selection; all API/events require tenant_context (company_id/client_id/branch_id)."

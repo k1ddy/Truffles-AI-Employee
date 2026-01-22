@@ -10,7 +10,12 @@ export default function LoginButton() {
             <div className="flex gap-4 items-center">
                 <p className="text-sm text-muted-foreground">Вы вошли</p>
                 <button
-                    onClick={() => signOut()}
+                    onClick={() => {
+                        if (typeof window !== "undefined") {
+                            window.localStorage.removeItem("console:client_id")
+                        }
+                        signOut()
+                    }}
                     className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
                     data-testid="logout-button"
                 >

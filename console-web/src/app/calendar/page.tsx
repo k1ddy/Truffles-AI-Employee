@@ -38,6 +38,22 @@ interface Booking {
     created_at: string;
 }
 
+interface BookingCreateRequest {
+    specialist_id: string;
+    start_at: string;
+    end_at: string;
+    customer_name?: string;
+    customer_phone?: string;
+    service_type?: string;
+    notes?: string;
+    conversation_id?: string;
+}
+
+interface BookingActionResponse {
+    success: boolean;
+    booking: Booking;
+}
+
 async function fetchSpecialists(): Promise<{ items: Specialist[] }> {
     const response = await api.get("/calendar/specialists");
     return response.data;
@@ -54,7 +70,7 @@ async function fetchBookings(date?: string): Promise<{ items: Booking[] }> {
     return response.data;
 }
 
-async function createBooking(data: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function createBooking(data: BookingCreateRequest): Promise<BookingActionResponse> {
     const response = await api.post("/calendar/bookings", data);
     return response.data;
 }

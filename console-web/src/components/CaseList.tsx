@@ -97,7 +97,6 @@ export default function CaseList() {
         refetchIntervalInBackground: false, // Only refresh when tab is active
     });
 
-    // Update allCases when data changes
     const cases = data?.items ?? [];
 
     // Sort by SLA if selected
@@ -135,15 +134,18 @@ export default function CaseList() {
 
     if (error) {
         return (
-            <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center" data-testid="cases-error">
-                <p className="text-destructive mb-4">Не удалось загрузить заявки</p>
-                <button
-                    onClick={() => refetch()}
-                    className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
-                    data-testid="cases-retry"
-                >
-                    Повторить
-                </button>
+            <div className="w-full">
+                <h2 className="text-xl font-semibold mb-4" data-testid="cases-title">Заявки</h2>
+                <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center" data-testid="cases-error">
+                    <p className="text-destructive mb-4">Не удалось загрузить заявки</p>
+                    <button
+                        onClick={() => refetch()}
+                        className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
+                        data-testid="cases-retry"
+                    >
+                        Повторить
+                    </button>
+                </div>
             </div>
         );
     }
