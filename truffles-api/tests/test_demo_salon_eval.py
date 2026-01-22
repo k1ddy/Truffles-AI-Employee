@@ -1245,6 +1245,23 @@ def test_llm_guard_records_trace_and_meta():
     assert meta.get("source") == "llm_guard"
 
 
+def test_semantic_tool_fact_and_response_guard_traces():
+    case_id = "CA09_SEMANTIC_TOOL_FACT_TRACE"
+    _response, conversation, saved_message = _run_webhook_conversation(
+        ["где вы находитесь?"],
+        case_id,
+        None,
+    )
+    trace = _get_decision_trace(conversation)
+    _assert_trace_stage_decision_any(trace, case_id, {"semantic_resolver"})
+    _assert_trace_stage_decision_any(trace, case_id, {"tool_fact_resolver"})
+    _assert_trace_stage_decision_any(trace, case_id, {"response_guard"})
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("response_guard") in {"pass", "fallback"}, (
+        f"{case_id}: response_guard mismatch ({meta.get('response_guard')})"
+    )
+
+
 def test_budget_gate_trace_records_on_budget_exceeded():
     conversation = SimpleNamespace(context={})
     saved_message = SimpleNamespace(message_metadata={"decision_meta": {}})

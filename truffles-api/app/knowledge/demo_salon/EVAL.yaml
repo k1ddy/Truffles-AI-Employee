@@ -8123,6 +8123,29 @@ eval_cases:
       normalization_flags:
       - layout_swap
       - normalized
+- id: E905
+  user: Қай жерде орналасқансыздар?
+  expected:
+    action: reply
+    intent: location
+    must_include:
+    - Абая 150
+    - Розыбакиева
+- id: E906
+  user: Нешеге дейін ашықсыздар?
+  expected:
+    action: reply
+    intent: hours
+    must_include:
+    - 21:00
+- id: E907
+  user: Маникюр бағасы сколько?
+  expected:
+    action: reply
+    intent: price_manicure
+    must_include_any:
+    - 2 500
+    - 3 500
 - id: E903
   tier: chaos
   messages:

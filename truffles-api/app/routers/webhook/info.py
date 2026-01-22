@@ -222,6 +222,8 @@ def _build_info_intent_reply(
             fact_source="truth",
             fact_intents=[intent],
         )
+        if isinstance(meta, dict) and isinstance(reply, str):
+            meta["fact_text"] = reply
         return reply, meta or None
     if intent == "location":
         reply, meta = build_info_combined_reply(
@@ -234,6 +236,8 @@ def _build_info_intent_reply(
             fact_source="truth",
             fact_intents=[intent],
         )
+        if isinstance(meta, dict) and isinstance(reply, str):
+            meta["fact_text"] = reply
         return reply, meta or None
     if intent in {"pricing", "duration"} and not service_query and message_text:
         service_query = get_demo_salon_service_hint(message_text, client_slug=client_slug)
@@ -264,6 +268,8 @@ def _build_info_intent_reply(
             fact_source="truth",
             fact_intents=[intent],
         )
+        if isinstance(meta, dict) and isinstance(reply_text, str):
+            meta["fact_text"] = reply_text
         return reply_text, meta or None
     fallback = format_reply_from_truth("duration_or_price_clarify", client_slug=client_slug)
     if info_prefix:
@@ -273,6 +279,8 @@ def _build_info_intent_reply(
         fact_source="truth",
         fact_intents=[intent],
     )
+    if isinstance(meta, dict) and isinstance(fallback, str):
+        meta["fact_text"] = fallback
     return fallback, meta or None
 
 
@@ -374,6 +382,8 @@ def _handle_info_flow(
             )
             if multi_result:
                 multi_reply, multi_meta = multi_result
+                if isinstance(multi_meta, dict) and isinstance(multi_reply, str):
+                    multi_meta["fact_text"] = multi_reply
                 guard_response = maybe_apply_fact_guard(
                     decision_meta=multi_meta if isinstance(multi_meta, dict) else None,
                     intent="multi_truth",
@@ -708,6 +718,8 @@ def _handle_info_flow(
                 db.commit()
                 return InfoFlowResult(response=guard_response, force_truth_gate=force_truth_gate)
             bot_response = "\n\n".join(replies)
+            if isinstance(info_meta_combined, dict):
+                info_meta_combined["fact_text"] = bot_response
             composer_meta = None
             bot_response, composer_meta = legacy._compose_fact_response(
                 bot_response,
@@ -800,6 +812,8 @@ def _handle_info_flow(
         if base_bundle_meta:
             info_class_intents_for_reply.add("guest_policy")
         if isinstance(base_bundle_reply, str) and base_bundle_reply.strip():
+            if isinstance(base_bundle_meta, dict):
+                base_bundle_meta["fact_text"] = base_bundle_reply.strip()
             guard_response = maybe_apply_fact_guard(
                 decision_meta=base_bundle_meta if isinstance(base_bundle_meta, dict) else None,
                 intent="guest_policy",
@@ -908,6 +922,8 @@ def _handle_info_flow(
         )
     if service_decision:
         if service_decision.action == "reply":
+            if isinstance(service_decision.meta, dict) and isinstance(service_decision.response, str):
+                service_decision.meta["fact_text"] = service_decision.response
             guard_response = maybe_apply_fact_guard(
                 decision_meta=service_decision.meta if isinstance(service_decision.meta, dict) else None,
                 intent=service_decision.intent,
@@ -1164,6 +1180,8 @@ def _handle_truth_gate_fallback(
                 now=now,
             )
         if decision.action == "reply":
+            if isinstance(decision.meta, dict) and isinstance(decision.response, str):
+                decision.meta["fact_text"] = decision.response
             guard_response = maybe_apply_fact_guard(
                 decision_meta=decision.meta if isinstance(decision.meta, dict) else None,
                 intent=decision.intent,
@@ -1402,6 +1420,8 @@ def _handle_offline_info_class(
                 db.commit()
                 return guard_response
             bot_response = base_bundle_reply.strip()
+            if isinstance(info_meta_combined, dict):
+                info_meta_combined["fact_text"] = bot_response
             composer_meta = None
             bot_response, composer_meta = legacy._compose_fact_response(
                 bot_response,

@@ -31,7 +31,7 @@ from app.contracts.decision import (
 from app.models import ClientSettings, Conversation, Message
 from app.schemas.webhook import WebhookRequest
 from app.services.demo_salon_knowledge import DemoSalonDecision
-from app.services.intent_service import Intent
+from app.services.intent_service import Intent, resolve_semantic_cards
 
 
 def _normalize_message_text(message_text: str | None) -> str:
@@ -509,6 +509,7 @@ def _run_intent_decomposition(
     intent_decomp_service_query = None
     intent_decomp_multi = False
     intent_decomp_used = False
+    intent_decomp_used_by_semantic = False
     consult_intent = False
     consult_topic = None
     consult_question = None
@@ -600,6 +601,118 @@ def _run_intent_decomposition(
                     **consult_meta,
                 },
             )
+
+    semantic_result = None
+    semantic_decision = "skipped"
+    semantic_low_confidence = False
+    if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
+        semantic_result = resolve_semantic_cards(
+            message_text,
+            client_slug=client_slug,
+            service_query=intent_decomp_service_query,
+        )
+        intent_match = semantic_result.intent_match
+        service_match = semantic_result.service_match
+        if intent_match and intent_match.score >= intent_match.threshold:
+            semantic_decision = "commit_semantic"
+            semantic_low_confidence = False
+            intent_value = (intent_match.intent or "").strip().casefold()
+            if intent_value:
+                intent_decomp_intents = [intent_value]
+                intent_decomp_primary = intent_value
+                intent_decomp_secondary = []
+                intent_decomp_multi = False
+                intent_decomp_used_by_semantic = True
+                if intent_value == "consult":
+                    consult_intent = True
+                intent_decomp_payload = {
+                    "multi_intent": False,
+                    "primary_intent": intent_value,
+                    "secondary_intents": [],
+                    "intents": [intent_value],
+                    "service_query": intent_decomp_service_query or "",
+                    "consult_intent": consult_intent,
+                    "consult_topic": consult_topic or "",
+                    "consult_question": consult_question or "",
+                    "semantic_used": True,
+                }
+        else:
+            semantic_decision = "keep_llm" if intent_decomp_used else "no_match"
+            semantic_low_confidence = bool(intent_decomp_used)
+
+        service_intent_allowed = bool(
+            intent_decomp_intents
+            and set(intent_decomp_intents) & {"booking", "pricing", "duration"}
+        )
+        if service_match and service_match.score >= service_match.threshold and service_intent_allowed:
+            intent_decomp_service_query = service_match.label
+            if isinstance(intent_decomp_payload, dict):
+                intent_decomp_payload = dict(intent_decomp_payload)
+                intent_decomp_payload["service_query"] = service_match.label
+                intent_decomp_payload["service_query_source"] = "semantic_resolver"
+                intent_decomp_payload["service_query_score"] = service_match.score
+            if saved_message:
+                legacy._update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "service_query": service_match.label,
+                        "service_query_source": "semantic_resolver",
+                        "service_query_score": service_match.score,
+                    },
+                )
+        semantic_candidates = [
+            {
+                "id": item.card_id,
+                "label": item.label,
+                "intent": item.intent,
+                "score": item.score,
+                "threshold": item.threshold,
+            }
+            for item in (semantic_result.intent_candidates or [])
+        ]
+        semantic_service_candidates = [
+            {
+                "id": item.card_id,
+                "label": item.label,
+                "intent": item.intent,
+                "score": item.score,
+                "threshold": item.threshold,
+            }
+            for item in (semantic_result.service_candidates or [])
+        ]
+        semantic_meta = {
+            "semantic_used": semantic_decision == "commit_semantic",
+            "semantic_decision": semantic_decision,
+            "semantic_intent": intent_match.intent if intent_match else None,
+            "semantic_service": service_match.label if service_match else None,
+            "semantic_score": intent_match.score if intent_match else None,
+            "semantic_threshold": intent_match.threshold if intent_match else None,
+            "semantic_candidates": semantic_candidates,
+            "semantic_service_candidates": semantic_service_candidates,
+            "semantic_version": semantic_result.version,
+            "semantic_low_confidence": semantic_low_confidence or None,
+            "semantic_fallback_reason": semantic_result.fallback_reason,
+        }
+        legacy._record_decision_trace(
+            conversation,
+            {
+                "stage": "semantic_resolver",
+                "decision": semantic_decision,
+                "semantic_intent": semantic_meta.get("semantic_intent"),
+                "semantic_service": semantic_meta.get("semantic_service"),
+                "semantic_score": semantic_meta.get("semantic_score"),
+                "semantic_threshold": semantic_meta.get("semantic_threshold"),
+                "semantic_candidates": semantic_candidates,
+                "semantic_service_candidates": semantic_service_candidates,
+                "semantic_fallback_reason": semantic_meta.get("semantic_fallback_reason"),
+                "semantic_version": semantic_meta.get("semantic_version"),
+            },
+        )
+        if saved_message:
+            legacy._update_message_decision_metadata(saved_message, semantic_meta)
+
+    if intent_decomp_used_by_semantic:
+        intent_decomp_used = True
 
     if expected_reply_type == legacy.EXPECTED_REPLY_INTENT_CHOICE and intent_queue and message_text:
         intent_queue_choice = legacy._select_intent_from_queue(
@@ -3513,6 +3626,58 @@ async def _handle_webhook_payload(
         facts = {key: decision_meta.get(key) for key in fact_keys if key in decision_meta}
         return facts or None
 
+    def _record_tool_fact_resolver_trace(decision_meta: dict[str, Any] | None) -> None:
+        if not isinstance(decision_meta, dict):
+            return
+        fact_source = decision_meta.get("fact_source")
+        if not isinstance(fact_source, str) or not fact_source:
+            return
+        facts = _extract_fact_payload(decision_meta)
+        fact_text = decision_meta.get("fact_text")
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "tool_fact_resolver",
+                "decision": "resolved" if isinstance(fact_text, str) and fact_text.strip() else "missing",
+                "fact_source": fact_source,
+                "facts": facts,
+            },
+        )
+
+    def _apply_response_guard(
+        text: str | None,
+        decision_meta: dict[str, Any] | None,
+    ) -> tuple[str | None, dict[str, Any]]:
+        if not isinstance(decision_meta, dict):
+            return text, {}
+        fact_source = decision_meta.get("fact_source")
+        if not isinstance(fact_source, str) or not fact_source:
+            return text, {"response_guard": "skipped", "response_guard_reason": "no_fact_source"}
+        fact_text = decision_meta.get("fact_text")
+        if not isinstance(fact_text, str) or not fact_text.strip():
+            return text, {"response_guard": "skipped", "response_guard_reason": "fact_text_missing"}
+        guarded_text = text or ""
+        guard_decision = "pass"
+        guard_reason = None
+        if fact_text not in guarded_text:
+            guard_decision = "fallback"
+            guard_reason = "fact_text_missing_in_response"
+            guarded_text = fact_text
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "response_guard",
+                "decision": guard_decision,
+                "reason": guard_reason,
+                "fact_source": fact_source,
+            },
+        )
+        return guarded_text, {
+            "response_guard": guard_decision,
+            "response_guard_reason": guard_reason,
+            "response_guard_fallback": guard_decision == "fallback",
+        }
+
     def _maybe_apply_fact_guard(
         *,
         decision_meta: dict[str, Any] | None,
@@ -3722,7 +3887,16 @@ async def _handle_webhook_payload(
         )
 
     def _send_and_save(text: str, *, allow_quiet_hours: bool = True) -> tuple[str, bool]:
-        final_text = _finalize_bot_response(text, allow_quiet_hours=allow_quiet_hours)
+        decision_meta: dict[str, Any] | None = None
+        if saved_message and isinstance(saved_message.message_metadata, dict):
+            raw_meta = saved_message.message_metadata.get("decision_meta")
+            if isinstance(raw_meta, dict):
+                decision_meta = raw_meta
+        _record_tool_fact_resolver_trace(decision_meta)
+        guarded_text, guard_meta = _apply_response_guard(text, decision_meta)
+        if saved_message and guard_meta:
+            _update_message_decision_metadata(saved_message, guard_meta)
+        final_text = _finalize_bot_response(guarded_text, allow_quiet_hours=allow_quiet_hours)
         _record_contract_traces()
         save_message(db, conversation.id, client.id, role="assistant", content=final_text)
         sent = _send_response(final_text)
@@ -5229,6 +5403,15 @@ async def _handle_webhook_payload(
             source="intent_queue",
             fast_intent=False,
         )
+        if saved_message and isinstance(prompt, str):
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "fact_source": "booking_prompt",
+                    "fact_intents": ["booking"],
+                    "fact_text": prompt,
+                },
+            )
         bot_response = prompt or MSG_BOOKING_ASK_DATETIME
         bot_response = _maybe_apply_consult_return(
             conversation=conversation,
@@ -5754,6 +5937,9 @@ async def _handle_webhook_payload(
             timing_context=timing_context,
             client_config=client.config if client else None,
             intent=intent,
+            intent_decomp_payload=intent_decomp_payload,
+            info_class_intents=info_class_intents,
+            booking_signal=booking_signal,
             multi_intent_other_followup=multi_intent_other_followup,
             send_and_save=_send_and_save,
             record_escalation_metric=_record_escalation_metric,

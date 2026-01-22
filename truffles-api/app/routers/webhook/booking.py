@@ -1097,6 +1097,8 @@ def _handle_booking_interrupt(
                     source=info_source or "booking_interrupt",
                     fast_intent=False,
                 )
+                if isinstance(info_meta, dict) and isinstance(info_decision.response, str):
+                    info_meta.setdefault("fact_text", info_decision.response)
                 if saved_message:
                     legacy._update_message_decision_metadata(
                         saved_message,
@@ -1446,6 +1448,15 @@ def _handle_booking_flow(
                     source="booking",
                     fast_intent=False,
                 )
+                if saved_message and isinstance(prompt, str):
+                    legacy._update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "fact_source": "booking_prompt",
+                            "fact_intents": ["booking"],
+                            "fact_text": prompt,
+                        },
+                    )
                 bot_response = legacy._combine_sidecar(prompt, policy_price_sidecar)
                 bot_response = legacy._combine_sidecar(bot_response, multi_intent_booking_followup)
                 if consult_return_pending:

@@ -20,6 +20,21 @@ from app.routers.webhook.trace import (
 )
 from app.schemas.webhook import WebhookResponse
 
+TOOL_FACT_DEFAULT_TOP_K = 4
+TOOL_FACT_DEFAULT_THRESHOLD = 0.45
+TOOL_FACT_ALLOWED_INTENTS = {
+    "booking",
+    "consult",
+    "duration",
+    "guest_policy",
+    "hours",
+    "info_bundle",
+    "location",
+    "pricing",
+    "services_overview",
+}
+TOOL_FACT_SERVICE_REQUIRED = {"pricing", "duration"}
+
 
 def _maybe_append_booking_cta(
     bot_response: str | None,
@@ -182,6 +197,136 @@ def _compose_fact_response(
     if composed == bot_response and not ack_text and not next_step:
         return bot_response, None
     return composed, {"response_variant_id": variant_id, "response_variant_tag": response_tag}
+
+
+def _normalize_intents(values: Any) -> set[str]:
+    intents: set[str] = set()
+    if not isinstance(values, list):
+        return intents
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        cleaned = item.strip().casefold()
+        if cleaned:
+            intents.add(cleaned)
+    return intents
+
+
+def _extract_tool_fact_service_query(intent_decomp_payload: dict | None) -> str | None:
+    if not isinstance(intent_decomp_payload, dict):
+        return None
+    raw_query = intent_decomp_payload.get("service_query")
+    if not isinstance(raw_query, str):
+        return None
+    cleaned = raw_query.strip()
+    return cleaned or None
+
+
+def _collect_tool_fact_intents(
+    intent_decomp_payload: dict | None,
+    info_class_intents: set[str] | None,
+    booking_signal: bool,
+) -> set[str]:
+    intents: set[str] = set()
+    if isinstance(info_class_intents, set):
+        intents.update({item.strip().casefold() for item in info_class_intents if isinstance(item, str)})
+    if isinstance(intent_decomp_payload, dict):
+        intents.update(_normalize_intents(intent_decomp_payload.get("intents")))
+    if booking_signal:
+        intents.add("booking")
+    return intents
+
+
+def _should_attempt_tool_fact_resolver(
+    *,
+    message_text: str | None,
+    client_slug: str | None,
+    intent_decomp_payload: dict | None,
+    info_class_intents: set[str] | None,
+    booking_signal: bool,
+    class_router_result: dict | None = None,
+    out_of_domain_signal: bool = False,
+    expected_reply_shortcircuit: bool = False,
+) -> tuple[bool, list[str], str | None]:
+    if not message_text or not client_slug:
+        return False, [], None
+    if out_of_domain_signal and not expected_reply_shortcircuit:
+        return False, [], None
+    intents = _collect_tool_fact_intents(intent_decomp_payload, info_class_intents, booking_signal)
+    normalized_intents = {intent for intent in intents if intent in TOOL_FACT_ALLOWED_INTENTS}
+    service_query = _extract_tool_fact_service_query(intent_decomp_payload)
+    if normalized_intents == {"booking"} and not service_query:
+        return False, [], service_query
+    if normalized_intents & TOOL_FACT_SERVICE_REQUIRED and not service_query:
+        return False, [], service_query
+    has_router_signal = False
+    if isinstance(class_router_result, dict):
+        in_signals = class_router_result.get("in_signals") or []
+        anchors_in_hits = int(class_router_result.get("anchors_in_hits") or 0)
+        has_router_signal = bool(in_signals) or anchors_in_hits > 0
+    has_signal = bool(normalized_intents) or bool(service_query) or has_router_signal
+    if not has_signal:
+        return False, [], service_query
+    return True, sorted(normalized_intents), service_query
+
+
+@dataclass(frozen=True)
+class ToolFactResult:
+    text: str
+    query: str
+    score: float | None
+    source: str | None
+    results_count: int
+
+
+def _resolve_tool_fact_result(
+    *,
+    message_text: str | None,
+    client_slug: str | None,
+    timing_context: dict,
+) -> ToolFactResult | None:
+    if not message_text or not client_slug:
+        return None
+    from app.services.ai_service import _extract_branch_filter, _resolve_rag_query
+    from app.services.knowledge_service import search_knowledge
+
+    query = _resolve_rag_query(message_text, timing_context)
+    if not query:
+        return None
+    branch_id, knowledge_tag = _extract_branch_filter(timing_context)
+    try:
+        results = search_knowledge(
+            query,
+            client_slug,
+            limit=TOOL_FACT_DEFAULT_TOP_K,
+            score_threshold=TOOL_FACT_DEFAULT_THRESHOLD,
+            branch_id=branch_id,
+            knowledge_tag=knowledge_tag,
+            trace_context=timing_context,
+        )
+    except Exception as exc:
+        from . import _legacy as legacy
+
+        legacy.logger.warning(
+            "tool_fact_resolver failed",
+            extra={"context": {"error": str(exc), "client_slug": client_slug}},
+        )
+        return None
+    if not results:
+        return None
+    top = results[0] if isinstance(results[0], dict) else None
+    if not isinstance(top, dict):
+        return None
+    text = top.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return None
+    return ToolFactResult(
+        text=text.strip(),
+        query=query,
+        score=float(top.get("score") or 0.0) if top.get("score") is not None else None,
+        source=top.get("source") if isinstance(top.get("source"), str) else None,
+        results_count=len(results),
+    )
 
 
 def _apply_quiet_hours_notice(text: str, notice: str | None) -> str:
@@ -697,6 +842,15 @@ def _handle_consult_flow(
             )
             consult_flow_decision = "consult_clarify"
 
+    if consult_decision and consult_decision.action == "reply" and consult_flow_decision == "consult_reply":
+        if isinstance(consult_meta, dict) and isinstance(consult_decision.response, str):
+            consult_meta.setdefault("fact_source", "consult_playbook")
+            consult_meta.setdefault(
+                "fact_intents",
+                [consult_decision.intent] if consult_decision.intent else ["consult_reply"],
+            )
+            consult_meta["fact_text"] = consult_decision.response
+
     if consult_decision:
         if consult_flow_decision:
             consult_flow_trace = {
@@ -870,6 +1024,9 @@ def _handle_llm_primary(
     timing_context: dict,
     client_config: dict | None,
     intent: Any,
+    intent_decomp_payload: dict | None = None,
+    info_class_intents: set[str] | None = None,
+    booking_signal: bool = False,
     multi_intent_other_followup: str | None,
     send_and_save: Callable[..., tuple[str | None, bool]],
     record_escalation_metric: Callable[[str], None],
@@ -1019,47 +1176,114 @@ def _handle_llm_primary(
                 llm_primary_reason=llm_primary_reason,
             )
 
-        bot_response = response_text
-        bot_response = legacy._combine_sidecar(bot_response, multi_intent_other_followup)
-        legacy._reset_low_confidence_retry(conversation)
-        trace = _attach_llm_cache_flag(
-            {
-                "stage": "ai_response",
-                "decision": "bot_reply",
-                "state": conversation.state,
-                "confidence": confidence,
-                "llm_primary_used": True,
-            },
-            timing_context,
+        tool_fact_attempted, tool_fact_intents, _service_query = _should_attempt_tool_fact_resolver(
+            message_text=message_text,
+            client_slug=client_slug,
+            intent_decomp_payload=intent_decomp_payload,
+            info_class_intents=info_class_intents,
+            booking_signal=booking_signal,
         )
-        _record_decision_trace(conversation, trace)
-        bot_response, sent = send_and_save(bot_response)
-        result_message = "Message sent" if sent else "Failed to send"
-        if saved_message:
-            llm_used = bool(timing_context.get("llm_used")) if timing_context else False
-            llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
-            llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
-            _update_message_decision_metadata(
-                saved_message,
+        tool_fact_result = (
+            _resolve_tool_fact_result(
+                message_text=message_text,
+                client_slug=client_slug,
+                timing_context=timing_context,
+            )
+            if tool_fact_attempted
+            else None
+        )
+        if tool_fact_result:
+            fact_text = tool_fact_result.text.strip()
+            bot_response, composer_meta = _compose_fact_response(
+                fact_text,
+                client_slug=client_slug,
+                conversation_id=str(conversation.id),
+                response_tag="tool_fact",
+                conversation_state=conversation.state,
+                allow_booking_flow=routing.get("allow_booking_flow", False),
+                has_followup=bool(multi_intent_other_followup),
+            )
+            bot_response = legacy._combine_sidecar(
+                bot_response or fact_text,
+                multi_intent_other_followup,
+            )
+            legacy._reset_low_confidence_retry(conversation)
+            trace = _attach_llm_cache_flag(
                 {
+                    "stage": "ai_response",
+                    "decision": "tool_fact_resolver",
+                    "state": conversation.state,
+                    "confidence": confidence,
+                    "llm_primary_used": True,
+                },
+                timing_context,
+            )
+            _record_decision_trace(conversation, trace)
+            bot_response, sent = send_and_save(bot_response)
+            result_message = (
+                "Tool fact reply sent" if sent else "Tool fact reply send failed"
+            )
+            if saved_message:
+                llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+                llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+                llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+                resolved_intent = None
+                if intent is not None:
+                    resolved_intent = getattr(intent, "value", None)
+                if not resolved_intent and isinstance(intent_decomp_payload, dict):
+                    primary_intent = intent_decomp_payload.get("primary_intent")
+                    if isinstance(primary_intent, str) and primary_intent.strip():
+                        resolved_intent = primary_intent.strip()
+                    else:
+                        raw_intents = intent_decomp_payload.get("intents")
+                        if isinstance(raw_intents, list):
+                            for item in raw_intents:
+                                if isinstance(item, str) and item.strip():
+                                    resolved_intent = item.strip()
+                                    break
+                updates: dict[str, Any] = {
                     "action": "ai_response",
-                    "intent": intent.value if intent else None,
-                    "source": "llm" if llm_used else "rule",
+                    "intent": resolved_intent,
+                    "source": "tool_fact_resolver",
                     "fast_intent": False,
                     "llm_primary_used": True,
                     "llm_used": llm_used,
                     "llm_timeout": llm_timeout,
                     "llm_cache_hit": llm_cache_hit,
-                },
+                    "fact_source": "tool_fact_resolver",
+                    "fact_text": fact_text,
+                }
+                if tool_fact_intents:
+                    updates["fact_intents"] = tool_fact_intents
+                tool_fact_meta = {
+                    "tool_fact_query": tool_fact_result.query,
+                    "tool_fact_score": tool_fact_result.score,
+                    "tool_fact_doc": tool_fact_result.source,
+                    "tool_fact_results": tool_fact_result.results_count,
+                }
+                for key, value in tool_fact_meta.items():
+                    if value is not None:
+                        updates[key] = value
+                if composer_meta:
+                    updates.update(composer_meta)
+                _update_message_decision_metadata(saved_message, updates)
+            db.commit()
+            return LlmPrimaryOutcome(
+                response=WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                ),
+                llm_primary_result=llm_primary_result,
+                llm_primary_failed=llm_primary_failed,
+                llm_primary_reason=llm_primary_reason,
             )
-        db.commit()
+
+        llm_primary_failed = True
+        llm_primary_reason = "tool_fact_missing" if tool_fact_attempted else "tool_fact_skipped"
         return LlmPrimaryOutcome(
-            response=WebhookResponse(
-                success=True,
-                message=result_message,
-                conversation_id=conversation.id,
-                bot_response=bot_response,
-            ),
+            response=None,
             llm_primary_result=llm_primary_result,
             llm_primary_failed=llm_primary_failed,
             llm_primary_reason=llm_primary_reason,
@@ -1156,6 +1380,112 @@ def _handle_ai_response_action(
         )
 
     response_text, confidence = gen_result.value
+    tool_fact_attempted, tool_fact_intents, _service_query = _should_attempt_tool_fact_resolver(
+        message_text=message_text,
+        client_slug=client_slug,
+        intent_decomp_payload=intent_decomp_payload,
+        info_class_intents=info_class_intents,
+        booking_signal=booking_signal,
+        class_router_result=class_router_result,
+        out_of_domain_signal=out_of_domain_signal,
+        expected_reply_shortcircuit=expected_reply_shortcircuit,
+    )
+    tool_fact_result = (
+        _resolve_tool_fact_result(
+            message_text=message_text,
+            client_slug=client_slug,
+            timing_context=timing_context,
+        )
+        if tool_fact_attempted
+        else None
+    )
+    if tool_fact_result:
+        fact_text = tool_fact_result.text.strip()
+        bot_response, composer_meta = _compose_fact_response(
+            fact_text,
+            client_slug=client_slug,
+            conversation_id=str(conversation.id),
+            response_tag="tool_fact",
+            conversation_state=conversation.state,
+            allow_booking_flow=routing.get("allow_booking_flow", False),
+            has_followup=False,
+        )
+        bot_response = bot_response or fact_text
+        legacy._reset_low_confidence_retry(conversation)
+        trace = _attach_llm_cache_flag(
+            {
+                "stage": "ai_response",
+                "decision": "tool_fact_resolver",
+                "state": conversation.state,
+                "confidence": confidence,
+            },
+            timing_context,
+        )
+        _record_decision_trace(conversation, trace)
+        if saved_message:
+            llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+            llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+            llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+            resolved_intent = None
+            if intent is not None:
+                resolved_intent = getattr(intent, "value", None)
+            if not resolved_intent and isinstance(intent_decomp_payload, dict):
+                primary_intent = intent_decomp_payload.get("primary_intent")
+                if isinstance(primary_intent, str) and primary_intent.strip():
+                    resolved_intent = primary_intent.strip()
+                else:
+                    raw_intents = intent_decomp_payload.get("intents")
+                    if isinstance(raw_intents, list):
+                        for item in raw_intents:
+                            if isinstance(item, str) and item.strip():
+                                resolved_intent = item.strip()
+                                break
+            updates: dict[str, Any] = {
+                "action": "ai_response",
+                "intent": resolved_intent,
+                "source": "tool_fact_resolver",
+                "fast_intent": False,
+                "llm_primary_used": False,
+                "llm_used": llm_used,
+                "llm_timeout": llm_timeout,
+                "llm_cache_hit": llm_cache_hit,
+                "fact_source": "tool_fact_resolver",
+                "fact_text": fact_text,
+            }
+            if tool_fact_intents:
+                updates["fact_intents"] = tool_fact_intents
+            tool_fact_meta = {
+                "tool_fact_query": tool_fact_result.query,
+                "tool_fact_score": tool_fact_result.score,
+                "tool_fact_doc": tool_fact_result.source,
+                "tool_fact_results": tool_fact_result.results_count,
+            }
+            for key, value in tool_fact_meta.items():
+                if value is not None:
+                    updates[key] = value
+            if composer_meta:
+                updates.update(composer_meta)
+            _update_message_decision_metadata(saved_message, updates)
+        bot_response, sent = send_and_save(bot_response)
+        result_message = (
+            "Tool fact reply sent" if sent else "Tool fact reply send failed"
+        )
+        db.commit()
+        return AiResponseOutcome(
+            response=WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            ),
+            bot_response=bot_response,
+            result_message=result_message,
+            llm_primary_failed=llm_primary_failed,
+            llm_primary_reason=llm_primary_reason,
+        )
+    if response_text and confidence not in {"low_confidence", "bot_inactive"}:
+        confidence = "low_confidence"
+        response_text = None
 
     if confidence == "low_confidence":
         miss_type = (
@@ -1433,22 +1763,29 @@ def _handle_ai_response_action(
                     llm_used = bool(timing_context.get("llm_used")) if timing_context else False
                     llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
                     llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
-                    _update_message_decision_metadata(
-                        saved_message,
-                        {
-                            "action": semantic_result.action,
-                            "intent": "service_semantic",
-                            "source": "service_semantic_matcher",
-                            "service_semantic_score": semantic_result.score,
-                            "service_semantic_rewrite_used": rewrite_used,
-                            "service_semantic_rewrite_query": rewrite_query,
-                            "fast_intent": False,
-                            "llm_primary_used": False,
-                            "llm_used": llm_used,
-                            "llm_timeout": llm_timeout,
-                            "llm_cache_hit": llm_cache_hit,
-                        },
-                    )
+                    fact_intents = None
+                    if semantic_result.action == "match":
+                        fact_intents = ["service_match"]
+                    elif semantic_result.action == "suggest":
+                        fact_intents = ["service_suggest"]
+                    updates = {
+                        "action": semantic_result.action,
+                        "intent": "service_semantic",
+                        "source": "service_semantic_matcher",
+                        "service_semantic_score": semantic_result.score,
+                        "service_semantic_rewrite_used": rewrite_used,
+                        "service_semantic_rewrite_query": rewrite_query,
+                        "fast_intent": False,
+                        "llm_primary_used": False,
+                        "llm_used": llm_used,
+                        "llm_timeout": llm_timeout,
+                        "llm_cache_hit": llm_cache_hit,
+                        "fact_source": "service_semantic_matcher",
+                        "fact_text": bot_response,
+                    }
+                    if fact_intents:
+                        updates["fact_intents"] = fact_intents
+                    _update_message_decision_metadata(saved_message, updates)
                 bot_response, sent = send_and_save(bot_response)
                 result_message = (
                     "Service semantic matcher reply sent"

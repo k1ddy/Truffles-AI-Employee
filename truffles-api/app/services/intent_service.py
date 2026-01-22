@@ -3,9 +3,13 @@ import math
 import os
 import re
 import time
+from dataclasses import dataclass
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Tuple
+
+import yaml
 
 import httpx
 
@@ -154,6 +158,32 @@ CONTROLLER_PROMPT_FALLBACK = """# Dialogue Controller Prompt (Salon)
 
 _CONTROLLER_PROMPT_CACHE: str | None = None
 
+_DEFAULT_CLIENT_SLUG = "demo_salon"
+_SEMANTIC_DEFAULT_INTENT_THRESHOLD = 0.70
+_SEMANTIC_DEFAULT_SERVICE_THRESHOLD = 0.78
+_SEMANTIC_DEFAULT_TOP_K = 3
+
+
+@dataclass(frozen=True)
+class SemanticCandidate:
+    card_id: str
+    label: str
+    intent: str | None
+    score: float
+    threshold: float
+
+
+@dataclass(frozen=True)
+class SemanticResolverResult:
+    intent_match: SemanticCandidate | None
+    service_match: SemanticCandidate | None
+    intent_candidates: list[SemanticCandidate]
+    service_candidates: list[SemanticCandidate]
+    intent_threshold: float
+    service_threshold: float
+    version: str
+    fallback_reason: str | None
+
 
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
     if value is None:
@@ -174,6 +204,262 @@ def _load_controller_prompt() -> str:
         logger.warning("Dialogue controller prompt fallback in use")
         _CONTROLLER_PROMPT_CACHE = CONTROLLER_PROMPT_FALLBACK.strip()
     return _CONTROLLER_PROMPT_CACHE
+
+
+def _normalize_client_slug(client_slug: str | None) -> str:
+    slug = str(client_slug or _DEFAULT_CLIENT_SLUG).strip()
+    return slug or _DEFAULT_CLIENT_SLUG
+
+
+def _semantic_truth_path(client_slug: str | None) -> Path:
+    base = Path(__file__).resolve().parents[1] / "knowledge"
+    return base / _normalize_client_slug(client_slug) / "SALON_TRUTH.yaml"
+
+
+@lru_cache(maxsize=32)
+def _load_semantic_config(client_slug: str | None) -> dict[str, Any]:
+    path = _semantic_truth_path(client_slug)
+    if not path.exists():
+        return {
+            "intent_cards": [],
+            "service_cards": [],
+            "intent_threshold": _SEMANTIC_DEFAULT_INTENT_THRESHOLD,
+            "service_threshold": _SEMANTIC_DEFAULT_SERVICE_THRESHOLD,
+            "top_k": _SEMANTIC_DEFAULT_TOP_K,
+            "version": "v1",
+        }
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    domain_pack = data.get("domain_pack") if isinstance(data.get("domain_pack"), dict) else {}
+    client_pack = data.get("client_pack") if isinstance(data.get("client_pack"), dict) else {}
+    semantic_config = (
+        domain_pack.get("semantic_resolver")
+        if isinstance(domain_pack.get("semantic_resolver"), dict)
+        else {}
+    )
+    intent_cards = semantic_config.get("intent_cards") or []
+    service_cards = client_pack.get("service_cards") or []
+    intent_threshold = semantic_config.get("intent_threshold", _SEMANTIC_DEFAULT_INTENT_THRESHOLD)
+    service_threshold = semantic_config.get("service_threshold", _SEMANTIC_DEFAULT_SERVICE_THRESHOLD)
+    top_k = semantic_config.get("top_k", _SEMANTIC_DEFAULT_TOP_K)
+    version = semantic_config.get("version", "v1")
+    return {
+        "intent_cards": intent_cards if isinstance(intent_cards, list) else [],
+        "service_cards": service_cards if isinstance(service_cards, list) else [],
+        "intent_threshold": float(intent_threshold),
+        "service_threshold": float(service_threshold),
+        "top_k": int(top_k),
+        "version": str(version),
+    }
+
+
+def _collect_card_examples(card: dict[str, Any]) -> list[str]:
+    examples: list[str] = []
+    raw_examples = card.get("examples")
+    if isinstance(raw_examples, dict):
+        for items in raw_examples.values():
+            if isinstance(items, list):
+                examples.extend([item for item in items if isinstance(item, str) and item.strip()])
+    elif isinstance(raw_examples, list):
+        examples.extend([item for item in raw_examples if isinstance(item, str) and item.strip()])
+    for key in ("title_ru", "title_kk", "name_ru", "name_kk", "description_ru", "description_kk"):
+        value = card.get(key)
+        if isinstance(value, str) and value.strip():
+            examples.append(value.strip())
+    cleaned: list[str] = []
+    seen = set()
+    for item in examples:
+        normalized = re.sub(r"\s+", " ", item).strip()
+        if not normalized or normalized in seen:
+            continue
+        cleaned.append(normalized)
+        seen.add(normalized)
+    return cleaned
+
+
+def _safe_get_embedding(text: str, *, client_slug: str | None) -> list[float] | None:
+    from app.services.knowledge_service import get_embedding
+
+    try:
+        return get_embedding(text, client_slug=client_slug)
+    except Exception as exc:
+        logger.warning(
+            "semantic_resolver embedding failed",
+            extra={"context": {"error": str(exc), "text_preview": text[:40]}},
+        )
+        return None
+
+
+def _cosine_similarity(vector_a: list[float], vector_b: list[float]) -> float:
+    if not vector_a or not vector_b:
+        return 0.0
+    dot = sum(a * b for a, b in zip(vector_a, vector_b))
+    norm_a = math.sqrt(sum(a * a for a in vector_a))
+    norm_b = math.sqrt(sum(b * b for b in vector_b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+_SEMANTIC_CARD_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
+
+
+def _build_card_index(
+    cards: list[dict[str, Any]],
+    *,
+    client_slug: str | None,
+    default_threshold: float,
+    version: str,
+) -> list[dict[str, Any]]:
+    slug = _normalize_client_slug(client_slug)
+    cache_key = (slug, version)
+    cached = _SEMANTIC_CARD_CACHE.get(cache_key)
+    if cached and cached.get("source") == id(cards):
+        return cached.get("index") or []
+    index: list[dict[str, Any]] = []
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        examples = _collect_card_examples(card)
+        if not examples:
+            continue
+        vectors: list[list[float]] = []
+        for example in examples:
+            vector = _safe_get_embedding(example, client_slug=slug)
+            if vector:
+                vectors.append(vector)
+        if not vectors:
+            continue
+        card_id = str(card.get("id") or card.get("intent") or card.get("name_ru") or "").strip()
+        if not card_id:
+            continue
+        label = str(card.get("name_ru") or card.get("title_ru") or card_id).strip()
+        intent = card.get("intent")
+        threshold = card.get("threshold")
+        threshold_value = (
+            float(threshold)
+            if isinstance(threshold, (int, float)) and threshold > 0
+            else default_threshold
+        )
+        index.append(
+            {
+                "card_id": card_id,
+                "label": label,
+                "intent": intent if isinstance(intent, str) else None,
+                "threshold": threshold_value,
+                "vectors": vectors,
+            }
+        )
+    _SEMANTIC_CARD_CACHE[cache_key] = {"source": id(cards), "index": index}
+    return index
+
+
+def _score_cards(
+    query_vector: list[float],
+    cards_index: list[dict[str, Any]],
+    *,
+    top_k: int,
+) -> list[SemanticCandidate]:
+    candidates: list[SemanticCandidate] = []
+    for card in cards_index:
+        vectors = card.get("vectors") or []
+        best_score = 0.0
+        for vector in vectors:
+            score = _cosine_similarity(query_vector, vector)
+            if score > best_score:
+                best_score = score
+        candidates.append(
+            SemanticCandidate(
+                card_id=card.get("card_id"),
+                label=card.get("label"),
+                intent=card.get("intent"),
+                score=round(float(best_score), 4),
+                threshold=float(card.get("threshold") or 0.0),
+            )
+        )
+    candidates.sort(key=lambda item: item.score, reverse=True)
+    return candidates[: max(1, top_k)]
+
+
+def resolve_semantic_cards(
+    message_text: str | None,
+    *,
+    client_slug: str | None,
+    service_query: str | None = None,
+) -> SemanticResolverResult:
+    config = _load_semantic_config(client_slug)
+    intent_threshold = float(config.get("intent_threshold", _SEMANTIC_DEFAULT_INTENT_THRESHOLD))
+    service_threshold = float(config.get("service_threshold", _SEMANTIC_DEFAULT_SERVICE_THRESHOLD))
+    top_k = int(config.get("top_k", _SEMANTIC_DEFAULT_TOP_K))
+    version = str(config.get("version", "v1"))
+    if not message_text:
+        return SemanticResolverResult(
+            intent_match=None,
+            service_match=None,
+            intent_candidates=[],
+            service_candidates=[],
+            intent_threshold=intent_threshold,
+            service_threshold=service_threshold,
+            version=version,
+            fallback_reason="empty_text",
+        )
+    intent_cards = config.get("intent_cards") or []
+    service_cards = config.get("service_cards") or []
+    if not intent_cards and not service_cards:
+        return SemanticResolverResult(
+            intent_match=None,
+            service_match=None,
+            intent_candidates=[],
+            service_candidates=[],
+            intent_threshold=intent_threshold,
+            service_threshold=service_threshold,
+            version=version,
+            fallback_reason="no_cards",
+        )
+    query_vector = _safe_get_embedding(message_text, client_slug=client_slug)
+    if not query_vector:
+        return SemanticResolverResult(
+            intent_match=None,
+            service_match=None,
+            intent_candidates=[],
+            service_candidates=[],
+            intent_threshold=intent_threshold,
+            service_threshold=service_threshold,
+            version=version,
+            fallback_reason="embedding_unavailable",
+        )
+    intent_index = _build_card_index(
+        intent_cards,
+        client_slug=client_slug,
+        default_threshold=intent_threshold,
+        version=version,
+    )
+    intent_candidates = _score_cards(query_vector, intent_index, top_k=top_k) if intent_index else []
+    intent_match = intent_candidates[0] if intent_candidates else None
+
+    service_text = service_query or message_text
+    service_vector = _safe_get_embedding(service_text, client_slug=client_slug)
+    service_candidates: list[SemanticCandidate] = []
+    service_match = None
+    if service_cards and service_vector:
+        service_index = _build_card_index(
+            service_cards,
+            client_slug=client_slug,
+            default_threshold=service_threshold,
+            version=version,
+        )
+        service_candidates = _score_cards(service_vector, service_index, top_k=top_k) if service_index else []
+        service_match = service_candidates[0] if service_candidates else None
+
+    return SemanticResolverResult(
+        intent_match=intent_match,
+        service_match=service_match,
+        intent_candidates=intent_candidates,
+        service_candidates=service_candidates,
+        intent_threshold=intent_threshold,
+        service_threshold=service_threshold,
+        version=version,
+        fallback_reason=None,
+    )
 
 
 def _clean_controller_class(value: str | None) -> str | None:
