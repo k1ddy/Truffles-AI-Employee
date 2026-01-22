@@ -676,28 +676,28 @@ async def _process_outbox_rows(
                     outbox_ids=[str(oid) for oid in outbox_ids if oid],
                     outbox_created_at=group_created_at,
                 )
-            if not response.success:
-                raise RuntimeError(response.message)
-            outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
-            logger.info(
-                "Outbox timing",
-                extra={
-                    "context": {
-                        "outbox_ids": [str(oid) for oid in outbox_ids if oid],
-                        "conversation_id": conversation_id,
-                        "client_slug": base_payload.client_slug,
-                        "outbox_total_ms": outbox_total_ms,
-                    }
-                },
-            )
-            for outbox_id in outbox_ids:
-                if outbox_id:
-                    _log_outbox_done(str(outbox_id), total_ms=outbox_total_ms)
-            for outbox_id in outbox_ids:
-                if outbox_id:
-                    mark_outbox_status(
-                        db,
-                        outbox_id=outbox_id,
+                if not response.success:
+                    raise RuntimeError(response.message)
+                outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
+                logger.info(
+                    "Outbox timing",
+                    extra={
+                        "context": {
+                            "outbox_ids": [str(oid) for oid in outbox_ids if oid],
+                            "conversation_id": conversation_id,
+                            "client_slug": base_payload.client_slug,
+                            "outbox_total_ms": outbox_total_ms,
+                        }
+                    },
+                )
+                for outbox_id in outbox_ids:
+                    if outbox_id:
+                        _log_outbox_done(str(outbox_id), total_ms=outbox_total_ms)
+                for outbox_id in outbox_ids:
+                    if outbox_id:
+                        mark_outbox_status(
+                            db,
+                            outbox_id=outbox_id,
                             status="SENT",
                             last_error=None,
                             next_attempt_at=None,
@@ -705,7 +705,12 @@ async def _process_outbox_rows(
                 results["sent"] += len(outbox_ids)
                 logger.info(
                     "Outbox processed",
-                    extra={"context": {"conversation_id": conversation_id, "coalesced_count": len(group)}},
+                    extra={
+                        "context": {
+                            "conversation_id": conversation_id,
+                            "coalesced_count": len(group),
+                        }
+                    },
                 )
             except Exception as exc:
                 try:
@@ -714,24 +719,28 @@ async def _process_outbox_rows(
                     logger.warning(
                         "Outbox rollback failed",
                         extra={"context": {"error": str(rollback_exc)}},
+                    )
+                outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
+                logger.info(
+                    "Outbox timing",
+                    extra={
+                        "context": {
+                            "outbox_ids": [str(oid) for oid in outbox_ids if oid],
+                            "conversation_id": conversation_id,
+                            "client_slug": base_payload.client_slug,
+                            "outbox_total_ms": outbox_total_ms,
+                            "error": str(exc),
+                        }
+                    },
                 )
-            outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
-            logger.info(
-                "Outbox timing",
-                extra={
-                    "context": {
-                        "outbox_ids": [str(oid) for oid in outbox_ids if oid],
-                        "conversation_id": conversation_id,
-                        "client_slug": base_payload.client_slug,
-                        "outbox_total_ms": outbox_total_ms,
-                        "error": str(exc),
-                    }
-                },
-            )
-            for outbox_id in outbox_ids:
-                if outbox_id:
-                    _log_outbox_done(str(outbox_id), error=str(exc), total_ms=outbox_total_ms)
-            now = datetime.now(timezone.utc)
+                for outbox_id in outbox_ids:
+                    if outbox_id:
+                        _log_outbox_done(
+                            str(outbox_id),
+                            error=str(exc),
+                            total_ms=outbox_total_ms,
+                        )
+                now = datetime.now(timezone.utc)
                 for row in group:
                     outbox_id = row.get("id")
                     if not outbox_id:
