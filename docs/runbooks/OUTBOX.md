@@ -20,6 +20,11 @@ WHERE status IN ('PENDING','PROCESSING','FAILED')\
 GROUP BY status;"
 ```
 
+```bash
+# Bundle timings for a specific inbound message.
+python3 ops/diagnose.py trace-bundle --client-slug demo_salon --message-id "<CHATFLOW_MESSAGE_ID>"
+```
+
 Recovery steps
 1) Restart outbox worker
 ```bash
