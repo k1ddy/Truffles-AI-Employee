@@ -1,11 +1,12 @@
 # Runbook: Trace Bundle
 
 Purpose
-- Capture a single bundle with decision_meta, decision_trace, outbox rows, and latency.
+- Single evidence bundle for one inbound message (decision_meta + decision_trace + outbox rows + timing).
 
 When to use
-- Live-check failures or slow delivery.
-- Need a single artifact for STATE.md evidence.
+- Live-check failures (missing_action, timeout, no reply).
+- Outbox latency spikes (p90/p95) or PROCESSING backlog.
+- Contract errors (outbox payload, action gate).
 
 Command
 ```bash
@@ -15,23 +16,32 @@ python3 ops/diagnose.py trace-bundle \
   --output /tmp/trace-bundle.json
 ```
 
-Alternative selectors
-```bash
-python3 ops/diagnose.py trace-bundle --conversation-id "<CONV_ID>" --limit 1
-python3 ops/diagnose.py trace-bundle --remote-jid "7701...@s.whatsapp.net" --minutes 60
-python3 ops/diagnose.py trace-bundle --receiver-phone "+7701..." --text "LC-MARKER" --minutes 120
-```
+Inputs
+- `--message-id` (ChatFlow messageId), or
+- `--message-uuid` (messages.id), or
+- `--conversation-id`, or
+- `--text` + `--minutes`, or
+- `--receiver-phone` (auto-resolve client_slug)
 
-What you get
-- `decision_meta` (including `timing.*` if present).
-- `decision_trace` (conversation context trace list).
-- `outbox.rows` with status, attempts, last_error, payload_meta.
-- `outbox.latency_ms` with inbound-to-outbox and outbox total time.
+What to read (quick map)
+- `message.*` → correlation keys: `message_id`, `conversation_id`, `remote_jid`.
+- `decision_meta.action/source/intent` → final decision.
+- `decision_trace` → ordered stages (see `DECISION_STAGE_ORDER_SNAPSHOT`).
+- `decision_meta.timing` → pipeline timing + outbox timing.
+- `outbox.rows[].meta.timing` → worker timings (wait/process/total).
+- `outbox.latency_ms` → inbound→outbox enqueue latency (derived).
+
+Correlation keys
+- `message_id` → ChatFlow inbound id.
+- `outbox_id` → outbox row id.
+- `trace_id` → decision_meta trace id (propagates to timing/outbox logs).
 
 Evidence to capture
-- Bundle file path and a short snippet (message_id, conversation_id).
-- Any `outbox.last_error` or high latency fields.
+- Trace-bundle JSON file path.
+- 1–3 key fields from decision_meta/trace/outbox meta.
+- CI run URL (if live-check involved).
 
 Notes
-- Use real inbound messages; do not edit DB/trace to fabricate evidence.
-- For outbox retries, the latest row reflects current status.
+- Do not edit DB/trace to fabricate evidence.
+- If `decision_meta.action` missing → check `outbox_payload_guard` or `action_gate` stages.
+- Stage order changes require updating `DECISION_STAGE_ORDER_SNAPSHOT` hash in `truffles-api/tests/test_outbox_payload_contract.py`.

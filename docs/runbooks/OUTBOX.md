@@ -12,6 +12,11 @@ Quick checks
 curl -s http://localhost:8000/admin/health
 ```
 
+Contract guardrails
+- Payload must pass `contracts/events/outbox.webhook_payload.v1.jsonschema` (enforced before enqueue).
+- Invalid payload → `decision_trace.stage=outbox_payload_guard`, `decision_meta.action=error`, no outbox enqueue.
+- Timing evidence: `decision_meta.timing.outbox` + `outbox_messages.meta.timing`.
+
 ```bash
 docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c "\
 SELECT status, COUNT(*), MIN(created_at) AS oldest\

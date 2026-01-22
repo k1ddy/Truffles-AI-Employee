@@ -3276,6 +3276,33 @@ async def _handle_webhook_payload(
         _merge_message_timing(saved_message, snapshot)
         timing_context["timing_persisted"] = True
 
+    def _ensure_action_gate() -> None:
+        if not saved_message:
+            return
+        metadata = saved_message.message_metadata if isinstance(saved_message.message_metadata, dict) else {}
+        decision_meta = metadata.get("decision_meta") if isinstance(metadata, dict) else {}
+        action = decision_meta.get("action") if isinstance(decision_meta, dict) else None
+        if action:
+            return
+        intent_value = getattr(intent, "value", None)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "action_gate",
+                "decision": "error",
+                "reason": "missing_action",
+                "state": conversation.state,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="error",
+            intent=intent_value if isinstance(intent_value, str) else None,
+            source="action_gate",
+            fast_intent=False,
+        )
+        _update_message_decision_metadata(saved_message, {"action_error": "missing_action"})
+
     def _record_escalation_metric(trigger: str) -> None:
         record_escalation_count(payload.client_slug, trigger)
 
@@ -6266,6 +6293,7 @@ async def _handle_webhook_payload(
         )
         result_message = f"Unknown state: {conversation.state}"
 
+    _ensure_action_gate()
     _persist_timing_snapshot()
     db.commit()
 
