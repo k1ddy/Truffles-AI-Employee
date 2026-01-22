@@ -352,6 +352,7 @@ truffles-api/
 - `ops/migrations/015_add_metrics_daily.sql` — дневные метрики (SLA/LLM/эскалации).
 - `ops/migrations/016_add_asr_metrics.sql` — метрики ASR (fail rate + totals).
 - `ops/migrations/017_add_knowledge_backlog.sql` — backlog пропусков (low_confidence/out_of_domain/llm_timeout/clarify).
+- `ops/migrations/018_add_outbox_meta.sql` — JSONB meta в `outbox_messages` для таймингов/метаданных.
 
 **Старые скрипты:** `.archive/ops_old/` — не в git.
 
