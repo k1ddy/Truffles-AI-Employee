@@ -43,8 +43,8 @@ Console uses `agent_identities` to map OIDC `sub` → `agents` → `client_id`.
 `truffles-api/app/services/console_auth.py` → `get_console_context()`
 
 **Note (current limitation):**
-Org-level access is not implemented yet. Company-level selection (company/client/branch) is planned per DEC-011
-and requires membership/RBAC changes.
+Org-level access реализован частично: есть `agent_memberships` и RBAC, но company/branch selection в UI
+ограничен выбором клиента. Полная модель Company → Client → Branch — по DEC‑011.
 
 Rules:
 - `sub` must exist in `agent_identities` (channel=`oidc`).
