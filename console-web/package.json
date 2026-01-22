@@ -9,6 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test --grep @smoke",
+    "test:e2e:mutating": "E2E_ALLOW_MUTATIONS=1 playwright test --grep @mutating",
     "generate:api": "openapi-typescript ../contracts/console_api/openapi.v1.yaml -o src/types/api.generated.ts"
   },
   "dependencies": {

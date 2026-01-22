@@ -1,38 +1,44 @@
 import { test, expect } from '@playwright/test';
 
+const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
+const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
+const loginUser = process.env.E2E_USERNAME ?? 'admin';
+const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
+const runMutations = process.env.E2E_ALLOW_MUTATIONS === '1';
+
 // =========================================
 // SMOKE TESTS: Authentication
 // =========================================
 test.describe('Smoke Test: Login Flow', () => {
-    test('should redirect to Keycloak login', async ({ page }) => {
+    test('should redirect to Keycloak login @smoke', async ({ page }) => {
         await page.goto('/');
         await expect(page.getByText('Truffles Console')).toBeVisible();
         await page.getByRole('button', { name: /войти/i }).click();
-        await expect(page).toHaveURL(/localhost:8080|192\.168\.5\.27:8080/);
+        await expect(page).toHaveURL(keycloakHostPattern);
         // Keycloak login page title
         await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible();
     });
 
-    test('should login and see inbox', async ({ page }) => {
+    test('should login and see inbox @smoke', async ({ page }) => {
         await page.goto('/');
         await page.getByRole('button', { name: /войти/i }).click();
-        await page.waitForURL(/localhost:8080|192\.168\.5\.27:8080/);
-        await page.fill('#username', 'admin');
-        await page.fill('#password', 'admin');
+        await page.waitForURL(keycloakHostPattern);
+        await page.fill('#username', loginUser);
+        await page.fill('#password', loginPassword);
         await page.click('#kc-login');
-        await page.waitForURL(/localhost:3000|192\.168\.5\.27:3000/);
+        await page.waitForURL(consoleHostPattern);
         await expect(page.getByText('Truffles Console')).toBeVisible();
         await expect(page.getByText('Заявки')).toBeVisible({ timeout: 10000 });
     });
 
-    test('should logout successfully', async ({ page }) => {
+    test('should logout successfully @smoke', async ({ page }) => {
         await page.goto('/');
         await page.getByRole('button', { name: /войти/i }).click();
-        await page.waitForURL(/localhost:8080|192\.168\.5\.27:8080/);
-        await page.fill('#username', 'admin');
-        await page.fill('#password', 'admin');
+        await page.waitForURL(keycloakHostPattern);
+        await page.fill('#username', loginUser);
+        await page.fill('#password', loginPassword);
         await page.click('#kc-login');
-        await page.waitForURL(/localhost:3000|192\.168\.5\.27:3000/);
+        await page.waitForURL(consoleHostPattern);
         await page.getByRole('button', { name: /выйти/i }).click();
         await expect(page.getByRole('button', { name: /войти/i })).toBeVisible({ timeout: 10000 });
     });
@@ -44,11 +50,11 @@ test.describe('Smoke Test: Login Flow', () => {
 async function loginAsAdmin(page: import('@playwright/test').Page) {
     await page.goto('/');
     await page.getByRole('button', { name: /войти/i }).click();
-    await page.waitForURL(/localhost:8080|192\.168\.5\.27:8080/);
-    await page.fill('#username', 'admin');
-    await page.fill('#password', 'admin');
+    await page.waitForURL(keycloakHostPattern);
+    await page.fill('#username', loginUser);
+    await page.fill('#password', loginPassword);
     await page.click('#kc-login');
-    await page.waitForURL(/localhost:3000|192\.168\.5\.27:3000/);
+    await page.waitForURL(consoleHostPattern);
     await expect(page.getByText('Заявки')).toBeVisible({ timeout: 10000 });
 }
 
@@ -61,19 +67,19 @@ test.describe('Inbox Features', () => {
         await loginAsAdmin(page);
     });
 
-    test('should display filter controls', async ({ page }) => {
+    test('should display filter controls @smoke', async ({ page }) => {
         await expect(page.getByRole('combobox').first()).toBeVisible();
         await expect(page.getByText('Мои заявки')).toBeVisible();
         await expect(page.getByText('Обновить')).toBeVisible();
     });
 
-    test('should filter by status', async ({ page }) => {
+    test('should filter by status @smoke', async ({ page }) => {
         await page.locator('select').first().selectOption('Ожидает');
         await page.waitForTimeout(1000);
-        await expect(page.getByText(/заявк/i)).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Заявки' })).toBeVisible();
     });
 
-    test('should navigate to case detail', async ({ page }) => {
+    test('should navigate to case detail @smoke', async ({ page }) => {
         const openButton = page.getByRole('link', { name: 'Открыть' }).first();
         if (await openButton.isVisible()) {
             await openButton.click();
@@ -91,19 +97,19 @@ test.describe('Navigation', () => {
         await loginAsAdmin(page);
     });
 
-    test('should navigate to Status page', async ({ page }) => {
+    test('should navigate to Status page @smoke', async ({ page }) => {
         await page.getByRole('link', { name: 'Статус' }).click();
         await expect(page).toHaveURL('/ops');
         await expect(page.getByText('Статус системы')).toBeVisible();
     });
 
-    test('should navigate to Audit Log', async ({ page }) => {
+    test('should navigate to Audit Log @smoke', async ({ page }) => {
         await page.getByRole('link', { name: 'Журнал' }).click();
         await expect(page).toHaveURL('/audit');
         await expect(page.getByText('Журнал')).toBeVisible();
     });
 
-    test('should navigate to Settings', async ({ page }) => {
+    test('should navigate to Settings @smoke', async ({ page }) => {
         await page.getByRole('link', { name: 'Настройки' }).click();
         await expect(page).toHaveURL('/settings');
         await expect(page.getByText('Филиалы')).toBeVisible();
@@ -113,12 +119,13 @@ test.describe('Navigation', () => {
 // =========================================
 // CASE ACTIONS (Take, Reply, Resolve)
 // =========================================
-test.describe('Case Actions', () => {
+test.describe('Case Actions @mutating', () => {
+    test.skip(!runMutations, 'Mutating tests are disabled');
     test.beforeEach(async ({ page }) => {
         await loginAsAdmin(page);
     });
 
-    test('should take a pending case', async ({ page }) => {
+    test('should take a pending case @mutating', async ({ page }) => {
         // Filter to pending cases using visible text
         await page.locator('select').first().selectOption('Ожидает');
         await page.waitForTimeout(500);
@@ -142,7 +149,7 @@ test.describe('Case Actions', () => {
         }
     });
 
-    test('should send a reply message', async ({ page }) => {
+    test('should send a reply message @mutating', async ({ page }) => {
         // Filter to active cases (where we can reply)
         await page.locator('select').first().selectOption('В работе');
         await page.waitForTimeout(500);
@@ -175,7 +182,7 @@ test.describe('Case Actions', () => {
         }
     });
 
-    test('should resolve an active case', async ({ page }) => {
+    test('should resolve an active case @mutating', async ({ page }) => {
         // Filter to active cases
         await page.locator('select').first().selectOption('В работе');
         await page.waitForTimeout(500);
@@ -215,7 +222,7 @@ test.describe('Audit Log', () => {
         await expect(page).toHaveURL('/audit');
     });
 
-    test('should display audit events table', async ({ page }) => {
+    test('should display audit events table @smoke', async ({ page }) => {
         await expect(page.getByText('Журнал действий')).toBeVisible();
         // Check for table headers
         await expect(page.getByText('Время')).toBeVisible();
@@ -223,7 +230,7 @@ test.describe('Audit Log', () => {
         await expect(page.getByText('Исполнитель')).toBeVisible();
     });
 
-    test('should show event types with badges', async ({ page }) => {
+    test('should show event types with badges @smoke', async ({ page }) => {
         // Look for common event type badges
         const eventBadges = page.locator('[class*="bg-"]').filter({ hasText: /case_taken|case_resolved|message_sent/i });
         // Just verify no crash, events may or may not exist
@@ -241,11 +248,11 @@ test.describe('Settings Page', () => {
         await expect(page).toHaveURL('/settings');
     });
 
-    test('should display branches section', async ({ page }) => {
+    test('should display branches section @smoke', async ({ page }) => {
         await expect(page.getByText('Филиалы')).toBeVisible();
     });
 
-    test('should display team members section', async ({ page }) => {
+    test('should display team members section @smoke', async ({ page }) => {
         await expect(page.getByText('Команда')).toBeVisible();
     });
 });

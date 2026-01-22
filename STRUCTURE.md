@@ -333,6 +333,7 @@ truffles-api/
 | `knowledge_backlog_top.sql` | Топ‑вопросы knowledge backlog (последние 7 дней) |
 | `sync_client.py` | Синк/валидация client_pack в Qdrant |
 | `migrations/` | SQL миграции |
+| `k6/` | k6 load/soak сценарии (Console gates) |
 | `templates/` | Шаблоны (промпты, FAQ) |
 | `LESSONS_LEARNED.md` | Уроки из отладки |
 

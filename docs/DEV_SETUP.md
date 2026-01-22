@@ -103,4 +103,41 @@ curl http://localhost:3000/api/health/full
 
 ---
 
-*Обновлено: 2026-01-19*
+## 6. Console tests (local)
+
+**Playwright smoke (read-only):**
+```bash
+cd /home/zhan/truffles-main/console-web
+PLAYWRIGHT_BASE_URL=http://localhost:3000 \
+NEXTAUTH_URL=http://localhost:3000 \
+KEYCLOAK_ISSUER=https://auth.truffles.kz/realms/truffles \
+KEYCLOAK_CLIENT_ID=console-web \
+KEYCLOAK_CLIENT_SECRET=console-client-secret \
+NEXT_PUBLIC_API_URL=https://api.truffles.kz/console/v1 \
+E2E_USERNAME=admin \
+E2E_PASSWORD=admin \
+npm run test:e2e:smoke
+```
+
+**Schemathesis contract smoke (GET-only):**
+```bash
+SCHEMATHESIS_TOKEN="<bearer token>" \
+schemathesis run /home/zhan/truffles-main/contracts/console_api/openapi.v1.yaml \
+  --url https://api.truffles.kz/console/v1 \
+  --include-method=GET \
+  --checks all \
+  --request-timeout 10 \
+  --hypothesis-max-examples=3 \
+  --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"
+```
+
+**k6 (manual load smoke):**
+```bash
+CONSOLE_API_URL=https://api.truffles.kz/console/v1 \
+CONSOLE_API_TOKEN="<bearer token>" \
+k6 run /home/zhan/truffles-main/ops/k6/console_smoke.js
+```
+
+---
+
+*Обновлено: 2026-01-21*

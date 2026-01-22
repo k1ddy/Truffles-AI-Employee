@@ -202,6 +202,57 @@ docker logs truffles-sentinel --tail 5 | rg -i 'otel enabled'
 
 ---
 
+## Console quality gates (Playwright / Schemathesis / k6)
+CI uses GitHub secrets for auth and skips jobs if they are missing:
+- `CONSOLE_E2E_USERNAME`, `CONSOLE_E2E_PASSWORD`
+- `CONSOLE_KEYCLOAK_TOKEN_URL`, `CONSOLE_KEYCLOAK_CLIENT_ID`, `CONSOLE_KEYCLOAK_CLIENT_SECRET`,
+  `CONSOLE_KEYCLOAK_USERNAME`, `CONSOLE_KEYCLOAK_PASSWORD`
+- optional: `CONSOLE_API_TOKEN` (bypass Keycloak for contract/k6)
+
+**Playwright (smoke, read-only):**
+```bash
+cd console-web
+PLAYWRIGHT_BASE_URL=http://localhost:3000 \
+NEXT_PUBLIC_API_URL=https://api.truffles.kz/console/v1 \
+KEYCLOAK_ISSUER=https://auth.truffles.kz/realms/truffles \
+KEYCLOAK_CLIENT_ID=console-web \
+KEYCLOAK_CLIENT_SECRET=console-client-secret \
+NEXTAUTH_URL=http://localhost:3000 \
+E2E_USERNAME=admin \
+E2E_PASSWORD=admin \
+npm run test:e2e:smoke
+```
+
+**Playwright (mutating, only staging):**
+```bash
+cd console-web
+E2E_ALLOW_MUTATIONS=1 npm run test:e2e:mutating
+```
+
+**Schemathesis (GET-only contract smoke):**
+```bash
+SCHEMATHESIS_TOKEN="<bearer token>" \
+schemathesis run contracts/console_api/openapi.v1.yaml \
+  --url https://api.truffles.kz/console/v1 \
+  --include-method=GET \
+  --checks all \
+  --request-timeout 10 \
+  --hypothesis-max-examples=3 \
+  --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"
+```
+
+**k6 (manual load smoke):**
+```bash
+CONSOLE_API_URL=https://api.truffles.kz/console/v1 \
+CONSOLE_API_TOKEN="<bearer token>" \
+k6 run ops/k6/console_smoke.js
+```
+- **Когда запускать:** перед релизом после изменений в Console API/фильтрах/пагинации/индексах; перед подключением крупного клиента; при подозрении на деградацию.
+- **Когда обновлять сценарий:** появился новый “горячий” эндпоинт или изменились параметры фильтров; изменились SLO/пороговые значения.
+- **Режим:** только read‑only; low VU/iterations; предпочтительно staging.
+
+---
+
 ## CI / GitHub Actions (как запускать, зачем и когда)
 
 **Источник правды:** `.github/workflows/ci.yml`.
@@ -210,6 +261,11 @@ docker logs truffles-sentinel --tail 5 | rg -i 'otel enabled'
 - **Pull Request → main:** lint + unit + core‑eval (если затронуты L1‑пути). long/asr только при L2‑изменениях или label `run-long`. build/push/deploy/livecheck не выполняются.
 - **Push → main:** полный пайплайн (lint/unit/core/long/asr → build-push → deploy → ci-livecheck), если гейты позволяют.
 - **workflow_dispatch:** ручной запуск с опциями `run_long` и `run_livecheck`.
+
+### Console gates
+- `console-e2e` (Playwright smoke) — запускается при изменениях в `console-web/**` или CI.
+- `console-contract` (Schemathesis GET-only) — запускается при изменениях в `contracts/console_api/**` или console API.
+- `console-k6` — ручной запуск через `workflow_dispatch` (input `run_k6=true`).
 
 ### Почему этапы пропускаются (skipped)
 **Path filters (changes):**

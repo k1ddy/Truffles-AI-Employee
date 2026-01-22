@@ -15,6 +15,10 @@ on:
         description: "Force ci-livecheck (requires deploy)"
         type: boolean
         default: false
+      run_k6:
+        description: "Run k6 console load smoke"
+        type: boolean
+        default: false
 
 env:
   IMAGE_NAME: ghcr.io/k1ddy/truffles-ai-employee
@@ -34,6 +38,8 @@ jobs:
     outputs:
       l1: ${{ steps.manual.outputs.l1 || steps.filter.outputs.l1 }}
       l2: ${{ steps.manual.outputs.l2 || steps.filter.outputs.l2 }}
+      console_web: ${{ steps.manual.outputs.console_web || steps.filter.outputs.console_web }}
+      console_contracts: ${{ steps.manual.outputs.console_contracts || steps.filter.outputs.console_contracts }}
       deploy_required: ${{ steps.manual.outputs.deploy_required || steps.filter.outputs.deploy_required }}
       livecheck_required: ${{ steps.manual.outputs.livecheck_required || steps.filter.outputs.livecheck_required }}
     steps:
@@ -44,6 +50,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           echo "l1=true" >> "$GITHUB_OUTPUT"
+          echo "console_web=true" >> "$GITHUB_OUTPUT"
+          echo "console_contracts=true" >> "$GITHUB_OUTPUT"
           if [ "${{ inputs.run_long }}" = "true" ]; then
             echo "l2=true" >> "$GITHUB_OUTPUT"
           fi
@@ -79,6 +87,16 @@ jobs:
               - "truffles-api/Dockerfile"
               - "knowledge/**"
               - "ops/**"
+              - ".github/workflows/**"
+            console_web:
+              - "console-web/**"
+              - ".github/workflows/**"
+            console_contracts:
+              - "contracts/console_api/**"
+              - "truffles-api/app/routers/console.py"
+              - "truffles-api/app/schemas/console.py"
+              - "truffles-api/app/services/console_auth.py"
+              - "truffles-api/scripts/generate_openapi.py"
               - ".github/workflows/**"
 
   lint:
@@ -158,6 +176,209 @@ jobs:
             --ignore=tests/test_message_endpoint.py \
             --ignore=tests/test_chatflow_contract.py \
             --ignore=tests/test_knowledge_service.py
+
+  console-e2e:
+    needs: [changes]
+    if: needs.changes.outputs.console_web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: console-web
+    env:
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ci-console-secret
+      KEYCLOAK_CLIENT_ID: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_ID || 'console-web' }}
+      KEYCLOAK_CLIENT_SECRET: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET }}
+      KEYCLOAK_ISSUER: ${{ secrets.CONSOLE_KEYCLOAK_ISSUER || 'https://auth.truffles.kz/realms/truffles' }}
+      NEXT_PUBLIC_API_URL: https://api.truffles.kz/console/v1
+      PLAYWRIGHT_BASE_URL: http://localhost:3000
+      E2E_USERNAME: ${{ secrets.CONSOLE_E2E_USERNAME }}
+      E2E_PASSWORD: ${{ secrets.CONSOLE_E2E_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard console e2e secrets
+        id: guard
+        run: |
+          if [ -z "${E2E_USERNAME}" ] || [ -z "${E2E_PASSWORD}" ]; then
+            echo "Missing CONSOLE_E2E_USERNAME/CONSOLE_E2E_PASSWORD; skipping Playwright."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${KEYCLOAK_CLIENT_SECRET}" ]; then
+            echo "Missing CONSOLE_KEYCLOAK_CLIENT_SECRET; skipping Playwright."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: console-web/package-lock.json
+
+      - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
+        run: npm ci
+
+      - name: Install Playwright browsers
+        if: steps.guard.outputs.skip != 'true'
+        run: npx playwright install --with-deps
+
+      - name: Playwright smoke
+        if: steps.guard.outputs.skip != 'true'
+        run: npm run test:e2e:smoke
+
+  console-contract:
+    needs: [changes]
+    if: needs.changes.outputs.console_contracts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CONSOLE_API_TOKEN: ${{ secrets.CONSOLE_API_TOKEN }}
+      KEYCLOAK_TOKEN_URL: ${{ secrets.CONSOLE_KEYCLOAK_TOKEN_URL || 'https://auth.truffles.kz/realms/truffles/protocol/openid-connect/token' }}
+      KEYCLOAK_CLIENT_ID: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_ID || 'console-web' }}
+      KEYCLOAK_CLIENT_SECRET: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET }}
+      KEYCLOAK_USERNAME: ${{ secrets.CONSOLE_KEYCLOAK_USERNAME }}
+      KEYCLOAK_PASSWORD: ${{ secrets.CONSOLE_KEYCLOAK_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard console contract auth
+        id: guard
+        run: |
+          if [ -n "${CONSOLE_API_TOKEN}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "${KEYCLOAK_USERNAME}" ] && [ -n "${KEYCLOAK_PASSWORD}" ] && [ -n "${KEYCLOAK_CLIENT_SECRET}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Missing console auth secrets; skipping Schemathesis."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Schemathesis
+        if: steps.guard.outputs.skip != 'true'
+        run: pip install schemathesis
+
+      - name: Use pre-provisioned token
+        if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN != ''
+        run: echo "SCHEMATHESIS_TOKEN=${CONSOLE_API_TOKEN}" >> $GITHUB_ENV
+
+      - name: Fetch console token
+        if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN == ''
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          data = urllib.parse.urlencode({
+              "grant_type": "password",
+              "client_id": os.environ["KEYCLOAK_CLIENT_ID"],
+              "client_secret": os.environ["KEYCLOAK_CLIENT_SECRET"],
+              "username": os.environ["KEYCLOAK_USERNAME"],
+              "password": os.environ["KEYCLOAK_PASSWORD"],
+              "scope": "openid",
+          }).encode()
+
+          req = urllib.request.Request(os.environ["KEYCLOAK_TOKEN_URL"], data=data, method="POST")
+          with urllib.request.urlopen(req) as resp:
+              token = json.load(resp)["access_token"]
+          print(f"::add-mask::{token}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"SCHEMATHESIS_TOKEN={token}\\n")
+          PY
+
+      - name: Schemathesis GET-only smoke
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          schemathesis run contracts/console_api/openapi.v1.yaml \
+            --url https://api.truffles.kz/console/v1 \
+            --include-method=GET \
+            --checks all \
+            --request-timeout 10 \
+            --max-examples=3 \
+            --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"
+
+  console-k6:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_k6 == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CONSOLE_API_TOKEN: ${{ secrets.CONSOLE_API_TOKEN }}
+      KEYCLOAK_TOKEN_URL: ${{ secrets.CONSOLE_KEYCLOAK_TOKEN_URL || 'https://auth.truffles.kz/realms/truffles/protocol/openid-connect/token' }}
+      KEYCLOAK_CLIENT_ID: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_ID || 'console-web' }}
+      KEYCLOAK_CLIENT_SECRET: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET }}
+      KEYCLOAK_USERNAME: ${{ secrets.CONSOLE_KEYCLOAK_USERNAME }}
+      KEYCLOAK_PASSWORD: ${{ secrets.CONSOLE_KEYCLOAK_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard console k6 auth
+        id: guard
+        run: |
+          if [ -n "${CONSOLE_API_TOKEN}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "${KEYCLOAK_USERNAME}" ] && [ -n "${KEYCLOAK_PASSWORD}" ] && [ -n "${KEYCLOAK_CLIENT_SECRET}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Missing console auth secrets; skipping k6."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+
+      - name: Use pre-provisioned token
+        if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN != ''
+        run: echo "CONSOLE_API_TOKEN=${CONSOLE_API_TOKEN}" >> $GITHUB_ENV
+
+      - name: Fetch console token
+        if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN == ''
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          data = urllib.parse.urlencode({
+              "grant_type": "password",
+              "client_id": os.environ["KEYCLOAK_CLIENT_ID"],
+              "client_secret": os.environ["KEYCLOAK_CLIENT_SECRET"],
+              "username": os.environ["KEYCLOAK_USERNAME"],
+              "password": os.environ["KEYCLOAK_PASSWORD"],
+              "scope": "openid",
+          }).encode()
+
+          req = urllib.request.Request(os.environ["KEYCLOAK_TOKEN_URL"], data=data, method="POST")
+          with urllib.request.urlopen(req) as resp:
+              token = json.load(resp)["access_token"]
+          print(f"::add-mask::{token}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"CONSOLE_API_TOKEN={token}\\n")
+          PY
+
+      - name: k6 console smoke
+        if: steps.guard.outputs.skip != 'true'
+        uses: grafana/k6-action@v0.3.0
+        with:
+          filename: ops/k6/console_smoke.js
+        env:
+          CONSOLE_API_URL: https://api.truffles.kz/console/v1
+          CONSOLE_API_TOKEN: ${{ env.CONSOLE_API_TOKEN }}
 
   core-eval:
     needs: [lint, unit-tests, changes]
@@ -317,12 +538,14 @@ jobs:
         (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') &&
         needs.lint.result == 'success' &&
         needs.unit-tests.result == 'success' &&
+        (needs.console-e2e.result == 'success' || needs.console-e2e.result == 'skipped') &&
+        (needs.console-contract.result == 'success' || needs.console-contract.result == 'skipped') &&
         (needs.core-eval.result == 'success' || needs.core-eval.result == 'skipped') &&
         (needs.long-eval.result == 'success' || needs.long-eval.result == 'skipped') &&
         (needs.asr-eval.result == 'success' || needs.asr-eval.result == 'skipped') &&
         needs.secret-scan.result == 'success'
       }}
-    needs: [changes, lint, unit-tests, core-eval, long-eval, asr-eval, secret-scan]
+    needs: [changes, lint, unit-tests, console-e2e, console-contract, core-eval, long-eval, asr-eval, secret-scan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

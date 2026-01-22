@@ -23,8 +23,6 @@ tags:
     description: Case management (Inbox)
   - name: messages
     description: Messages within cases
-  - name: calendar
-    description: Calendar and bookings
   - name: settings
     description: Client/branch settings
   - name: ops
@@ -51,6 +49,8 @@ paths:
                 $ref: "#/components/schemas/MeResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
         "403":
           $ref: "#/components/responses/Forbidden"
 
@@ -100,6 +100,8 @@ paths:
                 $ref: "#/components/schemas/CaseListResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
 
   /cases/{case_id}:
     get:
@@ -115,6 +117,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Case"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -183,6 +191,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessageListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /conversations/{conversation_id}/messages:
     post:
@@ -217,185 +233,6 @@ paths:
           $ref: "#/components/responses/NotAssigned"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
-
-  # ──────────────────────────────────────────────────────────────────
-  # CALENDAR
-  # ──────────────────────────────────────────────────────────────────
-  /calendar/specialists:
-    get:
-      operationId: listSpecialists
-      tags: [calendar]
-      summary: List specialists
-      description: Get all specialists for the client
-      parameters:
-        - name: branch_id
-          in: query
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Specialists
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SpecialistsResponse"
-
-  /calendar/slots:
-    get:
-      operationId: getSlots
-      tags: [calendar]
-      summary: Get available slots
-      description: Combines working hours, bookings, and Google Calendar
-      parameters:
-        - name: specialist_id
-          in: query
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: date
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: duration
-          in: query
-          schema:
-            type: integer
-            minimum: 15
-            maximum: 240
-            default: 60
-      responses:
-        "200":
-          description: Slots
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SlotsResponse"
-
-  /calendar/bookings:
-    post:
-      operationId: createBooking
-      tags: [calendar]
-      summary: Create booking
-      description: Concurrency-safe booking creation
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/BookingCreate"
-      responses:
-        "200":
-          description: Booking created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/BookingActionResponse"
-    get:
-      operationId: listBookings
-      tags: [calendar]
-      summary: List bookings
-      parameters:
-        - name: specialist_id
-          in: query
-          schema:
-            type: string
-            format: uuid
-        - name: date_from
-          in: query
-          schema:
-            type: string
-        - name: date_to
-          in: query
-          schema:
-            type: string
-        - name: status
-          in: query
-          schema:
-            type: string
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 50
-      responses:
-        "200":
-          description: Booking list
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/BookingsListResponse"
-
-  /calendar/bookings/{booking_id}/cancel:
-    post:
-      operationId: cancelBooking
-      tags: [calendar]
-      summary: Cancel booking
-      parameters:
-        - name: booking_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: reason
-          in: query
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Booking cancelled
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/BookingActionResponse"
-
-  /calendar/google/connect:
-    get:
-      operationId: googleConnect
-      tags: [calendar]
-      summary: Google connect
-      description: Redirects to Google consent screen
-      responses:
-        "200":
-          description: Redirect
-
-  /calendar/google/callback:
-    get:
-      operationId: googleCallback
-      tags: [calendar]
-      summary: Google OAuth callback
-      parameters:
-        - name: code
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: state
-          in: query
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Redirect
-
-  /calendar/google/status:
-    get:
-      operationId: googleStatus
-      tags: [calendar]
-      summary: Google Calendar status
-      responses:
-        "200":
-          description: Connection status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GoogleStatusResponse"
 
   # ──────────────────────────────────────────────────────────────────
   # OPS / HEALTH
@@ -433,6 +270,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MetricsDailyResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
 
   # ──────────────────────────────────────────────────────────────────
   # SETTINGS
@@ -449,6 +292,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SettingsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
     patch:
       operationId: updateSettings
       tags: [settings]
@@ -498,6 +345,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
 
 # ════════════════════════════════════════════════════════════════════
 # COMPONENTS
@@ -552,6 +405,8 @@ components:
               code: AUTH_REQUIRED
               message: Authentication required
               trace_id: abc123
+    BadRequest:
+      description: Malformed request
     Forbidden:
       description: Insufficient permissions
       content:
@@ -609,6 +464,12 @@ components:
               code: IDEMPOTENCY_CONFLICT
               message: Request already processed
               trace_id: abc123
+    ValidationError:
+      description: Request validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationError"
 
   schemas:
     # ── Errors ──
@@ -623,8 +484,10 @@ components:
           type: string
           description: Human-readable message
         details:
-          type: object
-          additionalProperties: true
+          anyOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
         trace_id:
           type: string
           description: Correlation ID for debugging
@@ -635,6 +498,19 @@ components:
       properties:
         error:
           $ref: "#/components/schemas/Error"
+
+    ValidationErrorItem:
+      type: object
+      additionalProperties: true
+
+    ValidationError:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationErrorItem"
 
     # ── Auth ──
     Agent:
@@ -824,15 +700,15 @@ components:
       properties:
         status:
           type: string
-          enum: [healthy, degraded, unhealthy]
+          enum: [ok, healthy, degraded, unhealthy]
         version:
           type: string
         database:
           type: string
-          enum: [ok, error]
+          enum: [ok, error, connected]
         redis:
           type: string
-          enum: [ok, error]
+          enum: [ok, error, connected]
         outbox_backlog:
           type: integer
 
