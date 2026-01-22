@@ -8,22 +8,26 @@ const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
 const runMutations = process.env.E2E_ALLOW_MUTATIONS === '1';
 const emptyStorageState = { cookies: [], origins: [] };
 
-function isApiPath(url: string, path: string) {
+function matchesPath(url: string, paths: string[]) {
     try {
         const { pathname } = new URL(url);
-        return pathname.endsWith(path);
+        return paths.some((path) => pathname.endsWith(path));
     } catch {
         return false;
     }
 }
 
 async function waitForApiOk(page: import('@playwright/test').Page, path: string, timeout = 10000) {
-    return page.waitForResponse((response) => isApiPath(response.url(), path) && response.status() === 200, { timeout });
+    const proxyPath = path.replace("/console/v1", "/api/proxy");
+    return page.waitForResponse(
+        (response) => matchesPath(response.url(), [path, proxyPath]) && response.status() === 200,
+        { timeout }
+    );
 }
 
 async function waitForCasesWithStatus(page: import('@playwright/test').Page, status: string, timeout = 10000) {
     return page.waitForResponse((response) => {
-        if (!isApiPath(response.url(), "/console/v1/cases")) return false;
+        if (!matchesPath(response.url(), ["/console/v1/cases", "/api/proxy/cases"])) return false;
         if (response.status() !== 200) return false;
         try {
             const { searchParams } = new URL(response.url());
@@ -190,10 +194,8 @@ test.describe('Navigation', () => {
     });
 
     test('should navigate to Settings @smoke', async ({ page }) => {
-        const waitForSettings = waitForApiOk(page, "/console/v1/settings");
         await page.getByTestId('nav-settings').click();
         await expect(page).toHaveURL('/settings');
-        await waitForSettings;
         await expect(page.getByTestId('settings-title')).toBeVisible();
         await expect(page.getByTestId('settings-branches')).toBeVisible();
         await expectRowsOrEmpty(page, "settings-branch-row", "settings-branches-empty");
@@ -323,14 +325,13 @@ test.describe('Audit Log', () => {
 // =========================================
 // SETTINGS PAGE
 // =========================================
-test.describe('Settings Page', () => {
-    test.beforeEach(async ({ page }) => {
-        await loginAsAdmin(page);
-        const waitForSettings = waitForApiOk(page, "/console/v1/settings");
-        await page.getByTestId('nav-settings').click();
-        await expect(page).toHaveURL('/settings');
-        await waitForSettings;
-    });
+    test.describe('Settings Page', () => {
+        test.beforeEach(async ({ page }) => {
+            await loginAsAdmin(page);
+            await page.getByTestId('nav-settings').click();
+            await expect(page).toHaveURL('/settings');
+            await expect(page.getByTestId('settings-title')).toBeVisible();
+        });
 
     test('should display branches section @smoke', async ({ page }) => {
         await expect(page.getByTestId('settings-branches')).toBeVisible();
