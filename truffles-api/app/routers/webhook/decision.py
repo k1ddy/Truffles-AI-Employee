@@ -5912,6 +5912,19 @@ async def _handle_webhook_payload(
         out_of_domain_signal=out_of_domain_signal,
         rag_confident=rag_confident,
     )
+    if saved_message:
+        metadata = saved_message.message_metadata if isinstance(saved_message.message_metadata, dict) else {}
+        decision_meta = metadata.get("decision_meta") if isinstance(metadata, dict) else {}
+        if not (isinstance(decision_meta, dict) and decision_meta.get("action")):
+            intent_value = getattr(intent, "value", None)
+            _record_message_decision_meta(
+                saved_message,
+                action=decision.action,
+                intent=intent_value if isinstance(intent_value, str) else None,
+                source="action_resolve",
+                fast_intent=False,
+            )
+            db.commit()
 
     if decision.action == "smalltalk":
         bot_response = GREETING_RESPONSE if intent == Intent.GREETING else THANKS_RESPONSE
