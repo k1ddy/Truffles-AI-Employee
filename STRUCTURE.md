@@ -93,6 +93,7 @@
 - `docs/SESSION_START_PROMPT.txt` — протокол старта.
 - `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml` — решения и GAP.
 - `docs/runbooks/*` — операционные runbooks (outbox/sentinel/incidents).
+- `docs/runbooks/TRACE_BUNDLE.md` — bundle диагностика (trace/meta/outbox latency).
 - `truffles-api/app/knowledge/<client_slug>/*` — runtime pack (truth/policy/eval).
 - `knowledge/<client_slug>/*` — канон RAG‑контента клиента.
 

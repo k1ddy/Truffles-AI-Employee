@@ -1502,6 +1502,7 @@ from app.routers.webhook.session_memory import (
 from app.routers.webhook.shield import _handle_shield_gate
 from app.routers.webhook.trace import (
     _attach_llm_cache_flag,
+    _merge_message_timing,
     _record_decision_trace,
     _record_message_decision_meta,
     _update_message_decision_metadata,
@@ -3119,6 +3120,8 @@ async def _handle_webhook_payload(
 ) -> WebhookResponse:
     """Shared webhook processing for inbound ChatFlow payloads."""
     logger.info(f"Webhook received: client_slug={payload.client_slug}")
+    pipeline_started_at = datetime.now(timezone.utc)
+    pipeline_start = time.monotonic()
 
     def _resolve_trace_conversation(
         *,
@@ -3228,6 +3231,7 @@ async def _handle_webhook_payload(
         timing_context["branch_id"] = str(resolved_branch_id)
     if resolved_knowledge_tag:
         timing_context["knowledge_tag"] = resolved_knowledge_tag
+    timing_context["timing_persisted"] = False
 
     outbound_idempotency_key = message_id or build_inbound_message_id(
         message_id,
@@ -3252,6 +3256,25 @@ async def _handle_webhook_payload(
         context["stage"] = stage
         context["elapsed_ms"] = round(elapsed_ms, 2)
         logger.info("Timing", extra={"context": context})
+        timing = timing_context.get("timing")
+        if not isinstance(timing, dict):
+            timing = {}
+        stages = timing.get("stages")
+        if not isinstance(stages, dict):
+            stages = {}
+        stages[stage] = context["elapsed_ms"]
+        timing["stages"] = stages
+        timing_context["timing"] = timing
+
+    def _persist_timing_snapshot() -> None:
+        if not saved_message or timing_context.get("timing_persisted"):
+            return
+        snapshot = dict(timing_context.get("timing") or {})
+        snapshot["pipeline_started_at"] = pipeline_started_at.isoformat()
+        snapshot["pipeline_finished_at"] = datetime.now(timezone.utc).isoformat()
+        snapshot["pipeline_ms"] = round((time.monotonic() - pipeline_start) * 1000, 2)
+        _merge_message_timing(saved_message, snapshot)
+        timing_context["timing_persisted"] = True
 
     def _record_escalation_metric(trigger: str) -> None:
         record_escalation_count(payload.client_slug, trigger)
@@ -3726,6 +3749,7 @@ async def _handle_webhook_payload(
         _record_contract_traces()
         save_message(db, conversation.id, client.id, role="assistant", content=final_text)
         sent = _send_response(final_text)
+        _persist_timing_snapshot()
         return final_text, sent
     previous_last_message_at = conversation.last_message_at
     conversation.last_message_at = now
@@ -6242,6 +6266,7 @@ async def _handle_webhook_payload(
         )
         result_message = f"Unknown state: {conversation.state}"
 
+    _persist_timing_snapshot()
     db.commit()
 
     return WebhookResponse(

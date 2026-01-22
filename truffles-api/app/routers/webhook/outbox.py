@@ -18,7 +18,7 @@ from app.routers.webhook.media import (
     _store_media_locally,
     _update_message_media_metadata,
 )
-from app.routers.webhook.trace import _record_decision_trace
+from app.routers.webhook.trace import _merge_message_timing, _record_decision_trace
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.escalation_service import get_telegram_credentials
 from app.services.outbox_service import (
@@ -343,12 +343,22 @@ async def _process_outbox_rows(
         payload_json = row.get("payload_json") or {}
         created_at = row.get("created_at")
         conversation_id = row.get("conversation_id")
+        inbound_message_id = row.get("inbound_message_id")
+        client_id = row.get("client_id")
+        message_text = None
+        if isinstance(payload_json, dict):
+            body = payload_json.get("body")
+            if isinstance(body, dict):
+                message_text = body.get("message")
         outbox_id_str = str(outbox_id)
         pick_info[outbox_id_str] = {
             "picked_at": picked_at,
             "created_at": created_at,
             "conversation_id": conversation_id,
             "client_slug": payload_json.get("client_slug"),
+            "client_id": client_id,
+            "inbound_message_id": inbound_message_id,
+            "message_text": message_text,
         }
         logger.info(
             "Outbox picked",
@@ -363,7 +373,65 @@ async def _process_outbox_rows(
             },
         )
 
-    def _log_outbox_done(outbox_id: str, *, error: str | None = None) -> None:
+    def _persist_outbox_timing(
+        *,
+        outbox_id: str,
+        done_at: datetime,
+        wait_ms: float | None,
+        process_ms: float | None,
+        total_ms: float | None,
+        error: str | None,
+    ) -> None:
+        info = pick_info.get(outbox_id, {})
+        inbound_message_id = info.get("inbound_message_id")
+        client_id = info.get("client_id")
+        message = None
+        if client_id and inbound_message_id:
+            message = legacy._find_message_by_message_id(db, client_id, str(inbound_message_id))
+        if not message and info.get("conversation_id") and info.get("created_at"):
+            message = legacy._find_message_by_conversation_created_at(
+                db,
+                info.get("conversation_id"),
+                info.get("created_at"),
+                message_text=info.get("message_text"),
+            )
+        if not message:
+            logger.warning(
+                "Outbox timing message not found",
+                extra={
+                    "context": {
+                        "outbox_id": outbox_id,
+                        "inbound_message_id": str(inbound_message_id) if inbound_message_id else None,
+                    }
+                },
+            )
+            return
+        payload = {
+            "outbox": {
+                "outbox_id": outbox_id,
+                "inbound_message_id": str(inbound_message_id) if inbound_message_id else None,
+                "created_at": info.get("created_at").isoformat()
+                if isinstance(info.get("created_at"), datetime)
+                else info.get("created_at"),
+                "picked_at": info.get("picked_at").isoformat()
+                if isinstance(info.get("picked_at"), datetime)
+                else info.get("picked_at"),
+                "done_at": done_at.isoformat(),
+                "wait_ms": round(wait_ms, 2) if wait_ms is not None else None,
+                "process_ms": round(process_ms, 2) if process_ms is not None else None,
+                "total_ms": round(total_ms, 2) if total_ms is not None else None,
+            }
+        }
+        if error:
+            payload["outbox"]["error"] = error
+        _merge_message_timing(message, payload)
+
+    def _log_outbox_done(
+        outbox_id: str,
+        *,
+        error: str | None = None,
+        total_ms: float | None = None,
+    ) -> None:
         info = pick_info.get(outbox_id, {})
         done_at = datetime.now(timezone.utc)
         created_at = info.get("created_at")
@@ -391,6 +459,14 @@ async def _process_outbox_rows(
         if error:
             context["error"] = error
         logger.info("Outbox done", extra={"context": context})
+        _persist_outbox_timing(
+            outbox_id=outbox_id,
+            done_at=done_at,
+            wait_ms=wait_ms,
+            process_ms=process_ms,
+            total_ms=total_ms,
+            error=error,
+        )
 
     def _row_has_media(row: dict) -> bool:
         payload_json = row.get("payload_json") or {}
@@ -434,6 +510,7 @@ async def _process_outbox_rows(
             )
             if not response.success:
                 raise RuntimeError(response.message)
+            outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
             logger.info(
                 "Outbox timing",
                 extra={
@@ -442,11 +519,11 @@ async def _process_outbox_rows(
                         "outbox_ids": outbox_ids,
                         "conversation_id": conversation_id,
                         "client_slug": payload.client_slug,
-                        "outbox_total_ms": round((time.monotonic() - timing_start) * 1000, 2),
+                        "outbox_total_ms": outbox_total_ms,
                     }
                 },
             )
-            _log_outbox_done(str(outbox_id))
+            _log_outbox_done(str(outbox_id), total_ms=outbox_total_ms)
             mark_outbox_status(
                 db,
                 outbox_id=outbox_id,
@@ -483,6 +560,7 @@ async def _process_outbox_rows(
                         "Outbox rollback failed",
                         extra={"context": {"error": str(rollback_exc)}},
                     )
+            outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
             logger.info(
                 "Outbox timing",
                 extra={
@@ -491,12 +569,12 @@ async def _process_outbox_rows(
                         "outbox_ids": [str(outbox_id)],
                         "conversation_id": conversation_id,
                         "client_slug": payload.client_slug,
-                        "outbox_total_ms": round((time.monotonic() - timing_start) * 1000, 2),
+                        "outbox_total_ms": outbox_total_ms,
                         "error": str(exc),
                     }
                 },
             )
-            _log_outbox_done(str(outbox_id), error=str(exc))
+            _log_outbox_done(str(outbox_id), error=str(exc), total_ms=outbox_total_ms)
             now = datetime.now(timezone.utc)
             attempts = int(row.get("attempts") or 0)
             if attempts >= max_attempts:
@@ -600,6 +678,7 @@ async def _process_outbox_rows(
                 )
                 if not response.success:
                     raise RuntimeError(response.message)
+                outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
                 logger.info(
                     "Outbox timing",
                     extra={
@@ -607,13 +686,13 @@ async def _process_outbox_rows(
                             "outbox_ids": [str(oid) for oid in outbox_ids if oid],
                             "conversation_id": conversation_id,
                             "client_slug": base_payload.client_slug,
-                            "outbox_total_ms": round((time.monotonic() - timing_start) * 1000, 2),
+                            "outbox_total_ms": outbox_total_ms,
                         }
                     },
                 )
                 for outbox_id in outbox_ids:
                     if outbox_id:
-                        _log_outbox_done(str(outbox_id))
+                        _log_outbox_done(str(outbox_id), total_ms=outbox_total_ms)
                 for outbox_id in outbox_ids:
                     if outbox_id:
                         mark_outbox_status(
@@ -626,7 +705,12 @@ async def _process_outbox_rows(
                 results["sent"] += len(outbox_ids)
                 logger.info(
                     "Outbox processed",
-                    extra={"context": {"conversation_id": conversation_id, "coalesced_count": len(group)}},
+                    extra={
+                        "context": {
+                            "conversation_id": conversation_id,
+                            "coalesced_count": len(group),
+                        }
+                    },
                 )
             except Exception as exc:
                 try:
@@ -636,6 +720,7 @@ async def _process_outbox_rows(
                         "Outbox rollback failed",
                         extra={"context": {"error": str(rollback_exc)}},
                     )
+                outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
                 logger.info(
                     "Outbox timing",
                     extra={
@@ -643,14 +728,18 @@ async def _process_outbox_rows(
                             "outbox_ids": [str(oid) for oid in outbox_ids if oid],
                             "conversation_id": conversation_id,
                             "client_slug": base_payload.client_slug,
-                            "outbox_total_ms": round((time.monotonic() - timing_start) * 1000, 2),
+                            "outbox_total_ms": outbox_total_ms,
                             "error": str(exc),
                         }
                     },
                 )
                 for outbox_id in outbox_ids:
                     if outbox_id:
-                        _log_outbox_done(str(outbox_id), error=str(exc))
+                        _log_outbox_done(
+                            str(outbox_id),
+                            error=str(exc),
+                            total_ms=outbox_total_ms,
+                        )
                 now = datetime.now(timezone.utc)
                 for row in group:
                     outbox_id = row.get("id")

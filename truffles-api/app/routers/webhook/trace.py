@@ -120,6 +120,25 @@ def _update_message_decision_metadata(message: Message, updates: dict[str, Any])
     message.message_metadata = metadata
 
 
+def _merge_message_timing(message: Message | None, timing_updates: dict[str, Any] | None) -> None:
+    if not message or not isinstance(timing_updates, dict):
+        return
+    metadata = dict(message.message_metadata or {})
+    decision_meta = dict(metadata.get("decision_meta") or {})
+    existing = decision_meta.get("timing")
+    merged: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+    for key, value in timing_updates.items():
+        if value is None:
+            continue
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = {**merged[key], **value}
+        else:
+            merged[key] = value
+    decision_meta["timing"] = merged
+    metadata["decision_meta"] = decision_meta
+    message.message_metadata = metadata
+
+
 def _record_message_decision_meta(
     message: Message | None,
     *,
@@ -203,5 +222,6 @@ __all__ = [
     "_attach_llm_cache_flag",
     "_record_decision_trace",
     "_record_message_decision_meta",
+    "_merge_message_timing",
     "_update_message_decision_metadata",
 ]

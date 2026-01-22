@@ -31,6 +31,7 @@
 - `ops/diagnose.py send-and-explain` — отправка + быстрый `explain`.
 - `ops/chatflow_send.py` — минимальный sender‑скрипт (без diagnose).
 - `ops/diagnose.py explain` — быстрый разбор конкретного сообщения (decision_meta/trace + outbox).
+- `ops/diagnose.py trace-bundle` — полный пакет (decision_meta/trace + outbox rows + latency).
 - `ops/diagnose.py deploy-verify` — проверка версии деплоя (`/admin/version`) и совпадения commit.
 - `ops/sync_client.py` — validate/sync client packs (truth → Qdrant).
 - `/home/zhan/restart_api.sh` — restart API контейнера.
