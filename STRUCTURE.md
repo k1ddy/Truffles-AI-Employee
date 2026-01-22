@@ -27,6 +27,7 @@
 | `console-web/eslint.config.js` | ESLint flat config для console-web | Frontend |
 | `console-web/.env.e2e.example` | Шаблон env для console‑e2e | Frontend/QA |
 | `docs/CONSOLE_GUIDE.md` | Guide по Console (API, тесты, дебаг) | Frontend/Backend |
+| `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 
 ---
 

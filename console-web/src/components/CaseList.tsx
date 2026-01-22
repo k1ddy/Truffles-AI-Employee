@@ -127,7 +127,7 @@ export default function CaseList() {
     if (isLoading && !cursor) {
         return (
             <div className="w-full">
-                <h2 className="text-xl font-semibold mb-4">Заявки</h2>
+                <h2 data-testid="cases-title" className="text-xl font-semibold mb-4">Заявки</h2>
                 <TableSkeleton />
             </div>
         );
@@ -135,14 +135,17 @@ export default function CaseList() {
 
     if (error) {
         return (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-                <p className="text-red-600 mb-4">Не удалось загрузить заявки</p>
-                <button
-                    onClick={() => refetch()}
-                    className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-                >
-                    Повторить
-                </button>
+            <div className="w-full">
+                <h2 data-testid="cases-title" className="text-xl font-semibold mb-4">Заявки</h2>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+                    <p className="text-red-600 mb-4">Не удалось загрузить заявки</p>
+                    <button
+                        onClick={() => refetch()}
+                        className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                    >
+                        Повторить
+                    </button>
+                </div>
             </div>
         );
     }
@@ -151,7 +154,7 @@ export default function CaseList() {
         <div className="w-full">
             {/* Header with filters */}
             <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-                <h2 className="text-xl font-semibold">Заявки</h2>
+                <h2 data-testid="cases-title" className="text-xl font-semibold">Заявки</h2>
                 <button
                     onClick={() => { resetPagination(); refetch(); }}
                     className="text-sm text-blue-600 hover:underline"
