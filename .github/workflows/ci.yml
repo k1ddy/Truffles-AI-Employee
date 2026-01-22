@@ -228,7 +228,7 @@ jobs:
 
       - name: Install Playwright browsers
         if: steps.guard.outputs.skip != 'true'
-        run: npx playwright install --with-deps
+        run: npx playwright install --with-deps chromium
 
       - name: Playwright smoke
         if: steps.guard.outputs.skip != 'true'

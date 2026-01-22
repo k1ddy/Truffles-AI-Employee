@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 
 const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
 const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
 const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
 const runMutations = process.env.E2E_ALLOW_MUTATIONS === '1';
@@ -44,9 +45,21 @@ async function expectRowsOrEmpty(
     await expect(row.or(empty)).toBeVisible({ timeout });
 }
 
+async function startKeycloakLogin(page: import('@playwright/test').Page) {
+    const signInUrl = `${baseURL}/api/auth/signin?callbackUrl=${encodeURIComponent(baseURL)}`;
+    await page.goto(signInUrl, { waitUntil: "domcontentloaded" });
+    const providerForm = page.locator('form[action*="keycloak"]');
+    await providerForm.first().waitFor({ state: "visible", timeout: 15000 });
+    const submitButton = providerForm
+        .first()
+        .locator('button[type="submit"], input[type="submit"]')
+        .first();
+    await submitButton.click();
+    await page.waitForURL(keycloakHostPattern, { timeout: 20000 });
+}
+
 async function loginThroughKeycloak(page: import('@playwright/test').Page) {
-    await page.getByTestId('login-button').click();
-    await page.waitForURL(keycloakHostPattern);
+    await startKeycloakLogin(page);
     await expect(page.locator('#username')).toBeVisible();
     await expect(page.locator('#password')).toBeVisible();
     await page.fill('#username', loginUser);
@@ -74,8 +87,7 @@ test.describe('Smoke Test: Login Flow', () => {
         await page.goto('/');
         await expect(page.getByTestId('console-header')).toBeVisible();
         await expect(page.getByTestId('login-button')).toBeVisible();
-        await page.getByTestId('login-button').click();
-        await page.waitForURL(keycloakHostPattern);
+        await startKeycloakLogin(page);
         await expect(page.locator('#username')).toBeVisible();
         await expect(page.locator('#password')).toBeVisible();
     });

@@ -121,7 +121,20 @@ Set `users[].id` in `ops/keycloak-realm.json` to avoid `sub` changes on re‑cre
 
 ---
 
-## 6) Debug & Troubleshooting
+## 6) Console tests (E2E/CI)
+
+**Purpose:** catch auth breakage, navigation regressions, and read-only API wiring.
+
+**Defaults:**
+- Smoke tests are read-only. Mutating checks require `E2E_ALLOW_MUTATIONS=1`.
+- CI uses `E2E_USE_STORAGE_STATE=1` to log in once per run (faster, less flaky).
+- Login flow uses NextAuth sign-in to reach Keycloak (more stable than clicking UI).
+
+**Where to run:** `docs/DEV_SETUP.md` (Console tests section).
+
+---
+
+## 7) Debug & Troubleshooting
 
 **403 ACCESS_DENIED**
 - Check `agent_identities` mapping for `sub`.
@@ -139,7 +152,7 @@ Set `users[].id` in `ops/keycloak-realm.json` to avoid `sub` changes on re‑cre
 
 ---
 
-## 7) Related Canon Docs
+## 8) Related Canon Docs
 
 - `SPECS/MULTI_TENANT.md` — tenant boundaries and branch routing.
 - `TECH.md` — console env + deploy commands.
