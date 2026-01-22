@@ -5,7 +5,7 @@
 **Обновлено:** 2026-01-22  
 **Scope:** мультитенант, онбординг, isolation, branch‑routing.  
 **Out of scope:** реализация, evidence/CI.  
-**Links:** `SPECS/ARCHITECTURE.md`, `SPECS/SYSTEM_REFERENCE.md`, `STATE.md`.
+**Links:** `SPECS/ARCHITECTURE.md`, `SPECS/SYSTEM_REFERENCE.md`, `docs/IMPERIUM_DECISIONS.yaml`, `STATE.md`.
 
 **Источник правды по архитектуре работы с несколькими заказчиками.**  
 **Создано:** 2025-12-07
@@ -30,6 +30,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 | Онбординг скрипт | ⚠️ РУЧНОЙ (onboard_client.py отсутствует; sync_client.py только для KB) |
 | Счётчик сообщений | 📋 ПЛАН |
 | Dashboard для заказчика | 📋 ПЛАН |
+| Console org‑уровень (Company/Client/Branch) | ⚠️ ЧАСТИЧНО: multi‑client selection есть, membership/RBAC нет |
 
 ---
 
@@ -105,6 +106,21 @@ Company
 | Knowledge | client_slug + branch filter (knowledge_tag/branch_id; без fallback) | Branch.knowledge_tag |
 | Conversation привязан к | branch_id (сохраняется + используется в routing) | branch_id |
 | Каналы (WhatsApp/Instagram) | 1 на client | через Channel (backlog) |
+| Console access | Один `sub` → один client (исторически); сейчас доступен multi‑client через `X-Client-Id` | Org‑уровень с membership и RBAC |
+
+## Console tenancy (текущее, промежуточное)
+
+**DEC‑011:** орг‑уровень Company → Client → Branch (roles/RBAC) — целевой, не реализован полностью.
+
+**Что уже есть (без membership):**
+- Один OIDC `sub` может быть привязан к нескольким `agents` (по клиентам).
+- `/console/v1/me` возвращает `clients[]` и `selection_required`.
+- При нескольких клиентах обязателен заголовок `X-Client-Id`; иначе `CLIENT_SELECTION_REQUIRED`.
+- UI хранит выбор в `localStorage` (`console:client_id`) и очищает на logout.
+
+**Что ещё нужно:**
+- Модель membership (company/client/branch) + роли.
+- Явный `tenant_context` (company_id/client_id/branch_id) в событиях/аудите/метриках.
 
 ---
 

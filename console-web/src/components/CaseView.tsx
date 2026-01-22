@@ -85,7 +85,6 @@ export default function CaseView({ caseId }: CaseViewProps) {
     const {
         data: messagesData,
         isLoading: messagesLoading,
-        refetch: refetchMessages,
     } = useQuery({
         queryKey: ["messages", caseId],
         queryFn: () => fetchMessages(caseId),
@@ -99,8 +98,8 @@ export default function CaseView({ caseId }: CaseViewProps) {
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
         },
-        onError: (error: any) => {
-            const code = error?.response?.data?.error?.code;
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
             if (code === "CASE_ALREADY_TAKEN") {
                 toast.error("Заявка уже взята другим менеджером");
             } else {

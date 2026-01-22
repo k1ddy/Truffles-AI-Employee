@@ -97,6 +97,15 @@
 3. **Валидация packs** через `ops/sync_client.py --validate` (без генерации новых файлов).
 **Как проверяем:** синк в Qdrant, smoke‑check в WhatsApp, `/admin/version`.
 
+### Фаза 2.5 — Org‑level tenancy (Company → Client → Branch)
+**Почему:** без орг‑уровня нельзя безопасно масштабировать консоль и разделять бизнесы.
+**Что делаем:**
+1. **DEC‑011 + канон‑доки** (SPECS/MULTI_TENANT + консольный гайд + контракты).
+2. **Membership/RBAC** (company/client/branch) и tenant_context в API/событиях.
+3. **Console selection**: обязательный `X-Client-Id` при multi‑client + UI выбор.
+4. **Tenant‑scoping тесты**: unit + contract, запрет cross‑tenant.
+**Как проверяем:** contract tests + tenant‑scoping unit tests + CI evidence.
+
 ### Фаза 3 — UX для админов (Telegram‑first, затем Web)
 **Почему:** операционная эффективность и контроль SLA.
 **Что делаем:**
@@ -155,6 +164,7 @@ _Сводка для ориентира; актуальный статус и ev
 | Goal‑stack/consult‑return | ✅ Done |
 | Active learning queue | 📋 Plan |
 | Monitoring | ⚠️ Partial |
+| Org‑level tenancy + console RBAC | 📋 Plan (interim selection only) |
 
 ---
 

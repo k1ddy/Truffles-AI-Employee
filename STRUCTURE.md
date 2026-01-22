@@ -21,7 +21,12 @@
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `truffles-api/` | Backend API + workers | Backend |
+| `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
+| `console-web/e2e/` | Playwright smoke/login/setup тесты | Frontend/QA |
+| `console-web/eslint.config.js` | ESLint flat config для console-web | Frontend |
+| `console-web/.env.e2e.example` | Шаблон env для console‑e2e | Frontend/QA |
+| `docs/CONSOLE_GUIDE.md` | Guide по Console (API, тесты, дебаг) | Frontend/Backend |
 
 ---
 
@@ -44,6 +49,7 @@
 - Бизнес-ограничения: `STRATEGY/REQUIREMENTS.md`.
 - Тарифы/обещания: `STRATEGY/PRODUCT.md` + `docs/SELLING_TRUTHS.md` (claim/proof/boundary).
 - Контракты Console API: `contracts/console_api/*` (OpenAPI + ошибки).
+- Console guide: `docs/CONSOLE_GUIDE.md` (tests/debug/flows).
 - Поведение/архитектура: `SPECS/*` (кроме `SPECS/ACTIVE_LEARNING_PLAN.md`; ключевые: `CONSULTANT.md`, `ESCALATION.md`, `ARCHITECTURE.md`).
 - Процесс/инструменты (entrypoint): `SPECS/SYSTEM_REFERENCE.md` → section "Start Here — Process Map".
 - План/приоритеты: `STRATEGY/TECH_ROADMAP.md`.

@@ -145,6 +145,12 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `console-web/.env.local` — `NEXTAUTH_URL`, `KEYCLOAK_ISSUER`, `NEXT_PUBLIC_API_URL`.
 - `truffles-api/docker-compose.yml` — `CONSOLE_OIDC_JWKS_URL`, `CONSOLE_OIDC_ISSUER`, `CONSOLE_OIDC_AUDIENCE`.
 
+**Console tenancy (interim):**
+- `/console/v1/me` возвращает список `clients` и `selection_required`.
+- При нескольких клиентах обязателен `X-Client-Id`.
+- UI хранит выбор в `localStorage` (`console:client_id`) и очищает на logout.
+- Полный орг‑уровень (Company/Client/Branch) — DEC‑011, в разработке.
+
 **Запуск (docker‑вариант, preferred):**
 ```bash
 docker compose -f /home/zhan/truffles-main/docker-compose.console.yml up -d console-postgres console-redis console-keycloak
@@ -266,6 +272,19 @@ k6 run ops/k6/console_smoke.js
 - `console-e2e` (Playwright smoke) — запускается при изменениях в `console-web/**` или CI.
 - `console-contract` (Schemathesis GET-only) — запускается при изменениях в `contracts/console_api/**` или console API.
 - `console-k6` — ручной запуск через `workflow_dispatch` (input `run_k6=true`).
+
+### Console E2E (локально, чтобы воспроизвести CI)
+- Креды: `/home/zhan/secrets/console-e2e.env` (не коммитить).
+- Важно: `NEXTAUTH_URL` должен совпадать с `PLAYWRIGHT_BASE_URL` (иначе CSRF).
+- Команда и контекст запуска — в `docs/DEV_SETUP.md` (раздел 6).
+- Seed данных (идемпотентный) — `truffles-api/scripts/console_e2e_seed.py`.
+
+### Console secrets (источник истины)
+- CI secrets: GitHub Actions (`CONSOLE_E2E_USERNAME`, `CONSOLE_E2E_PASSWORD`, `CONSOLE_KEYCLOAK_CLIENT_SECRET`, `CONSOLE_API_TOKEN`).
+- Prod host: `/home/zhan/secrets/console-e2e.env` (E2E login + Keycloak client secret).
+- Contract/k6: `/home/zhan/secrets/console-contract.env` (token or Keycloak user creds).
+- `CONSOLE_API_TOKEN` не хранится в репозитории: получать через Keycloak token endpoint и использовать локально.
+- Шаблон переменных: `console-web/.env.e2e.example`.
 
 ### Почему этапы пропускаются (skipped)
 **Path filters (changes):**

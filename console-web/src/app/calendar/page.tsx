@@ -38,6 +38,22 @@ interface Booking {
     created_at: string;
 }
 
+interface BookingCreateRequest {
+    specialist_id: string;
+    start_at: string;
+    end_at: string;
+    customer_name?: string;
+    customer_phone?: string;
+    service_type?: string;
+    notes?: string;
+    conversation_id?: string;
+}
+
+interface BookingActionResponse {
+    success: boolean;
+    booking: Booking;
+}
+
 async function fetchSpecialists(): Promise<{ items: Specialist[] }> {
     const response = await api.get("/calendar/specialists");
     return response.data;
@@ -54,7 +70,7 @@ async function fetchBookings(date?: string): Promise<{ items: Booking[] }> {
     return response.data;
 }
 
-async function createBooking(data: any): Promise<any> {
+async function createBooking(data: BookingCreateRequest): Promise<BookingActionResponse> {
     const response = await api.post("/calendar/bookings", data);
     return response.data;
 }
@@ -78,7 +94,7 @@ export default function CalendarPage() {
     const [showForm, setShowForm] = useState(false);
 
     // Queries
-    const { data: specialistsData, isLoading: specialistsLoading, isError: specialistsError, error: specialistsErrorData } = useQuery({
+    const { data: specialistsData, isError: specialistsError, error: specialistsErrorData } = useQuery({
         queryKey: ["specialists"],
         queryFn: fetchSpecialists,
         enabled: !!session,
@@ -99,7 +115,7 @@ export default function CalendarPage() {
     const currentSpecialist = specialists.find(s => s.id === selectedSpecialist);
     const duration = selectedService?.duration_min || 60;
 
-    const { data: slotsData, isLoading: slotsLoading, refetch: refetchSlots } = useQuery({
+    const { data: slotsData, isLoading: slotsLoading } = useQuery({
         queryKey: ["slots", selectedSpecialist, selectedDate, duration],
         queryFn: () => fetchSlots(selectedSpecialist, selectedDate, duration),
         enabled: !!session && !!selectedSpecialist && !!selectedDate,
@@ -124,8 +140,8 @@ export default function CalendarPage() {
             queryClient.invalidateQueries({ queryKey: ["bookings"] });
             resetForm();
         },
-        onError: (error: any) => {
-            const code = error?.response?.data?.error?.code;
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
             if (code === "BOOKING_CONFLICT") {
                 toast.error("Это время уже занято. Выберите другой слот.");
             } else {

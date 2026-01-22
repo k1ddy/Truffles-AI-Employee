@@ -54,6 +54,21 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
         )
         for branch in context.branches
     ]
+    clients = [
+        {
+            "id": client.id,
+            "slug": client.name,
+            "name": client.name,
+            "company_id": client.company_id,
+        }
+        for client in (context.accessible_clients or [])
+    ]
+    active_client = {
+        "id": context.client.id,
+        "slug": context.client.name,
+        "name": context.client.name,
+        "company_id": context.client.company_id,
+    } if context.client else None
     return ConsoleMeResponse(
         agent={
             "id": context.agent.id,
@@ -63,8 +78,10 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
             "branch_id": context.agent.branch_id,
             "is_active": context.agent.is_active,
         },
-        client={"id": context.client.id, "slug": context.client.name},
+        client=active_client,
         branches=branches,
+        clients=clients,
+        selection_required=context.selection_required,
     )
 
 
@@ -74,7 +91,7 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
     responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
 )
 async def get_me(request: Request, db: Session = Depends(get_db)) -> ConsoleMeResponse:
-    context = get_console_context(request, db)
+    context = get_console_context(request, db, require_selection=False)
     if not context.agent or not context.client:
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Console access missing")
     return _build_me_response(context)

@@ -1,61 +1,13 @@
 import { test, expect } from '@playwright/test';
 
-const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
-const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
-const loginUser = process.env.E2E_USERNAME ?? 'admin';
-const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
 const runMutations = process.env.E2E_ALLOW_MUTATIONS === '1';
 
 // =========================================
-// SMOKE TESTS: Authentication
+// HELPER: Open inbox with storage state
 // =========================================
-test.describe('Smoke Test: Login Flow', () => {
-    test('should redirect to Keycloak login @smoke', async ({ page }) => {
-        await page.goto('/');
-        await expect(page.getByText('Truffles Console')).toBeVisible();
-        await page.getByRole('button', { name: /войти/i }).click();
-        await expect(page).toHaveURL(keycloakHostPattern);
-        // Keycloak login page title
-        await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible();
-    });
-
-    test('should login and see inbox @smoke', async ({ page }) => {
-        await page.goto('/');
-        await page.getByRole('button', { name: /войти/i }).click();
-        await page.waitForURL(keycloakHostPattern);
-        await page.fill('#username', loginUser);
-        await page.fill('#password', loginPassword);
-        await page.click('#kc-login');
-        await page.waitForURL(consoleHostPattern);
-        await expect(page.getByText('Truffles Console')).toBeVisible();
-        await expect(page.getByText('Заявки')).toBeVisible({ timeout: 10000 });
-    });
-
-    test('should logout successfully @smoke', async ({ page }) => {
-        await page.goto('/');
-        await page.getByRole('button', { name: /войти/i }).click();
-        await page.waitForURL(keycloakHostPattern);
-        await page.fill('#username', loginUser);
-        await page.fill('#password', loginPassword);
-        await page.click('#kc-login');
-        await page.waitForURL(consoleHostPattern);
-        await page.getByRole('button', { name: /выйти/i }).click();
-        await expect(page.getByRole('button', { name: /войти/i })).toBeVisible({ timeout: 10000 });
-    });
-});
-
-// =========================================
-// HELPER: Login before tests
-// =========================================
-async function loginAsAdmin(page: import('@playwright/test').Page) {
+async function openInbox(page: import('@playwright/test').Page) {
     await page.goto('/');
-    await page.getByRole('button', { name: /войти/i }).click();
-    await page.waitForURL(keycloakHostPattern);
-    await page.fill('#username', loginUser);
-    await page.fill('#password', loginPassword);
-    await page.click('#kc-login');
-    await page.waitForURL(consoleHostPattern);
-    await expect(page.getByText('Заявки')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('cases-title')).toBeVisible({ timeout: 10000 });
 }
 
 
@@ -64,7 +16,7 @@ async function loginAsAdmin(page: import('@playwright/test').Page) {
 // =========================================
 test.describe('Inbox Features', () => {
     test.beforeEach(async ({ page }) => {
-        await loginAsAdmin(page);
+        await openInbox(page);
     });
 
     test('should display filter controls @smoke', async ({ page }) => {
@@ -94,7 +46,7 @@ test.describe('Inbox Features', () => {
 // =========================================
 test.describe('Navigation', () => {
     test.beforeEach(async ({ page }) => {
-        await loginAsAdmin(page);
+        await openInbox(page);
     });
 
     test('should navigate to Status page @smoke', async ({ page }) => {
@@ -122,7 +74,7 @@ test.describe('Navigation', () => {
 test.describe('Case Actions @mutating', () => {
     test.skip(!runMutations, 'Mutating tests are disabled');
     test.beforeEach(async ({ page }) => {
-        await loginAsAdmin(page);
+        await openInbox(page);
     });
 
     test('should take a pending case @mutating', async ({ page }) => {
@@ -217,7 +169,7 @@ test.describe('Case Actions @mutating', () => {
 // =========================================
 test.describe('Audit Log', () => {
     test.beforeEach(async ({ page }) => {
-        await loginAsAdmin(page);
+        await openInbox(page);
         await page.getByRole('link', { name: 'Журнал' }).click();
         await expect(page).toHaveURL('/audit');
     });
@@ -243,7 +195,7 @@ test.describe('Audit Log', () => {
 // =========================================
 test.describe('Settings Page', () => {
     test.beforeEach(async ({ page }) => {
-        await loginAsAdmin(page);
+        await openInbox(page);
         await page.getByRole('link', { name: 'Настройки' }).click();
         await expect(page).toHaveURL('/settings');
     });

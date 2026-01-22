@@ -27,6 +27,8 @@ class ConsoleAgent(BaseModel):
 class ConsoleClient(BaseModel):
     id: UUID
     slug: str
+    name: Optional[str] = None
+    company_id: Optional[UUID] = None
 
 
 class ConsoleBranch(BaseModel):
@@ -38,8 +40,10 @@ class ConsoleBranch(BaseModel):
 
 class ConsoleMeResponse(BaseModel):
     agent: ConsoleAgent
-    client: ConsoleClient
+    client: Optional[ConsoleClient] = None
     branches: list[ConsoleBranch]
+    clients: list[ConsoleClient] = []
+    selection_required: bool = False
 
 
 class ConsoleMessage(BaseModel):
@@ -171,7 +175,6 @@ class ConsoleSettingsUpdateRequest(BaseModel):
 class ConsoleSettingsUpdateResponse(BaseModel):
     success: bool
     message: str
-
 
 
 

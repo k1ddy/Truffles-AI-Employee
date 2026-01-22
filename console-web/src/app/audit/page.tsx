@@ -12,7 +12,7 @@ interface AuditEvent {
     actor_name: string | null;
     entity_type: string | null;
     entity_id: string | null;
-    payload: Record<string, any> | null;
+    payload: Record<string, unknown> | null;
 }
 
 async function fetchAuditEvents(): Promise<{ items: AuditEvent[] }> {

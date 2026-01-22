@@ -18,7 +18,7 @@ export const authOptions: NextAuthOptions = {
             return token
         },
         async session({ session, token }: { session: Session, token: JWT }) {
-            // @ts-ignore
+            // @ts-expect-error NextAuth session typing lacks accessToken.
             session.accessToken = token.accessToken
             return session
         },

@@ -77,7 +77,7 @@ function MetricCard({ label, value, subtext }: { label: string; value: string | 
 export default function OpsPage() {
     const { data: session } = useSession();
 
-    const { data: health, isLoading: healthLoading, error: healthError, refetch: refetchHealth } = useQuery({
+    const { data: health, isLoading: healthLoading, refetch: refetchHealth } = useQuery({
         queryKey: ["health"],
         queryFn: fetchHealth,
         enabled: !!session,

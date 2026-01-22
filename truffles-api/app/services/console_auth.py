@@ -3,6 +3,7 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Any, Optional
+from uuid import UUID
 
 from fastapi import Request
 from sqlalchemy.orm import Session
@@ -24,6 +25,8 @@ class ConsoleAuthContext:
     agent: Agent
     client: Client
     branches: list[Branch]
+    accessible_clients: list[Client]
+    selection_required: bool
     subject: str
     token_payload: dict[str, Any]
 
@@ -123,37 +126,97 @@ def _decode_token(token: str) -> dict[str, Any]:
     )
 
 
-def get_console_context(request: Request, db: Session) -> ConsoleAuthContext:
+def _parse_client_header(request: Request) -> Optional[UUID]:
+    raw_client_id = request.headers.get("x-client-id")
+    if not raw_client_id:
+        return None
+    try:
+        return UUID(raw_client_id)
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid X-Client-Id header") from exc
+
+
+def _pick_agent_for_client(agents: list[Agent], client_id: UUID) -> Agent:
+    role_priority = {"owner": 0, "admin": 1, "manager": 2, "support": 3}
+    candidates = [agent for agent in agents if agent.client_id == client_id]
+    if not candidates:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "No agent for selected client")
+    return sorted(
+        candidates,
+        key=lambda agent: (
+            role_priority.get(agent.role, 99),
+            0 if agent.branch_id is None else 1,
+            agent.name or "",
+            str(agent.id),
+        ),
+    )[0]
+
+
+def get_console_context(request: Request, db: Session, *, require_selection: bool = True) -> ConsoleAuthContext:
     token = _get_bearer_token(request)
     payload = _decode_token(token)
     subject = payload.get("sub")
     if not subject:
         raise ConsoleAPIError(401, "TOKEN_INVALID", "Missing subject claim")
 
-    identity = (
+    identities = (
         db.query(AgentIdentity)
+        .join(Agent)
         .filter(AgentIdentity.channel == "oidc", AgentIdentity.external_id == subject)
-        .first()
+        .all()
     )
-    if not identity or not identity.agent:
+    if not identities:
         raise ConsoleAPIError(403, "ACCESS_DENIED", "No console access for this identity")
-    agent = identity.agent
-    if not agent.is_active:
+
+    agents_by_id: dict[UUID, Agent] = {}
+    for identity in identities:
+        agent = identity.agent
+        if agent and agent.is_active:
+            agents_by_id[agent.id] = agent
+    agents = list(agents_by_id.values())
+    if not agents:
         raise ConsoleAPIError(403, "ACCOUNT_DISABLED", "Agent is disabled")
 
-    client = db.query(Client).filter(Client.id == agent.client_id).first()
-    if not client:
+    client_ids = {agent.client_id for agent in agents}
+    clients = db.query(Client).filter(Client.id.in_(client_ids)).all()
+    clients_by_id = {client.id: client for client in clients}
+    accessible_clients = sorted(clients_by_id.values(), key=lambda client: client.name)
+    if not accessible_clients:
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Client not found for agent")
 
-    branch_query = db.query(Branch).filter(Branch.client_id == client.id)
-    if agent.branch_id:
-        branch_query = branch_query.filter(Branch.id == agent.branch_id)
+    try:
+        selected_client_id = _parse_client_header(request)
+    except ConsoleAPIError:
+        if require_selection:
+            raise
+        selected_client_id = None
+    selection_required = False
+    if selected_client_id:
+        if selected_client_id not in clients_by_id:
+            if require_selection:
+                raise ConsoleAPIError(403, "TENANT_MISMATCH", "Client access denied")
+            selected_client_id = None
+    elif len(accessible_clients) == 1:
+        selected_client_id = accessible_clients[0].id
+    else:
+        selection_required = True
+        if require_selection:
+            raise ConsoleAPIError(400, "CLIENT_SELECTION_REQUIRED", "Client selection required")
+
+    selected_client = clients_by_id.get(selected_client_id) if selected_client_id else accessible_clients[0]
+    selected_agent = _pick_agent_for_client(agents, selected_client.id)
+
+    branch_query = db.query(Branch).filter(Branch.client_id == selected_client.id)
+    if selected_agent.branch_id:
+        branch_query = branch_query.filter(Branch.id == selected_agent.branch_id)
     branches = branch_query.order_by(Branch.name.asc()).all()
 
     return ConsoleAuthContext(
-        agent=agent,
-        client=client,
+        agent=selected_agent,
+        client=selected_client,
         branches=branches,
+        accessible_clients=accessible_clients,
+        selection_required=selection_required,
         subject=str(subject),
         token_payload=payload,
     )

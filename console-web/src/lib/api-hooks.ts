@@ -18,17 +18,8 @@ import {
     settingsApi,
     auditApi,
     parseApiError,
-    type Case,
-    type CaseListResponse,
-    type MeResponse,
-    type HealthResponse,
-    type MetricsDailyResponse,
-    type SettingsResponse,
-    type AuditListResponse,
-    type MessageListResponse,
     type ListCasesParams,
     type ListAuditParams,
-    type ParsedApiError,
 } from "./api-client";
 import type { components } from "@/types/api.generated";
 

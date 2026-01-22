@@ -28,6 +28,7 @@ export async function GET(
     const url = new URL(request.url);
     const queryString = url.search;
     const targetUrl = `${API_BASE_URL}/${apiPath}${queryString}`;
+    const clientId = request.headers.get('x-client-id');
 
     try {
         const response = await fetch(targetUrl, {
@@ -35,6 +36,7 @@ export async function GET(
             headers: {
                 'Authorization': `Bearer ${session.accessToken}`,
                 'Content-Type': 'application/json',
+                ...(clientId ? { 'X-Client-Id': clientId } : {}),
             },
         });
 
@@ -66,6 +68,7 @@ export async function POST(
     const apiPath = path.join('/');
     const targetUrl = `${API_BASE_URL}/${apiPath}`;
     const body = await request.text();
+    const clientId = request.headers.get('x-client-id');
 
     try {
         const idempotencyKey =
@@ -76,6 +79,7 @@ export async function POST(
                 'Authorization': `Bearer ${session.accessToken}`,
                 'Content-Type': 'application/json',
                 ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+                ...(clientId ? { 'X-Client-Id': clientId } : {}),
             },
             body,
         });

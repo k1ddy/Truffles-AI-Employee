@@ -69,12 +69,12 @@ export default function ChatInterface({
             queryClient.invalidateQueries({ queryKey: ["messages", caseId] });
             toast.success("Сообщение отправлено");
         },
-        onError: (error: any, _, context) => {
+        onError: (error: unknown, _, context) => {
             // Rollback on error
             if (context?.previousMessages) {
                 queryClient.setQueryData(["messages", caseId], context.previousMessages);
             }
-            const code = error?.response?.data?.error?.code;
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
             if (code === "NOT_ASSIGNED") {
                 toast.error("Вы не назначены на эту заявку");
             } else if (code === "CASE_NOT_ACTIVE") {

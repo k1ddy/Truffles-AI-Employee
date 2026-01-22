@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useAuthenticatedApi } from "@/hooks/useAuthenticatedApi";
@@ -59,9 +59,7 @@ export default function CaseList() {
         dateTo: undefined,
         sortBy: "created_at",
     });
-    const [allCases, setAllCases] = useState<Case[]>([]);
     const [cursor, setCursor] = useState<string | undefined>(undefined);
-    const [hasMore, setHasMore] = useState(false);
 
     // Check if we have a valid token
     const hasToken = !!(session as { accessToken?: string } | null)?.accessToken;
@@ -99,7 +97,6 @@ export default function CaseList() {
         refetchIntervalInBackground: false, // Only refresh when tab is active
     });
 
-    // Update allCases when data changes
     const cases = data?.items ?? [];
 
     // Sort by SLA if selected

@@ -8,6 +8,16 @@
 import axios, { AxiosError, AxiosInstance } from "axios";
 import type { components, operations } from "@/types/api.generated";
 
+const CLIENT_ID_STORAGE_KEY = "console:client_id";
+
+function getSelectedClientId(): string | undefined {
+    if (typeof window === "undefined") {
+        return undefined;
+    }
+    const stored = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    return stored || undefined;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // ERROR TYPES & HANDLING
 // ═══════════════════════════════════════════════════════════════════
@@ -21,6 +31,7 @@ export const ErrorCodes = {
     AUTH_REQUIRED: "AUTH_REQUIRED",
     TOKEN_EXPIRED: "TOKEN_EXPIRED",
     ACCESS_DENIED: "ACCESS_DENIED",
+    CLIENT_SELECTION_REQUIRED: "CLIENT_SELECTION_REQUIRED",
     TENANT_MISMATCH: "TENANT_MISMATCH",
     BRANCH_ACCESS_DENIED: "BRANCH_ACCESS_DENIED",
     NOT_FOUND: "NOT_FOUND",
@@ -83,6 +94,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
     ACCESS_DENIED: {
         http_status: 403,
         ui_behavior: { action: "toast", toast: true, toast_type: "error" },
+        retryable: false,
+    },
+    CLIENT_SELECTION_REQUIRED: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
         retryable: false,
     },
     TENANT_MISMATCH: {
@@ -255,10 +271,16 @@ export function createApiClient(): AxiosInstance {
 
     // Request interceptor for idempotency key
     client.interceptors.request.use((config) => {
+        const headers = config.headers ?? {};
+        config.headers = headers;
+        const selectedClientId = getSelectedClientId();
+        if (selectedClientId && !headers["X-Client-Id"]) {
+            headers["X-Client-Id"] = selectedClientId;
+        }
         // Add idempotency key for mutations
         if (config.method && ["post", "put", "patch", "delete"].includes(config.method)) {
-            if (!config.headers["Idempotency-Key"]) {
-                config.headers["Idempotency-Key"] = crypto.randomUUID();
+            if (!headers["Idempotency-Key"]) {
+                headers["Idempotency-Key"] = crypto.randomUUID();
             }
         }
         return config;
@@ -280,6 +302,7 @@ export type CaseListResponse = components["schemas"]["CaseListResponse"];
 export type CaseActionResponse = components["schemas"]["CaseActionResponse"];
 export type Message = components["schemas"]["Message"];
 export type MessageListResponse = components["schemas"]["MessageListResponse"];
+export type Client = components["schemas"]["Client"];
 export type MeResponse = components["schemas"]["MeResponse"];
 export type Agent = components["schemas"]["Agent"];
 export type Branch = components["schemas"]["Branch"];

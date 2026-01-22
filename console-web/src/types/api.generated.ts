@@ -7,13 +7,16 @@ export interface paths {
     "/me": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
         /**
          * Get current agent context
-         * @description Returns authenticated agent info, client, and accessible branches
+         * @description Returns authenticated agent info, active client, accessible branches, and client list
          */
         get: operations["getMe"];
         put?: never;
@@ -27,7 +30,10 @@ export interface paths {
     "/cases": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -47,7 +53,10 @@ export interface paths {
     "/cases/{case_id}": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -64,7 +73,10 @@ export interface paths {
     "/cases/{case_id}/take": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -73,7 +85,7 @@ export interface paths {
         /**
          * Take ownership of a case
          * @description Assigns case to current agent. Returns 409 if already taken.
-         *     Idempotent: re-taking own case returns success.
+         *     Idempotent via Idempotency-Key header.
          */
         post: operations["takeCase"];
         delete?: never;
@@ -85,7 +97,10 @@ export interface paths {
     "/cases/{case_id}/resolve": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -105,7 +120,10 @@ export interface paths {
     "/cases/{case_id}/messages": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -122,7 +140,10 @@ export interface paths {
     "/conversations/{conversation_id}/messages": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -143,7 +164,10 @@ export interface paths {
     "/health": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -160,7 +184,10 @@ export interface paths {
     "/metrics/daily": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -177,7 +204,10 @@ export interface paths {
     "/settings": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -198,7 +228,10 @@ export interface paths {
     "/audit": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -223,12 +256,18 @@ export interface components {
             message: string;
             details?: {
                 [key: string]: unknown;
-            };
+            } | null;
             /** @description Correlation ID for debugging */
             trace_id: string;
         };
         ErrorResponse: {
             error: components["schemas"]["Error"];
+        };
+        ValidationErrorItem: {
+            [key: string]: unknown;
+        };
+        ValidationError: {
+            detail: components["schemas"]["ValidationErrorItem"][];
         };
         Agent: {
             /** Format: uuid */
@@ -246,6 +285,9 @@ export interface components {
             /** Format: uuid */
             id?: string;
             slug?: string;
+            name?: string;
+            /** Format: uuid */
+            company_id?: string | null;
         };
         Branch: {
             /** Format: uuid */
@@ -258,6 +300,8 @@ export interface components {
             agent?: components["schemas"]["Agent"];
             client?: components["schemas"]["Client"];
             branches?: components["schemas"]["Branch"][];
+            clients?: components["schemas"]["Client"][];
+            selection_required?: boolean;
         };
         Case: {
             /** Format: uuid */
@@ -317,12 +361,12 @@ export interface components {
         };
         HealthResponse: {
             /** @enum {string} */
-            status?: "healthy" | "degraded" | "unhealthy";
+            status?: "ok" | "healthy" | "degraded" | "unhealthy";
             version?: string;
             /** @enum {string} */
-            database?: "ok" | "error";
+            database?: "ok" | "error" | "connected";
             /** @enum {string} */
-            redis?: "ok" | "error";
+            redis?: "ok" | "error" | "connected";
             outbox_backlog?: number;
         };
         MetricsDailyResponse: {
@@ -361,6 +405,79 @@ export interface components {
             success?: boolean;
             message?: string;
         };
+        BookingCreate: {
+            /** Format: uuid */
+            specialist_id: string;
+            /** Format: date-time */
+            start_at: string;
+            /** Format: date-time */
+            end_at: string;
+            customer_name?: string | null;
+            customer_phone?: string | null;
+            service_type?: string | null;
+            notes?: string | null;
+            /** Format: uuid */
+            conversation_id?: string | null;
+        };
+        BookingResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            specialist_id: string;
+            specialist_name: string;
+            /** Format: date-time */
+            start_at: string;
+            /** Format: date-time */
+            end_at: string;
+            customer_name?: string | null;
+            customer_phone?: string | null;
+            service_type?: string | null;
+            status: string;
+            google_event_id?: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        BookingActionResponse: {
+            success: boolean;
+            booking: components["schemas"]["BookingResponse"];
+        };
+        BookingsListResponse: {
+            items: components["schemas"]["BookingResponse"][];
+        };
+        SlotResponse: {
+            start?: string;
+            end?: string;
+            start_time?: string;
+            end_time?: string;
+            available?: boolean;
+        };
+        SlotsResponse: {
+            date?: string;
+            /** Format: uuid */
+            specialist_id?: string;
+            specialist_name?: string;
+            duration_minutes?: number;
+            slots?: components["schemas"]["SlotResponse"][];
+        };
+        SpecialistResponse: {
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            branch_name?: string | null;
+            services?: Record<string, never>[];
+            is_active?: boolean;
+        };
+        SpecialistsResponse: {
+            items?: components["schemas"]["SpecialistResponse"][];
+        };
+        GoogleStatusResponse: {
+            connected: boolean;
+            /** Format: date-time */
+            expires_at?: string | null;
+            is_expired: boolean;
+        };
         AuditEvent: {
             /** Format: uuid */
             id?: string;
@@ -397,6 +514,13 @@ export interface components {
                  */
                 "application/json": components["schemas"]["ErrorResponse"];
             };
+        };
+        /** @description Malformed request */
+        BadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content?: never;
         };
         /** @description Insufficient permissions */
         Forbidden: {
@@ -473,8 +597,39 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description Idempotency key already used or in progress */
+        IdempotencyConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "IDEMPOTENCY_CONFLICT",
+                 *         "message": "Request already processed",
+                 *         "trace_id": "abc123"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description Request validation error */
+        ValidationError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ValidationError"];
+            };
+        };
     };
     parameters: {
+        /** @description Stable key for safe retries of mutating requests. */
+        idempotency_key: string;
+        /** @description Client selection when identity maps to multiple clients. */
+        client_id_header: string;
         case_id: string;
         /** @description Pagination cursor (opaque) */
         cursor: string;
@@ -489,7 +644,10 @@ export interface operations {
     getMe: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -506,6 +664,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
         };
     };
     listCases: {
@@ -520,7 +679,10 @@ export interface operations {
                 cursor?: components["parameters"]["cursor"];
                 limit?: components["parameters"]["limit"];
             };
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -536,12 +698,16 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            422: components["responses"]["ValidationError"];
         };
     };
     getCase: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path: {
                 case_id: components["parameters"]["case_id"];
             };
@@ -558,13 +724,21 @@ export interface operations {
                     "application/json": components["schemas"]["Case"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
         };
     };
     takeCase: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Stable key for safe retries of mutating requests. */
+                "Idempotency-Key"?: components["parameters"]["idempotency_key"];
+            };
             path: {
                 case_id: components["parameters"]["case_id"];
             };
@@ -581,13 +755,26 @@ export interface operations {
                     "application/json": components["schemas"]["CaseActionResponse"];
                 };
             };
-            409: components["responses"]["CaseAlreadyTaken"];
+            /** @description Case already taken or idempotency key conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     resolveCase: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Stable key for safe retries of mutating requests. */
+                "Idempotency-Key"?: components["parameters"]["idempotency_key"];
+            };
             path: {
                 case_id: components["parameters"]["case_id"];
             };
@@ -605,6 +792,7 @@ export interface operations {
                 };
             };
             403: components["responses"]["NotAssigned"];
+            409: components["responses"]["IdempotencyConflict"];
         };
     };
     getCaseMessages: {
@@ -614,7 +802,10 @@ export interface operations {
                 cursor?: components["parameters"]["cursor"];
                 limit?: components["parameters"]["limit"];
             };
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path: {
                 case_id: components["parameters"]["case_id"];
             };
@@ -631,12 +822,21 @@ export interface operations {
                     "application/json": components["schemas"]["MessageListResponse"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
         };
     };
     sendManagerMessage: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Stable key for safe retries of mutating requests. */
+                "Idempotency-Key"?: components["parameters"]["idempotency_key"];
+            };
             path: {
                 conversation_id: string;
             };
@@ -658,12 +858,16 @@ export interface operations {
                 };
             };
             403: components["responses"]["NotAssigned"];
+            409: components["responses"]["IdempotencyConflict"];
         };
     };
     getHealth: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -686,7 +890,10 @@ export interface operations {
                 /** @description Defaults to today */
                 date?: string;
             };
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -701,12 +908,18 @@ export interface operations {
                     "application/json": components["schemas"]["MetricsDailyResponse"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
         };
     };
     getSettings: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -721,12 +934,17 @@ export interface operations {
                     "application/json": components["schemas"]["SettingsResponse"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     updateSettings: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -757,7 +975,10 @@ export interface operations {
                 cursor?: components["parameters"]["cursor"];
                 limit?: components["parameters"]["limit"];
             };
-            header?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -772,6 +993,9 @@ export interface operations {
                     "application/json": components["schemas"]["AuditListResponse"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
         };
     };
 }
