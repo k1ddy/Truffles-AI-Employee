@@ -102,6 +102,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CaseListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "422":
@@ -288,6 +290,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MetricsDailyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -367,6 +371,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -437,6 +443,15 @@ components:
               trace_id: abc123
     BadRequest:
       description: Malformed request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_PARAM
+              message: Invalid parameter
+              trace_id: abc123
     Forbidden:
       description: Insufficient permissions
       content:

@@ -47,6 +47,17 @@
             },
             "retryable": false
         },
+        "INVALID_PARAM": {
+            "http_status": 400,
+            "message_template": "Invalid parameter",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "error",
+                "description": "Show error toast with parameter details"
+            },
+            "retryable": false
+        },
         "TENANT_MISMATCH": {
             "http_status": 403,
             "message_template": "Access denied: resource belongs to another organization",
