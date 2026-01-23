@@ -175,6 +175,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - `pending/manager_active` форвардит сообщения клиента в topic (текст/медиа по policy).
 - Take/Resolve (Console или Telegram) обновляет Telegram‑карточку и шлёт клиенту системное уведомление.
 - Аудит содержит `case_taken/resolved` + `manager_connected/disconnected`.
+- В карточке кейса есть две ссылки: `tg://` (Desktop) и `https://t.me` (Web); если Desktop не открывает topic, используйте Web‑ссылку.
 
 **Контракт требований (минимум для работы):**
 - `branches.telegram_chat_id` заполнен на каждый филиал.

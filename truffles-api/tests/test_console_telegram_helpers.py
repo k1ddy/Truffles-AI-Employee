@@ -15,6 +15,24 @@ def test_build_telegram_link_with_topic():
     )
 
 
+def test_build_telegram_desktop_link():
+    assert (
+        console_router._build_telegram_desktop_link("-1001234567890", 42)
+        == "tg://openmessage?chat_id=-1001234567890&message_id=42"
+    )
+
+
+def test_build_telegram_desktop_link_with_topic():
+    assert (
+        console_router._build_telegram_desktop_link("-1001234567890", 42, 5112)
+        == "tg://openmessage?chat_id=-1001234567890&message_id=5112"
+    )
+
+
+def test_build_telegram_desktop_link_rejects_invalid_chat():
+    assert console_router._build_telegram_desktop_link("chat", 42) is None
+
+
 def test_build_telegram_link_rejects_non_private_group():
     assert console_router._build_telegram_link("123456", 42) is None
 
