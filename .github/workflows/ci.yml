@@ -388,7 +388,7 @@ jobs:
       - name: Schemathesis GET-only smoke
         if: steps.guard.outputs.skip != 'true'
         run: |
-          schemathesis run contracts/console_api/openapi.v1.yaml \
+          schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml \
             --url https://api.truffles.kz/console/v1 \
             --include-method=GET \
             --checks all \

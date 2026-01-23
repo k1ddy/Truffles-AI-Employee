@@ -13,6 +13,7 @@
 | `STRUCTURE.md` | Этот файл — карта проекта | Оба (каждую сессию) |
 | `TECH.md` | Доступы, команды, данные сервера | Кодер |
 | `contracts/` | Канон контрактов (Console API, ошибки) | Архитектор/Frontend |
+| `contracts/console_api/schemathesis.toml` | Seed/overrides для Schemathesis contract smoke | Backend/QA |
 | `contracts/events/` | Контракты событий (outbox) | Архитектор/Backend |
 | `contracts/integrations/` | Контракты портов/адаптеров | Архитектор/Backend |
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
