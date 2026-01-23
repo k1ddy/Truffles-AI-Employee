@@ -85,7 +85,13 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/FastAPIErrorResponse"
         "422":
           $ref: "#/components/responses/ValidationError"
 
@@ -741,6 +747,13 @@ components:
       properties:
         error:
           $ref: "#/components/schemas/Error"
+
+    FastAPIErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
 
     ValidationErrorItem:
       type: object

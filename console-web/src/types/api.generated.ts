@@ -429,6 +429,9 @@ export interface components {
         ErrorResponse: {
             error: components["schemas"]["Error"];
         };
+        FastAPIErrorResponse: {
+            detail: string;
+        };
         ValidationErrorItem: {
             [key: string]: unknown;
         };
@@ -987,7 +990,15 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"] | components["schemas"]["FastAPIErrorResponse"];
+                };
+            };
             422: components["responses"]["ValidationError"];
         };
     };
