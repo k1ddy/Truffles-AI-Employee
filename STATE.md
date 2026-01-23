@@ -44,7 +44,8 @@
 - DONE: `/console/v1/me` теперь возвращает `selection_required=true`, `clients_count=2` для E2E. Evidence: curl + jq.
 - BLOCKERS: Playwright smoke на prod UI падает из‑за `CLIENT_SELECTION_REQUIRED` (prod console-web не отправляет `X-Client-Id`). Evidence: `npm run test:e2e:smoke` + docker logs `ConsoleAPIError: CLIENT_SELECTION_REQUIRED`.
 - DONE: Console query‑params validation (unknown params + enums + dates + limit) + cursor tolerant + OpenAPI 400/403 + `INVALID_PARAM` error registry. Evidence: CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21270247679; Schemathesis GET-only smoke on prod (seed 68493311863361754745919126795202296800) — 580 passed, warnings for missing test data on `/cases/{case_id}` + `/cases/{case_id}/messages` and schema mismatch (see below).
-- GAP: Schemathesis warnings persist for `/cases/{case_id}` + `/cases/{case_id}/messages` (missing valid IDs; schema mismatch). Need config/seeded IDs for contract tests.
+- DONE: Schemathesis seeds added for `/cases/{case_id}` + `/cases/{case_id}/messages` (stable IDs in `contracts/console_api/schemathesis.toml`), warnings resolved.
+- QUICKSTART: Console onboarding checklist now in `docs/SESSION_START_PROMPT.txt` (data source, OIDC mapping, secrets, contract config).
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
