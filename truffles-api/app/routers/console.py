@@ -1397,31 +1397,32 @@ async def send_manager_message(
     
     if delivery_status == "delivered":
         try:
-            routing_meta = resolve_telegram_routing(
-                db,
-                conversation=conversation,
-                client_id=context.client.id,
-            )
-            bot_token = routing_meta.get("bot_token")
-            chat_id = routing_meta.get("chat_id")
-            topic_id = conversation.telegram_topic_id
-            if bot_token and chat_id and topic_id:
-                telegram = TelegramService(bot_token)
-                result = telegram.send_message(
-                    chat_id=str(chat_id),
-                    text=f"🖥️ <b>{context.agent.name or 'Менеджер'}</b>: {body.content}",
-                    message_thread_id=topic_id,
+            if conversation.telegram_topic_id:
+                routing_meta = resolve_telegram_routing(
+                    db,
+                    conversation=conversation,
+                    client_id=context.client.id,
                 )
-                if not result.get("ok"):
-                    logger.warning(
-                        "Telegram console echo failed",
-                        extra={
-                            "context": {
-                                "conversation_id": str(conversation_id),
-                                "error": result.get("error"),
-                            }
-                        },
+                bot_token = routing_meta.get("bot_token")
+                chat_id = routing_meta.get("chat_id")
+                if bot_token and chat_id:
+                    telegram = TelegramService(bot_token)
+                    manager_label = context.agent.name or "Менеджер"
+                    result = telegram.send_message(
+                        chat_id=str(chat_id),
+                        text=f"🖥️ <b>{manager_label}</b>: {body.content}",
+                        message_thread_id=conversation.telegram_topic_id,
                     )
+                    if not result.get("ok"):
+                        logger.warning(
+                            "Telegram console echo failed",
+                            extra={
+                                "context": {
+                                    "conversation_id": str(conversation_id),
+                                    "error": result.get("error"),
+                                }
+                            },
+                        )
         except Exception as exc:
             logger.warning(
                 "Telegram console echo exception",
