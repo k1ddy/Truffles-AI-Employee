@@ -62,6 +62,7 @@
 
 ## Session Notes (handoff)
 
+- Commit: `9211eda9` (pending guard: reset to bot_active when no active handover; add pending_guard trace stage).
 - Commit: `48527fa3` (chaos-sim: уникальный JID base на simulation_id/seed, чтобы не было протечек pending между прогонами; summary/report пишет `jid_base`).
 - Commit: `05a50205` (graceful shutdown for chaos-sim; summary/report written on stop).
 - PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/319
@@ -72,6 +73,10 @@
   - `python3 ops/diagnose.py chaos-sim --count 3 --seed 42 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 3 --poll-interval 0.2 --debug-all --console-mode skip --min-turns 6 --max-turns 8`
   - Summary: `simulation_id=SIM-20260123-091232-42`, `cases_processed=3`, `turns=14`, `failures=9`
   - Top failure patterns: pending_wait + action/state/expected_reply_type mismatch (see summary.json)
+- Smoke run after pending guard:
+  - `python3 ops/diagnose.py chaos-sim --count 5 --seed 44 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 3 --poll-interval 0.2 --debug-all --console-mode skip --min-turns 10 --max-turns 12 --noise high`
+  - Summary: `simulation_id=SIM-20260123-103904-44`, `cases_processed=5`, `turns=51`, `failures=40`
+  - Note: HTTP 500 on `CHAOS_INFO_0003` turn 5 (decision_meta/trace missing).
 - Next step candidates:
   - Fix pending_gate behavior (pending_wait/expected_reply_type/booking_interrupt) as a single pattern.
   - Fix booking expected_reply_type drift in multi-intent.
