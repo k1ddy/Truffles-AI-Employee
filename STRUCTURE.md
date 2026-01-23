@@ -39,6 +39,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ci-fix.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-schemathesis-unexclude.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-telegram-linking-sync.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-telegram-protocol-docs.md`
 
 ---
@@ -184,6 +185,7 @@
 |------|------------|
 | `truffles-api/app/services/state_service.py`, `state_machine.py` | Статусы/переходы |
 | `truffles-api/app/services/escalation_service.py`, `manager_message_service.py`, `reminder_service.py` | Эскалация/SLA |
+| `truffles-api/app/services/agent_link_service.py` | Telegram linking tokens |
 | `truffles-api/app/services/knowledge_service.py`, `demo_salon_knowledge.py`, `intent_service.py`, `ai_service.py` | Facts/Intent/LLM |
 | `truffles-api/app/services/outbox_service.py`, `alert_service.py`, `health_service.py` | Надежность/алерты |
 | `truffles-api/app/services/console_idempotency.py` | Идемпотентность мутаций Console API |
@@ -197,6 +199,7 @@
 | `truffles-api/migrations/*.sql` | SQL миграции для app‑схемы |
 | `truffles-api/migrations/006_add_outbox_audit_branch_id.sql` | branch_id для audit/outbox + backfill |
 | `truffles-api/migrations/007_backfill_conversations_branch_id.sql` | backfill conversations.branch_id из instanceId |
+| `truffles-api/migrations/008_add_agent_link_tokens.sql` | linking tokens для Telegram |
 | `truffles-api/app/knowledge/<client_slug>/*` | Truth/policy/eval packs |
 | `knowledge/<client_slug>/*` | Канон RAG‑контента |
 

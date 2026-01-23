@@ -95,6 +95,12 @@
 - Response: `{"status":"degraded","webhook_alive":true,"last_success_at":"2026-01-23T07:10:02.332610+00:00","last_error_at":"2026-01-18T11:43:05+00:00","last_error_message":"Wrong response from the webhook: 502 Bad Gateway","error_rate_24h":0.0,"pending_messages":0}`
 - Evidence: CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277995685 (console-contract includes /telegram/health)
 
+### 2026-01-23 — Agent↔Telegram linking + Console↔Telegram sync (local)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-telegram-linking-sync.md`
+- Checks: `pytest -q truffles-api/tests/test_agent_link_service.py` → `3 passed`; `pytest -q truffles-api/tests/test_manager_message_rbac.py` → `2 passed`; `ruff check truffles-api/app truffles-api/tests` → `All checks passed!`
+- Contract gen: `npm --prefix console-web run generate:api`
+- Evidence: local checks only (CI pending)
+
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
 - **Следующий шаг:** P0 outbox latency tail — см. последние SQL‑срезы; p90 > 10s, нужен следующий минимальный fix + evidence.
