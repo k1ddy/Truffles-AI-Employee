@@ -147,6 +147,25 @@ def _build_telegram_link(
     return f"https://t.me/c/{internal_id}/{target_str}"
 
 
+def _build_telegram_desktop_link(
+    chat_id: Optional[str],
+    message_id: Optional[int],
+    topic_id: Optional[int] = None,
+) -> Optional[str]:
+    if not chat_id:
+        return None
+    chat_id_str = str(chat_id).strip()
+    if not chat_id_str or not chat_id_str.lstrip("-").isdigit():
+        return None
+    target_id = topic_id or message_id
+    if not target_id:
+        return None
+    target_str = str(target_id)
+    if not target_str.isdigit():
+        return None
+    return f"tg://openmessage?chat_id={chat_id_str}&message_id={target_str}"
+
+
 def _build_telegram_trail(
     *,
     handover: Optional[Handover],
@@ -164,6 +183,7 @@ def _build_telegram_trail(
         topic_id=topic_id,
         chat_id=str(chat_id) if chat_id else None,
         telegram_link=_build_telegram_link(chat_id, message_id, topic_id),
+        telegram_desktop_link=_build_telegram_desktop_link(chat_id, message_id, topic_id),
         delivery_status=delivery_status,
         delivered_at=delivered_at,
     )
@@ -1274,8 +1294,18 @@ async def send_manager_message(
     if case.status != "active" and context.role not in ("owner", "admin"):
         raise ConsoleAPIError(403, "CASE_NOT_ACTIVE", "Case must be active to send messages")
     
-    if case.assigned_to_name != context.agent.name and context.role not in ("owner", "admin"):
-        raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+    if context.role not in ("owner", "admin"):
+        assigned_id = str(case.assigned_to or "").strip()
+        if assigned_id:
+            if assigned_id != str(context.agent.id):
+                raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+        else:
+            assigned_name = (case.assigned_to_name or "").strip()
+            agent_name = (context.agent.name or "").strip()
+            if assigned_name and assigned_name != agent_name:
+                raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+            if not assigned_name:
+                raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
     
     # Get conversation to find user
     conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
@@ -1365,6 +1395,39 @@ async def send_manager_message(
         delivery_status = "failed"
         delivery_error = str(e)
     
+    if delivery_status == "delivered":
+        try:
+            routing_meta = resolve_telegram_routing(
+                db,
+                conversation=conversation,
+                client_id=context.client.id,
+            )
+            bot_token = routing_meta.get("bot_token")
+            chat_id = routing_meta.get("chat_id")
+            topic_id = conversation.telegram_topic_id
+            if bot_token and chat_id and topic_id:
+                telegram = TelegramService(bot_token)
+                result = telegram.send_message(
+                    chat_id=str(chat_id),
+                    text=f"🖥️ <b>{context.agent.name or 'Менеджер'}</b>: {body.content}",
+                    message_thread_id=topic_id,
+                )
+                if not result.get("ok"):
+                    logger.warning(
+                        "Telegram console echo failed",
+                        extra={
+                            "context": {
+                                "conversation_id": str(conversation_id),
+                                "error": result.get("error"),
+                            }
+                        },
+                    )
+        except Exception as exc:
+            logger.warning(
+                "Telegram console echo exception",
+                extra={"context": {"conversation_id": str(conversation_id), "error": str(exc)}},
+            )
+
     response = ConsoleManagerMessageResponse(
         success=delivery_status == "delivered",
         message=ConsoleMessage(

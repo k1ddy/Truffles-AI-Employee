@@ -11,6 +11,7 @@ export interface TelegramTrail {
     topic_id?: number | null;
     chat_id?: string | null;
     telegram_link?: string | null;
+    telegram_desktop_link?: string | null;
     delivery_status?: string | null;  // sent, failed, pending
     delivered_at?: string | null;
 }

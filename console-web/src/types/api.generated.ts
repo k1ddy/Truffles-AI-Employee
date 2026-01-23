@@ -619,6 +619,7 @@ export interface components {
             topic_id?: number | null;
             chat_id?: string | null;
             telegram_link?: string | null;
+            telegram_desktop_link?: string | null;
             /** @enum {string|null} */
             delivery_status?: "sent" | "failed" | "pending" | null;
             /** Format: date-time */

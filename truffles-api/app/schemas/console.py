@@ -80,6 +80,7 @@ class ConsoleTelegramTrail(BaseModel):
     topic_id: Optional[int] = None
     chat_id: Optional[str] = None
     telegram_link: Optional[str] = None
+    telegram_desktop_link: Optional[str] = None
     delivery_status: Optional[str] = None
     delivered_at: Optional[str] = None
 

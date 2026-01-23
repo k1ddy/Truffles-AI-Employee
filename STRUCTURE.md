@@ -42,6 +42,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-23-telegram-onboarding-link.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-telegram-linking-sync.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-telegram-protocol-docs.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-console-telegram-sync-fixes.md`
 
 ---
 

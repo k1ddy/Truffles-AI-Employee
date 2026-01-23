@@ -1173,6 +1173,9 @@ components:
         telegram_link:
           type: string
           nullable: true
+        telegram_desktop_link:
+          type: string
+          nullable: true
         delivery_status:
           type: string
           enum: [sent, failed, pending]
