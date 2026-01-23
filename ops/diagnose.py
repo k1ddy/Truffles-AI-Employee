@@ -533,6 +533,7 @@ CHAOS_POLICY_MAP = {
 }
 CHAOS_HARD_LAW = {"refund", "medical", "complaint", "reschedule"}
 CHAOS_INFO = {"pricing", "address", "hours", "duration"}
+CHAOS_RAG_TOP_N = 10
 CHAOS_IN_DOMAIN_INTENTS = (
     set(CHAOS_INFO)
     | set(CHAOS_POLICY_MAP.keys())
@@ -1455,6 +1456,144 @@ def _chaos_trace_has_stage(trace_entries, stage):
     return False
 
 
+def _chaos_rag_status(rag_confident, rag_reason):
+    if rag_confident is True:
+        return "confident"
+    if rag_confident is False:
+        if isinstance(rag_reason, str) and rag_reason.strip():
+            return rag_reason.strip()
+        if rag_reason is None:
+            return "not_confident"
+        return str(rag_reason)
+    return "missing"
+
+
+def _chaos_extract_rag_scores(trace_entries):
+    for entry in trace_entries or []:
+        if isinstance(entry, dict):
+            rag_scores = entry.get("rag_scores")
+            if isinstance(rag_scores, dict):
+                return rag_scores
+    return None
+
+
+def _chaos_extract_rag_filter(trace_entries):
+    for entry in trace_entries or []:
+        if isinstance(entry, dict):
+            rag_filter = entry.get("rag_filter")
+            if isinstance(rag_filter, dict):
+                return rag_filter
+    return None
+
+
+def _chaos_best_rag_score(rag_scores):
+    if not isinstance(rag_scores, dict):
+        return None
+    best = None
+    for key in ("hybrid_max", "vector_max", "bm25_max"):
+        value = rag_scores.get(key)
+        if isinstance(value, (int, float)):
+            best = value if best is None else max(best, value)
+    return best
+
+
+def _chaos_build_rag_record(
+    *,
+    case,
+    turn,
+    turn_idx,
+    message_id,
+    conversation_id,
+    meta,
+    trace_entries,
+    noise_level,
+    response_status,
+):
+    intent_set = _chaos_intent_set(turn)
+    intent_bucket = (
+        "in_domain" if intent_set.intersection(CHAOS_IN_DOMAIN_INTENTS) else "out_of_domain"
+    )
+    rag_confident = (meta or {}).get("rag_confident")
+    rag_reason = (meta or {}).get("rag_reason")
+    rag_scores = (meta or {}).get("rag_scores") if isinstance(meta, dict) else None
+    if not isinstance(rag_scores, dict):
+        rag_scores = _chaos_extract_rag_scores(trace_entries)
+    rag_best_score = _chaos_best_rag_score(rag_scores)
+    rag_filter = _chaos_extract_rag_filter(trace_entries)
+    rag_filter_reason = rag_filter.get("filter_reason") if isinstance(rag_filter, dict) else None
+    rag_status = _chaos_rag_status(rag_confident, rag_reason)
+    record = {
+        "case_id": case.get("case_id"),
+        "kind": case.get("kind"),
+        "lang_mode": case.get("lang_mode"),
+        "noise": noise_level,
+        "turn": turn_idx,
+        "message_id": message_id,
+        "conversation_id": conversation_id,
+        "text": turn.get("text"),
+        "intents": sorted(intent_set),
+        "intent_bucket": intent_bucket,
+        "rag_status": rag_status,
+        "rag_confident": rag_confident,
+        "rag_reason": rag_reason,
+        "rag_best_score": rag_best_score,
+        "rag_scores": rag_scores,
+        "rag_filter": rag_filter,
+        "rag_filter_reason": rag_filter_reason,
+        "action": (meta or {}).get("action"),
+        "policy_gate": (meta or {}).get("policy_gate"),
+        "response_status": response_status,
+    }
+    pattern = (
+        f"{case.get('lang_mode')}|{noise_level}|{intent_bucket}|{rag_status}|"
+        f"{rag_filter_reason or 'missing'}"
+    )
+    flags = {
+        "low_score_in_domain": intent_bucket == "in_domain"
+        and rag_status in {"low_score", "empty"},
+        "high_score_out_of_domain": intent_bucket == "out_of_domain" and rag_confident is True,
+        "branch_filter_missing": rag_filter_reason == "branch_missing",
+        "branch_filter_empty": rag_filter_reason == "branch_filter_empty",
+    }
+    return record, pattern, flags
+
+
+def _chaos_update_rag_summary(summary, record, pattern, flags):
+    summary["total_turns"] += 1
+    rag_status = record.get("rag_status") or "missing"
+    status_counts = summary.setdefault("rag_status_counts", {})
+    status_counts[rag_status] = status_counts.get(rag_status, 0) + 1
+    if rag_status == "confident":
+        summary["rag_confident"] += 1
+    elif rag_status == "low_score":
+        summary["rag_low_score"] += 1
+    elif rag_status == "empty":
+        summary["rag_empty"] += 1
+    elif rag_status == "overridden_by_gate":
+        summary["rag_overridden_by_gate"] += 1
+    elif rag_status == "missing":
+        summary["rag_missing"] += 1
+    if flags.get("low_score_in_domain"):
+        summary["low_score_in_domain"] += 1
+    if flags.get("high_score_out_of_domain"):
+        summary["high_score_out_of_domain"] += 1
+    if flags.get("branch_filter_missing"):
+        summary["branch_filter_missing"] += 1
+    if flags.get("branch_filter_empty"):
+        summary["branch_filter_empty"] += 1
+    lang_counts = summary.setdefault("lang_mode_counts", {})
+    lang_mode = record.get("lang_mode") or "unknown"
+    lang_counts[lang_mode] = lang_counts.get(lang_mode, 0) + 1
+    noise_counts = summary.setdefault("noise_counts", {})
+    noise_level = record.get("noise") or "unknown"
+    noise_counts[noise_level] = noise_counts.get(noise_level, 0) + 1
+    intent_counts = summary.setdefault("intent_bucket_counts", {})
+    intent_bucket = record.get("intent_bucket") or "unknown"
+    intent_counts[intent_bucket] = intent_counts.get(intent_bucket, 0) + 1
+    patterns = summary.setdefault("patterns", {})
+    patterns[pattern] = patterns.get(pattern, 0) + 1
+
+
 def _chaos_evaluate_turn(
     *,
     turn,
@@ -1824,6 +1963,7 @@ def _parse_chaos_sim_args(argv):
     parser.add_argument("--console-mode", choices=["real", "skip"], default="real")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--debug-all", action="store_true")
+    parser.add_argument("--rag-audit", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
@@ -3312,6 +3452,30 @@ def _run_chaos_sim(args):
     if args.debug_all:
         turns_path = os.path.join(output_dir, "turns.jsonl")
         turns_handle = open(turns_path, "w", encoding="utf-8")
+    rag_audit = bool(getattr(args, "rag_audit", False))
+    rag_debug_path = None
+    rag_debug_handle = None
+    rag_summary = None
+    if rag_audit:
+        rag_debug_path = os.path.join(output_dir, "rag_debug.jsonl")
+        rag_debug_handle = open(rag_debug_path, "w", encoding="utf-8")
+        rag_summary = {
+            "total_turns": 0,
+            "rag_confident": 0,
+            "rag_low_score": 0,
+            "rag_empty": 0,
+            "rag_overridden_by_gate": 0,
+            "rag_missing": 0,
+            "low_score_in_domain": 0,
+            "high_score_out_of_domain": 0,
+            "branch_filter_missing": 0,
+            "branch_filter_empty": 0,
+            "rag_status_counts": {},
+            "lang_mode_counts": {},
+            "noise_counts": {},
+            "intent_bucket_counts": {},
+            "patterns": {},
+        }
 
     container_name, _ = resolve_container_name()
     admin_token = args.admin_token or os.environ.get("ALERTS_ADMIN_TOKEN")
@@ -3660,6 +3824,23 @@ def _run_chaos_sim(args):
                     _bump_pattern_counts(pattern_keys)
                     stats["failures"] += 1
 
+            if rag_audit:
+                rag_record, rag_pattern, rag_flags = _chaos_build_rag_record(
+                    case=case,
+                    turn=turn,
+                    turn_idx=turn_idx,
+                    message_id=message_id,
+                    conversation_id=conv_id,
+                    meta=meta,
+                    trace_entries=trace_entries,
+                    noise_level=args.noise,
+                    response_status=response_status,
+                )
+                if rag_debug_handle:
+                    rag_debug_handle.write(json.dumps(rag_record, ensure_ascii=False) + "\n")
+                if rag_summary is not None:
+                    _chaos_update_rag_summary(rag_summary, rag_record, rag_pattern, rag_flags)
+
             if meta and meta.get("policy_gate"):
                 stats["escalations"] += 1
             if meta and meta.get("action") in _chaos_booking_completion_actions():
@@ -3713,6 +3894,8 @@ def _run_chaos_sim(args):
 
     if turns_handle:
         turns_handle.close()
+    if rag_debug_handle:
+        rag_debug_handle.close()
 
     failure_path = os.path.join(output_dir, "failures.jsonl")
     with open(failure_path, "w", encoding="utf-8") as handle:
@@ -3722,6 +3905,19 @@ def _run_chaos_sim(args):
     stats_path = os.path.join(output_dir, "stats.json")
     summary_path = os.path.join(output_dir, "summary.json")
     report_path = os.path.join(output_dir, "report.md")
+    rag_summary_path = None
+    if rag_audit and rag_summary is not None:
+        rag_summary_path = os.path.join(output_dir, "rag_summary.json")
+        rag_summary["rag_audit"] = True
+        rag_summary["top_patterns"] = sorted(
+            (
+                {"pattern": key, "count": count}
+                for key, count in (rag_summary.get("patterns") or {}).items()
+            ),
+            key=lambda item: -item["count"],
+        )[:CHAOS_RAG_TOP_N]
+        with open(rag_summary_path, "w", encoding="utf-8") as handle:
+            json.dump(rag_summary, handle, ensure_ascii=False, indent=2)
 
     summary = {
         "simulation_id": simulation_id,
@@ -3738,6 +3934,9 @@ def _run_chaos_sim(args):
         "console_mode": args.console_mode,
         "llm_mode": args.mode,
         "turns_path": turns_path,
+        "rag_audit": rag_audit,
+        "rag_debug_path": rag_debug_path,
+        "rag_summary_path": rag_summary_path,
         "interrupted": interrupted,
         "stop_reason": stop_reason,
     }
@@ -3773,6 +3972,32 @@ def _run_chaos_sim(args):
             handle.write("## Failure Patterns\n")
             for key, count in sorted(pattern_counts.items(), key=lambda item: -item[1]):
                 handle.write(f"- {key}: {count}\n")
+            handle.write("\n")
+        if rag_audit and rag_summary:
+            handle.write("## RAG Quality Findings\n")
+            handle.write(f"- rag_audit: {str(rag_audit).lower()}\n")
+            handle.write(f"- total_turns: {rag_summary.get('total_turns', 0)}\n")
+            handle.write(f"- rag_confident: {rag_summary.get('rag_confident', 0)}\n")
+            handle.write(f"- rag_low_score: {rag_summary.get('rag_low_score', 0)}\n")
+            handle.write(f"- rag_empty: {rag_summary.get('rag_empty', 0)}\n")
+            handle.write(
+                f"- rag_overridden_by_gate: {rag_summary.get('rag_overridden_by_gate', 0)}\n"
+            )
+            handle.write(f"- rag_missing: {rag_summary.get('rag_missing', 0)}\n")
+            handle.write(f"- low_score_in_domain: {rag_summary.get('low_score_in_domain', 0)}\n")
+            handle.write(
+                f"- high_score_out_of_domain: {rag_summary.get('high_score_out_of_domain', 0)}\n"
+            )
+            handle.write(
+                f"- branch_filter_missing: {rag_summary.get('branch_filter_missing', 0)}\n"
+            )
+            handle.write(
+                f"- branch_filter_empty: {rag_summary.get('branch_filter_empty', 0)}\n"
+            )
+            if rag_summary.get("top_patterns"):
+                handle.write("\n### Top Patterns\n")
+                for item in rag_summary["top_patterns"]:
+                    handle.write(f"- {item['pattern']}: {item['count']}\n")
 
     print(json.dumps({"summary": summary}, ensure_ascii=False))
 

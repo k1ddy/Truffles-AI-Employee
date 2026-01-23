@@ -1,58 +1,45 @@
-- Название/цель: Chaos-sim v1 + улучшение качества консультаций (multi-intent, "не оказываем" + безопасный совет) без памяти.
-- Canon refs: `STATE.md` (GAP-023, GAP-024), `SPECS/CONSULTANT.md` (consult canon), `SPECS/SYSTEM_REFERENCE.md` (Chaos-sim SOP), `STRATEGY/REQUIREMENTS.md`.
+- Название/цель: Chaos-sim v1 + RAG-аудит качества консультаций (RU/KZ/mixed) без изменения core-логики.
+- Canon refs: `STATE.md` (GAP-023, GAP-024), `SPECS/CONSULTANT.md` (RAG thresholds), `SPECS/SYSTEM_REFERENCE.md` (Chaos-sim SOP), `TECH.md` (RAG/Qdrant), `STRATEGY/REQUIREMENTS.md`.
 - Invariant:
   - Никаких внешних WA/Telegram отправок в сим-режиме.
-  - Facts только из packs; LLM не утверждает услуги/цены/условия салона.
+  - Core-логика бота не меняется: только ops/diagnose артефакты и отчеты.
   - decision_meta/decision_trace пишутся на каждом user-message.
 - Scope:
-  - Consult flow: service availability + безопасный LLM-совет (pack-first, multi-intent).
-  - Chaos-sim runner + evaluator (must_not инварианты, паттерны дефектов) и артефакты + SOP.
-  - Память оставляем отключенной (feature flag OFF) и документируем задел.
+  - Chaos-sim: RAG audit артефакты (`rag_debug.jsonl`, `rag_summary.json`) + RAG findings в `report.md`.
+  - Evaluator: пост-анализ RAG паттернов (без изменения pass/fail).
+  - Память/персонализация остаются отключены; задел фиксируем в доке.
 - Out of scope:
-  - Персонализация/долгосрочная память (в этой сессии не включаем).
+  - Любые изменения логики консультирования/политик/knowledge packs.
+  - Персонализация/долгосрочная память (отложено).
   - Календарное бронирование.
   - Feedback после визита.
 - Touch-list:
-  - `truffles-api/app/routers/webhook/response.py`
-  - `truffles-api/app/services/ai_service.py`
-  - `truffles-api/app/services/demo_salon_knowledge.py`
-  - `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
-  - `truffles-api/app/routers/webhook/decision.py`
   - `ops/diagnose.py`
-  - `SPECS/ARCHITECTURE.md`
-  - `SPECS/CONSULTANT.md`
-  - `SPECS/SYSTEM_REFERENCE.md`
-  - `docs/IMPERIUM_GAPS.yaml`
-  - `STATE.md`
+  - `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md`
 - Plan:
-  1) Отключить память флагом (не менять поведение в этой сессии).
-  2) Добавить consult LLM (safe) и combine с service availability в multi-intent.
-  3) Расширить EVAL для chaos-мультиинтентов (RU/KZ/mixed).
-  4) Обновить канон/документацию + зафиксировать GAP-024.
-  5) Обновить evaluator: must_not инварианты + кластеры дефектов (pattern-based).
-  6) Smoke checks + короткий chaos-sim прогон.
+  1) Обновить Task Package под RAG-аудит.
+  2) Добавить `--rag-audit` и генерацию `rag_debug.jsonl`/`rag_summary.json`.
+  3) Добавить блок RAG Quality Findings в `report.md` (Top-N паттернов).
+  4) Smoke chaos-sim (20-50 кейсов) и проверка артефактов.
 - DoD:
-  - Multi-intent consult отвечает: "не оказываем" + (опционально) безопасный совет.
-  - LLM-consult не упоминает услуги/цены/запись/адрес.
-  - Память не активна по умолчанию (MEMORY_PROFILE_ENABLED=0).
-  - Chaos-sim SOP обновлён и запускается.
-  - Chaos-sim отчёт включает паттерны дефектов; evaluator ловит false-positive по meta/trace.
+  - `rag_debug.jsonl` и `rag_summary.json` создаются при `--rag-audit`.
+  - `report.md` включает RAG Quality Findings и Top-N паттернов.
+  - Core-логика бота не меняется.
+  - Smoke chaos-sim завершился с артефактами.
 - Checks:
-  - `python3 -m pytest truffles-api/tests/test_demo_salon_eval.py -k E003n`
-  - `EVAL_TIER=chaos python3 -m pytest truffles-api/tests/test_demo_salon_eval.py`
-  - `python3 ops/diagnose.py chaos-sim --count 50 --seed 42 --mode logic --client-slug demo_salon`
+  - `python3 ops/diagnose.py chaos-sim --count 20 --seed 42 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 5 --poll-interval 0.2 --min-turns 10 --max-turns 12 --noise high --rag-audit`
 - Evidence:
-  - Логи прогонов + артефакты `ops/artifacts/chaos_sim/<timestamp>/`.
-  - SQL/trace bundle по выборке (если нужен для STATE.md).
+  - Артефакты `ops/artifacts/chaos_sim/<timestamp>/rag_debug.jsonl`, `rag_summary.json`, `report.md`, `summary.json`.
 - Rollback:
   - `git revert <commit>`.
 - No-go:
+  - Изменения core-логики/knowledge packs/LLM промптов.
   - Включать память/персонализацию.
   - Внешние отправки WA/Telegram в сим-режиме.
   - Ручные правки БД ради evidence.
 - Риски/блокеры:
-  - Стоимость LLM: включать только ограниченный прогон (100-150) при необходимости.
-  - LLM недоступен (OPENAI_API_KEY): consult LLM деградирует в clarify.
+  - 500 на старом контейнере: требуется деплой фикса перед live-прогонами.
+  - Стоимость LLM: LLM subset отдельно и позже.
 - Branch/worktree:
   - Branch: `ops/chaos-sim-v1`
   - Worktree: `/home/zhan/worktrees/chaos-sim-v1`
