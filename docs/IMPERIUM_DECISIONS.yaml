@@ -48,3 +48,8 @@ decisions:
     area: "org_level_tenancy"
     choice: "COMPANY_CLIENT_BRANCH"
     statement: "Company -> Client -> Branch hierarchy with explicit memberships/roles; console supports client/branch selection; all API/events require tenant_context (company_id/client_id/branch_id)."
+  - id: "DEC-012"
+    area: "observability"
+    choice: "OTEL_TEMPO"
+    statement: "Adopt OTel spans in API/outbox/sentinel with correlation attrs; persist stage timing in decision_meta.timing.stages and outbox.meta; trace-bundle includes timing; Tempo is trace store."
+
