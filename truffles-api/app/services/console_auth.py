@@ -162,6 +162,28 @@ def _parse_branch_header(request: Request) -> Optional[UUID]:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid X-Branch-Id header") from exc
 
 
+def _resolve_client_selection(
+    access_map: dict[UUID, _AccessEntry],
+    accessible_clients: list[Client],
+    *,
+    selected_client_id: Optional[UUID],
+    require_selection: bool,
+) -> tuple[Optional[UUID], bool]:
+    selection_required = False
+    if selected_client_id:
+        if selected_client_id not in access_map:
+            if require_selection:
+                raise ConsoleAPIError(403, "TENANT_MISMATCH", "Client access denied")
+            selected_client_id = None
+    elif len(accessible_clients) == 1:
+        selected_client_id = accessible_clients[0].id
+    else:
+        selection_required = True
+        if require_selection:
+            raise ConsoleAPIError(400, "CLIENT_SELECTION_REQUIRED", "Client selection required")
+    return selected_client_id, selection_required
+
+
 def _resolve_branch_selection(
     allowed_branch_ids: set[UUID],
     *,
@@ -356,18 +378,12 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
         if require_selection:
             raise
         selected_client_id = None
-    selection_required = False
-    if selected_client_id:
-        if selected_client_id not in access_map:
-            if require_selection:
-                raise ConsoleAPIError(403, "TENANT_MISMATCH", "Client access denied")
-            selected_client_id = None
-    elif len(accessible_clients) == 1:
-        selected_client_id = accessible_clients[0].id
-    else:
-        selection_required = True
-        if require_selection:
-            raise ConsoleAPIError(400, "CLIENT_SELECTION_REQUIRED", "Client selection required")
+    selected_client_id, selection_required = _resolve_client_selection(
+        access_map,
+        accessible_clients,
+        selected_client_id=selected_client_id,
+        require_selection=require_selection,
+    )
 
     selected_client = clients_by_id.get(selected_client_id) if selected_client_id else accessible_clients[0]
     access_entry = access_map.get(selected_client.id, _AccessEntry())

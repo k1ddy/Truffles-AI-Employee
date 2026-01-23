@@ -345,6 +345,10 @@ async def take_case(
             details={"current_assignee": case.assigned_to_name},
         )
 
+    # Fetch conversation for branch_id before commit to avoid extra failures later
+    conversation = db.query(Conversation).filter(Conversation.id == case.conversation_id).first()
+    branch_id = conversation.branch_id if conversation else None
+
     # 3. Update
     case.status = "active"
     case.assigned_to_name = context.agent.name
@@ -358,12 +362,9 @@ async def take_case(
         event_type="case_taken",
         entity_type="handover",
         entity_id=case.id,
-        payload={"previous_status": case.status}
+        payload={"previous_status": case.status},
+        branch_id=branch_id,
     )
-    
-    # Fetch conversation for branch_id before commit to avoid extra failures later
-    conversation = db.query(Conversation).filter(Conversation.id == case.conversation_id).first()
-    branch_id = conversation.branch_id if conversation else None
 
     try:
         db.commit()
@@ -433,17 +434,17 @@ async def resolve_case(
     case.resolved_by_name = context.agent.name
     db.add(case)
     
+    conversation = db.query(Conversation).filter(Conversation.id == case.conversation_id).first()
+    branch_id = conversation.branch_id if conversation else None
+
     record_audit_event(
         db,
         actor=context.agent,
         event_type="case_resolved",
         entity_type="handover",
-        entity_id=case.id
+        entity_id=case.id,
+        branch_id=branch_id,
     )
-    
-    # Fetch conversation for branch_id before commit to avoid extra failures later
-    conversation = db.query(Conversation).filter(Conversation.id == case.conversation_id).first()
-    branch_id = conversation.branch_id if conversation else None
 
     try:
         db.commit()
@@ -680,6 +681,7 @@ async def send_manager_message(
             entity_type="conversation",
             entity_id=conversation_id,
             payload={"content_length": len(body.content), "source": "web_console"},
+            branch_id=conversation.branch_id,
         )
 
         db.commit()
@@ -802,6 +804,12 @@ async def list_audit_events(
     _validate_limit(limit)
 
     query = db.query(AuditEvent).filter(AuditEvent.client_id == context.client.id)
+
+    if context.branch_restricted:
+        allowed_branch_ids = {b.id for b in context.branches}
+        if not allowed_branch_ids:
+            return ConsoleAuditListResponse(items=[], cursor=None, has_more=False)
+        query = query.filter(AuditEvent.branch_id.in_(allowed_branch_ids))
     
     if entity_type is not None:
         if entity_type not in {"case", "conversation", "settings", "agent"}:
@@ -935,8 +943,24 @@ async def get_metrics_daily(
     # Base query for the date
     start_of_day = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=timezone.utc)
     end_of_day = datetime.combine(target_date, datetime.max.time()).replace(tzinfo=timezone.utc)
-    
-    base_query = db.query(Handover).filter(
+
+    base_query = db.query(Handover)
+    if context.branch_restricted:
+        allowed_branch_ids = {b.id for b in context.branches}
+        if not allowed_branch_ids:
+            return ConsoleMetricsDailyResponse(
+                date=target_date.isoformat(),
+                total_cases=0,
+                pending_cases=0,
+                active_cases=0,
+                resolved_cases=0,
+                avg_resolution_hours=None,
+            )
+        base_query = base_query.join(
+            Conversation,
+            Handover.conversation_id == Conversation.id,
+        ).filter(Conversation.branch_id.in_(allowed_branch_ids))
+    base_query = base_query.filter(
         Handover.client_id == context.client.id,
         Handover.created_at >= start_of_day,
         Handover.created_at <= end_of_day,
