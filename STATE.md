@@ -73,7 +73,7 @@
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ui.md`
 - Checks: `npm --prefix console-web run lint` → FAIL (missing `eslint-config-next/core-web-vitals` in `console-web/node_modules`)
 - Test waiver: UI-only wiring; no automated UI tests executed (recorded in TP).
-- Evidence: local changes only (CI pending)
+- Evidence: local changes only (CI pending). CI run queued: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21276341412
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
