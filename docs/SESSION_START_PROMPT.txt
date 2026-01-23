@@ -42,6 +42,15 @@ Before SSH, verify environment: if `pwd` = `/home/zhan/truffles-main` and public
 
 ---
 
+CONSOLE QUICKSTART (first login)
+- UI: `https://console.truffles.kz` (auth at `https://auth.truffles.kz`).
+- Source of truth DB: core `chatbot` via `truffles-api` (`DATABASE_URL`, container `truffles_postgres_1`).
+- If `/api/proxy/*` returns 400/502: check `NEXT_PUBLIC_API_URL`, then `agent_identities` mapping for OIDC `sub`;
+  duplicates => `CLIENT_SELECTION_REQUIRED` (fix mapping or add `X-Client-Id`).
+- Contract tests: token from `/home/zhan/secrets/console-contract.env`, config in `contracts/console_api/schemathesis.toml`.
+
+---
+
 TESTING CONTRACT (summary)
 - Source of truth: `SPECS/SYSTEM_REFERENCE.md` (Test design rules + LLM testing policy + CA-Matrix).
 - CI usage + skip rules: `TECH.md` → "CI / GitHub Actions (как запускать, зачем и когда)".
