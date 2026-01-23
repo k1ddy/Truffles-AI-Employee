@@ -1,3 +1,4 @@
+import time
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
@@ -202,6 +203,33 @@ class TestGenerateAIResponse:
         assert result.error_code == "ai_error"
         assert "LLM error" in result.error
         mock_alert.assert_called_once()
+
+    @patch("app.services.ai_service.get_llm_provider")
+    @patch("app.services.ai_service.search_knowledge")
+    @patch("app.services.ai_service.get_system_prompt")
+    @patch("app.services.ai_service.get_conversation_history")
+    def test_pipeline_budget_skips_llm(self, mock_history, mock_prompt, mock_search, mock_llm):
+        mock_db = Mock()
+        mock_prompt.return_value = "You are a helpful assistant"
+        timing_context = {
+            "pipeline_deadline": time.monotonic() - 1.0,
+            "pipeline_budget_ms": 10,
+        }
+
+        result = generate_ai_response(
+            mock_db,
+            uuid4(),
+            "test-client",
+            uuid4(),
+            "What is X?",
+            timing_context=timing_context,
+        )
+
+        assert result.ok is True
+        assert result.value[1] == "low_confidence"
+        assert timing_context.get("llm_degradation_reason") == "deadline_exceeded"
+        mock_search.assert_not_called()
+        mock_llm.assert_not_called()
 
 
 class TestLowConfidenceEscalation:

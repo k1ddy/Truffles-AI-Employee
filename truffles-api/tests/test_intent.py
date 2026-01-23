@@ -1,3 +1,4 @@
+import time
 from unittest.mock import patch
 
 from app.services.intent_service import (
@@ -119,4 +120,18 @@ class TestDialogueControllerOffline:
         assert payload["class"] == "other"
         assert payload["goal"] == "other"
         assert payload["controller_error"] == "no_api_key"
+        mock_llm.assert_not_called()
+
+
+class TestDialogueControllerBudget:
+    def test_budget_deadline_skips_llm(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        timing_context = {"pipeline_deadline": time.monotonic() - 1.0, "pipeline_budget_ms": 10}
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            result = route_dialogue_controller("Привет", timing_context=timing_context)
+
+        assert result["error"] == "deadline_exceeded"
+        assert result["ok"] is False
+        payload = result["payload"]
+        assert payload["controller_error"] == "deadline_exceeded"
         mock_llm.assert_not_called()
