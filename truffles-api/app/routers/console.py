@@ -1274,8 +1274,12 @@ async def send_manager_message(
     if case.status != "active" and context.role not in ("owner", "admin"):
         raise ConsoleAPIError(403, "CASE_NOT_ACTIVE", "Case must be active to send messages")
     
-    if case.assigned_to_name != context.agent.name and context.role not in ("owner", "admin"):
-        raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+    if context.role not in ("owner", "admin"):
+        assigned_id = str(case.assigned_to) if case.assigned_to else None
+        if assigned_id and assigned_id != str(context.agent.id):
+            raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+        if not assigned_id and case.assigned_to_name and case.assigned_to_name != context.agent.name:
+            raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
     
     # Get conversation to find user
     conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
@@ -1365,6 +1369,27 @@ async def send_manager_message(
         delivery_status = "failed"
         delivery_error = str(e)
     
+    # Sync manager message to Telegram topic for visibility
+    try:
+        if conversation.telegram_topic_id:
+            routing_meta = resolve_telegram_routing(
+                db,
+                conversation=conversation,
+                client_id=context.client.id,
+            )
+            bot_token = routing_meta.get("bot_token")
+            chat_id = routing_meta.get("chat_id")
+            if bot_token and chat_id:
+                telegram = TelegramService(bot_token)
+                manager_label = context.agent.name or "Менеджер"
+                telegram.send_message(
+                    chat_id=str(chat_id),
+                    text=f"🖥️ <b>{manager_label}</b>: {body.content}",
+                    message_thread_id=conversation.telegram_topic_id,
+                )
+    except Exception as exc:
+        logger.warning(f"Failed to sync console message to Telegram: {exc}")
+
     response = ConsoleManagerMessageResponse(
         success=delivery_status == "delivered",
         message=ConsoleMessage(
