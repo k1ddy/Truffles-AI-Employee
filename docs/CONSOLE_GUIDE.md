@@ -14,7 +14,8 @@
 Keycloak issues JWT; NextAuth stores session; API validates JWT signature and maps `sub` to agent.
 
 **Console API (FastAPI)**  
-`/console/v1/*` endpoints read/write DB tables with tenant scoping.
+`/console/v1/*` endpoints read/write **core DB** tables with tenant scoping
+(DB: `chatbot` via `DATABASE_URL` in `truffles-api`).
 
 **Proxy Route**  
 `console-web/src/app/api/proxy/[...path]/route.ts` forwards requests to `NEXT_PUBLIC_API_URL` with Bearer token.
@@ -51,6 +52,8 @@ Rules:
 - All queries filter by `context.client.id`.
 - If multiple clients → `X-Client-Id` is mandatory.
 - Non‑admin/owner users are restricted to their branch.
+- Если один `sub` связан с несколькими клиентами → API вернёт
+  `CLIENT_SELECTION_REQUIRED` (нужен `X-Client-Id`) либо надо убрать дубликаты.
 
 **Common symptom:** “Only 1–2 cases shown / no slots.”  
 Usually means the admin is mapped to the wrong `client_id` or the wrong client was selected.
@@ -179,9 +182,15 @@ curl -s -X POST "$KEYCLOAK_TOKEN_URL" \
 - Check `agent_identities` mapping for `sub`.
 - Verify `agents.is_active = true`.
 
-**CLIENT_SELECTION_REQUIRED**
+**400 CLIENT_SELECTION_REQUIRED**
+- Один `sub` связан с несколькими клиентами/агентами.
 - `/console/v1/me` вернул `selection_required=true` → выбрать клиента или передать `X-Client-Id`.
 - Очистить `localStorage` ключ `console:client_id`, если выбранный клиент удалён.
+- Решение: оставить одну связку `agent_identities` для нужного клиента или использовать `X-Client-Id`.
+
+**502 /api/proxy/**
+- `NEXT_PUBLIC_API_URL` не задан или API недоступен.
+- Проверить `console-web/.env.local` и доступность `https://api.truffles.kz/console/v1`.
 
 **Empty “Cases”**
 - Check `handovers` count by `client_id`.

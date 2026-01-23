@@ -156,6 +156,7 @@ docker restart truffles_qdrant_1
 ### Symptoms
 - 403 ACCESS_DENIED after SSO login
 - "No agent found" in logs
+- 400 CLIENT_SELECTION_REQUIRED on `/console/v1/*`
 
 ### Diagnosis
 ```bash
@@ -165,6 +166,14 @@ SELECT ai.external_id, a.name, a.role
 FROM agent_identities ai 
 JOIN agents a ON a.id = ai.agent_id 
 WHERE ai.channel = 'oidc';"
+
+# Check duplicate client mappings for one sub
+docker exec truffles_postgres_1 psql -U $DB_USER -d chatbot -c "
+SELECT external_id, COUNT(DISTINCT agent_id) AS agents
+FROM agent_identities
+WHERE channel = 'oidc'
+GROUP BY external_id
+HAVING COUNT(DISTINCT agent_id) > 1;"
 ```
 
 ### Resolution
@@ -174,6 +183,9 @@ docker exec truffles_postgres_1 psql -U $DB_USER -d chatbot -c "
 INSERT INTO agent_identities (id, agent_id, channel, external_id)
 SELECT gen_random_uuid(), a.id, 'oidc', 'KEYCLOAK_USER_SUBJECT'
 FROM agents a WHERE a.name = 'manager';"
+
+# If CLIENT_SELECTION_REQUIRED: keep only one mapping or use X-Client-Id
+# (remove extra agent_identities for the same external_id)
 ```
 
 ---

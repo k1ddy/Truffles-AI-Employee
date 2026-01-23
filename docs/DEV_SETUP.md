@@ -31,6 +31,8 @@ CONSOLE_OIDC_JWKS_URL=http://localhost:8080/realms/truffles/protocol/openid-conn
 CONSOLE_OIDC_ISSUER=http://localhost:8080/realms/truffles
 ```
 
+**Важно:** Console API использует core DB (`chatbot`) из `truffles-api` — `console-postgres` не является источником данных для `/console/v1/*`.
+
 ### truffles-api/.env
 
 ```bash

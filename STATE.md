@@ -2001,6 +2001,9 @@ DONE (evidence):
 - Schemathesis GET-only smoke passes with seed overrides.
   Evidence: `schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml --url https://api.truffles.kz/console/v1 --include-method=GET ...`
   → `No issues found` (8/12 operations selected, 230 passed, 152 skipped, seed `48407844212243077467606490987405373033`).
+- Документация обновлена для новых агентов: источник данных консоли (core DB), troubleshooting `CLIENT_SELECTION_REQUIRED`,
+  путь до секретов для контрактов/Е2Е, и usage Schemathesis config.
+  Evidence: `TECH.md`, `docs/CONSOLE_GUIDE.md`, `docs/DEV_SETUP.md`, `docs/RUNBOOK.md`, `contracts/console_api/README.md`.
 
 git status -sb:
 ## main...origin/main
