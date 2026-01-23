@@ -187,6 +187,7 @@
 | `truffles-api/app/models/*` | Модели БД |
 | `truffles-api/app/models/console_idempotency.py` | Idempotency keys для Console API |
 | `truffles-api/migrations/*.sql` | SQL миграции для app‑схемы |
+| `truffles-api/migrations/006_add_outbox_audit_branch_id.sql` | branch_id для audit/outbox + backfill |
 | `truffles-api/app/knowledge/<client_slug>/*` | Truth/policy/eval packs |
 | `knowledge/<client_slug>/*` | Канон RAG‑контента |
 

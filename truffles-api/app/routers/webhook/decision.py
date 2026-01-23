@@ -3356,6 +3356,13 @@ async def _handle_webhook_payload(
                     "idempotency_key": outbound_idempotency_key,
                     "client_id": str(client.id),
                     "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
+                    "tenant_context": {
+                        "client_id": str(client.id),
+                        "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
+                        "client_slug": client.name,
+                        "instance_id": instance_id,
+                        "source": "system",
+                    },
                     "conversation_id": str(conversation.id),
                     "channel": "whatsapp",
                     "created_at": datetime.now(timezone.utc).isoformat(),
@@ -3372,6 +3379,7 @@ async def _handle_webhook_payload(
                     conversation_id=conversation.id,
                     inbound_message_id=outbound_idempotency_key,
                     payload_json=outbox_payload,
+                    branch_id=conversation.branch_id,
                 )
                 if not sent:
                     logger.info(

@@ -48,6 +48,7 @@
 - QUICKSTART: Console onboarding checklist now in `docs/SESSION_START_PROMPT.txt` (data source, OIDC mapping, secrets, contract config).
 - DONE: Tenant UX v1 + tenant_context contract + data isolation plan закреплены в `SPECS/MULTI_TENANT.md`; добавлен контракт `contracts/tenancy/tenant_context.v1.jsonschema` и optional `tenant_context` в outbox contract.
 - DONE: Console branch selection enforcement — `X-Branch-Id` header, UI selector, новые ошибки/контракты (`branch_selection_required`, `BRANCH_SELECTION_REQUIRED`). Evidence: `pytest -q truffles-api/tests/test_console_auth_access.py` → 8 passed.
+- DONE: Audit/outbox tenant keys (branch_id) + outbox tenant_context payload; добавлена миграция `truffles-api/migrations/006_add_outbox_audit_branch_id.sql`; cross-tenant selection tests расширены. Evidence: `pytest -q truffles-api/tests/test_console_auth_access.py` → 11 passed.
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.

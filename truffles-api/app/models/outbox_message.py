@@ -13,6 +13,7 @@ class OutboxMessage(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id = Column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True)
+    branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True)
     inbound_message_id = Column(Text, nullable=False)
     payload_json = Column(JSONB, nullable=False)
     meta = Column(JSONB)

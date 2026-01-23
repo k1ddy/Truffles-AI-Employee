@@ -131,6 +131,7 @@ def test_resolve_client_selection_rejects_mismatched_client():
         )
 
     assert exc_info.value.code == "TENANT_MISMATCH"
+    assert exc_info.value.status_code == 403
 
 
 def test_resolve_client_selection_auto_for_single_client():
@@ -202,3 +203,4 @@ def test_resolve_branch_selection_rejects_out_of_scope():
         )
 
     assert exc_info.value.code == "BRANCH_ACCESS_DENIED"
+    assert exc_info.value.status_code == 403
