@@ -66,7 +66,8 @@ async function fetchSettings(): Promise<SettingsData> {
 
 async function fetchAgents(): Promise<{ items: Agent[] }> {
     const response = await agentsApi.list();
-    return response.data;
+    const data = response.data || {};
+    return { items: (data.items || []) as unknown as Agent[] };
 }
 
 function RoleBadge({ role }: { role: string }) {
@@ -181,7 +182,7 @@ export default function SettingsPage() {
             setLinkTarget(agentId);
         },
         onSuccess: ({ data, agentId }) => {
-            setLinkTokens((prev) => ({ ...prev, [agentId]: data }));
+            setLinkTokens((prev) => ({ ...prev, [agentId]: data as unknown as AgentLinkData }));
             toast.success("Ссылка для Telegram создана");
         },
         onError: (error) => {
@@ -454,71 +455,71 @@ export default function SettingsPage() {
                             : telegramIdentity?.external_id;
 
                         return (
-                        <div
-                            key={agent.id}
-                            className="flex flex-col gap-2 p-3 bg-muted rounded"
-                            data-testid="settings-team-row"
-                        >
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-9 h-9 bg-secondary rounded-full flex items-center justify-center text-secondary-foreground font-medium">
-                                        {agent.name?.charAt(0).toUpperCase() || "?"}
+                            <div
+                                key={agent.id}
+                                className="flex flex-col gap-2 p-3 bg-muted rounded"
+                                data-testid="settings-team-row"
+                            >
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-9 h-9 bg-secondary rounded-full flex items-center justify-center text-secondary-foreground font-medium">
+                                            {agent.name?.charAt(0).toUpperCase() || "?"}
+                                        </div>
+                                        <span className="font-medium">{agent.name || "Без имени"}</span>
                                     </div>
-                                    <span className="font-medium">{agent.name || "Без имени"}</span>
+                                    <div className="flex items-center gap-2">
+                                        <RoleBadge role={agent.role} />
+                                        <span
+                                            className={`w-2 h-2 rounded-full ${agent.is_active ? "bg-green-500" : "bg-muted"
+                                                }`}
+                                        ></span>
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <RoleBadge role={agent.role} />
-                                    <span
-                                        className={`w-2 h-2 rounded-full ${agent.is_active ? "bg-green-500" : "bg-muted"
-                                            }`}
-                                    ></span>
-                                </div>
-                            </div>
-                            <div className="flex items-center justify-between text-xs">
-                                <span className="text-muted-foreground">Telegram:</span>
-                                <span className={telegramIdentity ? "font-medium" : "text-muted-foreground"}>
-                                    {telegramIdentity ? displayHandle : "не подключен"}
-                                </span>
-                            </div>
-                            <div className="flex items-center justify-between gap-2">
-                                <button
-                                    type="button"
-                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                    onClick={() => linkMutation.mutate(agent.id)}
-                                    disabled={linkTarget === agent.id}
-                                    data-testid="settings-team-link"
-                                >
-                                    {linkTarget === agent.id
-                                        ? "Генерация..."
-                                        : telegramIdentity
-                                            ? "Переподключить"
-                                            : "Подключить Telegram"}
-                                </button>
-                                {telegramIdentity?.linked_at && (
-                                    <span className="text-xs text-muted-foreground">
-                                        {new Date(telegramIdentity.linked_at).toLocaleDateString("ru-RU")}
+                                <div className="flex items-center justify-between text-xs">
+                                    <span className="text-muted-foreground">Telegram:</span>
+                                    <span className={telegramIdentity ? "font-medium" : "text-muted-foreground"}>
+                                        {telegramIdentity ? displayHandle : "не подключен"}
                                     </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2">
+                                    <button
+                                        type="button"
+                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                        onClick={() => linkMutation.mutate(agent.id)}
+                                        disabled={linkTarget === agent.id}
+                                        data-testid="settings-team-link"
+                                    >
+                                        {linkTarget === agent.id
+                                            ? "Генерация..."
+                                            : telegramIdentity
+                                                ? "Переподключить"
+                                                : "Подключить Telegram"}
+                                    </button>
+                                    {telegramIdentity?.linked_at && (
+                                        <span className="text-xs text-muted-foreground">
+                                            {new Date(telegramIdentity.linked_at).toLocaleDateString("ru-RU")}
+                                        </span>
+                                    )}
+                                </div>
+                                {linkData && (
+                                    <div className="text-xs bg-background p-2 rounded border border-border/60 space-y-1">
+                                        <div>
+                                            Код: <span className="font-mono">{linkData.token}</span>
+                                        </div>
+                                        {linkData.deep_link && (
+                                            <Link className="text-primary underline" href={linkData.deep_link} target="_blank">
+                                                Открыть в Telegram
+                                            </Link>
+                                        )}
+                                        <div className="text-muted-foreground">
+                                            Отправьте боту <span className="font-mono">/start {linkData.token}</span>
+                                        </div>
+                                        <div className="text-muted-foreground">
+                                            Истекает: {new Date(linkData.expires_at).toLocaleString("ru-RU")}
+                                        </div>
+                                    </div>
                                 )}
                             </div>
-                            {linkData && (
-                                <div className="text-xs bg-background p-2 rounded border border-border/60 space-y-1">
-                                    <div>
-                                        Код: <span className="font-mono">{linkData.token}</span>
-                                    </div>
-                                    {linkData.deep_link && (
-                                        <Link className="text-primary underline" href={linkData.deep_link} target="_blank">
-                                            Открыть в Telegram
-                                        </Link>
-                                    )}
-                                    <div className="text-muted-foreground">
-                                        Отправьте боту <span className="font-mono">/start {linkData.token}</span>
-                                    </div>
-                                    <div className="text-muted-foreground">
-                                        Истекает: {new Date(linkData.expires_at).toLocaleString("ru-RU")}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
                         );
                     })}
                     {!agentsLoading && !agentsError && agentsData?.items.length === 0 && (
