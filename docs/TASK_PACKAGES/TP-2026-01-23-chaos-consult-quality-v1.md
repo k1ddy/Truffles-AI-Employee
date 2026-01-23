@@ -62,6 +62,7 @@
 
 ## Session Notes (handoff)
 
+- Commit: `48527fa3` (chaos-sim: уникальный JID base на simulation_id/seed, чтобы не было протечек pending между прогонами; summary/report пишет `jid_base`).
 - Commit: `05a50205` (graceful shutdown for chaos-sim; summary/report written on stop).
 - PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/319
 - Artifacts (untracked):
