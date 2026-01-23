@@ -40,6 +40,7 @@ export async function GET(
     const queryString = url.search;
     const targetUrl = `${API_BASE_URL}/${apiPath}${queryString}`;
     const clientId = request.headers.get('x-client-id');
+    const branchId = request.headers.get('x-branch-id');
 
     try {
         const response = await fetch(targetUrl, {
@@ -48,6 +49,7 @@ export async function GET(
                 'Authorization': `Bearer ${session.accessToken}`,
                 'Content-Type': 'application/json',
                 ...(clientId ? { 'X-Client-Id': clientId } : {}),
+                ...(branchId ? { 'X-Branch-Id': branchId } : {}),
             },
         });
 
@@ -84,6 +86,7 @@ export async function POST(
     const targetUrl = `${API_BASE_URL}/${apiPath}`;
     const body = await request.text();
     const clientId = request.headers.get('x-client-id');
+    const branchId = request.headers.get('x-branch-id');
 
     try {
         const idempotencyKey =
@@ -95,6 +98,7 @@ export async function POST(
                 'Content-Type': 'application/json',
                 ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
                 ...(clientId ? { 'X-Client-Id': clientId } : {}),
+                ...(branchId ? { 'X-Branch-Id': branchId } : {}),
             },
             body,
         });

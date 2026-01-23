@@ -46,6 +46,8 @@
 - DONE: Console query‑params validation (unknown params + enums + dates + limit) + cursor tolerant + OpenAPI 400/403 + `INVALID_PARAM` error registry. Evidence: CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21270247679; Schemathesis GET-only smoke on prod (seed 68493311863361754745919126795202296800) — 580 passed, warnings for missing test data on `/cases/{case_id}` + `/cases/{case_id}/messages` and schema mismatch (see below).
 - DONE: Schemathesis seeds added for `/cases/{case_id}` + `/cases/{case_id}/messages` (stable IDs in `contracts/console_api/schemathesis.toml`), warnings resolved.
 - QUICKSTART: Console onboarding checklist now in `docs/SESSION_START_PROMPT.txt` (data source, OIDC mapping, secrets, contract config).
+- DONE: Tenant UX v1 + tenant_context contract + data isolation plan закреплены в `SPECS/MULTI_TENANT.md`; добавлен контракт `contracts/tenancy/tenant_context.v1.jsonschema` и optional `tenant_context` в outbox contract.
+- DONE: Console branch selection enforcement — `X-Branch-Id` header, UI selector, новые ошибки/контракты (`branch_selection_required`, `BRANCH_SELECTION_REQUIRED`). Evidence: `pytest -q truffles-api/tests/test_console_auth_access.py` → 8 passed.
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.

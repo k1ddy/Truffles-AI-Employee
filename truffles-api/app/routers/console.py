@@ -84,6 +84,8 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
         branches=branches,
         clients=clients,
         selection_required=context.selection_required,
+        branch_selection_required=context.branch_selection_required,
+        selected_branch_id=context.effective_branch_id,
     )
 
 

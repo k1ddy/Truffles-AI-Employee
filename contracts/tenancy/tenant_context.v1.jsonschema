@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/tenancy/tenant_context.v1.jsonschema",
+  "title": "Tenant Context",
+  "type": "object",
+  "required": ["client_id"],
+  "properties": {
+    "company_id": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "client_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "branch_id": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "client_slug": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "branch_slug": {
+      "type": ["string", "null"]
+    },
+    "instance_id": {
+      "type": ["string", "null"]
+    },
+    "source": {
+      "type": ["string", "null"],
+      "enum": ["header", "token", "webhook", "system", null]
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,12 +1,21 @@
 import axios, { AxiosInstance } from "axios";
 
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
+const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 
 function getSelectedClientId(): string | undefined {
     if (typeof window === "undefined") {
         return undefined;
     }
     const stored = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    return stored || undefined;
+}
+
+function getSelectedBranchId(): string | undefined {
+    if (typeof window === "undefined") {
+        return undefined;
+    }
+    const stored = window.localStorage.getItem(BRANCH_ID_STORAGE_KEY);
     return stored || undefined;
 }
 
@@ -17,6 +26,10 @@ function attachIdempotencyKey(client: AxiosInstance): AxiosInstance {
         const selectedClientId = getSelectedClientId();
         if (selectedClientId && !headers["X-Client-Id"]) {
             headers["X-Client-Id"] = selectedClientId;
+        }
+        const selectedBranchId = getSelectedBranchId();
+        if (selectedBranchId && !headers["X-Branch-Id"]) {
+            headers["X-Branch-Id"] = selectedBranchId;
         }
         if (config.method && ["post", "put", "patch", "delete"].includes(config.method)) {
             if (!headers["Idempotency-Key"]) {

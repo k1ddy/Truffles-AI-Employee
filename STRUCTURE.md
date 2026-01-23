@@ -15,6 +15,7 @@
 | `contracts/` | Канон контрактов (Console API, ошибки) | Архитектор/Frontend |
 | `contracts/console_api/schemathesis.toml` | Seed/overrides для Schemathesis contract smoke | Backend/QA |
 | `contracts/events/` | Контракты событий (outbox) | Архитектор/Backend |
+| `contracts/tenancy/tenant_context.v1.jsonschema` | Канон tenant_context (company/client/branch) | Архитектор/Backend |
 | `contracts/integrations/` | Контракты портов/адаптеров | Архитектор/Backend |
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
