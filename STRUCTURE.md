@@ -37,6 +37,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-verify-test.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ui.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ci-fix.md`
 
 ---
 

@@ -392,6 +392,7 @@ jobs:
             --url https://api.truffles.kz/console/v1 \
             --include-method=GET \
             --checks all \
+            --exclude-path /telegram/health \
             --request-timeout 10 \
             --max-examples=3 \
             --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"

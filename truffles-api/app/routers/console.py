@@ -1,6 +1,6 @@
+import secrets
 from datetime import date as dt_date
 from datetime import datetime, time, timezone
-import secrets
 from typing import Optional
 from uuid import UUID
 
@@ -31,11 +31,11 @@ from app.schemas.console import (
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
     ConsoleTelegramHealthResponse,
-    ConsoleTelegramVerifyRequest,
-    ConsoleTelegramVerifyResponse,
     ConsoleTelegramTestRequest,
     ConsoleTelegramTestResponse,
     ConsoleTelegramTrail,
+    ConsoleTelegramVerifyRequest,
+    ConsoleTelegramVerifyResponse,
 )
 from app.services.audit_service import record_audit_event
 from app.services.console_auth import ConsoleAuthContext, get_console_context
