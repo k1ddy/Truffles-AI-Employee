@@ -47,6 +47,9 @@ TEST_MODE=1
 OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net
 ```
 
+**БД креды (prod):** источник истины — `/home/zhan/infrastructure/.env` (`DB_POSTGRESDB_USER`, `DB_POSTGRESDB_PASSWORD`).  
+В `truffles-api/.env` `DB_USER` может отсутствовать — для psql используйте значения из infra env.
+
 ---
 
 ## 3. Quick Start
