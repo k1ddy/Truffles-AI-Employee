@@ -77,6 +77,14 @@
   - `python3 ops/diagnose.py chaos-sim --count 5 --seed 44 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 3 --poll-interval 0.2 --debug-all --console-mode skip --min-turns 10 --max-turns 12 --noise high`
   - Summary: `simulation_id=SIM-20260123-103904-44`, `cases_processed=5`, `turns=51`, `failures=40`
   - Note: HTTP 500 on `CHAOS_INFO_0003` turn 5 (decision_meta/trace missing).
+- Baseline run after pending guard (seed 42):
+  - `python3 ops/diagnose.py chaos-sim --count 20 --seed 42 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 5 --poll-interval 0.2 --timeout 30 --debug-all --console-mode skip --min-turns 10 --max-turns 12 --noise high --output-dir ops/artifacts/chaos_sim/20260123-111000-seed42`
+  - Summary: `simulation_id=SIM-20260123-110351-42`, `cases_processed=20`, `turns=204`, `failures=166`
+  - HTTP 500 entries (response_status=500): `CHAOS_CONSULT_0006` turn 2 (`SIM-20260123-110351-0006-02-97a50f9a`), `CHAOS_INFO_0013` turn 1 (`SIM-20260123-110351-0013-01-210b939b`), `CHAOS_BOOKING_0017` turn 1 (`SIM-20260123-110351-0017-01-44472827`), `CHAOS_BOOKING_0018` turn 3 (`SIM-20260123-110351-0018-03-ce8babf6`).
+- Baseline run after pending guard (seed 43):
+  - `python3 ops/diagnose.py chaos-sim --count 20 --seed 43 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 5 --poll-interval 0.2 --timeout 30 --debug-all --console-mode skip --min-turns 10 --max-turns 12 --noise high --output-dir ops/artifacts/chaos_sim/20260123-111000-seed43`
+  - Summary: `simulation_id=SIM-20260123-112311-43`, `cases_processed=20`, `turns=207`, `failures=151`
+  - HTTP 500 entry: `CHAOS_BOOKING_0002` turn 5 (`SIM-20260123-112311-0002-05-3803b69f`).
 - Next step candidates:
   - Fix pending_gate behavior (pending_wait/expected_reply_type/booking_interrupt) as a single pattern.
   - Fix booking expected_reply_type drift in multi-intent.
