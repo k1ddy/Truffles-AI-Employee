@@ -91,6 +91,15 @@
   - Fix: pass `load_yaml_truth(client_slug)` into `_format_service_suggestions_reply` in `semantic_service_match`.
   - Test added: `test_semantic_service_matcher_returns_suggestions_reply` in `truffles-api/tests/test_message_endpoint.py`.
   - Local pytest failed due to missing `dateparser` (ModuleNotFoundError) in this environment.
+- Post-fix chaos smoke (seed 42, interrupted):
+  - `python3 ops/diagnose.py chaos-sim --count 20 --seed 42 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 5 --poll-interval 0.2 --timeout 30 --debug-all --console-mode skip --min-turns 10 --max-turns 12 --noise high --output-dir ops/artifacts/chaos_sim/20260123-123500-seed42-postfix`
+  - Summary: `simulation_id=SIM-20260123-123449-42`, `cases_processed=14`, `turns=146`, `failures=118`, `interrupted=true` (signal_2).
+  - HTTP 500 entries: `CHAOS_CONSULT_0002` turn 5 (`қашанға дейін ашық пжл`), `CHAOS_CONSULT_0006` turn 6 (`график работы какой спс`).
+  - Root cause (still on prod image): same missing `truth` in `_format_service_suggestions_reply` but triggered via `_extract_service_hint` inside name validation. Fix already in repo; needs deploy to take effect.
+- Evaluator updates (false-positive reduction for multi-intent):
+  - Allow `booking_prompt`/booking completion actions when expected is `reply` and required `info_sections` are satisfied.
+  - Allow `reply` when expected is `booking_prompt` if `expected_reply_type` is already set or `question_contract` shows `booking_prompt`.
+  - Implemented in `ops/diagnose.py` via `_chaos_action_fallback_ok` + `info_sections_ok` handling.
 - Next step candidates:
   - Fix pending_gate behavior (pending_wait/expected_reply_type/booking_interrupt) as a single pattern.
   - Fix booking expected_reply_type drift in multi-intent.

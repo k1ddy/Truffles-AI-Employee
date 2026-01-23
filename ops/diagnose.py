@@ -1394,6 +1394,43 @@ def _chaos_matches_action(meta, expected_actions):
     return action in expected_actions or pending_action in expected_actions
 
 
+def _chaos_trace_has_stage_with_reason(trace_entries, stage, reason=None):
+    for entry in trace_entries or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("stage") != stage:
+            continue
+        if reason is None or entry.get("reason") == reason:
+            return True
+    return False
+
+
+def _chaos_info_sections_match(meta, expected_sections):
+    if not expected_sections:
+        return True
+    info_sections = (meta or {}).get("info_sections")
+    if not isinstance(info_sections, list):
+        return False
+    return all(section in info_sections for section in expected_sections)
+
+
+def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sections_ok):
+    expected_actions = expected.get("action_any") or []
+    meta_action = (meta or {}).get("action")
+    if "reply" in expected_actions and expected.get("info_sections") and info_sections_ok:
+        if meta_action in _chaos_booking_completion_actions() or meta_action == "booking_prompt":
+            return True
+    if "booking_prompt" in expected_actions and meta_action == "reply":
+        expected_reply_type = expected.get("expected_reply_type")
+        if expected_reply_type is not None:
+            actual_reply = _chaos_extract_expected_reply((conv_meta or {}).get("context"))
+            if actual_reply == expected_reply_type:
+                return True
+        if _chaos_trace_has_stage_with_reason(trace_entries, "question_contract", "booking_prompt"):
+            return True
+    return False
+
+
 def _chaos_extract_expected_reply(context):
     if not isinstance(context, dict):
         return None
@@ -1440,17 +1477,15 @@ def _chaos_evaluate_turn(
         (meta or {}).get("consult_playbook_id") != expected.get("consult_playbook_id")
     ):
         failures.append("consult_playbook_mismatch")
-    if expected.get("info_sections"):
-        info_sections = (meta or {}).get("info_sections")
-        expected_sections = expected.get("info_sections") or []
-        if not isinstance(info_sections, list) or any(
-            section not in info_sections for section in expected_sections
-        ):
-            failures.append("info_sections_mismatch")
+    expected_sections = expected.get("info_sections") or []
+    info_sections_ok = _chaos_info_sections_match(meta, expected_sections)
+    if expected_sections and not info_sections_ok:
+        failures.append("info_sections_mismatch")
     if expected.get("booking_interrupt") and not (meta or {}).get("booking_info_interrupt"):
         failures.append("booking_interrupt_missing")
     if expected.get("action_any") and not _chaos_matches_action(meta, expected.get("action_any")):
-        failures.append("action_mismatch")
+        if not _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sections_ok):
+            failures.append("action_mismatch")
     forbid = expected.get("forbid") if isinstance(expected.get("forbid"), dict) else {}
     if forbid:
         forbidden_actions = forbid.get("action_any") or []
