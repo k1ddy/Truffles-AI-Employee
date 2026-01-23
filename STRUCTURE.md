@@ -33,6 +33,12 @@
 | `docs/CONSOLE_GUIDE.md` | Guide по Console (API, тесты, дебаг) | Frontend/Backend |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 
+**Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-verify-test.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ui.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ci-fix.md`
+
 ---
 
 ## OWNERS (кто обновляет)
@@ -198,6 +204,13 @@
 
 | Файл | Назначение |
 |------|------------|
+
+---
+
+## TESTS
+
+- `truffles-api/tests/test_console_telegram_helpers.py` — Console↔Telegram helper tests.
+- `truffles-api/tests/test_console_telegram_connector.py` — Console↔Telegram verify/test helpers.
 | `.github/workflows/ci.yml` | GitHub Actions: ruff + pytest + build/push GHCR + deploy (optional) |
 
 ---
@@ -399,6 +412,8 @@ truffles-api/
 | Файл | Что тестирует |
 |------|---------------|
 | `truffles-api/tests/test_cases.json` | Тестовые сценарии диалогов |
+| `truffles-api/tests/test_console_telegram_connector.py` | Unit: Console Telegram verify/test helpers |
+| `truffles-api/tests/test_console_telegram_helpers.py` | Unit: Console Telegram trail helpers |
 | `truffles-api/tests/test_webhook_booking.py` | Unit: expected_reply_type и booking slot validators |
 | `truffles-api/tests/test_webhook_dedup.py` | Unit: webhook buffer/dedup helpers |
 | `truffles-api/tests/test_webhook_response.py` | Unit: CTA и quiet hours helpers |

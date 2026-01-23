@@ -215,6 +215,10 @@ class TelegramService:
             logger.warning(f"Failed to create topic: {result}")
             return None
 
+    def get_webhook_info(self) -> dict:
+        """Return Telegram webhook info for the bot token."""
+        return self._make_request("getWebhookInfo")
+
     def get_file_path(self, file_id: str) -> Optional[str]:
         """Resolve Telegram file_id to file_path for downloading."""
         result = self._make_request("getFile", {"file_id": file_id})

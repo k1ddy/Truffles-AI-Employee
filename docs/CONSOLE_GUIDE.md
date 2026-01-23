@@ -111,6 +111,76 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 
 ---
 
+## 3.1 Telegram integration (Console)
+
+**Purpose:** Telegram is paging/fallback; Console remains the source of truth for workflow, RBAC, and audit.
+
+**Backend (Console API + core mapping):**
+- Health: `GET /console/v1/telegram/health` (Console API).
+- Verify: `POST /console/v1/telegram/verify` (owner/admin).
+- Test: `POST /console/v1/telegram/test` (owner/admin).
+- Case trail: `GET /console/v1/cases/{id}` returns `telegram_trail`.
+- Branch routing: `GET /console/v1/settings` returns `branches[].telegram_chat_id` + `branches[].instance_id`.
+
+**UI locations:**
+- Settings → Telegram connector: client-scope Verify/Test.
+- Settings → Branches: per-branch Verify/Test (requires `telegram_chat_id`).
+- Ops → Telegram card: client-scope Verify/Test (owner/admin).
+
+**Data sources (core DB):**
+- `branches.telegram_chat_id`, `branches.instance_id` (routing + UI display).
+- `client_settings.telegram_bot_token`, `client_settings.telegram_chat_id` (bot config + legacy fallback).
+- `conversations.telegram_topic_id` (topic per user).
+- `handovers.telegram_message_id`, `handovers.notified_at` (delivery evidence).
+
+**Trail mapping (Console API):**
+- `message_id` → `handovers.telegram_message_id`
+- `topic_id` → `conversations.telegram_topic_id`
+- `chat_id` → `branches.telegram_chat_id` (fallback to `client_settings.telegram_chat_id`)
+- `delivery_status` → `sent` when message_id present, otherwise `pending`
+- `delivered_at` → `handovers.notified_at` (if present)
+- `telegram_link` → `https://t.me/c/<internal_id>/<message_id>` when `chat_id` is `-100...`
+  - `internal_id` = `chat_id` without `-100` prefix; if not numeric, link is omitted.
+
+**Health mapping (Console API):**
+- `webhook_alive` via Telegram `getWebhookInfo` for `telegram_bot_token`.
+- `pending_messages` = `pending_update_count` from Telegram webhook info.
+- `last_error_at`/`last_error_message` from Telegram webhook info.
+- `error_rate_24h` = 0.0 (no persisted telemetry yet; recorded as gap in STATE).
+
+**Where to change code:**
+- API endpoint + mapping: `truffles-api/app/routers/console.py`
+- Telegram API helper: `truffles-api/app/services/telegram_service.py`
+- UI Ops card: `console-web/src/components/OpsPage.tsx`
+- UI Case trail: `console-web/src/components/CaseView.tsx`
+- UI Branch list: `console-web/src/app/settings/page.tsx`
+- Console schemas: `truffles-api/app/schemas/console.py`
+- Contracts: `contracts/console_api/openapi.v1.yaml`
+
+**Diagnostics (quick):**
+- Webhook status: `curl -s -H "Authorization: Bearer $TOKEN" https://api.truffles.kz/console/v1/telegram/health`
+- Telegram webhook raw: `curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"`
+- Verify (client scope):
+  ```bash
+  curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \\
+    https://api.truffles.kz/console/v1/telegram/verify \\
+    -d '{"scope":"client"}'
+  ```
+- Verify (branch scope):
+  ```bash
+  curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \\
+    https://api.truffles.kz/console/v1/telegram/verify \\
+    -d '{"scope":"branch","branch_id":"<UUID>"}'
+  ```
+- Test message (custom text):
+  ```bash
+  curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \\
+    https://api.truffles.kz/console/v1/telegram/test \\
+    -d '{"scope":"branch","branch_id":"<UUID>","message":"Truffles test message"}'
+  ```
+
+---
+
 ## 4) Console Auth & Tokens
 
 **OIDC config (API side)**  

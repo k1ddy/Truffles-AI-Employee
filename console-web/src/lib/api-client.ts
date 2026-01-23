@@ -53,6 +53,7 @@ export const ErrorCodes = {
     MESSAGE_TOO_LONG: "MESSAGE_TOO_LONG",
     OUTBOX_FAILED: "OUTBOX_FAILED",
     INTEGRATION_UNAVAILABLE: "INTEGRATION_UNAVAILABLE",
+    TELEGRAM_CONFIG_MISSING: "TELEGRAM_CONFIG_MISSING",
     RATE_LIMITED: "RATE_LIMITED",
     SERVER_ERROR: "SERVER_ERROR",
     DATABASE_ERROR: "DATABASE_ERROR",
@@ -171,6 +172,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
         ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
         retryable: true,
         retry_after_seconds: 30,
+    },
+    TELEGRAM_CONFIG_MISSING: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "error" },
+        retryable: false,
     },
     RATE_LIMITED: {
         http_status: 429,
@@ -330,6 +336,10 @@ export type MetricsDailyResponse = components["schemas"]["MetricsDailyResponse"]
 export type SettingsResponse = components["schemas"]["SettingsResponse"];
 export type AuditEvent = components["schemas"]["AuditEvent"];
 export type AuditListResponse = components["schemas"]["AuditListResponse"];
+export type TelegramVerifyRequest = components["schemas"]["TelegramVerifyRequest"];
+export type TelegramVerifyResponse = components["schemas"]["TelegramVerifyResponse"];
+export type TelegramTestRequest = components["schemas"]["TelegramTestRequest"];
+export type TelegramTestResponse = components["schemas"]["TelegramTestResponse"];
 
 // Query params
 export type ListCasesParams = operations["listCases"]["parameters"]["query"];
@@ -377,6 +387,14 @@ export const opsApi = {
     getHealth: () => apiClient.get<HealthResponse>("/health"),
     getMetricsDaily: (date?: string) =>
         apiClient.get<MetricsDailyResponse>("/metrics/daily", { params: { date } }),
+};
+
+/** Telegram connector endpoints */
+export const telegramApi = {
+    verify: (data: TelegramVerifyRequest) =>
+        apiClient.post<TelegramVerifyResponse>("/telegram/verify", data),
+    test: (data: TelegramTestRequest) =>
+        apiClient.post<TelegramTestResponse>("/telegram/test", data),
 };
 
 /** Settings endpoints */

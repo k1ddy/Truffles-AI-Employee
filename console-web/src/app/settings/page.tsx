@@ -1,15 +1,20 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
+import { telegramApi } from "@/lib/api-client";
+import { useErrorHandler } from "@/lib/api-hooks";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import toast from "react-hot-toast";
 
 interface Branch {
     id: string;
     slug: string;
     name: string;
     is_active: boolean;
+    instance_id?: string | null;
     telegram_chat_id?: string | null;
 }
 
@@ -84,11 +89,60 @@ function ConfigCard({ label, value, type = "text" }: { label: string; value: str
 
 export default function SettingsPage() {
     const { data: session } = useSession();
+    const { handleError } = useErrorHandler();
+    const [verifyTarget, setVerifyTarget] = useState<string | null>(null);
+    const [testTarget, setTestTarget] = useState<string | null>(null);
 
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["settings"],
         queryFn: fetchSettings,
         enabled: !!session,
+    });
+
+    const verifyMutation = useMutation({
+        mutationFn: async (action: { targetKey: string; label: string; payload: { scope: "client" | "branch"; branch_id?: string } }) => {
+            const { data } = await telegramApi.verify(action.payload);
+            return { data, action };
+        },
+        onMutate: (action) => {
+            setVerifyTarget(action.targetKey);
+        },
+        onSuccess: ({ data, action }) => {
+            if (data.success) {
+                toast.success(`Код верификации (${action.label}): ${data.verification_code}`);
+            } else {
+                toast.error(data.error_message || `Не удалось отправить код (${action.label})`);
+            }
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+        onSettled: () => {
+            setVerifyTarget(null);
+        },
+    });
+
+    const testMutation = useMutation({
+        mutationFn: async (action: { targetKey: string; label: string; payload: { scope: "client" | "branch"; branch_id?: string; message?: string } }) => {
+            const { data } = await telegramApi.test(action.payload);
+            return { data, action };
+        },
+        onMutate: (action) => {
+            setTestTarget(action.targetKey);
+        },
+        onSuccess: ({ data, action }) => {
+            if (data.success) {
+                toast.success(`Тестовое сообщение отправлено (${action.label})`);
+            } else {
+                toast.error(data.error_message || `Не удалось отправить тест (${action.label})`);
+            }
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+        onSettled: () => {
+            setTestTarget(null);
+        },
     });
 
     if (!session) {
@@ -193,6 +247,48 @@ export default function SettingsPage() {
                     )}
                 </div>
 
+                {/* Telegram Connector */}
+                <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-telegram-connector">
+                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        📨 Telegram коннектор
+                    </h2>
+                    <p className="text-sm text-muted-foreground mb-3">
+                        Проверка и тест отправки в Telegram (client scope, owner/admin).
+                    </p>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() =>
+                                verifyMutation.mutate({
+                                    targetKey: "client",
+                                    label: "client",
+                                    payload: { scope: "client" },
+                                })
+                            }
+                            disabled={verifyTarget === "client"}
+                            data-testid="settings-telegram-verify"
+                        >
+                            {verifyTarget === "client" ? "Отправка..." : "Verify"}
+                        </button>
+                        <button
+                            type="button"
+                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() =>
+                                testMutation.mutate({
+                                    targetKey: "client",
+                                    label: "client",
+                                    payload: { scope: "client" },
+                                })
+                            }
+                            disabled={testTarget === "client"}
+                            data-testid="settings-telegram-test"
+                        >
+                            {testTarget === "client" ? "Отправка..." : "Send test"}
+                        </button>
+                    </div>
+                </div>
+
                 {/* Branches (TG-02) */}
                 <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-branches">
                     <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -209,6 +305,9 @@ export default function SettingsPage() {
                                     <div className="flex items-center gap-2">
                                         <span className="font-medium">{branch.name}</span>
                                         <span className="text-sm text-muted-foreground">({branch.slug})</span>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground mt-1">
+                                        instance_id: {branch.instance_id || "—"}
                                     </div>
                                     {/* Telegram status */}
                                     <div className="flex items-center gap-1 mt-1">
@@ -233,6 +332,36 @@ export default function SettingsPage() {
                                     >
                                         {branch.is_active ? "Активен" : "Неактивен"}
                                     </span>
+                                    <button
+                                        type="button"
+                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                        onClick={() =>
+                                            verifyMutation.mutate({
+                                                targetKey: branch.id,
+                                                label: branch.name,
+                                                payload: { scope: "branch", branch_id: branch.id },
+                                            })
+                                        }
+                                        disabled={!branch.telegram_chat_id || verifyTarget === branch.id}
+                                        data-testid="settings-branch-verify"
+                                    >
+                                        {verifyTarget === branch.id ? "Отправка..." : "Verify"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                        onClick={() =>
+                                            testMutation.mutate({
+                                                targetKey: branch.id,
+                                                label: branch.name,
+                                                payload: { scope: "branch", branch_id: branch.id },
+                                            })
+                                        }
+                                        disabled={!branch.telegram_chat_id || testTarget === branch.id}
+                                        data-testid="settings-branch-test"
+                                    >
+                                        {testTarget === branch.id ? "Отправка..." : "Send test"}
+                                    </button>
                                 </div>
                             </div>
                         ))}
