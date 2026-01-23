@@ -111,6 +111,28 @@ def _validate_limit(limit: int) -> None:
         raise ConsoleAPIError(400, "INVALID_PARAM", "limit must be between 1 and 100")
 
 
+def _parse_uuid_param(name: str, value: Optional[str]) -> Optional[UUID]:
+    if value is None:
+        return None
+    if value == "":
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
+    try:
+        return UUID(value)
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}") from exc
+
+
+def _parse_bool_param(name: str, value: Optional[str], default: bool = False) -> bool:
+    if value is None:
+        return default
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
+
+
 def _parse_date_param(name: str, value: Optional[str]) -> Optional[dt_date]:
     if value is None:
         return None
@@ -122,6 +144,17 @@ def _parse_date_param(name: str, value: Optional[str]) -> Optional[dt_date]:
             "INVALID_PARAM",
             f"Invalid {name} (expected YYYY-MM-DD)",
         ) from exc
+
+
+def _parse_cursor_param(value: Optional[str]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value == "":
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid cursor")
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid cursor") from exc
 
 
 @router.get(
@@ -166,6 +199,11 @@ async def list_cases(
         },
     )
     _validate_limit(limit)
+    assigned_to_me = _parse_bool_param(
+        "assigned_to_me",
+        request.query_params.get("assigned_to_me"),
+        default=assigned_to_me,
+    )
     
     # Base query
     query = (
@@ -187,30 +225,27 @@ async def list_cases(
             return ConsoleCaseListResponse(items=[], cursor=None, has_more=False)
         query = query.filter(Conversation.branch_id.in_(allowed_branch_ids))
     
-    if branch_id:
-        try:
-            bid = UUID(branch_id)
-            if not is_privileged and bid not in allowed_branch_ids:
-                raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
-            query = query.filter(Conversation.branch_id == bid)
-        except ValueError:
-            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid branch_id")
+    if branch_id is not None:
+        bid = _parse_uuid_param("branch_id", branch_id)
+        if not is_privileged and bid not in allowed_branch_ids:
+            raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
+        query = query.filter(Conversation.branch_id == bid)
     elif context.branch_restricted:
         query = query.filter(Conversation.branch_id.in_(allowed_branch_ids))
     
     # Status filter
-    if status:
+    if status is not None:
         if status not in {"pending", "active", "resolved"}:
             raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
         query = query.filter(Handover.status == status)
     
     # Date range filter
-    if date_from:
+    if date_from is not None:
         from_date = _parse_date_param("date_from", date_from)
         start_of_day = datetime.combine(from_date, time.min).replace(tzinfo=timezone.utc)
         query = query.filter(Handover.created_at >= start_of_day)
     
-    if date_to:
+    if date_to is not None:
         to_date = _parse_date_param("date_to", date_to)
         end_of_day = datetime.combine(to_date, time.max).replace(tzinfo=timezone.utc)
         query = query.filter(Handover.created_at <= end_of_day)
@@ -222,12 +257,9 @@ async def list_cases(
     # Sorting & Pagination (Cursor based on created_at)
     query = query.order_by(Handover.created_at.desc())
     
-    if cursor:
-        try:
-            cursor_date = datetime.fromisoformat(cursor)
-            query = query.filter(Handover.created_at < cursor_date)
-        except ValueError:
-             pass # Ignore invalid cursor
+    cursor_date = _parse_cursor_param(cursor)
+    if cursor_date is not None:
+        query = query.filter(Handover.created_at < cursor_date)
 
     # Select handover + conversation + customer
     items = query.with_entities(Handover, Conversation, User).limit(limit + 1).all()
@@ -462,12 +494,9 @@ async def get_case_messages(
     query = db.query(Message).filter(Message.conversation_id == case.conversation_id)
     query = query.order_by(Message.created_at.desc())
     
-    if cursor:
-        try:
-            cursor_date = datetime.fromisoformat(cursor)
-            query = query.filter(Message.created_at < cursor_date)
-        except ValueError:
-             pass
+    cursor_date = _parse_cursor_param(cursor)
+    if cursor_date is not None:
+        query = query.filter(Message.created_at < cursor_date)
 
     items = query.limit(limit + 1).all()
     
@@ -774,26 +803,20 @@ async def list_audit_events(
 
     query = db.query(AuditEvent).filter(AuditEvent.client_id == context.client.id)
     
-    if entity_type:
+    if entity_type is not None:
         if entity_type not in {"case", "conversation", "settings", "agent"}:
             raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid entity_type")
         query = query.filter(AuditEvent.entity_type == entity_type)
     
-    if entity_id:
-        try:
-            eid = UUID(entity_id)
-            query = query.filter(AuditEvent.entity_id == eid)
-        except ValueError:
-            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid entity_id")
+    if entity_id is not None:
+        eid = _parse_uuid_param("entity_id", entity_id)
+        query = query.filter(AuditEvent.entity_id == eid)
     
     query = query.order_by(AuditEvent.created_at.desc())
     
-    if cursor:
-        try:
-            cursor_date = datetime.fromisoformat(cursor)
-            query = query.filter(AuditEvent.created_at < cursor_date)
-        except ValueError:
-            pass
+    cursor_date = _parse_cursor_param(cursor)
+    if cursor_date is not None:
+        query = query.filter(AuditEvent.created_at < cursor_date)
     
     items = query.limit(limit + 1).all()
     
@@ -904,7 +927,7 @@ async def get_metrics_daily(
     _reject_unknown_query_params(request, {"date"})
 
     # Parse date or use today
-    if date:
+    if date is not None:
         target_date = _parse_date_param("date", date)
     else:
         target_date = datetime.now(timezone.utc).date()
