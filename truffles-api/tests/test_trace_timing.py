@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app import logging_config
 
+
 def _load_webhook_trace():
     trace_path = (
         Path(__file__).resolve().parents[1]

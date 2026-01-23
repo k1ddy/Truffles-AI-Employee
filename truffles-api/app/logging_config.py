@@ -1,9 +1,9 @@
 """JSON logging configuration for Truffles API."""
 
 import json
-from contextlib import contextmanager
 import logging
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
