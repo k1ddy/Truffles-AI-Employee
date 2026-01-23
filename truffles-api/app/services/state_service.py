@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ logger = get_logger("state_service")
 
 PENDING_RESUME_KEY = "pending_resume"
 DECISION_TRACE_KEY = "decision_trace"
+SIMULATION_CONTEXT_KEY = "simulation"
 PENDING_RESUME_SNAPSHOT_KEYS = {
     "context_manager",
     "expected_reply_type",
@@ -35,10 +37,97 @@ PENDING_RESUME_CLEAR_KEYS = {
 
 def _reset_context_preserving_trace(conversation: Conversation) -> None:
     existing = conversation.context if isinstance(conversation.context, dict) else {}
+    preserved: dict = {}
     if DECISION_TRACE_KEY in existing:
-        conversation.context = {DECISION_TRACE_KEY: existing.get(DECISION_TRACE_KEY)}
+        preserved[DECISION_TRACE_KEY] = existing.get(DECISION_TRACE_KEY)
+    if SIMULATION_CONTEXT_KEY in existing:
+        preserved[SIMULATION_CONTEXT_KEY] = existing.get(SIMULATION_CONTEXT_KEY)
+    if "memory_profile" in existing:
+        preserved["memory_profile"] = existing.get("memory_profile")
+    if "memory_pending" in existing:
+        preserved["memory_pending"] = existing.get("memory_pending")
+    conversation.context = preserved or {}
+
+
+def _extract_simulation_meta(metadata) -> dict | None:
+    if not metadata:
+        return None
+    sim_mode = getattr(metadata, "simulation_mode", None)
+    sim_id = getattr(metadata, "simulation_id", None)
+    sim_llm = getattr(metadata, "simulation_llm", None)
+    if sim_mode is None and sim_id is None and sim_llm is None:
+        return None
+    if sim_mode is None:
+        sim_mode = True
+    payload = {"mode": bool(sim_mode), "id": sim_id}
+    if sim_llm is not None:
+        payload["llm_allowed"] = bool(sim_llm)
+    return payload
+
+
+def build_simulation_context(metadata) -> dict | None:
+    return _extract_simulation_meta(metadata)
+
+
+def _get_simulation_context(value) -> dict | None:
+    if hasattr(value, "context"):
+        context = value.context
     else:
-        conversation.context = {}
+        context = value
+    if not isinstance(context, dict):
+        return None
+    sim_context = context.get(SIMULATION_CONTEXT_KEY)
+    if isinstance(sim_context, dict):
+        if sim_context.get("mode") is None:
+            sim_context = dict(sim_context)
+            sim_context["mode"] = True
+        return sim_context
+    sim_mode = context.get("simulation_mode")
+    sim_id = context.get("simulation_id")
+    sim_llm = context.get("simulation_llm")
+    if sim_mode is None and sim_id is None and sim_llm is None:
+        return None
+    if sim_mode is None:
+        sim_mode = True
+    payload = {"mode": bool(sim_mode), "id": sim_id}
+    if sim_llm is not None:
+        payload["llm_allowed"] = bool(sim_llm)
+    return payload
+
+
+def apply_simulation_context(conversation: Conversation, metadata) -> dict | None:
+    sim_meta = _extract_simulation_meta(metadata)
+    if not sim_meta:
+        return None
+    context = conversation.context if isinstance(conversation.context, dict) else {}
+    updated = dict(context)
+    sim_context = dict(updated.get(SIMULATION_CONTEXT_KEY) or {})
+    if sim_meta.get("id") and not sim_context.get("id"):
+        sim_context["id"] = sim_meta["id"]
+    if "mode" in sim_meta:
+        sim_context["mode"] = sim_meta["mode"]
+    if "llm_allowed" in sim_meta:
+        sim_context["llm_allowed"] = sim_meta["llm_allowed"]
+    sim_context.setdefault("source", "webhook_metadata")
+    sim_context["updated_at"] = datetime.now(timezone.utc).isoformat()
+    updated[SIMULATION_CONTEXT_KEY] = sim_context
+    conversation.context = updated
+    return sim_context
+
+
+def is_simulation_context(value) -> bool:
+    sim_context = _get_simulation_context(value)
+    if not sim_context:
+        return False
+    if sim_context.get("mode") is not None:
+        return bool(sim_context.get("mode"))
+    return True
+
+
+def _build_simulated_topic_id(conversation: Conversation, user: User | None) -> int:
+    seed = f"sim:{conversation.id}:{getattr(user, 'id', '')}"
+    digest = uuid.uuid5(uuid.NAMESPACE_DNS, seed).int
+    return 1000 + (digest % 2147480000)
 
 
 def _capture_pending_resume_context(context: dict | None) -> dict:
@@ -69,6 +158,48 @@ def escalate_to_pending(
         return Result.failure(f"Cannot escalate from state {conversation.state}", "invalid_state")
 
     try:
+        if is_simulation_context(conversation):
+            conversation.context = _capture_pending_resume_context(conversation.context)
+            now = datetime.now(timezone.utc)
+            user = db.query(User).filter(User.id == conversation.user_id).first()
+            remote_jid = user.remote_jid if user else None
+            topic_id = _build_simulated_topic_id(conversation, user)
+
+            handover = Handover(
+                conversation_id=conversation.id,
+                client_id=conversation.client_id,
+                trigger_type=trigger_type,
+                trigger_value=trigger_value,
+                user_message=user_message,
+                status="pending",
+                created_at=now,
+                channel="telegram",
+                channel_ref=remote_jid,
+            )
+            db.add(handover)
+
+            transition_state(
+                conversation,
+                ConversationState.PENDING,
+                allow_same=False,
+                enforce=True,
+                handover=handover,
+            )
+            conversation.telegram_topic_id = topic_id
+            if user:
+                user.telegram_topic_id = topic_id
+            conversation.escalated_at = now
+            conversation.retry_offered_at = None
+
+            db.flush()
+
+            logger.info(
+                "Escalated conversation %s to pending (simulation), topic=%s",
+                conversation.id,
+                topic_id,
+            )
+            return Result.success(handover)
+
         conversation.context = _capture_pending_resume_context(conversation.context)
         routing_meta = resolve_telegram_routing(
             db,

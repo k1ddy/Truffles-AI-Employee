@@ -27,6 +27,18 @@ class OutboxPayloadMetadata(BaseModel):
     timestamp: int | None = None
     messageId: str | None = None
     remoteJid: str = Field(..., min_length=1)
+    simulation_mode: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("simulation_mode", "simulationMode"),
+    )
+    simulation_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("simulation_id", "simulationId"),
+    )
+    simulation_llm: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("simulation_llm", "simulationLlm"),
+    )
     instanceId: str | None = Field(
         default=None,
         validation_alias=AliasChoices("instanceId", "instance_id", "instance"),

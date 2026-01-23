@@ -20,7 +20,7 @@ from app.services.chatflow_service import (
 from app.services.learning_service import add_to_knowledge, get_client_slug, is_owner_response
 from app.services.message_service import save_message
 from app.services.state_machine import ConversationState
-from app.services.state_service import transition_state
+from app.services.state_service import is_simulation_context, transition_state
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("manager_message_service")
@@ -276,6 +276,18 @@ def process_manager_message(
     # Update handover with manager response
     handover.manager_response = message_text
 
+    if is_simulation_context(conversation):
+        logger.info(
+            "Simulation mode: skipping outbound and learning",
+            extra={
+                "context": {
+                    "conversation_id": str(conversation.id),
+                    "handover_id": str(handover.id),
+                }
+            },
+        )
+        return True, "Simulation: manager message recorded", took_handover, handover
+
     # Auto-learn from owner responses
     effective_manager_id = manager_telegram_id if manager_telegram_id else None
     if not effective_manager_id and handover.assigned_to:
@@ -367,6 +379,11 @@ def process_manager_media(
     )
     if not conversation or not handover:
         return False, error or "No active conversation found for this chat", False, None
+
+    if is_simulation_context(conversation):
+        if caption and caption.strip():
+            handover.manager_response = caption.strip()
+        return True, "Simulation: manager media recorded", took_handover, handover
 
     if not bot_token:
         return False, "Telegram bot token not found", took_handover, handover

@@ -688,6 +688,46 @@ LIMIT 3;
 
 ---
 
+### 5.7.1 Chaos‑sim SOP (10–15 ходов, RU/KZ/mixed)
+
+**Цель:** прогон 1000–1500 диалогов с шумом/перебивками и проверкой `decision_meta/trace` + state‑переходов, без внешних отправок.
+
+**Команда (logic, без LLM):**
+```bash
+python3 ops/diagnose.py chaos-sim \
+  --count 1200 \
+  --seed 42 \
+  --mode logic \
+  --client-slug demo_salon
+```
+
+**LLM‑режим (ограниченный прогон):**
+```bash
+python3 ops/diagnose.py chaos-sim \
+  --count 150 \
+  --seed 42 \
+  --mode llm \
+  --client-slug demo_salon
+```
+
+**Опции:**
+- `--mode logic|llm` — логический прогон без LLM (по умолчанию) или LLM‑прогон.
+- `--console-mode real|skip` — real требует `CONSOLE_API_TOKEN` или `/home/zhan/secrets/console-contract.env`.
+- `--console-client-id` — для Console API; если не задано, используется client_id из БД.
+- `--debug-all` — пишет `turns.jsonl` с полной структурой meta/trace по каждому ходу.
+
+**Артефакты:**
+- `ops/artifacts/chaos_sim/<timestamp>/failures.jsonl`
+- `stats.json`, `summary.json`, `report.md`
+- `turns.jsonl` (если включён `--debug-all`)
+
+**Safety:**
+- `simulation_mode` в metadata → нет реальных WA/Telegram отправок.
+- outbox помечается как simulated.
+- Рекомендовано `TEST_MODE=1` на проде.
+
+---
+
 ### 5.8 Ожидаемые исходы (чтобы не путаться)
 
 **Logic‑mode (`webhook-fuzz --mode logic`):**

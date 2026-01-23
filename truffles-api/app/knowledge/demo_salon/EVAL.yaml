@@ -135,6 +135,32 @@ eval_cases:
     intent: consult_reply
     must_include_any:
     - уходу после окрашивания
+- id: E003n
+  tier: chaos
+  user: Делаете массаж ног? Волосы ломаются, что посоветуете?
+  expected:
+    action: reply
+    must_include_any:
+    - нет такой позиции
+    - нет такой услуги
+    - нет в списке
+    must_not:
+    - у нас
+    - цена
+    - запис
+- id: E003o
+  tier: chaos
+  user: Сіздер массаж жасайсыздар ма? Шашым сынғыш.
+  expected:
+    action: reply
+    must_include_any:
+    - нет такой позиции
+    - нет такой услуги
+    - нет в списке
+    must_not:
+    - у нас
+    - цена
+    - запис
 - id: E003l
   user: Сколько стоит маникюр?
   expected:

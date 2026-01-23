@@ -19,6 +19,31 @@ logger = get_logger("telegram_webhook")
 router = APIRouter()
 
 
+def _is_simulation_handover(db: Session, handover: Handover | None) -> bool:
+    if not handover:
+        return False
+    conversation = getattr(handover, "conversation", None)
+    if not conversation:
+        conversation = (
+            db.query(Conversation)
+            .filter(Conversation.id == handover.conversation_id)
+            .first()
+        )
+    if not conversation or not isinstance(conversation.context, dict):
+        return False
+    sim_context = conversation.context.get("simulation")
+    if isinstance(sim_context, dict):
+        if sim_context.get("mode") is not None:
+            return bool(sim_context.get("mode"))
+        if sim_context.get("id"):
+            return True
+    if conversation.context.get("simulation_mode") is True:
+        return True
+    if conversation.context.get("simulation_id"):
+        return True
+    return False
+
+
 async def parse_telegram_update(request: Request) -> Optional[dict]:
     """
     Parse Telegram update with tolerant decoding to avoid utf-8 crashes.
@@ -142,6 +167,9 @@ async def handle_manager_message(update: TelegramUpdate, db: Session) -> Telegra
     )
 
     db.commit()
+
+    if _is_simulation_handover(db, handover):
+        return TelegramWebhookResponse(success=success, message=result_message)
 
     bot_token = get_bot_token_by_chat(db, chat_id)
     if bot_token:
@@ -435,19 +463,15 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
     chat_id = callback.message.chat.id if callback.message else None
     message_id = callback.message.message_id if callback.message else None
 
-    # Get bot token
-    bot_token = get_bot_token_by_chat(db, chat_id) if chat_id else None
-    if not bot_token:
-        return TelegramWebhookResponse(success=False, message="Bot token not found")
-
-    telegram = TelegramService(bot_token)
-
     # Find handover
     handover = db.query(Handover).filter(Handover.id == handover_id).first()
     if not handover:
-        telegram._make_request(
-            "answerCallbackQuery", {"callback_query_id": callback.id, "text": "❌ Заявка не найдена"}
-        )
+        bot_token = get_bot_token_by_chat(db, chat_id) if chat_id else None
+        if bot_token:
+            telegram = TelegramService(bot_token)
+            telegram._make_request(
+                "answerCallbackQuery", {"callback_query_id": callback.id, "text": "❌ Заявка не найдена"}
+            )
         return TelegramWebhookResponse(success=False, message=f"Handover {handover_id} not found")
 
     # Get conversation
@@ -455,6 +479,30 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
 
     # Get topic_id for sending messages
     topic_id = conversation.telegram_topic_id if conversation else None
+
+    if _is_simulation_handover(db, handover):
+        if action == "take":
+            result = state_manager_take(db, conversation, handover, manager_id, manager_name)
+            if not result.ok:
+                return TelegramWebhookResponse(success=False, message=result.error)
+            db.commit()
+            return TelegramWebhookResponse(success=True, message="Taken (simulation)", conversation_id=handover.conversation_id)
+        if action in {"resolve", "return"}:
+            result = state_manager_resolve(db, conversation, handover, manager_id, manager_name)
+            if not result.ok:
+                return TelegramWebhookResponse(success=False, message=result.error)
+            db.commit()
+            return TelegramWebhookResponse(success=True, message="Resolved (simulation)", conversation_id=handover.conversation_id)
+        if action == "skip":
+            return TelegramWebhookResponse(success=True, message="Skipped (simulation)")
+        return TelegramWebhookResponse(success=False, message=f"Unknown action: {action}")
+
+    # Get bot token
+    bot_token = get_bot_token_by_chat(db, chat_id) if chat_id else None
+    if not bot_token:
+        return TelegramWebhookResponse(success=False, message="Bot token not found")
+
+    telegram = TelegramService(bot_token)
 
     # Stale buttons protection: if handover already closed, don't error and remove buttons.
     if handover.status not in ["pending", "active"]:

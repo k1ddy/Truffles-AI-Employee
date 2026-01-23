@@ -9,6 +9,18 @@ class WebhookMetadata(BaseModel):
     timestamp: Optional[int] = None
     messageId: Optional[str] = None
     remoteJid: Optional[str] = None
+    simulation_mode: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("simulation_mode", "simulationMode"),
+    )
+    simulation_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("simulation_id", "simulationId"),
+    )
+    simulation_llm: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("simulation_llm", "simulationLlm"),
+    )
     instanceId: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("instanceId", "instance_id", "instance"),

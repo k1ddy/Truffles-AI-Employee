@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 from uuid import UUID
@@ -11,6 +12,30 @@ from app.services.state_machine import ConversationState
 from app.services.telegram_service import TelegramService, build_handover_buttons, format_handover_message
 
 logger = get_logger("escalation_service")
+
+SIMULATION_CONTEXT_KEY = "simulation"
+
+
+def _is_simulation_context(conversation: Conversation | None) -> bool:
+    if not conversation or not isinstance(conversation.context, dict):
+        return False
+    sim_context = conversation.context.get(SIMULATION_CONTEXT_KEY)
+    if isinstance(sim_context, dict):
+        if sim_context.get("mode") is not None:
+            return bool(sim_context.get("mode"))
+        if sim_context.get("id"):
+            return True
+    if conversation.context.get("simulation_mode") is True:
+        return True
+    if conversation.context.get("simulation_id"):
+        return True
+    return False
+
+
+def _build_simulated_topic_id(conversation: Conversation, user: User | None) -> int:
+    seed = f"sim:{conversation.id}:{getattr(user, 'id', '')}"
+    digest = uuid.uuid5(uuid.NAMESPACE_DNS, seed).int
+    return 1000 + (digest % 2147480000)
 
 
 def get_telegram_credentials(db: Session, client_id: UUID) -> Tuple[Optional[str], Optional[str]]:
@@ -104,7 +129,7 @@ def get_active_handover(db: Session, conversation_id: UUID) -> Optional[Handover
 
 def get_or_create_topic(
     db: Session,
-    telegram: TelegramService,
+    telegram: TelegramService | None,
     chat_id: str,
     conversation: Conversation,
     user: User,
@@ -122,6 +147,14 @@ def get_or_create_topic(
         if conversation.telegram_topic_id != topic_id:
             conversation.telegram_topic_id = topic_id
         db.flush()
+        return topic_id
+
+    if _is_simulation_context(conversation):
+        topic_id = _build_simulated_topic_id(conversation, user)
+        user.telegram_topic_id = topic_id
+        conversation.telegram_topic_id = topic_id
+        db.flush()
+        logger.info("Simulation topic assigned %s for conversation %s", topic_id, conversation.id)
         return topic_id
 
     # Create topic name: "77015705555 Жанбол [Truffles]"
@@ -153,6 +186,18 @@ def send_telegram_notification(
     routing_meta: dict | None = None,
 ) -> bool:
     """Send handover notification to Telegram topic with buttons and pin."""
+    if _is_simulation_context(conversation):
+        topic_id = get_or_create_topic(db, None, "", conversation, user)
+        handover.notified_at = datetime.now(timezone.utc)
+        if topic_id and not handover.telegram_message_id:
+            handover.telegram_message_id = -abs(int(topic_id))
+        db.flush()
+        logger.info(
+            "Simulation mode: skipping telegram notification for handover %s",
+            handover.id,
+        )
+        return True
+
     routing_meta = routing_meta or resolve_telegram_routing(
         db,
         conversation=conversation,

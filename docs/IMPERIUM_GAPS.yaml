@@ -292,3 +292,17 @@ gaps:
     acceptance_tests:
       - "EVAL_TIER=chaos runs deterministically with fixed seed and passes"
       - "Chaos suite asserts booking completion and no unexpected escalation on noisy inputs"
+
+  - id: "GAP-024"
+    title: "Long-term memory profile (consent + context) deferred"
+    status: "PARTIAL"
+    why_it_matters: "Personalization is planned but must be opt-in and safe; current work is a disabled skeleton."
+    evidence:
+      - "SPECS/CONSULTANT.md (Правило 3: отложено, flag OFF)"
+      - "truffles-api/app/routers/webhook/decision.py (memory_profile skeleton, flag OFF)"
+      - "truffles-api/app/routers/webhook/context_manager.py (memory helpers)"
+      - "truffles-api/app/services/state_service.py (preserve memory keys on reset)"
+    proposed_fix_mvp: "Enable MEMORY_PROFILE_ENABLED with consent gate, finalize contract, add tests."
+    acceptance_tests:
+      - "Consent prompt shown once; pending stored; yes persists memory in conversation.context"
+      - "MEMORY_PROFILE_ENABLED=0 produces no memory writes"

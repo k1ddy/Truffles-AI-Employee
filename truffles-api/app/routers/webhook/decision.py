@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from pydantic import ValidationError
@@ -1354,6 +1354,8 @@ from app.routers.webhook.context_manager import (
     _get_conversation_context,
     _get_expected_reply_type,
     _get_low_confidence_retry_count,
+    _get_memory_pending,
+    _get_memory_profile,
     _get_reengage_confirmation,
     _get_service_carryover,
     _increment_context_message_count,
@@ -1377,6 +1379,8 @@ from app.routers.webhook.context_manager import (
     _set_expected_reply_type,
     _set_handover_confirmation,
     _set_low_confidence_retry_count,
+    _set_memory_pending,
+    _set_memory_profile,
     _set_re_entry_required,
     _set_reengage_confirmation,
     _set_service_carryover,
@@ -1576,7 +1580,14 @@ from app.services.intent_service import (
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
 from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.state_machine import ConversationState
-from app.services.state_service import escalate_to_pending, manager_resolve, transition_state
+from app.services.state_service import (
+    build_simulation_context,
+    apply_simulation_context,
+    escalate_to_pending,
+    is_simulation_context,
+    manager_resolve,
+    transition_state,
+)
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("webhook")
@@ -1898,6 +1909,14 @@ MSG_LOW_CONFIDENCE = "Хороший вопрос! Уточню у коллег 
 MSG_HANDOVER_CONFIRM = "Не уверен, что понял. Подключить менеджера? Ответьте 'да' или 'нет'."
 MSG_REENGAGE_CONFIRM = "Вы просили не писать. Хотите снова общаться? Ответьте 'да' или 'нет'."
 MSG_REENGAGE_DECLINED = "Хорошо, не буду писать. Если передумаете — напишите снова."
+MSG_MEMORY_CONSENT = (
+    "Могу запомнить ваши предпочтения (имя/услуга/время), чтобы не задавать одно и то же. "
+    "Ответьте 'да' или 'нет'.\n\n"
+    "Қалауыңызды есте сақтай аламын ба (атыңыз/қызмет/уақыт)? "
+    "'иә' немесе 'жоқ' деп жазыңыз."
+)
+MSG_MEMORY_CONSENT_ACCEPTED = "Спасибо! Запомнил ваши предпочтения."
+MSG_MEMORY_CONSENT_DECLINED = "Хорошо, не буду запоминать."
 MSG_HANDOVER_DECLINED = (
     "Ок. Напишите, что именно интересует по салону: цена/запись/адрес/мастер/жалоба."
 )
@@ -1942,6 +1961,15 @@ PENDING_SLA_CONTEXT_KEY = "pending_sla"
 PENDING_SLA_PING_SENT_KEY = "ping_sent_at"
 PENDING_SLA_AUTO_CLOSE_KEY = "auto_closed_at"
 PENDING_RESUME_KEY = "pending_resume"
+MEMORY_PROFILE_KEY = "memory_profile"
+MEMORY_PENDING_KEY = "memory_pending"
+MEMORY_PROFILE_TTL_DAYS = 180
+MEMORY_PENDING_TTL_HOURS = 168
+MEMORY_PROFILE_ENABLED = os.environ.get("MEMORY_PROFILE_ENABLED", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 PENDING_ACK_PHRASES = {
     "ага",
@@ -3258,6 +3286,9 @@ async def _handle_webhook_payload(
         timing_context["branch_id"] = str(resolved_branch_id)
     if resolved_knowledge_tag:
         timing_context["knowledge_tag"] = resolved_knowledge_tag
+    simulation_context = build_simulation_context(metadata)
+    if simulation_context:
+        timing_context["simulation"] = dict(simulation_context)
     timing_context["timing_persisted"] = False
 
     outbound_idempotency_key = message_id or build_inbound_message_id(
@@ -3338,6 +3369,18 @@ async def _handle_webhook_payload(
 
     def _send_response(text: str) -> bool:
         send_start = time.monotonic()
+        if conversation and is_simulation_context(conversation):
+            logger.info(
+                "Simulation mode: skipping outbound send",
+                extra={
+                    "context": {
+                        "conversation_id": str(conversation.id),
+                        "remote_jid": remote_jid,
+                    }
+                },
+            )
+            _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": True})
+            return True
         instance_id = get_instance_id(
             db,
             client.id,
@@ -3458,6 +3501,10 @@ async def _handle_webhook_payload(
                 branch_id=resolved_branch_id,
             )
         timing_context["conversation_id"] = str(conversation.id)
+        if metadata and conversation:
+            sim_context = apply_simulation_context(conversation, metadata)
+            if sim_context:
+                timing_context["simulation"] = dict(sim_context)
 
         if media_info and media_decision is None and media_policy:
             media_decision = await _evaluate_media_decision(
@@ -3839,8 +3886,229 @@ async def _handle_webhook_payload(
             },
         )
 
+    def _detect_language_preference(text: str | None) -> str | None:
+        if not text:
+            return None
+        normalized = _normalize_text(text)
+        if not normalized:
+            return None
+        if any(token in normalized for token in ("қазақша", "казах", "қазақ", "қазак")):
+            return "kz"
+        if any(token in normalized for token in ("по-русски", "русск")):
+            return "ru"
+        for char in ("ә", "ғ", "қ", "ң", "ө", "ұ", "ү", "һ", "і"):
+            if char in normalized:
+                return "kz"
+        return None
+
+    def _collect_memory_candidates(context: dict, text: str | None) -> dict[str, dict]:
+        candidates: dict[str, dict] = {}
+        booking_state = _get_booking_context(context)
+        if isinstance(booking_state, dict):
+            name_value = booking_state.get("name")
+            if isinstance(name_value, str) and name_value.strip():
+                candidates["name"] = {
+                    "value": name_value.strip(),
+                    "source": "booking_slot",
+                    "confidence": 1.0,
+                }
+            service_value = booking_state.get("service")
+            if isinstance(service_value, str) and service_value.strip():
+                candidates["preferred_service"] = {
+                    "value": service_value.strip(),
+                    "source": "booking_slot",
+                    "confidence": 1.0,
+                }
+            time_value = booking_state.get("datetime")
+            if isinstance(time_value, str) and time_value.strip():
+                candidates["preferred_time"] = {
+                    "value": time_value.strip(),
+                    "source": "booking_slot",
+                    "confidence": 1.0,
+                }
+        language = _detect_language_preference(text)
+        if language:
+            candidates["language"] = {
+                "value": language,
+                "source": "language_detect",
+                "confidence": 1.0,
+            }
+        return candidates
+
+    def _upsert_memory_item(
+        *,
+        items: dict[str, dict],
+        key: str,
+        payload: dict,
+        now: datetime,
+        ttl_days: int,
+    ) -> bool:
+        if not isinstance(key, str) or not key.strip() or not isinstance(payload, dict):
+            return False
+        value = payload.get("value")
+        if not isinstance(value, str) or not value.strip():
+            return False
+        expires_at = (now + timedelta(days=ttl_days)).isoformat()
+        next_item = {
+            "value": value.strip(),
+            "confidence": float(payload.get("confidence") or 1.0),
+            "source": payload.get("source") or "user",
+            "updated_at": now.isoformat(),
+            "expires_at": expires_at,
+        }
+        existing = items.get(key) if isinstance(items.get(key), dict) else None
+        if existing and existing.get("value") == next_item["value"]:
+            items[key] = {**existing, **next_item}
+            return True
+        items[key] = next_item
+        return True
+
+    def _merge_pending_items(
+        pending: dict | None,
+        candidates: dict[str, dict],
+        now: datetime,
+    ) -> tuple[dict | None, list[str]]:
+        if not candidates:
+            return pending, []
+        pending = dict(pending) if isinstance(pending, dict) else {}
+        items = pending.get("items")
+        if not isinstance(items, dict):
+            items = {}
+        added_keys: list[str] = []
+        for key, payload in candidates.items():
+            if not isinstance(payload, dict):
+                continue
+            value = payload.get("value")
+            if not isinstance(value, str) or not value.strip():
+                continue
+            items[key] = {
+                "value": value.strip(),
+                "source": payload.get("source") or "user",
+                "confidence": float(payload.get("confidence") or 1.0),
+                "captured_at": now.isoformat(),
+            }
+            added_keys.append(key)
+        if items:
+            pending["items"] = items
+            pending["expires_at"] = (now + timedelta(hours=MEMORY_PENDING_TTL_HOURS)).isoformat()
+            return pending, added_keys
+        return None, []
+
+    def _should_prompt_memory_consent(context: dict, response_text: str | None) -> bool:
+        if conversation.state != ConversationState.BOT_ACTIVE.value:
+            return False
+        if not response_text:
+            return False
+        expected_reply = _get_expected_reply_type(context)
+        if expected_reply:
+            return False
+        booking_state = _get_booking_context(context)
+        if isinstance(booking_state, dict) and booking_state.get("active"):
+            return False
+        normalized = _normalize_text(response_text)
+        if "ответьте" in normalized and "да" in normalized and "нет" in normalized:
+            return False
+        return True
+
+    def _apply_memory_updates(response_text: str | None) -> str | None:
+        if not response_text:
+            return response_text
+        if not MEMORY_PROFILE_ENABLED:
+            return response_text
+        context = _get_conversation_context(conversation)
+        profile, profile_changed = _get_memory_profile(context, now=now)
+        pending, pending_expired = _get_memory_pending(context, now=now)
+        if pending_expired:
+            pending = None
+        consent = profile.get("consent") if isinstance(profile.get("consent"), dict) else {}
+        consent_status = consent.get("status") or "unknown"
+        candidates = _collect_memory_candidates(context, message_text)
+        stored_keys: list[str] = []
+        pending_keys: list[str] = []
+        prompt_consent = False
+
+        if consent_status == "granted":
+            items = profile.get("items") if isinstance(profile.get("items"), dict) else {}
+            for key, payload in candidates.items():
+                if _upsert_memory_item(
+                    items=items,
+                    key=key,
+                    payload=payload,
+                    now=now,
+                    ttl_days=int(profile.get("ttl_days") or MEMORY_PROFILE_TTL_DAYS),
+                ):
+                    stored_keys.append(key)
+            if pending and isinstance(pending.get("items"), dict):
+                for key, payload in pending["items"].items():
+                    if _upsert_memory_item(
+                        items=items,
+                        key=key,
+                        payload=payload,
+                        now=now,
+                        ttl_days=int(profile.get("ttl_days") or MEMORY_PROFILE_TTL_DAYS),
+                    ):
+                        stored_keys.append(key)
+                pending = None
+            profile["items"] = items
+        elif consent_status == "declined":
+            pending = None
+        else:
+            pending, pending_keys = _merge_pending_items(pending, candidates, now)
+            if consent_status == "unknown" and pending_keys and _should_prompt_memory_consent(
+                context, response_text
+            ):
+                consent_status = "asked"
+                consent["status"] = "asked"
+                consent["asked_at"] = now.isoformat()
+                consent["source"] = "explicit"
+                consent["prompt_count"] = int(consent.get("prompt_count") or 0) + 1
+                prompt_consent = True
+                profile_changed = True
+
+        consent["status"] = consent_status
+        profile["consent"] = consent
+        if stored_keys:
+            profile["last_updated_at"] = now.isoformat()
+        if profile_changed or stored_keys or pending_expired or pending_keys:
+            context = _set_memory_profile(context, profile)
+            context = _set_memory_pending(context, pending)
+            _set_conversation_context(conversation, context)
+        if prompt_consent:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "memory_profile",
+                    "decision": "consent_prompted",
+                    "state": conversation.state,
+                    "pending_keys": pending_keys,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {"memory_consent_prompted": True, "memory_pending_keys": pending_keys},
+                )
+            return f"{response_text}\n\n{MSG_MEMORY_CONSENT}"
+        if stored_keys:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "memory_profile",
+                    "decision": "stored",
+                    "state": conversation.state,
+                    "stored_keys": sorted(set(stored_keys)),
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {"memory_profile_stored": sorted(set(stored_keys))},
+                )
+        return response_text
+
     def _send_and_save(text: str, *, allow_quiet_hours: bool = True) -> tuple[str, bool]:
         final_text = _finalize_bot_response(text, allow_quiet_hours=allow_quiet_hours)
+        final_text = _apply_memory_updates(final_text)
         _record_contract_traces()
         save_message(db, conversation.id, client.id, role="assistant", content=final_text)
         sent = _send_response(final_text)
@@ -4210,40 +4478,111 @@ async def _handle_webhook_payload(
                     context = _set_asr_confirmation(context, None)
                     _set_conversation_context(conversation, context)
 
-        if asr_low_confidence and transcript:
-            attempt = int(asr_confirmation.get("attempt", 0)) + 1 if asr_confirmation else 1
-            confirmation_payload = {
-                "asked_at": now.isoformat(),
-                "transcript": transcript.strip(),
+    if asr_low_confidence and transcript:
+        attempt = int(asr_confirmation.get("attempt", 0)) + 1 if asr_confirmation else 1
+        confirmation_payload = {
+            "asked_at": now.isoformat(),
+            "transcript": transcript.strip(),
+            "attempt": attempt,
+        }
+        context = _set_asr_confirmation(context, confirmation_payload)
+        _set_conversation_context(conversation, context)
+        bot_response = MSG_ASR_CONFIRM.format(text=confirmation_payload["transcript"])
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {"asr_confirm_requested": True, "asr_low_confidence": True},
+            )
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "media",
+                "decision": "asr_confirm_requested",
+                "reason": "low_confidence",
+                "state": conversation.state,
                 "attempt": attempt,
-            }
-            context = _set_asr_confirmation(context, confirmation_payload)
-            _set_conversation_context(conversation, context)
-            bot_response = MSG_ASR_CONFIRM.format(text=confirmation_payload["transcript"])
-            if saved_message:
-                _update_message_decision_metadata(
-                    saved_message,
-                    {"asr_confirm_requested": True, "asr_low_confidence": True},
+            },
+        )
+        bot_response, sent = _send_and_save(bot_response)
+        result_message = "ASR confirmation requested" if sent else "ASR confirmation send failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    # 9.015 Memory consent confirmation (bot-active only).
+    if (
+        MEMORY_PROFILE_ENABLED
+        and routing.get("allow_bot_reply")
+        and conversation.state == ConversationState.BOT_ACTIVE.value
+    ):
+        context = _get_conversation_context(conversation)
+        profile, profile_changed = _get_memory_profile(context, now=now)
+        consent = profile.get("consent") if isinstance(profile.get("consent"), dict) else {}
+        if consent.get("status") == "asked":
+            decision = classify_confirmation(message_text)
+            if decision in {"yes", "no"}:
+                pending, pending_expired = _get_memory_pending(context, now=now)
+                if pending_expired:
+                    pending = None
+                stored_keys: list[str] = []
+                if decision == "yes":
+                    items = profile.get("items") if isinstance(profile.get("items"), dict) else {}
+                    if pending and isinstance(pending.get("items"), dict):
+                        for key, payload in pending["items"].items():
+                            if _upsert_memory_item(
+                                items=items,
+                                key=key,
+                                payload=payload,
+                                now=now,
+                                ttl_days=int(profile.get("ttl_days") or MEMORY_PROFILE_TTL_DAYS),
+                            ):
+                                stored_keys.append(key)
+                    profile["items"] = items
+                    consent["status"] = "granted"
+                    consent["granted_at"] = now.isoformat()
+                    response_text = MSG_MEMORY_CONSENT_ACCEPTED
+                else:
+                    consent["status"] = "declined"
+                    consent["declined_at"] = now.isoformat()
+                    response_text = MSG_MEMORY_CONSENT_DECLINED
+                profile["consent"] = consent
+                if stored_keys:
+                    profile["last_updated_at"] = now.isoformat()
+                context = _set_memory_profile(context, profile)
+                context = _set_memory_pending(context, None)
+                _set_conversation_context(conversation, context)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "memory_profile",
+                        "decision": "consent_granted" if decision == "yes" else "consent_declined",
+                        "state": conversation.state,
+                        "stored_keys": sorted(set(stored_keys)) if stored_keys else None,
+                    },
                 )
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "media",
-                    "decision": "asr_confirm_requested",
-                    "reason": "low_confidence",
-                    "state": conversation.state,
-                    "attempt": attempt,
-                },
-            )
-            bot_response, sent = _send_and_save(bot_response)
-            result_message = "ASR confirmation requested" if sent else "ASR confirmation send failed"
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message=result_message,
-                conversation_id=conversation.id,
-                bot_response=bot_response,
-            )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "memory_consent": decision,
+                            "memory_stored": sorted(set(stored_keys)) if stored_keys else None,
+                        },
+                    )
+                bot_response, sent = _send_and_save(response_text)
+                result_message = (
+                    "Memory consent handled" if sent else "Memory consent response failed"
+                )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
 
     pending_response = _handle_pending_gate(
         db=db,
@@ -5590,6 +5929,8 @@ async def _handle_webhook_payload(
         message_text=message_text,
         saved_message=saved_message,
         client_slug=payload.client_slug,
+        policy_type=policy_type,
+        policy_pack=policy_pack,
         routing=routing,
         bypass_domain_flows=bypass_domain_flows,
         booking_wants_flow=booking_wants_flow,
@@ -5607,6 +5948,8 @@ async def _handle_webhook_payload(
         consult_context=consult_context,
         message_count=message_count,
         now=now,
+        timing_context=timing_context,
+        client_config=client.config if client else None,
         send_and_save=_send_and_save,
         record_escalation_metric=_record_escalation_metric,
     )

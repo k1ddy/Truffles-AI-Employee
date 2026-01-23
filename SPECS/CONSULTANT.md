@@ -21,7 +21,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 |---------|--------|
 | 1. Нет значит нет | ✅ РЕАЛИЗОВАНО |
 | 2. Анти-амнезия | ⚠️ ЧАСТИЧНО (session memory + re-entry; time‑awareness pending) |
-| 3. Долгосрочная память | 📋 ПЛАН (P2-P3) |
+| 3. Долгосрочная память | ⏸ ОТЛОЖЕНО (context, TTL 180d; флаг OFF) |
 | 4. Умные продажи | 📋 ПЛАН (P3) |
 | 5. Терпение к странностям | ✅ В ПРОМПТЕ |
 | 6. Краткость | ✅ В ПРОМПТЕ |
@@ -113,7 +113,8 @@ _Любые статусы ниже — DERIVED; единственный ист
 
 **Живой хост — канон (in-domain):**
 - **3 исхода:** факт‑ответ (info/consult), booking intake, эскалация.
-- **Fact‑answer (info/consult):** только факты из `client_pack`/`consult_playbooks`; LLM может **только перефразировать** эти факты, новые факты/советы запрещены.
+- **Fact‑answer (info):** только факты из `client_pack`; LLM может **только перефразировать** эти факты.
+- **Consult:** pack‑first (`consult_playbooks`), LLM‑советы только по общему beauty‑уходу (без фактов о салоне).
 - **Booking intake:** сбор слотов записи (`expected_reply_type`); при перебивке — факт‑ответ и возврат к последнему booking‑вопросу.
 - **Hard‑LAW:** оплата (подтверждение/проверка/возвраты), медицинка, жалобы, переносы → только эскалация.
 - **Policy‑gates:** скидки и способы оплаты разрешены **только** по явным правилам в `client_pack`; иначе эскалация.
@@ -126,14 +127,15 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Decision trace/meta: `stage=booking_interrupt`, `booking_info_interrupt=true`, `booking_info_intents` сохраняются.
 - Если сообщение не относится к записи и нет booking‑сигнала → поставить booking на паузу до явного запроса записи.
 
-**Consult clarify (pack-only, no LLM advice):**
-- Consult canon: info-first only from pack playbooks; no LLM advice/facts. If explicit info/booking request (pricing/duration/location/hours/booking) and service recognized → short-circuit to normal info/booking; advice-style consult stays in consult even if service recognized. If playbook missing and no service → max 2 clarifications (`clarify_limit=2`), then escalate `consult_no_service`.
-- Consult‑интенты → пытаемся матчить `client_pack.consult_playbooks` (topic/aliases). Если playbook найден → info-first ответ только из pack (`lead`, `questions`, `options`, `next_step`), без LLM-советов/фактов.
-- Если consult‑интент содержит распознанную услугу/категорию → **short‑circuit** в обычный info/booking (без уточнения).
+**Consult clarify (pack-first + LLM fallback, safe):**
+- Consult canon: сначала playbook из `client_pack.consult_playbooks`; если нет playbook и это beauty‑тема без Hard‑LAW — разрешён LLM‑совет (общие рекомендации).
+- LLM‑совет **не имеет права** говорить о наличии услуг, ценах, условиях салона. Только общая бьюти‑консультация.
+- Если в сообщении есть вопрос "оказываете ли X" и услуги нет в каталоге → чёткий ответ "у нас нет" + мягкая альтернатива. ЛLM‑совет может идти **после** этого ответа.
+- Если explicit info/booking (pricing/duration/location/hours/booking) и услуга распознана → short‑circuit в info/booking (без уточнения).
 - Если playbook не найден и услуги нет → максимум 2 уточнения (`clarify_limit=2`), `expected_reply_type=service_choice`; после лимита без услуги → эскалация с reason `consult_no_service`.
-- Hard‑LAW/Policy/opt‑out/human выше consult: если сработало — consult‑playbook не применяется.
-- Вариант ответа выбирается детерминированно (hash от `conversation_id + playbook_id`) — без дрейфа.
-- Trace/meta: `stage=consult_flow` (`decision=consult_clarify|consult_escalate|short_circuit`), `clarify_attempt`, `expected_reply_type=service_choice`, `consult_playbook_id`, `consult_variant_id`, `tips_used` (из `options`), `source=pack`.
+- Hard‑LAW/Policy/opt‑out/human выше consult: если сработало — consult‑playbook/LLM не применяется.
+- Вариант ответа playbook выбирается детерминированно (hash от `conversation_id + playbook_id`) — без дрейфа.
+- Trace/meta: `stage=consult_flow` (`decision=consult_clarify|consult_escalate|short_circuit|consult_llm`), `clarify_attempt`, `expected_reply_type=service_choice`, `consult_playbook_id`, `consult_variant_id`, `tips_used`, `source=pack|llm`.
 
 **CTA после инфо‑ответа (standalone, вне booking):**
 - После ответа на цены/длительность/часы/адрес — добавить мягкий CTA: “Хотите записаться?”.
@@ -188,8 +190,8 @@ _Любые статусы ниже — DERIVED; единственный ист
 - **LLM‑контроллер** отдаёт intent/slots (structured JSON), но commit — детерминированный (validators + semantic resolver).
 - **Enforcement‑гейты** (state/policy/LAW) выше смысла и могут перекрывать решение ради безопасности.
 - Semantic resolver (embeddings) подтверждает смысл; ключевые слова/якоря — только fallback.
-- LLM **не создаёт факты**. Факты берутся только из tools/packs.
-- LLM формулирует ответ **только** на фактах из `client_pack`/`consult_playbooks` и может лишь перефразировать их.
+- LLM **не создаёт факты**. Факты об услугах/ценах/наличии берутся только из tools/packs.
+- LLM может давать **общие beauty‑рекомендации** (consult) без медицины и без заявлений о наличии услуг/цен/условий салона.
 - Response Guard обязателен: ответ = ack + facts + next_step; лишнее → fallback/clarify.
 - Валидатор ответа:
   - оплата (подтверждение/проверка/возвраты)/медицинка/жалобы/переносы → **override на эскалацию**;
@@ -285,50 +287,68 @@ def get_conversation_history(db, conversation_id, limit=10):
 - Поведение: короткое спокойное сообщение (1–2 предложения) с уведомлением, что салон закрыт, и просьбой оставить вопрос для ответа в рабочее время.
 - Применяется только в `bot_active` (в `pending/manager_active` бот молчит по правилам состояния).
 
-**Memory policy (PLAN):**
-- TTL: старые слоты не использовать без re‑confirm; после handoff — re‑entry.
-- Re‑confirm: при паузе/сомнении подтверждаем ключевые слоты (услуга/время/филиал).
-- Конфликт слотов: приоритет последнего подтверждённого значения.
+**Memory policy (DEFERRED; feature flag OFF):**
+- Память будет храниться в `conversation.context` (v1), без user‑metadata. TTL = 180 дней.
+- Consent обязателен: один явный вопрос, ответ "да/нет". До согласия — только pending‑слоты.
+- Записываем только подтверждённые данные с высокой уверенностью (слоты booking, явное имя).
+- Конфликт слотов: приоритет последнего подтверждённого значения; при сомнении — re‑confirm.
 - `compact_summary` — детерминированный, без новых фактов/советов.
+- В этой сессии память **не активируем**; флаг `MEMORY_PROFILE_ENABLED=0` (default).
 
 ---
 
-## Правило 3: Долгосрочная память [ПЛАН P2-P3]
+## Правило 3: Долгосрочная память (v1, context‑based) [P2 → ОТЛОЖЕНО]
 
-Клиент вернулся через день/неделю/месяц → бот помнит:
-- Последнее намерение (`interested_in_pro`)
-- Последнее решение (`thinking`, `will_call_back`)
-- О чём говорили
+Цель: бережно помнить клиента в рамках диалога (и повторных сообщений по тому же `conversation`)
+без риска галлюцинаций.
 
-**Пример:**
-> "Здравствуйте, Анна! Что решили по поводу тарифа Pro?"
-
-**Что нужно реализовать:**
-
-1. Добавить поля в `users`:
-```sql
-ALTER TABLE users ADD COLUMN last_intent TEXT;
-ALTER TABLE users ADD COLUMN last_decision TEXT;
-ALTER TABLE users ADD COLUMN metadata JSONB;  -- для summary
+**Контракт `conversation.context.memory_profile` (v1):**
+```yaml
+memory_profile:
+  version: 1
+  ttl_days: 180
+  last_updated_at: ISO8601
+  consent:
+    status: "unknown|asked|granted|declined"
+    asked_at: ISO8601
+    granted_at: ISO8601
+    declined_at: ISO8601
+    source: "explicit"
+    prompt_count: int
+  items:
+    name:
+      value: "Анна"
+      confidence: 1.0
+      source: "booking_slot"
+      updated_at: ISO8601
+      expires_at: ISO8601
+    preferred_service:
+      value: "Маникюр"
+      confidence: 1.0
+      source: "booking_slot"
+      updated_at: ISO8601
+      expires_at: ISO8601
+    preferred_time:
+      value: "вечером"
+      confidence: 1.0
+      source: "booking_slot"
+      updated_at: ISO8601
+      expires_at: ISO8601
 ```
 
-2. После каждого разговора — суммаризация:
-```python
-def summarize_conversation(conversation_id):
-    """Создать summary разговора для долгосрочной памяти."""
-    messages = get_conversation_history(db, conversation_id, limit=50)
-    
-    summary = llm.generate([
-        {"role": "system", "content": "Кратко опиши: о чём говорили, что решил клиент, что важно помнить."},
-        {"role": "user", "content": format_messages(messages)}
-    ])
-    
-    user.metadata = {"summary": summary, "updated_at": now}
-```
+**Правила записи:**
+- Пока нет consent: новые данные попадают в `memory_pending` (не используются в ответах).
+- После "да": переносим pending → memory_profile.items и начинаем использовать.
+- После "нет": pending очищается, повторный запрос не делаем.
+- Только подтверждённые слоты (name/service/datetime) и надёжная детекция языка.
+- Медицинские/Hard‑LAW детали **не записываются**.
 
-3. При новом разговоре — использовать summary в промпте.
+**Статус:** отложено. Код‑скелет подготовлен, но feature flag OFF.
 
-**Статус:** Не реализовано. Приоритет P2-P3.
+**Где уже есть заготовка (не активна):**
+- `truffles-api/app/routers/webhook/decision.py` — consent‑prompt + запись `memory_profile`.
+- `truffles-api/app/routers/webhook/context_manager.py` — helpers для профиля/TTL.
+- `truffles-api/app/services/state_service.py` — сохранение профиля при reset.
 
 ---
 

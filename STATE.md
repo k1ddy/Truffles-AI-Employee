@@ -56,7 +56,9 @@
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **OPEN-1:** Branch routing stickiness: instanceId inbound не переопределяет existing conversation.branch_id; outbound уходит через client.config.instance_id (demo_salon). Evidence 2026-01-20 ниже.
 - **OPEN-2:** GAP-023 Chaos dialog testing (noise/interruptions) отсутствует — зафиксировано в `docs/IMPERIUM_GAPS.yaml`; нужен seeded chaos‑eval tier на 10–15 ходов.
+- **OPEN-3:** GAP-024 Долгосрочная память (context profile) отложена — код‑скелет есть, флаг OFF; см. `docs/IMPERIUM_GAPS.yaml`.
 - **PLAN (no evidence):** P0 “бот не знает, что отвечать” → расширить RU/KZ/mixed лексиконы и диалоги в packs + покрыть детерминированным webhook‑fuzz (см. Task Package ниже).
+- **PLAN (no evidence):** Task Package `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` — chaos‑sim + consult quality (multi‑intent, safe advice).
 - **DONE:** Anti bot-to-bot loop guard (preflight ignores inbound from sender‑JID matching `branches.phone`) deployed. Evidence: clean sender `77785890765` → demo_salon main branch OK (conv_id `10049e90-5805-425f-841b-c0c9419c9c30`, msg_id `3EB07B249B69BBABF1FB13`, decision_meta action=match source=service_semantic_matcher, outbox SENT). Branch‑sender ignore exercised: trace stage `preflight` reason `sender_is_branch` recorded at `2026-01-20T13:06:36Z` in conv_id `4dd2e5ae-c287-4137-803a-18a89e277bf4` after branch→branch send (LC-BRANCH-LOOP-20260120-130633).
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.

@@ -1873,6 +1873,12 @@ def _looks_like_service_question(
         "оказываете",
         "предоставляете",
         "можно сделать",
+        "жасайсыз",
+        "жасайсыздар",
+        "жасай ма",
+        "бар ма",
+        "қызмет көрсет",
+        "көрсетесіз",
     ]
     if _contains_any(normalized, service_keywords):
         return True

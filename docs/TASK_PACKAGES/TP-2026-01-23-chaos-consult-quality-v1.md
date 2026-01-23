@@ -1,0 +1,57 @@
+- Название/цель: Chaos-sim v1 + улучшение качества консультаций (multi-intent, "не оказываем" + безопасный совет) без памяти.
+- Canon refs: `STATE.md` (GAP-023, GAP-024), `SPECS/CONSULTANT.md` (consult canon), `SPECS/SYSTEM_REFERENCE.md` (Chaos-sim SOP), `STRATEGY/REQUIREMENTS.md`.
+- Invariant:
+  - Никаких внешних WA/Telegram отправок в сим-режиме.
+  - Facts только из packs; LLM не утверждает услуги/цены/условия салона.
+  - decision_meta/decision_trace пишутся на каждом user-message.
+- Scope:
+  - Consult flow: service availability + безопасный LLM-совет (pack-first, multi-intent).
+  - Chaos-sim runner и артефакты (ops/diagnose.py) + SOP.
+  - Память оставляем отключенной (feature flag OFF) и документируем задел.
+- Out of scope:
+  - Персонализация/долгосрочная память (в этой сессии не включаем).
+  - Календарное бронирование.
+  - Feedback после визита.
+- Touch-list:
+  - `truffles-api/app/routers/webhook/response.py`
+  - `truffles-api/app/services/ai_service.py`
+  - `truffles-api/app/services/demo_salon_knowledge.py`
+  - `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
+  - `truffles-api/app/routers/webhook/decision.py`
+  - `SPECS/CONSULTANT.md`
+  - `SPECS/SYSTEM_REFERENCE.md`
+  - `docs/IMPERIUM_GAPS.yaml`
+  - `STATE.md`
+- Plan:
+  1) Отключить память флагом (не менять поведение в этой сессии).
+  2) Добавить consult LLM (safe) и combine с service availability в multi-intent.
+  3) Расширить EVAL для chaos-мультиинтентов (RU/KZ/mixed).
+  4) Обновить канон/документацию + зафиксировать GAP-024.
+  5) Smoke checks + короткий chaos-sim прогон.
+- DoD:
+  - Multi-intent consult отвечает: "не оказываем" + (опционально) безопасный совет.
+  - LLM-consult не упоминает услуги/цены/запись/адрес.
+  - Память не активна по умолчанию (MEMORY_PROFILE_ENABLED=0).
+  - Chaos-sim SOP обновлён и запускается.
+- Checks:
+  - `python3 -m pytest truffles-api/tests/test_demo_salon_eval.py -k E003n`
+  - `EVAL_TIER=chaos python3 -m pytest truffles-api/tests/test_demo_salon_eval.py`
+  - `python3 ops/diagnose.py chaos-sim --count 50 --seed 42 --mode logic --client-slug demo_salon`
+- Evidence:
+  - Логи прогонов + артефакты `ops/artifacts/chaos_sim/<timestamp>/`.
+  - SQL/trace bundle по выборке (если нужен для STATE.md).
+- Rollback:
+  - `git revert <commit>`.
+- No-go:
+  - Включать память/персонализацию.
+  - Внешние отправки WA/Telegram в сим-режиме.
+  - Ручные правки БД ради evidence.
+- Риски/блокеры:
+  - Стоимость LLM: включать только ограниченный прогон (100-150) при необходимости.
+  - LLM недоступен (OPENAI_API_KEY): consult LLM деградирует в clarify.
+- Branch/worktree:
+  - Branch: `ops/chaos-sim-v1`
+  - Worktree: `/home/zhan/worktrees/chaos-sim-v1`
+  - Base ref: `origin/main`
+  - Merge policy: merge-only (no rebase)
+  - Cleanup: Brain/Top Architect после merge.

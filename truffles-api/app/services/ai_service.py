@@ -140,6 +140,8 @@ YES_CONFIRMATION_PHRASES = {
     "окей",
     "okay",
     "yes",
+    "иә",
+    "ия",
     "конечно",
     "давай",
     "подключай",
@@ -151,6 +153,8 @@ NO_CONFIRMATION_PHRASES = {
     "неа",
     "no",
     "не",
+    "жоқ",
+    "жок",
     "не надо",
     "не нужно",
     "не хочу",
@@ -227,6 +231,8 @@ LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "600"))
 MAX_HISTORY_MESSAGES = int(os.environ.get("LLM_HISTORY_MESSAGES", "6"))
 MAX_KNOWLEDGE_CHARS = int(os.environ.get("LLM_KNOWLEDGE_CHARS", "1500"))
 LLM_CACHE_TTL_SECONDS = int(os.environ.get("LLM_CACHE_TTL_SECONDS", "86400"))
+CONSULT_LLM_TIMEOUT_SECONDS = float(os.environ.get("CONSULT_LLM_TIMEOUT_SECONDS", "6"))
+CONSULT_LLM_MAX_TOKENS = int(os.environ.get("CONSULT_LLM_MAX_TOKENS", "220"))
 LLM_CACHE_PREFIX = "truffles:llm_cache"
 LLM_CACHE_SOCKET_TIMEOUT_SECONDS = float(os.environ.get("LLM_CACHE_SOCKET_TIMEOUT_SECONDS", "0.3"))
 REDIS_URL = os.environ.get("REDIS_URL", "redis://truffles_redis_1:6379/0")
@@ -234,6 +240,26 @@ POLICY_VERSION = os.environ.get("POLICY_VERSION", "v1")
 LLM_BUDGET_PREFIX = "truffles:llm_budget"
 LLM_BUDGET_SOCKET_TIMEOUT_SECONDS = float(os.environ.get("LLM_BUDGET_SOCKET_TIMEOUT_SECONDS", "0.3"))
 RAG_SEARCH_MIN_BUDGET_MS = 500.0
+CONSULT_DISALLOWED_PATTERNS = [
+    r"\bцена\b",
+    r"\bстоим",
+    r"\bстоимость",
+    r"\bпрайс",
+    r"\bзапис",
+    r"\bзапиш",
+    r"\bадрес\b",
+    r"\bмастер",
+    r"\bадминистратор",
+    r"\bскидк",
+    r"\bакци",
+    r"\bоплат",
+    r"\bкаспи",
+    r"\bу нас\b",
+    r"\bв салоне\b",
+    r"\bмы делаем\b",
+    r"\bмы оказываем\b",
+    r"\bмы предостав",
+]
 
 # Global LLM provider instance
 _llm_provider = None
@@ -337,18 +363,67 @@ def _should_attempt_stage(
     return False
 
 
+def _simulation_llm_allowed(timing_context: dict | None) -> bool:
+    if not isinstance(timing_context, dict):
+        return True
+    sim_context = timing_context.get("simulation")
+    if not isinstance(sim_context, dict):
+        return True
+    if sim_context.get("mode") is False:
+        return True
+    llm_allowed = sim_context.get("llm_allowed")
+    if llm_allowed is None:
+        return False
+    return bool(llm_allowed)
+
+
 def _should_attempt_llm(
     timing_context: dict | None,
     *,
     timeout_seconds: float,
     stage: str,
 ) -> bool:
+    if not _simulation_llm_allowed(timing_context):
+        if isinstance(timing_context, dict):
+            timing_context["llm_degradation_reason"] = "llm_skip"
+        return False
     required_ms = max(float(timeout_seconds) * 1000, 0.0)
     return _should_attempt_stage(
         timing_context,
         required_ms=required_ms,
         stage=stage,
     )
+
+
+def _split_consult_sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\s+|\n+", text)
+    return [part.strip() for part in parts if part and part.strip()]
+
+
+def _contains_disallowed_consult(text: str) -> bool:
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return False
+    for pattern in CONSULT_DISALLOWED_PATTERNS:
+        if re.search(pattern, normalized):
+            return True
+    return False
+
+
+def _filter_consult_advice(text: str) -> str | None:
+    if not text:
+        return None
+    cleaned = text.strip().strip('"').strip()
+    if not cleaned:
+        return None
+    sentences = _split_consult_sentences(cleaned)
+    if not sentences:
+        return None
+    allowed = [sentence for sentence in sentences if not _contains_disallowed_consult(sentence)]
+    if not allowed:
+        return None
+    combined = " ".join(allowed).strip()
+    return _trim_text(combined, 420)
 
 
 def get_llm_provider() -> OpenAIProvider:
@@ -1872,6 +1947,11 @@ def generate_ai_response(
         else:
             return Result.success((LOW_SIGNAL_RESPONSE, "medium"))
 
+    if not _simulation_llm_allowed(timing_context):
+        if timing_context is not None:
+            timing_context["llm_degradation_reason"] = "llm_skip"
+        return Result.success((None, "low_confidence"))
+
     logger.info(f"generate_ai_response: client_id={client_id}, client_slug={client_slug}")
     if timing_context is not None:
         timing_context.setdefault("llm_cache_hit", False)
@@ -2137,3 +2217,126 @@ def generate_ai_response(
         logger.error(f"AI generation error: {e}", exc_info=True)
         alert_error("AI generation failed", {"client_id": str(client_id), "error": str(e)})
         return Result.failure(str(e), "ai_error")
+
+
+def generate_consult_advice(
+    *,
+    db: Session,
+    client_id: UUID,
+    client_slug: str,
+    conversation_id: UUID,
+    message_text: str,
+    consult_topic: str | None = None,
+    consult_question: str | None = None,
+    client_config: dict | None = None,
+    timing_context: dict | None = None,
+) -> Result[Optional[str]]:
+    if not message_text:
+        return Result.success(None)
+    if not OPENAI_API_KEY:
+        logger.warning("Consult LLM skipped: OPENAI_API_KEY missing")
+        return Result.success(None)
+    if not _should_attempt_llm(
+        timing_context,
+        timeout_seconds=CONSULT_LLM_TIMEOUT_SECONDS,
+        stage="consult_llm",
+    ):
+        return Result.success(None)
+
+    budget_config = client_config or _resolve_client_config(db, client_id, timing_context)
+    budget_meta = consume_llm_budget(
+        client_slug=client_slug,
+        client_config=budget_config,
+        scope="consult",
+    )
+    _append_llm_budget_event(timing_context, budget_meta)
+    if not budget_meta.get("allowed", True):
+        if timing_context is not None:
+            timing_context["llm_degradation_reason"] = "budget_exceeded"
+        return Result.success(None)
+
+    system_prompt = (
+        "Ты бережный консультант салона красоты. Дай общие советы по уходу и красоте. "
+        "Запрещено: утверждать, что салон оказывает услуги, упоминать цены, запись, адрес, "
+        "мастеров, акции или оплату. Запрещено медицинское консультирование и диагнозы. "
+        "Ответ: 1-3 коротких предложения. Пиши на языке клиента (RU/KZ, можно смешанно)."
+    )
+    context_lines = []
+    if consult_topic:
+        context_lines.append(f"Тема: {consult_topic}")
+    if consult_question:
+        context_lines.append(f"Вопрос: {consult_question}")
+    if context_lines:
+        system_prompt = f"{system_prompt}\n\n" + "\n".join(context_lines)
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": message_text},
+    ]
+    llm = get_llm_provider()
+    temperature = 1.0 if FAST_MODEL.strip().lower().startswith("gpt-5") else 0.3
+    llm_start = time.monotonic()
+    try:
+        if timing_context is not None:
+            timing_context["llm_used"] = True
+            timing_context["consult_llm_used"] = True
+        response = llm.generate(
+            messages,
+            temperature=temperature,
+            max_tokens=CONSULT_LLM_MAX_TOKENS,
+            timeout_seconds=CONSULT_LLM_TIMEOUT_SECONDS,
+            model=FAST_MODEL,
+        )
+    except httpx.TimeoutException as exc:
+        if timing_context is not None:
+            timing_context["llm_timeout"] = True
+            timing_context["llm_degradation_reason"] = "llm_timeout"
+        _log_timing(
+            "consult_llm_ms",
+            (time.monotonic() - llm_start) * 1000,
+            timing_context=timing_context,
+            extra={
+                "model_name": FAST_MODEL,
+                "model_tier": "fast",
+                "timeout": True,
+                "timeout_seconds": CONSULT_LLM_TIMEOUT_SECONDS,
+                "conversation_id": str(conversation_id),
+            },
+        )
+        logger.warning(f"Consult LLM timeout after {CONSULT_LLM_TIMEOUT_SECONDS}s: {exc}")
+        return Result.success(None)
+    except Exception as exc:
+        _log_timing(
+            "consult_llm_ms",
+            (time.monotonic() - llm_start) * 1000,
+            timing_context=timing_context,
+            extra={
+                "model_name": FAST_MODEL,
+                "model_tier": "fast",
+                "timeout": False,
+                "conversation_id": str(conversation_id),
+                "error": str(exc),
+            },
+        )
+        logger.warning(f"Consult LLM failed: {exc}")
+        return Result.success(None)
+
+    if timing_context is not None:
+        timing_context["llm_timeout"] = False
+    _log_timing(
+        "consult_llm_ms",
+        (time.monotonic() - llm_start) * 1000,
+        timing_context=timing_context,
+        extra={
+            "model_name": FAST_MODEL,
+            "model_tier": "fast",
+            "timeout": False,
+            "conversation_id": str(conversation_id),
+        },
+    )
+
+    content = (response.content or "").strip()
+    filtered = _filter_consult_advice(content)
+    if not filtered:
+        return Result.success(None)
+    return Result.success(filtered)
