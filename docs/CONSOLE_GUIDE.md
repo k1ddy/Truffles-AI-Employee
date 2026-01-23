@@ -39,6 +39,11 @@ Console uses `agent_identities` to map OIDC `sub` → `agents` → `client_id`.
 - `/console/v1/me` возвращает `clients[]` и `selection_required`.
 - API требует заголовок `X-Client-Id`, если клиентов > 1.
 - UI хранит выбор в `localStorage` (`console:client_id`) и очищает на logout.
+
+**Branch selection (если филиалов несколько или роль branch‑scoped):**
+- `/console/v1/me` возвращает `branches[]` и `branch_selection_required`.
+- API требует заголовок `X-Branch-Id`, если филиалов > 1 и доступ ограничен филиалами.
+- UI хранит выбор в `localStorage` (`console:branch_id`) и очищает на logout.
 **Access scope is enforced here:**
 `truffles-api/app/services/console_auth.py` → `get_console_context()`
 
@@ -54,6 +59,12 @@ Rules:
 - Non‑admin/owner users are restricted to their branch.
 - Если один `sub` связан с несколькими клиентами → API вернёт
   `CLIENT_SELECTION_REQUIRED` (нужен `X-Client-Id`) либо надо убрать дубликаты.
+
+**Tenant UX contract (short):**
+- Контекст (Company / Client / Branch) всегда виден в UI.
+- Selector показывается только если есть выбор (2+).
+- Ошибки должны быть объяснимы: “Выберите клиента/филиал”.
+- Fail‑closed: без валидного контекста запросы не выполняются.
 
 **Common symptom:** “Only 1–2 cases shown / no slots.”  
 Usually means the admin is mapped to the wrong `client_id` or the wrong client was selected.
@@ -188,6 +199,11 @@ curl -s -X POST "$KEYCLOAK_TOKEN_URL" \
 - Очистить `localStorage` ключ `console:client_id`, если выбранный клиент удалён.
 - Решение: оставить одну связку `agent_identities` для нужного клиента или использовать `X-Client-Id`.
 
+**400 BRANCH_SELECTION_REQUIRED**
+- Роль branch‑scoped и доступно несколько филиалов.
+- `/console/v1/me` вернул `branch_selection_required=true` → выбрать филиал или передать `X-Branch-Id`.
+- Очистить `localStorage` ключ `console:branch_id`, если выбранный филиал удалён.
+
 **502 /api/proxy/**
 - `NEXT_PUBLIC_API_URL` не задан или API недоступен.
 - Проверить `console-web/.env.local` и доступность `https://api.truffles.kz/console/v1`.
@@ -207,6 +223,7 @@ curl -s -X POST "$KEYCLOAK_TOKEN_URL" \
 ## 8) Related Canon Docs
 
 - `SPECS/MULTI_TENANT.md` — tenant boundaries and branch routing.
+- `contracts/tenancy/tenant_context.v1.jsonschema` — canonical tenant context contract.
 - `TECH.md` — console env + deploy commands.
 - `docs/PROCESSES.md` — contract map and core flows.
 - `contracts/console_api/*` — API contract source of truth.

@@ -297,6 +297,16 @@ async def _handle_enqueue_only_accept(
         message_id, remote_jid, metadata.timestamp if metadata else None, message_text
     )
     payload_json = payload.model_dump(exclude_none=True)
+    tenant_context = {
+        "client_id": str(client.id),
+        "branch_id": str(conversation.branch_id) if conversation and conversation.branch_id else None,
+        "client_slug": client.name,
+        "source": "webhook",
+    }
+    _merge_nested_dict(
+        payload_json,
+        {"tenant_context": {key: value for key, value in tenant_context.items() if value is not None}},
+    )
     validated_payload, payload_error = validate_outbox_payload(
         payload_json,
         expected_client_slug=client.name,
@@ -335,6 +345,7 @@ async def _handle_enqueue_only_accept(
         conversation_id=conversation.id,
         inbound_message_id=inbound_message_id,
         payload_json=payload_json,
+        branch_id=conversation.branch_id,
     )
     if enqueued:
         logger.info(

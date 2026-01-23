@@ -10,6 +10,8 @@ export interface paths {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -33,6 +35,8 @@ export interface paths {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -56,6 +60,8 @@ export interface paths {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -76,6 +82,8 @@ export interface paths {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -100,6 +108,8 @@ export interface paths {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -123,6 +133,8 @@ export interface paths {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -143,6 +155,8 @@ export interface paths {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -167,6 +181,8 @@ export interface paths {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -187,6 +203,8 @@ export interface paths {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -207,6 +225,8 @@ export interface paths {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -231,6 +251,8 @@ export interface paths {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -302,6 +324,9 @@ export interface components {
             branches?: components["schemas"]["Branch"][];
             clients?: components["schemas"]["Client"][];
             selection_required?: boolean;
+            branch_selection_required?: boolean;
+            /** Format: uuid */
+            selected_branch_id?: string | null;
         };
         Case: {
             /** Format: uuid */
@@ -520,7 +545,18 @@ export interface components {
             headers: {
                 [name: string]: unknown;
             };
-            content?: never;
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "INVALID_PARAM",
+                 *         "message": "Invalid parameter",
+                 *         "trace_id": "abc123"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
         };
         /** @description Insufficient permissions */
         Forbidden: {
@@ -630,6 +666,9 @@ export interface components {
         idempotency_key: string;
         /** @description Client selection when identity maps to multiple clients. */
         client_id_header: string;
+        /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+        branch_id_header: string;
+        /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
         case_id: string;
         /** @description Pagination cursor (opaque) */
         cursor: string;
@@ -647,6 +686,8 @@ export interface operations {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -682,6 +723,8 @@ export interface operations {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -697,7 +740,9 @@ export interface operations {
                     "application/json": components["schemas"]["CaseListResponse"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["ValidationError"];
         };
     };
@@ -707,8 +752,11 @@ export interface operations {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path: {
+                /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
                 case_id: components["parameters"]["case_id"];
             };
             cookie?: never;
@@ -726,6 +774,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationError"];
         };
@@ -736,10 +785,13 @@ export interface operations {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
                 /** @description Stable key for safe retries of mutating requests. */
                 "Idempotency-Key"?: components["parameters"]["idempotency_key"];
             };
             path: {
+                /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
                 case_id: components["parameters"]["case_id"];
             };
             cookie?: never;
@@ -772,10 +824,13 @@ export interface operations {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
                 /** @description Stable key for safe retries of mutating requests. */
                 "Idempotency-Key"?: components["parameters"]["idempotency_key"];
             };
             path: {
+                /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
                 case_id: components["parameters"]["case_id"];
             };
             cookie?: never;
@@ -805,8 +860,11 @@ export interface operations {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path: {
+                /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
                 case_id: components["parameters"]["case_id"];
             };
             cookie?: never;
@@ -824,6 +882,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationError"];
         };
@@ -834,10 +893,13 @@ export interface operations {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
                 /** @description Stable key for safe retries of mutating requests. */
                 "Idempotency-Key"?: components["parameters"]["idempotency_key"];
             };
             path: {
+                /** @example e03933eb-780e-4d0d-890f-741bc3ca9733 */
                 conversation_id: string;
             };
             cookie?: never;
@@ -867,6 +929,8 @@ export interface operations {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -893,6 +957,8 @@ export interface operations {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -908,6 +974,7 @@ export interface operations {
                     "application/json": components["schemas"]["MetricsDailyResponse"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["ValidationError"];
@@ -919,6 +986,8 @@ export interface operations {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -934,6 +1003,7 @@ export interface operations {
                     "application/json": components["schemas"]["SettingsResponse"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -944,6 +1014,8 @@ export interface operations {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -978,6 +1050,8 @@ export interface operations {
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
                 "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
             };
             path?: never;
             cookie?: never;
@@ -993,6 +1067,7 @@ export interface operations {
                     "application/json": components["schemas"]["AuditListResponse"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["ValidationError"];

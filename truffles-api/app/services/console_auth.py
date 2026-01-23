@@ -32,6 +32,8 @@ class ConsoleAuthContext:
     allowed_branch_ids: set[UUID]
     branch_restricted: bool
     effective_branch_id: Optional[UUID]
+    branch_selection_required: bool
+    selected_branch_id: Optional[UUID]
     subject: str
     token_payload: dict[str, Any]
 
@@ -148,6 +150,60 @@ def _parse_client_header(request: Request) -> Optional[UUID]:
         return UUID(raw_client_id)
     except ValueError as exc:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid X-Client-Id header") from exc
+
+
+def _parse_branch_header(request: Request) -> Optional[UUID]:
+    raw_branch_id = request.headers.get("x-branch-id")
+    if not raw_branch_id:
+        return None
+    try:
+        return UUID(raw_branch_id)
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid X-Branch-Id header") from exc
+
+
+def _resolve_client_selection(
+    access_map: dict[UUID, _AccessEntry],
+    accessible_clients: list[Client],
+    *,
+    selected_client_id: Optional[UUID],
+    require_selection: bool,
+) -> tuple[Optional[UUID], bool]:
+    selection_required = False
+    if selected_client_id:
+        if selected_client_id not in access_map:
+            if require_selection:
+                raise ConsoleAPIError(403, "TENANT_MISMATCH", "Client access denied")
+            selected_client_id = None
+    elif len(accessible_clients) == 1:
+        selected_client_id = accessible_clients[0].id
+    else:
+        selection_required = True
+        if require_selection:
+            raise ConsoleAPIError(400, "CLIENT_SELECTION_REQUIRED", "Client selection required")
+    return selected_client_id, selection_required
+
+
+def _resolve_branch_selection(
+    allowed_branch_ids: set[UUID],
+    *,
+    branch_restricted: bool,
+    selected_branch_id: Optional[UUID],
+    require_selection: bool,
+) -> tuple[Optional[UUID], bool]:
+    branch_selection_required = False
+    effective_branch_id = None
+    if selected_branch_id:
+        if selected_branch_id not in allowed_branch_ids:
+            raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+        effective_branch_id = selected_branch_id
+    elif branch_restricted and len(allowed_branch_ids) == 1:
+        effective_branch_id = next(iter(allowed_branch_ids))
+    elif branch_restricted and len(allowed_branch_ids) > 1:
+        branch_selection_required = True
+        if require_selection:
+            raise ConsoleAPIError(400, "BRANCH_SELECTION_REQUIRED", "Branch selection required")
+    return effective_branch_id, branch_selection_required
 
 
 def _pick_agent_for_client(agents: list[Agent], client_id: UUID) -> Agent:
@@ -322,18 +378,12 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
         if require_selection:
             raise
         selected_client_id = None
-    selection_required = False
-    if selected_client_id:
-        if selected_client_id not in access_map:
-            if require_selection:
-                raise ConsoleAPIError(403, "TENANT_MISMATCH", "Client access denied")
-            selected_client_id = None
-    elif len(accessible_clients) == 1:
-        selected_client_id = accessible_clients[0].id
-    else:
-        selection_required = True
-        if require_selection:
-            raise ConsoleAPIError(400, "CLIENT_SELECTION_REQUIRED", "Client selection required")
+    selected_client_id, selection_required = _resolve_client_selection(
+        access_map,
+        accessible_clients,
+        selected_client_id=selected_client_id,
+        require_selection=require_selection,
+    )
 
     selected_client = clients_by_id.get(selected_client_id) if selected_client_id else accessible_clients[0]
     access_entry = access_map.get(selected_client.id, _AccessEntry())
@@ -361,9 +411,20 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
         allowed_branch_ids = {branch.id for branch in branches_for_client}
         branches = branches_for_client
 
-    effective_branch_id = None
-    if branch_restricted and len(allowed_branch_ids) == 1:
-        effective_branch_id = next(iter(allowed_branch_ids))
+    selected_branch_id: Optional[UUID] = None
+    try:
+        selected_branch_id = _parse_branch_header(request)
+    except ConsoleAPIError:
+        if require_selection:
+            raise
+        selected_branch_id = None
+
+    effective_branch_id, branch_selection_required = _resolve_branch_selection(
+        allowed_branch_ids,
+        branch_restricted=branch_restricted,
+        selected_branch_id=selected_branch_id,
+        require_selection=require_selection,
+    )
 
     return ConsoleAuthContext(
         agent=selected_agent,
@@ -375,6 +436,8 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
         allowed_branch_ids=allowed_branch_ids,
         branch_restricted=branch_restricted,
         effective_branch_id=effective_branch_id,
+        branch_selection_required=branch_selection_required,
+        selected_branch_id=selected_branch_id,
         subject=str(subject),
         token_payload=payload,
     )

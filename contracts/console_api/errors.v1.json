@@ -47,6 +47,17 @@
             },
             "retryable": false
         },
+        "BRANCH_SELECTION_REQUIRED": {
+            "http_status": 400,
+            "message_template": "Branch selection required",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Prompt to select a branch before loading data"
+            },
+            "retryable": false
+        },
         "INVALID_PARAM": {
             "http_status": 400,
             "message_template": "Invalid parameter",

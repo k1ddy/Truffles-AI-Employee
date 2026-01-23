@@ -9,6 +9,9 @@
       "type": "string",
       "minLength": 1
     },
+    "tenant_context": {
+      "$ref": "../tenancy/tenant_context.v1.jsonschema"
+    },
     "body": {
       "type": "object",
       "required": ["metadata"],

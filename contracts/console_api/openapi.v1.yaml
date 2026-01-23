@@ -37,6 +37,7 @@ paths:
   /me:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
     get:
       operationId: getMe
       tags: [auth]
@@ -62,6 +63,7 @@ paths:
   /cases:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
     get:
       operationId: listCases
       tags: [cases]
@@ -114,6 +116,7 @@ paths:
   /cases/{case_id}:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
     get:
       operationId: getCase
       tags: [cases]
@@ -141,6 +144,7 @@ paths:
   /cases/{case_id}/take:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
     post:
       operationId: takeCase
       tags: [cases]
@@ -168,6 +172,7 @@ paths:
   /cases/{case_id}/resolve:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
     post:
       operationId: resolveCase
       tags: [cases]
@@ -194,6 +199,7 @@ paths:
   /cases/{case_id}/messages:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
     get:
       operationId: getCaseMessages
       tags: [messages]
@@ -223,6 +229,7 @@ paths:
   /conversations/{conversation_id}/messages:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
     post:
       operationId: sendManagerMessage
       tags: [messages]
@@ -263,6 +270,7 @@ paths:
   /health:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
     get:
       operationId: getHealth
       tags: [ops]
@@ -279,6 +287,7 @@ paths:
   /metrics/daily:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
     get:
       operationId: getMetricsDaily
       tags: [ops]
@@ -312,6 +321,7 @@ paths:
   /settings:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
     get:
       operationId: getSettings
       tags: [settings]
@@ -356,6 +366,7 @@ paths:
   /audit:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
     get:
       operationId: listAuditEvents
       tags: [audit]
@@ -413,6 +424,14 @@ components:
       in: header
       required: false
       description: Client selection when identity maps to multiple clients.
+      schema:
+        type: string
+        format: uuid
+    branch_id_header:
+      name: X-Branch-Id
+      in: header
+      required: false
+      description: Branch selection when identity is branch-scoped or multiple branches exist.
       schema:
         type: string
         format: uuid
@@ -634,6 +653,12 @@ components:
             $ref: "#/components/schemas/Client"
         selection_required:
           type: boolean
+        branch_selection_required:
+          type: boolean
+        selected_branch_id:
+          type: string
+          format: uuid
+          nullable: true
 
     # ── Cases ──
     Case:

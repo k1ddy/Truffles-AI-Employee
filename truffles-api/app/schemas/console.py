@@ -44,6 +44,8 @@ class ConsoleMeResponse(BaseModel):
     branches: list[ConsoleBranch]
     clients: list[ConsoleClient] = []
     selection_required: bool = False
+    branch_selection_required: bool = False
+    selected_branch_id: Optional[UUID] = None
 
 
 class ConsoleMessage(BaseModel):
@@ -175,6 +177,5 @@ class ConsoleSettingsUpdateRequest(BaseModel):
 class ConsoleSettingsUpdateResponse(BaseModel):
     success: bool
     message: str
-
 
 

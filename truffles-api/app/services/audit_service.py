@@ -21,6 +21,7 @@ class AuditEvent(Base):
     id = Column("event_id", PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     client_id = Column(PGUUID(as_uuid=True), nullable=True)
+    branch_id = Column(PGUUID(as_uuid=True), nullable=True)
     actor_id = Column("actor_agent_id", PGUUID(as_uuid=True), nullable=True)
     actor_name = Column(String(255), nullable=True)
     event_type = Column(String(100), nullable=False)
@@ -31,18 +32,23 @@ class AuditEvent(Base):
 
 def record_audit_event(
     db: Session,
-    actor: Any,
-    event_type: str,
+    actor: Any = None,
+    event_type: str = "",
     entity_type: Optional[str] = None,
     entity_id: Optional[UUID] = None,
     payload: Optional[dict] = None,
+    *,
+    client_id: Optional[UUID] = None,
+    branch_id: Optional[UUID] = None,
+    actor_id: Optional[UUID | str] = None,
+    actor_name: Optional[str] = None,
 ) -> AuditEvent:
     """
     Record an audit event.
 
     Args:
         db: Database session
-        actor: The agent performing the action (has id, name, client_id)
+        actor: The agent performing the action (has id, name, client_id, optional branch_id)
         event_type: Type of event (case_taken, case_resolved, message_sent, etc.)
         entity_type: Type of entity being acted upon (handover, conversation, etc.)
         entity_id: ID of the entity
@@ -51,12 +57,18 @@ def record_audit_event(
     Returns:
         The created AuditEvent
     """
+    resolved_client_id = client_id or getattr(actor, "client_id", None)
+    resolved_branch_id = branch_id or getattr(actor, "branch_id", None)
+    resolved_actor_id = actor_id or getattr(actor, "id", None)
+    resolved_actor_name = actor_name or getattr(actor, "name", None)
+
     event = AuditEvent(
         id=uuid4(),
         created_at=datetime.utcnow(),
-        client_id=getattr(actor, "client_id", None),
-        actor_id=getattr(actor, "id", None),
-        actor_name=getattr(actor, "name", None),
+        client_id=resolved_client_id,
+        branch_id=resolved_branch_id,
+        actor_id=resolved_actor_id,
+        actor_name=resolved_actor_name,
         event_type=event_type,
         entity_type=entity_type,
         entity_id=entity_id,

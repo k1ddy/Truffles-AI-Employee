@@ -9,12 +9,21 @@ import axios, { AxiosError, AxiosInstance } from "axios";
 import type { components, operations } from "@/types/api.generated";
 
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
+const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 
 function getSelectedClientId(): string | undefined {
     if (typeof window === "undefined") {
         return undefined;
     }
     const stored = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    return stored || undefined;
+}
+
+function getSelectedBranchId(): string | undefined {
+    if (typeof window === "undefined") {
+        return undefined;
+    }
+    const stored = window.localStorage.getItem(BRANCH_ID_STORAGE_KEY);
     return stored || undefined;
 }
 
@@ -32,6 +41,7 @@ export const ErrorCodes = {
     TOKEN_EXPIRED: "TOKEN_EXPIRED",
     ACCESS_DENIED: "ACCESS_DENIED",
     CLIENT_SELECTION_REQUIRED: "CLIENT_SELECTION_REQUIRED",
+    BRANCH_SELECTION_REQUIRED: "BRANCH_SELECTION_REQUIRED",
     TENANT_MISMATCH: "TENANT_MISMATCH",
     BRANCH_ACCESS_DENIED: "BRANCH_ACCESS_DENIED",
     NOT_FOUND: "NOT_FOUND",
@@ -97,6 +107,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
         retryable: false,
     },
     CLIENT_SELECTION_REQUIRED: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    BRANCH_SELECTION_REQUIRED: {
         http_status: 400,
         ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
         retryable: false,
@@ -276,6 +291,10 @@ export function createApiClient(): AxiosInstance {
         const selectedClientId = getSelectedClientId();
         if (selectedClientId && !headers["X-Client-Id"]) {
             headers["X-Client-Id"] = selectedClientId;
+        }
+        const selectedBranchId = getSelectedBranchId();
+        if (selectedBranchId && !headers["X-Branch-Id"]) {
+            headers["X-Branch-Id"] = selectedBranchId;
         }
         // Add idempotency key for mutations
         if (config.method && ["post", "put", "patch", "delete"].includes(config.method)) {

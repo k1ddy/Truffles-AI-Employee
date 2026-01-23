@@ -52,6 +52,9 @@ hostname; whoami; pwd; curl -s https://ifconfig.me
 | Пользователь | ${DB_USER} |
 | Пароль | ${DB_POSTGRESDB_PASSWORD} |
 
+**Где брать креды:** на проде источник истины — `/home/zhan/infrastructure/.env` (переменные `DB_POSTGRESDB_USER`, `DB_POSTGRESDB_PASSWORD`).  
+В `truffles-api/.env` `DB_USER` может отсутствовать — используйте значения из infra env.
+
 ### Подключение
 ```bash
 # Из SSH
@@ -62,13 +65,17 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 ```
 
 ### Таблицы (ключевые)
-- clients — клиенты (компании)
+- clients, companies, branches — орг‑структура/тенант
+- agents, agent_memberships — роли доступа в консоли
 - client_settings — настройки клиента
-- users — пользователи (телефоны)
-- conversations — диалоги
-- messages — сообщения
+- users, conversations, messages — ядро диалогов
 - handovers — заявки на менеджера
-- prompts — промпты для AI
+- outbox_messages — ACK‑first доставка
+- audit_events — аудит действий консоли
+- console_idempotency_keys — идемпотентность console API
+- metrics_daily — агрегированные метрики
+
+Полный список таблиц и дата актуализации — `docs/IMPERIUM_CONTEXT.yaml`.
 
 ---
 
