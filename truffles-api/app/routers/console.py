@@ -147,14 +147,12 @@ def _parse_date_param(name: str, value: Optional[str]) -> Optional[dt_date]:
 
 
 def _parse_cursor_param(value: Optional[str]) -> Optional[datetime]:
-    if value is None:
+    if not value:
         return None
-    if value == "":
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid cursor")
     try:
         return datetime.fromisoformat(value)
-    except ValueError as exc:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid cursor") from exc
+    except ValueError:
+        return None
 
 
 @router.get(
