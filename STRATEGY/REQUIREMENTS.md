@@ -86,6 +86,7 @@
 
 ### Наблюдаемость и доказуемость
 - [ ] decision_trace/decision_meta на каждый user‑message.
+- [ ] Единый log/trace контракт: message_id/outbox_id/trace_id + timing.stages в decision_meta; Tempo traces доступны.
 - [ ] Метрики + регресс‑кейсы + smoke‑check перед релизом.
 - [ ] Никакого container drift — деплой только из образа/коммита.
 

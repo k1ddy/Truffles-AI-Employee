@@ -1,6 +1,7 @@
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
+from app import logging_config
 
 def _load_webhook_trace():
     trace_path = (
@@ -56,3 +57,27 @@ def test_merge_message_timing_merges_nested_payloads():
     assert timing["stages"]["booking_ms"] == 3.4
     assert timing["outbox"]["wait_ms"] == 10.0
     assert timing["outbox"]["process_ms"] == 20.0
+
+
+def test_build_trace_attributes_filters():
+    context = {
+        "message_id": "msg-1",
+        "outbox_id": "out-1",
+        "trace_id": "trace-1",
+        "client_slug": "demo",
+        "conversation_id": "conv-1",
+        "branch_id": "branch-1",
+        "extra": "skip",
+        "outbox_ids": ["out-1"],
+    }
+
+    attrs = logging_config.build_trace_attributes(context)
+
+    assert attrs["message_id"] == "msg-1"
+    assert attrs["outbox_id"] == "out-1"
+    assert attrs["trace_id"] == "trace-1"
+    assert attrs["client_slug"] == "demo"
+    assert attrs["conversation_id"] == "conv-1"
+    assert attrs["branch_id"] == "branch-1"
+    assert "extra" not in attrs
+    assert "outbox_ids" not in attrs

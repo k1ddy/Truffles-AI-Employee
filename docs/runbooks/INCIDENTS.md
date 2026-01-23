@@ -14,6 +14,7 @@ Process
 3) Mitigate: rollback, restart, rate limit, or disable noisy path.
 4) Verify: evidence via /admin/health, SQL, logs, trace.
    - For message-chain issues, capture `ops/diagnose.py trace-bundle` output.
+   - Pull `timing.stages` for controller/RAG/dedup/outbox to localize latency.
 5) Record: update STATE.md with evidence and status.
 
 Monitoring quick checks
@@ -38,11 +39,16 @@ for a in alerts:
 PY
 ```
 
+```bash
+curl -s http://localhost:3200/metrics | rg -m 1 tempo_distributor_spans_received_total
+```
+
 Minimum evidence
 - Time window + symptom
 - 5-15 log lines or SQL output
 - System health snapshot
 - Trace-bundle JSON path (if message-chain related)
+- timing.stages snapshot (e.g., controller_llm_ms, rag_ms, outbox_process_ms)
 - Action taken
 
 Post-incident

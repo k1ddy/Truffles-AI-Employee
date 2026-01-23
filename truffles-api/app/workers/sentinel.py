@@ -5,7 +5,7 @@ import httpx
 from sqlalchemy import text
 
 from app.database import SessionLocal
-from app.logging_config import get_logger, setup_logging
+from app.logging_config import get_logger, setup_logging, start_span
 from app.models import Handover, OutboxMessage
 from app.services.health_service import check_and_alert_health, check_and_heal_conversations
 
@@ -45,7 +45,11 @@ def _setup_otel() -> None:
         )
         return
 
-    service_name = os.environ.get("OTEL_SERVICE_NAME", "truffles-sentinel")
+    service_name = (
+        os.environ.get("OTEL_SERVICE_NAME_SENTINEL")
+        or os.environ.get("OTEL_SERVICE_NAME")
+        or "truffles-sentinel"
+    )
     resource = Resource.create({"service.name": service_name})
     provider = TracerProvider(resource=resource)
     exporter = OTLPSpanExporter(endpoint=endpoint)
@@ -125,7 +129,8 @@ async def run_worker():
             db = SessionLocal()
             try:
                 # Run health checks
-                checks = await _run_sentinel_health_checks(db)
+                with start_span("sentinel.health_check"):
+                    checks = await _run_sentinel_health_checks(db)
                 
                 # Send alerts
                 alerts = check_and_alert_health(checks)
@@ -137,7 +142,8 @@ async def run_worker():
                 
                 # Self-heal
                 if heal_enabled:
-                    result = check_and_heal_conversations(db)
+                    with start_span("sentinel.heal"):
+                        result = check_and_heal_conversations(db)
                     if result["healed_count"] > 0:
                         logger.info(
                             "Sentinel healed conversations",

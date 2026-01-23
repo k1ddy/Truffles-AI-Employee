@@ -1299,6 +1299,7 @@ from app.logging_config import (
     record_escalation_count,
     record_inbound_count,
     record_policy_count,
+    start_span,
 )
 from app.models import Branch, Client, Handover, User
 from app.ports.messaging import MessageOptions
@@ -3204,15 +3205,20 @@ async def _handle_webhook_payload(
 
     from . import http as http_helpers
 
-    preflight_response, preflight_payload = http_helpers._run_preflight(
-        payload,
-        db,
-        provided_secret=provided_secret,
-        enforce_secret=enforce_secret,
-        conversation_id=conversation_id,
-        resolve_trace_conversation=_resolve_trace_conversation,
-        record_early_trace=_record_early_trace,
-    )
+    preflight_context = {"client_slug": payload.client_slug}
+    preflight_trace_id = get_trace_id()
+    if preflight_trace_id:
+        preflight_context["trace_id"] = preflight_trace_id
+    with start_span("webhook.preflight", context=preflight_context):
+        preflight_response, preflight_payload = http_helpers._run_preflight(
+            payload,
+            db,
+            provided_secret=provided_secret,
+            enforce_secret=enforce_secret,
+            conversation_id=conversation_id,
+            resolve_trace_conversation=_resolve_trace_conversation,
+            record_early_trace=_record_early_trace,
+        )
     if preflight_response:
         return preflight_response
 
@@ -3243,10 +3249,11 @@ async def _handle_webhook_payload(
     timing_context: dict = {
         "client_slug": payload.client_slug,
         "remote_jid": remote_jid,
+        "message_id": message_id,
         "pipeline_budget_ms": pipeline_budget_ms,
         "pipeline_deadline": pipeline_deadline,
     }
-    trace_id = get_trace_id()
+    trace_id = preflight_trace_id or get_trace_id()
     if trace_id:
         timing_context["trace_id"] = trace_id
     if client and isinstance(client.config, dict):
@@ -3282,6 +3289,8 @@ async def _handle_webhook_payload(
             context.update(extra)
         context["stage"] = stage
         context["elapsed_ms"] = round(elapsed_ms, 2)
+        for key in ("message_id", "outbox_id", "trace_id"):
+            context.setdefault(key, None)
         logger.info("Timing", extra={"context": context})
         timing = timing_context.get("timing")
         if not isinstance(timing, dict):
@@ -3338,64 +3347,77 @@ async def _handle_webhook_payload(
 
     def _send_response(text: str) -> bool:
         send_start = time.monotonic()
-        instance_id = get_instance_id(
-            db,
-            client.id,
-            branch_id=conversation.branch_id if conversation else None,
-            remote_jid=remote_jid,
-        )
-        if not instance_id:
-            logger.warning(f"No instance_id found for client {client.id}, jid={remote_jid}")
-            sent = False
-        else:
-            use_outbox_send = _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False)
-            if use_outbox_send and conversation:
-                outbox_payload = {
-                    "schema_version": "outbox.v1",
-                    "event_type": "whatsapp.send_text",
-                    "idempotency_key": outbound_idempotency_key,
-                    "client_id": str(client.id),
-                    "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
-                    "conversation_id": str(conversation.id),
-                    "channel": "whatsapp",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "payload": {
-                        "remote_jid": remote_jid,
-                        "text": text,
-                        "instance_id": instance_id,
-                        "idempotency_key": outbound_idempotency_key,
-                    },
-                }
-                sent = enqueue_outbox_message(
-                    db,
-                    client_id=client.id,
-                    conversation_id=conversation.id,
-                    inbound_message_id=outbound_idempotency_key,
-                    payload_json=outbox_payload,
-                )
-                if not sent:
-                    logger.info(
-                        "Outbox send skipped (duplicate)",
-                        extra={
-                            "context": {
-                                "conversation_id": str(conversation.id),
-                                "remote_jid": remote_jid,
-                                "idempotency_key": outbound_idempotency_key,
-                            }
-                        },
-                    )
-                    sent = True
+        sent = False
+        with start_span("webhook.send", context=timing_context) as span:
+            instance_id = get_instance_id(
+                db,
+                client.id,
+                branch_id=conversation.branch_id if conversation else None,
+                remote_jid=remote_jid,
+            )
+            if not instance_id:
+                logger.warning(f"No instance_id found for client {client.id}, jid={remote_jid}")
+                sent = False
             else:
-                adapter = ChatFlowAdapter()
-                options = MessageOptions(
-                    instance_id=instance_id,
-                    idempotency_key=outbound_idempotency_key,
-                )
-                result = adapter.send_text(remote_jid, text, options)
-                sent = result.is_ok()
-                if not sent and skip_persist:
-                    # Preserve legacy behavior when raise_on_fail=True (skip_persist path).
-                    raise RuntimeError(f"ChatFlow delivery failed: {result.error}")
+                use_outbox_send = _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False)
+                if use_outbox_send and conversation:
+                    outbox_payload = {
+                        "schema_version": "outbox.v1",
+                        "event_type": "whatsapp.send_text",
+                        "idempotency_key": outbound_idempotency_key,
+                        "client_id": str(client.id),
+                        "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
+                        "conversation_id": str(conversation.id),
+                        "channel": "whatsapp",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "payload": {
+                            "remote_jid": remote_jid,
+                            "text": text,
+                            "instance_id": instance_id,
+                            "idempotency_key": outbound_idempotency_key,
+                        },
+                    }
+                    enqueue_start = time.monotonic()
+                    with start_span("outbox.enqueue", context=timing_context) as enqueue_span:
+                        sent = enqueue_outbox_message(
+                            db,
+                            client_id=client.id,
+                            conversation_id=conversation.id,
+                            inbound_message_id=outbound_idempotency_key,
+                            payload_json=outbox_payload,
+                        )
+                    if enqueue_span is not None:
+                        enqueue_span.set_attribute("outbox.enqueued", bool(sent))
+                    _log_timing(
+                        "outbox_enqueue_ms",
+                        (time.monotonic() - enqueue_start) * 1000,
+                        {"outbox_enqueued": sent},
+                    )
+                    if not sent:
+                        logger.info(
+                            "Outbox send skipped (duplicate)",
+                            extra={
+                                "context": {
+                                    "conversation_id": str(conversation.id),
+                                    "remote_jid": remote_jid,
+                                    "idempotency_key": outbound_idempotency_key,
+                                }
+                            },
+                        )
+                        sent = True
+                else:
+                    adapter = ChatFlowAdapter()
+                    options = MessageOptions(
+                        instance_id=instance_id,
+                        idempotency_key=outbound_idempotency_key,
+                    )
+                    result = adapter.send_text(remote_jid, text, options)
+                    sent = result.is_ok()
+                    if not sent and skip_persist:
+                        # Preserve legacy behavior when raise_on_fail=True (skip_persist path).
+                        raise RuntimeError(f"ChatFlow delivery failed: {result.error}")
+        if span is not None:
+            span.set_attribute("send.ok", bool(sent))
         _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": sent})
         return sent
 
@@ -3425,16 +3447,26 @@ async def _handle_webhook_payload(
         if skip_response:
             return skip_response
     else:
-        dedupe_response, message_id = await _handle_dedup_gate(
-            db=db,
-            client=client,
-            message_id=message_id,
-            remote_jid=remote_jid,
-            metadata=metadata,
-            message_text=message_text,
-            conversation_id=conversation_id,
-            resolve_trace_conversation=_resolve_trace_conversation,
-            record_early_trace=_record_early_trace,
+        dedup_start = time.monotonic()
+        with start_span("webhook.dedup", context=timing_context) as span:
+            dedupe_response, message_id = await _handle_dedup_gate(
+                db=db,
+                client=client,
+                message_id=message_id,
+                remote_jid=remote_jid,
+                metadata=metadata,
+                message_text=message_text,
+                conversation_id=conversation_id,
+                resolve_trace_conversation=_resolve_trace_conversation,
+                record_early_trace=_record_early_trace,
+            )
+        if span is not None:
+            span.set_attribute("dedup.skipped", dedupe_response is not None)
+        timing_context["message_id"] = message_id
+        _log_timing(
+            "dedup_ms",
+            (time.monotonic() - dedup_start) * 1000,
+            {"dedup_skipped": dedupe_response is not None},
         )
         if dedupe_response:
             return dedupe_response
@@ -5922,23 +5954,26 @@ async def _handle_webhook_payload(
             return truth_gate_response
 
     # 10. Classify intent (expensive). Protect against accidental escalations on short/noisy messages.
-    intent_routing = _run_class_router_stage(
-        conversation=conversation,
-        saved_message=saved_message,
-        message_text=message_text,
-        client_slug=payload.client_slug,
-        client_config=client.config if client else None,
-        remote_jid=remote_jid,
-        timing_context=timing_context,
-        info_class_intents=info_class_intents,
-        info_class_meta=info_class_meta,
-        booking_signal=booking_signal,
-        class_carryover=class_carryover,
-        router_state=router_state,
-        intent_decomp_payload=intent_decomp_payload,
-        expected_reply_shortcircuit=expected_reply_shortcircuit,
-        log_timing=_log_timing,
-    )
+    with start_span("webhook.router", context=timing_context) as span:
+        intent_routing = _run_class_router_stage(
+            conversation=conversation,
+            saved_message=saved_message,
+            message_text=message_text,
+            client_slug=payload.client_slug,
+            client_config=client.config if client else None,
+            remote_jid=remote_jid,
+            timing_context=timing_context,
+            info_class_intents=info_class_intents,
+            info_class_meta=info_class_meta,
+            booking_signal=booking_signal,
+            class_carryover=class_carryover,
+            router_state=router_state,
+            intent_decomp_payload=intent_decomp_payload,
+            expected_reply_shortcircuit=expected_reply_shortcircuit,
+            log_timing=_log_timing,
+        )
+    if span is not None:
+        span.set_attribute("router.intent", getattr(intent_routing.intent, "value", None))
     signals = intent_routing.signals
     intent = intent_routing.intent
     domain_intent = intent_routing.domain_intent

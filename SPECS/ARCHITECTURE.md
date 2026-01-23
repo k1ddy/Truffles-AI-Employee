@@ -146,9 +146,14 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Каноничный порядок стадий фиксируется в `DECISION_STAGE_ORDER_SNAPSHOT` (`truffles-api/app/routers/webhook/trace.py`) и защищён hash‑тестом.  
 - Любая смена порядка стадий → обновить список + test hash (сознательное изменение).  
 
-#### Observability roadmap (Phase 2; DEC required for external trace store)
-1) Trace retention / external trace store  
-   - Подготовить DEC: варианты (Postgres JSONB bump vs отдельный trace‑store), срок хранения, безопасность.  
+#### Observability (DEC-012)
+- Корреляция: `message_id`/`outbox_id`/`trace_id` в логах + decision_meta + outbox meta.
+- Тайминги стадий: `decision_meta.timing.stages` + `decision_meta.timing.outbox` + `outbox_messages.meta.timing`.
+- OTel spans в API/outbox/sentinel с атрибутами `message_id`, `outbox_id`, `trace_id`, `client_slug`, `conversation_id`, `branch_id`; Tempo хранит трейсы.
+
+#### Observability roadmap (Phase 2; follow-ups after DEC-012)
+1) Trace retention policy (Tempo)  
+   - Зафиксировать retention для Tempo (L0/L1/L2), бюджет хранения, безопасность.  
    - Ввести единую схему `trace_event` + экспортер из decision_trace.  
    - Добавить trace‑viewer и правила retention (L0/L1/L2).  
    - CI‑гейт: критические стадии не теряются.  

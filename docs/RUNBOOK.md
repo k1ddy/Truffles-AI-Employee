@@ -291,6 +291,27 @@ docker restart truffles_postgres_1
 
 ---
 
+## 8. Trace / Observability
+
+### Symptoms
+- Latency spikes or "no reply" complaints
+- Outbox backlog without clear error
+
+### Diagnosis
+```bash
+python3 ops/diagnose.py trace-bundle --client-slug <slug> --message-id <id> --output /tmp/trace-bundle.json
+```
+
+```bash
+curl -fsS http://localhost:3200/metrics | rg -m 1 tempo_distributor_spans_received_total
+```
+
+### Evidence
+- trace-bundle JSON path + timing.stages snapshot
+- Tempo metric line or container logs
+
+---
+
 ## Contact
 
 | Issue | Contact |
