@@ -1516,6 +1516,16 @@ def _chaos_build_failure_patterns(failures, meta, conv_meta):
         )
     return patterns
 
+
+def _resolve_chaos_jid_base(simulation_id: str, seed: int | None) -> int:
+    env_base = os.environ.get("CHAOS_JID_BASE")
+    if env_base and env_base.isdigit():
+        return int(env_base)
+    digits = "".join(ch for ch in simulation_id if ch.isdigit())
+    offset = int(digits[-6:]) if digits else int(seed or 0) % 1000000
+    offset = (offset + int(seed or 0)) % 1000000
+    return 79990000000 + (offset * 1000)
+
 def _parse_livecheck_args(argv):
     parser = argparse.ArgumentParser(
         prog="ops/diagnose.py livecheck",
@@ -3252,6 +3262,7 @@ def _run_chaos_sim(args):
     webhook_url = f"{base_url}/webhook/{client_slug}"
     webhook_secret = _resolve_webhook_secret(client_slug, args.webhook_secret)
     simulation_id = args.simulation_id or f"SIM-{timestamp}-{seed}"
+    jid_base = _resolve_chaos_jid_base(simulation_id, seed)
 
     output_dir = args.output_dir or os.path.join(
         os.getcwd(),
@@ -3330,8 +3341,7 @@ def _run_chaos_sim(args):
             pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
 
     def _build_remote_jid(idx):
-        base = int(os.environ.get("CHAOS_JID_BASE", "79990000000"))
-        return f"{base + idx}@s.whatsapp.net"
+        return f"{jid_base + idx}@s.whatsapp.net"
 
     def _send_telegram_callback(action, handover_id):
         if not telegram_chat_id:
@@ -3688,6 +3698,7 @@ def _run_chaos_sim(args):
         "failure_types": failure_counts,
         "failure_patterns": pattern_counts,
         "output_dir": output_dir,
+        "jid_base": jid_base,
         "client_slug": client_slug,
         "console_mode": args.console_mode,
         "llm_mode": args.mode,
@@ -3707,6 +3718,7 @@ def _run_chaos_sim(args):
         handle.write(f"- cases_processed: {processed_cases}\n")
         handle.write(f"- turns: {stats['turns']}\n")
         handle.write(f"- failures: {stats['failures']}\n")
+        handle.write(f"- jid_base: {jid_base}\n")
         handle.write(f"- interrupted: {str(interrupted).lower()}\n")
         if stop_reason:
             handle.write(f"- stop_reason: {stop_reason}\n")
