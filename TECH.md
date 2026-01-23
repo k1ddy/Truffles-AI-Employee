@@ -147,6 +147,14 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `console-web/.env.local` — `NEXTAUTH_URL`, `KEYCLOAK_ISSUER`, `NEXT_PUBLIC_API_URL`.
 - `truffles-api/docker-compose.yml` — `CONSOLE_OIDC_JWKS_URL`, `CONSOLE_OIDC_ISSUER`, `CONSOLE_OIDC_AUDIENCE`.
 
+**Данные и источники:**
+- Console API читает/пишет **core DB** (`DATABASE_URL` в `truffles-api`, контейнер `truffles_postgres_1`, БД `chatbot`).
+- `console-postgres` в `docker-compose.console.yml` сейчас не используется Console API (резерв под будущие нужды).
+
+**Secrets (локально, не в git):**
+- `/home/zhan/secrets/console-contract.env` → `CONSOLE_API_TOKEN` для Schemathesis/k6.
+- `/home/zhan/secrets/console-e2e.env` → креды Playwright.
+
 **Console tenancy (interim):**
 - `/console/v1/me` возвращает список `clients` и `selection_required`.
 - При нескольких клиентах обязателен `X-Client-Id`.
@@ -240,7 +248,7 @@ E2E_ALLOW_MUTATIONS=1 npm run test:e2e:mutating
 **Schemathesis (GET-only contract smoke):**
 ```bash
 SCHEMATHESIS_TOKEN="<bearer token>" \
-schemathesis run contracts/console_api/openapi.v1.yaml \
+schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml \
   --url https://api.truffles.kz/console/v1 \
   --include-method=GET \
   --checks all \
@@ -248,6 +256,9 @@ schemathesis run contracts/console_api/openapi.v1.yaml \
   --hypothesis-max-examples=3 \
   --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"
 ```
+**Seed IDs:** `contracts/console_api/schemathesis.toml` contains stable `case_id`/`conversation_id` used in contract
+checks. If the IDs go stale, update them with a real handover + conversation from the same client as the
+console token.
 
 **k6 (manual load smoke):**
 ```bash

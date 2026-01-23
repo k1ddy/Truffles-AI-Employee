@@ -31,6 +31,8 @@ CONSOLE_OIDC_JWKS_URL=http://localhost:8080/realms/truffles/protocol/openid-conn
 CONSOLE_OIDC_ISSUER=http://localhost:8080/realms/truffles
 ```
 
+**Важно:** Console API использует core DB (`chatbot`) из `truffles-api` — `console-postgres` не является источником данных для `/console/v1/*`.
+
 ### truffles-api/.env
 
 ```bash
@@ -176,7 +178,7 @@ python scripts/console_e2e_seed.py
 **Schemathesis contract smoke (GET-only):**
 ```bash
 SCHEMATHESIS_TOKEN="<bearer token>" \
-schemathesis run /home/zhan/truffles-main/contracts/console_api/openapi.v1.yaml \
+schemathesis --config-file /home/zhan/truffles-main/contracts/console_api/schemathesis.toml run /home/zhan/truffles-main/contracts/console_api/openapi.v1.yaml \
   --url https://api.truffles.kz/console/v1 \
   --include-method=GET \
   --checks all \
@@ -184,6 +186,7 @@ schemathesis run /home/zhan/truffles-main/contracts/console_api/openapi.v1.yaml 
   --hypothesis-max-examples=3 \
   --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"
 ```
+Seed IDs live in `/home/zhan/truffles-main/contracts/console_api/schemathesis.toml`.
 
 **k6 (manual load smoke):**
 ```bash

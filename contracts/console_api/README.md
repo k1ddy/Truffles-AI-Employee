@@ -72,5 +72,9 @@ Add to CI pipeline:
   run: npx @redocly/cli lint contracts/console_api/openapi.v1.yaml
 
 - name: Contract Tests
-  run: schemathesis run contracts/console_api/openapi.v1.yaml --url http://localhost:8000
+  run: schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml --url http://localhost:8000
 ```
+
+**Seed overrides**
+- `contracts/console_api/schemathesis.toml` provides stable `case_id` / `conversation_id`.
+- If they go stale, update both this file and the `example` values in `openapi.v1.yaml`.

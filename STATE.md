@@ -1984,6 +1984,28 @@ Evidence:
 - Console health inside container: status: 'healthy', API/db/qdrant reachable.
 - Keycloak realm now has "loginTheme" : "truffles" (from kcadm.sh get realms/truffles).
 
+### 2026-01-23 — Console login fix (admin mapping)
+
+DONE (evidence):
+- Keycloak admin `sub` mapped to a single agent (demo_salon) to avoid multi-client selection errors.
+  Evidence (SQL, core DB): `SELECT agent_id, external_id FROM agent_identities WHERE channel='oidc' AND external_id='4c00053e-51da-45ec-88fe-752f138818aa';`
+  → `aaaaaaaa-0000-0000-0000-000000000001 | 4c00053e-51da-45ec-88fe-752f138818aa`
+- API accepts admin token from auth.truffles.kz.
+  Evidence: `cases_status=200 settings_status=200` via token grant against `https://auth.truffles.kz/...`.
+
+### 2026-01-23 — Console contract seeds (Schemathesis)
+
+DONE (evidence):
+- Added stable Schemathesis parameter overrides for `case_id` + `conversation_id` and updated OpenAPI examples.
+  Evidence: `contracts/console_api/schemathesis.toml`, `contracts/console_api/openapi.v1.yaml`.
+- Schemathesis GET-only smoke passes with seed overrides.
+  Evidence: `schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml --url https://api.truffles.kz/console/v1 --include-method=GET ...`
+  → `No issues found` (8/12 operations selected, 230 passed, 152 skipped, seed `48407844212243077467606490987405373033`).
+- Документация обновлена для новых агентов: источник данных консоли (core DB), troubleshooting `CLIENT_SELECTION_REQUIRED`,
+  путь до секретов для контрактов/Е2Е, и usage Schemathesis config.
+  Evidence: `TECH.md`, `docs/CONSOLE_GUIDE.md`, `docs/DEV_SETUP.md`, `docs/RUNBOOK.md`, `contracts/console_api/README.md`,
+  `docs/SESSION_START_PROMPT.txt`.
+
 git status -sb:
 ## main...origin/main
  M TECH.md
