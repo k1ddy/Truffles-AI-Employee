@@ -120,7 +120,7 @@ Set `users[].id` in `ops/keycloak-realm.json` to avoid `sub` changes on re‑cre
 4. Keep UI consistent with `globals.css` tokens.
 
 **Tests**
-- Contract: `schemathesis run contracts/console_api/openapi.v1.yaml --url https://api.truffles.kz/console/v1`
+- Contract: `schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml --url https://api.truffles.kz/console/v1`
 - E2E (if required): `console-e2e` (Playwright)
 
 ---

@@ -215,6 +215,7 @@ paths:
           schema:
             type: string
             format: uuid
+          example: "e03933eb-780e-4d0d-890f-741bc3ca9733"
         - $ref: "#/components/parameters/idempotency_key"
       requestBody:
         required: true
@@ -378,6 +379,7 @@ components:
       schema:
         type: string
         format: uuid
+      example: "39af8e47-a062-4b81-8343-34bdc3084ef9"
     cursor:
       name: cursor
       in: query

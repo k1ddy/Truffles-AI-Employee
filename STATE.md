@@ -1988,6 +1988,15 @@ DONE (evidence):
 - API accepts admin token from auth.truffles.kz.
   Evidence: `cases_status=200 settings_status=200` via token grant against `https://auth.truffles.kz/...`.
 
+### 2026-01-23 — Console contract seeds (Schemathesis)
+
+DONE (evidence):
+- Added stable Schemathesis parameter overrides for `case_id` + `conversation_id` and updated OpenAPI examples.
+  Evidence: `contracts/console_api/schemathesis.toml`, `contracts/console_api/openapi.v1.yaml`.
+- Schemathesis GET-only smoke passes with seed overrides.
+  Evidence: `schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml --url https://api.truffles.kz/console/v1 --include-method=GET ...`
+  → `No issues found` (8/12 operations selected, 230 passed, 152 skipped, seed `48407844212243077467606490987405373033`).
+
 git status -sb:
 ## main...origin/main
  M TECH.md

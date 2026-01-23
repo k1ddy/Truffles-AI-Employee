@@ -1,0 +1,9 @@
+# Schemathesis overrides for stable Console contract checks.
+[parameters]
+# demo_salon handover + conversation (stable prod seed)
+case_id = "39af8e47-a062-4b81-8343-34bdc3084ef9"
+conversation_id = "e03933eb-780e-4d0d-890f-741bc3ca9733"
+
+[generation]
+mode = "positive"
+allow-extra-parameters = false

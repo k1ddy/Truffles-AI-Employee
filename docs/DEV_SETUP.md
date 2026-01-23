@@ -124,7 +124,7 @@ npm run test:e2e:smoke
 **Schemathesis contract smoke (GET-only):**
 ```bash
 SCHEMATHESIS_TOKEN="<bearer token>" \
-schemathesis run /home/zhan/truffles-main/contracts/console_api/openapi.v1.yaml \
+schemathesis --config-file /home/zhan/truffles-main/contracts/console_api/schemathesis.toml run /home/zhan/truffles-main/contracts/console_api/openapi.v1.yaml \
   --url https://api.truffles.kz/console/v1 \
   --include-method=GET \
   --checks all \
@@ -132,6 +132,7 @@ schemathesis run /home/zhan/truffles-main/contracts/console_api/openapi.v1.yaml 
   --hypothesis-max-examples=3 \
   --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"
 ```
+Seed IDs live in `/home/zhan/truffles-main/contracts/console_api/schemathesis.toml`.
 
 **k6 (manual load smoke):**
 ```bash
