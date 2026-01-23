@@ -1987,9 +1987,11 @@ Evidence:
 ### 2026-01-23 — Console login fix (admin mapping)
 
 DONE (evidence):
-- OIDC `sub` for Keycloak admin mapped to console agent identity (fixes 403/empty cases after login).
-  Evidence (SQL): `SELECT channel, external_id, agent_id FROM agent_identities WHERE agent_id='54ed3221-7803-4b0c-9780-5404780e0bf5';`
-  → `oidc | 4c00053e-51da-45ec-88fe-752f138818aa | 54ed3221-7803-4b0c-9780-5404780e0bf5`
+- Keycloak admin `sub` mapped to a single agent (demo_salon) to avoid multi-client selection errors.
+  Evidence (SQL, core DB): `SELECT agent_id, external_id FROM agent_identities WHERE channel='oidc' AND external_id='4c00053e-51da-45ec-88fe-752f138818aa';`
+  → `aaaaaaaa-0000-0000-0000-000000000001 | 4c00053e-51da-45ec-88fe-752f138818aa`
+- API accepts admin token from auth.truffles.kz.
+  Evidence: `cases_status=200 settings_status=200` via token grant against `https://auth.truffles.kz/...`.
 
 git status -sb:
 ## main...origin/main
