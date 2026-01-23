@@ -30,6 +30,7 @@ export default function ChatInterface({
 }: ChatInterfaceProps) {
     const [inputValue, setInputValue] = useState("");
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const lastMessageIdRef = useRef<string | null>(null);
     const queryClient = useQueryClient();
 
     // Reverse messages for chronological display (oldest first)
@@ -37,7 +38,11 @@ export default function ChatInterface({
 
     // Scroll to bottom on new messages
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        const latestId = messages[0]?.id || null;
+        if (latestId && latestId !== lastMessageIdRef.current) {
+            lastMessageIdRef.current = latestId;
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }
     }, [messages]);
 
     // Send message mutation with optimistic updates

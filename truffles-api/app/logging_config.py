@@ -3,6 +3,7 @@
 import json
 import logging
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -304,6 +305,52 @@ def get_trace_id() -> str | None:
     if not context or not context.is_valid:
         return None
     return f"{context.trace_id:032x}"
+
+
+_TRACE_ATTR_KEYS = (
+    "message_id",
+    "outbox_id",
+    "trace_id",
+    "client_slug",
+    "conversation_id",
+    "branch_id",
+)
+
+
+def build_trace_attributes(context: dict | None) -> dict[str, Any]:
+    if not isinstance(context, dict):
+        return {}
+    attrs: dict[str, Any] = {}
+    for key in _TRACE_ATTR_KEYS:
+        value = context.get(key)
+        if value is None:
+            continue
+        if isinstance(value, (list, dict)):
+            continue
+        attrs[key] = str(value)
+    return attrs
+
+
+@contextmanager
+def start_span(
+    name: str,
+    *,
+    context: dict | None = None,
+    attributes: dict[str, Any] | None = None,
+):
+    if trace is None:
+        yield None
+        return
+    tracer = trace.get_tracer("truffles")
+    with tracer.start_as_current_span(name) as span:
+        attrs = build_trace_attributes(context)
+        if attributes:
+            for key, value in attributes.items():
+                if value is not None:
+                    attrs[key] = value
+        if attrs:
+            span.set_attributes(attrs)
+        yield span
 
 
 # HTTP metrics helpers

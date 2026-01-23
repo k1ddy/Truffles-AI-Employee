@@ -31,7 +31,7 @@
 - `ops/diagnose.py send-and-explain` — отправка + быстрый `explain`.
 - `ops/chatflow_send.py` — минимальный sender‑скрипт (без diagnose).
 - `ops/diagnose.py explain` — быстрый разбор конкретного сообщения (decision_meta/trace + outbox).
-- `ops/diagnose.py trace-bundle` — полный пакет (decision_meta/trace + outbox rows + latency).
+- `ops/diagnose.py trace-bundle` — полный пакет (decision_meta/trace + timing + outbox rows + latency).
 - `ops/diagnose.py deploy-verify` — проверка версии деплоя (`/admin/version`) и совпадения commit.
 - `ops/sync_client.py` — validate/sync client packs (truth → Qdrant).
 - `/home/zhan/restart_api.sh` — restart API контейнера.
@@ -572,6 +572,9 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 **Что уже есть (runtime evidence):**
 - `decision_trace` (conversation.context) — стадии решения.
 - `decision_meta` (messages.metadata) — факты, intent, policy, llm flags.
+- `decision_meta.timing` — pipeline + stage timings + outbox timing.
+- `ops/diagnose.py trace-bundle` — timing snapshot в одном JSON.
+- OTel/Tempo spans с корреляцией `message_id`/`outbox_id`/`trace_id`.
 - LLM‑поля: `llm_used`, `llm_timeout`, `llm_cache_hit`, `llm_primary_reason`.
 - Метрики: `/admin/metrics` (latency, outbox, SLA), алерты: `/alerts/test`.
 

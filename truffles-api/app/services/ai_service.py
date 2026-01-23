@@ -10,7 +10,7 @@ from uuid import UUID
 import httpx
 from sqlalchemy.orm import Session
 
-from app.logging_config import get_logger, record_llm_time, record_rag_time
+from app.logging_config import get_logger, record_llm_time, record_rag_time, start_span
 from app.models import Client, Message, Prompt
 from app.services.alert_service import alert_error
 from app.services.knowledge_service import format_knowledge_context, search_knowledge
@@ -283,12 +283,24 @@ def _log_timing(
     extra: dict | None = None,
 ) -> None:
     context: dict = {}
-    if timing_context:
+    if isinstance(timing_context, dict):
         context.update(timing_context)
     if extra:
         context.update(extra)
     context["stage"] = stage
     context["elapsed_ms"] = round(elapsed_ms, 2)
+    for key in ("message_id", "outbox_id", "trace_id"):
+        context.setdefault(key, None)
+    if isinstance(timing_context, dict):
+        timing = timing_context.get("timing")
+        if not isinstance(timing, dict):
+            timing = {}
+        stages = timing.get("stages")
+        if not isinstance(stages, dict):
+            stages = {}
+        stages[stage] = context["elapsed_ms"]
+        timing["stages"] = stages
+        timing_context["timing"] = timing
     stage_key = stage.strip().lower()
     client_slug = context.get("client_slug")
     if stage_key.endswith("llm_ms"):
@@ -296,6 +308,17 @@ def _log_timing(
     elif stage_key == "rag_ms":
         record_rag_time(client_slug, elapsed_ms)
     logger.info("Timing", extra={"context": context})
+
+
+def _start_rag_span(timing_context: dict | None, *, client_slug: str | None, branch_id: str | None):
+    context: dict = {}
+    if isinstance(timing_context, dict):
+        context.update(timing_context)
+    if isinstance(client_slug, str) and client_slug:
+        context.setdefault("client_slug", client_slug)
+    if branch_id:
+        context.setdefault("branch_id", branch_id)
+    return start_span("rag.search", context=context)
 
 
 def _remaining_pipeline_budget_ms(timing_context: dict | None) -> float | None:
@@ -1801,14 +1824,15 @@ def get_rag_confidence(
         return False, 0.0
     try:
         rag_start = time.monotonic()
-        vector_results = search_knowledge(
-            query_for_rag,
-            client_slug,
-            limit=3,
-            branch_id=branch_id,
-            knowledge_tag=knowledge_tag,
-            trace_context=timing_context,
-        )
+        with _start_rag_span(timing_context, client_slug=client_slug, branch_id=branch_id):
+            vector_results = search_knowledge(
+                query_for_rag,
+                client_slug,
+                limit=3,
+                branch_id=branch_id,
+                knowledge_tag=knowledge_tag,
+                trace_context=timing_context,
+            )
         from app.services.intent_service import hybrid_retrieve_knowledge
 
         results, rag_scores = hybrid_retrieve_knowledge(
@@ -1857,14 +1881,15 @@ def get_rag_confidence(
                     ):
                         return False, max_score
                     rag_start = time.monotonic()
-                    vector_results = search_knowledge(
-                        contextual_query,
-                        client_slug,
-                        limit=3,
-                        branch_id=branch_id,
-                        knowledge_tag=knowledge_tag,
-                        trace_context=timing_context,
-                    )
+                    with _start_rag_span(timing_context, client_slug=client_slug, branch_id=branch_id):
+                        vector_results = search_knowledge(
+                            contextual_query,
+                            client_slug,
+                            limit=3,
+                            branch_id=branch_id,
+                            knowledge_tag=knowledge_tag,
+                            trace_context=timing_context,
+                        )
                     from app.services.intent_service import hybrid_retrieve_knowledge
 
                     retry_results, rag_scores = hybrid_retrieve_knowledge(
@@ -1978,14 +2003,15 @@ def generate_ai_response(
 
         try:
             rag_start = time.monotonic()
-            vector_results = search_knowledge(
-                query_for_rag,
-                client_slug,
-                limit=3,
-                branch_id=branch_id,
-                knowledge_tag=knowledge_tag,
-                trace_context=timing_context,
-            )
+            with _start_rag_span(timing_context, client_slug=client_slug, branch_id=branch_id):
+                vector_results = search_knowledge(
+                    query_for_rag,
+                    client_slug,
+                    limit=3,
+                    branch_id=branch_id,
+                    knowledge_tag=knowledge_tag,
+                    trace_context=timing_context,
+                )
             from app.services.intent_service import hybrid_retrieve_knowledge
 
             knowledge_results, rag_scores = hybrid_retrieve_knowledge(
@@ -2040,14 +2066,15 @@ def generate_ai_response(
                         ):
                             return Result.success((None, "low_confidence"))
                         rag_start = time.monotonic()
-                        vector_results = search_knowledge(
-                            contextual_query,
-                            client_slug,
-                            limit=3,
-                            branch_id=branch_id,
-                            knowledge_tag=knowledge_tag,
-                            trace_context=timing_context,
-                        )
+                        with _start_rag_span(timing_context, client_slug=client_slug, branch_id=branch_id):
+                            vector_results = search_knowledge(
+                                contextual_query,
+                                client_slug,
+                                limit=3,
+                                branch_id=branch_id,
+                                knowledge_tag=knowledge_tag,
+                                trace_context=timing_context,
+                            )
                         from app.services.intent_service import hybrid_retrieve_knowledge
 
                         retry_results, rag_scores = hybrid_retrieve_knowledge(

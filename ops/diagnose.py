@@ -4208,6 +4208,8 @@ def _run_trace_bundle(args):
     for row in rows:
         conv_id = row.get("conversation_id")
         decision_meta = row.get("decision_meta") if isinstance(row.get("decision_meta"), dict) else {}
+        timing_meta = decision_meta.get("timing") if isinstance(decision_meta, dict) else None
+        timing_snapshot = timing_meta if isinstance(timing_meta, dict) else {}
         conversation_meta, _ = _fetch_conversation_meta(db_user, conv_id)
         context = conversation_meta.get("context") if isinstance(conversation_meta, dict) else None
         decision_trace = _trace_as_list(context.get("decision_trace")) if isinstance(context, dict) else []
@@ -4252,6 +4254,13 @@ def _run_trace_bundle(args):
                     "content": row.get("content"),
                 },
                 "decision_meta": decision_meta,
+                "timing": {
+                    "stages": timing_snapshot.get("stages"),
+                    "outbox": timing_snapshot.get("outbox"),
+                    "pipeline_ms": timing_snapshot.get("pipeline_ms"),
+                    "pipeline_started_at": timing_snapshot.get("pipeline_started_at"),
+                    "pipeline_finished_at": timing_snapshot.get("pipeline_finished_at"),
+                },
                 "decision_trace": decision_trace,
                 "conversation": {
                     "state": conversation_meta.get("state") if isinstance(conversation_meta, dict) else None,

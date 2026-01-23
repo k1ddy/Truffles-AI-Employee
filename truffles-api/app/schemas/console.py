@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -24,6 +24,23 @@ class ConsoleAgent(BaseModel):
     is_active: bool
 
 
+class ConsoleAgentIdentity(BaseModel):
+    channel: Literal["telegram"]
+    external_id: str
+    username: Optional[str] = None
+    linked_at: Optional[str] = None
+
+
+class ConsoleAgentWithIdentities(BaseModel):
+    id: UUID
+    name: Optional[str] = None
+    role: str
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    is_active: bool
+    identities: list[ConsoleAgentIdentity] = []
+
+
 class ConsoleClient(BaseModel):
     id: UUID
     slug: str
@@ -36,6 +53,8 @@ class ConsoleBranch(BaseModel):
     slug: str
     name: str
     is_active: bool
+    instance_id: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
 
 
 class ConsoleMeResponse(BaseModel):
@@ -44,6 +63,8 @@ class ConsoleMeResponse(BaseModel):
     branches: list[ConsoleBranch]
     clients: list[ConsoleClient] = []
     selection_required: bool = False
+    branch_selection_required: bool = False
+    selected_branch_id: Optional[UUID] = None
 
 
 class ConsoleMessage(BaseModel):
@@ -52,6 +73,16 @@ class ConsoleMessage(BaseModel):
     content: str
     created_at: str
     metadata: Optional[dict] = None
+
+
+class ConsoleTelegramTrail(BaseModel):
+    message_id: Optional[int] = None
+    topic_id: Optional[int] = None
+    chat_id: Optional[str] = None
+    telegram_link: Optional[str] = None
+    telegram_desktop_link: Optional[str] = None
+    delivery_status: Optional[str] = None
+    delivered_at: Optional[str] = None
 
 
 class ConsoleCase(BaseModel):
@@ -73,6 +104,8 @@ class ConsoleCase(BaseModel):
     customer_remote_jid: Optional[str] = None
     # Decision trace
     decision_trace: Optional[list[dict]] = None
+    # Telegram trail (for escalation visibility)
+    telegram_trail: Optional[ConsoleTelegramTrail] = None
 
 
 class ConsoleCaseListResponse(BaseModel):
@@ -81,9 +114,20 @@ class ConsoleCaseListResponse(BaseModel):
     has_more: bool
 
 
+class ConsoleSyncStatus(BaseModel):
+    status: Literal["ok", "skipped", "failed"]
+    detail: Optional[str] = None
+
+
+class ConsoleCaseActionSync(BaseModel):
+    telegram: Optional[ConsoleSyncStatus] = None
+    client_notify: Optional[ConsoleSyncStatus] = None
+
+
 class ConsoleCaseActionResponse(BaseModel):
     success: bool
     case: ConsoleCase
+    sync: Optional[ConsoleCaseActionSync] = None
 
 
 class ConsoleMessageListResponse(BaseModel):
@@ -157,6 +201,10 @@ class ConsoleSettingsResponse(BaseModel):
     bot_config: Optional[ConsoleBotConfig] = None
 
 
+class ConsoleAgentListResponse(BaseModel):
+    items: list[ConsoleAgentWithIdentities]
+
+
 class ConsoleMetricsDailyResponse(BaseModel):
     date: str
     total_cases: int
@@ -177,4 +225,47 @@ class ConsoleSettingsUpdateResponse(BaseModel):
     message: str
 
 
+class ConsoleTelegramHealthResponse(BaseModel):
+    status: str
+    webhook_alive: bool
+    last_success_at: Optional[str] = None
+    last_error_at: Optional[str] = None
+    last_error_message: Optional[str] = None
+    error_rate_24h: float
+    pending_messages: int
 
+
+class ConsoleTelegramVerifyRequest(BaseModel):
+    scope: Literal["client", "branch"] = "client"
+    branch_id: Optional[UUID] = None
+    chat_id: Optional[str] = None
+
+
+class ConsoleTelegramVerifyResponse(BaseModel):
+    success: bool
+    delivery_status: str
+    verification_code: str
+    message_id: Optional[int] = None
+    chat_id: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    error_message: Optional[str] = None
+
+
+class ConsoleTelegramTestRequest(ConsoleTelegramVerifyRequest):
+    message: Optional[str] = None
+
+
+class ConsoleTelegramTestResponse(BaseModel):
+    success: bool
+    delivery_status: str
+    message_id: Optional[int] = None
+    chat_id: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    error_message: Optional[str] = None
+
+
+class ConsoleTelegramLinkResponse(BaseModel):
+    token: str
+    deep_link: Optional[str] = None
+    bot_username: Optional[str] = None
+    expires_at: str

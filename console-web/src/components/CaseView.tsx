@@ -79,6 +79,9 @@ export default function CaseView({ caseId }: CaseViewProps) {
     } = useQuery({
         queryKey: ["case", caseId],
         queryFn: () => fetchCase(caseId),
+        refetchInterval: 10000,
+        refetchIntervalInBackground: true,
+        refetchOnWindowFocus: true,
     });
 
     // Fetch messages
@@ -88,6 +91,9 @@ export default function CaseView({ caseId }: CaseViewProps) {
     } = useQuery({
         queryKey: ["messages", caseId],
         queryFn: () => fetchMessages(caseId),
+        refetchInterval: 5000,
+        refetchIntervalInBackground: true,
+        refetchOnWindowFocus: true,
     });
 
     // Take mutation
@@ -326,6 +332,37 @@ export default function CaseView({ caseId }: CaseViewProps) {
                         <div className="border-t border-border/60 pt-4">
                             <h3 className="font-medium text-muted-foreground mb-2">📨 Telegram</h3>
                             <div className="space-y-2 text-sm">
+                                {(() => {
+                                    const trail = caseDetail.telegram_trail;
+                                    const targetId = trail.topic_id ?? trail.message_id;
+                                    const desktopLink = trail.chat_id && targetId
+                                        ? `tg://openmessage?chat_id=${trail.chat_id}&message_id=${targetId}`
+                                        : null;
+                                    return (
+                                        <>
+                                            {desktopLink && (
+                                                <a
+                                                    href={desktopLink}
+                                                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground rounded text-xs hover:bg-primary/90 transition-colors"
+                                                >
+                                                    <span>📲</span>
+                                                    Открыть в Telegram
+                                                </a>
+                                            )}
+                                            {caseDetail.telegram_trail.telegram_link && (
+                                                <a
+                                                    href={caseDetail.telegram_trail.telegram_link}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-muted text-foreground rounded text-xs hover:bg-muted/80 transition-colors"
+                                                >
+                                                    <span>🌐</span>
+                                                    Открыть в Web
+                                                </a>
+                                            )}
+                                        </>
+                                    );
+                                })()}
                                 {/* Delivery status badge */}
                                 <div className="flex items-center gap-2">
                                     <span className="text-muted-foreground">Статус:</span>
@@ -371,17 +408,30 @@ export default function CaseView({ caseId }: CaseViewProps) {
                                     </div>
                                 )}
 
-                                {/* Open in Telegram link */}
-                                {caseDetail.telegram_trail.telegram_link && (
-                                    <a
-                                        href={caseDetail.telegram_trail.telegram_link}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground rounded text-xs hover:bg-primary/90 transition-colors"
-                                    >
-                                        <span>📲</span>
-                                        Открыть в Telegram
-                                    </a>
+                                {/* Open in Telegram links */}
+                                {(caseDetail.telegram_trail.telegram_desktop_link || caseDetail.telegram_trail.telegram_link) && (
+                                    <div className="flex flex-wrap gap-2">
+                                        {caseDetail.telegram_trail.telegram_desktop_link && (
+                                            <a
+                                                href={caseDetail.telegram_trail.telegram_desktop_link}
+                                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground rounded text-xs hover:bg-primary/90 transition-colors"
+                                            >
+                                                <span>📲</span>
+                                                Открыть в Telegram
+                                            </a>
+                                        )}
+                                        {caseDetail.telegram_trail.telegram_link && (
+                                            <a
+                                                href={caseDetail.telegram_trail.telegram_link}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-1 px-3 py-1.5 border border-border/60 rounded text-xs hover:bg-muted transition-colors"
+                                            >
+                                                <span>🌐</span>
+                                                Открыть в Web
+                                            </a>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         </div>

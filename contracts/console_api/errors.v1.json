@@ -47,6 +47,17 @@
             },
             "retryable": false
         },
+        "BRANCH_SELECTION_REQUIRED": {
+            "http_status": 400,
+            "message_template": "Branch selection required",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Prompt to select a branch before loading data"
+            },
+            "retryable": false
+        },
         "INVALID_PARAM": {
             "http_status": 400,
             "message_template": "Invalid parameter",
@@ -180,6 +191,61 @@
             },
             "retryable": true,
             "retry_after_seconds": 30
+        },
+        "TELEGRAM_CONFIG_MISSING": {
+            "http_status": 400,
+            "message_template": "Telegram configuration is missing",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "error",
+                "description": "Show configuration error and prompt to update settings"
+            },
+            "retryable": false
+        },
+        "TELEGRAM_LINK_INVALID": {
+            "http_status": 400,
+            "message_template": "Invalid Telegram linking token",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "error",
+                "description": "Show error toast and ask to generate a new link"
+            },
+            "retryable": false
+        },
+        "TELEGRAM_LINK_EXPIRED": {
+            "http_status": 400,
+            "message_template": "Telegram linking token has expired",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Show warning and ask to generate a new link"
+            },
+            "retryable": false
+        },
+        "TELEGRAM_LINK_USED": {
+            "http_status": 409,
+            "message_template": "Telegram linking token has already been used",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Show warning and ask to generate a new link"
+            },
+            "retryable": false
+        },
+        "TELEGRAM_LINK_CONFLICT": {
+            "http_status": 409,
+            "message_template": "Telegram account is already linked to another agent",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "error",
+                "description": "Show error and ask admin to unlink before retrying"
+            },
+            "retryable": false
         },
         "RATE_LIMITED": {
             "http_status": 429,

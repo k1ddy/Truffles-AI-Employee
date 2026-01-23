@@ -9,12 +9,21 @@ import axios, { AxiosError, AxiosInstance } from "axios";
 import type { components, operations } from "@/types/api.generated";
 
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
+const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 
 function getSelectedClientId(): string | undefined {
     if (typeof window === "undefined") {
         return undefined;
     }
     const stored = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    return stored || undefined;
+}
+
+function getSelectedBranchId(): string | undefined {
+    if (typeof window === "undefined") {
+        return undefined;
+    }
+    const stored = window.localStorage.getItem(BRANCH_ID_STORAGE_KEY);
     return stored || undefined;
 }
 
@@ -32,6 +41,7 @@ export const ErrorCodes = {
     TOKEN_EXPIRED: "TOKEN_EXPIRED",
     ACCESS_DENIED: "ACCESS_DENIED",
     CLIENT_SELECTION_REQUIRED: "CLIENT_SELECTION_REQUIRED",
+    BRANCH_SELECTION_REQUIRED: "BRANCH_SELECTION_REQUIRED",
     TENANT_MISMATCH: "TENANT_MISMATCH",
     BRANCH_ACCESS_DENIED: "BRANCH_ACCESS_DENIED",
     NOT_FOUND: "NOT_FOUND",
@@ -43,6 +53,11 @@ export const ErrorCodes = {
     MESSAGE_TOO_LONG: "MESSAGE_TOO_LONG",
     OUTBOX_FAILED: "OUTBOX_FAILED",
     INTEGRATION_UNAVAILABLE: "INTEGRATION_UNAVAILABLE",
+    TELEGRAM_CONFIG_MISSING: "TELEGRAM_CONFIG_MISSING",
+    TELEGRAM_LINK_INVALID: "TELEGRAM_LINK_INVALID",
+    TELEGRAM_LINK_EXPIRED: "TELEGRAM_LINK_EXPIRED",
+    TELEGRAM_LINK_USED: "TELEGRAM_LINK_USED",
+    TELEGRAM_LINK_CONFLICT: "TELEGRAM_LINK_CONFLICT",
     RATE_LIMITED: "RATE_LIMITED",
     SERVER_ERROR: "SERVER_ERROR",
     DATABASE_ERROR: "DATABASE_ERROR",
@@ -97,6 +112,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
         retryable: false,
     },
     CLIENT_SELECTION_REQUIRED: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    BRANCH_SELECTION_REQUIRED: {
         http_status: 400,
         ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
         retryable: false,
@@ -157,6 +177,31 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
         retryable: true,
         retry_after_seconds: 30,
     },
+    TELEGRAM_CONFIG_MISSING: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "error" },
+        retryable: false,
+    },
+    TELEGRAM_LINK_INVALID: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "error" },
+        retryable: false,
+    },
+    TELEGRAM_LINK_EXPIRED: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    TELEGRAM_LINK_USED: {
+        http_status: 409,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    TELEGRAM_LINK_CONFLICT: {
+        http_status: 409,
+        ui_behavior: { action: "toast", toast: true, toast_type: "error" },
+        retryable: false,
+    },
     RATE_LIMITED: {
         http_status: 429,
         ui_behavior: { action: "disable_actions", toast: true, toast_type: "warning" },
@@ -204,7 +249,7 @@ export function isRetryable(code: string): boolean {
 export interface ParsedApiError {
     code: string;
     message: string;
-    details?: Record<string, unknown>;
+    details?: Record<string, unknown> | null;
     trace_id: string;
     config?: ErrorConfig;
 }
@@ -219,7 +264,7 @@ export function parseApiError(error: unknown): ParsedApiError {
             return {
                 code: apiError.code,
                 message: apiError.message,
-                details: apiError.details,
+                details: apiError.details ?? undefined,
                 trace_id: apiError.trace_id,
                 config: getErrorConfig(apiError.code),
             };
@@ -277,6 +322,10 @@ export function createApiClient(): AxiosInstance {
         if (selectedClientId && !headers["X-Client-Id"]) {
             headers["X-Client-Id"] = selectedClientId;
         }
+        const selectedBranchId = getSelectedBranchId();
+        if (selectedBranchId && !headers["X-Branch-Id"]) {
+            headers["X-Branch-Id"] = selectedBranchId;
+        }
         // Add idempotency key for mutations
         if (config.method && ["post", "put", "patch", "delete"].includes(config.method)) {
             if (!headers["Idempotency-Key"]) {
@@ -311,6 +360,12 @@ export type MetricsDailyResponse = components["schemas"]["MetricsDailyResponse"]
 export type SettingsResponse = components["schemas"]["SettingsResponse"];
 export type AuditEvent = components["schemas"]["AuditEvent"];
 export type AuditListResponse = components["schemas"]["AuditListResponse"];
+export type AgentListResponse = components["schemas"]["AgentListResponse"];
+export type TelegramVerifyRequest = components["schemas"]["TelegramVerifyRequest"];
+export type TelegramVerifyResponse = components["schemas"]["TelegramVerifyResponse"];
+export type TelegramTestRequest = components["schemas"]["TelegramTestRequest"];
+export type TelegramTestResponse = components["schemas"]["TelegramTestResponse"];
+export type TelegramLinkResponse = components["schemas"]["TelegramLinkResponse"];
 
 // Query params
 export type ListCasesParams = operations["listCases"]["parameters"]["query"];
@@ -339,6 +394,9 @@ export const casesApi = {
     resolve: (caseId: string) =>
         apiClient.post<CaseActionResponse>(`/cases/${caseId}/resolve`),
 
+    returnToBot: (caseId: string) =>
+        apiClient.post<CaseActionResponse>(`/cases/${caseId}/return`),
+
     getMessages: (caseId: string, params?: { cursor?: string; limit?: number }) =>
         apiClient.get<MessageListResponse>(`/cases/${caseId}/messages`, { params }),
 };
@@ -358,6 +416,21 @@ export const opsApi = {
     getHealth: () => apiClient.get<HealthResponse>("/health"),
     getMetricsDaily: (date?: string) =>
         apiClient.get<MetricsDailyResponse>("/metrics/daily", { params: { date } }),
+};
+
+/** Telegram connector endpoints */
+export const telegramApi = {
+    verify: (data: TelegramVerifyRequest) =>
+        apiClient.post<TelegramVerifyResponse>("/telegram/verify", data),
+    test: (data: TelegramTestRequest) =>
+        apiClient.post<TelegramTestResponse>("/telegram/test", data),
+};
+
+/** Agent endpoints */
+export const agentsApi = {
+    list: () => apiClient.get<AgentListResponse>("/agents"),
+    linkTelegram: (agentId: string) =>
+        apiClient.post<TelegramLinkResponse>(`/agents/${agentId}/telegram/link`),
 };
 
 /** Settings endpoints */

@@ -10,7 +10,8 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.models import ClientSettings, Conversation, Handover, User
+from app.models import Agent, AgentIdentity, Branch, ClientSettings, Conversation, Handover, User
+from app.services.audit_service import record_audit_event
 from app.services.chatflow_service import (
     build_signed_media_url,
     get_instance_id,
@@ -19,8 +20,7 @@ from app.services.chatflow_service import (
 )
 from app.services.learning_service import add_to_knowledge, get_client_slug, is_owner_response
 from app.services.message_service import save_message
-from app.services.state_machine import ConversationState
-from app.services.state_service import is_simulation_context, transition_state
+from app.services.state_service import is_simulation_context, manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("manager_message_service")
@@ -28,6 +28,8 @@ logger = get_logger("manager_message_service")
 MEDIA_STORAGE_BASE_DIR = Path(os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media"))
 MEDIA_MANAGER_DIRNAME = "manager"
 CHATFLOW_MEDIA_TIMEOUT_SECONDS = float(os.environ.get("CHATFLOW_MEDIA_TIMEOUT_SECONDS", "90"))
+MANAGER_CONNECTED_TEMPLATE = "👤 Менеджер {name} подключился. Сейчас отвечу."
+MANAGER_DISCONNECTED_MESSAGE = "🤖 Заявка закрыта, бот снова отвечает."
 
 
 def _safe_media_id(value: Optional[str]) -> str:
@@ -78,6 +80,74 @@ def is_probably_whatsapp_jid(value: Optional[str]) -> bool:
     return "@" in value
 
 
+def resolve_linked_agent(
+    db: Session,
+    *,
+    telegram_user_id: int,
+    client_id: UUID,
+    branch_id: Optional[UUID],
+) -> Optional[Agent]:
+    identity = (
+        db.query(AgentIdentity)
+        .join(Agent)
+        .filter(
+            AgentIdentity.channel == "telegram",
+            AgentIdentity.external_id == str(telegram_user_id),
+            Agent.client_id == client_id,
+            Agent.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
+    if not identity or not identity.agent:
+        return None
+    agent = identity.agent
+    if branch_id and agent.branch_id and agent.branch_id != branch_id:
+        return None
+    return agent
+
+
+def notify_client_manager_status(
+    db: Session,
+    *,
+    conversation: Conversation,
+    handover: Handover,
+    status: str,
+    manager_name: Optional[str] = None,
+) -> tuple[bool, Optional[str]]:
+    remote_jid = get_user_remote_jid(db, conversation.user_id)
+    if not is_probably_whatsapp_jid(remote_jid):
+        return False, "remote_jid_missing"
+
+    if status == "connected":
+        name = (manager_name or "").strip() or "менеджер"
+        message = MANAGER_CONNECTED_TEMPLATE.format(name=name)
+        idempotency_key = f"manager_connected:{handover.id}"
+    else:
+        message = MANAGER_DISCONNECTED_MESSAGE
+        idempotency_key = f"manager_disconnected:{handover.id}"
+
+    save_message(
+        db=db,
+        conversation_id=conversation.id,
+        client_id=conversation.client_id,
+        role="assistant",
+        content=message,
+        message_metadata={"system": True, "event": f"manager_{status}"},
+    )
+
+    sent = send_bot_response(
+        db=db,
+        client_id=conversation.client_id,
+        remote_jid=remote_jid,
+        message=message,
+        branch_id=conversation.branch_id,
+        idempotency_key=idempotency_key,
+    )
+    if not sent:
+        return False, "chatflow_failed"
+    return True, None
+
+
 def find_conversation_by_telegram(
     db: Session,
     chat_id: int,
@@ -91,8 +161,16 @@ def find_conversation_by_telegram(
     2. Resolve user by topic_id
     3. Find active handover for that user
     """
-    # Find client by telegram_chat_id
+    # Find client by telegram_chat_id (branch preferred, fallback to client_settings)
     settings = db.query(ClientSettings).filter(ClientSettings.telegram_chat_id == str(chat_id)).first()
+    if not settings:
+        branch = db.query(Branch).filter(Branch.telegram_chat_id == str(chat_id)).first()
+        if branch:
+            settings = (
+                db.query(ClientSettings)
+                .filter(ClientSettings.client_id == branch.client_id)
+                .first()
+            )
 
     if not settings:
         logger.warning(f"No client found for telegram chat_id={chat_id}")
@@ -214,32 +292,70 @@ def _prepare_handover_for_manager(
     message_thread_id: Optional[int],
     manager_telegram_id: int,
     manager_name: str,
-) -> Tuple[Optional[Conversation], Optional[Handover], bool, str]:
+) -> Tuple[Optional[Conversation], Optional[Handover], Optional[Agent], bool, str]:
     result = find_conversation_by_telegram(db, chat_id, message_thread_id)
     if not result:
         logger.warning(f"No conversation found for chat_id={chat_id}, thread={message_thread_id}")
-        return None, None, False, "No active conversation found for this chat"
+        return None, None, None, False, "No active conversation found for this chat"
 
     conversation, handover = result
     took_handover = False
+    linked_agent = resolve_linked_agent(
+        db,
+        telegram_user_id=manager_telegram_id,
+        client_id=conversation.client_id,
+        branch_id=conversation.branch_id,
+    )
+    if not linked_agent:
+        return None, None, None, False, "Access denied"
+
+    if handover.status == "active":
+        assigned_raw = str(handover.assigned_to or "").strip()
+        if assigned_raw and assigned_raw != str(linked_agent.id):
+            return None, None, None, False, "Access denied"
 
     if handover.status == "pending":
-        handover.status = "active"
-        handover.first_response_at = datetime.now(timezone.utc)
-        if manager_telegram_id:
-            handover.assigned_to = str(manager_telegram_id)
-        if manager_name and manager_name != "Unknown":
-            handover.assigned_to_name = manager_name
-        took_handover = True
-        transition_state(
+        take_result = state_manager_take(
+            db,
             conversation,
-            ConversationState.MANAGER_ACTIVE,
-            allow_same=True,
-            enforce=False,
+            handover,
+            str(linked_agent.id),
+            linked_agent.name or manager_name,
+        )
+        if not take_result.ok:
+            return None, None, None, False, take_result.error or "Case already taken"
+
+        took_handover = True
+        record_audit_event(
+            db,
+            actor=linked_agent,
+            event_type="case_taken",
+            entity_type="handover",
+            entity_id=handover.id,
+            payload={"previous_status": "pending"},
+            branch_id=conversation.branch_id,
+        )
+        notify_ok, notify_detail = notify_client_manager_status(
+            db,
+            conversation=conversation,
             handover=handover,
+            status="connected",
+            manager_name=linked_agent.name or manager_name,
+        )
+        record_audit_event(
+            db,
+            actor=linked_agent,
+            event_type="manager_connected",
+            entity_type="handover",
+            entity_id=handover.id,
+            payload={
+                "client_notify_status": "ok" if notify_ok else "failed",
+                "client_notify_detail": notify_detail,
+            },
+            branch_id=conversation.branch_id,
         )
 
-    return conversation, handover, took_handover, ""
+    return conversation, handover, linked_agent, took_handover, ""
 
 
 def process_manager_message(
@@ -258,11 +374,13 @@ def process_manager_message(
     """
     logger.info(f"process_manager_message: chat_id={chat_id}, manager={manager_telegram_id}, thread={message_thread_id}")
 
-    conversation, handover, took_handover, error = _prepare_handover_for_manager(
+    conversation, handover, linked_agent, took_handover, error = _prepare_handover_for_manager(
         db, chat_id, message_thread_id, manager_telegram_id, manager_name
     )
-    if not conversation or not handover:
+    if not conversation or not handover or not linked_agent:
         return False, error or "No active conversation found for this chat", False, None
+
+    resolved_manager_name = linked_agent.name or manager_name
 
     # 3. Save manager message
     save_message(
@@ -275,6 +393,8 @@ def process_manager_message(
 
     # Update handover with manager response
     handover.manager_response = message_text
+    if resolved_manager_name and resolved_manager_name != "Unknown":
+        handover.assigned_to_name = resolved_manager_name
 
     if is_simulation_context(conversation):
         logger.info(
@@ -374,11 +494,15 @@ def process_manager_media(
         f"process_manager_media: chat_id={chat_id}, manager={manager_telegram_id}, thread={message_thread_id}, type={media_type}"
     )
 
-    conversation, handover, took_handover, error = _prepare_handover_for_manager(
+    conversation, handover, linked_agent, took_handover, error = _prepare_handover_for_manager(
         db, chat_id, message_thread_id, manager_telegram_id, manager_name
     )
-    if not conversation or not handover:
+    if not conversation or not handover or not linked_agent:
         return False, error or "No active conversation found for this chat", False, None
+
+    resolved_manager_name = linked_agent.name or manager_name
+    if resolved_manager_name and resolved_manager_name != "Unknown":
+        handover.assigned_to_name = resolved_manager_name
 
     if is_simulation_context(conversation):
         if caption and caption.strip():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -67,11 +68,24 @@ class OutboxPayloadBody(BaseModel):
         return self
 
 
+class TenantContext(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    company_id: UUID | None = None
+    client_id: UUID
+    branch_id: UUID | None = None
+    client_slug: str | None = None
+    branch_slug: str | None = None
+    instance_id: str | None = None
+    source: str | None = None
+
+
 class OutboxPayloadContract(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     body: OutboxPayloadBody
     client_slug: str = Field(..., min_length=1)
+    tenant_context: TenantContext | None = None
 
     @model_validator(mode="after")
     def _normalize_client_slug(self) -> "OutboxPayloadContract":

@@ -13,6 +13,7 @@ export default function LoginButton() {
                     onClick={() => {
                         if (typeof window !== "undefined") {
                             window.localStorage.removeItem("console:client_id")
+                            window.localStorage.removeItem("console:branch_id")
                         }
                         signOut()
                     }}

@@ -35,14 +35,23 @@ def enqueue_outbox_message(
     conversation_id,
     inbound_message_id: str,
     payload_json: dict[str, Any],
+    branch_id: uuid.UUID | None = None,
 ) -> bool:
     now = datetime.now(timezone.utc)
+    resolved_branch_id = branch_id
+    if not resolved_branch_id and isinstance(payload_json, dict):
+        tenant_context = payload_json.get("tenant_context")
+        if isinstance(tenant_context, dict):
+            resolved_branch_id = tenant_context.get("branch_id")
+        if not resolved_branch_id:
+            resolved_branch_id = payload_json.get("branch_id")
     stmt = (
         insert(OutboxMessage)
         .values(
             id=uuid.uuid4(),
             client_id=client_id,
             conversation_id=conversation_id,
+            branch_id=resolved_branch_id,
             inbound_message_id=inbound_message_id,
             payload_json=payload_json,
             status="PENDING",
@@ -78,6 +87,7 @@ def claim_pending_outbox(db: Session, *, limit: int = 10) -> list[dict[str, Any]
                 WHERE outbox_messages.id = cte.id
                 RETURNING outbox_messages.id,
                           outbox_messages.client_id,
+                          outbox_messages.branch_id,
                           outbox_messages.conversation_id,
                           outbox_messages.inbound_message_id,
                           outbox_messages.payload_json,
@@ -134,6 +144,7 @@ def claim_pending_outbox_batches(
                 WHERE id IN (SELECT id FROM to_claim)
                 RETURNING outbox_messages.id,
                           outbox_messages.client_id,
+                          outbox_messages.branch_id,
                           outbox_messages.conversation_id,
                           outbox_messages.inbound_message_id,
                           outbox_messages.payload_json,

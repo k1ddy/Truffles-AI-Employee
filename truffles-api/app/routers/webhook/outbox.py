@@ -11,7 +11,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.adapters.chatflow import ChatFlowAdapter
-from app.logging_config import get_logger, record_outbox_latency
+from app.logging_config import get_logger, record_outbox_latency, start_span
 from app.models import Conversation, OutboxMessage, User
 from app.ports.messaging import MessageOptions
 from app.routers.webhook.media import (
@@ -298,6 +298,16 @@ async def _handle_enqueue_only_accept(
         message_id, remote_jid, metadata.timestamp if metadata else None, message_text
     )
     payload_json = payload.model_dump(exclude_none=True)
+    tenant_context = {
+        "client_id": str(client.id),
+        "branch_id": str(conversation.branch_id) if conversation and conversation.branch_id else None,
+        "client_slug": client.name,
+        "source": "webhook",
+    }
+    _merge_nested_dict(
+        payload_json,
+        {"tenant_context": {key: value for key, value in tenant_context.items() if value is not None}},
+    )
     validated_payload, payload_error = validate_outbox_payload(
         payload_json,
         expected_client_slug=client.name,
@@ -336,6 +346,7 @@ async def _handle_enqueue_only_accept(
         conversation_id=conversation.id,
         inbound_message_id=inbound_message_id,
         payload_json=payload_json,
+        branch_id=conversation.branch_id,
     )
     if enqueued:
         logger.info(
@@ -417,6 +428,15 @@ async def _process_outbox_rows(
         payload_json = row.get("payload_json") or {}
         created_at = row.get("created_at")
         conversation_id = row.get("conversation_id")
+        branch_id = None
+        if conversation_id:
+            conversation = (
+                db.query(Conversation)
+                .filter(Conversation.id == conversation_id)
+                .first()
+            )
+            if conversation:
+                branch_id = conversation.branch_id
         inbound_message_id = row.get("inbound_message_id")
         client_id = row.get("client_id")
         message_text = None
@@ -430,6 +450,7 @@ async def _process_outbox_rows(
             "picked_at": picked_at,
             "created_at": created_at,
             "conversation_id": conversation_id,
+            "branch_id": branch_id,
             "client_slug": payload_json.get("client_slug"),
             "client_id": client_id,
             "inbound_message_id": inbound_message_id,
@@ -440,14 +461,15 @@ async def _process_outbox_rows(
         logger.info(
             "Outbox picked",
             extra={
-                "context": {
-                    "outbox_id": outbox_id_str,
-                    "conversation_id": str(conversation_id) if conversation_id else None,
-                    "client_slug": payload_json.get("client_slug"),
-                    "inbound_message_id": inbound_message_id,
-                    "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
-                    "outbox_picked_at": picked_at.isoformat(),
-                }
+                    "context": {
+                        "outbox_id": outbox_id_str,
+                        "conversation_id": str(conversation_id) if conversation_id else None,
+                        "branch_id": str(branch_id) if branch_id else None,
+                        "client_slug": payload_json.get("client_slug"),
+                        "inbound_message_id": inbound_message_id,
+                        "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
+                        "outbox_picked_at": picked_at.isoformat(),
+                    }
             },
         )
 
@@ -605,6 +627,8 @@ async def _process_outbox_rows(
         }
         if error:
             payload["outbox"]["error"] = error
+        if process_ms is not None:
+            payload["stages"] = {"outbox_process_ms": round(process_ms, 2)}
         _merge_message_timing(message, payload)
 
         decision_meta = {}
@@ -663,6 +687,25 @@ async def _process_outbox_rows(
         if error:
             context["error"] = error
         logger.info("Outbox done", extra={"context": context})
+        if process_ms is not None:
+            logger.info(
+                "Timing",
+                extra={
+                    "context": {
+                        "message_id": str(info.get("inbound_message_id"))
+                        if info.get("inbound_message_id")
+                        else None,
+                        "outbox_id": outbox_id,
+                        "trace_id": trace_id,
+                        "stage": "outbox_process_ms",
+                        "elapsed_ms": round(process_ms, 2),
+                        "client_slug": info.get("client_slug"),
+                        "conversation_id": str(info.get("conversation_id"))
+                        if info.get("conversation_id")
+                        else None,
+                    }
+                },
+            )
         _persist_outbox_timing(
             outbox_id=outbox_id,
             done_at=done_at,
@@ -693,12 +736,12 @@ async def _process_outbox_rows(
         outbox_ids = [outbox_id_str]
         timing_start = time.monotonic()
         sim_info = pick_info.get(outbox_id_str, {})
+        message = _resolve_outbox_message(outbox_id_str)
         if sim_info.get("simulation_mode"):
             _merge_outbox_meta(
                 outbox_id_str,
                 {"simulation": {"mode": True, "id": sim_info.get("simulation_id")}},
             )
-            message = _resolve_outbox_message(outbox_id_str)
             if message:
                 _update_message_decision_metadata(message, {"outbox_simulated": True})
             outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
@@ -712,6 +755,19 @@ async def _process_outbox_rows(
             )
             results["sent"] += 1
             return
+        span_context = {
+            "message_id": row.get("inbound_message_id"),
+            "outbox_id": outbox_id_str,
+            "client_slug": client_slug,
+            "conversation_id": conversation_id,
+        }
+        branch_id = sim_info.get("branch_id")
+        if branch_id:
+            span_context["branch_id"] = str(branch_id)
+        if message and isinstance(message.message_metadata, dict):
+            decision_meta = message.message_metadata.get("decision_meta")
+            if isinstance(decision_meta, dict) and decision_meta.get("trace_id"):
+                span_context["trace_id"] = decision_meta.get("trace_id")
 
         try:
             if _is_outbox_event(payload_json):
@@ -748,7 +804,10 @@ async def _process_outbox_rows(
                     instance_id=instance_id,
                     idempotency_key=idempotency_key,
                 )
-                result = adapter.send_text(remote_jid, text, options)
+                with start_span("outbox.send", context=span_context) as span:
+                    result = adapter.send_text(remote_jid, text, options)
+                if span is not None:
+                    span.set_attribute("send.ok", result.is_ok())
                 if not result.is_ok():
                     raise RuntimeError(f"ChatFlow delivery failed: {result.error}")
             else:
@@ -767,16 +826,17 @@ async def _process_outbox_rows(
                 payload_json = validated_payload.model_dump(exclude_none=True)
                 payload = WebhookRequest.model_validate(payload_json)
                 client_slug = payload.client_slug
-                response = await legacy._handle_webhook_payload(
-                    payload,
-                    db,
-                    provided_secret=None,
-                    enforce_secret=False,
-                    skip_persist=True,
-                    conversation_id=UUID(conversation_id),
-                    outbox_ids=outbox_ids,
-                    outbox_created_at=row.get("created_at"),
-                )
+                with start_span("outbox.process", context=span_context):
+                    response = await legacy._handle_webhook_payload(
+                        payload,
+                        db,
+                        provided_secret=None,
+                        enforce_secret=False,
+                        skip_persist=True,
+                        conversation_id=UUID(conversation_id),
+                        outbox_ids=outbox_ids,
+                        outbox_created_at=row.get("created_at"),
+                    )
                 if not response.success:
                     raise RuntimeError(response.message)
 

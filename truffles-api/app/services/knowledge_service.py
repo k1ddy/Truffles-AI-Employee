@@ -9,6 +9,35 @@ from app.services.alert_service import alert_warning
 
 logger = get_logger("knowledge_service")
 
+
+def _log_timing(
+    stage: str,
+    elapsed_ms: float,
+    *,
+    timing_context: dict | None = None,
+    extra: dict | None = None,
+) -> None:
+    context: dict = {}
+    if isinstance(timing_context, dict):
+        context.update(timing_context)
+    if extra:
+        context.update(extra)
+    context["stage"] = stage
+    context["elapsed_ms"] = round(elapsed_ms, 2)
+    for key in ("message_id", "outbox_id", "trace_id"):
+        context.setdefault(key, None)
+    if isinstance(timing_context, dict):
+        timing = timing_context.get("timing")
+        if not isinstance(timing, dict):
+            timing = {}
+        stages = timing.get("stages")
+        if not isinstance(stages, dict):
+            stages = {}
+        stages[stage] = context["elapsed_ms"]
+        timing["stages"] = stages
+        timing_context["timing"] = timing
+    logger.info("Timing", extra={"context": context})
+
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 TEST_MODE = os.environ.get("TEST_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -80,6 +109,15 @@ def search_knowledge(
     trace_context: dict | None = None,
 ) -> List[dict]:
     """Search knowledge base in Qdrant."""
+    search_start = time.monotonic()
+
+    def _log_search(extra: dict | None = None) -> None:
+        _log_timing(
+            "knowledge_search_ms",
+            (time.monotonic() - search_start) * 1000,
+            timing_context=trace_context,
+            extra=extra,
+        )
 
     # Enforce strict branch isolation: skip RAG if branch filter is missing.
     headers = {"api-key": QDRANT_API_KEY} if QDRANT_API_KEY else None
@@ -91,6 +129,7 @@ def search_knowledge(
     _set_rag_filter_trace(trace_context, filter_meta)
     if filter_meta.get("filter_reason") == "branch_missing":
         logger.info(f"Knowledge search skipped (branch missing) for '{query[:30]}...'")
+        _log_search({"reason": "branch_missing"})
         return []
 
     # Get embedding for query
@@ -113,6 +152,7 @@ def search_knowledge(
         if response.status_code != 200:
             logger.error(f"Qdrant search error: {response.status_code} - {response.text}")
             alert_warning("Qdrant search failed", {"status": response.status_code, "query": query[:50]})
+            _log_search({"status_code": response.status_code, "reason": "qdrant_error"})
             return []
 
         data = response.json()
@@ -131,11 +171,13 @@ def search_knowledge(
 
         if results or filter_meta.get("filter_mode") != "branch":
             logger.info(f"Knowledge search: found {len(results)} results for '{query[:30]}...'")
+            _log_search({"results": len(results)})
             return results
 
         filter_meta.update({"filter_reason": "branch_filter_empty"})
         _set_rag_filter_trace(trace_context, filter_meta)
         logger.info(f"Knowledge search: found 0 results for '{query[:30]}...' (strict branch)")
+        _log_search({"results": len(results), "reason": "branch_filter_empty"})
         return results
 
 

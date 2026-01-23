@@ -27,9 +27,13 @@ What to read (quick map)
 - `message.*` → correlation keys: `message_id`, `conversation_id`, `remote_jid`.
 - `decision_meta.action/source/intent` → final decision.
 - `decision_trace` → ordered stages (see `DECISION_STAGE_ORDER_SNAPSHOT`).
-- `decision_meta.timing` → pipeline timing + outbox timing.
+- `timing` (and `decision_meta.timing`) → pipeline timing + stage timings + outbox timing.
 - `outbox.rows[].meta.timing` → worker timings (wait/process/total).
 - `outbox.latency_ms` → inbound→outbox enqueue latency (derived).
+
+Stage timing keys (timing.stages)
+- `controller_llm_ms`, `multi_intent_llm_ms`, `rag_rewrite_llm_ms`, `rag_ms`, `knowledge_search_ms`.
+- `dedup_ms`, `outbox_enqueue_ms`, `outbox_process_ms`, `send_ms`.
 
 Correlation keys
 - `message_id` → ChatFlow inbound id.

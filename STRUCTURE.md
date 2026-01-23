@@ -15,6 +15,7 @@
 | `contracts/` | Канон контрактов (Console API, ошибки) | Архитектор/Frontend |
 | `contracts/console_api/schemathesis.toml` | Seed/overrides для Schemathesis contract smoke | Backend/QA |
 | `contracts/events/` | Контракты событий (outbox) | Архитектор/Backend |
+| `contracts/tenancy/tenant_context.v1.jsonschema` | Канон tenant_context (company/client/branch) | Архитектор/Backend |
 | `contracts/integrations/` | Контракты портов/адаптеров | Архитектор/Backend |
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
@@ -32,6 +33,17 @@
 | `docs/CONSOLE_GUIDE.md` | Guide по Console (API, тесты, дебаг) | Frontend/Backend |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
+
+**Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-verify-test.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ui.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ci-fix.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-schemathesis-unexclude.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-telegram-onboarding-link.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-telegram-linking-sync.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-telegram-protocol-docs.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-console-telegram-sync-fixes.md`
 
 ---
 
@@ -176,6 +188,7 @@
 |------|------------|
 | `truffles-api/app/services/state_service.py`, `state_machine.py` | Статусы/переходы |
 | `truffles-api/app/services/escalation_service.py`, `manager_message_service.py`, `reminder_service.py` | Эскалация/SLA |
+| `truffles-api/app/services/agent_link_service.py` | Telegram linking tokens |
 | `truffles-api/app/services/knowledge_service.py`, `demo_salon_knowledge.py`, `intent_service.py`, `ai_service.py` | Facts/Intent/LLM |
 | `truffles-api/app/services/outbox_service.py`, `alert_service.py`, `health_service.py` | Надежность/алерты |
 | `truffles-api/app/services/console_idempotency.py` | Идемпотентность мутаций Console API |
@@ -187,6 +200,9 @@
 | `truffles-api/app/models/*` | Модели БД |
 | `truffles-api/app/models/console_idempotency.py` | Idempotency keys для Console API |
 | `truffles-api/migrations/*.sql` | SQL миграции для app‑схемы |
+| `truffles-api/migrations/006_add_outbox_audit_branch_id.sql` | branch_id для audit/outbox + backfill |
+| `truffles-api/migrations/007_backfill_conversations_branch_id.sql` | backfill conversations.branch_id из instanceId |
+| `truffles-api/migrations/008_add_agent_link_tokens.sql` | linking tokens для Telegram |
 | `truffles-api/app/knowledge/<client_slug>/*` | Truth/policy/eval packs |
 | `knowledge/<client_slug>/*` | Канон RAG‑контента |
 
@@ -196,6 +212,13 @@
 
 | Файл | Назначение |
 |------|------------|
+
+---
+
+## TESTS
+
+- `truffles-api/tests/test_console_telegram_helpers.py` — Console↔Telegram helper tests.
+- `truffles-api/tests/test_console_telegram_connector.py` — Console↔Telegram verify/test helpers.
 | `.github/workflows/ci.yml` | GitHub Actions: ruff + pytest + build/push GHCR + deploy (optional) |
 
 ---
@@ -397,6 +420,8 @@ truffles-api/
 | Файл | Что тестирует |
 |------|---------------|
 | `truffles-api/tests/test_cases.json` | Тестовые сценарии диалогов |
+| `truffles-api/tests/test_console_telegram_connector.py` | Unit: Console Telegram verify/test helpers |
+| `truffles-api/tests/test_console_telegram_helpers.py` | Unit: Console Telegram trail helpers |
 | `truffles-api/tests/test_webhook_booking.py` | Unit: expected_reply_type и booking slot validators |
 | `truffles-api/tests/test_webhook_dedup.py` | Unit: webhook buffer/dedup helpers |
 | `truffles-api/tests/test_webhook_response.py` | Unit: CTA и quiet hours helpers |

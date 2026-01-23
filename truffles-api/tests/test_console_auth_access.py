@@ -1,7 +1,15 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from app.services.console_auth import _build_access_map, _resolve_role
+import pytest
+
+from app.services.console_auth import (
+    _build_access_map,
+    _resolve_branch_selection,
+    _resolve_client_selection,
+    _resolve_role,
+)
+from app.services.console_errors import ConsoleAPIError
 
 
 def test_build_access_map_branch_membership():
@@ -92,3 +100,107 @@ def test_build_access_map_legacy_agent_fallback():
 def test_resolve_role_priority():
     role = _resolve_role({"manager", "owner", "support"})
     assert role == "owner"
+
+
+def test_resolve_client_selection_requires_client_when_multiple():
+    client_a = SimpleNamespace(id=uuid4(), name="Client A")
+    client_b = SimpleNamespace(id=uuid4(), name="Client B")
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        _resolve_client_selection(
+            {client_a.id: SimpleNamespace(), client_b.id: SimpleNamespace()},
+            [client_a, client_b],
+            selected_client_id=None,
+            require_selection=True,
+        )
+
+    assert exc_info.value.code == "CLIENT_SELECTION_REQUIRED"
+
+
+def test_resolve_client_selection_rejects_mismatched_client():
+    client_a = SimpleNamespace(id=uuid4(), name="Client A")
+    client_b = SimpleNamespace(id=uuid4(), name="Client B")
+    selected_client_id = uuid4()
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        _resolve_client_selection(
+            {client_a.id: SimpleNamespace(), client_b.id: SimpleNamespace()},
+            [client_a, client_b],
+            selected_client_id=selected_client_id,
+            require_selection=True,
+        )
+
+    assert exc_info.value.code == "TENANT_MISMATCH"
+    assert exc_info.value.status_code == 403
+
+
+def test_resolve_client_selection_auto_for_single_client():
+    client = SimpleNamespace(id=uuid4(), name="Client A")
+
+    selected_client_id, selection_required = _resolve_client_selection(
+        {client.id: SimpleNamespace()},
+        [client],
+        selected_client_id=None,
+        require_selection=True,
+    )
+
+    assert selected_client_id == client.id
+    assert selection_required is False
+
+
+def test_resolve_branch_selection_requires_branch_when_multiple():
+    branch_ids = {uuid4(), uuid4()}
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        _resolve_branch_selection(
+            branch_ids,
+            branch_restricted=True,
+            selected_branch_id=None,
+            require_selection=True,
+        )
+
+    assert exc_info.value.code == "BRANCH_SELECTION_REQUIRED"
+
+
+def test_resolve_branch_selection_auto_for_single_branch():
+    branch_id = uuid4()
+
+    effective_branch_id, selection_required = _resolve_branch_selection(
+        {branch_id},
+        branch_restricted=True,
+        selected_branch_id=None,
+        require_selection=True,
+    )
+
+    assert effective_branch_id == branch_id
+    assert selection_required is False
+
+
+def test_resolve_branch_selection_accepts_valid_branch():
+    branch_id = uuid4()
+
+    effective_branch_id, selection_required = _resolve_branch_selection(
+        {branch_id},
+        branch_restricted=False,
+        selected_branch_id=branch_id,
+        require_selection=True,
+    )
+
+    assert effective_branch_id == branch_id
+    assert selection_required is False
+
+
+def test_resolve_branch_selection_rejects_out_of_scope():
+    allowed_branch_id = uuid4()
+    denied_branch_id = uuid4()
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        _resolve_branch_selection(
+            {allowed_branch_id},
+            branch_restricted=False,
+            selected_branch_id=denied_branch_id,
+            require_selection=True,
+        )
+
+    assert exc_info.value.code == "BRANCH_ACCESS_DENIED"
+    assert exc_info.value.status_code == 403

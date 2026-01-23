@@ -1,9 +1,13 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
+import { telegramApi } from "@/lib/api-client";
+import { useErrorHandler } from "@/lib/api-hooks";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import toast from "react-hot-toast";
 
 interface HealthData {
     status: string;
@@ -76,6 +80,8 @@ function MetricCard({ label, value, subtext }: { label: string; value: string | 
 
 export default function OpsPage() {
     const { data: session } = useSession();
+    const { handleError } = useErrorHandler();
+    const [telegramAction, setTelegramAction] = useState<"verify" | "test" | null>(null);
 
     const { data: health, isLoading: healthLoading, refetch: refetchHealth } = useQuery({
         queryKey: ["health"],
@@ -97,6 +103,52 @@ export default function OpsPage() {
         queryFn: fetchTelegramHealth,
         enabled: !!session,
         refetchInterval: 30000,
+    });
+
+    const telegramVerify = useMutation({
+        mutationFn: async () => {
+            const { data } = await telegramApi.verify({ scope: "client" });
+            return data;
+        },
+        onMutate: () => {
+            setTelegramAction("verify");
+        },
+        onSuccess: (data) => {
+            if (data.success) {
+                toast.success(`Код верификации: ${data.verification_code}`);
+            } else {
+                toast.error(data.error_message || "Не удалось отправить код");
+            }
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+        onSettled: () => {
+            setTelegramAction(null);
+        },
+    });
+
+    const telegramTest = useMutation({
+        mutationFn: async () => {
+            const { data } = await telegramApi.test({ scope: "client" });
+            return data;
+        },
+        onMutate: () => {
+            setTelegramAction("test");
+        },
+        onSuccess: (data) => {
+            if (data.success) {
+                toast.success("Тестовое сообщение отправлено");
+            } else {
+                toast.error(data.error_message || "Не удалось отправить тест");
+            }
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+        onSettled: () => {
+            setTelegramAction(null);
+        },
     });
 
     const isLoading = healthLoading || metricsLoading;
@@ -229,6 +281,26 @@ export default function OpsPage() {
                         ⚠️ {telegramHealth.last_error_message}
                     </div>
                 )}
+                <div className="mt-4 flex items-center gap-2">
+                    <button
+                        type="button"
+                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => telegramVerify.mutate()}
+                        disabled={telegramAction !== null}
+                        data-testid="ops-telegram-verify"
+                    >
+                        {telegramAction === "verify" ? "Отправка..." : "Verify"}
+                    </button>
+                    <button
+                        type="button"
+                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => telegramTest.mutate()}
+                        disabled={telegramAction !== null}
+                        data-testid="ops-telegram-test"
+                    >
+                        {telegramAction === "test" ? "Отправка..." : "Send test"}
+                    </button>
+                </div>
             </div>
 
             {/* Message Queue */}

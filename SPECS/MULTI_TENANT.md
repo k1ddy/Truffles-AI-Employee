@@ -37,6 +37,163 @@ _Любые статусы ниже — DERIVED; единственный ист
 
 ---
 
+# ЧАСТЬ 0: TENANT UX V1 (ПОЛЬЗОВАТЕЛЬСКАЯ МОДЕЛЬ)
+
+## Ценность для конечного пользователя
+
+- **Owner (владелец бизнеса):** видит все компании/клиенты/филиалы в одном месте, без смешения данных.
+- **Admin клиента:** управляет своим бизнесом и филиалами, не видит чужие компании.
+- **Менеджер филиала:** работает только со своим филиалом (заявки, записи, настройки), без риска утечки.
+
+## Роли и видимость (UX)
+
+| Роль | Видит | Не видит |
+|------|-------|----------|
+| Owner | Все компании → все клиенты → все филиалы | Ничего |
+| Admin (client) | Свой клиент + все филиалы клиента | Чужие компании/клиенты |
+| Manager (branch) | Один филиал | Другие филиалы и клиенты |
+| Support | Назначенные филиалы | Остальное |
+
+## Основные сценарии
+
+1) **Owner**
+   - Логин → выбор Company → выбор Client → выбор Branch (опционально) → рабочие разделы.
+2) **Admin клиента**
+   - Логин → фиксированный Client → выбор Branch (если несколько) → рабочие разделы.
+3) **Manager филиала**
+   - Логин → auto‑select Branch → рабочие разделы (переключение скрыто).
+
+## UX правила (обязательные)
+
+- Tenant‑selector показывается **только если** есть выбор (2+ компаний/клиентов/филиалов).
+- Контекст всегда виден (Company / Client / Branch в шапке).
+- Любая ошибка tenant‑контекста должна быть понятной: “Выберите клиента/филиал” или “Нет доступа”.
+- Нет “догадок”: если контекст не выбран или не валиден — запрос отклоняется.
+
+## Ключевые экраны (UX)
+
+- **Клиентский контекст‑бар:** Company ▸ Client ▸ Branch (видим всегда).
+- **Заявки:** фильтры строго по выбранному филиалу/клиенту.
+- **Записи:** список мастеров/слотов только в контексте филиала.
+- **Настройки:** редактируемые поля только в текущем контексте.
+
+## Ошибки и пустые состояния (текст UX)
+
+- `CLIENT_SELECTION_REQUIRED` → “Выберите клиента, чтобы загрузить данные.”
+- `BRANCH_SELECTION_REQUIRED` → “Выберите филиал, чтобы продолжить.”
+- `TENANT_MISMATCH` → “Нет доступа к выбранному контексту.”
+- Нет данных → “В выбранном филиале пока нет заявок/записей.”
+
+---
+
+# ЧАСТЬ 0.1: TENANT CONTEXT CONTRACT V1 (ОБЯЗАТЕЛЕН ВЕЗДЕ)
+
+## Минимальный контракт (tenant_context)
+
+```
+tenant_context:
+  company_id: UUID|null
+  client_id: UUID (required)
+  branch_id: UUID|null
+  client_slug: string (required for inbound)
+  branch_slug: string|null
+  instance_id: string|null
+  source: header|token|webhook|system|null
+```
+
+## Где обязателен
+
+**API/Console**
+- Заголовки: `X-Client-Id` (required при multi‑client), `X-Branch-Id` (required при multi‑branch или branch‑scoped роли).
+- `/console/v1/me` всегда возвращает доступные clients/branches + selection_required.
+
+**Inbound (Webhook)**
+- `client_slug` обязателен; `instanceId` обязателен при branch_mode=by_instance/hybrid.
+- `branch_id` должен быть вычислен до любых бизнес‑гейтов.
+
+**Decision Meta/Trace**
+- Каждый user‑message должен иметь `client_id` и `branch_id` (если branch включён).
+- Стадии, зависящие от филиала (RAG/pricing/booking/telegram) обязаны писать `branch_id`.
+
+**Outbox / Audit / Metrics**
+- Outbox payload содержит `client_id`, `branch_id`, `instance_id`.
+- Audit‑events должны включать `client_id` + `branch_id` (если есть).
+- Метрики обязаны быть аггрегируемыми по client/branch.
+
+## Правила отказа (fail‑closed)
+
+- Нет `X-Client-Id` при 2+ доступных клиентов → `CLIENT_SELECTION_REQUIRED` (400).
+- `X-Client-Id` не принадлежит агенту → `TENANT_MISMATCH` (403).
+- Branch‑scoped роль без `X-Branch-Id` при 2+ филиалах → `BRANCH_SELECTION_REQUIRED` (400).
+
+## Dev guardrails (обязательные)
+
+- В каждом API endpoint: `get_console_context()` или аналогичный guard.
+- В webhook: branch выбирается **до** любых бизнес‑гейтов.
+- В outbox/audit: tenant_context должен быть в payload/meta.
+- Тесты: минимум 1 cross‑tenant case (чужой client/branch → 403).
+- Логика выбора должна быть централизована (никаких “ручных if” в роутерах).
+
+---
+
+# ЧАСТЬ 0.2: DATA ISOLATION PLAN V1 (ПОЛНАЯ ИЗОЛЯЦИЯ)
+
+## Цель
+
+Жёстко исключить кросс‑тенант доступ на уровне БД, API, интеграций и событий.  
+Даже при ошибке UI или невалидном запросе — чужие данные не возвращаются.
+
+## Стратегия (этапная)
+
+**Stage A — Логическая изоляция (сейчас)**
+- Один PostgreSQL, но **все запросы** строго фильтруются по tenant_context.
+- Все ключевые таблицы имеют `client_id`, а где нужно — `branch_id`.
+
+**Stage B — Контракт + enforcement (P0)**
+- `tenant_context` обязателен во всех API и событиях.
+- Сервер отвергает запросы без tenant‑контекста (fail‑closed).
+- Автотесты: cross‑tenant access forbidden.
+
+**Stage C — Физическая изоляция (P1/P2)**
+- Опционально: schema‑per‑tenant или DB‑per‑tenant для крупных клиентов.
+- Стандартизировать процесс миграции/архивации.
+
+## Обязательные поверхности (минимум)
+
+| Поверхность | Требование |
+|------------|------------|
+| Postgres (операционные данные) | `client_id` + `branch_id` где применимо; индексы по tenant ключам |
+| Qdrant (RAG) | фильтр `client_slug` + `branch_id/knowledge_tag`, без fallback |
+| Outbox | payload содержит `client_id` + `branch_id` |
+| Audit | запись `client_id` + `branch_id` |
+| Метрики | измерения по client/branch |
+| Кэш/хранилища | ключи с tenant префиксом |
+
+## Матрица изоляции (минимум)
+
+| Сущность | client_id | branch_id | Примечание |
+|----------|-----------|-----------|------------|
+| conversations | required | required | branch_id назначается на входе |
+| messages | derived | derived | через conversation; meta содержит tenant |
+| handovers | required | derived | branch_id через conversation |
+| bookings | required | required | bookings/slots/scopes |
+| specialists | required | required | мастер всегда в филиале |
+| learned_responses | required | optional | branch‑specific для локальных знаний |
+| audit_events | required | required | audit всегда tenant‑scoped |
+| outbox_messages | required | required | payload_json содержит tenant |
+| client_settings | required | n/a | уровень клиента |
+| branches | required | n/a | ветки внутри клиента |
+
+## План миграций (кратко)
+
+1) Добавить `branch_id` в таблицы, где он нужен (outbox, audit, bookings, specialists, messages/meta).
+2) Backfill: проставить branch_id из conversations/instanceId.
+3) Индексы: `(client_id, branch_id, created_at)` для основных списков.
+4) Валидаторы: запрет записи без tenant_context.
+5) Прогон тестов cross‑tenant.
+
+---
+
 # ЧАСТЬ 1: ТЕРМИНОЛОГИЯ И ИЕРАРХИЯ
 
 ## Ключевые термины
