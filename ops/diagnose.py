@@ -14,6 +14,7 @@ import json
 import os
 import random
 import re
+import signal
 import shlex
 import socket
 import subprocess
@@ -3227,6 +3228,22 @@ def _run_chaos_sim(args):
     if args.min_turns < 4 or args.min_turns > args.max_turns:
         raise SystemExit("chaos-sim: invalid --min-turns/--max-turns range")
 
+    stop_requested = False
+    stop_reason = None
+    interrupted = False
+
+    def _handle_stop(signum, _frame):
+        nonlocal stop_requested, stop_reason, interrupted
+        if stop_requested:
+            return
+        stop_requested = True
+        interrupted = True
+        stop_reason = f"signal_{signum}"
+        print("chaos-sim: stop requested, finishing current turn...", file=sys.stderr)
+
+    signal.signal(signal.SIGINT, _handle_stop)
+    signal.signal(signal.SIGTERM, _handle_stop)
+
     seed = args.seed or int(time.time())
     rng = random.Random(seed)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -3302,6 +3319,7 @@ def _run_chaos_sim(args):
         "manager_resolved": 0,
         "console_resolved": 0,
     }
+    processed_cases = 0
 
     def _bump_failure_counts(labels):
         for label in labels:
@@ -3351,9 +3369,13 @@ def _run_chaos_sim(args):
         )
 
     for case_idx, case in enumerate(cases, start=1):
+        if stop_requested:
+            break
         remote_jid = _build_remote_jid(case_idx)
         conversation_id = None
         for turn_idx, turn in enumerate(case["turns"], start=1):
+            if stop_requested:
+                break
             if turn.get("type") == "manager":
                 if not conversation_id:
                     failures.append(
@@ -3640,6 +3662,10 @@ def _run_chaos_sim(args):
 
             time.sleep(rng.uniform(args.min_wait, args.max_wait))
 
+        if stop_requested:
+            break
+        processed_cases += 1
+
     if turns_handle:
         turns_handle.close()
 
@@ -3656,6 +3682,7 @@ def _run_chaos_sim(args):
         "simulation_id": simulation_id,
         "seed": seed,
         "cases": stats["cases"],
+        "cases_processed": processed_cases,
         "turns": stats["turns"],
         "failures": stats["failures"],
         "failure_types": failure_counts,
@@ -3665,6 +3692,8 @@ def _run_chaos_sim(args):
         "console_mode": args.console_mode,
         "llm_mode": args.mode,
         "turns_path": turns_path,
+        "interrupted": interrupted,
+        "stop_reason": stop_reason,
     }
     with open(stats_path, "w", encoding="utf-8") as handle:
         json.dump(stats, handle, ensure_ascii=False, indent=2)
@@ -3675,8 +3704,12 @@ def _run_chaos_sim(args):
         handle.write("# Chaos Simulation Report\n\n")
         handle.write(f"- simulation_id: {simulation_id}\n")
         handle.write(f"- cases: {stats['cases']}\n")
+        handle.write(f"- cases_processed: {processed_cases}\n")
         handle.write(f"- turns: {stats['turns']}\n")
         handle.write(f"- failures: {stats['failures']}\n")
+        handle.write(f"- interrupted: {str(interrupted).lower()}\n")
+        if stop_reason:
+            handle.write(f"- stop_reason: {stop_reason}\n")
         handle.write(f"- escalations: {stats['escalations']}\n")
         handle.write(f"- lead_captured: {stats['lead_captured']}\n")
         handle.write(f"- booking_failed: {stats['booking_failed']}\n")
