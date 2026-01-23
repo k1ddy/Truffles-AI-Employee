@@ -240,7 +240,7 @@ E2E_ALLOW_MUTATIONS=1 npm run test:e2e:mutating
 **Schemathesis (GET-only contract smoke):**
 ```bash
 SCHEMATHESIS_TOKEN="<bearer token>" \
-schemathesis run contracts/console_api/openapi.v1.yaml \
+schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml \
   --url https://api.truffles.kz/console/v1 \
   --include-method=GET \
   --checks all \
@@ -248,6 +248,9 @@ schemathesis run contracts/console_api/openapi.v1.yaml \
   --hypothesis-max-examples=3 \
   --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"
 ```
+**Seed IDs:** `contracts/console_api/schemathesis.toml` contains stable `case_id`/`conversation_id` used in contract
+checks. If the IDs go stale, update them with a real handover + conversation from the same client as the
+console token.
 
 **k6 (manual load smoke):**
 ```bash
