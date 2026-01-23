@@ -200,11 +200,17 @@ docker compose -f /home/zhan/truffles-main/truffles-api/docker-compose.yml up -d
 **Включение:**
 - `OTEL_ENABLED=1`
 - `OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318/v1/traces`
-- `OTEL_SERVICE_NAME` — разный для `truffles-api`, `truffles-outbox`, `truffles-sentinel`.
+- `OTEL_SERVICE_NAME` — для API (`truffles-api`).
+- `OTEL_SERVICE_NAME_OUTBOX` — для outbox worker (`truffles-outbox`).
+- `OTEL_SERVICE_NAME_SENTINEL` — для sentinel (`truffles-sentinel`).
+- Span attrs: `message_id`/`outbox_id`/`trace_id`/`client_slug`/`conversation_id`/`branch_id`.
 
 **Проверки:**
 ```bash
 curl -fsS http://localhost:3200/ready
+curl -fsS http://localhost:3200/metrics | rg -m 1 tempo_distributor_spans_received_total
+
+docker logs truffles-api --tail 5 | rg -i 'otel enabled'
 docker logs truffles-outbox --tail 5 | rg -i 'otel enabled'
 docker logs truffles-sentinel --tail 5 | rg -i 'otel enabled'
 ```

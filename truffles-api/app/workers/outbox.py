@@ -42,7 +42,11 @@ def _setup_otel() -> None:
         )
         return
 
-    service_name = os.environ.get("OTEL_SERVICE_NAME", "truffles-outbox")
+    service_name = (
+        os.environ.get("OTEL_SERVICE_NAME_OUTBOX")
+        or os.environ.get("OTEL_SERVICE_NAME")
+        or "truffles-outbox"
+    )
     resource = Resource.create({"service.name": service_name})
     provider = TracerProvider(resource=resource)
     exporter = OTLPSpanExporter(endpoint=endpoint)

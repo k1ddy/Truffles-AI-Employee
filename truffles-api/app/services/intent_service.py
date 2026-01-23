@@ -22,6 +22,35 @@ from app.services.ai_service import (
 
 logger = get_logger("intent_service")
 
+
+def _log_timing(
+    stage: str,
+    elapsed_ms: float,
+    *,
+    timing_context: dict | None = None,
+    extra: dict | None = None,
+) -> None:
+    context: dict = {}
+    if isinstance(timing_context, dict):
+        context.update(timing_context)
+    if extra:
+        context.update(extra)
+    context["stage"] = stage
+    context["elapsed_ms"] = round(elapsed_ms, 2)
+    for key in ("message_id", "outbox_id", "trace_id"):
+        context.setdefault(key, None)
+    if isinstance(timing_context, dict):
+        timing = timing_context.get("timing")
+        if not isinstance(timing, dict):
+            timing = {}
+        stages = timing.get("stages")
+        if not isinstance(stages, dict):
+            stages = {}
+        stages[stage] = context["elapsed_ms"]
+        timing["stages"] = stages
+        timing_context["timing"] = timing
+    logger.info("Timing", extra={"context": context})
+
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "truffles_knowledge")
@@ -651,19 +680,17 @@ def route_dialogue_controller(
             response = llm.generate(**kwargs)
         except httpx.TimeoutException as exc:
             elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-            logger.info(
-                "Timing",
+            _log_timing(
+                "controller_llm_ms",
+                elapsed_ms,
+                timing_context=timing_context,
                 extra={
-                    "context": {
-                        "stage": "controller_llm_ms",
-                        "elapsed_ms": elapsed_ms,
-                        "model_name": CONTROLLER_MODEL,
-                        "model_tier": "fast",
-                        "timeout": True,
-                        "timeout_seconds": CONTROLLER_TIMEOUT_SECONDS,
-                        "max_tokens": max_tokens,
-                        "temperature": temperature_override,
-                    }
+                    "model_name": CONTROLLER_MODEL,
+                    "model_tier": "fast",
+                    "timeout": True,
+                    "timeout_seconds": CONTROLLER_TIMEOUT_SECONDS,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature_override,
                 },
             )
             record_llm_time(client_slug, "controller_llm_ms", elapsed_ms)
@@ -675,19 +702,17 @@ def route_dialogue_controller(
             error_code = "error"
             if "temperature" in error_text and "unsupported" in error_text:
                 error_code = "unsupported_temperature"
-            logger.info(
-                "Timing",
+            _log_timing(
+                "controller_llm_ms",
+                elapsed_ms,
+                timing_context=timing_context,
                 extra={
-                    "context": {
-                        "stage": "controller_llm_ms",
-                        "elapsed_ms": elapsed_ms,
-                        "model_name": CONTROLLER_MODEL,
-                        "model_tier": "fast",
-                        "timeout": False,
-                        "error": error_text,
-                        "max_tokens": max_tokens,
-                        "temperature": temperature_override,
-                    }
+                    "model_name": CONTROLLER_MODEL,
+                    "model_tier": "fast",
+                    "timeout": False,
+                    "error": error_text,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature_override,
                 },
             )
             record_llm_time(client_slug, "controller_llm_ms", elapsed_ms)
@@ -695,18 +720,16 @@ def route_dialogue_controller(
             return None, elapsed_ms, error_code
 
         elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-        logger.info(
-            "Timing",
+        _log_timing(
+            "controller_llm_ms",
+            elapsed_ms,
+            timing_context=timing_context,
             extra={
-                "context": {
-                    "stage": "controller_llm_ms",
-                    "elapsed_ms": elapsed_ms,
-                    "model_name": CONTROLLER_MODEL,
-                    "model_tier": "fast",
-                    "timeout": False,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature_override,
-                }
+                "model_name": CONTROLLER_MODEL,
+                "model_tier": "fast",
+                "timeout": False,
+                "max_tokens": max_tokens,
+                "temperature": temperature_override,
             },
         )
         record_llm_time(client_slug, "controller_llm_ms", elapsed_ms)
