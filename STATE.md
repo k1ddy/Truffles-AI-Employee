@@ -104,6 +104,9 @@
 ### 2026-01-24 — Console↔Telegram live sync + desktop deep link (PLAN)
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-console-telegram-sync-fixes.md`
 
+### 2026-01-24 — Unified Inbox + Case Health (PLAN)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-inbox-health-search.md`
+
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
 - **Следующий шаг:** P0 outbox latency tail — см. последние SQL‑срезы; p90 > 10s, нужен следующий минимальный fix + evidence.

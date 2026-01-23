@@ -87,10 +87,12 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - API: `GET /console/v1/cases`
 - Data: `handovers` + `conversations` + `users`
 - Paging: cursor = `handover.created_at`
+- Target (planned): сортировка по `last_inbound_at`, быстрый поиск по телефону/имени/ID, бейджи `NEW/LIVE/⚠️`.
 
 **Case view**
 - UI: `console-web/src/app/cases/[id]/page.tsx`
 - API: `GET /console/v1/cases/{id}`, `POST /take`, `POST /resolve`
+- Target (planned): блок Case Health (последние inbound/outbound + статус доставки).
 
 **Calendar (Записи)**
 - UI: `console-web/src/app/calendar/page.tsx`
