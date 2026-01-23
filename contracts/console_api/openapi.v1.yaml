@@ -29,6 +29,8 @@ tags:
     description: Operations and health
   - name: audit
     description: Audit log
+  - name: integrations
+    description: Connector setup and verification
 
 paths:
   # ──────────────────────────────────────────────────────────────────
@@ -315,6 +317,85 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /telegram/health:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: getTelegramHealth
+      tags: [ops]
+      summary: Telegram connector health
+      responses:
+        "200":
+          description: Telegram health status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelegramHealthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /telegram/verify:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    post:
+      operationId: verifyTelegramConnector
+      tags: [integrations]
+      summary: Send verification message to Telegram
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TelegramVerifyRequest"
+      responses:
+        "200":
+          description: Verification message result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelegramVerifyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /telegram/test:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    post:
+      operationId: sendTelegramTest
+      tags: [integrations]
+      summary: Send test message to Telegram
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TelegramTestRequest"
+      responses:
+        "200":
+          description: Test message result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelegramTestResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   # ──────────────────────────────────────────────────────────────────
   # SETTINGS
   # ──────────────────────────────────────────────────────────────────
@@ -376,7 +457,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [case, conversation, settings, agent]
+            enum: [case, conversation, settings, agent, branch, client, integration]
         - name: entity_id
           in: query
           schema:
@@ -635,6 +716,12 @@ components:
           type: string
         is_active:
           type: boolean
+        instance_id:
+          type: string
+          nullable: true
+        telegram_chat_id:
+          type: string
+          nullable: true
 
     MeResponse:
       type: object
@@ -714,6 +801,9 @@ components:
           type: array
           items:
             type: object
+          nullable: true
+        telegram_trail:
+          $ref: "#/components/schemas/TelegramTrail"
           nullable: true
 
     CaseListResponse:
@@ -893,6 +983,133 @@ components:
           type: boolean
         message:
           type: string
+
+    TelegramTrail:
+      type: object
+      properties:
+        message_id:
+          type: integer
+          nullable: true
+        topic_id:
+          type: integer
+          nullable: true
+        chat_id:
+          type: string
+          nullable: true
+        telegram_link:
+          type: string
+          nullable: true
+        delivery_status:
+          type: string
+          enum: [sent, failed, pending]
+          nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    TelegramHealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, error]
+        webhook_alive:
+          type: boolean
+        last_success_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error_message:
+          type: string
+          nullable: true
+        error_rate_24h:
+          type: number
+        pending_messages:
+          type: integer
+
+    TelegramVerifyRequest:
+      type: object
+      properties:
+        scope:
+          type: string
+          enum: [client, branch]
+          default: client
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        chat_id:
+          type: string
+          nullable: true
+
+    TelegramVerifyResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        delivery_status:
+          type: string
+          enum: [sent, failed]
+        verification_code:
+          type: string
+        message_id:
+          type: integer
+          nullable: true
+        chat_id:
+          type: string
+          nullable: true
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+
+    TelegramTestRequest:
+      type: object
+      properties:
+        scope:
+          type: string
+          enum: [client, branch]
+          default: client
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        chat_id:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+
+    TelegramTestResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        delivery_status:
+          type: string
+          enum: [sent, failed]
+        message_id:
+          type: integer
+          nullable: true
+        chat_id:
+          type: string
+          nullable: true
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
 
     # ── Calendar ──
     BookingCreate:

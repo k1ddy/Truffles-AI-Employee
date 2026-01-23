@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -36,6 +36,8 @@ class ConsoleBranch(BaseModel):
     slug: str
     name: str
     is_active: bool
+    instance_id: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
 
 
 class ConsoleMeResponse(BaseModel):
@@ -54,6 +56,15 @@ class ConsoleMessage(BaseModel):
     content: str
     created_at: str
     metadata: Optional[dict] = None
+
+
+class ConsoleTelegramTrail(BaseModel):
+    message_id: Optional[int] = None
+    topic_id: Optional[int] = None
+    chat_id: Optional[str] = None
+    telegram_link: Optional[str] = None
+    delivery_status: Optional[str] = None
+    delivered_at: Optional[str] = None
 
 
 class ConsoleCase(BaseModel):
@@ -75,6 +86,8 @@ class ConsoleCase(BaseModel):
     customer_remote_jid: Optional[str] = None
     # Decision trace
     decision_trace: Optional[list[dict]] = None
+    # Telegram trail (for escalation visibility)
+    telegram_trail: Optional[ConsoleTelegramTrail] = None
 
 
 class ConsoleCaseListResponse(BaseModel):
@@ -179,3 +192,40 @@ class ConsoleSettingsUpdateResponse(BaseModel):
     message: str
 
 
+class ConsoleTelegramHealthResponse(BaseModel):
+    status: str
+    webhook_alive: bool
+    last_success_at: Optional[str] = None
+    last_error_at: Optional[str] = None
+    last_error_message: Optional[str] = None
+    error_rate_24h: float
+    pending_messages: int
+
+
+class ConsoleTelegramVerifyRequest(BaseModel):
+    scope: Literal["client", "branch"] = "client"
+    branch_id: Optional[UUID] = None
+    chat_id: Optional[str] = None
+
+
+class ConsoleTelegramVerifyResponse(BaseModel):
+    success: bool
+    delivery_status: str
+    verification_code: str
+    message_id: Optional[int] = None
+    chat_id: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    error_message: Optional[str] = None
+
+
+class ConsoleTelegramTestRequest(ConsoleTelegramVerifyRequest):
+    message: Optional[str] = None
+
+
+class ConsoleTelegramTestResponse(BaseModel):
+    success: bool
+    delivery_status: str
+    message_id: Optional[int] = None
+    chat_id: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    error_message: Optional[str] = None

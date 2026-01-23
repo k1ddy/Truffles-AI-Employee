@@ -219,6 +219,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/telegram/health": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** Telegram connector health */
+        get: operations["getTelegramHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/telegram/verify": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send verification message to Telegram */
+        post: operations["verifyTelegramConnector"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/telegram/test": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send test message to Telegram */
+        post: operations["sendTelegramTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings": {
         parameters: {
             query?: never;
@@ -317,6 +383,8 @@ export interface components {
             slug?: string;
             name?: string;
             is_active?: boolean;
+            instance_id?: string | null;
+            telegram_chat_id?: string | null;
         };
         MeResponse: {
             agent?: components["schemas"]["Agent"];
@@ -352,6 +420,7 @@ export interface components {
             customer_phone?: string | null;
             customer_remote_jid?: string | null;
             decision_trace?: Record<string, never>[] | null;
+            telegram_trail?: components["schemas"]["TelegramTrail"];
         };
         CaseListResponse: {
             items?: components["schemas"]["Case"][];
@@ -429,6 +498,70 @@ export interface components {
         SettingsUpdateResponse: {
             success?: boolean;
             message?: string;
+        };
+        TelegramTrail: {
+            message_id?: number | null;
+            topic_id?: number | null;
+            chat_id?: string | null;
+            telegram_link?: string | null;
+            /** @enum {string|null} */
+            delivery_status?: "sent" | "failed" | "pending" | null;
+            /** Format: date-time */
+            delivered_at?: string | null;
+        };
+        TelegramHealthResponse: {
+            /** @enum {string} */
+            status?: "ok" | "degraded" | "error";
+            webhook_alive?: boolean;
+            /** Format: date-time */
+            last_success_at?: string | null;
+            /** Format: date-time */
+            last_error_at?: string | null;
+            last_error_message?: string | null;
+            error_rate_24h?: number;
+            pending_messages?: number;
+        };
+        TelegramVerifyRequest: {
+            /**
+             * @default client
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /** Format: uuid */
+            branch_id?: string | null;
+            chat_id?: string | null;
+        };
+        TelegramVerifyResponse: {
+            success?: boolean;
+            /** @enum {string} */
+            delivery_status?: "sent" | "failed";
+            verification_code?: string;
+            message_id?: number | null;
+            chat_id?: string | null;
+            /** Format: uuid */
+            branch_id?: string | null;
+            error_message?: string | null;
+        };
+        TelegramTestRequest: {
+            /**
+             * @default client
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /** Format: uuid */
+            branch_id?: string | null;
+            chat_id?: string | null;
+            message?: string | null;
+        };
+        TelegramTestResponse: {
+            success?: boolean;
+            /** @enum {string} */
+            delivery_status?: "sent" | "failed";
+            message_id?: number | null;
+            chat_id?: string | null;
+            /** Format: uuid */
+            branch_id?: string | null;
+            error_message?: string | null;
         };
         BookingCreate: {
             /** Format: uuid */
@@ -980,6 +1113,99 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
+    getTelegramHealth: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Telegram health status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramHealthResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    verifyTelegramConnector: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TelegramVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Verification message result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramVerifyResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    sendTelegramTest: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TelegramTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Test message result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramTestResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     getSettings: {
         parameters: {
             query?: never;
@@ -1041,7 +1267,7 @@ export interface operations {
     listAuditEvents: {
         parameters: {
             query?: {
-                entity_type?: "case" | "conversation" | "settings" | "agent";
+                entity_type?: "case" | "conversation" | "settings" | "agent" | "branch" | "client" | "integration";
                 entity_id?: string;
                 /** @description Pagination cursor (opaque) */
                 cursor?: components["parameters"]["cursor"];

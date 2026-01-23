@@ -192,6 +192,17 @@
             "retryable": true,
             "retry_after_seconds": 30
         },
+        "TELEGRAM_CONFIG_MISSING": {
+            "http_status": 400,
+            "message_template": "Telegram configuration is missing",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "error",
+                "description": "Show configuration error and prompt to update settings"
+            },
+            "retryable": false
+        },
         "RATE_LIMITED": {
             "http_status": 429,
             "message_template": "Too many requests. Please wait {retry_after} seconds.",

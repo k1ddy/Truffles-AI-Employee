@@ -46,12 +46,34 @@
 - BLOCKERS: Playwright smoke на prod UI падает из‑за `CLIENT_SELECTION_REQUIRED` (prod console-web не отправляет `X-Client-Id`). Evidence: `npm run test:e2e:smoke` + docker logs `ConsoleAPIError: CLIENT_SELECTION_REQUIRED`.
 - DONE: Console query‑params validation (unknown params + enums + dates + limit) + cursor tolerant + OpenAPI 400/403 + `INVALID_PARAM` error registry. Evidence: CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21270247679; Schemathesis GET-only smoke on prod (seed 68493311863361754745919126795202296800) — 580 passed, warnings for missing test data on `/cases/{case_id}` + `/cases/{case_id}/messages` and schema mismatch (see below).
 - DONE: Schemathesis seeds added for `/cases/{case_id}` + `/cases/{case_id}/messages` (stable IDs in `contracts/console_api/schemathesis.toml`), warnings resolved.
+- PLAN: TP-2026-01-23 Console↔Telegram P0 contract alignment (OpenAPI + API + UI + docs) — in progress, no evidence yet.
+- PLAN: TP-2026-01-23 Console Telegram verify/test endpoints + audit events — in progress, local checks recorded.
+- PLAN: TP-2026-01-23 Console Telegram UI wiring (verify/test in Settings/Ops) — in progress, test waiver planned.
+- GAP: Канон‑док “2026‑01‑17 (Web‑Console primary, Telegram fallback)” не найден в репозитории — нужен путь/ссылка.
 - QUICKSTART: Console onboarding checklist now in `docs/SESSION_START_PROMPT.txt` (data source, OIDC mapping, secrets, contract config).
 - DONE: Tenant UX v1 + tenant_context contract + data isolation plan закреплены в `SPECS/MULTI_TENANT.md`; добавлен контракт `contracts/tenancy/tenant_context.v1.jsonschema` и optional `tenant_context` в outbox contract.
 - DONE: Console branch selection enforcement — `X-Branch-Id` header, UI selector, новые ошибки/контракты (`branch_selection_required`, `BRANCH_SELECTION_REQUIRED`). Evidence: `pytest -q truffles-api/tests/test_console_auth_access.py` → 8 passed.
 - DONE: Audit/outbox tenant keys (branch_id) + outbox tenant_context payload; добавлена миграция `truffles-api/migrations/006_add_outbox_audit_branch_id.sql`; cross-tenant selection tests расширены. Evidence: `pytest -q truffles-api/tests/test_console_auth_access.py` → 11 passed; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21273642769; миграция применена на prod: `UPDATE 6693/9/9`, `outbox_messages.branch_id`/`audit_events.branch_id` columns present; backfill gaps: `outbox_missing_branch=472`, `audit_missing_branch=2` при `conversations_missing_branch=327`.
 - DONE: Backfill conversations.branch_id (migration `007_backfill_conversations_branch_id.sql`) — instanceId match + single-branch fallback. Applied on prod: `UPDATE 0` (instanceId), `UPDATE 2` (single-branch). Остаток: `conversations.branch_id IS NULL = 325`; 5 conversation имеют `metadata.instanceId='demo'` без branch match. Evidence: SQL outputs 2026-01-23.
 - DECISION: Legacy conversations остаются с `branch_id=NULL` (без догадок/массового назначения). Повторный backfill — только по явным маппингам или согласованным default‑branch для клиента.
+
+### 2026-01-23 — Console↔Telegram P0 contract alignment (local)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
+- Checks: `pytest -q truffles-api/tests/test_console_telegram_helpers.py` → `4 passed in 2.64s`
+- Contract gen: `npm --prefix console-web run generate:api`
+- Evidence: local checks only (CI pending)
+
+### 2026-01-23 — Console Telegram verify/test + audit (local)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-verify-test.md`
+- Checks: `pytest -q truffles-api/tests/test_console_telegram_connector.py` → `7 passed in 1.34s`
+- Contract gen: `npm --prefix console-web run generate:api`
+- Evidence: local checks only (CI pending)
+
+### 2026-01-23 — Console Telegram UI verify/test wiring (local)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ui.md`
+- Checks: `npm --prefix console-web run lint` → FAIL (missing `eslint-config-next/core-web-vitals` in `console-web/node_modules`)
+- Test waiver: UI-only wiring; no automated UI tests executed (recorded in TP).
+- Evidence: local changes only (CI pending)
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
