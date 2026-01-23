@@ -69,7 +69,7 @@
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
 - Checks: `pytest -q truffles-api/tests/test_console_telegram_helpers.py` → `4 passed in 2.64s`
 - Contract gen: `npm --prefix console-web run generate:api`
-- Evidence: local checks only (CI pending)
+- Evidence: CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21282651560 (lint/unit-tests/console-contract/console-e2e/console-e2e-live/core-eval success)
 
 ### 2026-01-23 — Console Telegram verify/test + audit (local)
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-verify-test.md`
