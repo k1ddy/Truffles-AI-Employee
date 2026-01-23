@@ -49,6 +49,9 @@
 - PLAN: TP-2026-01-23 Console↔Telegram P0 contract alignment (OpenAPI + API + UI + docs) — in progress, no evidence yet.
 - PLAN: TP-2026-01-23 Console Telegram verify/test endpoints + audit events — in progress, local checks recorded.
 - PLAN: TP-2026-01-23 Console Telegram UI wiring (verify/test in Settings/Ops) — in progress, test waiver planned.
+- STOP-LINE: CI run failed — https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21276341412
+  - lint job → step "Lint (ruff)" failed: `ruff check app tests`, error `I001 Import block is un-sorted or un-formatted` at `app/routers/console.py:1:1` (ubuntu-latest, Python 3.11.14).
+  - console-contract job → step "Schemathesis GET-only smoke" failed: GET `/telegram/health` returned 404 (documented 200/401/403), command `schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml --url https://api.truffles.kz/console/v1 --include-method=GET --checks all --request-timeout 10 --max-examples=3 --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"` (ubuntu-latest, Python 3.11.14).
 - GAP: Канон‑док “2026‑01‑17 (Web‑Console primary, Telegram fallback)” не найден в репозитории — нужен путь/ссылка.
 - QUICKSTART: Console onboarding checklist now in `docs/SESSION_START_PROMPT.txt` (data source, OIDC mapping, secrets, contract config).
 - DONE: Tenant UX v1 + tenant_context contract + data isolation plan закреплены в `SPECS/MULTI_TENANT.md`; добавлен контракт `contracts/tenancy/tenant_context.v1.jsonschema` и optional `tenant_context` в outbox contract.
