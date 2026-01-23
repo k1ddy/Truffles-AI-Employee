@@ -59,3 +59,19 @@
   - Base ref: `origin/main`
   - Merge policy: merge-only (no rebase)
   - Cleanup: Brain/Top Architect после merge.
+
+## Session Notes (handoff)
+
+- Commit: `05a50205` (graceful shutdown for chaos-sim; summary/report written on stop).
+- PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/319
+- Artifacts (untracked):
+  - `ops/artifacts/chaos_sim/20260123-091232/` (stable short run, 3 cases, summary.json + report.md)
+  - `ops/artifacts/chaos_sim/20260123-090728/` and `ops/artifacts/chaos_sim/20260123-091038/` (interrupted runs, summary.json with stop_reason)
+- Last stable run (3 cases, logic mode):
+  - `python3 ops/diagnose.py chaos-sim --count 3 --seed 42 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 3 --poll-interval 0.2 --debug-all --console-mode skip --min-turns 6 --max-turns 8`
+  - Summary: `simulation_id=SIM-20260123-091232-42`, `cases_processed=3`, `turns=14`, `failures=9`
+  - Top failure patterns: pending_wait + action/state/expected_reply_type mismatch (see summary.json)
+- Next step candidates:
+  - Fix pending_gate behavior (pending_wait/expected_reply_type/booking_interrupt) as a single pattern.
+  - Fix booking expected_reply_type drift in multi-intent.
+  - Re-run short chaos (20 cases) → nightly 1000–1500.
