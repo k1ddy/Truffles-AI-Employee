@@ -1852,6 +1852,29 @@ def test_semantic_service_matcher_allows_short_query_without_keywords():
     assert result.response == "Маникюр — 2 500 ₸."
 
 
+def test_semantic_service_matcher_returns_suggestions_reply():
+    results = [
+        {"score": 0.35, "payload": {"canonical_name": "Маникюр"}},
+        {"score": 0.32, "payload": {"canonical_name": "Педикюр"}},
+    ]
+    truth = {
+        "services_catalog": {
+            "not_found_reply": "В списке услуг нет такой позиции. Возможно, вы имели в виду: {suggestions}.",
+        }
+    }
+
+    with patch(
+        "app.services.demo_salon_knowledge._search_services_index", return_value=results
+    ), patch(
+        "app.services.demo_salon_knowledge.load_yaml_truth", return_value=truth
+    ):
+        result = semantic_service_match("маникюр?", "demo_salon")
+
+    assert result is not None
+    assert result.action == "suggest"
+    assert "Маникюр" in result.response
+
+
 def test_semantic_question_type_routes_duration_and_price():
     import app.services.demo_salon_knowledge as demo_salon_knowledge
 

@@ -85,6 +85,12 @@
   - `python3 ops/diagnose.py chaos-sim --count 20 --seed 43 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 5 --poll-interval 0.2 --timeout 30 --debug-all --console-mode skip --min-turns 10 --max-turns 12 --noise high --output-dir ops/artifacts/chaos_sim/20260123-111000-seed43`
   - Summary: `simulation_id=SIM-20260123-112311-43`, `cases_processed=20`, `turns=207`, `failures=151`
   - HTTP 500 entry: `CHAOS_BOOKING_0002` turn 5 (`SIM-20260123-112311-0002-05-3803b69f`).
+- 500 root cause (repro on prod, HTTP payload with instanceId):
+  - Repro: POST `/webhook/demo_salon` with `instanceId` set + text `мекенжай қайда, тағы график работы какой` → HTTP 500.
+  - Stack trace: `TypeError: _format_service_suggestions_reply() missing 1 required positional argument: 'truth'` from `semantic_service_match` → `compose_multi_truth_reply`.
+  - Fix: pass `load_yaml_truth(client_slug)` into `_format_service_suggestions_reply` in `semantic_service_match`.
+  - Test added: `test_semantic_service_matcher_returns_suggestions_reply` in `truffles-api/tests/test_message_endpoint.py`.
+  - Local pytest failed due to missing `dateparser` (ModuleNotFoundError) in this environment.
 - Next step candidates:
   - Fix pending_gate behavior (pending_wait/expected_reply_type/booking_interrupt) as a single pattern.
   - Fix booking expected_reply_type drift in multi-intent.

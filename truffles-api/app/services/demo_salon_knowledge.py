@@ -1523,7 +1523,7 @@ def semantic_service_match(text: str, client_slug: str) -> SemanticServiceMatch 
             )
 
     if score >= _SERVICE_SUGGEST_THRESHOLD:
-        reply = _format_service_suggestions_reply(suggestions or [])
+        reply = _format_service_suggestions_reply(suggestions or [], load_yaml_truth(client_slug))
         if reply:
             return SemanticServiceMatch(
                 action="suggest",
