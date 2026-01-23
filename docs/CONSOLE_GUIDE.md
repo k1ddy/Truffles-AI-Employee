@@ -119,7 +119,9 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - Health: `GET /console/v1/telegram/health` (Console API).
 - Verify: `POST /console/v1/telegram/verify` (owner/admin).
 - Test: `POST /console/v1/telegram/test` (owner/admin).
+- Agent linking: `GET /console/v1/agents` + `POST /console/v1/agents/{id}/telegram/link`.
 - Case trail: `GET /console/v1/cases/{id}` returns `telegram_trail`.
+- Case actions: `POST /console/v1/cases/{id}/take|resolve|return` return `sync` status.
 - Branch routing: `GET /console/v1/settings` returns `branches[].telegram_chat_id` + `branches[].instance_id`.
 
 **UI locations:**
@@ -132,6 +134,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - `client_settings.telegram_bot_token`, `client_settings.telegram_chat_id` (bot config + legacy fallback).
 - `conversations.telegram_topic_id` (topic per user).
 - `handovers.telegram_message_id`, `handovers.notified_at` (delivery evidence).
+- `agent_identities` (channel=telegram) + `agent_link_tokens` (linking tokens).
 
 **Trail mapping (Console API):**
 - `message_id` → `handovers.telegram_message_id`
@@ -182,6 +185,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 **Where to change code:**
 - API endpoint + mapping: `truffles-api/app/routers/console.py`
 - Telegram API helper: `truffles-api/app/services/telegram_service.py`
+- Linking helpers: `truffles-api/app/services/agent_link_service.py`
 - UI Ops card: `console-web/src/components/OpsPage.tsx`
 - UI Case trail: `console-web/src/components/CaseView.tsx`
 - UI Branch list: `console-web/src/app/settings/page.tsx`
@@ -191,6 +195,12 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 **Diagnostics (quick):**
 - Webhook status: `curl -s -H "Authorization: Bearer $TOKEN" https://api.truffles.kz/console/v1/telegram/health`
 - Telegram webhook raw: `curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"`
+- Agent linking (token):
+  ```bash
+  curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+    https://api.truffles.kz/console/v1/agents/<agent_id>/telegram/link
+  ```
+- Link usage: отправить в Telegram боту `/start <token>` (создаст `agent_identity`).
 - Verify (client scope):
   ```bash
   curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \\

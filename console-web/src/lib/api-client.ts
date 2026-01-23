@@ -54,6 +54,10 @@ export const ErrorCodes = {
     OUTBOX_FAILED: "OUTBOX_FAILED",
     INTEGRATION_UNAVAILABLE: "INTEGRATION_UNAVAILABLE",
     TELEGRAM_CONFIG_MISSING: "TELEGRAM_CONFIG_MISSING",
+    TELEGRAM_LINK_INVALID: "TELEGRAM_LINK_INVALID",
+    TELEGRAM_LINK_EXPIRED: "TELEGRAM_LINK_EXPIRED",
+    TELEGRAM_LINK_USED: "TELEGRAM_LINK_USED",
+    TELEGRAM_LINK_CONFLICT: "TELEGRAM_LINK_CONFLICT",
     RATE_LIMITED: "RATE_LIMITED",
     SERVER_ERROR: "SERVER_ERROR",
     DATABASE_ERROR: "DATABASE_ERROR",
@@ -175,6 +179,26 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
     },
     TELEGRAM_CONFIG_MISSING: {
         http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "error" },
+        retryable: false,
+    },
+    TELEGRAM_LINK_INVALID: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "error" },
+        retryable: false,
+    },
+    TELEGRAM_LINK_EXPIRED: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    TELEGRAM_LINK_USED: {
+        http_status: 409,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    TELEGRAM_LINK_CONFLICT: {
+        http_status: 409,
         ui_behavior: { action: "toast", toast: true, toast_type: "error" },
         retryable: false,
     },
@@ -336,10 +360,12 @@ export type MetricsDailyResponse = components["schemas"]["MetricsDailyResponse"]
 export type SettingsResponse = components["schemas"]["SettingsResponse"];
 export type AuditEvent = components["schemas"]["AuditEvent"];
 export type AuditListResponse = components["schemas"]["AuditListResponse"];
+export type AgentListResponse = components["schemas"]["AgentListResponse"];
 export type TelegramVerifyRequest = components["schemas"]["TelegramVerifyRequest"];
 export type TelegramVerifyResponse = components["schemas"]["TelegramVerifyResponse"];
 export type TelegramTestRequest = components["schemas"]["TelegramTestRequest"];
 export type TelegramTestResponse = components["schemas"]["TelegramTestResponse"];
+export type TelegramLinkResponse = components["schemas"]["TelegramLinkResponse"];
 
 // Query params
 export type ListCasesParams = operations["listCases"]["parameters"]["query"];
@@ -368,6 +394,9 @@ export const casesApi = {
     resolve: (caseId: string) =>
         apiClient.post<CaseActionResponse>(`/cases/${caseId}/resolve`),
 
+    returnToBot: (caseId: string) =>
+        apiClient.post<CaseActionResponse>(`/cases/${caseId}/return`),
+
     getMessages: (caseId: string, params?: { cursor?: string; limit?: number }) =>
         apiClient.get<MessageListResponse>(`/cases/${caseId}/messages`, { params }),
 };
@@ -395,6 +424,13 @@ export const telegramApi = {
         apiClient.post<TelegramVerifyResponse>("/telegram/verify", data),
     test: (data: TelegramTestRequest) =>
         apiClient.post<TelegramTestResponse>("/telegram/test", data),
+};
+
+/** Agent endpoints */
+export const agentsApi = {
+    list: () => apiClient.get<AgentListResponse>("/agents"),
+    linkTelegram: (agentId: string) =>
+        apiClient.post<TelegramLinkResponse>(`/agents/${agentId}/telegram/link`),
 };
 
 /** Settings endpoints */

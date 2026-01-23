@@ -24,6 +24,23 @@ class ConsoleAgent(BaseModel):
     is_active: bool
 
 
+class ConsoleAgentIdentity(BaseModel):
+    channel: Literal["telegram"]
+    external_id: str
+    username: Optional[str] = None
+    linked_at: Optional[str] = None
+
+
+class ConsoleAgentWithIdentities(BaseModel):
+    id: UUID
+    name: Optional[str] = None
+    role: str
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    is_active: bool
+    identities: list[ConsoleAgentIdentity] = []
+
+
 class ConsoleClient(BaseModel):
     id: UUID
     slug: str
@@ -96,9 +113,20 @@ class ConsoleCaseListResponse(BaseModel):
     has_more: bool
 
 
+class ConsoleSyncStatus(BaseModel):
+    status: Literal["ok", "skipped", "failed"]
+    detail: Optional[str] = None
+
+
+class ConsoleCaseActionSync(BaseModel):
+    telegram: Optional[ConsoleSyncStatus] = None
+    client_notify: Optional[ConsoleSyncStatus] = None
+
+
 class ConsoleCaseActionResponse(BaseModel):
     success: bool
     case: ConsoleCase
+    sync: Optional[ConsoleCaseActionSync] = None
 
 
 class ConsoleMessageListResponse(BaseModel):
@@ -172,6 +200,10 @@ class ConsoleSettingsResponse(BaseModel):
     bot_config: Optional[ConsoleBotConfig] = None
 
 
+class ConsoleAgentListResponse(BaseModel):
+    items: list[ConsoleAgentWithIdentities]
+
+
 class ConsoleMetricsDailyResponse(BaseModel):
     date: str
     total_cases: int
@@ -229,3 +261,10 @@ class ConsoleTelegramTestResponse(BaseModel):
     chat_id: Optional[str] = None
     branch_id: Optional[UUID] = None
     error_message: Optional[str] = None
+
+
+class ConsoleTelegramLinkResponse(BaseModel):
+    token: str
+    deep_link: Optional[str] = None
+    bot_username: Optional[str] = None
+    expires_at: str

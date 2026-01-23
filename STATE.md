@@ -46,11 +46,12 @@
 - BLOCKERS: Playwright smoke на prod UI падает из‑за `CLIENT_SELECTION_REQUIRED` (prod console-web не отправляет `X-Client-Id`). Evidence: `npm run test:e2e:smoke` + docker logs `ConsoleAPIError: CLIENT_SELECTION_REQUIRED`.
 - DONE: Console query‑params validation (unknown params + enums + dates + limit) + cursor tolerant + OpenAPI 400/403 + `INVALID_PARAM` error registry. Evidence: CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21270247679; Schemathesis GET-only smoke on prod (seed 68493311863361754745919126795202296800) — 580 passed, warnings for missing test data on `/cases/{case_id}` + `/cases/{case_id}/messages` and schema mismatch (see below).
 - DONE: Schemathesis seeds added for `/cases/{case_id}` + `/cases/{case_id}/messages` (stable IDs in `contracts/console_api/schemathesis.toml`), warnings resolved.
-- PLAN: TP-2026-01-23 Console↔Telegram P0 contract alignment (OpenAPI + API + UI + docs) — in progress, no evidence yet.
-- PLAN: TP-2026-01-23 Console Telegram verify/test endpoints + audit events — in progress, local checks recorded.
-- PLAN: TP-2026-01-23 Console Telegram UI wiring (verify/test in Settings/Ops) — in progress, test waiver planned.
-- PLAN: TP-2026-01-23 Console Telegram CI fix (ruff import order + schemathesis exclude) — in progress.
+- DONE: TP-2026-01-23 Console↔Telegram P0 contract alignment (OpenAPI + API + UI + docs) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277543109
+- DONE: TP-2026-01-23 Console Telegram verify/test endpoints + audit events — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277543109
+- DONE: TP-2026-01-23 Console Telegram UI wiring (verify/test in Settings/Ops) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277543109
+- DONE: TP-2026-01-23 Console Telegram CI fix (ruff import order + schemathesis exclude) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277543109
 - DONE: TP-2026-01-23 Console Telegram Schemathesis unexclude (/telegram/health) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277995685
+- PLAN: TP-2026-01-23 Telegram protocol docs (Web-first) — in progress
 - STOP-LINE: CI run failed — https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21276341412
   - lint job → step "Lint (ruff)" failed: `ruff check app tests`, error `I001 Import block is un-sorted or un-formatted` at `app/routers/console.py:1:1` (ubuntu-latest, Python 3.11.14).
   - console-contract job → step "Schemathesis GET-only smoke" failed: GET `/telegram/health` returned 404 (documented 200/401/403), command `schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml --url https://api.truffles.kz/console/v1 --include-method=GET --checks all --request-timeout 10 --max-examples=3 --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"` (ubuntu-latest, Python 3.11.14).
@@ -64,35 +65,41 @@
 - DONE: Backfill conversations.branch_id (migration `007_backfill_conversations_branch_id.sql`) — instanceId match + single-branch fallback. Applied on prod: `UPDATE 0` (instanceId), `UPDATE 2` (single-branch). Остаток: `conversations.branch_id IS NULL = 325`; 5 conversation имеют `metadata.instanceId='demo'` без branch match. Evidence: SQL outputs 2026-01-23.
 - DECISION: Legacy conversations остаются с `branch_id=NULL` (без догадок/массового назначения). Повторный backfill — только по явным маппингам или согласованным default‑branch для клиента.
 
-### 2026-01-23 — Console↔Telegram P0 contract alignment (local)
+### 2026-01-23 — Console↔Telegram P0 contract alignment
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
 - Checks: `pytest -q truffles-api/tests/test_console_telegram_helpers.py` → `4 passed in 2.64s`
 - Contract gen: `npm --prefix console-web run generate:api`
-- Evidence: local checks only (CI pending)
+- Evidence: CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277543109
 
-### 2026-01-23 — Console Telegram verify/test + audit (local)
+### 2026-01-23 — Console Telegram verify/test + audit
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-verify-test.md`
 - Checks: `pytest -q truffles-api/tests/test_console_telegram_connector.py` → `7 passed in 1.34s`
 - Contract gen: `npm --prefix console-web run generate:api`
-- Evidence: local checks only (CI pending)
+- Evidence: CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277543109
 
-### 2026-01-23 — Console Telegram UI verify/test wiring (local)
+### 2026-01-23 — Console Telegram UI verify/test wiring
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ui.md`
 - Checks: `npm --prefix console-web run lint` → FAIL (missing `eslint-config-next/core-web-vitals` in `console-web/node_modules`)
 - Test waiver: UI-only wiring; no automated UI tests executed (recorded in TP).
-- Evidence: local changes only (CI pending). CI run queued: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21276341412
+- Evidence: CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277543109
 
-### 2026-01-23 — Console Telegram CI fix (local)
+### 2026-01-23 — Console Telegram CI fix
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ci-fix.md`
 - Checks: `cd truffles-api && ruff check app tests` → `All checks passed!`
 - Change: console-contract job excludes `/telegram/health` until endpoint is deployed to prod.
-- Evidence: CI run green https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277330558
+- Evidence: CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277543109
 
 ### 2026-01-23 — Console Telegram Schemathesis unexclude
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-schemathesis-unexclude.md`
 - Checks: `GET /console/v1/telegram/health` (prod, demo_salon client_id `c839d5dd-65be-4733-a5d2-72c9f70707f0`) → HTTP 200
 - Response: `{"status":"degraded","webhook_alive":true,"last_success_at":"2026-01-23T07:10:02.332610+00:00","last_error_at":"2026-01-18T11:43:05+00:00","last_error_message":"Wrong response from the webhook: 502 Bad Gateway","error_rate_24h":0.0,"pending_messages":0}`
 - Evidence: CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277995685 (console-contract includes /telegram/health)
+
+### 2026-01-23 — Agent↔Telegram linking + Console↔Telegram sync (local)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-telegram-linking-sync.md`
+- Checks: `pytest -q truffles-api/tests/test_agent_link_service.py` → `3 passed`; `pytest -q truffles-api/tests/test_manager_message_rbac.py` → `2 passed`; `ruff check truffles-api/app truffles-api/tests` → `All checks passed!`
+- Contract gen: `npm --prefix console-web run generate:api`
+- Evidence: local checks only (CI pending)
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.

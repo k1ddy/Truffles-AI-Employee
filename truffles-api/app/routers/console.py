@@ -10,14 +10,18 @@ from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Branch, Conversation, Handover, Message, User
+from app.models import Agent, AgentIdentity, Branch, ClientSettings, Conversation, Handover, Message, User
 from app.schemas.console import (
+    ConsoleAgentIdentity,
     ConsoleAgentInfo,
+    ConsoleAgentListResponse,
+    ConsoleAgentWithIdentities,
     ConsoleAuditEvent,
     ConsoleAuditListResponse,
     ConsoleBranch,
     ConsoleCase,
     ConsoleCaseActionResponse,
+    ConsoleCaseActionSync,
     ConsoleCaseListResponse,
     ConsoleErrorResponse,
     ConsoleHealthResponse,
@@ -30,13 +34,16 @@ from app.schemas.console import (
     ConsoleSettingsResponse,
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
+    ConsoleSyncStatus,
     ConsoleTelegramHealthResponse,
+    ConsoleTelegramLinkResponse,
     ConsoleTelegramTestRequest,
     ConsoleTelegramTestResponse,
     ConsoleTelegramTrail,
     ConsoleTelegramVerifyRequest,
     ConsoleTelegramVerifyResponse,
 )
+from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
 from app.services.audit_service import record_audit_event
 from app.services.console_auth import ConsoleAuthContext, get_console_context
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
@@ -45,6 +52,11 @@ from app.services.console_idempotency import (
     release_idempotency,
     start_idempotency,
 )
+from app.services.escalation_service import resolve_telegram_routing
+from app.services.manager_message_service import notify_client_manager_status
+from app.services.state_service import manager_resolve as state_manager_resolve
+from app.services.state_service import manager_take as state_manager_take
+from app.services.telegram_service import TelegramService
 
 router = APIRouter(prefix="/console/v1", tags=["console"])
 
@@ -154,6 +166,115 @@ def _build_telegram_trail(
         delivery_status=delivery_status,
         delivered_at=delivered_at,
     )
+
+
+def _build_sync_status(status: str, detail: Optional[str] = None) -> ConsoleSyncStatus:
+    return ConsoleSyncStatus(status=status, detail=detail)
+
+
+def _sync_telegram_after_take(
+    db: Session,
+    *,
+    conversation: Conversation,
+    handover: Handover,
+    manager_name: str,
+) -> ConsoleSyncStatus:
+    routing_meta = resolve_telegram_routing(
+        db,
+        conversation=conversation,
+        client_id=conversation.client_id,
+    )
+    bot_token = routing_meta.get("bot_token")
+    chat_id = routing_meta.get("chat_id")
+    message_id = handover.telegram_message_id
+
+    if not bot_token or not chat_id or not message_id:
+        return _build_sync_status("skipped", "telegram_context_missing")
+
+    telegram = TelegramService(bot_token)
+    result = telegram._make_request(
+        "editMessageReplyMarkup",
+        {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reply_markup": {
+                "inline_keyboard": [[{"text": "Решено ✅", "callback_data": f"resolve_{handover.id}"}]]
+            },
+        },
+    )
+    if not result.get("ok"):
+        return _build_sync_status("failed", "telegram_edit_failed")
+
+    if conversation.telegram_topic_id:
+        telegram.send_message(
+            chat_id=str(chat_id),
+            text=f"👤 <b>{manager_name}</b> взял заявку",
+            message_thread_id=conversation.telegram_topic_id,
+        )
+
+    return _build_sync_status("ok")
+
+
+def _sync_telegram_after_close(
+    db: Session,
+    *,
+    conversation: Conversation,
+    handover: Handover,
+    manager_name: str,
+    action: str,
+) -> ConsoleSyncStatus:
+    routing_meta = resolve_telegram_routing(
+        db,
+        conversation=conversation,
+        client_id=conversation.client_id,
+    )
+    bot_token = routing_meta.get("bot_token")
+    chat_id = routing_meta.get("chat_id")
+    message_id = handover.telegram_message_id
+
+    if not bot_token or not chat_id or not message_id:
+        return _build_sync_status("skipped", "telegram_context_missing")
+
+    telegram = TelegramService(bot_token)
+    result = telegram._make_request(
+        "editMessageReplyMarkup",
+        {"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
+    )
+    if not result.get("ok"):
+        return _build_sync_status("failed", "telegram_edit_failed")
+
+    telegram.unpin_message(str(chat_id), message_id)
+
+    if action == "return" and conversation.telegram_topic_id:
+        telegram.send_message(
+            chat_id=str(chat_id),
+            text=f"🤖 Заявка закрыта, бот снова отвечает (by {manager_name})",
+            message_thread_id=conversation.telegram_topic_id,
+        )
+
+    return _build_sync_status("ok")
+
+
+def _notify_client_status(
+    *,
+    db: Session,
+    conversation: Conversation,
+    handover: Handover,
+    status: str,
+    manager_name: str,
+) -> ConsoleSyncStatus:
+    ok, detail = notify_client_manager_status(
+        db,
+        conversation=conversation,
+        handover=handover,
+        status=status,
+        manager_name=manager_name,
+    )
+    if ok:
+        return _build_sync_status("ok")
+    if detail == "remote_jid_missing":
+        return _build_sync_status("skipped", detail)
+    return _build_sync_status("failed", detail or "notify_failed")
 
 
 def _require_owner_admin(context: ConsoleAuthContext) -> None:
@@ -274,6 +395,122 @@ async def get_me(request: Request, db: Session = Depends(get_db)) -> ConsoleMeRe
     if not context.agent or not context.client:
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Console access missing")
     return _build_me_response(context)
+
+
+@router.get(
+    "/agents",
+    response_model=ConsoleAgentListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_agents(request: Request, db: Session = Depends(get_db)) -> ConsoleAgentListResponse:
+    context = get_console_context(request, db)
+    if context.role not in ("owner", "admin"):
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin can view agents")
+
+    agents = (
+        db.query(Agent)
+        .filter(Agent.client_id == context.client.id)
+        .order_by(Agent.created_at.asc())
+        .all()
+    )
+    agent_ids = [agent.id for agent in agents]
+    identities = []
+    if agent_ids:
+        identities = (
+            db.query(AgentIdentity)
+            .filter(
+                AgentIdentity.agent_id.in_(agent_ids),
+                AgentIdentity.channel == "telegram",
+            )
+            .all()
+        )
+
+    identities_by_agent: dict[UUID, list[ConsoleAgentIdentity]] = {agent.id: [] for agent in agents}
+    for identity in identities:
+        identities_by_agent.setdefault(identity.agent_id, []).append(
+            ConsoleAgentIdentity(
+                channel="telegram",
+                external_id=identity.external_id,
+                username=identity.username,
+                linked_at=identity.created_at.isoformat() if identity.created_at else None,
+            )
+        )
+
+    return ConsoleAgentListResponse(
+        items=[
+            ConsoleAgentWithIdentities(
+                id=agent.id,
+                name=agent.name,
+                role=agent.role,
+                client_id=agent.client_id,
+                branch_id=agent.branch_id,
+                is_active=agent.is_active,
+                identities=identities_by_agent.get(agent.id, []),
+            )
+            for agent in agents
+        ]
+    )
+
+
+@router.post(
+    "/agents/{agent_id}/telegram/link",
+    response_model=ConsoleTelegramLinkResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def link_agent_telegram(
+    agent_id: UUID, request: Request, db: Session = Depends(get_db)
+) -> ConsoleTelegramLinkResponse:
+    context = get_console_context(request, db)
+    if context.role not in ("owner", "admin") and context.agent.id != agent_id:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin can link other agents")
+
+    agent = (
+        db.query(Agent)
+        .filter(Agent.id == agent_id, Agent.client_id == context.client.id)
+        .first()
+    )
+    if not agent:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
+
+    settings = db.query(ClientSettings).filter(ClientSettings.client_id == context.client.id).first()
+    if not settings or not settings.telegram_bot_token:
+        raise ConsoleAPIError(400, "TELEGRAM_CONFIG_MISSING", "Telegram bot token is not configured")
+
+    token, record = create_agent_link_token(
+        db,
+        agent=agent,
+        created_by_id=context.agent.id,
+    )
+
+    bot_username = None
+    telegram = TelegramService(settings.telegram_bot_token)
+    bot_info = telegram._make_request("getMe")
+    if bot_info.get("ok"):
+        bot_username = bot_info.get("result", {}).get("username")
+
+    deep_link = build_telegram_deep_link(bot_username, token)
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="telegram_link_created",
+        entity_type="agent",
+        entity_id=agent.id,
+        payload={
+            "expires_at": record.expires_at.isoformat(),
+            "token_hint": token[:4],
+        },
+        branch_id=agent.branch_id,
+    )
+
+    db.commit()
+
+    return ConsoleTelegramLinkResponse(
+        token=token,
+        deep_link=deep_link,
+        bot_username=bot_username,
+        expires_at=record.expires_at.isoformat(),
+    )
 
 
 @router.get(
@@ -435,47 +672,42 @@ async def take_case(
         .with_for_update()
         .first()
     )
-    
+
     if not case:
         if idempotency and idempotency.record:
             release_idempotency(db, record=idempotency.record)
         raise ConsoleAPIError(404, "NOT_FOUND", "Case not found")
 
-    # 2. Check if already taken
-    if case.status == "active" and case.assigned_to_name and case.assigned_to_name != context.agent.name:
+    conversation = (
+        db.query(Conversation)
+        .filter(Conversation.id == case.conversation_id)
+        .with_for_update()
+        .first()
+    )
+    if not conversation:
         if idempotency and idempotency.record:
             release_idempotency(db, record=idempotency.record)
-        raise ConsoleAPIError(
-            409,
-            "CASE_ALREADY_TAKEN",
-            "Case already taken",
-            details={"current_assignee": case.assigned_to_name},
-        )
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
 
-    # Fetch conversation for branch_id before commit to avoid extra failures later
-    conversation = db.query(Conversation).filter(Conversation.id == case.conversation_id).first()
-    branch_id = conversation.branch_id if conversation else None
+    branch_id = conversation.branch_id
+    manager_name = context.agent.name or "Менеджер"
 
-    # 3. Update
-    case.status = "active"
-    case.assigned_to_name = context.agent.name
-    # case.assigned_to = str(context.agent.id) # If we migrate to IDs later
-    db.add(case)
-    
-    # 4. Audit
-    record_audit_event(
-        db,
-        actor=context.agent,
-        event_type="case_taken",
-        entity_type="handover",
-        entity_id=case.id,
-        payload={"previous_status": case.status},
-        branch_id=branch_id,
-    )
+    if case.status == "resolved":
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
 
-    try:
-        db.commit()
-        db.refresh(case)
+    if case.status == "active":
+        if case.assigned_to_name and case.assigned_to_name != context.agent.name:
+            if idempotency and idempotency.record:
+                release_idempotency(db, record=idempotency.record)
+            raise ConsoleAPIError(
+                409,
+                "CASE_ALREADY_TAKEN",
+                "Case already taken",
+                details={"current_assignee": case.assigned_to_name},
+            )
+
         response = ConsoleCaseActionResponse(
             success=True,
             case=ConsoleCase(
@@ -486,6 +718,82 @@ async def take_case(
                 created_at=case.created_at.isoformat(),
                 assigned_to_name=case.assigned_to_name,
                 branch_id=branch_id,
+            ),
+            sync=ConsoleCaseActionSync(
+                telegram=_build_sync_status("skipped", "already_taken"),
+                client_notify=_build_sync_status("skipped", "already_taken"),
+            ),
+        )
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+
+    previous_status = case.status
+    result = state_manager_take(db, conversation, case, str(context.agent.id), manager_name)
+    if not result.ok:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise ConsoleAPIError(409, "CASE_ALREADY_TAKEN", result.error or "Case already taken")
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="case_taken",
+        entity_type="handover",
+        entity_id=case.id,
+        payload={"previous_status": previous_status},
+        branch_id=branch_id,
+    )
+
+    try:
+        db.commit()
+        db.refresh(case)
+        telegram_status = _sync_telegram_after_take(
+            db,
+            conversation=conversation,
+            handover=case,
+            manager_name=manager_name,
+        )
+        client_notify = _notify_client_status(
+            db=db,
+            conversation=conversation,
+            handover=case,
+            status="connected",
+            manager_name=manager_name,
+        )
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="manager_connected",
+            entity_type="handover",
+            entity_id=case.id,
+            payload={
+                "telegram_status": telegram_status.status,
+                "client_notify_status": client_notify.status,
+            },
+            branch_id=branch_id,
+        )
+        db.commit()
+
+        response = ConsoleCaseActionResponse(
+            success=True,
+            case=ConsoleCase(
+                id=case.id,
+                conversation_id=case.conversation_id,
+                status=case.status,
+                trigger_type=case.trigger_type,
+                created_at=case.created_at.isoformat(),
+                assigned_to_name=case.assigned_to_name,
+                branch_id=branch_id,
+            ),
+            sync=ConsoleCaseActionSync(
+                telegram=telegram_status,
+                client_notify=client_notify,
             ),
         )
         if idempotency and idempotency.record:
@@ -510,17 +818,6 @@ async def resolve_case(
     case_id: UUID, request: Request, db: Session = Depends(get_db)
 ) -> ConsoleCaseActionResponse:
     context = get_console_context(request, db)
-    idempotency = None
-    
-    case = (
-        db.query(Handover)
-        .filter(Handover.id == case_id, Handover.client_id == context.client.id)
-        .first()
-    )
-    
-    if not case:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Case not found")
-
     idempotency_key = _get_idempotency_key(request)
     idempotency = start_idempotency(
         db,
@@ -536,13 +833,54 @@ async def resolve_case(
             content=idempotency.response_body,
         )
 
-    case.status = "resolved"
-    case.resolved_at = datetime.now(timezone.utc)
-    case.resolved_by_name = context.agent.name
-    db.add(case)
-    
-    conversation = db.query(Conversation).filter(Conversation.id == case.conversation_id).first()
-    branch_id = conversation.branch_id if conversation else None
+    case = (
+        db.query(Handover)
+        .filter(Handover.id == case_id, Handover.client_id == context.client.id)
+        .with_for_update()
+        .first()
+    )
+    if not case:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise ConsoleAPIError(404, "NOT_FOUND", "Case not found")
+
+    conversation = (
+        db.query(Conversation)
+        .filter(Conversation.id == case.conversation_id)
+        .with_for_update()
+        .first()
+    )
+    if not conversation:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+
+    branch_id = conversation.branch_id
+    manager_name = context.agent.name or "Менеджер"
+
+    if case.status == "resolved":
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+
+    if context.role not in ("owner", "admin"):
+        if case.assigned_to_name and case.assigned_to_name != context.agent.name:
+            if idempotency and idempotency.record:
+                release_idempotency(db, record=idempotency.record)
+            raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+
+    result = state_manager_resolve(
+        db,
+        conversation,
+        case,
+        str(context.agent.id),
+        manager_name,
+        preserve_context=True,
+    )
+    if not result.ok:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", result.error or "Case already resolved")
 
     record_audit_event(
         db,
@@ -555,6 +893,34 @@ async def resolve_case(
 
     try:
         db.commit()
+        telegram_status = _sync_telegram_after_close(
+            db,
+            conversation=conversation,
+            handover=case,
+            manager_name=manager_name,
+            action="resolve",
+        )
+        client_notify = _notify_client_status(
+            db=db,
+            conversation=conversation,
+            handover=case,
+            status="disconnected",
+            manager_name=manager_name,
+        )
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="manager_disconnected",
+            entity_type="handover",
+            entity_id=case.id,
+            payload={
+                "telegram_status": telegram_status.status,
+                "client_notify_status": client_notify.status,
+            },
+            branch_id=branch_id,
+        )
+        db.commit()
+
         response = ConsoleCaseActionResponse(
             success=True,
             case=ConsoleCase(
@@ -564,6 +930,151 @@ async def resolve_case(
                 trigger_type=case.trigger_type,
                 created_at=case.created_at.isoformat(),
                 branch_id=branch_id,
+            ),
+            sync=ConsoleCaseActionSync(
+                telegram=telegram_status,
+                client_notify=client_notify,
+            ),
+        )
+        if idempotency and idempotency.record:
+            finalize_idempotency(
+                db,
+                record=idempotency.record,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+        return response
+    except Exception:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
+
+
+@router.post(
+    "/cases/{case_id}/return",
+    response_model=ConsoleCaseActionResponse,
+)
+async def return_case(
+    case_id: UUID, request: Request, db: Session = Depends(get_db)
+) -> ConsoleCaseActionResponse:
+    context = get_console_context(request, db)
+    idempotency_key = _get_idempotency_key(request)
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.case.return",
+        payload={"case_id": str(case_id)},
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    case = (
+        db.query(Handover)
+        .filter(Handover.id == case_id, Handover.client_id == context.client.id)
+        .with_for_update()
+        .first()
+    )
+    if not case:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise ConsoleAPIError(404, "NOT_FOUND", "Case not found")
+
+    conversation = (
+        db.query(Conversation)
+        .filter(Conversation.id == case.conversation_id)
+        .with_for_update()
+        .first()
+    )
+    if not conversation:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+
+    branch_id = conversation.branch_id
+    manager_name = context.agent.name or "Менеджер"
+
+    if case.status == "resolved":
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
+
+    if context.role not in ("owner", "admin"):
+        if case.assigned_to_name and case.assigned_to_name != context.agent.name:
+            if idempotency and idempotency.record:
+                release_idempotency(db, record=idempotency.record)
+            raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+
+    result = state_manager_resolve(
+        db,
+        conversation,
+        case,
+        str(context.agent.id),
+        manager_name,
+    )
+    if not result.ok:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", result.error or "Case already resolved")
+
+    case.resolution_notes = "Returned to bot by manager"
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="case_returned",
+        entity_type="handover",
+        entity_id=case.id,
+        branch_id=branch_id,
+    )
+
+    try:
+        db.commit()
+        telegram_status = _sync_telegram_after_close(
+            db,
+            conversation=conversation,
+            handover=case,
+            manager_name=manager_name,
+            action="return",
+        )
+        client_notify = _notify_client_status(
+            db=db,
+            conversation=conversation,
+            handover=case,
+            status="disconnected",
+            manager_name=manager_name,
+        )
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="manager_disconnected",
+            entity_type="handover",
+            entity_id=case.id,
+            payload={
+                "telegram_status": telegram_status.status,
+                "client_notify_status": client_notify.status,
+            },
+            branch_id=branch_id,
+        )
+        db.commit()
+
+        response = ConsoleCaseActionResponse(
+            success=True,
+            case=ConsoleCase(
+                id=case.id,
+                conversation_id=case.conversation_id,
+                status=case.status,
+                trigger_type=case.trigger_type,
+                created_at=case.created_at.isoformat(),
+                branch_id=branch_id,
+            ),
+            sync=ConsoleCaseActionSync(
+                telegram=telegram_status,
+                client_notify=client_notify,
             ),
         )
         if idempotency and idempotency.record:
