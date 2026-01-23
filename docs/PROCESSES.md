@@ -133,6 +133,97 @@ This document defines the **contracts** between all actors in the system: proces
 
 ---
 
+### 2.3.1 Console ↔ Telegram Sync (Target, Web-first)
+
+**Purpose:** Console is the control plane; Telegram is paging/fallback. Actions must be consistent.
+
+**Contract: Console take → Telegram + Client**
+```python
+# Input (Console API)
+POST /console/v1/cases/{case_id}/take
+
+# Actions (must be atomic)
+1) state_service.manager_take()  # pending -> manager_active
+2) audit: case_taken (actor=agent_id)
+3) Telegram:
+   - edit handover card buttons -> [Решено]
+   - post to topic: "Менеджер подключился"
+4) WhatsApp:
+   - send template: manager_connected (from client settings/pack)
+
+# Output
+{ "success": true, "case_id": UUID, "sync": {"telegram":"sent|failed","client_notify":"sent|failed"} }
+```
+
+**Contract: Console resolve/return → Telegram + Client**
+```python
+# Input
+POST /console/v1/cases/{case_id}/resolve
+POST /console/v1/cases/{case_id}/return
+
+# Actions
+1) state_service.manager_resolve()  # manager_active/pending -> bot_active
+2) audit: case_resolved/case_returned
+3) Telegram:
+   - remove buttons, unpin card
+   - post to topic: "Бот снова отвечает"
+4) WhatsApp:
+   - send template: manager_disconnected (from client settings/pack)
+```
+
+---
+
+### 2.3.2 Agent ↔ Telegram Linking (Target)
+
+**Goal:** enforce RBAC and correct audit attribution.
+
+**Flow:**
+1) Console UI issues a short token (server-side only).
+2) Agent sends `/start <token>` to the bot.
+3) Server creates `agent_identities` row (`channel="telegram"`, `external_id=from_user.id`).
+4) Console shows “Connected” + username.
+
+**Rule:** take/resolve in Telegram is allowed only for linked agents.
+
+---
+
+### 2.3.3 Manager Quick Replies (Target)
+
+**Goal:** reduce time-to-first-response without hardcoding text.
+
+**Contract:**
+- Templates live in client data (`client_settings` or pack).
+- Telegram shows quick buttons; click inserts text, manager can edit.
+- Saved messages still go through `manager_message_service`.
+
+---
+
+### 2.3.4 Noise Control Rules (Target)
+
+- Branch routing: one group per branch, one topic per client.
+- Quiet hours per branch/role (Console settings).
+- Event filters (handover created, SLA reminder, client replied while manager_active).
+- Dedup and rate-limit for Telegram sends.
+
+---
+
+### 2.3.5 Execution Plan (for next sessions)
+
+**P0**
+1) Agent↔Telegram linking (tokens, webhook handler, Console UI, audit).
+2) Console take/resolve sync to Telegram + WhatsApp notifications.
+3) Audit events for telegram_delivery and manager_connect/disconnect.
+
+**P1**
+1) Quick replies (templates + UI buttons).
+2) Notification rules (quiet hours + event filters).
+
+**P2**
+1) On-call routing and personal delivery.
+2) Topic reset tool (if topic deleted).
+
+---
+
 ### 2.4 Onboarding Flow (Client + Branch)
 
 **Goal**

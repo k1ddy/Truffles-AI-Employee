@@ -40,6 +40,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ci-fix.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-schemathesis-unexclude.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-telegram-linking-sync.md`
+- `docs/TASK_PACKAGES/TP-2026-01-23-telegram-protocol-docs.md`
 
 ---
 
