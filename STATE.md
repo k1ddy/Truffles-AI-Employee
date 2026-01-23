@@ -50,7 +50,7 @@
 - PLAN: TP-2026-01-23 Console Telegram verify/test endpoints + audit events — in progress, local checks recorded.
 - PLAN: TP-2026-01-23 Console Telegram UI wiring (verify/test in Settings/Ops) — in progress, test waiver planned.
 - PLAN: TP-2026-01-23 Console Telegram CI fix (ruff import order + schemathesis exclude) — in progress.
-- PLAN: TP-2026-01-23 Console Telegram Schemathesis unexclude (/telegram/health) — in progress.
+- DONE: TP-2026-01-23 Console Telegram Schemathesis unexclude (/telegram/health) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277995685
 - STOP-LINE: CI run failed — https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21276341412
   - lint job → step "Lint (ruff)" failed: `ruff check app tests`, error `I001 Import block is un-sorted or un-formatted` at `app/routers/console.py:1:1` (ubuntu-latest, Python 3.11.14).
   - console-contract job → step "Schemathesis GET-only smoke" failed: GET `/telegram/health` returned 404 (documented 200/401/403), command `schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml --url https://api.truffles.kz/console/v1 --include-method=GET --checks all --request-timeout 10 --max-examples=3 --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"` (ubuntu-latest, Python 3.11.14).
@@ -88,11 +88,11 @@
 - Change: console-contract job excludes `/telegram/health` until endpoint is deployed to prod.
 - Evidence: CI run green https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277330558
 
-### 2026-01-23 — Console Telegram Schemathesis unexclude (local)
+### 2026-01-23 — Console Telegram Schemathesis unexclude
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-schemathesis-unexclude.md`
 - Checks: `GET /console/v1/telegram/health` (prod, demo_salon client_id `c839d5dd-65be-4733-a5d2-72c9f70707f0`) → HTTP 200
 - Response: `{"status":"degraded","webhook_alive":true,"last_success_at":"2026-01-23T07:10:02.332610+00:00","last_error_at":"2026-01-18T11:43:05+00:00","last_error_message":"Wrong response from the webhook: 502 Bad Gateway","error_rate_24h":0.0,"pending_messages":0}`
-- Evidence: local checks only (CI rerun pending)
+- Evidence: CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277995685 (console-contract includes /telegram/health)
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
