@@ -140,6 +140,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - `delivery_status` → `sent` when message_id present, otherwise `pending`
 - `delivered_at` → `handovers.notified_at` (if present)
 - `telegram_link` → `https://t.me/c/<internal_id>/<message_id>` when `chat_id` is `-100...`
+  - если есть `topic_id` → добавляем `?thread=<topic_id>` для открытия нужного топика.
   - `internal_id` = `chat_id` without `-100` prefix; if not numeric, link is omitted.
 
 **Health mapping (Console API):**
@@ -147,6 +148,36 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - `pending_messages` = `pending_update_count` from Telegram webhook info.
 - `last_error_at`/`last_error_message` from Telegram webhook info.
 - `error_rate_24h` = 0.0 (no persisted telemetry yet; recorded as gap in STATE).
+- `status` = `degraded` только если ошибка свежая (последние 24ч) или есть pending messages.
+
+**Onboarding checklist (Telegram + Console, P0)**
+
+**Что нужно от бизнес‑владельца (входные данные):**
+- Список филиалов + телефоны + `instanceId` из ChatFlow.
+- Telegram‑группа на каждый филиал (supergroup), **topics включены**.
+- Бот добавлен админом в каждую группу.
+- Список менеджеров и их роли (owner/admin/manager), кто работает через Telegram.
+
+**Шаги онбординга (один раз на клиента):**
+1) Создать `client`, `branches`, `agents`.
+2) Заполнить `branches.instance_id` (ChatFlow) и `branches.telegram_chat_id` (TG group id `-100...`).
+3) Заполнить `client_settings.telegram_bot_token`.
+4) Настроить ChatFlow webhook: `/webhook/{client_slug}?webhook_secret=...`.
+5) Настроить Telegram webhook: `https://api.truffles.kz/telegram-webhook`.
+6) В Console → Settings → Team: подключить Telegram для каждого менеджера (token → `/start <token>`).
+7) В Console → Settings/Ops: Verify/Test (client + branch scope).
+
+**Ожидаемый результат (после онбординга):**
+- Эскалация создаёт topic и карточку с кнопками.
+- `pending/manager_active` форвардит сообщения клиента в topic (текст/медиа по policy).
+- Take/Resolve (Console или Telegram) обновляет Telegram‑карточку и шлёт клиенту системное уведомление.
+- Аудит содержит `case_taken/resolved` + `manager_connected/disconnected`.
+
+**Контракт требований (минимум для работы):**
+- `branches.telegram_chat_id` заполнен на каждый филиал.
+- `client_settings.telegram_bot_token` задан и webhook установлен.
+- Агент связал Telegram через `/start <token>`.
+- `POST /console/v1/cases/{id}/take|resolve|return` идёт через `state_service`.
 
 **Where to change code:**
 - API endpoint + mapping: `truffles-api/app/routers/console.py`

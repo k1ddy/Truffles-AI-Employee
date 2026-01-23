@@ -8,6 +8,13 @@ def test_build_telegram_link_private_group():
     )
 
 
+def test_build_telegram_link_with_topic():
+    assert (
+        console_router._build_telegram_link("-1001234567890", 42, 5112)
+        == "https://t.me/c/1234567890/42?thread=5112"
+    )
+
+
 def test_build_telegram_link_rejects_non_private_group():
     assert console_router._build_telegram_link("123456", 42) is None
 

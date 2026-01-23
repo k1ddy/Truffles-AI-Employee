@@ -113,7 +113,11 @@ def _format_telegram_timestamp(value: Optional[int]) -> Optional[str]:
     return datetime.fromtimestamp(int(value), tz=timezone.utc).isoformat()
 
 
-def _build_telegram_link(chat_id: Optional[str], message_id: Optional[int]) -> Optional[str]:
+def _build_telegram_link(
+    chat_id: Optional[str],
+    message_id: Optional[int],
+    topic_id: Optional[int] = None,
+) -> Optional[str]:
     if not chat_id or not message_id:
         return None
     chat_id_str = str(chat_id)
@@ -122,7 +126,12 @@ def _build_telegram_link(chat_id: Optional[str], message_id: Optional[int]) -> O
     internal_id = chat_id_str[4:]
     if not internal_id.isdigit():
         return None
-    return f"https://t.me/c/{internal_id}/{message_id}"
+    base_link = f"https://t.me/c/{internal_id}/{message_id}"
+    if topic_id:
+        topic_str = str(topic_id)
+        if topic_str.isdigit():
+            return f"{base_link}?thread={topic_str}"
+    return base_link
 
 
 def _build_telegram_trail(
@@ -141,7 +150,7 @@ def _build_telegram_trail(
         message_id=message_id,
         topic_id=topic_id,
         chat_id=str(chat_id) if chat_id else None,
-        telegram_link=_build_telegram_link(chat_id, message_id),
+        telegram_link=_build_telegram_link(chat_id, message_id, topic_id),
         delivery_status=delivery_status,
         delivered_at=delivered_at,
     )
@@ -1154,8 +1163,18 @@ async def get_telegram_health(
     result = info.get("result", {}) if isinstance(info.get("result"), dict) else {}
     webhook_alive = bool(result.get("url"))
     pending_messages = int(result.get("pending_update_count") or 0)
-    last_error_at = _format_telegram_timestamp(result.get("last_error_date"))
+    last_error_date_raw = result.get("last_error_date")
+    last_error_at = _format_telegram_timestamp(last_error_date_raw)
     last_error_message = result.get("last_error_message")
+    last_error_recent = False
+    if last_error_date_raw:
+        try:
+            last_error_dt = datetime.fromtimestamp(int(last_error_date_raw), tz=timezone.utc)
+            last_error_recent = (datetime.now(timezone.utc) - last_error_dt).total_seconds() < 86400
+        except (TypeError, ValueError):
+            last_error_recent = True
+    if last_error_message and not last_error_recent:
+        last_error_message = None
 
     last_success = (
         db.query(func.max(Handover.notified_at))
@@ -1170,7 +1189,7 @@ async def get_telegram_health(
     status = "ok"
     if not webhook_alive:
         status = "error"
-    elif pending_messages > 0 or last_error_at:
+    elif pending_messages > 0 or last_error_recent:
         status = "degraded"
 
     return ConsoleTelegramHealthResponse(
