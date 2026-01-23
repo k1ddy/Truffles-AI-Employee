@@ -249,7 +249,7 @@ export function isRetryable(code: string): boolean {
 export interface ParsedApiError {
     code: string;
     message: string;
-    details?: Record<string, unknown>;
+    details?: Record<string, unknown> | null;
     trace_id: string;
     config?: ErrorConfig;
 }
@@ -264,7 +264,7 @@ export function parseApiError(error: unknown): ParsedApiError {
             return {
                 code: apiError.code,
                 message: apiError.message,
-                details: apiError.details,
+                details: apiError.details ?? undefined,
                 trace_id: apiError.trace_id,
                 config: getErrorConfig(apiError.code),
             };

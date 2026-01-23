@@ -1,4 +1,4 @@
-import { NextAuthOptions, Account, Session } from "next-auth"
+import type { NextAuthOptions, Account, Session } from "next-auth"
 import { JWT } from "next-auth/jwt"
 import KeycloakProvider from "next-auth/providers/keycloak"
 

@@ -130,7 +130,7 @@ def _build_telegram_link(
     message_id: Optional[int],
     topic_id: Optional[int] = None,
 ) -> Optional[str]:
-    if not chat_id or not message_id:
+    if not chat_id:
         return None
     chat_id_str = str(chat_id)
     if not chat_id_str.startswith("-100"):
@@ -138,12 +138,13 @@ def _build_telegram_link(
     internal_id = chat_id_str[4:]
     if not internal_id.isdigit():
         return None
-    base_link = f"https://t.me/c/{internal_id}/{message_id}"
-    if topic_id:
-        topic_str = str(topic_id)
-        if topic_str.isdigit():
-            return f"{base_link}?thread={topic_str}"
-    return base_link
+    target_id = topic_id or message_id
+    if not target_id:
+        return None
+    target_str = str(target_id)
+    if not target_str.isdigit():
+        return None
+    return f"https://t.me/c/{internal_id}/{target_str}"
 
 
 def _build_telegram_trail(
