@@ -200,7 +200,7 @@ export default function SettingsPage() {
         );
     }
 
-    if (isLoading || agentsLoading) {
+    if (isLoading) {
         return (
             <div className="max-w-5xl mx-auto p-6" data-testid="settings-page">
                 <h1 className="text-2xl font-bold mb-6" data-testid="settings-title">Настройки</h1>
@@ -214,7 +214,7 @@ export default function SettingsPage() {
         );
     }
 
-    if (error || agentsError) {
+    if (error) {
         return (
             <div className="max-w-5xl mx-auto p-6" data-testid="settings-page">
                 <h1 className="text-2xl font-bold mb-6" data-testid="settings-title">Настройки</h1>
@@ -223,7 +223,6 @@ export default function SettingsPage() {
                     <button
                         onClick={() => {
                             refetch();
-                            refetchAgents();
                         }}
                         className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
                         data-testid="settings-retry"
@@ -428,7 +427,26 @@ export default function SettingsPage() {
                     👥 Команда
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {agentsData?.items.map((agent) => {
+                    {agentsLoading && (
+                        <p className="text-muted-foreground text-center py-4 col-span-3" data-testid="settings-team-empty">
+                            Загрузка команды...
+                        </p>
+                    )}
+                    {!agentsLoading && agentsError && (
+                        <div className="text-center py-4 col-span-3">
+                            <p className="text-muted-foreground" data-testid="settings-team-empty">
+                                Команда недоступна
+                            </p>
+                            <button
+                                type="button"
+                                className="mt-2 rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted"
+                                onClick={() => refetchAgents()}
+                            >
+                                Повторить
+                            </button>
+                        </div>
+                    )}
+                    {!agentsLoading && !agentsError && agentsData?.items.map((agent) => {
                         const telegramIdentity = agent.identities?.find((identity) => identity.channel === "telegram");
                         const linkData = linkTokens[agent.id];
                         const displayHandle = telegramIdentity?.username
@@ -503,7 +521,7 @@ export default function SettingsPage() {
                         </div>
                         );
                     })}
-                    {agentsData?.items.length === 0 && (
+                    {!agentsLoading && !agentsError && agentsData?.items.length === 0 && (
                         <p className="text-muted-foreground text-center py-4 col-span-3" data-testid="settings-team-empty">
                             Нет участников команды
                         </p>
