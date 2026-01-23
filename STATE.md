@@ -85,7 +85,7 @@
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ci-fix.md`
 - Checks: `cd truffles-api && ruff check app tests` → `All checks passed!`
 - Change: console-contract job excludes `/telegram/health` until endpoint is deployed to prod.
-- Evidence: local checks only (CI rerun pending)
+- Evidence: local checks only (CI rerun pending). CI run queued: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277330558
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
