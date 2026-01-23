@@ -73,6 +73,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 - **Console↔Telegram синхронизация**: take/resolve/return в консоли обновляют Telegram‑карточку и топик.
 - **Клиентские уведомления**: “менеджер подключился” и “бот снова отвечает” идут в WhatsApp при take/resolve.
 - **Agent↔Telegram linking** обязателен для RBAC (telegram_id → agent_id).
+- **Единый Inbox/Case Health в Console**: последняя активность, статус доставки, ошибки каналов — видны без переключений.
 
 _Статус реализации и evidence — в `STATE.md`._
 

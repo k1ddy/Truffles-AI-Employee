@@ -594,6 +594,23 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 - **Когда обновлять сценарий:** добавлен новый “горячий” эндпоинт или изменились фильтры/параметры; изменились SLO/пороги.
 - **Evidence:** k6 summary + команда запуска в `STATE.md`.
 
+### 5.5.4 Console Inbox health (target)
+
+**Цель:** единое и надёжное понимание состояния заявок (Console ↔ Telegram ↔ WhatsApp).
+
+**Target‑контракт (будет зафиксирован в OpenAPI при реализации):**
+- `last_inbound_at`, `last_outbound_at`
+- `last_message_preview`
+- `unread_count` (после `agent_last_viewed_at`)
+- `has_delivery_error`, `has_pending_outbox`
+- `last_activity_channel`
+
+**Индексы (минимум для p95):**
+- `messages(conversation_id, created_at)`
+- `messages(role, created_at)`
+- `handovers(status, created_at)`
+- `users(remote_jid)` и (если нужен поиск) `users.phone_normalized`
+
 ### 5.6 Повторяемый процесс запуска (один сценарий для всех ролей)
 
 1) **CI L0+L1** → ссылка на run (без этого STOP); **L2** обязателен при L2‑триггерах.  

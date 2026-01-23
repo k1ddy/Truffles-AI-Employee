@@ -207,7 +207,38 @@ POST /console/v1/cases/{case_id}/return
 
 ---
 
-### 2.3.5 Execution Plan (for next sessions)
+### 2.3.5 Unified Inbox + Case Health (Target)
+
+**Purpose:** единое понимание “что происходит с заявкой” и где теряются сообщения (Console ↔ Telegram ↔ WhatsApp).
+
+**Contract (target, to encode in OpenAPI + DB/queries):**
+- Все inbound/outbound сообщения пишутся в `messages` с `message_metadata.source`:
+  - `source="whatsapp"` (inbound/outbound)
+  - `source="telegram"` (manager replies)
+  - `source="console"` (web replies)
+- На уровне кейса вычисляются агрегаты:
+  - `last_inbound_at`, `last_outbound_at`
+  - `last_message_preview` (snippet)
+  - `last_activity_channel` (`whatsapp|telegram|console`)
+  - `unread_count` (сообщения после `agent_last_viewed_at`)
+  - `has_delivery_error`, `has_pending_outbox`
+  - `health` (ok/degraded/error) + `health_reason`
+- Inbox сортируется по `last_inbound_at desc` (самые “живые” сверху).
+- В UI:
+  - бейдж `NEW` (unread_count > 0)
+  - бейдж `LIVE` (inbound < N минут)
+  - бейдж `⚠️` при `has_delivery_error` или `has_pending_outbox`.
+
+**Inbox filters (target):**
+- `q` (поиск по телефону/имени/ID)
+- `phone` (normalized)
+- `status`, `branch_id`, `assigned_to_me`
+- `has_unread`, `has_delivery_error`
+- `last_activity_since`
+
+---
+
+### 2.3.6 Execution Plan (for next sessions)
 
 **P0**
 1) Agent↔Telegram linking (tokens, webhook handler, Console UI, audit).
