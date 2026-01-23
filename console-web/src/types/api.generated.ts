@@ -29,6 +29,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agents": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List agents with identities
+         * @description Returns agents and linked identities (e.g., telegram)
+         */
+        get: operations["listAgents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{agent_id}/telegram/link": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path: {
+                /** @example f0b1a4c7-8f33-4f92-9b1f-9fe0f3d3e7b1 */
+                agent_id: components["parameters"]["agent_id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Telegram linking token
+         * @description Returns a short token and deep-link for Telegram account linking.
+         */
+        post: operations["linkAgentTelegram"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cases": {
         parameters: {
             query?: never;
@@ -121,6 +174,31 @@ export interface paths {
          * @description Marks case as resolved. Must be assigned to current agent or owner/admin.
          */
         post: operations["resolveCase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cases/{case_id}/return": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Return case to bot
+         * @description Returns case to bot and closes the handover.
+         */
+        post: operations["returnCase"];
         delete?: never;
         options?: never;
         head?: never;
@@ -369,6 +447,27 @@ export interface components {
             branch_id?: string | null;
             is_active?: boolean;
         };
+        AgentIdentity: {
+            /** @enum {string} */
+            channel?: "telegram";
+            external_id?: string;
+            username?: string | null;
+            /** Format: date-time */
+            linked_at?: string | null;
+        };
+        AgentWithIdentities: {
+            /** Format: uuid */
+            id?: string;
+            name?: string | null;
+            /** @enum {string} */
+            role?: "owner" | "admin" | "manager" | "support";
+            /** Format: uuid */
+            client_id?: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            is_active?: boolean;
+            identities?: components["schemas"]["AgentIdentity"][];
+        };
         Client: {
             /** Format: uuid */
             id?: string;
@@ -430,6 +529,19 @@ export interface components {
         CaseActionResponse: {
             success?: boolean;
             case?: components["schemas"]["Case"];
+            sync?: components["schemas"]["CaseActionSync"];
+        };
+        CaseActionSync: {
+            telegram?: components["schemas"]["SyncStatus"];
+            client_notify?: components["schemas"]["SyncStatus"];
+        };
+        SyncStatus: {
+            /** @enum {string} */
+            status?: "ok" | "skipped" | "failed";
+            detail?: string | null;
+        };
+        AgentListResponse: {
+            items?: components["schemas"]["AgentWithIdentities"][];
         };
         Message: {
             /** Format: uuid */
@@ -562,6 +674,13 @@ export interface components {
             /** Format: uuid */
             branch_id?: string | null;
             error_message?: string | null;
+        };
+        TelegramLinkResponse: {
+            token?: string;
+            deep_link?: string | null;
+            bot_username?: string | null;
+            /** Format: date-time */
+            expires_at?: string;
         };
         BookingCreate: {
             /** Format: uuid */
@@ -803,6 +922,8 @@ export interface components {
         branch_id_header: string;
         /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
         case_id: string;
+        /** @example f0b1a4c7-8f33-4f92-9b1f-9fe0f3d3e7b1 */
+        agent_id: string;
         /** @description Pagination cursor (opaque) */
         cursor: string;
         limit: number;
@@ -839,6 +960,66 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    listAgents: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    linkAgentTelegram: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path: {
+                /** @example f0b1a4c7-8f33-4f92-9b1f-9fe0f3d3e7b1 */
+                agent_id: components["parameters"]["agent_id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Link token created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramLinkResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listCases: {
@@ -971,6 +1152,38 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Case resolved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaseActionResponse"];
+                };
+            };
+            403: components["responses"]["NotAssigned"];
+            409: components["responses"]["IdempotencyConflict"];
+        };
+    };
+    returnCase: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+                /** @description Stable key for safe retries of mutating requests. */
+                "Idempotency-Key"?: components["parameters"]["idempotency_key"];
+            };
+            path: {
+                /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
+                case_id: components["parameters"]["case_id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Case returned */
             200: {
                 headers: {
                     [name: string]: unknown;

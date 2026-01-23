@@ -50,6 +50,7 @@
 - PLAN: TP-2026-01-23 Console Telegram verify/test endpoints + audit events — in progress, local checks recorded.
 - PLAN: TP-2026-01-23 Console Telegram UI wiring (verify/test in Settings/Ops) — in progress, test waiver planned.
 - PLAN: TP-2026-01-23 Console Telegram CI fix (ruff import order + schemathesis exclude) — in progress.
+- PLAN: TP-2026-01-23 Agent↔Telegram linking + Console↔Telegram sync + client notify — in progress.
 - DONE: TP-2026-01-23 Console Telegram Schemathesis unexclude (/telegram/health) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277995685
 - STOP-LINE: CI run failed — https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21276341412
   - lint job → step "Lint (ruff)" failed: `ruff check app tests`, error `I001 Import block is un-sorted or un-formatted` at `app/routers/console.py:1:1` (ubuntu-latest, Python 3.11.14).
@@ -93,6 +94,12 @@
 - Checks: `GET /console/v1/telegram/health` (prod, demo_salon client_id `c839d5dd-65be-4733-a5d2-72c9f70707f0`) → HTTP 200
 - Response: `{"status":"degraded","webhook_alive":true,"last_success_at":"2026-01-23T07:10:02.332610+00:00","last_error_at":"2026-01-18T11:43:05+00:00","last_error_message":"Wrong response from the webhook: 502 Bad Gateway","error_rate_24h":0.0,"pending_messages":0}`
 - Evidence: CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277995685 (console-contract includes /telegram/health)
+
+### 2026-01-23 — Agent↔Telegram linking + Console↔Telegram sync (local)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-telegram-linking-sync.md`
+- Checks: `pytest -q truffles-api/tests/test_agent_link_service.py` → `3 passed`; `pytest -q truffles-api/tests/test_manager_message_rbac.py` → `2 passed`; `ruff check truffles-api/app truffles-api/tests` → `All checks passed!`
+- Contract gen: `npm --prefix console-web run generate:api`
+- Evidence: local checks only (CI pending)
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.

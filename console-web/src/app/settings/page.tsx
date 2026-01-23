@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
-import { telegramApi } from "@/lib/api-client";
+import { agentsApi, telegramApi } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -23,6 +23,21 @@ interface Agent {
     name: string | null;
     role: string;
     is_active: boolean;
+    identities?: AgentIdentity[];
+}
+
+interface AgentIdentity {
+    channel: "telegram";
+    external_id: string;
+    username?: string | null;
+    linked_at?: string | null;
+}
+
+interface AgentLinkData {
+    token: string;
+    deep_link?: string | null;
+    bot_username?: string | null;
+    expires_at: string;
 }
 
 interface BotConfig {
@@ -41,12 +56,16 @@ interface BotConfig {
 
 interface SettingsData {
     branches: Branch[];
-    agents: Agent[];
     bot_config: BotConfig | null;
 }
 
 async function fetchSettings(): Promise<SettingsData> {
     const response = await api.get("/settings");
+    return response.data;
+}
+
+async function fetchAgents(): Promise<{ items: Agent[] }> {
+    const response = await agentsApi.list();
     return response.data;
 }
 
@@ -92,10 +111,18 @@ export default function SettingsPage() {
     const { handleError } = useErrorHandler();
     const [verifyTarget, setVerifyTarget] = useState<string | null>(null);
     const [testTarget, setTestTarget] = useState<string | null>(null);
+    const [linkTarget, setLinkTarget] = useState<string | null>(null);
+    const [linkTokens, setLinkTokens] = useState<Record<string, AgentLinkData>>({});
 
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["settings"],
         queryFn: fetchSettings,
+        enabled: !!session,
+    });
+
+    const { data: agentsData, isLoading: agentsLoading, error: agentsError, refetch: refetchAgents } = useQuery({
+        queryKey: ["agents"],
+        queryFn: fetchAgents,
         enabled: !!session,
     });
 
@@ -145,6 +172,26 @@ export default function SettingsPage() {
         },
     });
 
+    const linkMutation = useMutation({
+        mutationFn: async (agentId: string) => {
+            const { data } = await agentsApi.linkTelegram(agentId);
+            return { data, agentId };
+        },
+        onMutate: (agentId) => {
+            setLinkTarget(agentId);
+        },
+        onSuccess: ({ data, agentId }) => {
+            setLinkTokens((prev) => ({ ...prev, [agentId]: data }));
+            toast.success("Ссылка для Telegram создана");
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+        onSettled: () => {
+            setLinkTarget(null);
+        },
+    });
+
     if (!session) {
         return (
             <div className="p-8 text-center text-muted-foreground">
@@ -153,7 +200,7 @@ export default function SettingsPage() {
         );
     }
 
-    if (isLoading) {
+    if (isLoading || agentsLoading) {
         return (
             <div className="max-w-5xl mx-auto p-6" data-testid="settings-page">
                 <h1 className="text-2xl font-bold mb-6" data-testid="settings-title">Настройки</h1>
@@ -167,14 +214,17 @@ export default function SettingsPage() {
         );
     }
 
-    if (error) {
+    if (error || agentsError) {
         return (
             <div className="max-w-5xl mx-auto p-6" data-testid="settings-page">
                 <h1 className="text-2xl font-bold mb-6" data-testid="settings-title">Настройки</h1>
                 <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center" data-testid="settings-error">
                     <p className="text-destructive mb-4">Не удалось загрузить настройки</p>
                     <button
-                        onClick={() => refetch()}
+                        onClick={() => {
+                            refetch();
+                            refetchAgents();
+                        }}
                         className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
                         data-testid="settings-retry"
                     >
@@ -378,28 +428,82 @@ export default function SettingsPage() {
                     👥 Команда
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {data?.agents.map((agent) => (
+                    {agentsData?.items.map((agent) => {
+                        const telegramIdentity = agent.identities?.find((identity) => identity.channel === "telegram");
+                        const linkData = linkTokens[agent.id];
+                        const displayHandle = telegramIdentity?.username
+                            ? `@${telegramIdentity.username}`
+                            : telegramIdentity?.external_id;
+
+                        return (
                         <div
                             key={agent.id}
-                            className="flex items-center justify-between p-3 bg-muted rounded"
+                            className="flex flex-col gap-2 p-3 bg-muted rounded"
                             data-testid="settings-team-row"
                         >
-                            <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 bg-secondary rounded-full flex items-center justify-center text-secondary-foreground font-medium">
-                                    {agent.name?.charAt(0).toUpperCase() || "?"}
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 bg-secondary rounded-full flex items-center justify-center text-secondary-foreground font-medium">
+                                        {agent.name?.charAt(0).toUpperCase() || "?"}
+                                    </div>
+                                    <span className="font-medium">{agent.name || "Без имени"}</span>
                                 </div>
-                                <span className="font-medium">{agent.name || "Без имени"}</span>
+                                <div className="flex items-center gap-2">
+                                    <RoleBadge role={agent.role} />
+                                    <span
+                                        className={`w-2 h-2 rounded-full ${agent.is_active ? "bg-green-500" : "bg-muted"
+                                            }`}
+                                    ></span>
+                                </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <RoleBadge role={agent.role} />
-                                <span
-                                    className={`w-2 h-2 rounded-full ${agent.is_active ? "bg-green-500" : "bg-muted"
-                                        }`}
-                                ></span>
+                            <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">Telegram:</span>
+                                <span className={telegramIdentity ? "font-medium" : "text-muted-foreground"}>
+                                    {telegramIdentity ? displayHandle : "не подключен"}
+                                </span>
                             </div>
+                            <div className="flex items-center justify-between gap-2">
+                                <button
+                                    type="button"
+                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onClick={() => linkMutation.mutate(agent.id)}
+                                    disabled={linkTarget === agent.id}
+                                    data-testid="settings-team-link"
+                                >
+                                    {linkTarget === agent.id
+                                        ? "Генерация..."
+                                        : telegramIdentity
+                                            ? "Переподключить"
+                                            : "Подключить Telegram"}
+                                </button>
+                                {telegramIdentity?.linked_at && (
+                                    <span className="text-xs text-muted-foreground">
+                                        {new Date(telegramIdentity.linked_at).toLocaleDateString("ru-RU")}
+                                    </span>
+                                )}
+                            </div>
+                            {linkData && (
+                                <div className="text-xs bg-background p-2 rounded border border-border/60 space-y-1">
+                                    <div>
+                                        Код: <span className="font-mono">{linkData.token}</span>
+                                    </div>
+                                    {linkData.deep_link && (
+                                        <Link className="text-primary underline" href={linkData.deep_link} target="_blank">
+                                            Открыть в Telegram
+                                        </Link>
+                                    )}
+                                    <div className="text-muted-foreground">
+                                        Отправьте боту <span className="font-mono">/start {linkData.token}</span>
+                                    </div>
+                                    <div className="text-muted-foreground">
+                                        Истекает: {new Date(linkData.expires_at).toLocaleString("ru-RU")}
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                    ))}
-                    {data?.agents.length === 0 && (
+                        );
+                    })}
+                    {agentsData?.items.length === 0 && (
                         <p className="text-muted-foreground text-center py-4 col-span-3" data-testid="settings-team-empty">
                             Нет участников команды
                         </p>

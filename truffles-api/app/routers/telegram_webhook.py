@@ -7,9 +7,16 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
 from app.logging_config import get_logger
-from app.models import ClientSettings, Conversation, Handover
+from app.models import Agent, AgentIdentity, AgentLinkToken, Branch, ClientSettings, Conversation, Handover
 from app.schemas.telegram import TelegramMessage, TelegramUpdate, TelegramWebhookResponse
-from app.services.manager_message_service import process_manager_media, process_manager_message
+from app.services.agent_link_service import consume_link_token, hash_link_token
+from app.services.audit_service import record_audit_event
+from app.services.manager_message_service import (
+    notify_client_manager_status,
+    process_manager_media,
+    process_manager_message,
+    resolve_linked_agent,
+)
 from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
@@ -39,6 +46,160 @@ async def parse_telegram_update(request: Request) -> Optional[dict]:
 
     logger.error("Failed to decode Telegram webhook payload after fallbacks")
     return None
+
+
+def _extract_start_token(text: str) -> Optional[str]:
+    raw = (text or "").strip()
+    if not raw.lower().startswith("/start"):
+        return None
+    token = raw[len("/start") :].strip()
+    if token.startswith("="):
+        token = token[1:].strip()
+    return token or None
+
+
+async def handle_link_command(update: TelegramUpdate, db: Session) -> TelegramWebhookResponse:
+    message = update.message
+    if not message or not message.text:
+        return TelegramWebhookResponse(success=False, message="No start payload")
+
+    token = _extract_start_token(message.text)
+    if not token:
+        return TelegramWebhookResponse(success=False, message="Missing link token")
+
+    manager_id = message.from_user.id if message.from_user else None
+    manager_username = message.from_user.username if message.from_user else None
+    if not manager_id:
+        return TelegramWebhookResponse(success=False, message="Missing user identity")
+
+    try:
+        link_record = consume_link_token(db, token)
+    except ValueError as exc:
+        reason = str(exc)
+        token_hash = hash_link_token(token)
+        record = (
+            db.query(AgentLinkToken)
+            .filter(AgentLinkToken.token_hash == token_hash)
+            .first()
+        )
+        if record:
+            agent = db.query(Agent).filter(Agent.id == record.agent_id).first()
+            if agent:
+                record_audit_event(
+                    db,
+                    actor_id=agent.id,
+                    actor_name=agent.name,
+                    client_id=agent.client_id,
+                    branch_id=agent.branch_id,
+                    event_type="telegram_link_failed",
+                    entity_type="agent",
+                    entity_id=agent.id,
+                    payload={"reason": reason},
+                )
+                db.commit()
+                settings = (
+                    db.query(ClientSettings)
+                    .filter(ClientSettings.client_id == agent.client_id)
+                    .first()
+                )
+                if settings and settings.telegram_bot_token:
+                    telegram = TelegramService(settings.telegram_bot_token)
+                    telegram.send_message(
+                        chat_id=str(message.chat.id),
+                        text=f"❌ Ссылка недействительна: {reason}",
+                    )
+        return TelegramWebhookResponse(success=False, message=f"Token {reason}")
+
+    agent = db.query(Agent).filter(Agent.id == link_record.agent_id).first()
+    if not agent:
+        return TelegramWebhookResponse(success=False, message="Agent not found")
+
+    existing_identity = (
+        db.query(AgentIdentity)
+        .filter(
+            AgentIdentity.channel == "telegram",
+            AgentIdentity.external_id == str(manager_id),
+        )
+        .first()
+    )
+    if existing_identity and existing_identity.agent_id != agent.id:
+        record_audit_event(
+            db,
+            actor_id=agent.id,
+            actor_name=agent.name,
+            client_id=agent.client_id,
+            branch_id=agent.branch_id,
+            event_type="telegram_link_failed",
+            entity_type="agent",
+            entity_id=agent.id,
+            payload={"reason": "conflict"},
+        )
+        db.commit()
+        settings = db.query(ClientSettings).filter(ClientSettings.client_id == agent.client_id).first()
+        if settings and settings.telegram_bot_token:
+            telegram = TelegramService(settings.telegram_bot_token)
+            telegram.send_message(
+                chat_id=str(message.chat.id),
+                text="⛔ Этот Telegram уже связан с другим агентом.",
+            )
+        return TelegramWebhookResponse(success=False, message="Telegram already linked")
+
+    now = datetime.now(timezone.utc)
+    agent_identity = (
+        db.query(AgentIdentity)
+        .filter(
+            AgentIdentity.agent_id == agent.id,
+            AgentIdentity.channel == "telegram",
+        )
+        .first()
+    )
+    if agent_identity:
+        agent_identity.external_id = str(manager_id)
+        agent_identity.username = manager_username
+        agent_identity.updated_at = now
+        if not agent_identity.created_at:
+            agent_identity.created_at = now
+    else:
+        agent_identity = AgentIdentity(
+            agent_id=agent.id,
+            channel="telegram",
+            external_id=str(manager_id),
+            username=manager_username,
+            identity_metadata={"linked_from": "telegram_start"},
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(agent_identity)
+
+    link_record.used_at = now
+    db.add(link_record)
+
+    record_audit_event(
+        db,
+        actor_id=agent.id,
+        actor_name=agent.name,
+        client_id=agent.client_id,
+        branch_id=agent.branch_id,
+        event_type="telegram_linked",
+        entity_type="agent",
+        entity_id=agent.id,
+        payload={
+            "telegram_user_id": str(manager_id),
+            "username": manager_username,
+        },
+    )
+
+    db.commit()
+
+    settings = db.query(ClientSettings).filter(ClientSettings.client_id == agent.client_id).first()
+    if settings and settings.telegram_bot_token:
+        telegram = TelegramService(settings.telegram_bot_token)
+        telegram.send_message(
+            chat_id=str(message.chat.id),
+            text=f"✅ Telegram связан с агентом {agent.name or 'Truffles'}",
+        )
+
+    return TelegramWebhookResponse(success=True, message="Linked")
 
 
 @router.post("/telegram-webhook", response_model=TelegramWebhookResponse)
@@ -99,7 +260,11 @@ async def handle_manager_message(update: TelegramUpdate, db: Session) -> Telegra
     if not message.text:
         return TelegramWebhookResponse(success=True, message="No text in message")
 
-    # Skip commands
+    # Handle linking command
+    if message.text.startswith("/start"):
+        return await handle_link_command(update, db)
+
+    # Skip other commands
     if message.text.startswith("/"):
         return TelegramWebhookResponse(success=True, message="Ignoring command")
 
@@ -162,17 +327,21 @@ async def handle_manager_message(update: TelegramUpdate, db: Session) -> Telegra
 
             # Notify in the topic that the manager took the request (auto-take on first message)
             if message_thread_id:
+                taken_name = handover.assigned_to_name or manager_name
                 telegram.send_message(
                     chat_id=str(chat_id),
-                    text=f"👤 <b>{manager_name}</b> взял заявку",
+                    text=f"👤 <b>{taken_name}</b> взял заявку",
                     message_thread_id=message_thread_id,
                 )
 
         # Only notify on failure
         if not success:
+            error_text = "❌ Не доставлено"
+            if result_message == "Access denied":
+                error_text = "⛔ Нет доступа. Привяжите Telegram в Console."
             telegram.send_message(
                 chat_id=str(chat_id),
-                text="❌ Не доставлено",
+                text=error_text,
                 message_thread_id=message_thread_id,
                 reply_to_message_id=message.message_id,
             )
@@ -280,9 +449,10 @@ def _process_manager_media_background(task: dict) -> None:
                 },
             )
             if message_thread_id:
+                taken_name = handover.assigned_to_name or manager_name
                 telegram.send_message(
                     chat_id=str(chat_id),
-                    text=f"👤 <b>{manager_name}</b> взял заявку",
+                    text=f"👤 <b>{taken_name}</b> взял заявку",
                     message_thread_id=message_thread_id,
                 )
 
@@ -297,9 +467,12 @@ def _process_manager_media_background(task: dict) -> None:
                     }
                 },
             )
+            error_text = "❌ Не доставлено"
+            if result_message == "Access denied":
+                error_text = "⛔ Нет доступа. Привяжите Telegram в Console."
             telegram.send_message(
                 chat_id=str(chat_id),
-                text="❌ Не доставлено",
+                text=error_text,
                 message_thread_id=message_thread_id,
                 reply_to_message_id=reply_to_message_id,
             )
@@ -399,6 +572,12 @@ async def handle_manager_media(
 def get_bot_token_by_chat(db: Session, chat_id: int) -> Optional[str]:
     """Get bot token by telegram chat_id."""
     settings = db.query(ClientSettings).filter(ClientSettings.telegram_chat_id == str(chat_id)).first()
+    if settings:
+        return settings.telegram_bot_token
+    branch = db.query(Branch).filter(Branch.telegram_chat_id == str(chat_id)).first()
+    if not branch:
+        return None
+    settings = db.query(ClientSettings).filter(ClientSettings.client_id == branch.client_id).first()
     return settings.telegram_bot_token if settings else None
 
 
@@ -426,7 +605,7 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
     logger.info(f"Callback: action={action}, handover_id={handover_id}")
 
     # Get manager info
-    manager_id = str(callback.from_user.id)
+    manager_telegram_id = callback.from_user.id
     manager_name = callback.from_user.first_name
     if callback.from_user.last_name:
         manager_name += f" {callback.from_user.last_name}"
@@ -452,9 +631,30 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
 
     # Get conversation
     conversation = db.query(Conversation).filter(Conversation.id == handover.conversation_id).first()
+    if not conversation:
+        telegram._make_request(
+            "answerCallbackQuery", {"callback_query_id": callback.id, "text": "❌ Диалог не найден"}
+        )
+        return TelegramWebhookResponse(success=False, message="Conversation not found")
+
+    linked_agent = resolve_linked_agent(
+        db,
+        telegram_user_id=manager_telegram_id,
+        client_id=conversation.client_id,
+        branch_id=conversation.branch_id,
+    )
+    if not linked_agent:
+        telegram._make_request(
+            "answerCallbackQuery",
+            {"callback_query_id": callback.id, "text": "⛔ Нет доступа. Привяжите Telegram в Console"},
+        )
+        return TelegramWebhookResponse(success=False, message="Access denied")
+
+    manager_id = str(linked_agent.id)
+    manager_name = linked_agent.name or manager_name
 
     # Get topic_id for sending messages
-    topic_id = conversation.telegram_topic_id if conversation else None
+    topic_id = conversation.telegram_topic_id
 
     # Stale buttons protection: if handover already closed, don't error and remove buttons.
     if handover.status not in ["pending", "active"]:
@@ -474,6 +674,16 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
 
         return TelegramWebhookResponse(success=True, message="Already closed", conversation_id=handover.conversation_id)
 
+    if action in ("resolve", "return") and handover.status == "active":
+        assigned_raw = str(handover.assigned_to or "").strip()
+        if assigned_raw and assigned_raw != str(linked_agent.id) and linked_agent.role not in ("owner", "admin"):
+            taken_by = handover.assigned_to_name or "менеджер"
+            telegram._make_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback.id, "text": f"⚠️ Заявку ведет {taken_by}", "show_alert": True},
+            )
+            return TelegramWebhookResponse(success=False, message="Access denied")
+
     # Process action
     if action == "take":
         # Take using state_service
@@ -486,6 +696,17 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
                 {"callback_query_id": callback.id, "text": f"⚠️ Заявку уже взял {taken_by}", "show_alert": True},
             )
             return TelegramWebhookResponse(success=False, message=result.error)
+
+        record_audit_event(
+            db,
+            actor_id=linked_agent.id,
+            actor_name=linked_agent.name,
+            client_id=conversation.client_id,
+            branch_id=conversation.branch_id,
+            event_type="case_taken",
+            entity_type="handover",
+            entity_id=handover.id,
+        )
 
         # Update buttons to [Решено]
         if message_id:
@@ -511,6 +732,29 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
         telegram._make_request("answerCallbackQuery", {"callback_query_id": callback.id, "text": "✅ Вы взяли заявку"})
 
         db.commit()
+
+        notify_ok, notify_detail = notify_client_manager_status(
+            db,
+            conversation=conversation,
+            handover=handover,
+            status="connected",
+            manager_name=manager_name,
+        )
+        record_audit_event(
+            db,
+            actor_id=linked_agent.id,
+            actor_name=linked_agent.name,
+            client_id=conversation.client_id,
+            branch_id=conversation.branch_id,
+            event_type="manager_connected",
+            entity_type="handover",
+            entity_id=handover.id,
+            payload={
+                "client_notify_status": "ok" if notify_ok else "failed",
+                "client_notify_detail": notify_detail,
+            },
+        )
+        db.commit()
         return TelegramWebhookResponse(success=True, message="Taken", conversation_id=handover.conversation_id)
 
     elif action == "resolve":
@@ -523,6 +767,17 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
                 {"callback_query_id": callback.id, "text": f"❌ Ошибка: {result.error}", "show_alert": True},
             )
             return TelegramWebhookResponse(success=False, message=result.error)
+
+        record_audit_event(
+            db,
+            actor_id=linked_agent.id,
+            actor_name=linked_agent.name,
+            client_id=conversation.client_id,
+            branch_id=conversation.branch_id,
+            event_type="case_resolved",
+            entity_type="handover",
+            entity_id=handover.id,
+        )
 
         # Remove buttons
         if message_id:
@@ -539,11 +794,41 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
         telegram._make_request("answerCallbackQuery", {"callback_query_id": callback.id, "text": "✅ Заявка решена"})
 
         db.commit()
+
+        notify_ok, notify_detail = notify_client_manager_status(
+            db,
+            conversation=conversation,
+            handover=handover,
+            status="disconnected",
+            manager_name=manager_name,
+        )
+        record_audit_event(
+            db,
+            actor_id=linked_agent.id,
+            actor_name=linked_agent.name,
+            client_id=conversation.client_id,
+            branch_id=conversation.branch_id,
+            event_type="manager_disconnected",
+            entity_type="handover",
+            entity_id=handover.id,
+            payload={
+                "client_notify_status": "ok" if notify_ok else "failed",
+                "client_notify_detail": notify_detail,
+            },
+        )
+        db.commit()
         return TelegramWebhookResponse(success=True, message="Resolved", conversation_id=handover.conversation_id)
 
     elif action == "return":
         # Return bot: close handover and set state back to bot_active (even if it was pending)
-        result = state_manager_resolve(db, conversation, handover, manager_id, manager_name)
+        result = state_manager_resolve(
+            db,
+            conversation,
+            handover,
+            manager_id,
+            manager_name,
+            preserve_context=True,
+        )
 
         if not result.ok:
             telegram._make_request(
@@ -553,6 +838,17 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
             return TelegramWebhookResponse(success=False, message=result.error)
 
         handover.resolution_notes = "Returned to bot by manager"
+
+        record_audit_event(
+            db,
+            actor_id=linked_agent.id,
+            actor_name=linked_agent.name,
+            client_id=conversation.client_id,
+            branch_id=conversation.branch_id,
+            event_type="case_returned",
+            entity_type="handover",
+            entity_id=handover.id,
+        )
 
         # Remove buttons
         if message_id:
@@ -576,6 +872,29 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
 
         telegram._make_request("answerCallbackQuery", {"callback_query_id": callback.id, "text": "✅ Возвращено боту"})
 
+        db.commit()
+
+        notify_ok, notify_detail = notify_client_manager_status(
+            db,
+            conversation=conversation,
+            handover=handover,
+            status="disconnected",
+            manager_name=manager_name,
+        )
+        record_audit_event(
+            db,
+            actor_id=linked_agent.id,
+            actor_name=linked_agent.name,
+            client_id=conversation.client_id,
+            branch_id=conversation.branch_id,
+            event_type="manager_disconnected",
+            entity_type="handover",
+            entity_id=handover.id,
+            payload={
+                "client_notify_status": "ok" if notify_ok else "failed",
+                "client_notify_detail": notify_detail,
+            },
+        )
         db.commit()
         return TelegramWebhookResponse(success=True, message="Returned to bot", conversation_id=handover.conversation_id)
 
