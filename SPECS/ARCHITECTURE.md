@@ -285,6 +285,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Response Guard обязателен: текст = ack + facts + next_step, иначе fallback.
 - Классы (по приоритету): Hard‑LAW → policy → opt‑out → human/frustration → booking → info‑bundle → consult → greeting → OOD.
 - Anchors/лексика/эвристики — **fallback/boost**, не основной источник смысла.
+- LLM‑контроллер — основной арбитр смысла; словари/якоря не расширяем ради покрытия, только для safety‑gate и минимальных якорей.
 - OOD допустим **только** если есть out‑signals и **нет** in‑signals (strict‑in).
 - Если confidence ниже порога/LLM недоступен → fallback на semantic resolver/детерминированный router; фиксация в trace.
 - Multi‑intent: сильный класс отвечает первым, остальные идут в очередь (intent_queue) с возвратом к цели.

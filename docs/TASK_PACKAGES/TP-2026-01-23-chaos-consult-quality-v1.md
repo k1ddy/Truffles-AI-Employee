@@ -6,7 +6,7 @@
   - decision_meta/decision_trace пишутся на каждом user-message.
 - Scope:
   - Consult flow: service availability + безопасный LLM-совет (pack-first, multi-intent).
-  - Chaos-sim runner и артефакты (ops/diagnose.py) + SOP.
+  - Chaos-sim runner + evaluator (must_not инварианты, паттерны дефектов) и артефакты + SOP.
   - Память оставляем отключенной (feature flag OFF) и документируем задел.
 - Out of scope:
   - Персонализация/долгосрочная память (в этой сессии не включаем).
@@ -18,6 +18,8 @@
   - `truffles-api/app/services/demo_salon_knowledge.py`
   - `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
   - `truffles-api/app/routers/webhook/decision.py`
+  - `ops/diagnose.py`
+  - `SPECS/ARCHITECTURE.md`
   - `SPECS/CONSULTANT.md`
   - `SPECS/SYSTEM_REFERENCE.md`
   - `docs/IMPERIUM_GAPS.yaml`
@@ -27,12 +29,14 @@
   2) Добавить consult LLM (safe) и combine с service availability в multi-intent.
   3) Расширить EVAL для chaos-мультиинтентов (RU/KZ/mixed).
   4) Обновить канон/документацию + зафиксировать GAP-024.
-  5) Smoke checks + короткий chaos-sim прогон.
+  5) Обновить evaluator: must_not инварианты + кластеры дефектов (pattern-based).
+  6) Smoke checks + короткий chaos-sim прогон.
 - DoD:
   - Multi-intent consult отвечает: "не оказываем" + (опционально) безопасный совет.
   - LLM-consult не упоминает услуги/цены/запись/адрес.
   - Память не активна по умолчанию (MEMORY_PROFILE_ENABLED=0).
   - Chaos-sim SOP обновлён и запускается.
+  - Chaos-sim отчёт включает паттерны дефектов; evaluator ловит false-positive по meta/trace.
 - Checks:
   - `python3 -m pytest truffles-api/tests/test_demo_salon_eval.py -k E003n`
   - `EVAL_TIER=chaos python3 -m pytest truffles-api/tests/test_demo_salon_eval.py`

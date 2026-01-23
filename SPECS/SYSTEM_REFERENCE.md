@@ -503,6 +503,40 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 **LLM‑ключи:** CI‑eval не должен зависеть от `OPENAI_API_KEY`. Нужные LLM‑проверки переносятся в L4/nightly или
 стабятся так, чтобы trace/meta фиксировали ожидаемую стадию без внешнего API.
 
+### 5.1.2a Правильность/ошибки/false‑positive (LLM‑first)
+
+**PASS (правильно):**
+- `decision_meta.action` и `policy_gate` соответствуют классу (Hard‑LAW → escalate; pending → pending_wait/ack).
+- `expected_reply_type`/`active_goal` сохраняются при перебивках; `booking_interrupt` фиксируется при инфо‑вопросе в booking.
+- `fact_source` согласован с фактами (нет заявлений об услуге, если `service_unavailable=true` или `service_not_found`).
+- OOD допускается **только** при отсутствии in‑signals.
+
+**FAIL (неправильно):**
+- Неверный gate/action (например pending → booking‑prompt, Hard‑LAW → reply).
+- “Правильный текст” в **неправильном классе** (goal‑drift, wrong intent/class).
+- Любая галлюцинация фактов (услуга/цена/условие вне packs/playbooks).
+- OOD при наличии in‑signals.
+
+**False‑positive риск:**
+- Тест “зелёный” по тексту, но meta/trace нарушает инвариант.
+
+**Требование:** pass/fail определяются только по `decision_meta/decision_trace`; текст не сравниваем. В каждом suite
+обязательны `must_not` проверки (forbidden_action/gate/fact_source).
+
+### 5.1.2b Протокол исправлений (pattern‑based, без словарей)
+
+1) Кластеризуем failures по `fail_code` + `action` + `intent` + `expected_reply_type` + `policy_gate`.
+2) Сверяемся с каноном: если правило не определено — **сначала** обновляем канон.
+3) Исправляем **правило/приоритет/threshold/LLM‑контроллер**, а не добавляем словари под кейс.
+4) Обновляем evaluator (инвариант/allowlist) так, чтобы дефект не вернулся.
+5) Короткий chaos‑срез (50–150) → ночной прогон (1000–1500 logic + 100–150 LLM).
+6) Evidence + запись в `STATE.md` (Brain/Top Architect).
+
+**LLM‑роль в тестах (экономия ручного труда):**
+- **LLM‑Generator:** генерирует RU/KZ/mixed/ASR‑варианты (фикс‑seed; сохранённый prompt).
+- **LLM‑Controller:** смысл/маршрут; детерминированные гейты защищают безопасность.
+- **LLM‑Triage (опционально):** группирует фейлы в паттерны; не влияет на PASS/FAIL.
+
 ### 5.1.3 Redis в CI (детерминизм против скорости)
 
 **Стандарт:** сначала включаем Redis‑service в CI для eval, фиксируем время прогона.

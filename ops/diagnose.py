@@ -532,6 +532,12 @@ CHAOS_POLICY_MAP = {
 }
 CHAOS_HARD_LAW = {"refund", "medical", "complaint", "reschedule"}
 CHAOS_INFO = {"pricing", "address", "hours", "duration"}
+CHAOS_IN_DOMAIN_INTENTS = (
+    set(CHAOS_INFO)
+    | set(CHAOS_POLICY_MAP.keys())
+    | set(CHAOS_HARD_LAW)
+    | {"booking", "consult", "service", "time", "name", "greeting", "thanks"}
+)
 CHAOS_PENDING_STATUS = [
     "когда ответит менеджер?",
     "когда будет ответ?",
@@ -670,12 +676,14 @@ def _chaos_make_pending_turn(rng, action):
         text = _chaos_pick(rng, CHAOS_PENDING_WAIT)
     else:
         text = _chaos_pick(rng, CHAOS_PENDING_STATUS)
+    forbid_actions = ["booking_prompt"] + _chaos_booking_completion_actions()
     return _chaos_make_turn(
         text,
         [action],
         {
             "pending_action": action,
             "state": "pending",
+            "forbid": {"action_any": forbid_actions},
         },
     )
 
@@ -1394,6 +1402,21 @@ def _chaos_extract_expected_reply(context):
     return value
 
 
+def _chaos_intent_set(turn):
+    intents = set()
+    for item in turn.get("intents") or []:
+        if isinstance(item, str):
+            intents.add(item)
+    return intents
+
+
+def _chaos_trace_has_stage(trace_entries, stage):
+    for entry in trace_entries or []:
+        if isinstance(entry, dict) and entry.get("stage") == stage:
+            return True
+    return False
+
+
 def _chaos_evaluate_turn(
     *,
     turn,
@@ -1404,6 +1427,10 @@ def _chaos_evaluate_turn(
 ):
     failures = []
     expected = turn.get("expected") or {}
+    intent_set = _chaos_intent_set(turn)
+    meta_action = (meta or {}).get("action")
+    meta_intent = (meta or {}).get("intent")
+    meta_policy_gate = (meta or {}).get("policy_gate")
     if meta is None:
         failures.append("missing_decision_meta")
     if expected.get("policy_gate") and (meta or {}).get("policy_gate") != expected.get("policy_gate"):
@@ -1423,6 +1450,25 @@ def _chaos_evaluate_turn(
         failures.append("booking_interrupt_missing")
     if expected.get("action_any") and not _chaos_matches_action(meta, expected.get("action_any")):
         failures.append("action_mismatch")
+    forbid = expected.get("forbid") if isinstance(expected.get("forbid"), dict) else {}
+    if forbid:
+        forbidden_actions = forbid.get("action_any") or []
+        if forbidden_actions and _chaos_matches_action(meta, forbidden_actions):
+            failures.append("forbidden_action")
+        forbidden_policies = forbid.get("policy_gate_any") or []
+        if forbidden_policies and meta_policy_gate in forbidden_policies:
+            failures.append("forbidden_policy_gate")
+        forbidden_sources = forbid.get("fact_source_any") or []
+        if forbidden_sources and (meta or {}).get("fact_source") in forbidden_sources:
+            failures.append("forbidden_fact_source")
+        forbidden_intents = forbid.get("intent_any") or []
+        if forbidden_intents and meta_intent in forbidden_intents:
+            failures.append("forbidden_intent")
+        forbidden_stages = forbid.get("trace_stage_any") or []
+        if forbidden_stages and any(
+            _chaos_trace_has_stage(trace_entries, stage) for stage in forbidden_stages
+        ):
+            failures.append("forbidden_trace_stage")
     if expected.get("pending_action") and (meta or {}).get("pending_action") != expected.get("pending_action"):
         failures.append("pending_action_mismatch")
     expected_state = expected.get("state")
@@ -1438,7 +1484,36 @@ def _chaos_evaluate_turn(
         failures.append("handover_status_mismatch")
     if not trace_entries:
         failures.append("missing_decision_trace")
+    if meta_policy_gate and not (
+        intent_set.intersection(set(CHAOS_POLICY_MAP.keys())) or intent_set.intersection(CHAOS_HARD_LAW)
+    ):
+        failures.append("policy_gate_false_positive")
+    if _chaos_trace_has_stage(trace_entries, "out_of_domain") and intent_set.intersection(
+        CHAOS_IN_DOMAIN_INTENTS
+    ):
+        failures.append("ood_false_positive")
     return failures
+
+
+def _chaos_build_failure_patterns(failures, meta, conv_meta):
+    patterns = []
+    action = (meta or {}).get("action") or "none"
+    intent = (meta or {}).get("intent") or (meta or {}).get("controller_goal") or "none"
+    policy_gate = (meta or {}).get("policy_gate") or "none"
+    expected_reply_type = _chaos_extract_expected_reply((conv_meta or {}).get("context")) or "none"
+    for failure in failures:
+        patterns.append(
+            " | ".join(
+                [
+                    failure,
+                    f"action={action}",
+                    f"intent={intent}",
+                    f"expected_reply_type={expected_reply_type}",
+                    f"policy_gate={policy_gate}",
+                ]
+            )
+        )
+    return patterns
 
 def _parse_livecheck_args(argv):
     parser = argparse.ArgumentParser(
@@ -3216,6 +3291,7 @@ def _run_chaos_sim(args):
     cases = _chaos_generate_cases(args.count, rng, args.min_turns, args.max_turns, args.noise)
     failures = []
     failure_counts = {}
+    pattern_counts = {}
     stats = {
         "cases": len(cases),
         "turns": 0,
@@ -3230,6 +3306,10 @@ def _run_chaos_sim(args):
     def _bump_failure_counts(labels):
         for label in labels:
             failure_counts[label] = failure_counts.get(label, 0) + 1
+
+    def _bump_pattern_counts(patterns):
+        for pattern in patterns:
+            pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
 
     def _build_remote_jid(idx):
         base = int(os.environ.get("CHAOS_JID_BASE", "79990000000"))
@@ -3491,6 +3571,7 @@ def _run_chaos_sim(args):
                     trace_entries=trace_entries,
                 )
                 if failures_for_turn:
+                    pattern_keys = _chaos_build_failure_patterns(failures_for_turn, meta, conv_meta)
                     record = {
                         "case_id": case["case_id"],
                         "turn": turn_idx,
@@ -3500,6 +3581,7 @@ def _run_chaos_sim(args):
                         "text": turn.get("text"),
                         "expected": expected,
                         "failure": failures_for_turn,
+                        "patterns": pattern_keys,
                         "decision_meta": meta if args.debug or args.debug_all else None,
                         "decision_trace": trace_entries if args.debug or args.debug_all else None,
                         "conversation_context": (conv_meta or {}).get("context")
@@ -3508,6 +3590,7 @@ def _run_chaos_sim(args):
                     }
                     failures.append(record)
                     _bump_failure_counts(failures_for_turn)
+                    _bump_pattern_counts(pattern_keys)
                     stats["failures"] += 1
 
             if meta and meta.get("policy_gate"):
@@ -3576,6 +3659,7 @@ def _run_chaos_sim(args):
         "turns": stats["turns"],
         "failures": stats["failures"],
         "failure_types": failure_counts,
+        "failure_patterns": pattern_counts,
         "output_dir": output_dir,
         "client_slug": client_slug,
         "console_mode": args.console_mode,
@@ -3603,6 +3687,11 @@ def _run_chaos_sim(args):
         if failure_counts:
             handle.write("## Failure Types\n")
             for key, count in sorted(failure_counts.items(), key=lambda item: -item[1]):
+                handle.write(f"- {key}: {count}\n")
+            handle.write("\n")
+        if pattern_counts:
+            handle.write("## Failure Patterns\n")
+            for key, count in sorted(pattern_counts.items(), key=lambda item: -item[1]):
                 handle.write(f"- {key}: {count}\n")
 
     print(json.dumps({"summary": summary}, ensure_ascii=False))
