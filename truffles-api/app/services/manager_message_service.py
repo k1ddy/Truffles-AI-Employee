@@ -20,7 +20,8 @@ from app.services.chatflow_service import (
 )
 from app.services.learning_service import add_to_knowledge, get_client_slug, is_owner_response
 from app.services.message_service import save_message
-from app.services.state_service import is_simulation_context, manager_take as state_manager_take
+from app.services.state_service import is_simulation_context
+from app.services.state_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("manager_message_service")

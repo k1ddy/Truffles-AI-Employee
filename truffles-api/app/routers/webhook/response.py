@@ -501,13 +501,13 @@ def _handle_consult_flow(
     send_and_save: Callable[..., tuple[str, bool]],
     record_escalation_metric: Callable[[str], None],
 ) -> ConsultFlowResult:
+    from app.services.ai_service import generate_consult_advice
     from app.services.demo_salon_knowledge import (
         DemoSalonDecision,
         build_consult_reply,
         get_demo_salon_service_decision,
         get_demo_salon_service_hint,
     )
-    from app.services.ai_service import generate_consult_advice
 
     from . import _legacy as legacy
 

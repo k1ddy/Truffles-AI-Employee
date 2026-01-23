@@ -1,17 +1,26 @@
 """Intent and decision helpers for webhook routing."""
 
-# ruff: noqa: E402
-
 from __future__ import annotations
 
+import asyncio
+import base64
+import functools
+import hashlib
+import mimetypes
 import os
+import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+from urllib.parse import urlparse
+from uuid import UUID
 
+import httpx
 from pydantic import ValidationError
+from sqlalchemy import or_, text
+from sqlalchemy.orm import Session
 
-# Import contracts from centralized module
+from app.adapters.chatflow import ChatFlowAdapter
 from app.contracts.decision import (
     DECISION_GRAPH_STAGES,
     DecisionOutcome,
@@ -28,10 +37,302 @@ from app.contracts.decision import (
     build_intent_contract,
     build_response_contract,
 )
-from app.models import ClientSettings, Conversation, Message
-from app.schemas.webhook import WebhookRequest
-from app.services.demo_salon_knowledge import DemoSalonDecision
-from app.services.intent_service import Intent
+from app.logging_config import (
+    get_logger,
+    get_trace_id,
+    record_escalation_count,
+    record_inbound_count,
+    record_policy_count,
+    start_span,
+)
+from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
+from app.ports.messaging import MessageOptions
+from app.routers.webhook.booking import (
+    BOOKING_SLOT_ORDER,
+    _apply_booking_slot,
+    _apply_expected_reply_slot,
+    _build_booking_summary,
+    _clear_service_hint,
+    _expected_reply_for_booking_question,
+    _get_booking_context,
+    _get_recent_service_hint,
+    _handle_booking_flow,
+    _handle_booking_interrupt,
+    _is_blocked_slot_message,
+    _is_booking_related_message,
+    _is_booking_time_service_decision,
+    _match_expected_reply,
+    _next_booking_prompt,
+    _resolve_datetime_offline,
+    _select_expected_reply_message,
+    _select_last_non_booking_message,
+    _set_booking_context,
+    _set_service_hint,
+    _update_booking_from_message,
+    _update_booking_from_messages,
+    _validate_name_slot,
+)
+from app.routers.webhook.branch_selection import (
+    BRANCH_CONTEXT_KEY,
+    BRANCH_SELECTION_KEY,
+    MSG_BRANCH_SELECTED,
+    _apply_branch_selection,
+    _build_branch_prompt,
+    _build_branch_selection,
+    _coerce_uuid,
+    _get_active_branches,
+    _get_branch_selection,
+    _get_user_branch_preference,
+    _handle_branch_selection_gate,
+    _is_branch_only_message,
+    _match_branch_choice,
+    _set_branch_selection,
+    _set_user_branch_preference,
+)
+from app.routers.webhook.context_manager import (
+    _build_compact_summary_text,
+    _build_consult_return_prompt,
+    _get_asr_confirmation,
+    _get_class_carryover,
+    _get_consult_context,
+    _get_context_manager,
+    _get_conversation_context,
+    _get_expected_reply_type,
+    _get_low_confidence_retry_count,
+    _get_memory_pending,
+    _get_memory_profile,
+    _get_reengage_confirmation,
+    _get_service_carryover,
+    _increment_context_message_count,
+    _is_asr_confirmation_active,
+    _is_re_entry_required,
+    _is_reengage_confirmation_active,
+    _maybe_store_class_carryover,
+    _maybe_store_service_carryover,
+    _prune_class_carryover,
+    _prune_consult_context,
+    _prune_service_carryover,
+    _record_context_manager_decision,
+    _reset_low_confidence_retry,
+    _resolve_current_goal,
+    _set_asr_confirmation,
+    _set_class_carryover,
+    _set_consult_context,
+    _set_context_manager,
+    _set_conversation_context,
+    _set_expected_reply_context,
+    _set_expected_reply_type,
+    _set_handover_confirmation,
+    _set_low_confidence_retry_count,
+    _set_memory_pending,
+    _set_memory_profile,
+    _set_re_entry_required,
+    _set_reengage_confirmation,
+    _set_service_carryover,
+    _update_compact_summary,
+)
+from app.routers.webhook.dedup import (
+    _buffer_user_message,
+    _drain_buffered_messages,
+    _get_debounce_redis,
+    _handle_debounce_gate,
+    _handle_dedup_gate,
+    is_duplicate_message_id,
+    should_process_debounced_message,
+)
+from app.routers.webhook.guards import (
+    _apply_session_timeout_reset,
+    _booking_clarify_guard_reason,
+    _format_intent_queue_prompt,
+    _format_multi_intent_followup,
+    _get_clarify_attempt_state,
+    _get_intent_queue,  # noqa: F401
+    _handle_clarify_limit_escalation,
+    _handle_opt_out_mute_gate,
+    _handle_reengage_and_mute_gate,
+    _register_clarify_attempt,
+    _select_intent_from_queue,  # noqa: F401
+    _set_clarify_attempt,
+    _set_intent_queue,
+    _should_escalate_for_clarify,
+)
+from app.routers.webhook.info import (
+    _build_info_intent_reply,
+    _count_anchor_hits,
+    _detect_info_class_intents,
+    _extract_truth_gate_info_intents,
+    _handle_info_flow,
+    _handle_offline_info_class,
+    _handle_truth_gate_fallback,
+    _is_short_reply,
+    _looks_like_info_query,
+    _tokenize_for_matching,
+)
+from app.routers.webhook.media import (
+    MediaDecision,
+    MediaInfo,
+    _build_media_caption,
+    _deserialize_media_decision,
+    _evaluate_media_decision,
+    _extract_media_info,
+    _get_media_policy,
+    _get_media_rate_settings,
+    _get_transcription_settings,
+    _is_asr_low_confidence,
+    _is_placeholder_text,
+    _is_style_reference_request,
+    _is_voice_note,
+    _maybe_transcribe_voice,
+    _send_telegram_media,
+    _serialize_media_decision,
+    _store_media_locally,
+    _update_message_asr_metadata,
+    _update_message_media_metadata,
+)
+from app.routers.webhook.outbox import _handle_enqueue_only_accept, _prepare_skip_persist
+from app.routers.webhook.pending import (
+    _forward_pending_to_telegram,
+    _handle_handover_confirmation_gate,
+    _handle_manager_active_gate,
+    _handle_pending_gate,
+)
+from app.routers.webhook.policy import (
+    _demo_salon_escalation_gate,
+    _demo_salon_price_sidecar,
+    _detect_booking_cancel,
+    _detect_llm_guard_topics,
+    _format_discounts_policy_reply,
+    _get_policy_handler,
+    _get_policy_pack,
+    _get_policy_type,
+    _get_routing_policy,
+    _handle_hard_law_gate,
+    _handle_policy_escalation_gate,
+    _has_discount_policy_rules,
+    _looks_like_policy_topic,
+    _looks_like_promotions_request,
+    _resolve_hard_law_sections,
+    _should_escalate_to_pending,
+    _should_run_booking_flow,
+    _should_run_demo_truth_gate,
+    _should_run_truth_gate,
+)
+from app.routers.webhook.response import (
+    _compose_fact_response,
+    _ensure_rag_rewrite,
+    _handle_ai_response_action,
+    _handle_consult_flow,
+    _handle_llm_primary,
+    _maybe_apply_consult_return,
+    _record_rag_meta,
+)
+from app.routers.webhook.response import (
+    _finalize_bot_response as _finalize_bot_response_helper,
+)
+from app.routers.webhook.response import (
+    _record_llm_budget_trace as _record_llm_budget_trace_helper,
+)
+from app.routers.webhook.response import (
+    _send_and_save as _send_and_save_helper,
+)
+from app.routers.webhook.response import (
+    _send_response as _send_response_helper,
+)
+from app.routers.webhook.router_sla import _update_router_sla
+from app.routers.webhook.session_memory import (
+    _get_session_memory,
+    _is_session_memory_expired,
+    _is_session_reset_only_message,
+    _normalize_session_memory,
+    _parse_session_memory_time,
+    _record_session_memory_update,
+    _reset_session_memory,
+    _session_memory_snapshot,
+    _set_session_memory,
+    _should_reset_session_memory,
+    _update_session_memory_goal,
+    _update_session_memory_on_answer,
+    _update_session_memory_on_question,
+)
+from app.routers.webhook.shield import _handle_shield_gate
+from app.routers.webhook.trace import (
+    _attach_llm_cache_flag,
+    _merge_message_timing,
+    _record_decision_trace,
+    _record_message_decision_meta,
+    _update_message_decision_metadata,
+)
+from app.schemas.webhook import WebhookRequest, WebhookResponse
+from app.services.ai_service import (
+    ACKNOWLEDGEMENT_RESPONSE,
+    BOT_STATUS_RESPONSE,
+    GREETING_RESPONSE,
+    HIGH_CONFIDENCE_THRESHOLD,
+    MID_CONFIDENCE_THRESHOLD,
+    OUT_OF_DOMAIN_RESPONSE,
+    THANKS_RESPONSE,
+    classify_confirmation,
+    detect_multi_intent,
+    detect_refusal_flags,
+    is_acknowledgement_message,
+    is_bot_status_question,
+    is_greeting_message,
+    is_low_signal_message,
+    is_thanks_message,
+    normalize_for_matching,
+    rewrite_for_service_match,
+    transcribe_audio_with_fallback,
+)
+from app.services.chatflow_service import get_instance_id
+from app.services.conversation_service import get_or_create_conversation, get_or_create_user
+from app.services.demo_salon_knowledge import (
+    DemoSalonDecision,
+    _detect_promotion_intent,
+    _has_duration_signal,
+    _has_price_signal,
+    _match_service,
+    build_consult_reply,
+    build_quiet_hours_notice,
+    compose_multi_truth_reply,
+    format_reply_from_truth,
+    get_demo_salon_decision,
+    get_demo_salon_price_item,
+    get_demo_salon_price_reply,
+    get_demo_salon_service_decision,
+    get_demo_salon_service_hint,
+    load_yaml_truth,
+    semantic_question_type,
+    semantic_service_match,
+)
+from app.services.demo_salon_knowledge import (
+    _normalize_text as _normalize_service_text,
+)
+from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
+from app.services.intent_service import (
+    DomainIntent,
+    Intent,
+    classify_domain_with_scores,
+    classify_intent,
+    interpret_expected_reply,
+    is_frustration_message,
+    is_human_request_message,
+    is_opt_out_message,
+    is_rejection,
+    route_dialogue_controller,
+    should_escalate,
+)
+from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
+from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
+from app.services.state_machine import ConversationState
+from app.services.state_service import (
+    apply_simulation_context,
+    build_simulation_context,
+    escalate_to_pending,
+    is_simulation_context,
+    manager_resolve,
+    transition_state,
+)
+from app.services.telegram_service import TelegramService
 
 
 def _normalize_message_text(message_text: str | None) -> str:
@@ -1278,318 +1579,6 @@ def _run_class_router_stage(
     )
 
 # Legacy webhook orchestrator + helpers moved from _legacy.py.
-import asyncio
-import base64
-import functools
-import hashlib
-import mimetypes
-import re
-from datetime import timedelta, timezone
-from urllib.parse import urlparse
-from uuid import UUID
-
-import httpx
-from sqlalchemy import or_, text
-from sqlalchemy.orm import Session
-
-from app.adapters.chatflow import ChatFlowAdapter
-from app.logging_config import (
-    get_logger,
-    get_trace_id,
-    record_escalation_count,
-    record_inbound_count,
-    record_policy_count,
-    start_span,
-)
-from app.models import Branch, Client, Handover, User
-from app.ports.messaging import MessageOptions
-from app.routers.webhook.booking import (
-    BOOKING_SLOT_ORDER,
-    _apply_booking_slot,
-    _apply_expected_reply_slot,
-    _build_booking_summary,
-    _clear_service_hint,
-    _expected_reply_for_booking_question,
-    _get_booking_context,
-    _get_recent_service_hint,
-    _handle_booking_flow,
-    _handle_booking_interrupt,
-    _is_blocked_slot_message,
-    _is_booking_related_message,
-    _is_booking_time_service_decision,
-    _match_expected_reply,
-    _next_booking_prompt,
-    _resolve_datetime_offline,
-    _select_expected_reply_message,
-    _select_last_non_booking_message,
-    _set_booking_context,
-    _set_service_hint,
-    _update_booking_from_message,
-    _update_booking_from_messages,
-    _validate_name_slot,
-)
-from app.routers.webhook.branch_selection import (
-    BRANCH_CONTEXT_KEY,
-    BRANCH_SELECTION_KEY,
-    MSG_BRANCH_SELECTED,
-    _apply_branch_selection,
-    _build_branch_prompt,
-    _build_branch_selection,
-    _coerce_uuid,
-    _get_active_branches,
-    _get_branch_selection,
-    _get_user_branch_preference,
-    _handle_branch_selection_gate,
-    _is_branch_only_message,
-    _match_branch_choice,
-    _set_branch_selection,
-    _set_user_branch_preference,
-)
-from app.routers.webhook.context_manager import (
-    _build_compact_summary_text,
-    _build_consult_return_prompt,
-    _get_asr_confirmation,
-    _get_class_carryover,
-    _get_consult_context,
-    _get_context_manager,
-    _get_conversation_context,
-    _get_expected_reply_type,
-    _get_low_confidence_retry_count,
-    _get_memory_pending,
-    _get_memory_profile,
-    _get_reengage_confirmation,
-    _get_service_carryover,
-    _increment_context_message_count,
-    _is_asr_confirmation_active,
-    _is_re_entry_required,
-    _is_reengage_confirmation_active,
-    _maybe_store_class_carryover,
-    _maybe_store_service_carryover,
-    _prune_class_carryover,
-    _prune_consult_context,
-    _prune_service_carryover,
-    _record_context_manager_decision,
-    _reset_low_confidence_retry,
-    _resolve_current_goal,
-    _set_asr_confirmation,
-    _set_class_carryover,
-    _set_consult_context,
-    _set_context_manager,
-    _set_conversation_context,
-    _set_expected_reply_context,
-    _set_expected_reply_type,
-    _set_handover_confirmation,
-    _set_low_confidence_retry_count,
-    _set_memory_pending,
-    _set_memory_profile,
-    _set_re_entry_required,
-    _set_reengage_confirmation,
-    _set_service_carryover,
-    _update_compact_summary,
-)
-from app.routers.webhook.dedup import (
-    _buffer_user_message,
-    _drain_buffered_messages,
-    _get_debounce_redis,
-    _handle_debounce_gate,
-    _handle_dedup_gate,
-    is_duplicate_message_id,
-    should_process_debounced_message,
-)
-from app.routers.webhook.guards import (
-    _apply_session_timeout_reset,
-    _booking_clarify_guard_reason,
-    _format_intent_queue_prompt,
-    _format_multi_intent_followup,
-    _get_clarify_attempt_state,
-    _get_intent_queue,  # noqa: F401
-    _handle_clarify_limit_escalation,
-    _handle_opt_out_mute_gate,
-    _handle_reengage_and_mute_gate,
-    _register_clarify_attempt,
-    _select_intent_from_queue,  # noqa: F401
-    _set_clarify_attempt,
-    _set_intent_queue,
-    _should_escalate_for_clarify,
-)
-from app.routers.webhook.info import (
-    _build_info_intent_reply,
-    _count_anchor_hits,
-    _detect_info_class_intents,
-    _extract_truth_gate_info_intents,
-    _handle_info_flow,
-    _handle_offline_info_class,
-    _handle_truth_gate_fallback,
-    _is_short_reply,
-    _looks_like_info_query,
-    _tokenize_for_matching,
-)
-from app.routers.webhook.media import (
-    MediaDecision,
-    MediaInfo,
-    _build_media_caption,
-    _deserialize_media_decision,
-    _evaluate_media_decision,
-    _extract_media_info,
-    _get_media_policy,
-    _get_media_rate_settings,
-    _get_transcription_settings,
-    _is_asr_low_confidence,
-    _is_placeholder_text,
-    _is_style_reference_request,
-    _is_voice_note,
-    _maybe_transcribe_voice,
-    _send_telegram_media,
-    _serialize_media_decision,
-    _store_media_locally,
-    _update_message_asr_metadata,
-    _update_message_media_metadata,
-)
-from app.routers.webhook.outbox import _handle_enqueue_only_accept, _prepare_skip_persist
-from app.routers.webhook.pending import (
-    _forward_pending_to_telegram,
-    _handle_handover_confirmation_gate,
-    _handle_manager_active_gate,
-    _handle_pending_gate,
-)
-from app.routers.webhook.policy import (
-    _demo_salon_escalation_gate,
-    _demo_salon_price_sidecar,
-    _detect_booking_cancel,
-    _detect_llm_guard_topics,
-    _format_discounts_policy_reply,
-    _get_policy_handler,
-    _get_policy_pack,
-    _get_policy_type,
-    _get_routing_policy,
-    _handle_hard_law_gate,
-    _handle_policy_escalation_gate,
-    _has_discount_policy_rules,
-    _looks_like_policy_topic,
-    _looks_like_promotions_request,
-    _resolve_hard_law_sections,
-    _should_escalate_to_pending,
-    _should_run_booking_flow,
-    _should_run_demo_truth_gate,
-    _should_run_truth_gate,
-)
-from app.routers.webhook.response import (
-    _compose_fact_response,
-    _ensure_rag_rewrite,
-    _handle_ai_response_action,
-    _handle_consult_flow,
-    _handle_llm_primary,
-    _maybe_apply_consult_return,
-    _record_rag_meta,
-)
-from app.routers.webhook.response import (
-    _finalize_bot_response as _finalize_bot_response_helper,
-)
-from app.routers.webhook.response import (
-    _record_llm_budget_trace as _record_llm_budget_trace_helper,
-)
-from app.routers.webhook.response import (
-    _send_and_save as _send_and_save_helper,
-)
-from app.routers.webhook.response import (
-    _send_response as _send_response_helper,
-)
-from app.routers.webhook.router_sla import _update_router_sla
-from app.routers.webhook.session_memory import (
-    _get_session_memory,
-    _is_session_memory_expired,
-    _is_session_reset_only_message,
-    _normalize_session_memory,
-    _parse_session_memory_time,
-    _record_session_memory_update,
-    _reset_session_memory,
-    _session_memory_snapshot,
-    _set_session_memory,
-    _should_reset_session_memory,
-    _update_session_memory_goal,
-    _update_session_memory_on_answer,
-    _update_session_memory_on_question,
-)
-from app.routers.webhook.shield import _handle_shield_gate
-from app.routers.webhook.trace import (
-    _attach_llm_cache_flag,
-    _merge_message_timing,
-    _record_decision_trace,
-    _record_message_decision_meta,
-    _update_message_decision_metadata,
-)
-from app.schemas.webhook import WebhookResponse
-from app.services.ai_service import (
-    ACKNOWLEDGEMENT_RESPONSE,
-    BOT_STATUS_RESPONSE,
-    GREETING_RESPONSE,
-    HIGH_CONFIDENCE_THRESHOLD,
-    MID_CONFIDENCE_THRESHOLD,
-    OUT_OF_DOMAIN_RESPONSE,
-    THANKS_RESPONSE,
-    classify_confirmation,
-    detect_multi_intent,
-    detect_refusal_flags,
-    is_acknowledgement_message,
-    is_bot_status_question,
-    is_greeting_message,
-    is_low_signal_message,
-    is_thanks_message,
-    normalize_for_matching,
-    rewrite_for_service_match,
-    transcribe_audio_with_fallback,
-)
-from app.services.chatflow_service import get_instance_id
-from app.services.conversation_service import (
-    get_or_create_conversation,
-    get_or_create_user,
-)
-from app.services.demo_salon_knowledge import (
-    _detect_promotion_intent,
-    _has_duration_signal,
-    _has_price_signal,
-    _match_service,
-    build_consult_reply,
-    build_quiet_hours_notice,
-    compose_multi_truth_reply,
-    format_reply_from_truth,
-    get_demo_salon_decision,
-    get_demo_salon_price_item,
-    get_demo_salon_price_reply,
-    get_demo_salon_service_decision,
-    get_demo_salon_service_hint,
-    load_yaml_truth,
-    semantic_question_type,
-    semantic_service_match,
-)
-from app.services.demo_salon_knowledge import (
-    _normalize_text as _normalize_service_text,
-)
-from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
-from app.services.intent_service import (
-    DomainIntent,
-    classify_domain_with_scores,
-    classify_intent,
-    interpret_expected_reply,
-    is_frustration_message,
-    is_human_request_message,
-    is_opt_out_message,
-    is_rejection,
-    route_dialogue_controller,
-    should_escalate,
-)
-from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
-from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
-from app.services.state_machine import ConversationState
-from app.services.state_service import (
-    build_simulation_context,
-    apply_simulation_context,
-    escalate_to_pending,
-    is_simulation_context,
-    manager_resolve,
-    transition_state,
-)
-from app.services.telegram_service import TelegramService
 
 logger = get_logger("webhook")
 _BRANCH_EXPORTS = (
