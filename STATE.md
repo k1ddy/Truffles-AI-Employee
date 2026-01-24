@@ -143,6 +143,9 @@
 ### 2026-01-24 — Calendar bot integration (PLAN)
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-calendar-bot-integration-phase4.md`
 - Scope: booking‑flow commit to `appointments` + trace/meta + manager notification.
+- Status: code committed on `feat/calendar-bot-integration-2026-01-24` (commit `c0f0a1b8`), pending CI/live-check.
+- Checks: `python3 -m compileall truffles-api/app/routers/webhook/booking.py truffles-api/app/services/appointment_service.py` OK; `pytest -q truffles-api/tests/test_booking_appointments.py` skipped (missing `dateparser` locally).
+- Evidence: локальные проверки только (no CI/live-check).
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
