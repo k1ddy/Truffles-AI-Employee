@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
+from app.models import Client, ClientSettings, Conversation, User
+from app.models.branch import Branch
 from app.routers import webhook as webhook_router
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
 from app.services.state_machine import ConversationState
@@ -17,14 +19,28 @@ def _make_db(client, settings, conversation, user):
     conversation_query.filter.return_value.first.return_value = conversation
     user_query = Mock()
     user_query.filter.return_value.first.return_value = user
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = None
+    branch_phone_query = Mock()
+    branch_phone_query.filter.return_value.all.return_value = []
 
     db = Mock()
-    db.query.side_effect = [
-        client_query,
-        settings_query,
-        conversation_query,
-        user_query,
-    ]
+    def _query(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Conversation:
+            return conversation_query
+        if model is User:
+            return user_query
+        if model is Branch:
+            return branch_query
+        if model is Branch.phone:
+            return branch_phone_query
+        return Mock()
+
+    db.query.side_effect = _query
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
