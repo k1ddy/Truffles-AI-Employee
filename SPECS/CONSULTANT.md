@@ -122,8 +122,16 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Clarify policy: одно уточнение = один слот; выбираем самый информативный слот для разблокировки ответа/записи.
 - Если есть frustration/human_request или явный opt-out → без уточнений, сразу handoff/мьют по правилам выше.
 
+**Multi-intent contract (P0):**
+- `primary_goal` определяется по приоритету: активный booking (`expected_reply_type`) → consult → info → smalltalk/OOD.
+- `goal_stack` хранит до 3 целей (текущая + отложенные); перебивка **не** сбрасывает активную цель.
+- Допускается составной ответ: (1) consult/info на перебивку (2) в том же сообщении вернуть booking‑prompt, если запись активна.
+- Если есть consult‑интент и нет Hard‑LAW → консультативный ответ обязателен, даже при наличии цен/расписания.
+- Если в сообщении есть запрос на отсутствующую услугу → явный “не оказываем” по этой услуге; остальные интенты отвечаем только если безопасны и in‑domain.
+- В `pending/manager_active` multi‑intent не обрабатываем (см. Pending guard).
+
 **Booking interrupt (expected_reply_type активен):**
-- Если идёт сбор слота записи и приходит in-domain вопрос (цены/длительность/адрес/часы) → ответить по фактам **и в том же сообщении** вернуть booking‑prompt (продолжить запись).
+- Если идёт сбор слота записи и приходит in‑domain вопрос/consult (цены/длительность/адрес/часы/уход) → ответить по фактам/consult **и в том же сообщении** вернуть booking‑prompt (продолжить запись).
 - Decision trace/meta: `stage=booking_interrupt`, `booking_info_interrupt=true`, `booking_info_intents` сохраняются.
 - Если сообщение не относится к записи и нет booking‑сигнала → поставить booking на паузу до явного запроса записи.
 
@@ -139,6 +147,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Если explicit info/booking (pricing/duration/location/hours/booking) и услуга распознана → short‑circuit в info/booking (без уточнения).
 - Если playbook не найден и услуги нет → максимум 2 уточнения (`clarify_limit=2`), `expected_reply_type=service_choice`; после лимита без услуги → эскалация с reason `consult_no_service`.
 - Hard‑LAW/Policy/opt‑out/human выше consult: если сработало — consult‑playbook/LLM не применяется.
+- Если есть consult‑интент вместе с pricing/match → consult‑ответ обязателен, цены/матч допускаются только после consult и при наличии услуги в каталоге.
 - Вариант ответа playbook выбирается детерминированно (hash от `conversation_id + playbook_id`) — без дрейфа.
 - Trace/meta: `stage=consult_flow` (`decision=consult_clarify|consult_escalate|short_circuit|consult_llm`), `clarify_attempt`, `expected_reply_type=service_choice`, `consult_playbook_id`, `consult_variant_id`, `tips_used`, `source=pack|llm`.
 
@@ -176,6 +185,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 
 **Long-form стабильность (P0)**
 - Цель диалога не теряется 10-15 сообщений: `current_goal` и `expected_reply_type` сохраняются между перебивками.
+- `primary_goal` и `goal_stack` сохраняются; отложенные цели возвращаются после закрытия перебивки.
 - При перебивке в booking: дать факт-ответ и вернуть к последнему booking-вопросу.
 - При OOD в booking: мягкий отказ + вернуть к booking-вопросу.
 - При Hard-LAW/Policy-gate: эскалация, booking ставится на паузу до явного запроса записи.
