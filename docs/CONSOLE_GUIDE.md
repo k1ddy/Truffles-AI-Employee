@@ -86,8 +86,8 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - UI: `console-web/src/components/CaseList.tsx`
 - API: `GET /console/v1/cases`
 - Data: `handovers` + `conversations` + `users`
-- Paging: cursor = `handover.created_at`
-- Filters: `status`, `branch_id`, `assigned_to_me`, `q`, `phone`, `has_delivery_error`, `has_pending_outbox`.
+- Paging: cursor зависит от `sort_by` (по умолчанию `last_activity`).
+- Filters: `status`, `branch_id`, `assigned_to_me`, `q`, `phone`, `has_delivery_error`, `has_pending_outbox`, `sort_by`.
 - Health: `last_inbound_at`, `last_outbound_at`, `last_activity_at`, `last_message_preview`, `needs_reply`, `has_delivery_error`, `has_pending_outbox`.
 
 **Case view**
@@ -219,6 +219,16 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
     https://api.truffles.kz/console/v1/telegram/verify \\
     -d '{"scope":"branch","branch_id":"<UUID>"}'
   ```
+
+**Live-check (post-deploy, Console↔Telegram↔WhatsApp):**
+1) Inbox: открой `Console → Заявки`, сортировка `Активные` (last_activity). Отправь тестовое сообщение клиенту —
+   нужная заявка должна подняться вверх, а в строке показать канал активности.
+2) Case View: в карточке проверь `Case Health` (last in/out, NEW/LIVE/⚠️), `Telegram trail` и ссылки:
+   - Web: `https://t.me/c/<id>/<message_id>?thread=<topic_id>`
+   - Desktop: `tg://openmessage?chat_id=<internal_id>&message_id=<message_id>`
+3) Telegram → Console: отправь сообщение из Telegram топика → оно должно появиться в Console (polling ≤ 5s).
+4) Console → Telegram: отправь сообщение из Console → оно должно уйти клиенту и отобразиться в Telegram топике (echo).
+5) Ops: проверь `Console → Ops` (Telegram health + outbox backlog).
 - Test message (custom text):
   ```bash
   curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \\

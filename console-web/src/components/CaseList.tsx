@@ -99,20 +99,41 @@ export default function CaseList() {
     const { data, isLoading, error, refetch, isFetching } = useQuery({
         queryKey: ["cases", filters, cursor],
         queryFn: async (): Promise<CasesResponse> => {
-            const params = new URLSearchParams();
-            if (filters.status) params.append("status", filters.status);
-            if (filters.branchId) params.append("branch_id", filters.branchId);
-            if (filters.assignedToMe) params.append("assigned_to_me", "true");
-            if (filters.query) params.append("q", filters.query);
-            if (filters.hasDeliveryError) params.append("has_delivery_error", "true");
-            if (filters.hasPendingOutbox) params.append("has_pending_outbox", "true");
-            if (filters.dateFrom) params.append("date_from", filters.dateFrom);
-            if (filters.dateTo) params.append("date_to", filters.dateTo);
-            if (cursor) params.append("cursor", cursor);
-            params.append("limit", "20");
+            const buildParams = (includeSort: boolean) => {
+                const params = new URLSearchParams();
+                if (filters.status) params.append("status", filters.status);
+                if (filters.branchId) params.append("branch_id", filters.branchId);
+                if (filters.assignedToMe) params.append("assigned_to_me", "true");
+                if (filters.query) params.append("q", filters.query);
+                if (filters.hasDeliveryError) params.append("has_delivery_error", "true");
+                if (filters.hasPendingOutbox) params.append("has_pending_outbox", "true");
+                if (filters.dateFrom) params.append("date_from", filters.dateFrom);
+                if (filters.dateTo) params.append("date_to", filters.dateTo);
+                if (includeSort) {
+                    if (filters.sortBy === "activity") params.append("sort_by", "last_activity");
+                    if (filters.sortBy === "created_at") params.append("sort_by", "created_at");
+                }
+                if (cursor) params.append("cursor", cursor);
+                params.append("limit", "20");
+                return params;
+            };
 
-            const response = await api.get(`/cases?${params.toString()}`);
-            return response.data;
+            const fetchCases = async (includeSort: boolean) => {
+                const params = buildParams(includeSort);
+                const response = await api.get(`/cases?${params.toString()}`);
+                return response.data as CasesResponse;
+            };
+
+            try {
+                return await fetchCases(true);
+            } catch (err) {
+                const code = (err as { response?: { data?: { error?: { code?: string; message?: string } } } })?.response?.data?.error?.code;
+                const message = (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message;
+                if (code === "INVALID_PARAM" && message?.includes("sort_by")) {
+                    return await fetchCases(false);
+                }
+                throw err;
+            }
         },
         enabled: hasToken,
         refetchInterval: 10000, // Auto-refresh every 10 seconds
@@ -395,7 +416,12 @@ export default function CaseList() {
                                         </div>
                                     </td>
                                     <td className="p-4 text-sm text-muted-foreground">
-                                        {new Date(lastActivity).toLocaleString("ru-RU")}
+                                        <div className="flex flex-col">
+                                            <span>{new Date(lastActivity).toLocaleString("ru-RU")}</span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {c.last_activity_channel || "—"}
+                                            </span>
+                                        </div>
                                     </td>
                                     <td className="p-4">
                                         <Link

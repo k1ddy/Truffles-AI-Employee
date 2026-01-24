@@ -172,6 +172,13 @@ paths:
           schema:
             type: string
             format: date-time
+        - name: sort_by
+          in: query
+          description: Sort order for inbox results.
+          schema:
+            type: string
+            enum: [last_activity, created_at]
+            default: last_activity
         - name: date_from
           in: query
           schema:
