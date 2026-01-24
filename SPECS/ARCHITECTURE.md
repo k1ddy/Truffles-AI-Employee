@@ -501,6 +501,15 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - `availability_provider`: `none` | `google_calendar` | `bitrix` | `amocrm` | `manual`.
 - Если провайдер не задан/недоступен — только сбор предпочтений, **без обещаний слотов**.
 
+### Scheduling core (appointments SoT)
+- Источник истины по записям — Postgres (`appointments`); внешние календари = проекции + источник занятости.
+- Bot/Console/Telegram используют **один** scheduling service; канал не влияет на бизнес‑логику.
+- Команды на запись (create/confirm/cancel/reschedule/check‑in) идут с `expected_version` + idempotency; lost‑update запрещён.
+- Синхронизация с провайдерами — **только через outbox**, без прямых вызовов в request‑path.
+- Branch‑scope: календарь, токены, настройки и права строго по `branch_id`, с `timezone` на филиале.
+- При деградации провайдера — fail‑closed на `collect_preferences` + эскалация, без обещаний слотов.
+- Данные бизнеса (мастера, часы, услуги/длительности/буферы) — только из БД/онбординга, без хардкода.
+
 ### Behavioral Shield (реализовано)
 - Цель: отсечь спам/машинную скорость и токсичные сообщения до LLM.
 - Каналы: для WhatsApp нет IP, поэтому ключ — `remote_jid`.

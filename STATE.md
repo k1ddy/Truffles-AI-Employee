@@ -115,6 +115,35 @@
 - Evidence: local checks only (CI pending)
 - CI note: `console-contract` исключает `/ops/outbox` до деплоя endpoint на prod (убрать exclude после деплоя).
 
+### 2026-01-24 — Calendar scheduling DEC + specs (DONE)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-calendar-dec-phase0.md`
+- Evidence: DEC‑013 в `docs/IMPERIUM_DECISIONS.yaml`; канон‑доки обновлены (`SPECS/ARCHITECTURE.md`, `SPECS/MULTI_TENANT.md`).
+
+### 2026-01-24 — Calendar scheduling data model + migrations (DONE)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-calendar-data-model-phase1.md`
+- Checks: `python3 -m compileall truffles-api/app/models truffles-api/app/services/google_calendar_service.py`
+- Evidence: migration `truffles-api/migrations/009_add_calendar_scheduling.sql` + модели добавлены.
+
+### 2026-01-24 — Calendar DB rollout (DONE)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-calendar-db-rollout-phase1.md`
+- Evidence: applied migration `009_add_calendar_scheduling.sql` (CREATE TABLE/INDEX output); `\\dt appointments` и `\\dt calendar_blocks` OK; API restart container id `8ca2803aa15b`.
+
+### 2026-01-24 — Calendar local provider + scheduling service (PLAN)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-calendar-local-provider-phase2.md`
+- Checks: `python3 -m compileall truffles-api/app/services truffles-api/app/routers/calendar.py`
+- Evidence: API image rebuilt + restart container `354fd4e62a73`; console‑web rebuilt; `GET /console/v1/me` 200; `GET /console/v1/calendar/specialists` returns 5 items; `GET /console/v1/calendar/slots` returns slots (2026‑01‑24).
+
+### 2026-01-24 — Calendar backfill (DONE)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-calendar-backfill-phase3.md`
+- Evidence: backfill SQL `010_backfill_appointments_from_bookings.sql` → `INSERT 0 17` (appointments/services); counts `appointments=17`, `bookings=17`; token backfill `UPDATE 0`.
+
+### 2026-01-24 — Calendar data seed (DONE)
+- Evidence: `011_seed_services_from_specialists.sql` → `INSERT 0 15` (services) + `INSERT 0 15` (specialist_services) + `UPDATE 1` (branches working_hours). Counts: `services=15`, `specialist_services=15`.
+
+### 2026-01-24 — Calendar bot integration (PLAN)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-calendar-bot-integration-phase4.md`
+- Scope: booking‑flow commit to `appointments` + trace/meta + manager notification.
+
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
 - **Следующий шаг:** P0 outbox latency tail — см. последние SQL‑срезы; p90 > 10s, нужен следующий минимальный fix + evidence.

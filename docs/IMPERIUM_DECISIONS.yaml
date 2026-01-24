@@ -52,4 +52,7 @@ decisions:
     area: "observability"
     choice: "OTEL_TEMPO"
     statement: "Adopt OTel spans in API/outbox/sentinel with correlation attrs; persist stage timing in decision_meta.timing.stages and outbox.meta; trace-bundle includes timing; Tempo is trace store."
-
+  - id: "DEC-013"
+    area: "calendar_scheduling"
+    choice: "SOT_POSTGRES_BRANCH_CALENDAR"
+    statement: "Appointments SoT lives in Postgres; external calendars are projection + busy sources only; confirmation policy is mixed per-branch; calendar scope is per-branch; bot/console/telegram use one scheduling service; provider sync via outbox; OAuth tokens encrypted with pgcrypto (KMS upgradeable)."

@@ -135,6 +135,7 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `MEDIA_CLEANUP_TTL_DAYS` — TTL очистки локальных медиа (default: 7).
 - `MEDIA_STORAGE_WARN_BYTES` — порог алерта по объёму (default: 5GB).
 - `QDRANT_COLLECTION` — коллекция Qdrant (default: truffles_knowledge; при `TEST_MODE=1` и пустом env → truffles_knowledge_ci).
+- `CALENDAR_TOKEN_ENC_KEY` — ключ pgcrypto для шифрования OAuth токенов календаря (обязателен после включения sync).
 - `AUDIO_TRANSCRIPTION_ENABLED` — включить транскрибацию коротких голосовых (default: false).
 - `AUDIO_TRANSCRIPTION_MAX_MB` — максимум размера голосового для транскрипции (default: 2).
 - `AUDIO_TRANSCRIPTION_MODEL` — модель транскрипции (default: whisper-1).
@@ -176,6 +177,57 @@ docker compose -f /home/zhan/truffles-main/truffles-api/docker-compose.yml up -d
 
 **Legacy (если console‑web ещё на PM2):**
 - см. `docs/DEPLOYMENT_RUNBOOK.md` (раздел PM2).
+
+---
+
+## Calendar Scheduling (SoT) — доступы и шаги
+
+**Env (API):**
+- Файл: `/home/zhan/truffles-main/truffles-api/.env`
+- Обязательно: `CALENDAR_TOKEN_ENC_KEY` (32+ bytes random, хранить как секрет).
+- OAuth: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`.
+
+**Миграция схемы (Phase 1):**
+```bash
+set -a
+source /home/zhan/infrastructure/.env
+set +a
+docker exec -e PGPASSWORD="$DB_POSTGRESDB_PASSWORD" -i truffles_postgres_1 \\
+  psql -U "$DB_POSTGRESDB_USER" -d chatbot < /home/zhan/truffles-main/truffles-api/migrations/009_add_calendar_scheduling.sql
+```
+
+**Проверка:**
+```bash
+docker exec -i truffles_postgres_1 psql -U "$DB_POSTGRESDB_USER" -d chatbot -c \"\\dt appointments\"
+docker exec -i truffles_postgres_1 psql -U "$DB_POSTGRESDB_USER" -d chatbot -c \"\\dt calendar_blocks\"
+```
+
+**Backfill legacy bookings → appointments (Phase 3):**
+```bash
+set -a
+source /home/zhan/infrastructure/.env
+set +a
+docker exec -e PGPASSWORD="$DB_POSTGRESDB_PASSWORD" -i truffles_postgres_1 \\
+  psql -U "$DB_POSTGRESDB_USER" -d chatbot < /home/zhan/truffles-main/truffles-api/migrations/010_backfill_appointments_from_bookings.sql
+```
+
+**Backfill tokens (pgcrypto):**
+```bash
+set -a
+source /home/zhan/truffles-main/truffles-api/.env
+source /home/zhan/infrastructure/.env
+set +a
+docker exec -e PGPASSWORD="$DB_POSTGRESDB_PASSWORD" -i truffles_postgres_1 \\
+  psql -U "$DB_POSTGRESDB_USER" -d chatbot -v key="$CALENDAR_TOKEN_ENC_KEY" \\
+  -c \"UPDATE google_calendar_tokens SET \\
+      access_token_enc = pgp_sym_encrypt(access_token, :'key'), \\
+      refresh_token_enc = pgp_sym_encrypt(refresh_token, :'key'), \\
+      encryption_version = 1, encrypted_at = now() \\
+    WHERE access_token_enc IS NULL AND access_token IS NOT NULL;\"
+```
+
+**Fail-closed поведение:**
+- Если `CALENDAR_TOKEN_ENC_KEY` не задан, а токены уже зашифрованы — доступ к календарю отключён.
 
 ---
 
