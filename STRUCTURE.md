@@ -59,6 +59,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-trace-booking-commit.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-consultant-chatgpt-like.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-slot-lock-booking-confirm.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-console-telegram-sync-fixes.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-inbox-health-search.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-consult-quality-core-v1.md`

@@ -54,11 +54,14 @@ from app.routers.webhook.booking import (
     _build_booking_summary,
     _clear_service_hint,
     _expected_reply_for_booking_question,
+    _get_booking_confirm_threshold,
+    _get_booking_confirmation,
     _get_booking_context,
     _get_recent_service_hint,
     _handle_booking_flow,
     _handle_booking_interrupt,
     _is_blocked_slot_message,
+    _is_booking_confirm_enabled,
     _is_booking_related_message,
     _is_booking_time_service_decision,
     _match_expected_reply,
@@ -66,11 +69,14 @@ from app.routers.webhook.booking import (
     _resolve_datetime_offline,
     _select_expected_reply_message,
     _select_last_non_booking_message,
+    _set_booking_confirmation,
     _set_booking_context,
     _set_service_hint,
     _update_booking_from_message,
     _update_booking_from_messages,
+    _validate_datetime_slot,
     _validate_name_slot,
+    _validate_service_slot,
 )
 from app.routers.webhook.branch_selection import (
     BRANCH_CONTEXT_KEY,
@@ -576,40 +582,63 @@ def _apply_expected_reply_contract(
             elif expected_reply_type == legacy.EXPECTED_REPLY_NAME:
                 prompt_hint = legacy.MSG_BOOKING_ASK_NAME
 
-            question_context = {
-                "prompt_hint": prompt_hint,
-                "booking": booking_context,
-                "current_goal": current_goal,
-                "service_carryover": legacy._get_service_carryover(
-                    context_manager, message_count=message_count
-                ),
-            }
-            answer_result = legacy.interpret_expected_reply(
-                expected_reply_text,
-                expected_reply_type=expected_reply_type,
-                carryover=class_carryover,
-                question_context=question_context,
-                client_slug=client_slug,
-            )
-            answer_payload = answer_result.get("payload") if isinstance(answer_result, dict) else None
-            if isinstance(answer_result, dict):
-                answer_error = answer_result.get("error") or "none"
-            if isinstance(answer_payload, dict):
-                answer_slot = answer_payload.get("slot") or ""
-                answer_value = answer_payload.get("value") or ""
-                try:
-                    answer_confidence = float(answer_payload.get("confidence") or 0.0)
-                except (TypeError, ValueError):
-                    answer_confidence = 0.0
-                answer_confidence = max(0.0, min(answer_confidence, 1.0))
-            answer_meta = {
-                "answer_interpreter_used": True,
-                "answer_confidence": answer_confidence,
-                "answer_slot": answer_slot,
-                "answer_value": answer_value,
-                "answer_error": answer_error,
-            }
+            confirmation_pending = _get_booking_confirmation(booking_context)
+            if confirmation_pending:
+                answer_error = "booking_confirm_pending"
+                answer_meta = {
+                    "answer_interpreter_used": False,
+                    "answer_confidence": 0.0,
+                    "answer_slot": "",
+                    "answer_value": "",
+                    "answer_error": "booking_confirm_pending",
+                }
+            else:
+                question_context = {
+                    "prompt_hint": prompt_hint,
+                    "booking": booking_context,
+                    "current_goal": current_goal,
+                    "service_carryover": legacy._get_service_carryover(
+                        context_manager, message_count=message_count
+                    ),
+                }
+                answer_result = legacy.interpret_expected_reply(
+                    expected_reply_text,
+                    expected_reply_type=expected_reply_type,
+                    carryover=class_carryover,
+                    question_context=question_context,
+                    client_slug=client_slug,
+                )
+                answer_payload = answer_result.get("payload") if isinstance(answer_result, dict) else None
+                if isinstance(answer_result, dict):
+                    answer_error = answer_result.get("error") or "none"
+                if isinstance(answer_payload, dict):
+                    answer_slot = answer_payload.get("slot") or ""
+                    answer_value = answer_payload.get("value") or ""
+                    try:
+                        answer_confidence = float(answer_payload.get("confidence") or 0.0)
+                    except (TypeError, ValueError):
+                        answer_confidence = 0.0
+                    answer_confidence = max(0.0, min(answer_confidence, 1.0))
+                answer_meta = {
+                    "answer_interpreter_used": True,
+                    "answer_confidence": answer_confidence,
+                    "answer_slot": answer_slot,
+                    "answer_value": answer_value,
+                    "answer_error": answer_error,
+                }
 
+        if answer_meta.get("answer_interpreter_used"):
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "slot_extract",
+                    "decision": "llm",
+                    "slot": answer_slot,
+                    "value": answer_value,
+                    "confidence": answer_confidence,
+                    "error": answer_error,
+                },
+            )
         answer_confidence_floor = 0.65
         answer_value_ok = isinstance(answer_value, str) and answer_value.strip()
         answer_slot_ok = isinstance(answer_slot, str) and answer_slot.strip()
@@ -620,6 +649,19 @@ def _apply_expected_reply_contract(
         )
         answer_used = answer_confidence_ok or answer_valid
         answer_value_validated = True
+        expected_slot_key = _expected_reply_slot_key(expected_reply_type)
+        if answer_used and expected_slot_key and answer_slot and answer_slot != expected_slot_key:
+            answer_used = False
+            answer_confidence = 0.0
+            answer_error = "slot_mismatch"
+            answer_slot = ""
+            answer_value = ""
+        matched = False
+        value = None
+        slot_source = None
+        slot_confidence = 0.0
+        slot_validation_error = None
+        use_llm_slot = _is_booking_confirm_enabled()
         (
             deterministic_matched,
             deterministic_value,
@@ -637,16 +679,35 @@ def _apply_expected_reply_contract(
                     answer_value = deterministic_value
             matched = True
             value = deterministic_value
+            slot_source = "deterministic"
+            slot_confidence = 1.0
         else:
-            if answer_used:
+            if answer_used and use_llm_slot:
+                validated_value = _validate_expected_reply_value(
+                    expected_reply_type=expected_reply_type,
+                    value=answer_value,
+                    client_slug=client_slug,
+                )
+                if validated_value:
+                    matched = True
+                    value = validated_value
+                    slot_source = "llm"
+                    slot_confidence = answer_confidence
+                else:
+                    answer_value_validated = False
+                    slot_validation_error = "validation_failed"
+            elif answer_used and not use_llm_slot:
                 answer_used = False
                 answer_value_validated = False
                 answer_confidence = 0.0
                 answer_error = "deterministic_miss"
                 answer_slot = ""
                 answer_value = ""
-            matched = False
-            value = None
+        slot_confirmation_required = False
+        if matched and slot_source == "llm" and use_llm_slot:
+            threshold = _get_booking_confirm_threshold()
+            if slot_confidence < threshold:
+                slot_confirmation_required = True
         answer_meta["normalization_flags"] = normalization_flags
         answer_meta.update(
             {
@@ -654,12 +715,30 @@ def _apply_expected_reply_contract(
                 "answer_slot": answer_slot,
                 "answer_value": answer_value,
                 "answer_error": answer_error,
+                "slot_confidence": slot_confidence,
+                "slot_source": slot_source,
+                "slot_validation_error": slot_validation_error,
+                "slot_confirmation_required": slot_confirmation_required,
             }
         )
-        expected_reply_matched = matched
         if matched:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "slot_validate",
+                    "decision": "matched",
+                    "slot": expected_slot_key,
+                    "value": value,
+                    "confidence": slot_confidence,
+                    "source": slot_source,
+                    "confirmation_required": slot_confirmation_required,
+                    "validation_error": slot_validation_error,
+                },
+            )
+        expected_reply_matched = matched
+        if matched and not slot_confirmation_required:
             expected_reply_shortcircuit = True
-        if matched and isinstance(value, str) and expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
+        if matched and not slot_confirmation_required and isinstance(value, str) and expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
             context = legacy._set_service_hint(context, value, now)
             legacy._set_conversation_context(conversation, context)
             legacy._maybe_store_service_carryover(
@@ -674,18 +753,31 @@ def _apply_expected_reply_contract(
                 reason="expected_reply",
             )
             context = legacy._get_conversation_context(conversation)
-        if matched and isinstance(value, str):
+        if matched and not slot_confirmation_required and isinstance(value, str):
             context = legacy._apply_expected_reply_slot(
                 context,
                 expected_reply_type=expected_reply_type,
                 value=value,
             )
             legacy._set_conversation_context(conversation, context)
-        if matched:
+            if expected_slot_key:
+                confirmation_state = _get_booking_confirmation(
+                    legacy._get_booking_context(context)
+                )
+                if (
+                    confirmation_state
+                    and confirmation_state.get("slot") == expected_slot_key
+                ):
+                    booking_state = _set_booking_confirmation(
+                        legacy._get_booking_context(context), None
+                    )
+                    context = legacy._set_booking_context(context, booking_state)
+                    legacy._set_conversation_context(conversation, context)
+        if matched and not slot_confirmation_required:
             next_expected = legacy.EXPECTED_REPLY_INTENT_CHOICE if intent_queue else None
             context = legacy._set_expected_reply_type(context, next_expected)
             legacy._set_conversation_context(conversation, context)
-        if matched and isinstance(value, str) and isinstance(expected_reply_type, str):
+        if matched and not slot_confirmation_required and isinstance(value, str) and isinstance(expected_reply_type, str):
             context = legacy._get_conversation_context(conversation)
             context, memory = legacy._update_session_memory_on_answer(
                 context,
@@ -700,6 +792,19 @@ def _apply_expected_reply_contract(
                 memory=memory,
                 reason="answer_matched",
             )
+        if matched and slot_confirmation_required and isinstance(value, str) and expected_slot_key:
+            context = legacy._get_conversation_context(conversation)
+            booking_state = legacy._get_booking_context(context)
+            if not _get_booking_confirmation(booking_state):
+                confirmation = {
+                    "slot": expected_slot_key,
+                    "value": value,
+                    "confidence": slot_confidence,
+                    "source": slot_source,
+                }
+                booking_state = _set_booking_confirmation(booking_state, confirmation)
+                context = legacy._set_booking_context(context, booking_state)
+                legacy._set_conversation_context(conversation, context)
         if expected_reply_shortcircuit:
             context_manager = legacy._get_context_manager(context)
             if context_manager.get("current_goal") != "booking":
@@ -1988,6 +2093,7 @@ PENDING_CLOSE_PHRASES = {
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
 MSG_BOOKING_ASK_NAME = "Как вас зовут?"
+MSG_BOOKING_SLOT_LOCK_STUB = "Я помогаю только по вопросам салона и записи."
 MSG_BOOKING_CANCELLED = "Хорошо, если передумаете — пишите."
 MSG_BOOKING_REENGAGE = "Хотите продолжить запись? Если да — напишите услугу."
 MSG_BOOKING_CTA = "Хотите записаться?"
@@ -2242,6 +2348,34 @@ def _match_expected_reply_candidates(
                 flags.insert(0, "latin_to_cyrillic")
             return True, value, flags
     return False, None, []
+
+
+def _expected_reply_slot_key(expected_reply_type: str | None) -> str | None:
+    if expected_reply_type == EXPECTED_REPLY_SERVICE:
+        return "service"
+    if expected_reply_type == EXPECTED_REPLY_TIME:
+        return "datetime"
+    if expected_reply_type == EXPECTED_REPLY_NAME:
+        return "name"
+    return None
+
+
+def _validate_expected_reply_value(
+    *,
+    expected_reply_type: str | None,
+    value: str | None,
+    client_slug: str | None,
+) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    cleaned = value.strip()
+    if expected_reply_type == EXPECTED_REPLY_SERVICE:
+        return _validate_service_slot(cleaned, allow_freeform=True, client_slug=client_slug)
+    if expected_reply_type == EXPECTED_REPLY_TIME:
+        return _validate_datetime_slot(cleaned, allow_freeform=True, client_slug=client_slug)
+    if expected_reply_type == EXPECTED_REPLY_NAME:
+        return _validate_name_slot(cleaned, allow_freeform=True, client_slug=client_slug)
+    return None
 
 
 def _coerce_batch_messages(message_text: str, batch_messages: list[str] | None) -> list[str]:
