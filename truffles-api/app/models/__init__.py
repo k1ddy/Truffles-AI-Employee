@@ -5,6 +5,7 @@ from app.models.agent_membership import AgentMembership
 from app.models.booking import Booking
 from app.models.branch import Branch
 from app.models.client import Client
+from app.models.client_capability import ClientCapability
 from app.models.client_settings import ClientSettings
 from app.models.company import Company
 from app.models.console_idempotency import ConsoleIdempotencyKey
@@ -20,6 +21,7 @@ from app.models.user import User
 __all__ = [
     "Company",
     "Client",
+    "ClientCapability",
     "Agent",
     "AgentMembership",
     "AgentIdentity",

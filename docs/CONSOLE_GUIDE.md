@@ -73,11 +73,13 @@ Rules:
 - Навигация в сайдбаре режется по роли (owner/admin/manager/support).
 
 **Phase 2 UI contract (Provisioning + Capabilities, planned):**
-- Доступ только для Platform Admin (RBAC gate).
+- RBAC gate: owner/admin/support (platform admin role TBD).
 - Provisioning Wizard: бизнес‑профиль → филиалы → команда → интеграции → knowledge (handoff в Knowledge Studio) → live‑check.
 - Go/No‑Go gate: без обязательных данных филиала (по provisioning‑схеме) publish блокируется; UI показывает missing fields.
 - Capabilities UI: показывает effective capabilities (client + branch overrides), редактирование через schema‑validated форму,
   сохранение в `/console/v1/admin/capabilities` с `schema_version` и audit.
+- API: `GET/PATCH /console/v1/admin/capabilities` (client через `X-Client-Id`, branch через `branch_id`).
+- Schema: `contracts/capabilities/capabilities.v1.jsonschema`.
 - Fail‑closed: без явного tenant‑контекста действия недоступны.
 
 **Common symptom:** “Only 1–2 cases shown / no slots.”  

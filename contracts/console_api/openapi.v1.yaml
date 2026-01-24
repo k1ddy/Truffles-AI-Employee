@@ -19,6 +19,8 @@ security:
 tags:
   - name: auth
     description: Authentication and context
+  - name: admin
+    description: Platform admin operations
   - name: cases
     description: Case management (Inbox)
   - name: messages
@@ -668,6 +670,59 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  # ──────────────────────────────────────────────────────────────────
+  # ADMIN
+  # ──────────────────────────────────────────────────────────────────
+  /admin/capabilities:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+    get:
+      operationId: getAdminCapabilities
+      tags: [admin]
+      summary: Get effective capabilities
+      parameters:
+        - $ref: "#/components/parameters/branch_id_query"
+      responses:
+        "200":
+          description: Capabilities response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilitiesResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    patch:
+      operationId: patchAdminCapabilities
+      tags: [admin]
+      summary: Upsert capabilities record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CapabilitiesPatchRequest"
+      responses:
+        "200":
+          description: Updated capabilities record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilitiesRecord"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
 # ════════════════════════════════════════════════════════════════════
 # COMPONENTS
 # ════════════════════════════════════════════════════════════════════
@@ -700,6 +755,14 @@ components:
       in: header
       required: false
       description: Branch selection when identity is branch-scoped or multiple branches exist.
+      schema:
+        type: string
+        format: uuid
+    branch_id_query:
+      name: branch_id
+      in: query
+      required: false
+      description: Optional branch override for effective capabilities.
       schema:
         type: string
         format: uuid
@@ -1389,6 +1452,147 @@ components:
           type: boolean
         message:
           type: string
+
+    CapabilitiesPayload:
+      type: object
+      required: [channels, providers, features]
+      additionalProperties: false
+      properties:
+        domain_slug:
+          type: string
+          nullable: true
+        channels:
+          $ref: "#/components/schemas/CapabilityChannels"
+        providers:
+          $ref: "#/components/schemas/CapabilityProviders"
+        features:
+          $ref: "#/components/schemas/CapabilityFeatures"
+
+    CapabilityChannels:
+      type: object
+      additionalProperties: false
+      properties:
+        whatsapp:
+          type: boolean
+          nullable: true
+        telegram:
+          type: boolean
+          nullable: true
+        instagram:
+          type: boolean
+          nullable: true
+
+    CapabilityProviders:
+      type: object
+      additionalProperties: false
+      properties:
+        availability_provider:
+          type: string
+          enum: [none, google_calendar, bitrix, amocrm, manual]
+          nullable: true
+        crm_provider:
+          type: string
+          enum: [none, amocrm, bitrix, custom]
+          nullable: true
+        calendar_provider:
+          type: string
+          enum: [none, google_calendar, local]
+          nullable: true
+
+    CapabilityFeatures:
+      type: object
+      additionalProperties: false
+      properties:
+        booking_mode:
+          type: string
+          enum: [collect_preferences, confirm_slots]
+          nullable: true
+        knowledge_upload:
+          type: boolean
+          nullable: true
+        analytics:
+          type: boolean
+          nullable: true
+        auto_learn:
+          type: boolean
+          nullable: true
+
+    CapabilitiesRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        scope:
+          type: string
+          enum: [client, branch]
+        status:
+          type: string
+          enum: [active, disabled]
+        schema_version:
+          type: string
+        payload:
+          $ref: "#/components/schemas/CapabilitiesPayload"
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    CapabilitiesResponse:
+      type: object
+      properties:
+        client_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        effective:
+          $ref: "#/components/schemas/CapabilitiesPayload"
+        client_capabilities:
+          $ref: "#/components/schemas/CapabilitiesRecord"
+          nullable: true
+        branch_capabilities:
+          $ref: "#/components/schemas/CapabilitiesRecord"
+          nullable: true
+
+    CapabilitiesPatchRequest:
+      type: object
+      additionalProperties: false
+      required: [scope, payload]
+      properties:
+        scope:
+          type: string
+          enum: [client, branch]
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum: [active, disabled]
+          nullable: true
+        schema_version:
+          type: string
+          nullable: true
+        payload:
+          $ref: "#/components/schemas/CapabilitiesPayload"
 
     TelegramTrail:
       type: object

@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.schemas.capabilities import CapabilitiesPayload
 
 class ConsoleError(BaseModel):
     code: str
@@ -251,6 +252,35 @@ class ConsoleSettingsResponse(BaseModel):
     branches: list[ConsoleBranch]
     agents: list[ConsoleAgentInfo]
     bot_config: Optional[ConsoleBotConfig] = None
+
+
+class ConsoleCapabilitiesRecord(BaseModel):
+    id: UUID
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    scope: Literal["client", "branch"]
+    status: Literal["active", "disabled"]
+    schema_version: str
+    payload: CapabilitiesPayload
+    created_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleCapabilitiesResponse(BaseModel):
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    effective: CapabilitiesPayload
+    client_capabilities: Optional[ConsoleCapabilitiesRecord] = None
+    branch_capabilities: Optional[ConsoleCapabilitiesRecord] = None
+
+
+class ConsoleCapabilitiesPatchRequest(BaseModel):
+    scope: Literal["client", "branch"]
+    branch_id: Optional[UUID] = None
+    status: Optional[Literal["active", "disabled"]] = None
+    schema_version: Optional[str] = None
+    payload: CapabilitiesPayload
 
 
 class ConsoleAgentListResponse(BaseModel):

@@ -11,6 +11,7 @@
 - DONE: DEC‑014 (Knowledge Studio publish pipeline) и DEC‑015 (capabilities model) зафиксированы в `docs/IMPERIUM_DECISIONS.yaml`. Evidence: doc updates in repo.
 - DONE: Phase 1 Control Plane UI (layout + context + roles) — PR #340 https://github.com/k1ddy/Truffles-AI-Employee/pull/340; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21314913097.
 - PLAN: Phase 2 Control Plane (Provisioning + Capabilities) — Task Package `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2.md`.
+- PLAN: Phase 2A Capabilities model + admin API — branch `feat/control-plane-phase2-capabilities`; checks: `python3 -m compileall truffles-api/app/services truffles-api/app/schemas truffles-api/app/routers/console.py`, `npm --prefix console-web run generate:api` (after `npm --prefix console-web install`); Task Package `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2-capabilities.md`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
