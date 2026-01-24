@@ -169,7 +169,7 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
     ), patch(
         "app.routers.webhook.booking._create_booking_appointment",
         return_value=(appointment_stub, dict(appointment_meta)),
-    ), patch(
+    ) as create_booking, patch(
         "app.routers.webhook._legacy._reuse_active_handover",
         return_value=(None, True, False),
     ):
@@ -185,10 +185,11 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
                 )
             )
 
-    booking_context = conversation.context.get("booking", {})
-    assert booking_context.get("service")
-    assert booking_context.get("datetime")
-    assert booking_context.get("name")
+    assert create_booking.call_count == 1
+    booking_state = create_booking.call_args.kwargs["booking_state"]
+    assert booking_state.get("service")
+    assert booking_state.get("datetime")
+    assert booking_state.get("name")
 
     trace = conversation.context.get("decision_trace") or []
     assert any(item.get("stage") == "booking_commit" for item in trace)

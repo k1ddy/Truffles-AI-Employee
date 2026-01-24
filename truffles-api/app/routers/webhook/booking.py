@@ -489,6 +489,8 @@ def _validate_name_slot(
     tokens = normalized.split()
     if not tokens or len(tokens) > 3:
         return None
+    if allow_freeform and len(tokens) > 2:
+        return None
     if any(len(token) < 2 for token in tokens):
         return None
     if all(token in legacy.NAME_NOISE_TOKENS for token in tokens):
