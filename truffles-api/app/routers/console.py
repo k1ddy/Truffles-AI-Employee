@@ -185,7 +185,12 @@ def _build_telegram_desktop_link(
     target_str = str(message_id)
     if not target_str.isdigit():
         return None
-    return f"tg://openmessage?chat_id={chat_id_str}&message_id={target_str}"
+    link = f"tg://privatepost?channel={chat_id_str}&post={target_str}"
+    if topic_id:
+        topic_str = str(topic_id)
+        if topic_str.isdigit():
+            link = f"{link}&thread={topic_str}"
+    return link
 
 
 def _build_telegram_trail(
