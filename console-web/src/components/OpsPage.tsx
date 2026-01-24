@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
 import { telegramApi } from "@/lib/api-client";
@@ -37,6 +37,46 @@ interface TelegramHealthData {
     pending_messages: number;
 }
 
+type OutboxStatusFilter = "failed" | "pending" | "processing" | "all";
+
+interface OutboxCounts {
+    pending: number;
+    processing: number;
+    failed: number;
+}
+
+interface OutboxItem {
+    id: string;
+    status: string;
+    attempts: number;
+    next_attempt_at: string | null;
+    last_error: string | null;
+    created_at: string;
+    updated_at: string;
+    conversation_id: string | null;
+    branch_id: string | null;
+    inbound_message_id: string;
+    channel: string | null;
+    message_type: string | null;
+    message_preview: string | null;
+    remote_jid: string | null;
+    instance_id: string | null;
+    forwarded_to_telegram: boolean | null;
+}
+
+interface OutboxListResponse {
+    items: OutboxItem[];
+    cursor: string | null;
+    has_more: boolean;
+    counts: OutboxCounts;
+}
+
+interface OutboxRetryResponse {
+    success: boolean;
+    retried: number;
+    skipped: number;
+}
+
 async function fetchHealth(): Promise<HealthData> {
     const response = await api.get("/health");
     return response.data;
@@ -49,6 +89,16 @@ async function fetchMetrics(): Promise<MetricsData> {
 
 async function fetchTelegramHealth(): Promise<TelegramHealthData> {
     const response = await api.get("/telegram/health");
+    return response.data;
+}
+
+async function fetchOutbox(status: OutboxStatusFilter): Promise<OutboxListResponse> {
+    const response = await api.get("/ops/outbox", {
+        params: {
+            status,
+            limit: 50,
+        },
+    });
     return response.data;
 }
 
@@ -82,6 +132,7 @@ export default function OpsPage() {
     const { data: session } = useSession();
     const { handleError } = useErrorHandler();
     const [telegramAction, setTelegramAction] = useState<"verify" | "test" | null>(null);
+    const [outboxStatus, setOutboxStatus] = useState<OutboxStatusFilter>("failed");
 
     const { data: health, isLoading: healthLoading, refetch: refetchHealth } = useQuery({
         queryKey: ["health"],
@@ -103,6 +154,16 @@ export default function OpsPage() {
         queryFn: fetchTelegramHealth,
         enabled: !!session,
         refetchInterval: 30000,
+    });
+
+    const { data: outboxData, isLoading: outboxLoading, error: outboxError, refetch: refetchOutbox } = useQuery({
+        queryKey: ["ops-outbox", outboxStatus],
+        queryFn: () => fetchOutbox(outboxStatus),
+        enabled: !!session,
+        refetchInterval: 30000,
+        onError: (error) => {
+            handleError(error);
+        },
     });
 
     const telegramVerify = useMutation({
@@ -150,6 +211,39 @@ export default function OpsPage() {
             setTelegramAction(null);
         },
     });
+
+    const outboxRetry = useMutation({
+        mutationFn: async (ids?: string[]) => {
+            const { data } = await api.post<OutboxRetryResponse>("/ops/outbox/retry", {
+                ids: ids && ids.length > 0 ? ids : undefined,
+                limit: 100,
+            });
+            return data;
+        },
+        onSuccess: (data) => {
+            if (data.success) {
+                toast.success(`Ретрай: ${data.retried} сообщений`);
+            } else {
+                toast.error("Не удалось ретраить сообщения");
+            }
+            refetchOutbox();
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+    });
+
+    const outboxCounts = useMemo(() => {
+        const pending = outboxData?.counts?.pending ?? 0;
+        const processing = outboxData?.counts?.processing ?? 0;
+        const failed = outboxData?.counts?.failed ?? 0;
+        return {
+            pending,
+            processing,
+            failed,
+            total: pending + processing + failed,
+        };
+    }, [outboxData]);
 
     const isLoading = healthLoading || metricsLoading;
 
@@ -305,9 +399,8 @@ export default function OpsPage() {
 
             {/* Message Queue */}
             <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-queue-card">
-                <h2 className="text-lg font-semibold mb-4">Очередь сообщений</h2>
-                <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Ожидающих сообщений</span>
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold">Очередь сообщений</h2>
                     <span
                         className={`text-2xl font-bold ${(health?.outbox_backlog || 0) > 100
                         ? "text-red-600"
@@ -320,6 +413,105 @@ export default function OpsPage() {
                         {health?.outbox_backlog ?? 0}
                     </span>
                 </div>
+                <div className="flex flex-wrap gap-2 mb-4">
+                    {([
+                        { value: "failed", label: "Failed", count: outboxCounts.failed },
+                        { value: "pending", label: "Pending", count: outboxCounts.pending },
+                        { value: "processing", label: "Processing", count: outboxCounts.processing },
+                        { value: "all", label: "All", count: outboxCounts.total },
+                    ] as const).map((item) => (
+                        <button
+                            key={item.value}
+                            type="button"
+                            onClick={() => setOutboxStatus(item.value)}
+                            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                                outboxStatus === item.value
+                                    ? "border-primary text-primary"
+                                    : "border-border/60 text-muted-foreground hover:text-foreground"
+                            }`}
+                        >
+                            {item.label} · {item.count}
+                        </button>
+                    ))}
+                    {outboxStatus === "failed" && (
+                        <button
+                            type="button"
+                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => outboxRetry.mutate()}
+                            disabled={outboxRetry.isPending}
+                        >
+                            {outboxRetry.isPending ? "Ретрай..." : "Retry failed"}
+                        </button>
+                    )}
+                </div>
+                {outboxLoading ? (
+                    <div className="text-sm text-muted-foreground">Загрузка...</div>
+                ) : outboxError ? (
+                    <div className="text-sm text-muted-foreground">Не удалось загрузить очередь</div>
+                ) : outboxData?.items?.length ? (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead className="text-xs text-muted-foreground">
+                                <tr className="text-left border-b border-border/60">
+                                    <th className="py-2 pr-3">Статус</th>
+                                    <th className="py-2 pr-3">Попытки</th>
+                                    <th className="py-2 pr-3">Канал</th>
+                                    <th className="py-2 pr-3">Сообщение</th>
+                                    <th className="py-2 pr-3">Ошибка</th>
+                                    <th className="py-2 pr-3">Обновлено</th>
+                                    <th className="py-2 pr-3 text-right">Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {outboxData.items.map((item) => (
+                                    <tr key={item.id} className="border-b border-border/40">
+                                        <td className="py-2 pr-3">
+                                            <span
+                                                className={`px-2 py-1 rounded text-xs font-medium ${
+                                                    item.status === "failed"
+                                                        ? "bg-red-100 text-red-800"
+                                                        : item.status === "pending"
+                                                            ? "bg-yellow-100 text-yellow-800"
+                                                            : "bg-blue-100 text-blue-800"
+                                                }`}
+                                            >
+                                                {item.status}
+                                            </span>
+                                        </td>
+                                        <td className="py-2 pr-3">{item.attempts}</td>
+                                        <td className="py-2 pr-3">{item.channel || "—"}</td>
+                                        <td className="py-2 pr-3">
+                                            <div className="text-xs text-foreground">{item.message_preview || "—"}</div>
+                                            {item.remote_jid && (
+                                                <div className="text-xs text-muted-foreground">{item.remote_jid}</div>
+                                            )}
+                                        </td>
+                                        <td className="py-2 pr-3">
+                                            <span className="text-xs text-destructive">{item.last_error || "—"}</span>
+                                        </td>
+                                        <td className="py-2 pr-3">
+                                            {item.updated_at ? new Date(item.updated_at).toLocaleString("ru-RU") : "—"}
+                                        </td>
+                                        <td className="py-2 pr-3 text-right">
+                                            {item.status === "failed" && (
+                                                <button
+                                                    type="button"
+                                                    className="text-xs text-primary hover:text-primary/80 disabled:opacity-50"
+                                                    onClick={() => outboxRetry.mutate([item.id])}
+                                                    disabled={outboxRetry.isPending}
+                                                >
+                                                    Retry
+                                                </button>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <div className="text-sm text-muted-foreground">Очередь пуста</div>
+                )}
             </div>
 
             {/* Navigation */}

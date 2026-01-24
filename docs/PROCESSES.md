@@ -422,6 +422,20 @@ class Stage(Protocol):
 | Escalation rate | > 30% | Review triggers |
 | LLM timeout | > 2% | Fallback to deterministic |
 
+### 6.1 Ops — Outbox Queue & Retry
+
+**Purpose:** увидеть зависшие доставки и безопасно ретраить (WhatsApp/outbox).
+
+**Process:**
+1) Ops UI → открыть очередь outbox (pending/processing/failed).
+2) Для failed — нажать Retry (bulk или по одному).
+3) API переводит статус `FAILED → PENDING`, сбрасывает `next_attempt_at`, пишет audit `outbox_retry`.
+4) Worker подхватывает и повторяет доставку; результат виден в статусах.
+
+**Console API:**
+- `GET /console/v1/ops/outbox` (filters: status, cursor, limit).
+- `POST /console/v1/ops/outbox/retry` (ids[] optional, limit default 100).
+
 ---
 
 ## 7. Error Codes

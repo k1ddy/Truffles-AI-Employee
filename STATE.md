@@ -109,6 +109,11 @@
 - Checks: `pytest -q truffles-api/tests/test_console_inbox_helpers.py` → `5 passed`; `npm --prefix console-web run generate:api`
 - Evidence: local checks only (CI pending)
 
+### 2026-01-24 — Ops Outbox Queue + Retry (PLAN)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-ops-outbox-delivery.md`
+- Checks: `pytest -q truffles-api/tests/test_console_outbox_ops.py` → `5 passed`; `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_outbox_ops.py`; `npm --prefix console-web run generate:api`
+- Evidence: local checks only (CI pending)
+
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
 - **Следующий шаг:** P0 outbox latency tail — см. последние SQL‑срезы; p90 > 10s, нужен следующий минимальный fix + evidence.

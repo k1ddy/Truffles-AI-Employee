@@ -363,6 +363,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ops/outbox": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** Outbox queue (pending/processing/failed) */
+        get: operations["listOutbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/outbox/retry": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry failed outbox messages */
+        post: operations["retryOutbox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings": {
         parameters: {
             query?: never;
@@ -598,6 +642,52 @@ export interface components {
             active_cases?: number;
             resolved_cases?: number;
             avg_resolution_hours?: number | null;
+        };
+        OutboxCounts: {
+            pending?: number;
+            processing?: number;
+            failed?: number;
+        };
+        OutboxItem: {
+            /** Format: uuid */
+            id?: string;
+            /** @enum {string} */
+            status?: "pending" | "processing" | "failed";
+            attempts?: number;
+            /** Format: date-time */
+            next_attempt_at?: string | null;
+            last_error?: string | null;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+            /** Format: uuid */
+            conversation_id?: string | null;
+            /** Format: uuid */
+            branch_id?: string | null;
+            inbound_message_id?: string;
+            channel?: string | null;
+            message_type?: string | null;
+            message_preview?: string | null;
+            remote_jid?: string | null;
+            instance_id?: string | null;
+            forwarded_to_telegram?: boolean | null;
+        };
+        OutboxListResponse: {
+            items?: components["schemas"]["OutboxItem"][];
+            cursor?: string | null;
+            has_more?: boolean;
+            counts?: components["schemas"]["OutboxCounts"];
+        };
+        OutboxRetryRequest: {
+            ids?: string[] | null;
+            /** @default 100 */
+            limit: number;
+        };
+        OutboxRetryResponse: {
+            success?: boolean;
+            retried?: number;
+            skipped?: number;
         };
         BotConfig: {
             reminder_timeout_1?: number | null;
@@ -1441,6 +1531,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TelegramTestResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listOutbox: {
+        parameters: {
+            query?: {
+                /** @description Filter by outbox status (default: failed) */
+                status?: "pending" | "processing" | "failed" | "all";
+                /** @description ISO timestamp cursor for pagination */
+                cursor?: string;
+                limit?: number;
+            };
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Outbox list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboxListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    retryOutbox: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutboxRetryRequest"];
+            };
+        };
+        responses: {
+            /** @description Retry result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboxRetryResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
