@@ -1,0 +1,61 @@
+- Название/цель: Канон‑фиксы качества консультаций v1 (multi‑intent, pending‑guard, service_not_offered) + обновление evaluator.
+- Canon refs: `STATE.md` (GAP-023/GAP-024), `SPECS/CONSULTANT.md` (multi‑intent, consult‑priority, service_not_offered), `SPECS/ESCALATION.md` (pending/manager_active), `SPECS/SYSTEM_REFERENCE.md` (eval/trace), `STRATEGY/REQUIREMENTS.md`.
+- Invariant:
+  - Hard‑LAW и policy‑gates приоритетнее LLM.
+  - decision_meta/decision_trace пишутся на каждом user‑message.
+  - В pending/manager_active нет новых решений (только pending‑responses/тишина).
+  - Никаких ручных правок БД ради evidence.
+- Scope:
+  - Core‑логика: strict pending‑guard (включая исключение shield‑drop в pending).
+  - Core‑логика: consult‑priority при multi‑intent, consult‑ответ обязателен и возвращает к booking‑prompt.
+  - Core‑логика: service_not_offered — явный ответ при отсутствии услуги, без галлюцинаций.
+  - Evaluator: новые канон‑сигналы (service_not_offered, goal_stack/current_goal, pending_gate_broken) и снижение false‑positive.
+  - EVAL: добавить кейсы RU/KZ/mixed для multi‑intent и “не оказываем”.
+- Out of scope:
+  - Память/персонализация/long‑term memory.
+  - Календарное бронирование.
+  - Feedback после визита.
+  - Изменение client_pack цен/услуг.
+- Touch-list:
+  - `truffles-api/app/routers/webhook/decision.py`
+  - `truffles-api/app/routers/webhook/response.py`
+  - `truffles-api/app/routers/webhook/booking.py`
+  - `truffles-api/app/routers/webhook/shield.py`
+  - `truffles-api/app/routers/webhook/context_manager.py`
+  - `ops/diagnose.py`
+  - `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
+  - `docs/TASK_PACKAGES/TP-2026-01-24-consult-quality-core-v1.md`
+- Plan:
+  1) Зафиксировать Task Package и обновить карту документов (STRUCTURE/STATE).
+  2) Pending‑guard: не допускать shield‑drop/прочих ответов в pending; приоритет pending‑responses.
+  3) Consult‑priority: при multi‑intent/consult в booking — ответ consult + booking‑prompt; не терять primary_goal.
+  4) Service_not_offered: явный ответ при отсутствии услуги, без перехода в OOD.
+  5) Evaluator + EVAL‑кейсы RU/KZ/mixed.
+  6) Smoke: logic 20 + llm 10, собрать артефакты.
+- DoD:
+  - `pending_gate_broken` ≤ 10% в smoke (logic 20).
+  - `service_not_offered` фиксируется как корректный outcome, без `ood_false_positive`.
+  - consult‑reply появляется в multi‑intent там, где есть consult‑сигнал.
+  - EVAL обновлён (минимум 4 кейса: RU/KZ/mixed, multi‑intent).
+  - Smoke‑артефакты собраны (summary + rag_summary + report).
+- Checks:
+  - `python3 ops/diagnose.py chaos-sim --count 20 --seed 42 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 5 --poll-interval 0.2 --min-turns 10 --max-turns 12 --noise high --rag-audit`
+  - `python3 ops/diagnose.py chaos-sim --count 10 --seed 43 --mode llm --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 5 --poll-interval 0.2 --min-turns 10 --max-turns 12 --noise high --rag-audit`
+- Evidence:
+  - `ops/artifacts/chaos_sim/<timestamp>/summary.json`
+  - `ops/artifacts/chaos_sim/<timestamp>/rag_summary.json`
+  - `ops/artifacts/chaos_sim/<timestamp>/report.md`
+- Rollback:
+  - `git revert <commit>`.
+- No-go:
+  - Изменения client_pack/knowledge packs кроме EVAL.
+  - Любые внешние WA/Telegram отправки в сим‑режиме.
+- Риски/блокеры:
+  - Старый контейнер (500) → нужен деплой перед live‑прогонами.
+  - Рост LLM‑стоимости → LLM subset только 10–20.
+- Branch/worktree:
+  - Branch: `consult/quality-fix-v1`
+  - Worktree: `/home/zhan/worktrees/consult-quality-fix-v1`
+  - Base ref: `origin/main`
+  - Merge policy: merge‑only (no rebase)
+  - Cleanup: Brain после merge

@@ -679,13 +679,23 @@ def _apply_consult_return(
     return legacy._append_followup(bot_response, consult_return_prompt)
 
 
-def _resolve_current_goal(intent_set: set[str], consult_intent: bool) -> str | None:
+def _resolve_current_goal(
+    intent_set: set[str],
+    consult_intent: bool,
+    expected_reply_type: str | None = None,
+) -> str | None:
+    from . import _legacy as legacy
+
+    if expected_reply_type in {
+        legacy.EXPECTED_REPLY_SERVICE,
+        legacy.EXPECTED_REPLY_TIME,
+        legacy.EXPECTED_REPLY_NAME,
+    }:
+        return "booking"
     if consult_intent:
         return "consult"
     if "booking" in intent_set:
         return "booking"
-    from . import _legacy as legacy
-
     if intent_set & legacy.INFO_INTENTS:
         return "info"
     return None

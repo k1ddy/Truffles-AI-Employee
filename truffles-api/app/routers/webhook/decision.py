@@ -1040,7 +1040,11 @@ def _run_intent_decomposition(
         )
         consult_return_prompt = legacy._build_consult_return_prompt(consult_context)
     if intent_decomp_used:
-        new_goal = legacy._resolve_current_goal(intent_decomp_set, consult_intent)
+        new_goal = legacy._resolve_current_goal(
+            intent_decomp_set,
+            consult_intent,
+            expected_reply_type,
+        )
         if not expected_reply_shortcircuit and not (
             current_goal == "consult" and consult_return_pending
         ):
@@ -4371,22 +4375,6 @@ async def _handle_webhook_payload(
             if branch and branch.knowledge_tag:
                 timing_context["knowledge_tag"] = branch.knowledge_tag
 
-    # 4.9 Behavioral shield (pre-LAW/policy).
-    shield_response = _handle_shield_gate(
-        db=db,
-        conversation=conversation,
-        user=user,
-        message_text=message_text,
-        metadata=metadata,
-        now=now,
-        saved_message=saved_message,
-        send_and_save=_send_and_save,
-        record_escalation_metric=_record_escalation_metric,
-        skip_persist=skip_persist,
-    )
-    if shield_response:
-        return shield_response
-
     # 5. Check session timeout - reset mute if no messages for 24h+
     bot_response = None
     sent = False
@@ -4623,6 +4611,22 @@ async def _handle_webhook_payload(
     )
     if pending_response:
         return pending_response
+
+    # 4.9 Behavioral shield (pre-LAW/policy).
+    shield_response = _handle_shield_gate(
+        db=db,
+        conversation=conversation,
+        user=user,
+        message_text=message_text,
+        metadata=metadata,
+        now=now,
+        saved_message=saved_message,
+        send_and_save=_send_and_save,
+        record_escalation_metric=_record_escalation_metric,
+        skip_persist=skip_persist,
+    )
+    if shield_response:
+        return shield_response
 
     if has_media:
         if not media_info:
@@ -5974,6 +5978,7 @@ async def _handle_webhook_payload(
         info_class_intents=info_class_intents,
         intent_queue_followup=intent_queue_followup,
         current_goal=current_goal,
+        expected_reply_type=expected_reply_type,
         consult_context=consult_context,
         message_count=message_count,
         now=now,

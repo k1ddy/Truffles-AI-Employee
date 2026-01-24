@@ -8149,6 +8149,20 @@ eval_cases:
       normalization_flags:
       - layout_swap
       - normalized
+- id: E905
+  messages:
+  - хочу записаться
+  - волосы ломаются, посоветуйте уход
+  expected:
+    action: reply
+    intent: consult_reply
+    must_include:
+    - рекомендации по восстановлению поврежденных волос
+    - на какую услугу хотите записаться
+    trace_contains:
+    - stage: consult_flow
+      decision: consult_reply
+      consult_playbook_id: hair_damage
 - id: E903
   tier: chaos
   messages:

@@ -493,6 +493,7 @@ def _handle_consult_flow(
     info_class_intents: set[str],
     intent_queue_followup: str | None,
     current_goal: str | None,
+    expected_reply_type: str | None,
     consult_context: dict | None,
     message_count: int,
     now: datetime,
@@ -531,6 +532,18 @@ def _handle_consult_flow(
     service_availability_used = False
     service_availability_decision = None
     consult_context_active = bool(current_goal == "consult")
+    booking_goal_locked = bool(
+        booking_wants_flow
+        or booking_active
+        or booking_signal
+        or current_goal == "booking"
+        or expected_reply_type
+        in {
+            legacy.EXPECTED_REPLY_SERVICE,
+            legacy.EXPECTED_REPLY_TIME,
+            legacy.EXPECTED_REPLY_NAME,
+        }
+    )
     consult_blocked = bool(booking_wants_flow or booking_active or booking_signal)
     if consult_intent or consult_context_active:
         consult_blocked = False
@@ -565,7 +578,7 @@ def _handle_consult_flow(
     service_query_for_consult = intent_decomp_service_query or service_hint
     allow_service_query = bool(service_query_for_consult and (consult_intent or consult_context_active))
     consult_candidate = None
-    if not consult_blocked:
+    if message_text:
         consult_candidate = build_consult_reply(
             message_text,
             client_slug=client_slug,
@@ -573,6 +586,8 @@ def _handle_consult_flow(
             conversation_id=str(conversation.id),
             allow_service_query=allow_service_query,
         )
+        if consult_candidate:
+            consult_blocked = False
     if consult_candidate and not consult_intent and isinstance(intent_decomp_payload, dict):
         consult_intent = True
         intent_decomp_payload = dict(intent_decomp_payload)
@@ -624,7 +639,7 @@ def _handle_consult_flow(
         }
         if consult_short_circuit_service and (
             explicit_info_intent or color_hair_signal or consult_service_short_circuit
-        ):
+        ) and not consult_intent_signal:
             consult_short_circuit = True
             if not consult_short_circuit_reason:
                 consult_short_circuit_reason = (
@@ -804,19 +819,22 @@ def _handle_consult_flow(
                 now=now,
                 reason="consult",
             )
-            context = legacy._get_conversation_context(conversation)
-            context = legacy._set_expected_reply_context(
-                conversation=conversation,
-                saved_message=saved_message,
-                context=context,
-                expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
-                reason="consult_clarify",
-                now=now,
-            )
             consult_meta["consult_questions"] = [legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC]
             consult_meta["clarify_attempt"] = {"intent": "consult", "count": clarify_count}
             consult_meta["clarify_reason"] = "consult"
-            consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+            if booking_goal_locked:
+                consult_meta["clarify_suppressed"] = True
+            else:
+                context = legacy._get_conversation_context(conversation)
+                context = legacy._set_expected_reply_context(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    context=context,
+                    expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                    reason="consult_clarify",
+                    now=now,
+                )
+                consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
             consult_decision = DemoSalonDecision(
                 action="reply",
                 response=legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC,
@@ -851,38 +869,39 @@ def _handle_consult_flow(
                 consult_flow_trace["consult_variant_id"] = consult_variant_id
             legacy._record_decision_trace(conversation, consult_flow_trace)
         if consult_decision.action == "reply":
-            context = legacy._get_conversation_context(conversation)
-            context_manager = legacy._get_context_manager(context)
-            context_manager["current_goal"] = "consult"
-            context_manager = legacy._set_consult_context(
-                context_manager,
-                consult_meta=consult_meta,
-                message_count=message_count,
-            )
-            context = legacy._set_context_manager(context, context_manager)
-            legacy._set_conversation_context(conversation, context)
-            context, memory = legacy._update_session_memory_goal(
-                context, active_goal="consult", now=now
-            )
-            legacy._set_conversation_context(conversation, context)
-            legacy._record_session_memory_update(
-                conversation,
-                saved_message,
-                memory=memory,
-                reason="active_goal",
-            )
-            consult_trace = {
-                "stage": "consult_context",
-                "decision": "set",
-                "current_goal": "consult",
-                "ttl": legacy.CONSULT_CONTEXT_TTL_MESSAGES,
-            }
-            consult_topic = consult_meta.get("consult_topic")
-            if consult_topic:
-                consult_trace["consult_topic"] = consult_topic
-            legacy._record_decision_trace(conversation, consult_trace)
-            if saved_message:
-                legacy._update_message_decision_metadata(saved_message, {"current_goal": "consult"})
+            if not booking_goal_locked:
+                context = legacy._get_conversation_context(conversation)
+                context_manager = legacy._get_context_manager(context)
+                context_manager["current_goal"] = "consult"
+                context_manager = legacy._set_consult_context(
+                    context_manager,
+                    consult_meta=consult_meta,
+                    message_count=message_count,
+                )
+                context = legacy._set_context_manager(context, context_manager)
+                legacy._set_conversation_context(conversation, context)
+                context, memory = legacy._update_session_memory_goal(
+                    context, active_goal="consult", now=now
+                )
+                legacy._set_conversation_context(conversation, context)
+                legacy._record_session_memory_update(
+                    conversation,
+                    saved_message,
+                    memory=memory,
+                    reason="active_goal",
+                )
+                consult_trace = {
+                    "stage": "consult_context",
+                    "decision": "set",
+                    "current_goal": "consult",
+                    "ttl": legacy.CONSULT_CONTEXT_TTL_MESSAGES,
+                }
+                consult_topic = consult_meta.get("consult_topic")
+                if consult_topic:
+                    consult_trace["consult_topic"] = consult_topic
+                legacy._record_decision_trace(conversation, consult_trace)
+                if saved_message:
+                    legacy._update_message_decision_metadata(saved_message, {"current_goal": "consult"})
         consult_trace = {
             "stage": "consult",
             "decision": consult_decision.action,
@@ -961,6 +980,28 @@ def _handle_consult_flow(
 
         bot_response = consult_decision.response
         bot_response = legacy._combine_sidecar(bot_response, intent_queue_followup)
+        booking_followup = None
+        if booking_goal_locked:
+            if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
+                booking_followup = legacy.MSG_BOOKING_ASK_SERVICE
+            elif expected_reply_type == legacy.EXPECTED_REPLY_TIME:
+                booking_followup = legacy.MSG_BOOKING_ASK_DATETIME
+            elif expected_reply_type == legacy.EXPECTED_REPLY_NAME:
+                booking_followup = legacy.MSG_BOOKING_ASK_NAME
+            else:
+                context = legacy._get_conversation_context(conversation)
+                context_manager = legacy._get_context_manager(context)
+                refusal_flags = (
+                    context_manager.get("refusal_flags") if isinstance(context_manager, dict) else None
+                )
+                booking_state = legacy._get_booking_context(context)
+                _, booking_followup = legacy._next_booking_prompt(
+                    booking_state,
+                    refusal_flags=refusal_flags,
+                )
+            if booking_followup:
+                consult_meta["booking_followup"] = True
+        bot_response = legacy._append_followup(bot_response, booking_followup)
         legacy._reset_low_confidence_retry(conversation)
         bot_response, sent = send_and_save(bot_response)
         result_message = "Consult reply sent" if sent else "Consult reply send failed"
