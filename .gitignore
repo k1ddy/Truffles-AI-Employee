@@ -20,3 +20,6 @@ __pycache__/
 
 # Generated OpenAPI artifacts
 contracts/console_api/openapi.generated.yaml
+
+# Chaos-sim artifacts
+ops/artifacts/

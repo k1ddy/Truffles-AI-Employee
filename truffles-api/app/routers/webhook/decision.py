@@ -1,17 +1,26 @@
 """Intent and decision helpers for webhook routing."""
 
-# ruff: noqa: E402
-
 from __future__ import annotations
 
+import asyncio
+import base64
+import functools
+import hashlib
+import mimetypes
 import os
+import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+from urllib.parse import urlparse
+from uuid import UUID
 
+import httpx
 from pydantic import ValidationError
+from sqlalchemy import or_, text
+from sqlalchemy.orm import Session
 
-# Import contracts from centralized module
+from app.adapters.chatflow import ChatFlowAdapter
 from app.contracts.decision import (
     DECISION_GRAPH_STAGES,
     DecisionOutcome,
@@ -28,10 +37,302 @@ from app.contracts.decision import (
     build_intent_contract,
     build_response_contract,
 )
-from app.models import ClientSettings, Conversation, Message
-from app.schemas.webhook import WebhookRequest
-from app.services.demo_salon_knowledge import DemoSalonDecision
-from app.services.intent_service import Intent
+from app.logging_config import (
+    get_logger,
+    get_trace_id,
+    record_escalation_count,
+    record_inbound_count,
+    record_policy_count,
+    start_span,
+)
+from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
+from app.ports.messaging import MessageOptions
+from app.routers.webhook.booking import (
+    BOOKING_SLOT_ORDER,
+    _apply_booking_slot,
+    _apply_expected_reply_slot,
+    _build_booking_summary,
+    _clear_service_hint,
+    _expected_reply_for_booking_question,
+    _get_booking_context,
+    _get_recent_service_hint,
+    _handle_booking_flow,
+    _handle_booking_interrupt,
+    _is_blocked_slot_message,
+    _is_booking_related_message,
+    _is_booking_time_service_decision,
+    _match_expected_reply,
+    _next_booking_prompt,
+    _resolve_datetime_offline,
+    _select_expected_reply_message,
+    _select_last_non_booking_message,
+    _set_booking_context,
+    _set_service_hint,
+    _update_booking_from_message,
+    _update_booking_from_messages,
+    _validate_name_slot,
+)
+from app.routers.webhook.branch_selection import (
+    BRANCH_CONTEXT_KEY,
+    BRANCH_SELECTION_KEY,
+    MSG_BRANCH_SELECTED,
+    _apply_branch_selection,
+    _build_branch_prompt,
+    _build_branch_selection,
+    _coerce_uuid,
+    _get_active_branches,
+    _get_branch_selection,
+    _get_user_branch_preference,
+    _handle_branch_selection_gate,
+    _is_branch_only_message,
+    _match_branch_choice,
+    _set_branch_selection,
+    _set_user_branch_preference,
+)
+from app.routers.webhook.context_manager import (
+    _build_compact_summary_text,
+    _build_consult_return_prompt,
+    _get_asr_confirmation,
+    _get_class_carryover,
+    _get_consult_context,
+    _get_context_manager,
+    _get_conversation_context,
+    _get_expected_reply_type,
+    _get_low_confidence_retry_count,
+    _get_memory_pending,
+    _get_memory_profile,
+    _get_reengage_confirmation,
+    _get_service_carryover,
+    _increment_context_message_count,
+    _is_asr_confirmation_active,
+    _is_re_entry_required,
+    _is_reengage_confirmation_active,
+    _maybe_store_class_carryover,
+    _maybe_store_service_carryover,
+    _prune_class_carryover,
+    _prune_consult_context,
+    _prune_service_carryover,
+    _record_context_manager_decision,
+    _reset_low_confidence_retry,
+    _resolve_current_goal,
+    _set_asr_confirmation,
+    _set_class_carryover,
+    _set_consult_context,
+    _set_context_manager,
+    _set_conversation_context,
+    _set_expected_reply_context,
+    _set_expected_reply_type,
+    _set_handover_confirmation,
+    _set_low_confidence_retry_count,
+    _set_memory_pending,
+    _set_memory_profile,
+    _set_re_entry_required,
+    _set_reengage_confirmation,
+    _set_service_carryover,
+    _update_compact_summary,
+)
+from app.routers.webhook.dedup import (
+    _buffer_user_message,
+    _drain_buffered_messages,
+    _get_debounce_redis,
+    _handle_debounce_gate,
+    _handle_dedup_gate,
+    is_duplicate_message_id,
+    should_process_debounced_message,
+)
+from app.routers.webhook.guards import (
+    _apply_session_timeout_reset,
+    _booking_clarify_guard_reason,
+    _format_intent_queue_prompt,
+    _format_multi_intent_followup,
+    _get_clarify_attempt_state,
+    _get_intent_queue,  # noqa: F401
+    _handle_clarify_limit_escalation,
+    _handle_opt_out_mute_gate,
+    _handle_reengage_and_mute_gate,
+    _register_clarify_attempt,
+    _select_intent_from_queue,  # noqa: F401
+    _set_clarify_attempt,
+    _set_intent_queue,
+    _should_escalate_for_clarify,
+)
+from app.routers.webhook.info import (
+    _build_info_intent_reply,
+    _count_anchor_hits,
+    _detect_info_class_intents,
+    _extract_truth_gate_info_intents,
+    _handle_info_flow,
+    _handle_offline_info_class,
+    _handle_truth_gate_fallback,
+    _is_short_reply,
+    _looks_like_info_query,
+    _tokenize_for_matching,
+)
+from app.routers.webhook.media import (
+    MediaDecision,
+    MediaInfo,
+    _build_media_caption,
+    _deserialize_media_decision,
+    _evaluate_media_decision,
+    _extract_media_info,
+    _get_media_policy,
+    _get_media_rate_settings,
+    _get_transcription_settings,
+    _is_asr_low_confidence,
+    _is_placeholder_text,
+    _is_style_reference_request,
+    _is_voice_note,
+    _maybe_transcribe_voice,
+    _send_telegram_media,
+    _serialize_media_decision,
+    _store_media_locally,
+    _update_message_asr_metadata,
+    _update_message_media_metadata,
+)
+from app.routers.webhook.outbox import _handle_enqueue_only_accept, _prepare_skip_persist
+from app.routers.webhook.pending import (
+    _forward_pending_to_telegram,
+    _handle_handover_confirmation_gate,
+    _handle_manager_active_gate,
+    _handle_pending_gate,
+)
+from app.routers.webhook.policy import (
+    _demo_salon_escalation_gate,
+    _demo_salon_price_sidecar,
+    _detect_booking_cancel,
+    _detect_llm_guard_topics,
+    _format_discounts_policy_reply,
+    _get_policy_handler,
+    _get_policy_pack,
+    _get_policy_type,
+    _get_routing_policy,
+    _handle_hard_law_gate,
+    _handle_policy_escalation_gate,
+    _has_discount_policy_rules,
+    _looks_like_policy_topic,
+    _looks_like_promotions_request,
+    _resolve_hard_law_sections,
+    _should_escalate_to_pending,
+    _should_run_booking_flow,
+    _should_run_demo_truth_gate,
+    _should_run_truth_gate,
+)
+from app.routers.webhook.response import (
+    _compose_fact_response,
+    _ensure_rag_rewrite,
+    _handle_ai_response_action,
+    _handle_consult_flow,
+    _handle_llm_primary,
+    _maybe_apply_consult_return,
+    _record_rag_meta,
+)
+from app.routers.webhook.response import (
+    _finalize_bot_response as _finalize_bot_response_helper,
+)
+from app.routers.webhook.response import (
+    _record_llm_budget_trace as _record_llm_budget_trace_helper,
+)
+from app.routers.webhook.response import (
+    _send_and_save as _send_and_save_helper,
+)
+from app.routers.webhook.response import (
+    _send_response as _send_response_helper,
+)
+from app.routers.webhook.router_sla import _update_router_sla
+from app.routers.webhook.session_memory import (
+    _get_session_memory,
+    _is_session_memory_expired,
+    _is_session_reset_only_message,
+    _normalize_session_memory,
+    _parse_session_memory_time,
+    _record_session_memory_update,
+    _reset_session_memory,
+    _session_memory_snapshot,
+    _set_session_memory,
+    _should_reset_session_memory,
+    _update_session_memory_goal,
+    _update_session_memory_on_answer,
+    _update_session_memory_on_question,
+)
+from app.routers.webhook.shield import _handle_shield_gate
+from app.routers.webhook.trace import (
+    _attach_llm_cache_flag,
+    _merge_message_timing,
+    _record_decision_trace,
+    _record_message_decision_meta,
+    _update_message_decision_metadata,
+)
+from app.schemas.webhook import WebhookRequest, WebhookResponse
+from app.services.ai_service import (
+    ACKNOWLEDGEMENT_RESPONSE,
+    BOT_STATUS_RESPONSE,
+    GREETING_RESPONSE,
+    HIGH_CONFIDENCE_THRESHOLD,
+    MID_CONFIDENCE_THRESHOLD,
+    OUT_OF_DOMAIN_RESPONSE,
+    THANKS_RESPONSE,
+    classify_confirmation,
+    detect_multi_intent,
+    detect_refusal_flags,
+    is_acknowledgement_message,
+    is_bot_status_question,
+    is_greeting_message,
+    is_low_signal_message,
+    is_thanks_message,
+    normalize_for_matching,
+    rewrite_for_service_match,
+    transcribe_audio_with_fallback,
+)
+from app.services.chatflow_service import get_instance_id
+from app.services.conversation_service import get_or_create_conversation, get_or_create_user
+from app.services.demo_salon_knowledge import (
+    DemoSalonDecision,
+    _detect_promotion_intent,
+    _has_duration_signal,
+    _has_price_signal,
+    _match_service,
+    build_consult_reply,
+    build_quiet_hours_notice,
+    compose_multi_truth_reply,
+    format_reply_from_truth,
+    get_demo_salon_decision,
+    get_demo_salon_price_item,
+    get_demo_salon_price_reply,
+    get_demo_salon_service_decision,
+    get_demo_salon_service_hint,
+    load_yaml_truth,
+    semantic_question_type,
+    semantic_service_match,
+)
+from app.services.demo_salon_knowledge import (
+    _normalize_text as _normalize_service_text,
+)
+from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
+from app.services.intent_service import (
+    DomainIntent,
+    Intent,
+    classify_domain_with_scores,
+    classify_intent,
+    interpret_expected_reply,
+    is_frustration_message,
+    is_human_request_message,
+    is_opt_out_message,
+    is_rejection,
+    route_dialogue_controller,
+    should_escalate,
+)
+from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
+from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
+from app.services.state_machine import ConversationState
+from app.services.state_service import (
+    apply_simulation_context,
+    build_simulation_context,
+    escalate_to_pending,
+    is_simulation_context,
+    manager_resolve,
+    transition_state,
+)
+from app.services.telegram_service import TelegramService
 
 
 def _normalize_message_text(message_text: str | None) -> str:
@@ -1278,307 +1579,6 @@ def _run_class_router_stage(
     )
 
 # Legacy webhook orchestrator + helpers moved from _legacy.py.
-import asyncio
-import base64
-import functools
-import hashlib
-import mimetypes
-import re
-from datetime import timedelta, timezone
-from urllib.parse import urlparse
-from uuid import UUID
-
-import httpx
-from sqlalchemy import or_, text
-from sqlalchemy.orm import Session
-
-from app.adapters.chatflow import ChatFlowAdapter
-from app.logging_config import (
-    get_logger,
-    get_trace_id,
-    record_escalation_count,
-    record_inbound_count,
-    record_policy_count,
-    start_span,
-)
-from app.models import Branch, Client, Handover, User
-from app.ports.messaging import MessageOptions
-from app.routers.webhook.booking import (
-    BOOKING_SLOT_ORDER,
-    _apply_booking_slot,
-    _apply_expected_reply_slot,
-    _build_booking_summary,
-    _clear_service_hint,
-    _expected_reply_for_booking_question,
-    _get_booking_context,
-    _get_recent_service_hint,
-    _handle_booking_flow,
-    _handle_booking_interrupt,
-    _is_blocked_slot_message,
-    _is_booking_related_message,
-    _is_booking_time_service_decision,
-    _match_expected_reply,
-    _next_booking_prompt,
-    _resolve_datetime_offline,
-    _select_expected_reply_message,
-    _select_last_non_booking_message,
-    _set_booking_context,
-    _set_service_hint,
-    _update_booking_from_message,
-    _update_booking_from_messages,
-    _validate_name_slot,
-)
-from app.routers.webhook.branch_selection import (
-    BRANCH_CONTEXT_KEY,
-    BRANCH_SELECTION_KEY,
-    MSG_BRANCH_SELECTED,
-    _apply_branch_selection,
-    _build_branch_prompt,
-    _build_branch_selection,
-    _coerce_uuid,
-    _get_active_branches,
-    _get_branch_selection,
-    _get_user_branch_preference,
-    _handle_branch_selection_gate,
-    _is_branch_only_message,
-    _match_branch_choice,
-    _set_branch_selection,
-    _set_user_branch_preference,
-)
-from app.routers.webhook.context_manager import (
-    _build_compact_summary_text,
-    _build_consult_return_prompt,
-    _get_asr_confirmation,
-    _get_class_carryover,
-    _get_consult_context,
-    _get_context_manager,
-    _get_conversation_context,
-    _get_expected_reply_type,
-    _get_low_confidence_retry_count,
-    _get_reengage_confirmation,
-    _get_service_carryover,
-    _increment_context_message_count,
-    _is_asr_confirmation_active,
-    _is_re_entry_required,
-    _is_reengage_confirmation_active,
-    _maybe_store_class_carryover,
-    _maybe_store_service_carryover,
-    _prune_class_carryover,
-    _prune_consult_context,
-    _prune_service_carryover,
-    _record_context_manager_decision,
-    _reset_low_confidence_retry,
-    _resolve_current_goal,
-    _set_asr_confirmation,
-    _set_class_carryover,
-    _set_consult_context,
-    _set_context_manager,
-    _set_conversation_context,
-    _set_expected_reply_context,
-    _set_expected_reply_type,
-    _set_handover_confirmation,
-    _set_low_confidence_retry_count,
-    _set_re_entry_required,
-    _set_reengage_confirmation,
-    _set_service_carryover,
-    _update_compact_summary,
-)
-from app.routers.webhook.dedup import (
-    _buffer_user_message,
-    _drain_buffered_messages,
-    _get_debounce_redis,
-    _handle_debounce_gate,
-    _handle_dedup_gate,
-    is_duplicate_message_id,
-    should_process_debounced_message,
-)
-from app.routers.webhook.guards import (
-    _apply_session_timeout_reset,
-    _booking_clarify_guard_reason,
-    _format_intent_queue_prompt,
-    _format_multi_intent_followup,
-    _get_clarify_attempt_state,
-    _get_intent_queue,  # noqa: F401
-    _handle_clarify_limit_escalation,
-    _handle_opt_out_mute_gate,
-    _handle_reengage_and_mute_gate,
-    _register_clarify_attempt,
-    _select_intent_from_queue,  # noqa: F401
-    _set_clarify_attempt,
-    _set_intent_queue,
-    _should_escalate_for_clarify,
-)
-from app.routers.webhook.info import (
-    _build_info_intent_reply,
-    _count_anchor_hits,
-    _detect_info_class_intents,
-    _extract_truth_gate_info_intents,
-    _handle_info_flow,
-    _handle_offline_info_class,
-    _handle_truth_gate_fallback,
-    _is_short_reply,
-    _looks_like_info_query,
-    _tokenize_for_matching,
-)
-from app.routers.webhook.media import (
-    MediaDecision,
-    MediaInfo,
-    _build_media_caption,
-    _deserialize_media_decision,
-    _evaluate_media_decision,
-    _extract_media_info,
-    _get_media_policy,
-    _get_media_rate_settings,
-    _get_transcription_settings,
-    _is_asr_low_confidence,
-    _is_placeholder_text,
-    _is_style_reference_request,
-    _is_voice_note,
-    _maybe_transcribe_voice,
-    _send_telegram_media,
-    _serialize_media_decision,
-    _store_media_locally,
-    _update_message_asr_metadata,
-    _update_message_media_metadata,
-)
-from app.routers.webhook.outbox import _handle_enqueue_only_accept, _prepare_skip_persist
-from app.routers.webhook.pending import (
-    _forward_pending_to_telegram,
-    _handle_handover_confirmation_gate,
-    _handle_manager_active_gate,
-    _handle_pending_gate,
-)
-from app.routers.webhook.policy import (
-    _demo_salon_escalation_gate,
-    _demo_salon_price_sidecar,
-    _detect_booking_cancel,
-    _detect_llm_guard_topics,
-    _format_discounts_policy_reply,
-    _get_policy_handler,
-    _get_policy_pack,
-    _get_policy_type,
-    _get_routing_policy,
-    _handle_hard_law_gate,
-    _handle_policy_escalation_gate,
-    _has_discount_policy_rules,
-    _looks_like_policy_topic,
-    _looks_like_promotions_request,
-    _resolve_hard_law_sections,
-    _should_escalate_to_pending,
-    _should_run_booking_flow,
-    _should_run_demo_truth_gate,
-    _should_run_truth_gate,
-)
-from app.routers.webhook.response import (
-    _compose_fact_response,
-    _ensure_rag_rewrite,
-    _handle_ai_response_action,
-    _handle_consult_flow,
-    _handle_llm_primary,
-    _maybe_apply_consult_return,
-    _record_rag_meta,
-)
-from app.routers.webhook.response import (
-    _finalize_bot_response as _finalize_bot_response_helper,
-)
-from app.routers.webhook.response import (
-    _record_llm_budget_trace as _record_llm_budget_trace_helper,
-)
-from app.routers.webhook.response import (
-    _send_and_save as _send_and_save_helper,
-)
-from app.routers.webhook.response import (
-    _send_response as _send_response_helper,
-)
-from app.routers.webhook.router_sla import _update_router_sla
-from app.routers.webhook.session_memory import (
-    _get_session_memory,
-    _is_session_memory_expired,
-    _is_session_reset_only_message,
-    _normalize_session_memory,
-    _parse_session_memory_time,
-    _record_session_memory_update,
-    _reset_session_memory,
-    _session_memory_snapshot,
-    _set_session_memory,
-    _should_reset_session_memory,
-    _update_session_memory_goal,
-    _update_session_memory_on_answer,
-    _update_session_memory_on_question,
-)
-from app.routers.webhook.shield import _handle_shield_gate
-from app.routers.webhook.trace import (
-    _attach_llm_cache_flag,
-    _merge_message_timing,
-    _record_decision_trace,
-    _record_message_decision_meta,
-    _update_message_decision_metadata,
-)
-from app.schemas.webhook import WebhookResponse
-from app.services.ai_service import (
-    ACKNOWLEDGEMENT_RESPONSE,
-    BOT_STATUS_RESPONSE,
-    GREETING_RESPONSE,
-    HIGH_CONFIDENCE_THRESHOLD,
-    MID_CONFIDENCE_THRESHOLD,
-    OUT_OF_DOMAIN_RESPONSE,
-    THANKS_RESPONSE,
-    classify_confirmation,
-    detect_multi_intent,
-    detect_refusal_flags,
-    is_acknowledgement_message,
-    is_bot_status_question,
-    is_greeting_message,
-    is_low_signal_message,
-    is_thanks_message,
-    normalize_for_matching,
-    rewrite_for_service_match,
-    transcribe_audio_with_fallback,
-)
-from app.services.chatflow_service import get_instance_id
-from app.services.conversation_service import (
-    get_or_create_conversation,
-    get_or_create_user,
-)
-from app.services.demo_salon_knowledge import (
-    _detect_promotion_intent,
-    _has_duration_signal,
-    _has_price_signal,
-    _match_service,
-    build_consult_reply,
-    build_quiet_hours_notice,
-    compose_multi_truth_reply,
-    format_reply_from_truth,
-    get_demo_salon_decision,
-    get_demo_salon_price_item,
-    get_demo_salon_price_reply,
-    get_demo_salon_service_decision,
-    get_demo_salon_service_hint,
-    load_yaml_truth,
-    semantic_question_type,
-    semantic_service_match,
-)
-from app.services.demo_salon_knowledge import (
-    _normalize_text as _normalize_service_text,
-)
-from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
-from app.services.intent_service import (
-    DomainIntent,
-    classify_domain_with_scores,
-    classify_intent,
-    interpret_expected_reply,
-    is_frustration_message,
-    is_human_request_message,
-    is_opt_out_message,
-    is_rejection,
-    route_dialogue_controller,
-    should_escalate,
-)
-from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
-from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
-from app.services.state_machine import ConversationState
-from app.services.state_service import escalate_to_pending, manager_resolve, transition_state
-from app.services.telegram_service import TelegramService
 
 logger = get_logger("webhook")
 _BRANCH_EXPORTS = (
@@ -1899,6 +1899,14 @@ MSG_LOW_CONFIDENCE = "Хороший вопрос! Уточню у коллег 
 MSG_HANDOVER_CONFIRM = "Не уверен, что понял. Подключить менеджера? Ответьте 'да' или 'нет'."
 MSG_REENGAGE_CONFIRM = "Вы просили не писать. Хотите снова общаться? Ответьте 'да' или 'нет'."
 MSG_REENGAGE_DECLINED = "Хорошо, не буду писать. Если передумаете — напишите снова."
+MSG_MEMORY_CONSENT = (
+    "Могу запомнить ваши предпочтения (имя/услуга/время), чтобы не задавать одно и то же. "
+    "Ответьте 'да' или 'нет'.\n\n"
+    "Қалауыңызды есте сақтай аламын ба (атыңыз/қызмет/уақыт)? "
+    "'иә' немесе 'жоқ' деп жазыңыз."
+)
+MSG_MEMORY_CONSENT_ACCEPTED = "Спасибо! Запомнил ваши предпочтения."
+MSG_MEMORY_CONSENT_DECLINED = "Хорошо, не буду запоминать."
 MSG_HANDOVER_DECLINED = (
     "Ок. Напишите, что именно интересует по салону: цена/запись/адрес/мастер/жалоба."
 )
@@ -1943,6 +1951,15 @@ PENDING_SLA_CONTEXT_KEY = "pending_sla"
 PENDING_SLA_PING_SENT_KEY = "ping_sent_at"
 PENDING_SLA_AUTO_CLOSE_KEY = "auto_closed_at"
 PENDING_RESUME_KEY = "pending_resume"
+MEMORY_PROFILE_KEY = "memory_profile"
+MEMORY_PENDING_KEY = "memory_pending"
+MEMORY_PROFILE_TTL_DAYS = 180
+MEMORY_PENDING_TTL_HOURS = 168
+MEMORY_PROFILE_ENABLED = os.environ.get("MEMORY_PROFILE_ENABLED", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 PENDING_ACK_PHRASES = {
     "ага",
@@ -3265,6 +3282,9 @@ async def _handle_webhook_payload(
         timing_context["branch_id"] = str(resolved_branch_id)
     if resolved_knowledge_tag:
         timing_context["knowledge_tag"] = resolved_knowledge_tag
+    simulation_context = build_simulation_context(metadata)
+    if simulation_context:
+        timing_context["simulation"] = dict(simulation_context)
     timing_context["timing_persisted"] = False
 
     outbound_idempotency_key = message_id or build_inbound_message_id(
@@ -3347,6 +3367,18 @@ async def _handle_webhook_payload(
 
     def _send_response(text: str) -> bool:
         send_start = time.monotonic()
+        if conversation and is_simulation_context(conversation):
+            logger.info(
+                "Simulation mode: skipping outbound send",
+                extra={
+                    "context": {
+                        "conversation_id": str(conversation.id),
+                        "remote_jid": remote_jid,
+                    }
+                },
+            )
+            _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": True})
+            return True
         sent = False
         with start_span("webhook.send", context=timing_context) as span:
             instance_id = get_instance_id(
@@ -3498,6 +3530,10 @@ async def _handle_webhook_payload(
                 branch_id=resolved_branch_id,
             )
         timing_context["conversation_id"] = str(conversation.id)
+        if metadata and conversation:
+            sim_context = apply_simulation_context(conversation, metadata)
+            if sim_context:
+                timing_context["simulation"] = dict(sim_context)
 
         if media_info and media_decision is None and media_policy:
             media_decision = await _evaluate_media_decision(
@@ -3879,8 +3915,229 @@ async def _handle_webhook_payload(
             },
         )
 
+    def _detect_language_preference(text: str | None) -> str | None:
+        if not text:
+            return None
+        normalized = _normalize_text(text)
+        if not normalized:
+            return None
+        if any(token in normalized for token in ("қазақша", "казах", "қазақ", "қазак")):
+            return "kz"
+        if any(token in normalized for token in ("по-русски", "русск")):
+            return "ru"
+        for char in ("ә", "ғ", "қ", "ң", "ө", "ұ", "ү", "һ", "і"):
+            if char in normalized:
+                return "kz"
+        return None
+
+    def _collect_memory_candidates(context: dict, text: str | None) -> dict[str, dict]:
+        candidates: dict[str, dict] = {}
+        booking_state = _get_booking_context(context)
+        if isinstance(booking_state, dict):
+            name_value = booking_state.get("name")
+            if isinstance(name_value, str) and name_value.strip():
+                candidates["name"] = {
+                    "value": name_value.strip(),
+                    "source": "booking_slot",
+                    "confidence": 1.0,
+                }
+            service_value = booking_state.get("service")
+            if isinstance(service_value, str) and service_value.strip():
+                candidates["preferred_service"] = {
+                    "value": service_value.strip(),
+                    "source": "booking_slot",
+                    "confidence": 1.0,
+                }
+            time_value = booking_state.get("datetime")
+            if isinstance(time_value, str) and time_value.strip():
+                candidates["preferred_time"] = {
+                    "value": time_value.strip(),
+                    "source": "booking_slot",
+                    "confidence": 1.0,
+                }
+        language = _detect_language_preference(text)
+        if language:
+            candidates["language"] = {
+                "value": language,
+                "source": "language_detect",
+                "confidence": 1.0,
+            }
+        return candidates
+
+    def _upsert_memory_item(
+        *,
+        items: dict[str, dict],
+        key: str,
+        payload: dict,
+        now: datetime,
+        ttl_days: int,
+    ) -> bool:
+        if not isinstance(key, str) or not key.strip() or not isinstance(payload, dict):
+            return False
+        value = payload.get("value")
+        if not isinstance(value, str) or not value.strip():
+            return False
+        expires_at = (now + timedelta(days=ttl_days)).isoformat()
+        next_item = {
+            "value": value.strip(),
+            "confidence": float(payload.get("confidence") or 1.0),
+            "source": payload.get("source") or "user",
+            "updated_at": now.isoformat(),
+            "expires_at": expires_at,
+        }
+        existing = items.get(key) if isinstance(items.get(key), dict) else None
+        if existing and existing.get("value") == next_item["value"]:
+            items[key] = {**existing, **next_item}
+            return True
+        items[key] = next_item
+        return True
+
+    def _merge_pending_items(
+        pending: dict | None,
+        candidates: dict[str, dict],
+        now: datetime,
+    ) -> tuple[dict | None, list[str]]:
+        if not candidates:
+            return pending, []
+        pending = dict(pending) if isinstance(pending, dict) else {}
+        items = pending.get("items")
+        if not isinstance(items, dict):
+            items = {}
+        added_keys: list[str] = []
+        for key, payload in candidates.items():
+            if not isinstance(payload, dict):
+                continue
+            value = payload.get("value")
+            if not isinstance(value, str) or not value.strip():
+                continue
+            items[key] = {
+                "value": value.strip(),
+                "source": payload.get("source") or "user",
+                "confidence": float(payload.get("confidence") or 1.0),
+                "captured_at": now.isoformat(),
+            }
+            added_keys.append(key)
+        if items:
+            pending["items"] = items
+            pending["expires_at"] = (now + timedelta(hours=MEMORY_PENDING_TTL_HOURS)).isoformat()
+            return pending, added_keys
+        return None, []
+
+    def _should_prompt_memory_consent(context: dict, response_text: str | None) -> bool:
+        if conversation.state != ConversationState.BOT_ACTIVE.value:
+            return False
+        if not response_text:
+            return False
+        expected_reply = _get_expected_reply_type(context)
+        if expected_reply:
+            return False
+        booking_state = _get_booking_context(context)
+        if isinstance(booking_state, dict) and booking_state.get("active"):
+            return False
+        normalized = _normalize_text(response_text)
+        if "ответьте" in normalized and "да" in normalized and "нет" in normalized:
+            return False
+        return True
+
+    def _apply_memory_updates(response_text: str | None) -> str | None:
+        if not response_text:
+            return response_text
+        if not MEMORY_PROFILE_ENABLED:
+            return response_text
+        context = _get_conversation_context(conversation)
+        profile, profile_changed = _get_memory_profile(context, now=now)
+        pending, pending_expired = _get_memory_pending(context, now=now)
+        if pending_expired:
+            pending = None
+        consent = profile.get("consent") if isinstance(profile.get("consent"), dict) else {}
+        consent_status = consent.get("status") or "unknown"
+        candidates = _collect_memory_candidates(context, message_text)
+        stored_keys: list[str] = []
+        pending_keys: list[str] = []
+        prompt_consent = False
+
+        if consent_status == "granted":
+            items = profile.get("items") if isinstance(profile.get("items"), dict) else {}
+            for key, payload in candidates.items():
+                if _upsert_memory_item(
+                    items=items,
+                    key=key,
+                    payload=payload,
+                    now=now,
+                    ttl_days=int(profile.get("ttl_days") or MEMORY_PROFILE_TTL_DAYS),
+                ):
+                    stored_keys.append(key)
+            if pending and isinstance(pending.get("items"), dict):
+                for key, payload in pending["items"].items():
+                    if _upsert_memory_item(
+                        items=items,
+                        key=key,
+                        payload=payload,
+                        now=now,
+                        ttl_days=int(profile.get("ttl_days") or MEMORY_PROFILE_TTL_DAYS),
+                    ):
+                        stored_keys.append(key)
+                pending = None
+            profile["items"] = items
+        elif consent_status == "declined":
+            pending = None
+        else:
+            pending, pending_keys = _merge_pending_items(pending, candidates, now)
+            if consent_status == "unknown" and pending_keys and _should_prompt_memory_consent(
+                context, response_text
+            ):
+                consent_status = "asked"
+                consent["status"] = "asked"
+                consent["asked_at"] = now.isoformat()
+                consent["source"] = "explicit"
+                consent["prompt_count"] = int(consent.get("prompt_count") or 0) + 1
+                prompt_consent = True
+                profile_changed = True
+
+        consent["status"] = consent_status
+        profile["consent"] = consent
+        if stored_keys:
+            profile["last_updated_at"] = now.isoformat()
+        if profile_changed or stored_keys or pending_expired or pending_keys:
+            context = _set_memory_profile(context, profile)
+            context = _set_memory_pending(context, pending)
+            _set_conversation_context(conversation, context)
+        if prompt_consent:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "memory_profile",
+                    "decision": "consent_prompted",
+                    "state": conversation.state,
+                    "pending_keys": pending_keys,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {"memory_consent_prompted": True, "memory_pending_keys": pending_keys},
+                )
+            return f"{response_text}\n\n{MSG_MEMORY_CONSENT}"
+        if stored_keys:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "memory_profile",
+                    "decision": "stored",
+                    "state": conversation.state,
+                    "stored_keys": sorted(set(stored_keys)),
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {"memory_profile_stored": sorted(set(stored_keys))},
+                )
+        return response_text
+
     def _send_and_save(text: str, *, allow_quiet_hours: bool = True) -> tuple[str, bool]:
         final_text = _finalize_bot_response(text, allow_quiet_hours=allow_quiet_hours)
+        final_text = _apply_memory_updates(final_text)
         _record_contract_traces()
         save_message(db, conversation.id, client.id, role="assistant", content=final_text)
         sent = _send_response(final_text)
@@ -4250,40 +4507,111 @@ async def _handle_webhook_payload(
                     context = _set_asr_confirmation(context, None)
                     _set_conversation_context(conversation, context)
 
-        if asr_low_confidence and transcript:
-            attempt = int(asr_confirmation.get("attempt", 0)) + 1 if asr_confirmation else 1
-            confirmation_payload = {
-                "asked_at": now.isoformat(),
-                "transcript": transcript.strip(),
+    if asr_low_confidence and transcript:
+        attempt = int(asr_confirmation.get("attempt", 0)) + 1 if asr_confirmation else 1
+        confirmation_payload = {
+            "asked_at": now.isoformat(),
+            "transcript": transcript.strip(),
+            "attempt": attempt,
+        }
+        context = _set_asr_confirmation(context, confirmation_payload)
+        _set_conversation_context(conversation, context)
+        bot_response = MSG_ASR_CONFIRM.format(text=confirmation_payload["transcript"])
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {"asr_confirm_requested": True, "asr_low_confidence": True},
+            )
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "media",
+                "decision": "asr_confirm_requested",
+                "reason": "low_confidence",
+                "state": conversation.state,
                 "attempt": attempt,
-            }
-            context = _set_asr_confirmation(context, confirmation_payload)
-            _set_conversation_context(conversation, context)
-            bot_response = MSG_ASR_CONFIRM.format(text=confirmation_payload["transcript"])
-            if saved_message:
-                _update_message_decision_metadata(
-                    saved_message,
-                    {"asr_confirm_requested": True, "asr_low_confidence": True},
+            },
+        )
+        bot_response, sent = _send_and_save(bot_response)
+        result_message = "ASR confirmation requested" if sent else "ASR confirmation send failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    # 9.015 Memory consent confirmation (bot-active only).
+    if (
+        MEMORY_PROFILE_ENABLED
+        and routing.get("allow_bot_reply")
+        and conversation.state == ConversationState.BOT_ACTIVE.value
+    ):
+        context = _get_conversation_context(conversation)
+        profile, profile_changed = _get_memory_profile(context, now=now)
+        consent = profile.get("consent") if isinstance(profile.get("consent"), dict) else {}
+        if consent.get("status") == "asked":
+            decision = classify_confirmation(message_text)
+            if decision in {"yes", "no"}:
+                pending, pending_expired = _get_memory_pending(context, now=now)
+                if pending_expired:
+                    pending = None
+                stored_keys: list[str] = []
+                if decision == "yes":
+                    items = profile.get("items") if isinstance(profile.get("items"), dict) else {}
+                    if pending and isinstance(pending.get("items"), dict):
+                        for key, payload in pending["items"].items():
+                            if _upsert_memory_item(
+                                items=items,
+                                key=key,
+                                payload=payload,
+                                now=now,
+                                ttl_days=int(profile.get("ttl_days") or MEMORY_PROFILE_TTL_DAYS),
+                            ):
+                                stored_keys.append(key)
+                    profile["items"] = items
+                    consent["status"] = "granted"
+                    consent["granted_at"] = now.isoformat()
+                    response_text = MSG_MEMORY_CONSENT_ACCEPTED
+                else:
+                    consent["status"] = "declined"
+                    consent["declined_at"] = now.isoformat()
+                    response_text = MSG_MEMORY_CONSENT_DECLINED
+                profile["consent"] = consent
+                if stored_keys:
+                    profile["last_updated_at"] = now.isoformat()
+                context = _set_memory_profile(context, profile)
+                context = _set_memory_pending(context, None)
+                _set_conversation_context(conversation, context)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "memory_profile",
+                        "decision": "consent_granted" if decision == "yes" else "consent_declined",
+                        "state": conversation.state,
+                        "stored_keys": sorted(set(stored_keys)) if stored_keys else None,
+                    },
                 )
-            _record_decision_trace(
-                conversation,
-                {
-                    "stage": "media",
-                    "decision": "asr_confirm_requested",
-                    "reason": "low_confidence",
-                    "state": conversation.state,
-                    "attempt": attempt,
-                },
-            )
-            bot_response, sent = _send_and_save(bot_response)
-            result_message = "ASR confirmation requested" if sent else "ASR confirmation send failed"
-            db.commit()
-            return WebhookResponse(
-                success=True,
-                message=result_message,
-                conversation_id=conversation.id,
-                bot_response=bot_response,
-            )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "memory_consent": decision,
+                            "memory_stored": sorted(set(stored_keys)) if stored_keys else None,
+                        },
+                    )
+                bot_response, sent = _send_and_save(response_text)
+                result_message = (
+                    "Memory consent handled" if sent else "Memory consent response failed"
+                )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
 
     pending_response = _handle_pending_gate(
         db=db,
@@ -5630,6 +5958,8 @@ async def _handle_webhook_payload(
         message_text=message_text,
         saved_message=saved_message,
         client_slug=payload.client_slug,
+        policy_type=policy_type,
+        policy_pack=policy_pack,
         routing=routing,
         bypass_domain_flows=bypass_domain_flows,
         booking_wants_flow=booking_wants_flow,
@@ -5647,6 +5977,8 @@ async def _handle_webhook_payload(
         consult_context=consult_context,
         message_count=message_count,
         now=now,
+        timing_context=timing_context,
+        client_config=client.config if client else None,
         send_and_save=_send_and_save,
         record_escalation_metric=_record_escalation_metric,
     )

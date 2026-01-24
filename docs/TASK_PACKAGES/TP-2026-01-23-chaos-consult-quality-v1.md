@@ -1,0 +1,102 @@
+- Название/цель: Chaos-sim v1 + RAG-аудит качества консультаций (RU/KZ/mixed) без изменения core-логики.
+- Canon refs: `STATE.md` (GAP-023, GAP-024), `SPECS/CONSULTANT.md` (RAG thresholds), `SPECS/SYSTEM_REFERENCE.md` (Chaos-sim SOP), `TECH.md` (RAG/Qdrant), `STRATEGY/REQUIREMENTS.md`.
+- Invariant:
+  - Никаких внешних WA/Telegram отправок в сим-режиме.
+  - Core-логика бота не меняется: только ops/diagnose артефакты и отчеты.
+  - decision_meta/decision_trace пишутся на каждом user-message.
+- Scope:
+  - Chaos-sim: RAG audit артефакты (`rag_debug.jsonl`, `rag_summary.json`) + RAG findings в `report.md`.
+  - Evaluator: пост-анализ RAG паттернов (без изменения pass/fail).
+  - Canon: уточнить multi-intent/pending/policy и качества (service_not_offered, safe_consult_only).
+  - Тест-протокол: описать корректность/разбор фейлов по паттернам (без правок runtime-логики).
+  - Память/персонализация остаются отключены; задел фиксируем в доке.
+- Out of scope:
+  - Любые изменения логики консультирования/политик/knowledge packs.
+  - Персонализация/долгосрочная память (отложено).
+  - Календарное бронирование.
+  - Feedback после визита.
+- Touch-list:
+  - `ops/diagnose.py`
+  - `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md`
+  - `SPECS/CONSULTANT.md`
+  - `SPECS/ESCALATION.md`
+  - `SPECS/SYSTEM_REFERENCE.md`
+- Plan:
+  1) Обновить Task Package под RAG-аудит.
+  2) Добавить `--rag-audit` и генерацию `rag_debug.jsonl`/`rag_summary.json`.
+  3) Добавить блок RAG Quality Findings в `report.md` (Top-N паттернов).
+  4) Уточнить канон multi-intent/pending/policy + service_not_offered/safe_consult_only.
+  5) Зафиксировать протокол корректности тестов и разбора фейлов.
+  6) Smoke chaos-sim (20-50 кейсов) и проверка артефактов.
+- DoD:
+  - `rag_debug.jsonl` и `rag_summary.json` создаются при `--rag-audit`.
+  - `report.md` включает RAG Quality Findings и Top-N паттернов.
+  - Canon обновлён: multi-intent/pending/policy + quality violations (без изменения поведения).
+  - Протокол корректности тестов и фиксации по паттернам описан в `SPECS/SYSTEM_REFERENCE.md`.
+  - Core-логика бота не меняется.
+  - Smoke chaos-sim завершился с артефактами.
+- Checks:
+  - `python3 ops/diagnose.py chaos-sim --count 20 --seed 42 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 5 --poll-interval 0.2 --min-turns 10 --max-turns 12 --noise high --rag-audit`
+- Evidence:
+  - Артефакты `ops/artifacts/chaos_sim/<timestamp>/rag_debug.jsonl`, `rag_summary.json`, `report.md`, `summary.json`.
+- Rollback:
+  - `git revert <commit>`.
+- No-go:
+  - Изменения core-логики/knowledge packs/LLM промптов.
+  - Включать память/персонализацию.
+  - Внешние отправки WA/Telegram в сим-режиме.
+  - Ручные правки БД ради evidence.
+- Риски/блокеры:
+  - 500 на старом контейнере: требуется деплой фикса перед live-прогонами.
+  - Стоимость LLM: LLM subset отдельно и позже.
+- Branch/worktree:
+  - Branch: `ops/chaos-sim-v1`
+  - Worktree: `/home/zhan/worktrees/chaos-sim-v1`
+  - Base ref: `origin/main`
+  - Merge policy: merge-only (no rebase)
+  - Cleanup: Brain/Top Architect после merge.
+
+## Session Notes (handoff)
+
+- Commit: `9211eda9` (pending guard: reset to bot_active when no active handover; add pending_guard trace stage).
+- Commit: `48527fa3` (chaos-sim: уникальный JID base на simulation_id/seed, чтобы не было протечек pending между прогонами; summary/report пишет `jid_base`).
+- Commit: `05a50205` (graceful shutdown for chaos-sim; summary/report written on stop).
+- PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/319
+- Artifacts (untracked):
+  - `ops/artifacts/chaos_sim/20260123-091232/` (stable short run, 3 cases, summary.json + report.md)
+  - `ops/artifacts/chaos_sim/20260123-090728/` and `ops/artifacts/chaos_sim/20260123-091038/` (interrupted runs, summary.json with stop_reason)
+- Last stable run (3 cases, logic mode):
+  - `python3 ops/diagnose.py chaos-sim --count 3 --seed 42 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 3 --poll-interval 0.2 --debug-all --console-mode skip --min-turns 6 --max-turns 8`
+  - Summary: `simulation_id=SIM-20260123-091232-42`, `cases_processed=3`, `turns=14`, `failures=9`
+  - Top failure patterns: pending_wait + action/state/expected_reply_type mismatch (see summary.json)
+- Smoke run after pending guard:
+  - `python3 ops/diagnose.py chaos-sim --count 5 --seed 44 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 3 --poll-interval 0.2 --debug-all --console-mode skip --min-turns 10 --max-turns 12 --noise high`
+  - Summary: `simulation_id=SIM-20260123-103904-44`, `cases_processed=5`, `turns=51`, `failures=40`
+  - Note: HTTP 500 on `CHAOS_INFO_0003` turn 5 (decision_meta/trace missing).
+- Baseline run after pending guard (seed 42):
+  - `python3 ops/diagnose.py chaos-sim --count 20 --seed 42 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 5 --poll-interval 0.2 --timeout 30 --debug-all --console-mode skip --min-turns 10 --max-turns 12 --noise high --output-dir ops/artifacts/chaos_sim/20260123-111000-seed42`
+  - Summary: `simulation_id=SIM-20260123-110351-42`, `cases_processed=20`, `turns=204`, `failures=166`
+  - HTTP 500 entries (response_status=500): `CHAOS_CONSULT_0006` turn 2 (`SIM-20260123-110351-0006-02-97a50f9a`), `CHAOS_INFO_0013` turn 1 (`SIM-20260123-110351-0013-01-210b939b`), `CHAOS_BOOKING_0017` turn 1 (`SIM-20260123-110351-0017-01-44472827`), `CHAOS_BOOKING_0018` turn 3 (`SIM-20260123-110351-0018-03-ce8babf6`).
+- Baseline run after pending guard (seed 43):
+  - `python3 ops/diagnose.py chaos-sim --count 20 --seed 43 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 5 --poll-interval 0.2 --timeout 30 --debug-all --console-mode skip --min-turns 10 --max-turns 12 --noise high --output-dir ops/artifacts/chaos_sim/20260123-111000-seed43`
+  - Summary: `simulation_id=SIM-20260123-112311-43`, `cases_processed=20`, `turns=207`, `failures=151`
+  - HTTP 500 entry: `CHAOS_BOOKING_0002` turn 5 (`SIM-20260123-112311-0002-05-3803b69f`).
+- 500 root cause (repro on prod, HTTP payload with instanceId):
+  - Repro: POST `/webhook/demo_salon` with `instanceId` set + text `мекенжай қайда, тағы график работы какой` → HTTP 500.
+  - Stack trace: `TypeError: _format_service_suggestions_reply() missing 1 required positional argument: 'truth'` from `semantic_service_match` → `compose_multi_truth_reply`.
+  - Fix: pass `load_yaml_truth(client_slug)` into `_format_service_suggestions_reply` in `semantic_service_match`.
+  - Test added: `test_semantic_service_matcher_returns_suggestions_reply` in `truffles-api/tests/test_message_endpoint.py`.
+  - Local pytest failed due to missing `dateparser` (ModuleNotFoundError) in this environment.
+- Post-fix chaos smoke (seed 42, interrupted):
+  - `python3 ops/diagnose.py chaos-sim --count 20 --seed 42 --mode logic --client-slug demo_salon --skip-outbox --min-wait 0 --max-wait 0.05 --poll-timeout 5 --poll-interval 0.2 --timeout 30 --debug-all --console-mode skip --min-turns 10 --max-turns 12 --noise high --output-dir ops/artifacts/chaos_sim/20260123-123500-seed42-postfix`
+  - Summary: `simulation_id=SIM-20260123-123449-42`, `cases_processed=14`, `turns=146`, `failures=118`, `interrupted=true` (signal_2).
+  - HTTP 500 entries: `CHAOS_CONSULT_0002` turn 5 (`қашанға дейін ашық пжл`), `CHAOS_CONSULT_0006` turn 6 (`график работы какой спс`).
+  - Root cause (still on prod image): same missing `truth` in `_format_service_suggestions_reply` but triggered via `_extract_service_hint` inside name validation. Fix already in repo; needs deploy to take effect.
+- Evaluator updates (false-positive reduction for multi-intent):
+  - Allow `booking_prompt`/booking completion actions when expected is `reply` and required `info_sections` are satisfied.
+  - Allow `reply` when expected is `booking_prompt` if `expected_reply_type` is already set or `question_contract` shows `booking_prompt`.
+  - Implemented in `ops/diagnose.py` via `_chaos_action_fallback_ok` + `info_sections_ok` handling.
+- Next step candidates:
+  - Fix pending_gate behavior (pending_wait/expected_reply_type/booking_interrupt) as a single pattern.
+  - Fix booking expected_reply_type drift in multi-intent.
+  - Re-run short chaos (20 cases) → nightly 1000–1500.

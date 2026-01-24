@@ -503,6 +503,40 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 **LLM‑ключи:** CI‑eval не должен зависеть от `OPENAI_API_KEY`. Нужные LLM‑проверки переносятся в L4/nightly или
 стабятся так, чтобы trace/meta фиксировали ожидаемую стадию без внешнего API.
 
+### 5.1.2a Правильность/ошибки/false‑positive (LLM‑first)
+
+**PASS (правильно):**
+- `decision_meta.action` и `policy_gate` соответствуют классу (Hard‑LAW → escalate; pending → pending_wait/ack).
+- `expected_reply_type`/`active_goal` сохраняются при перебивках; `booking_interrupt` фиксируется при инфо‑вопросе в booking.
+- `fact_source` согласован с фактами (нет заявлений об услуге, если `service_unavailable=true` или `service_not_found`).
+- OOD допускается **только** при отсутствии in‑signals.
+
+**FAIL (неправильно):**
+- Неверный gate/action (например pending → booking‑prompt, Hard‑LAW → reply).
+- “Правильный текст” в **неправильном классе** (goal‑drift, wrong intent/class).
+- Любая галлюцинация фактов (услуга/цена/условие вне packs/playbooks).
+- OOD при наличии in‑signals.
+
+**False‑positive риск:**
+- Тест “зелёный” по тексту, но meta/trace нарушает инвариант.
+
+**Требование:** pass/fail определяются только по `decision_meta/decision_trace`; текст не сравниваем. В каждом suite
+обязательны `must_not` проверки (forbidden_action/gate/fact_source).
+
+### 5.1.2b Протокол исправлений (pattern‑based, без словарей)
+
+1) Кластеризуем failures по `fail_code` + `action` + `intent` + `expected_reply_type` + `policy_gate`.
+2) Сверяемся с каноном: если правило не определено — **сначала** обновляем канон.
+3) Исправляем **правило/приоритет/threshold/LLM‑контроллер**, а не добавляем словари под кейс.
+4) Обновляем evaluator (инвариант/allowlist) так, чтобы дефект не вернулся.
+5) Короткий chaos‑срез (50–150) → ночной прогон (1000–1500 logic + 100–150 LLM).
+6) Evidence + запись в `STATE.md` (Brain/Top Architect).
+
+**LLM‑роль в тестах (экономия ручного труда):**
+- **LLM‑Generator:** генерирует RU/KZ/mixed/ASR‑варианты (фикс‑seed; сохранённый prompt).
+- **LLM‑Controller:** смысл/маршрут; детерминированные гейты защищают безопасность.
+- **LLM‑Triage (опционально):** группирует фейлы в паттерны; не влияет на PASS/FAIL.
+
 ### 5.1.3 Redis в CI (детерминизм против скорости)
 
 **Стандарт:** сначала включаем Redis‑service в CI для eval, фиксируем время прогона.
@@ -708,6 +742,46 @@ LIMIT 3;
 
 ---
 
+### 5.7.1 Chaos‑sim SOP (10–15 ходов, RU/KZ/mixed)
+
+**Цель:** прогон 1000–1500 диалогов с шумом/перебивками и проверкой `decision_meta/trace` + state‑переходов, без внешних отправок.
+
+**Команда (logic, без LLM):**
+```bash
+python3 ops/diagnose.py chaos-sim \
+  --count 1200 \
+  --seed 42 \
+  --mode logic \
+  --client-slug demo_salon
+```
+
+**LLM‑режим (ограниченный прогон):**
+```bash
+python3 ops/diagnose.py chaos-sim \
+  --count 150 \
+  --seed 42 \
+  --mode llm \
+  --client-slug demo_salon
+```
+
+**Опции:**
+- `--mode logic|llm` — логический прогон без LLM (по умолчанию) или LLM‑прогон.
+- `--console-mode real|skip` — real требует `CONSOLE_API_TOKEN` или `/home/zhan/secrets/console-contract.env`.
+- `--console-client-id` — для Console API; если не задано, используется client_id из БД.
+- `--debug-all` — пишет `turns.jsonl` с полной структурой meta/trace по каждому ходу.
+
+**Артефакты:**
+- `ops/artifacts/chaos_sim/<timestamp>/failures.jsonl`
+- `stats.json`, `summary.json`, `report.md`
+- `turns.jsonl` (если включён `--debug-all`)
+
+**Safety:**
+- `simulation_mode` в metadata → нет реальных WA/Telegram отправок.
+- outbox помечается как simulated.
+- Рекомендовано `TEST_MODE=1` на проде.
+
+---
+
 ### 5.8 Ожидаемые исходы (чтобы не путаться)
 
 **Logic‑mode (`webhook-fuzz --mode logic`):**
@@ -751,6 +825,19 @@ LIMIT 3;
 **Onboarding data quality:**
 - Негативные pack‑кейсы обязаны падать в `sync_client.py --validate`.
 - При неполных данных — fail‑closed (эскалация/уточнение), без “выдумки”.
+
+### 5.8.2 Протокол разбора фейлов (pattern‑based)
+
+**Цель:** фиксить причины, а не отдельные кейсы.
+
+1) Кластеризовать фейлы по паттернам (lang_mix + noise + intent + gate).
+2) Сверить с каноном:  
+   - канон не соответствует → обновить `SPECS/*` (Top Architect);  
+   - канон OK, но evaluator слишком строгий → поправить evaluator (false‑positive).
+3) Если это дефект логики → отдельный Task Package + минимальный фикс + регресс.
+4) Проверка: smoke (20–50) → полный прогон → evidence в `STATE.md`.
+
+**Quality‑violations:** см. `SPECS/CONSULTANT.md` (service_not_offered / safe_consult_only / hard_law_bypass / pending_gate_broken / goal_drop).
 
 ### 5.9 Safety‑контур (обязательная защита)
 

@@ -442,8 +442,37 @@ def _handle_pending_gate(
         eligible=False,
         reason="pending",
     )
+    handover = legacy.get_active_handover(db, conversation.id)
+    if not handover:
+        context = legacy._get_conversation_context(conversation)
+        context = _set_pending_resume(context, None)
+        context = _set_pending_sla(context, {})
+        context.pop("handover_confirmation", None)
+        legacy._set_conversation_context(conversation, context)
+        legacy.transition_state(
+            conversation,
+            ConversationState.BOT_ACTIVE,
+            allow_same=False,
+            enforce=True,
+        )
+        trace_payload = {
+            "stage": "pending_guard",
+            "decision": "reset_no_handover",
+            "state": conversation.state,
+        }
+        trace_payload.update(router_pending_meta)
+        legacy._record_decision_trace(conversation, trace_payload)
+        if saved_message:
+            legacy._update_message_decision_metadata(
+                saved_message,
+                {
+                    "pending_action": "pending_guard_reset",
+                    "pending_guard": "no_handover",
+                },
+            )
+        return None
+
     if legacy.is_opt_out_message(message_text):
-        handover = legacy.get_active_handover(db, conversation.id)
         if handover:
             legacy.manager_resolve(
                 db, conversation, handover, manager_id="system", manager_name="system"

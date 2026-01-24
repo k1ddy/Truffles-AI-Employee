@@ -35,6 +35,7 @@ from app.services.outbox_service import (
     mark_outbox_status,
 )
 from app.services.state_machine import ConversationState
+from app.services.state_service import is_simulation_context
 from app.services.telegram_service import TelegramService
 
 logger = get_logger("webhook")
@@ -402,6 +403,24 @@ async def _process_outbox_rows(
 
     picked_at = datetime.now(timezone.utc)
     pick_info: dict[str, dict[str, object]] = {}
+
+    def _resolve_simulation_context(conversation_id: UUID | None) -> tuple[bool, str | None]:
+        if not conversation_id:
+            return False, None
+        conversation = (
+            db.query(Conversation)
+            .filter(Conversation.id == conversation_id)
+            .first()
+        )
+        if not conversation:
+            return False, None
+        sim_id = None
+        if isinstance(conversation.context, dict):
+            sim_ctx = conversation.context.get("simulation")
+            if isinstance(sim_ctx, dict):
+                sim_id = sim_ctx.get("id")
+        return is_simulation_context(conversation), sim_id
+
     for row in rows:
         outbox_id = row.get("id")
         if not outbox_id:
@@ -426,6 +445,7 @@ async def _process_outbox_rows(
             if isinstance(body, dict):
                 message_text = body.get("message")
         outbox_id_str = str(outbox_id)
+        simulation_mode, simulation_id = _resolve_simulation_context(conversation_id)
         pick_info[outbox_id_str] = {
             "picked_at": picked_at,
             "created_at": created_at,
@@ -435,6 +455,8 @@ async def _process_outbox_rows(
             "client_id": client_id,
             "inbound_message_id": inbound_message_id,
             "message_text": message_text,
+            "simulation_mode": simulation_mode,
+            "simulation_id": simulation_id,
         }
         logger.info(
             "Outbox picked",
@@ -712,23 +734,42 @@ async def _process_outbox_rows(
         outbox_id_str = str(outbox_id)
         client_slug = payload_json.get("client_slug")
         outbox_ids = [outbox_id_str]
+        timing_start = time.monotonic()
+        sim_info = pick_info.get(outbox_id_str, {})
+        message = _resolve_outbox_message(outbox_id_str)
+        if sim_info.get("simulation_mode"):
+            _merge_outbox_meta(
+                outbox_id_str,
+                {"simulation": {"mode": True, "id": sim_info.get("simulation_id")}},
+            )
+            if message:
+                _update_message_decision_metadata(message, {"outbox_simulated": True})
+            outbox_total_ms = round((time.monotonic() - timing_start) * 1000, 2)
+            _log_outbox_done(outbox_id_str, total_ms=outbox_total_ms)
+            mark_outbox_status(
+                db,
+                outbox_id=outbox_id,
+                status="SENT",
+                last_error=None,
+                next_attempt_at=None,
+            )
+            results["sent"] += 1
+            return
         span_context = {
             "message_id": row.get("inbound_message_id"),
             "outbox_id": outbox_id_str,
             "client_slug": client_slug,
             "conversation_id": conversation_id,
         }
-        branch_id = pick_info.get(outbox_id_str, {}).get("branch_id")
+        branch_id = sim_info.get("branch_id")
         if branch_id:
             span_context["branch_id"] = str(branch_id)
-        message = _resolve_outbox_message(outbox_id_str)
         if message and isinstance(message.message_metadata, dict):
             decision_meta = message.message_metadata.get("decision_meta")
             if isinstance(decision_meta, dict) and decision_meta.get("trace_id"):
                 span_context["trace_id"] = decision_meta.get("trace_id")
 
         try:
-            timing_start = time.monotonic()
             if _is_outbox_event(payload_json):
                 event_type = payload_json.get("event_type")
                 if event_type != "whatsapp.send_text":

@@ -895,6 +895,111 @@ def _is_asr_confirmation_active(confirmation: dict, now: datetime) -> bool:
     return (now - asked_at) <= timedelta(minutes=legacy.ASR_CONFIRM_WINDOW_MINUTES)
 
 
+def _parse_profile_time(value: str | None) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _normalize_memory_profile(profile: dict | None, *, now: datetime) -> tuple[dict, bool]:
+    from . import _legacy as legacy
+
+    changed = False
+    if not isinstance(profile, dict):
+        profile = {}
+        changed = True
+    normalized = dict(profile)
+    if normalized.get("version") != 1:
+        normalized["version"] = 1
+        changed = True
+    ttl_days = normalized.get("ttl_days")
+    if not isinstance(ttl_days, int) or ttl_days <= 0:
+        normalized["ttl_days"] = legacy.MEMORY_PROFILE_TTL_DAYS
+        changed = True
+    consent = normalized.get("consent")
+    if not isinstance(consent, dict):
+        consent = {}
+        changed = True
+    status = consent.get("status")
+    if status not in {"unknown", "asked", "granted", "declined"}:
+        consent["status"] = "unknown"
+        changed = True
+    if "prompt_count" not in consent:
+        consent["prompt_count"] = 0
+        changed = True
+    normalized["consent"] = consent
+    items = normalized.get("items")
+    if not isinstance(items, dict):
+        items = {}
+        changed = True
+    pruned = {}
+    for key, item in items.items():
+        if not isinstance(key, str) or not isinstance(item, dict):
+            changed = True
+            continue
+        expires_at = _parse_profile_time(item.get("expires_at"))
+        if expires_at and expires_at <= now:
+            changed = True
+            continue
+        pruned[key] = item
+    if pruned != items:
+        changed = True
+    normalized["items"] = pruned
+    last_updated_at = normalized.get("last_updated_at")
+    if last_updated_at and not _parse_profile_time(last_updated_at):
+        normalized.pop("last_updated_at", None)
+        changed = True
+    return normalized, changed
+
+
+def _get_memory_profile(context: dict, *, now: datetime) -> tuple[dict, bool]:
+    from . import _legacy as legacy
+
+    payload = context.get(legacy.MEMORY_PROFILE_KEY) if isinstance(context, dict) else None
+    normalized, changed = _normalize_memory_profile(payload, now=now)
+    return normalized, changed
+
+
+def _set_memory_profile(context: dict, profile: dict | None) -> dict:
+    from . import _legacy as legacy
+
+    context = dict(context)
+    if profile:
+        context[legacy.MEMORY_PROFILE_KEY] = profile
+    else:
+        context.pop(legacy.MEMORY_PROFILE_KEY, None)
+    return context
+
+
+def _get_memory_pending(context: dict, *, now: datetime) -> tuple[dict | None, bool]:
+    from . import _legacy as legacy
+
+    pending = context.get(legacy.MEMORY_PENDING_KEY) if isinstance(context, dict) else None
+    if not isinstance(pending, dict):
+        return None, False
+    expires_at = _parse_profile_time(pending.get("expires_at"))
+    if expires_at and expires_at <= now:
+        return None, True
+    return dict(pending), False
+
+
+def _set_memory_pending(context: dict, pending: dict | None) -> dict:
+    from . import _legacy as legacy
+
+    context = dict(context)
+    if pending:
+        context[legacy.MEMORY_PENDING_KEY] = pending
+    else:
+        context.pop(legacy.MEMORY_PENDING_KEY, None)
+    return context
+
+
 __all__ = [
     "_apply_consult_return",
     "_build_compact_summary_text",
@@ -935,6 +1040,11 @@ __all__ = [
     "_set_handover_confirmation",
     "_set_low_confidence_retry_count",
     "_set_reengage_confirmation",
+    "_get_memory_profile",
+    "_set_memory_profile",
+    "_get_memory_pending",
+    "_set_memory_pending",
+    "_normalize_memory_profile",
     "_set_service_carryover",
     "_update_compact_summary",
 ]

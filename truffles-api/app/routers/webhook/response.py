@@ -477,6 +477,8 @@ def _handle_consult_flow(
     message_text: str | None,
     saved_message: Message | None,
     client_slug: str | None,
+    policy_type: str | None,
+    policy_pack: dict | None,
     routing: dict,
     bypass_domain_flows: bool,
     booking_wants_flow: bool,
@@ -494,12 +496,16 @@ def _handle_consult_flow(
     consult_context: dict | None,
     message_count: int,
     now: datetime,
+    timing_context: dict | None,
+    client_config: dict | None,
     send_and_save: Callable[..., tuple[str, bool]],
     record_escalation_metric: Callable[[str], None],
 ) -> ConsultFlowResult:
+    from app.services.ai_service import generate_consult_advice
     from app.services.demo_salon_knowledge import (
         DemoSalonDecision,
         build_consult_reply,
+        get_demo_salon_service_decision,
         get_demo_salon_service_hint,
     )
 
@@ -521,12 +527,35 @@ def _handle_consult_flow(
     consult_short_circuit = False
     consult_short_circuit_reason = None
     consult_short_circuit_service = None
+    consult_llm_used = False
+    service_availability_used = False
+    service_availability_decision = None
     consult_context_active = bool(current_goal == "consult")
     consult_blocked = bool(booking_wants_flow or booking_active or booking_signal)
     if consult_intent or consult_context_active:
         consult_blocked = False
     elif intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}:
         consult_blocked = True
+    def _has_service_availability_signal(text: str | None) -> bool:
+        if not text:
+            return False
+        normalized = legacy.normalize_for_matching(text)
+        if not normalized:
+            return False
+        keywords = (
+            "делаете",
+            "есть ли",
+            "оказываете",
+            "предоставляете",
+            "можно сделать",
+            "жасайсыз",
+            "жасайсыздар",
+            "жасай ма",
+            "бар ма",
+            "қызмет көрсет",
+            "көрсетесіз",
+        )
+        return any(keyword in normalized for keyword in keywords)
     service_hint = None
     service_hint_reason = None
     if message_text and (consult_intent or consult_context_active):
@@ -627,7 +656,74 @@ def _handle_consult_flow(
                 if consult_variant_id:
                     consult_flow_trace["consult_variant_id"] = consult_variant_id
             legacy._record_decision_trace(conversation, consult_flow_trace)
+    if consult_intent_signal and not consult_short_circuit and message_text:
+        service_availability_signal = bool(intent_decomp_service_query) or _has_service_availability_signal(
+            message_text
+        )
+        if service_availability_signal:
+            service_availability_decision = get_demo_salon_service_decision(
+                message_text,
+                client_slug=client_slug,
+                intent_decomp=intent_decomp_payload,
+            )
     consult_decision = None if consult_short_circuit else consult_candidate
+    if not consult_decision and consult_intent_signal and not consult_short_circuit and message_text:
+        advice_result = generate_consult_advice(
+            db=db,
+            client_id=conversation.client_id,
+            client_slug=client_slug or "demo_salon",
+            conversation_id=conversation.id,
+            message_text=message_text,
+            consult_topic=consult_topic,
+            consult_question=consult_question,
+            client_config=client_config,
+            timing_context=timing_context,
+        )
+        if advice_result.ok and advice_result.value:
+            blocked_topics = legacy._detect_llm_guard_topics(
+                advice_result.value,
+                policy_type=policy_type,
+                policy_pack=policy_pack,
+            )
+            if blocked_topics:
+                legacy._record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "consult_llm_guard",
+                        "decision": "blocked_topics",
+                        "state": conversation.state,
+                        "blocked_topics": blocked_topics,
+                    },
+                )
+                if saved_message:
+                    legacy._update_message_decision_metadata(
+                        saved_message,
+                        {"consult_llm_guard": blocked_topics},
+                    )
+            else:
+                consult_llm_used = True
+                consult_meta = {
+                    "consult_intent": True,
+                    "consult_topic": consult_topic,
+                    "consult_question": consult_question or message_text,
+                    "consult_llm_used": True,
+                    "source": "llm",
+                }
+                consult_decision = DemoSalonDecision(
+                    action="reply",
+                    response=advice_result.value,
+                    intent="consult_reply",
+                    meta=consult_meta,
+                )
+                consult_signal = True
+                if not consult_intent and isinstance(intent_decomp_payload, dict):
+                    consult_intent = True
+                    intent_decomp_payload = dict(intent_decomp_payload)
+                    intent_decomp_payload["consult_intent"] = True
+                    if consult_topic:
+                        intent_decomp_payload["consult_topic"] = consult_topic
+                    if consult_question:
+                        intent_decomp_payload["consult_question"] = consult_question
     if consult_decision:
         consult_meta = consult_decision.meta if isinstance(consult_decision.meta, dict) else {}
         consult_meta = dict(consult_meta)
@@ -639,6 +735,36 @@ def _handle_consult_flow(
             consult_meta["consult_topic"] = consult_topic
         if consult_question:
             consult_meta["consult_question"] = consult_question
+    if service_availability_decision and service_availability_decision.action == "reply":
+        service_reply = service_availability_decision.response
+        if service_reply:
+            service_availability_used = True
+            service_meta = (
+                service_availability_decision.meta
+                if isinstance(service_availability_decision.meta, dict)
+                else {}
+            )
+            consult_meta.setdefault("source", "service_availability")
+            consult_meta["service_decision_intent"] = service_availability_decision.intent
+            if service_meta:
+                consult_meta.setdefault("service_query", service_meta.get("service_query"))
+                consult_meta.setdefault("service_query_source", service_meta.get("service_query_source"))
+            if consult_decision and consult_decision.action == "reply":
+                combined_response = legacy._combine_sidecar(consult_decision.response, service_reply)
+                consult_decision = DemoSalonDecision(
+                    action="reply",
+                    response=combined_response,
+                    intent=consult_decision.intent or "consult_reply",
+                    meta=consult_meta,
+                )
+            else:
+                consult_decision = DemoSalonDecision(
+                    action="reply",
+                    response=service_reply,
+                    intent="consult_reply",
+                    meta=consult_meta,
+                )
+                consult_signal = True
     if consult_signal:
         context = legacy._get_conversation_context(conversation)
         context_manager = legacy._get_context_manager(context)
@@ -646,6 +772,8 @@ def _handle_consult_flow(
             consult_flow_decision = (
                 "consult_escalate" if consult_decision.action == "escalate" else "consult_reply"
             )
+            if consult_decision.action == "reply" and consult_llm_used:
+                consult_flow_decision = "consult_llm"
         elif legacy._should_escalate_for_clarify(context_manager, "consult"):
             clarify_count, _ = legacy._get_clarify_attempt_state(context_manager, "consult")
             legacy._record_context_manager_decision(
@@ -709,6 +837,10 @@ def _handle_consult_flow(
                 consult_flow_trace["reason"] = "consult_clarify"
             elif consult_flow_decision == "consult_escalate":
                 consult_flow_trace["reason"] = "consult_no_service"
+            elif consult_flow_decision == "consult_llm":
+                consult_flow_trace["reason"] = "consult_llm"
+            elif service_availability_used and not consult_candidate:
+                consult_flow_trace["reason"] = "service_availability"
             else:
                 consult_flow_trace["reason"] = "consult_pack"
             consult_playbook_id = consult_meta.get("consult_playbook_id")

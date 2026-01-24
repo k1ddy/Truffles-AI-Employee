@@ -17,6 +17,12 @@ class ChatFlowAdapter(MessagingPort):
                 service="chatflow",
                 context={"to": to}
             ))
+        if options.extra.get("simulation_mode"):
+            return Ok(MessageSent(
+                remote_jid=to,
+                message_id=options.idempotency_key,
+                provider_response={"simulation": True},
+            ))
 
         # Call the existing service function
         result = chatflow_service.send_message_safe(
@@ -47,6 +53,11 @@ class ChatFlowAdapter(MessagingPort):
                 message="instance_id is required for ChatFlow",
                 service="chatflow",
                 context={"to": to}
+            ))
+        if options.extra.get("simulation_mode"):
+            return Ok(MessageSent(
+                remote_jid=to,
+                provider_response={"simulation": True},
             ))
 
         # chatflow_service.send_whatsapp_media returns bool, not Result
