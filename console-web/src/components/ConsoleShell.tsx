@@ -394,7 +394,10 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                     </nav>
                 </aside>
                 <div className="flex flex-1 flex-col">
-                    <header className="sticky top-0 z-20 border-b border-border/60 bg-background/80 backdrop-blur">
+                    <header
+                        className="sticky top-0 z-20 border-b border-border/60 bg-background/80 backdrop-blur"
+                        data-testid="console-header"
+                    >
                         <div className="flex flex-col gap-4 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
                             <div className="flex items-center gap-3 md:hidden">
                                 <Image

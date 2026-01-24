@@ -12,18 +12,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const authFile = path.resolve(__dirname, '..', '.auth', 'console.json');
 
-async function selectClientIfNeeded(page: import('@playwright/test').Page) {
-    const clientSelector = page.getByTestId('client-selector');
-    if (!(await clientSelector.isVisible())) {
+async function selectOptionIfNeeded(
+    selector: import('@playwright/test').Locator
+) {
+    if (!(await selector.isVisible().catch(() => false))) {
         return;
     }
 
-    const currentValue = await clientSelector.inputValue();
+    const currentValue = await selector.inputValue();
     if (currentValue) {
         return;
     }
 
-    const options = clientSelector.locator('option');
+    const options = selector.locator('option');
     const optionCount = await options.count();
     if (optionCount < 2) {
         return;
@@ -31,11 +32,35 @@ async function selectClientIfNeeded(page: import('@playwright/test').Page) {
 
     const value = await options.nth(1).getAttribute('value');
     if (value) {
-        await clientSelector.selectOption(value);
+        await selector.selectOption(value);
     } else {
-        await clientSelector.selectOption({ index: 1 });
+        await selector.selectOption({ index: 1 });
     }
-    await expect(clientSelector).not.toHaveValue("");
+    await expect(selector).not.toHaveValue("");
+}
+
+async function selectClientIfNeeded(page: import('@playwright/test').Page) {
+    const gateSelector = page.getByTestId('client-select');
+    const contextSelector = page.getByTestId('context-client-select');
+    if (await gateSelector.isVisible().catch(() => false)) {
+        await selectOptionIfNeeded(gateSelector);
+        return;
+    }
+    if (await contextSelector.isVisible().catch(() => false)) {
+        await selectOptionIfNeeded(contextSelector);
+    }
+}
+
+async function selectBranchIfNeeded(page: import('@playwright/test').Page) {
+    const gateSelector = page.getByTestId('branch-select');
+    const contextSelector = page.getByTestId('context-branch-select');
+    if (await gateSelector.isVisible().catch(() => false)) {
+        await selectOptionIfNeeded(gateSelector);
+        return;
+    }
+    if (await contextSelector.isVisible().catch(() => false)) {
+        await selectOptionIfNeeded(contextSelector);
+    }
 }
 
 test('setup auth @smoke', async ({ page }) => {
@@ -48,6 +73,7 @@ test('setup auth @smoke', async ({ page }) => {
     await page.waitForURL(consoleHostPattern);
     await expect(page.getByRole('button', { name: /выйти/i })).toBeVisible({ timeout: 10000 });
     await selectClientIfNeeded(page);
+    await selectBranchIfNeeded(page);
     await expect(page.getByTestId('cases-title')).toBeVisible({ timeout: 10000 });
 
     fs.mkdirSync(path.dirname(authFile), { recursive: true });

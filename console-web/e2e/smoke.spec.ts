@@ -88,11 +88,11 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
     await expect(page.getByTestId('console-header')).toBeVisible();
     const casesTitle = page.getByTestId('cases-title');
     if (useStorageState) {
-        await expect(casesTitle, 'Expected logged-in UI with storage state.').toBeVisible({ timeout: 15000 });
-        const resolved = await ensureClientSelection(page);
+        const resolved = await ensureTenantSelection(page);
         if (resolved) {
             await page.reload({ waitUntil: 'domcontentloaded' });
         }
+        await expect(casesTitle, 'Expected logged-in UI with storage state.').toBeVisible({ timeout: 15000 });
         return;
     }
     try {
@@ -104,49 +104,73 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
             await loginThroughKeycloak(page);
         }
         await page.goto('/');
+        const resolved = await ensureTenantSelection(page);
+        if (resolved) {
+            await page.reload({ waitUntil: 'domcontentloaded' });
+        }
         await expect(casesTitle).toBeVisible({ timeout: 10000 });
-    }
-
-    const resolved = await ensureClientSelection(page);
-    if (resolved) {
-        await page.reload({ waitUntil: 'domcontentloaded' });
     }
 }
 
-async function ensureClientSelection(page: import('@playwright/test').Page): Promise<boolean> {
-    const stored = await page.evaluate(() => window.localStorage.getItem('console:client_id'));
-    if (stored) {
-        return false;
-    }
-
-    const envClientId = process.env.E2E_CLIENT_ID;
-    if (envClientId) {
-        await page.evaluate((id) => {
-            window.localStorage.setItem('console:client_id', id);
-        }, envClientId);
-        return true;
-    }
-
-    const picked = await page.evaluate(async () => {
-        const response = await fetch('/api/proxy/me');
+async function fetchMe(page: import('@playwright/test').Page, clientId?: string | null) {
+    return page.evaluate(async (id) => {
+        const headers: Record<string, string> = {};
+        if (id) {
+            headers['X-Client-Id'] = id;
+        }
+        const response = await fetch('/api/proxy/me', { headers });
         if (!response.ok) {
             return null;
         }
-        const data = await response.json();
-        if (!data?.clients?.length) {
-            return null;
-        }
-        return data.clients[0].id as string;
-    });
+        return response.json();
+    }, clientId ?? null);
+}
 
-    if (picked) {
-        await page.evaluate((id) => {
-            window.localStorage.setItem('console:client_id', id);
-        }, picked);
-        return true;
+async function ensureTenantSelection(page: import('@playwright/test').Page): Promise<boolean> {
+    const stored = await page.evaluate(() => ({
+        clientId: window.localStorage.getItem('console:client_id'),
+        branchId: window.localStorage.getItem('console:branch_id'),
+    }));
+    const envClientId = process.env.E2E_CLIENT_ID;
+    const envBranchId = process.env.E2E_BRANCH_ID;
+
+    let nextClientId = stored.clientId || envClientId || null;
+    let changed = false;
+
+    if (!nextClientId) {
+        const data = await fetchMe(page);
+        if (data?.clients?.length) {
+            nextClientId = data.clients[0].id as string;
+        } else if (data?.client?.id) {
+            nextClientId = data.client.id as string;
+        }
     }
 
-    return false;
+    if (nextClientId && nextClientId !== stored.clientId) {
+        await page.evaluate((id) => {
+            window.localStorage.setItem('console:client_id', id);
+            window.localStorage.removeItem('console:branch_id');
+        }, nextClientId);
+        changed = true;
+    }
+
+    if (!stored.branchId) {
+        let nextBranchId = envBranchId || null;
+        if (!nextBranchId && nextClientId) {
+            const data = await fetchMe(page, nextClientId);
+            if (data?.branch_selection_required && data?.branches?.length) {
+                nextBranchId = data.branches[0].id as string;
+            }
+        }
+        if (nextBranchId) {
+            await page.evaluate((id) => {
+                window.localStorage.setItem('console:branch_id', id);
+            }, nextBranchId);
+            changed = true;
+        }
+    }
+
+    return changed;
 }
 
 // =========================================
