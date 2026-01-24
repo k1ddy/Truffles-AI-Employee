@@ -59,6 +59,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase1.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2-capabilities.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2-provisioning.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-trace-booking-commit.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-consultant-chatgpt-like.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-console-telegram-sync-fixes.md`

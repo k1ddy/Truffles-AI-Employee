@@ -12,6 +12,7 @@
 - DONE: Phase 1 Control Plane UI (layout + context + roles) — PR #340 https://github.com/k1ddy/Truffles-AI-Employee/pull/340; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21314913097.
 - PLAN: Phase 2 Control Plane (Provisioning + Capabilities) — Task Package `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2.md`.
 - DONE: Phase 2A Capabilities model + admin API — PR #343 https://github.com/k1ddy/Truffles-AI-Employee/pull/343; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21315691684.
+- PLAN: Phase 2B Provisioning API — branch `feat/control-plane-phase2-provisioning`; Task Package `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2-provisioning.md`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
