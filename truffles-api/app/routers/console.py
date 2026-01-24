@@ -42,6 +42,11 @@ from app.schemas.console import (
     ConsoleMessage,
     ConsoleMessageListResponse,
     ConsoleMetricsDailyResponse,
+    ConsoleOutboxCounts,
+    ConsoleOutboxItem,
+    ConsoleOutboxListResponse,
+    ConsoleOutboxRetryRequest,
+    ConsoleOutboxRetryResponse,
     ConsoleSettingsResponse,
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
@@ -54,6 +59,7 @@ from app.schemas.console import (
     ConsoleTelegramVerifyRequest,
     ConsoleTelegramVerifyResponse,
 )
+from app.schemas.outbox_payload import validate_outbox_payload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
 from app.services.audit_service import record_audit_event
 from app.services.console_auth import ConsoleAuthContext, get_console_context
@@ -531,6 +537,119 @@ def _parse_cursor_param(value: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+_OUTBOX_STATUS_MAP = {
+    "pending": "PENDING",
+    "processing": "PROCESSING",
+    "failed": "FAILED",
+}
+
+
+def _require_ops_access(context: ConsoleAuthContext) -> None:
+    if context.role not in ("owner", "admin", "support"):
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin/support can access ops")
+
+
+def _normalize_outbox_status(status: Optional[str]) -> str:
+    if not status:
+        return "unknown"
+    lowered = status.lower()
+    if lowered in _OUTBOX_STATUS_MAP:
+        return lowered
+    return lowered
+
+
+def _parse_outbox_status_param(status: Optional[str]) -> Optional[list[str]]:
+    if not status:
+        return ["FAILED"]
+    normalized = status.strip().lower()
+    if normalized == "all":
+        return None
+    if normalized not in _OUTBOX_STATUS_MAP:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
+    return [_OUTBOX_STATUS_MAP[normalized]]
+
+
+def _truncate_preview(value: Optional[str], limit: int = 120) -> Optional[str]:
+    if not value:
+        return None
+    preview = value.strip()
+    if len(preview) <= limit:
+        return preview
+    if limit <= 3:
+        return preview[:limit]
+    return f"{preview[: limit - 3].rstrip()}..."
+
+
+def _summarize_outbox_payload(payload_json: dict | None) -> dict[str, Optional[str] | bool]:
+    if not isinstance(payload_json, dict):
+        return {
+            "message_type": None,
+            "message_preview": None,
+            "remote_jid": None,
+            "instance_id": None,
+            "forwarded_to_telegram": None,
+            "channel": None,
+        }
+    contract, _ = validate_outbox_payload(payload_json)
+    if contract:
+        message_type = (contract.body.messageType or "").strip() or None
+        message_preview = _truncate_preview(contract.body.message)
+        remote_jid = contract.body.metadata.remoteJid
+        instance_id = contract.body.metadata.instanceId
+        forwarded_to_telegram = contract.body.metadata.forwarded_to_telegram
+        channel = contract.tenant_context.source if contract.tenant_context else None
+        if not channel and remote_jid:
+            channel = "whatsapp"
+        return {
+            "message_type": message_type.lower() if message_type else None,
+            "message_preview": message_preview,
+            "remote_jid": remote_jid,
+            "instance_id": instance_id,
+            "forwarded_to_telegram": forwarded_to_telegram,
+            "channel": channel,
+        }
+    body = payload_json.get("body", {}) if isinstance(payload_json.get("body"), dict) else {}
+    metadata = body.get("metadata", {}) if isinstance(body.get("metadata"), dict) else {}
+    raw_message = body.get("message") if isinstance(body, dict) else None
+    remote_jid = metadata.get("remoteJid") or metadata.get("remote_jid")
+    instance_id = metadata.get("instanceId") or metadata.get("instance_id")
+    forwarded_to_telegram = metadata.get("forwarded_to_telegram") or metadata.get("forwardedToTelegram")
+    tenant_context = payload_json.get("tenant_context", {}) if isinstance(payload_json.get("tenant_context"), dict) else {}
+    channel = tenant_context.get("source")
+    if not channel and remote_jid:
+        channel = "whatsapp"
+    return {
+        "message_type": None,
+        "message_preview": _truncate_preview(raw_message if isinstance(raw_message, str) else None),
+        "remote_jid": remote_jid,
+        "instance_id": instance_id,
+        "forwarded_to_telegram": forwarded_to_telegram if isinstance(forwarded_to_telegram, bool) else None,
+        "channel": channel,
+    }
+
+
+def _build_outbox_item(row: OutboxMessage) -> ConsoleOutboxItem:
+    summary = _summarize_outbox_payload(row.payload_json if isinstance(row.payload_json, dict) else None)
+    return ConsoleOutboxItem(
+        id=row.id,
+        status=_normalize_outbox_status(row.status),
+        attempts=row.attempts,
+        next_attempt_at=row.next_attempt_at.isoformat() if row.next_attempt_at else None,
+        last_error=row.last_error,
+        created_at=row.created_at.isoformat() if row.created_at else "",
+        updated_at=row.updated_at.isoformat() if row.updated_at else "",
+        conversation_id=row.conversation_id,
+        branch_id=row.branch_id,
+        inbound_message_id=row.inbound_message_id,
+        channel=summary.get("channel"),
+        message_type=summary.get("message_type"),
+        message_preview=summary.get("message_preview"),
+        remote_jid=summary.get("remote_jid"),
+        instance_id=summary.get("instance_id"),
+        forwarded_to_telegram=summary.get("forwarded_to_telegram"),
+    )
 
 
 @router.get(
@@ -1777,7 +1896,11 @@ async def get_health(db: Session = Depends(get_db)) -> ConsoleHealthResponse:
     
     # Count outbox backlog
     try:
-        backlog = db.query(OutboxMessage).filter(OutboxMessage.status == "pending").count()
+        backlog = (
+            db.query(OutboxMessage)
+            .filter(OutboxMessage.status.in_(["PENDING", "PROCESSING"]))
+            .count()
+        )
     except Exception:
         backlog = -1
     
@@ -1788,6 +1911,144 @@ async def get_health(db: Session = Depends(get_db)) -> ConsoleHealthResponse:
         redis="connected",  # Simplified for MVP
         outbox_backlog=backlog,
     )
+
+
+@router.get(
+    "/ops/outbox",
+    response_model=ConsoleOutboxListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_outbox(
+    request: Request,
+    status: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+) -> ConsoleOutboxListResponse:
+    """List outbox queue entries for ops."""
+    context = get_console_context(request, db)
+    _require_ops_access(context)
+
+    _reject_unknown_query_params(request, {"status", "cursor", "limit"})
+    _validate_limit(limit)
+
+    status_filters = _parse_outbox_status_param(status)
+
+    base_query = db.query(OutboxMessage).filter(OutboxMessage.client_id == context.client.id)
+    if context.branch_restricted:
+        allowed_branch_ids = {b.id for b in context.branches}
+        if not allowed_branch_ids:
+            return ConsoleOutboxListResponse(
+                items=[],
+                cursor=None,
+                has_more=False,
+                counts=ConsoleOutboxCounts(pending=0, processing=0, failed=0),
+            )
+        base_query = base_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+
+    counts_rows = (
+        base_query.with_entities(OutboxMessage.status, func.count().label("count"))
+        .group_by(OutboxMessage.status)
+        .all()
+    )
+    counts = {"pending": 0, "processing": 0, "failed": 0}
+    for status_value, count in counts_rows:
+        normalized = _normalize_outbox_status(status_value)
+        if normalized in counts:
+            counts[normalized] = int(count or 0)
+
+    query = base_query
+    if status_filters:
+        query = query.filter(OutboxMessage.status.in_(status_filters))
+
+    cursor_date = _parse_cursor_param(cursor)
+    if cursor_date is not None:
+        query = query.filter(OutboxMessage.created_at < cursor_date)
+
+    rows = (
+        query.order_by(OutboxMessage.created_at.desc(), OutboxMessage.id.desc())
+        .limit(limit + 1)
+        .all()
+    )
+    has_more = len(rows) > limit
+    items_rows = rows[:limit]
+    next_cursor = items_rows[-1].created_at.isoformat() if has_more and items_rows else None
+
+    return ConsoleOutboxListResponse(
+        items=[_build_outbox_item(row) for row in items_rows],
+        cursor=next_cursor,
+        has_more=has_more,
+        counts=ConsoleOutboxCounts(
+            pending=counts["pending"],
+            processing=counts["processing"],
+            failed=counts["failed"],
+        ),
+    )
+
+
+@router.post(
+    "/ops/outbox/retry",
+    response_model=ConsoleOutboxRetryResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def retry_outbox(
+    body: ConsoleOutboxRetryRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleOutboxRetryResponse:
+    """Retry failed outbox messages."""
+    context = get_console_context(request, db)
+    _require_ops_access(context)
+
+    ids = [entry for entry in (body.ids or []) if entry]
+    if not ids:
+        _validate_limit(body.limit or 100)
+
+    query = db.query(OutboxMessage).filter(
+        OutboxMessage.client_id == context.client.id,
+        OutboxMessage.status == "FAILED",
+    )
+    if context.branch_restricted:
+        allowed_branch_ids = {b.id for b in context.branches}
+        if not allowed_branch_ids:
+            return ConsoleOutboxRetryResponse(success=True, retried=0, skipped=len(ids))
+        query = query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+
+    if ids:
+        query = query.filter(OutboxMessage.id.in_(ids))
+    else:
+        query = query.order_by(OutboxMessage.updated_at.desc()).limit(body.limit or 100)
+
+    rows = query.all()
+    if ids and not rows:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Outbox messages not found")
+
+    now = datetime.now(timezone.utc)
+    retried = 0
+    for row in rows:
+        row.status = "PENDING"
+        row.next_attempt_at = None
+        row.last_error = None
+        row.updated_at = now
+        retried += 1
+
+    skipped = max(0, len(ids) - retried) if ids else 0
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="outbox_retry",
+        entity_type="outbox",
+        payload={
+            "retried": retried,
+            "skipped": skipped,
+            "ids": [str(entry) for entry in ids] if ids else None,
+        },
+        client_id=context.client.id,
+    )
+    db.commit()
+
+    return ConsoleOutboxRetryResponse(success=True, retried=retried, skipped=skipped)
 
 
 @router.get(

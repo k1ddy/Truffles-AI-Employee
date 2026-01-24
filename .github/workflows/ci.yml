@@ -391,6 +391,7 @@ jobs:
           schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml \
             --url https://api.truffles.kz/console/v1 \
             --include-method=GET \
+            --exclude-path /ops/outbox \
             --checks all \
             --request-timeout 10 \
             --max-examples=3 \

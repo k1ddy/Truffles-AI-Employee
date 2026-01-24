@@ -162,6 +162,49 @@ class ConsoleHealthResponse(BaseModel):
     outbox_backlog: int
 
 
+class ConsoleOutboxCounts(BaseModel):
+    pending: int
+    processing: int
+    failed: int
+
+
+class ConsoleOutboxItem(BaseModel):
+    id: UUID
+    status: str
+    attempts: int
+    next_attempt_at: Optional[str] = None
+    last_error: Optional[str] = None
+    created_at: str
+    updated_at: str
+    conversation_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    inbound_message_id: str
+    channel: Optional[str] = None
+    message_type: Optional[str] = None
+    message_preview: Optional[str] = None
+    remote_jid: Optional[str] = None
+    instance_id: Optional[str] = None
+    forwarded_to_telegram: Optional[bool] = None
+
+
+class ConsoleOutboxListResponse(BaseModel):
+    items: list[ConsoleOutboxItem]
+    cursor: Optional[str] = None
+    has_more: bool
+    counts: ConsoleOutboxCounts
+
+
+class ConsoleOutboxRetryRequest(BaseModel):
+    ids: Optional[list[UUID]] = None
+    limit: Optional[int] = 100
+
+
+class ConsoleOutboxRetryResponse(BaseModel):
+    success: bool
+    retried: int
+    skipped: int
+
+
 class ConsoleAuditEvent(BaseModel):
     id: UUID
     created_at: str
