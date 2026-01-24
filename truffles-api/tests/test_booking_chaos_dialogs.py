@@ -118,6 +118,17 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
             return "маникюр"
         return None
 
+    def _stub_datetime(message_text):
+        if not message_text:
+            return None
+        if "15:00" in message_text:
+            return "15:00"
+        if "15 00" in message_text:
+            return "15:00"
+        if "завтра" in message_text.casefold():
+            return "завтра"
+        return None
+
     stub_answer = {
         "ok": False,
         "payload": {
@@ -143,6 +154,9 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
     ), patch(
         "app.routers.webhook._legacy._extract_service_hint",
         side_effect=_stub_service_hint,
+    ), patch(
+        "app.routers.webhook._legacy._extract_datetime",
+        side_effect=_stub_datetime,
     ), patch(
         "app.routers.webhook._legacy._get_recent_service_hint",
         return_value="маникюр",
