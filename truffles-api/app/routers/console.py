@@ -5,8 +5,9 @@ from datetime import datetime, time, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,7 @@ from app.models import (
     Agent,
     AgentIdentity,
     Branch,
+    ClientCapability,
     ClientSettings,
     Conversation,
     Handover,
@@ -22,6 +24,7 @@ from app.models import (
     OutboxMessage,
     User,
 )
+from app.schemas.capabilities import CAPABILITIES_SCHEMA_VERSION, CapabilitiesPayload
 from app.schemas.console import (
     ConsoleAgentIdentity,
     ConsoleAgentInfo,
@@ -30,6 +33,9 @@ from app.schemas.console import (
     ConsoleAuditEvent,
     ConsoleAuditListResponse,
     ConsoleBranch,
+    ConsoleCapabilitiesPatchRequest,
+    ConsoleCapabilitiesRecord,
+    ConsoleCapabilitiesResponse,
     ConsoleCase,
     ConsoleCaseActionResponse,
     ConsoleCaseActionSync,
@@ -62,6 +68,7 @@ from app.schemas.console import (
 from app.schemas.outbox_payload import validate_outbox_payload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
 from app.services.audit_service import record_audit_event
+from app.services.capabilities_service import merge_capabilities, payload_to_dict
 from app.services.console_auth import ConsoleAuthContext, get_console_context
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
 from app.services.console_idempotency import (
@@ -428,6 +435,11 @@ def _notify_client_status(
 def _require_owner_admin(context: ConsoleAuthContext) -> None:
     if context.role not in ("owner", "admin"):
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin can manage Telegram connector")
+
+
+def _require_platform_admin(context: ConsoleAuthContext) -> None:
+    if context.role not in ("owner", "admin", "support"):
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin/support can manage capabilities")
 
 
 def _generate_verification_code() -> str:
@@ -2621,3 +2633,178 @@ async def update_settings(
         success=True,
         message=f"Updated: {', '.join(updated_fields)}" if updated_fields else "No changes"
     )
+
+
+def _get_latest_capability(
+    db: Session,
+    *,
+    client_id: UUID,
+    scope: str,
+    branch_id: Optional[UUID],
+) -> Optional[ClientCapability]:
+    query = db.query(ClientCapability).filter(
+        ClientCapability.client_id == client_id,
+        ClientCapability.scope == scope,
+    )
+    if branch_id:
+        query = query.filter(ClientCapability.branch_id == branch_id)
+    else:
+        query = query.filter(ClientCapability.branch_id.is_(None))
+    return query.order_by(
+        ClientCapability.updated_at.desc(),
+        ClientCapability.created_at.desc(),
+    ).first()
+
+
+def _serialize_capabilities_record(record: ClientCapability) -> ConsoleCapabilitiesRecord:
+    try:
+        payload = CapabilitiesPayload.model_validate(record.payload_json or {})
+    except ValidationError as exc:
+        raise ConsoleAPIError(500, "CAPABILITIES_INVALID", "Stored capabilities payload is invalid") from exc
+    return ConsoleCapabilitiesRecord(
+        id=record.id,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        scope=record.scope,
+        status=record.status,
+        schema_version=record.schema_version,
+        payload=payload,
+        created_by=record.created_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
+@router.get(
+    "/admin/capabilities",
+    response_model=ConsoleCapabilitiesResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def get_capabilities(
+    request: Request,
+    branch_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleCapabilitiesResponse:
+    context = get_console_context(request, db)
+    _require_platform_admin(context)
+
+    if branch_id:
+        branch = (
+            db.query(Branch)
+            .filter(Branch.id == branch_id, Branch.client_id == context.client.id)
+            .first()
+        )
+        if not branch:
+            raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+
+    client_record = _get_latest_capability(
+        db,
+        client_id=context.client.id,
+        scope="client",
+        branch_id=None,
+    )
+    branch_record = None
+    if branch_id:
+        branch_record = _get_latest_capability(
+            db,
+            client_id=context.client.id,
+            scope="branch",
+            branch_id=branch_id,
+        )
+
+    client_payload = (
+        client_record.payload_json
+        if client_record and client_record.status == "active"
+        else None
+    )
+    branch_payload = (
+        branch_record.payload_json
+        if branch_record and branch_record.status == "active"
+        else None
+    )
+    effective_payload = CapabilitiesPayload.model_validate(
+        merge_capabilities(client_payload, branch_payload)
+    )
+
+    return ConsoleCapabilitiesResponse(
+        client_id=context.client.id,
+        branch_id=branch_id,
+        effective=effective_payload,
+        client_capabilities=_serialize_capabilities_record(client_record) if client_record else None,
+        branch_capabilities=_serialize_capabilities_record(branch_record) if branch_record else None,
+    )
+
+
+@router.patch(
+    "/admin/capabilities",
+    response_model=ConsoleCapabilitiesRecord,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def patch_capabilities(
+    request: Request,
+    body: ConsoleCapabilitiesPatchRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleCapabilitiesRecord:
+    context = get_console_context(request, db)
+    _require_platform_admin(context)
+
+    schema_version = body.schema_version or CAPABILITIES_SCHEMA_VERSION
+    if schema_version != CAPABILITIES_SCHEMA_VERSION:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported schema_version")
+
+    if body.scope == "branch":
+        if not body.branch_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id required for branch scope")
+        branch = (
+            db.query(Branch)
+            .filter(Branch.id == body.branch_id, Branch.client_id == context.client.id)
+            .first()
+        )
+        if not branch:
+            raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+    elif body.branch_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id is only valid for branch scope")
+
+    record = _get_latest_capability(
+        db,
+        client_id=context.client.id,
+        scope=body.scope,
+        branch_id=body.branch_id,
+    )
+    payload_dict = payload_to_dict(body.payload)
+    status_value = body.status or (record.status if record else "active")
+
+    if record:
+        record.payload_json = payload_dict
+        record.schema_version = schema_version
+        record.status = status_value
+    else:
+        record = ClientCapability(
+            client_id=context.client.id,
+            branch_id=body.branch_id,
+            scope=body.scope,
+            payload_json=payload_dict,
+            schema_version=schema_version,
+            status=status_value,
+            created_by=context.agent.id,
+        )
+        db.add(record)
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="capabilities_updated",
+        entity_type="client_capabilities",
+        entity_id=record.id,
+        branch_id=record.branch_id,
+        payload={
+            "scope": record.scope,
+            "client_id": str(context.client.id),
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "schema_version": record.schema_version,
+            "status": record.status,
+        },
+    )
+    db.commit()
+
+    return _serialize_capabilities_record(record)

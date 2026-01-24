@@ -407,26 +407,24 @@ Python API:
 
 ## 3.2 Capability Matrix (конфиг клиента)
 
-**Хранить в** `clients.config.capabilities` (строгая схема, без "магии").
+**Хранить в** `client_capabilities` (JSONB payload + schema_version; client‑scope + branch overrides).  
+**Контракт:** `contracts/capabilities/capabilities.v1.jsonschema`.
 
 ```yaml
-capabilities:
-  domain_slug: "salon|retail|clinic|restaurant"
-  channels:
-    whatsapp:
-      providers: ["chatflow", "wazzup"]
-      default_provider: "chatflow"
-    telegram:
-      providers: ["telegram_bot"]
-  integrations:
-    crm: {type: "amo", enabled: true}
-    sheets: {type: "google", enabled: false}
-    payments: {type: "kaspi", enabled: true}
-    custom_scripts: {enabled: false, allowlist: []}
-  features:
-    booking_flow: true
-    consult_flow: true
-    handoff: true
+domain_slug: "salon|retail|clinic|restaurant"
+channels:
+  whatsapp: true
+  telegram: true
+  instagram: false
+providers:
+  availability_provider: none        # none | google_calendar | bitrix | amocrm | manual
+  crm_provider: none                 # none | amocrm | bitrix | custom
+  calendar_provider: local           # none | google_calendar | local
+features:
+  booking_mode: collect_preferences  # collect_preferences | confirm_slots
+  knowledge_upload: true
+  analytics: false
+  auto_learn: false
 ```
 
 **Инвариант:** выбор логики определяется capabilities, а не hardcode.
@@ -468,7 +466,7 @@ capabilities:
 
 1) Создать `client` + `branch` (client_slug == clients.name, instanceId обязателен).  
 2) Создать packs под `domain_slug` + `client_slug`.  
-3) Заполнить capabilities (channels/providers/integrations/features).  
+3) Заполнить capabilities (channels/providers/features).  
 4) Sync KB (`ops/sync_client.py --validate` → sync).  
 5) Подключить провайдеры и выполнить smoke‑suite (CA‑01/02/03/07 минимум).
 

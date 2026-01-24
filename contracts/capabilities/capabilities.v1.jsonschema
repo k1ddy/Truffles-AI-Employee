@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/capabilities/capabilities.v1.jsonschema",
+  "title": "Client Capabilities v1",
+  "type": "object",
+  "required": ["channels", "providers", "features"],
+  "properties": {
+    "domain_slug": {
+      "type": ["string", "null"],
+      "pattern": "^[a-z0-9_-]+$"
+    },
+    "channels": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "whatsapp": { "type": ["boolean", "null"] },
+        "telegram": { "type": ["boolean", "null"] },
+        "instagram": { "type": ["boolean", "null"] }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "availability_provider": {
+          "type": ["string", "null"],
+          "enum": ["none", "google_calendar", "bitrix", "amocrm", "manual", null]
+        },
+        "crm_provider": {
+          "type": ["string", "null"],
+          "enum": ["none", "amocrm", "bitrix", "custom", null]
+        },
+        "calendar_provider": {
+          "type": ["string", "null"],
+          "enum": ["none", "google_calendar", "local", null]
+        }
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "booking_mode": {
+          "type": ["string", "null"],
+          "enum": ["collect_preferences", "confirm_slots", null]
+        },
+        "knowledge_upload": { "type": ["boolean", "null"] },
+        "analytics": { "type": ["boolean", "null"] },
+        "auto_learn": { "type": ["boolean", "null"] }
+      }
+    }
+  },
+  "additionalProperties": false
+}
