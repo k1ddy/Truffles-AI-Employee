@@ -49,6 +49,7 @@
 - `pytest -q truffles-api/tests/test_console_outbox_ops.py` (new)
 - `npm --prefix console-web run generate:api`
 - (CI) `.github/workflows/ci.yml`
+  - `console-contract` временно исключает `/ops/outbox` до деплоя endpoint на prod (после деплоя удалить exclude).
 
 ## Evidence
 - CI run URL + логи тестов.
