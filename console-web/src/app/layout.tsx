@@ -2,6 +2,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import Providers from "./providers";
+import ConsoleShell from "@/components/ConsoleShell";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -19,7 +20,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={inter.variable}>
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          <ConsoleShell>{children}</ConsoleShell>
+        </Providers>
       </body>
     </html>
   );

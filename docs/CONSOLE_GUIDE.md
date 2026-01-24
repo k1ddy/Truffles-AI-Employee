@@ -66,6 +66,12 @@ Rules:
 - Ошибки должны быть объяснимы: “Выберите клиента/филиал”.
 - Fail‑closed: без валидного контекста запросы не выполняются.
 
+**Phase 1 UI contract (Control Plane):**
+- Верхний Context Bar показывает Company/Client/Branch.
+- При `selection_required` / `branch_selection_required` UI блокирует контент и требует выбор.
+- Выбор хранится в localStorage (`console:client_id`, `console:branch_id`) и передаётся в `X-Client-Id` / `X-Branch-Id`.
+- Навигация в сайдбаре режется по роли (owner/admin/manager/support).
+
 **Common symptom:** “Only 1–2 cases shown / no slots.”  
 Usually means the admin is mapped to the wrong `client_id` or the wrong client was selected.
 

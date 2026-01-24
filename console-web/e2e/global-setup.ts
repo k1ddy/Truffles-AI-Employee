@@ -31,28 +31,54 @@ export default async function globalSetup(config: FullConfig) {
     await page.click("#kc-login");
     await page.waitForURL(consoleHostPattern, { timeout: 15000 });
 
-    const clientId = process.env.E2E_CLIENT_ID;
-    if (clientId) {
-        await page.evaluate((id) => {
-            window.localStorage.setItem("console:client_id", id);
-        }, clientId);
-    } else {
+    const envClientId = process.env.E2E_CLIENT_ID;
+    const envBranchId = process.env.E2E_BRANCH_ID;
+    let selectedClientId = envClientId ?? null;
+    if (!selectedClientId) {
         const selected = await page.evaluate(async () => {
             const response = await fetch("/api/proxy/me");
             if (!response.ok) {
                 return null;
             }
             const data = await response.json();
-            if (!data?.clients?.length) {
+            if (data?.clients?.length) {
+                return data.clients[0].id as string;
+            }
+            return data?.client?.id ?? null;
+        });
+        selectedClientId = selected;
+    }
+    if (selectedClientId) {
+        await page.evaluate((id) => {
+            window.localStorage.setItem("console:client_id", id);
+            window.localStorage.removeItem("console:branch_id");
+        }, selectedClientId);
+    }
+
+    let selectedBranchId = envBranchId ?? null;
+    if (!selectedBranchId && selectedClientId) {
+        const resolvedBranch = await page.evaluate(async (clientId) => {
+            const response = await fetch("/api/proxy/me", {
+                headers: { "X-Client-Id": clientId },
+            });
+            if (!response.ok) {
                 return null;
             }
-            return data.clients[0].id as string;
-        });
-        if (selected) {
-            await page.evaluate((id) => {
-                window.localStorage.setItem("console:client_id", id);
-            }, selected);
-        }
+            const data = await response.json();
+            if (!data?.branch_selection_required) {
+                return null;
+            }
+            if (!data?.branches?.length) {
+                return null;
+            }
+            return data.branches[0].id as string;
+        }, selectedClientId);
+        selectedBranchId = resolvedBranch;
+    }
+    if (selectedBranchId) {
+        await page.evaluate((id) => {
+            window.localStorage.setItem("console:branch_id", id);
+        }, selectedBranchId);
     }
 
     await page.context().storageState({ path: "e2e/.auth/state.json" });

@@ -9,10 +9,10 @@
 - Никаких “догадок” о tenant‑контексте.
 
 ## Scope
-- Новая оболочка Layout (sidebar + top context bar).
+- Общий Layout (sidebar + header + content slot).
+- Context Bar: Company/Client/Branch.
 - Ролевая навигация (owner/admin/manager/support).
-- Tenant selection UI (client/branch) с хранением в localStorage.
-- Обработка `selection_required`/`branch_selection_required` из `/console/v1/me`.
+- Tenant selection UI на основе `/console/v1/me`.
 
 ## Out of scope
 - Provisioning, Knowledge Studio, Team, Integrations UI.
@@ -22,33 +22,31 @@
 ## Touch-list
 - `console-web/src/app/layout.tsx`
 - `console-web/src/app/page.tsx`
-- `console-web/src/app/globals.css`
-- `console-web/src/components/*` (новые: Sidebar, ContextBar, TenantSelector)
-- `console-web/src/lib/api.ts`
-- `console-web/src/lib/api-client.ts`
+- `console-web/src/app/providers.tsx`
+- `console-web/src/components/ConsoleShell.tsx`
 - `docs/CONSOLE_GUIDE.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase1.md`
 - `STRUCTURE.md`
 - `STATE.md`
 
 ## Plan
-1) Добавить общий Layout (sidebar + header + content slot) для всех страниц.
-2) Реализовать Context Bar: отображение Company/Client/Branch + селекторы при 2+.
-3) Подключить `/console/v1/me` и локальное хранение выбранных client/branch.
-4) Реализовать role‑based menu (owner/admin/manager/support).
-5) Обновить docs/CONSOLE_GUIDE.md (контекст‑бар и правила selection).
+1) Добавить общий Layout (sidebar + header + content slot).
+2) Реализовать Context Bar с клиентом/филиалом.
+3) Подключить `/console/v1/me` и хранить выбор в localStorage.
+4) Включить role‑based menu.
+5) Обновить `docs/CONSOLE_GUIDE.md`.
 
 ## DoD
 - Контекст всегда виден, selector только при выборе.
-- При `selection_required`/`branch_selection_required` UI блокирует контент и требует выбор.
+- При `selection_required`/`branch_selection_required` UI блокирует контент.
 - Меню отражает роль (`agent.role`).
-- Вызовы API уходят с `X-Client-Id`/`X-Branch-Id` после выбора.
+- API запросы уходят с `X-Client-Id`/`X-Branch-Id` после выбора.
 
 ## Checks
 - `npm --prefix console-web run lint` (если зависимости установлены)
 
 ## Evidence
-- Скриншоты UI + описание поведения (manual) + запись в `STATE.md`.
+- Скриншоты UI + краткое описание поведения (manual) + запись в `STATE.md`.
 
 ## Rollback
 - Откатить UI‑изменения и вернуть текущую шапку.
@@ -57,11 +55,11 @@
 - Изменения API контрактов или backend поведения.
 
 ## Риски/блокеры
-- Отсутствие данных `/console/v1/me` на стенде; fallback‑режимы должны быть аккуратны.
+- Отсутствие валидных данных `/console/v1/me` на стенде.
 
 ## Branch / Worktree / Merge
-- Branch: `docs/control-plane-2026-01-24`
-- Worktree: `/home/zhan/worktrees/control-plane-docs`
+- Branch: `feat/control-plane-phase1-ui`
+- Worktree: `/home/zhan/worktrees/control-plane-phase1-ui`
 - Base ref: `origin/main`
 - Merge policy: PR + CI green, no rebase
 - Cleanup: удалить ветку после merge
