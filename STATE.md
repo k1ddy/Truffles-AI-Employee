@@ -9,7 +9,7 @@
 **NOW (1 экран)**
 - DONE: Control Plane канон зафиксирован (`SPECS/CONTROL_PLANE.md`), roadmap приведён к Web‑first; Task Package `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-canon.md`. Evidence: doc updates in repo.
 - DONE: DEC‑014 (Knowledge Studio publish pipeline) и DEC‑015 (capabilities model) зафиксированы в `docs/IMPERIUM_DECISIONS.yaml`. Evidence: doc updates in repo.
-- PLAN: Phase 1 Control Plane UI (layout + context + roles) — branch `feat/control-plane-phase1-ui`; lint blocked: `npm --prefix console-web run lint` → `next: not found`.
+- PLAN: Phase 1 Control Plane UI (layout + context + roles) — branch `feat/control-plane-phase1-ui`; local lint OK: `npm --prefix console-web run lint`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
