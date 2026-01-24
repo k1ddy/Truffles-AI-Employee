@@ -156,6 +156,11 @@
 - Checks: local `pytest -q truffles-api/tests/test_webhook_trace.py` (2 passed).
 - Evidence: pending CI/live-check.
 
+### 2026-01-24 — Consultant canon: ChatGPT-like domain-bound + slot-lock (PLAN)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-consultant-chatgpt-like.md`
+- Scope: обновить канон поведения (ChatGPT-like, domain-bound, slot-lock, booking_confirm) + strict LAW escalation.
+- Evidence: pending.
+
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
 - **Следующий шаг:** P0 outbox latency tail — см. последние SQL‑срезы; p90 > 10s, нужен следующий минимальный fix + evidence.
