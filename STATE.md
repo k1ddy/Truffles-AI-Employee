@@ -7,6 +7,7 @@
 ## СЕССИОННЫЙ СНИМОК (читать первым)
 
 **NOW (1 экран)**
+- PLAN: Control Plane Phase 1 UI (layout + context bar + role-based nav + selection gating) — branch `feat/control-plane-phase1-ui`; lint blocked: `npm --prefix console-web run lint` → `next: not found`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).

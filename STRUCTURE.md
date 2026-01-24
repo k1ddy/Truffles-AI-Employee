@@ -52,6 +52,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-24-calendar-local-provider-phase2.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-calendar-backfill-phase3.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-calendar-bot-integration-phase4.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase1.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-console-telegram-sync-fixes.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-inbox-health-search.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-consult-quality-core-v1.md`
