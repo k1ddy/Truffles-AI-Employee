@@ -8,12 +8,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Callable
+from zoneinfo import ZoneInfo
 
 import dateparser
 from rapidfuzz import fuzz, process
-from zoneinfo import ZoneInfo
 
 from app.schemas.webhook import WebhookResponse
+from app.services.appointment_service import SchedulingService
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -746,7 +747,6 @@ def _create_booking_appointment(
     from app.services.appointment_service import (
         AppointmentConflictError,
         BranchNotFoundError,
-        SchedulingService,
         SpecialistNotFoundError,
     )
 

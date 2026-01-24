@@ -8,8 +8,8 @@ from datetime import datetime, timedelta, timezone
 from datetime import time as dt_time
 from typing import Any, Dict, List, Optional
 from uuid import UUID
-
 from zoneinfo import ZoneInfo
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 

@@ -2,8 +2,8 @@ from app.models.agent import Agent
 from app.models.agent_identity import AgentIdentity
 from app.models.agent_link_token import AgentLinkToken
 from app.models.agent_membership import AgentMembership
-from app.models.branch import Branch
 from app.models.booking import Booking
+from app.models.branch import Branch
 from app.models.client import Client
 from app.models.client_settings import ClientSettings
 from app.models.company import Company
