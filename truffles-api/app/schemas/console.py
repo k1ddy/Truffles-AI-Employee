@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.schemas.capabilities import CapabilitiesPayload
 
+
 class ConsoleError(BaseModel):
     code: str
     message: str
