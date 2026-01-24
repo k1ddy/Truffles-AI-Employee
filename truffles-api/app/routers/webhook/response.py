@@ -764,6 +764,25 @@ def _handle_consult_flow(
             if service_meta:
                 consult_meta.setdefault("service_query", service_meta.get("service_query"))
                 consult_meta.setdefault("service_query_source", service_meta.get("service_query_source"))
+                # Preserve fact metadata from service_matcher replies for downstream contracts/tests.
+                for key in (
+                    "fact_source",
+                    "fact_intents",
+                    "info_sections",
+                    "info_combined",
+                    "question_type",
+                    "question_type_score",
+                    "service_query_score",
+                    "price_item",
+                    "duration_item",
+                    "info_signals",
+                    "anchor_intents",
+                    "anchor_hits",
+                    "anchor_boost",
+                ):
+                    value = service_meta.get(key)
+                    if value is not None and consult_meta.get(key) is None:
+                        consult_meta[key] = value
             if consult_decision and consult_decision.action == "reply":
                 combined_response = legacy._combine_sidecar(consult_decision.response, service_reply)
                 consult_decision = DemoSalonDecision(
