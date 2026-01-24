@@ -123,8 +123,15 @@ export default function CaseView({ caseId }: CaseViewProps) {
             queryClient.invalidateQueries({ queryKey: ["cases"] });
             router.push("/");
         },
-        onError: () => {
-            toast.error("Не удалось закрыть заявку");
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            if (code === "CASE_ALREADY_RESOLVED") {
+                toast.error("Заявка уже закрыта");
+                queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+                queryClient.invalidateQueries({ queryKey: ["cases"] });
+            } else {
+                toast.error("Не удалось закрыть заявку");
+            }
         },
     });
 

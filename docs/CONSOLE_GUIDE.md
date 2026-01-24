@@ -225,7 +225,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
    нужная заявка должна подняться вверх, а в строке показать канал активности.
 2) Case View: в карточке проверь `Case Health` (last in/out, NEW/LIVE/⚠️), `Telegram trail` и ссылки:
    - Web: `https://t.me/c/<id>/<message_id>?thread=<topic_id>`
-   - Desktop: `tg://openmessage?chat_id=<internal_id>&message_id=<message_id>`
+   - Desktop: `tg://privatepost?channel=<internal_id>&post=<message_id>&thread=<topic_id>`
 3) Telegram → Console: отправь сообщение из Telegram топика → оно должно появиться в Console (polling ≤ 5s).
 4) Console → Telegram: отправь сообщение из Console → оно должно уйти клиенту и отобразиться в Telegram топике (echo).
 5) Ops: проверь `Console → Ops` (Telegram health + outbox backlog).
