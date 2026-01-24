@@ -18,6 +18,7 @@ DECISION_TRACE_MAX = 40
 DECISION_TRACE_CRITICAL_STAGES = {
     "action_gate",
     "booking",
+    "booking_commit",
     "booking_interrupt",
     "consult_flow",
     "consult_return",
@@ -44,6 +45,9 @@ DECISION_TRACE_CRITICAL_STAGES = {
 DECISION_TRACE_PRIORITY_STAGES = {
     "booking_interrupt",
     "multi_truth",
+}
+DECISION_TRACE_PINNED_STAGES = {
+    "booking_commit",
 }
 
 DECISION_STAGE_ORDER_SNAPSHOT = [
@@ -121,10 +125,33 @@ def _retain_decision_trace(trace_list: list[dict[str, Any]]) -> list[dict[str, A
     if len(trace_list) <= DECISION_TRACE_MAX:
         return trace_list
 
+    pinned_indices: list[int] = []
+    if DECISION_TRACE_PINNED_STAGES:
+        for stage in DECISION_TRACE_PINNED_STAGES:
+            for idx in range(len(trace_list) - 1, -1, -1):
+                if trace_list[idx].get("stage") == stage:
+                    pinned_indices.append(idx)
+                    break
+    pinned_set = set(pinned_indices)
+    if len(pinned_indices) >= DECISION_TRACE_MAX:
+        logger.warning(
+            "Decision trace pinned retention exceeded limit",
+            extra={
+                "context": {
+                    "pinned_count": len(pinned_indices),
+                    "trace_max": DECISION_TRACE_MAX,
+                }
+            },
+        )
+        keep_indices = set(pinned_indices[-DECISION_TRACE_MAX:])
+        return [item for idx, item in enumerate(trace_list) if idx in keep_indices]
+
     priority_indices: list[int] = []
     critical_indices: list[int] = []
     normal_indices: list[int] = []
     for idx, item in enumerate(trace_list):
+        if idx in pinned_set:
+            continue
         stage = item.get("stage")
         if stage in DECISION_TRACE_PRIORITY_STAGES:
             priority_indices.append(idx)
@@ -133,22 +160,24 @@ def _retain_decision_trace(trace_list: list[dict[str, Any]]) -> list[dict[str, A
         else:
             normal_indices.append(idx)
 
-    if len(priority_indices) > DECISION_TRACE_MAX:
-        dropped = len(priority_indices) - DECISION_TRACE_MAX
-        keep_priority = priority_indices[-DECISION_TRACE_MAX:]
+    remaining = max(DECISION_TRACE_MAX - len(pinned_indices), 0)
+    if len(priority_indices) > remaining:
+        dropped = len(priority_indices) - remaining
+        keep_priority = priority_indices[-remaining:] if remaining else []
         logger.warning(
             "Decision trace priority retention exceeded limit",
             extra={
                 "context": {
                     "priority_count": len(priority_indices),
                     "dropped_priority": dropped,
+                    "pinned_count": len(pinned_indices),
                     "trace_max": DECISION_TRACE_MAX,
                 }
             },
         )
-        keep_indices = set(keep_priority)
+        keep_indices = set(pinned_indices + keep_priority)
     else:
-        remaining = max(DECISION_TRACE_MAX - len(priority_indices), 0)
+        remaining = max(remaining - len(priority_indices), 0)
         if len(critical_indices) > remaining:
             dropped = len(critical_indices) - remaining
             keep_critical = critical_indices[-remaining:] if remaining else []
@@ -158,6 +187,7 @@ def _retain_decision_trace(trace_list: list[dict[str, Any]]) -> list[dict[str, A
                     "context": {
                         "priority_count": len(priority_indices),
                         "critical_count": len(critical_indices),
+                        "pinned_count": len(pinned_indices),
                         "dropped_critical": dropped,
                         "trace_max": DECISION_TRACE_MAX,
                     }
@@ -167,7 +197,7 @@ def _retain_decision_trace(trace_list: list[dict[str, Any]]) -> list[dict[str, A
             keep_critical = critical_indices
         remaining = max(remaining - len(keep_critical), 0)
         keep_normals = normal_indices[-remaining:] if remaining else []
-        keep_indices = set(priority_indices + keep_critical + keep_normals)
+        keep_indices = set(pinned_indices + priority_indices + keep_critical + keep_normals)
 
     return [item for idx, item in enumerate(trace_list) if idx in keep_indices]
 
@@ -279,6 +309,7 @@ __all__ = [
     "DECISION_TRACE_CRITICAL_STAGES",
     "DECISION_TRACE_KEY",
     "DECISION_TRACE_MAX",
+    "DECISION_TRACE_PINNED_STAGES",
     "DECISION_STAGE_ORDER_SNAPSHOT",
     "_attach_llm_cache_flag",
     "_record_decision_trace",
