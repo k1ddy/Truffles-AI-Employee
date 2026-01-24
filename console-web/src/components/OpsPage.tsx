@@ -440,7 +440,7 @@ export default function OpsPage() {
                         <button
                             type="button"
                             className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                            onClick={() => outboxRetry.mutate()}
+                            onClick={() => outboxRetry.mutate(undefined)}
                             disabled={outboxRetry.isPending}
                         >
                             {outboxRetry.isPending ? "Ретрай..." : "Retry failed"}
