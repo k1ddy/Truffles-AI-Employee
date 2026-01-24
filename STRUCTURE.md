@@ -31,6 +31,9 @@
 | `console-web/.env.e2e.example` | Шаблон env для console‑e2e | Frontend/QA |
 | `console-web/public/brand/` | Бренд‑ассеты консоли (логотипы) | Frontend |
 | `docs/CONSOLE_GUIDE.md` | Guide по Console (API, тесты, дебаг) | Frontend/Backend |
+| `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |
+| `docs/REPORTS/` | Отчёты по прогонам/изменениям | Brain/Architect |
+| `docs/REPORTS/2026-01-24-consult-quality.md` | Отчёт: consult quality + chaos‑sim | Brain/Architect |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
@@ -45,6 +48,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-23-telegram-protocol-docs.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-console-telegram-sync-fixes.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-inbox-health-search.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-consult-quality-core-v1.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-ops-outbox-delivery.md`
 
 ---
