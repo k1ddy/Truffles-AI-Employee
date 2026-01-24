@@ -36,3 +36,18 @@ def test_retain_decision_trace_keeps_priority_stages_over_limit():
     stages = {item.get("stage") for item in retained}
     assert "booking_interrupt" in stages
     assert "multi_truth" in stages
+
+
+def test_retain_decision_trace_keeps_pinned_stage_over_limit():
+    trace_list = [
+        {"stage": "booking_commit"},
+    ]
+    trace_list.extend(
+        {"stage": "policy_gate"} for _ in range(webhook_trace.DECISION_TRACE_MAX + 5)
+    )
+
+    retained = webhook_trace._retain_decision_trace(trace_list)
+
+    assert len(retained) == webhook_trace.DECISION_TRACE_MAX
+    stages = {item.get("stage") for item in retained}
+    assert "booking_commit" in stages

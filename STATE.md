@@ -147,6 +147,12 @@
 - Checks: `python3 -m compileall truffles-api/app/routers/webhook/booking.py truffles-api/app/services/appointment_service.py` OK; `pytest -q truffles-api/tests/test_booking_appointments.py` skipped (missing `dateparser` locally).
 - Evidence: локальные проверки только (no CI/live-check).
 
+### 2026-01-24 — Trace booking_commit retention + booking livecheck (PLAN)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-trace-booking-commit.md`
+- Scope: pinned retention for `booking_commit` + livecheck suite checking appointments/appointment_audit/outbox.
+- Checks: local `pytest -q truffles-api/tests/test_webhook_trace.py` (2 passed).
+- Evidence: pending CI/live-check.
+
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
 - **Следующий шаг:** P0 outbox latency tail — см. последние SQL‑срезы; p90 > 10s, нужен следующий минимальный fix + evidence.

@@ -988,6 +988,7 @@ jobs:
               "livecheck-ca03-info.jsonl" \
               "livecheck-ca04-service.jsonl" \
               "livecheck-ca05-booking.jsonl" \
+              "livecheck-ca05-booking-commit.jsonl" \
               "livecheck-ca06-consult.jsonl" \
               "livecheck-ca07-ood.jsonl" \
               "livecheck-ca08-state.jsonl" \
@@ -1159,7 +1160,7 @@ jobs:
           git remote set-url origin "${SOURCE_ORIGIN_URL}"
           git fetch origin "${GIT_SHA}" --depth=1
           git checkout -q "${GIT_SHA}"
-          suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca06-consult ca07-ood ca08-state ca09-manager ca10-outbox)
+          suite_order=(ca01-core ca02-policy ca03-info ca04-service ca05-booking ca05-booking-commit ca06-consult ca07-ood ca08-state ca09-manager ca10-outbox)
           suite_jid="${ALLOWLIST_POOL[$JID_INDEX]}"
           suite_fail=0
           run_suite() {
@@ -1176,7 +1177,7 @@ jobs:
               poll_timeout=$((poll_timeout + 60))
             fi
             local fail_fast_after="${FAIL_FAST_AFTER}"
-            if [ "${suite_name}" = "ca05-booking" ] || [ "${suite_name}" = "ca08-state" ]; then
+            if [ "${suite_name}" = "ca05-booking" ] || [ "${suite_name}" = "ca05-booking-commit" ] || [ "${suite_name}" = "ca08-state" ]; then
               fail_fast_after="${poll_timeout}"
             fi
             local request_timeout=30
@@ -1216,6 +1217,7 @@ jobs:
               ca03-info) echo 775 ;;
               ca04-service) echo 774 ;;
               ca05-booking) echo 773 ;;
+              ca05-booking-commit) echo 783 ;;
               ca06-consult) echo 772 ;;
               ca07-ood) echo 771 ;;
               ca08-state) echo 778 ;;
