@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
 import { telegramApi } from "@/lib/api-client";
@@ -161,10 +161,13 @@ export default function OpsPage() {
         queryFn: () => fetchOutbox(outboxStatus),
         enabled: !!session,
         refetchInterval: 30000,
-        onError: (error) => {
-            handleError(error);
-        },
     });
+
+    useEffect(() => {
+        if (outboxError) {
+            handleError(outboxError);
+        }
+    }, [outboxError, handleError]);
 
     const telegramVerify = useMutation({
         mutationFn: async () => {
