@@ -277,7 +277,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - **Router** → вход + outbox + порядок стадий из цепочки выше.
 - **Safety Guard** → pending/opt‑out/Hard‑LAW escalation + policy‑gates (скидки/оплата info).
 - **OOD Guard** → early OOD (только если нет in‑signals).
-- **Booking Guard** → booking guard/flow + expected_reply_type контракт.
+- **Booking Guard** → booking guard/flow + expected_reply_type + slot-lock + booking_confirm.
 - **Info/RAG Specialist** → tools/packs fact‑resolver → LLM‑формулировка → Response Guard → truth gate fallback.
 - **Host Persona** → формулировка ответа (шаблоны/LLM) по `SPECS/CONSULTANT.md`, CTA/quiet hours в response‑слое.
 - **Observability** → decision_trace/meta на каждом сообщении.
@@ -285,6 +285,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 ### LLM‑first Understanding + Deterministic Commit — канон
 - Цель: **LLM даёт смысл**, но commit решения проходит через deterministic validators.
 - Выход LLM (IntentContract): `intent`, `slots`, `language`, `emotion`, `confidence`, `risk_signals`.
+- Booking slot extract: LLM выделяет `service/master/time/name` в JSON; при низкой уверенности → `booking_confirm`.
 - Semantic resolver подтверждает/опровергает; расхождения фиксируются в trace/meta (proposed vs committed).
 - Факты извлекаются **только** через tools/packs; LLM не создаёт факты.
 - Response Guard обязателен: текст = ack + facts + next_step, иначе fallback.
@@ -302,8 +303,14 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - FactContract: `facts`, `sources`, `policy_flags`.
 - ActionContract: `action_type`, `required_next_slots`, `escalation_reason`.
 - ResponseContract: `tone`, `must_include`, `must_not_include`, `language`.
-- MemoryContract: `mode`, `slots`, `summary`, `last_updated`, `ttl`, `last_updated_at`, `ttl_hours`, `active_goal`, `last_question_type`, `goal_stack`, `pending_slots`, `unanswered_questions`.
+- MemoryContract: `mode`, `slots`, `summary`, `last_updated`, `ttl`, `last_updated_at`, `ttl_hours`, `active_goal`, `last_question_type`, `goal_stack`, `pending_slots`, `unanswered_questions`, `slot_lock`, `slot_snapshot`, `slot_confirmation_required`.
 - TraceContract: `stage`, `decision`, `reason`, `meta`.
+
+### Slot extraction + confirmation (P0)
+- Stages: `slot_extract` (LLM JSON), `slot_validate` (детерминированно), `booking_confirm` (подтверждение слотов).
+- Slot-lock: активный `expected_reply_type` сохраняется при перебивках; смена только на заполнение слота/отмену/`pending`.
+- decision_trace: `stage=slot_extract|slot_validate|booking_confirm` с `decision` и `slot_summary`.
+- decision_meta: `slot_source`, `slot_confidence`, `slot_confirmation_required`, `slot_summary`.
 
 ### Tool Fact Contracts (P0)
 **Цель:** единственный источник фактов; LLM не создаёт факты.
