@@ -122,6 +122,8 @@
 - **PLAN (no evidence):** P0 “бот не знает, что отвечать” → расширить RU/KZ/mixed лексиконы и диалоги в packs + покрыть детерминированным webhook‑fuzz (см. Task Package ниже).
 - **PLAN (no evidence):** Task Package `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` — chaos‑sim + consult quality (multi‑intent, safe advice).
 - **PLAN (no evidence):** Task Package `docs/TASK_PACKAGES/TP-2026-01-24-consult-quality-core-v1.md` — core‑фиксы consult/pending/service_not_offered + evaluator.
+- **PLAN (no evidence):** Doc `docs/CONSULTANT_CODEMAP.md` — код‑карта консультанта (pipeline + блоки).
+- **PLAN (no evidence):** Doc `docs/REPORTS/2026-01-24-consult-quality.md` — отчёт по consult quality + chaos‑sim (PR #333, pending).
 - **DONE:** Anti bot-to-bot loop guard (preflight ignores inbound from sender‑JID matching `branches.phone`) deployed. Evidence: clean sender `77785890765` → demo_salon main branch OK (conv_id `10049e90-5805-425f-841b-c0c9419c9c30`, msg_id `3EB07B249B69BBABF1FB13`, decision_meta action=match source=service_semantic_matcher, outbox SENT). Branch‑sender ignore exercised: trace stage `preflight` reason `sender_is_branch` recorded at `2026-01-20T13:06:36Z` in conv_id `4dd2e5ae-c287-4137-803a-18a89e277bf4` after branch→branch send (LC-BRANCH-LOOP-20260120-130633).
 - **TODO:** Real WA inbound live-check (ChatFlow) для PR #143 — pending.
 - **Решение pending:** “полная перестройка системы” — требует отдельного решения в `docs/IMPERIUM_DECISIONS.yaml` и нового DoD.
