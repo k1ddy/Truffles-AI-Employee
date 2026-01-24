@@ -87,7 +87,8 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - API: `GET /console/v1/cases`
 - Data: `handovers` + `conversations` + `users`
 - Paging: cursor = `handover.created_at`
-- Target (planned): сортировка по `last_inbound_at`, быстрый поиск по телефону/имени/ID, бейджи `NEW/LIVE/⚠️`.
+- Filters: `status`, `branch_id`, `assigned_to_me`, `q`, `phone`, `has_delivery_error`, `has_pending_outbox`.
+- Health: `last_inbound_at`, `last_outbound_at`, `last_activity_at`, `last_message_preview`, `needs_reply`, `has_delivery_error`, `has_pending_outbox`.
 
 **Case view**
 - UI: `console-web/src/app/cases/[id]/page.tsx`

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useAuthenticatedApi } from "@/hooks/useAuthenticatedApi";
@@ -13,9 +13,12 @@ interface CaseFilters {
     status?: string;
     branchId?: string;
     assignedToMe: boolean;
+    query?: string;
+    hasDeliveryError: boolean;
+    hasPendingOutbox: boolean;
     dateFrom?: string;
     dateTo?: string;
-    sortBy: "created_at" | "sla";
+    sortBy: "created_at" | "sla" | "activity";
 }
 
 interface Branch {
@@ -55,11 +58,27 @@ export default function CaseList() {
         status: undefined,
         branchId: undefined,
         assignedToMe: false,
+        query: undefined,
+        hasDeliveryError: false,
+        hasPendingOutbox: false,
         dateFrom: undefined,
         dateTo: undefined,
-        sortBy: "created_at",
+        sortBy: "activity",
     });
     const [cursor, setCursor] = useState<string | undefined>(undefined);
+    const [searchValue, setSearchValue] = useState("");
+
+    useEffect(() => {
+        const handle = setTimeout(() => {
+            const trimmed = searchValue.trim();
+            setFilters((prev) => ({
+                ...prev,
+                query: trimmed || undefined,
+            }));
+            setCursor(undefined);
+        }, 300);
+        return () => clearTimeout(handle);
+    }, [searchValue]);
 
     // Check if we have a valid token
     const hasToken = !!(session as { accessToken?: string } | null)?.accessToken;
@@ -84,6 +103,9 @@ export default function CaseList() {
             if (filters.status) params.append("status", filters.status);
             if (filters.branchId) params.append("branch_id", filters.branchId);
             if (filters.assignedToMe) params.append("assigned_to_me", "true");
+            if (filters.query) params.append("q", filters.query);
+            if (filters.hasDeliveryError) params.append("has_delivery_error", "true");
+            if (filters.hasPendingOutbox) params.append("has_pending_outbox", "true");
             if (filters.dateFrom) params.append("date_from", filters.dateFrom);
             if (filters.dateTo) params.append("date_to", filters.dateTo);
             if (cursor) params.append("cursor", cursor);
@@ -93,7 +115,7 @@ export default function CaseList() {
             return response.data;
         },
         enabled: hasToken,
-        refetchInterval: 30000, // Auto-refresh every 30 seconds
+        refetchInterval: 10000, // Auto-refresh every 10 seconds
         refetchIntervalInBackground: false, // Only refresh when tab is active
     });
 
@@ -105,6 +127,11 @@ export default function CaseList() {
             const slaA = getSlaIndicator(a.created_at).minutes;
             const slaB = getSlaIndicator(b.created_at).minutes;
             return slaB - slaA; // Oldest first (highest SLA breach)
+        }
+        if (filters.sortBy === "activity") {
+            const aTime = a.last_inbound_at || a.last_activity_at || a.created_at;
+            const bTime = b.last_inbound_at || b.last_activity_at || b.created_at;
+            return new Date(bTime).getTime() - new Date(aTime).getTime();
         }
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
@@ -166,6 +193,14 @@ export default function CaseList() {
 
             {/* Filter row */}
             <div className="flex flex-wrap items-center gap-3 mb-4 p-3 bg-muted rounded-lg border border-border/60" data-testid="cases-filters">
+                <input
+                    type="text"
+                    value={searchValue}
+                    onChange={(e) => setSearchValue(e.target.value)}
+                    placeholder="Телефон / имя / ID"
+                    className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 min-w-[220px]"
+                    data-testid="cases-filter-search"
+                />
                 {/* Status filter */}
                 <select
                     value={filters.status || ""}
@@ -197,10 +232,11 @@ export default function CaseList() {
                 {/* Sort by */}
                 <select
                     value={filters.sortBy}
-                    onChange={(e) => setFilters({ ...filters, sortBy: e.target.value as "created_at" | "sla" })}
+                    onChange={(e) => setFilters({ ...filters, sortBy: e.target.value as "created_at" | "sla" | "activity" })}
                     className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
                     data-testid="cases-filter-sort"
                 >
+                    <option value="activity">Сортировка: Активные</option>
                     <option value="created_at">Сортировка: Новые</option>
                     <option value="sla">Сортировка: Срочные</option>
                 </select>
@@ -241,10 +277,41 @@ export default function CaseList() {
                     <span className="text-sm text-foreground/80">Мои заявки</span>
                 </label>
 
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={filters.hasDeliveryError}
+                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasDeliveryError: e.target.checked }); }}
+                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                        data-testid="cases-filter-delivery-error"
+                    />
+                    <span className="text-sm text-foreground/80">Есть ошибки</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={filters.hasPendingOutbox}
+                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasPendingOutbox: e.target.checked }); }}
+                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                        data-testid="cases-filter-pending-outbox"
+                    />
+                    <span className="text-sm text-foreground/80">В очереди</span>
+                </label>
+
                 {/* Clear filters */}
-                {(filters.status || filters.branchId || filters.dateFrom || filters.dateTo || filters.assignedToMe) && (
+                {(filters.status || filters.branchId || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox) && (
                     <button
-                        onClick={() => { resetPagination(); setFilters({ assignedToMe: false, sortBy: "created_at" }); }}
+                        onClick={() => {
+                            setSearchValue("");
+                            resetPagination();
+                            setFilters({
+                                assignedToMe: false,
+                                sortBy: "activity",
+                                hasDeliveryError: false,
+                                hasPendingOutbox: false,
+                            });
+                        }}
                         className="text-xs text-muted-foreground hover:text-destructive"
                         data-testid="cases-filter-clear"
                     >
@@ -271,7 +338,7 @@ export default function CaseList() {
                             <th className="p-4 text-sm font-medium text-muted-foreground">Канал</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Назначено</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Сообщение</th>
-                            <th className="p-4 text-sm font-medium text-muted-foreground">Создано</th>
+                            <th className="p-4 text-sm font-medium text-muted-foreground">Активность</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Действия</th>
                         </tr>
                     </thead>
@@ -279,6 +346,11 @@ export default function CaseList() {
                         {sortedCases.map((c) => {
                             const sla = getSlaIndicator(c.created_at);
                             const branchName = branchMap.get(c.branch_id || "") || "-";
+                            const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
+                            const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
+                            const isLive = lastInbound ? (Date.now() - lastInbound.getTime()) < 5 * 60 * 1000 : false;
+                            const needsReply = !!c.needs_reply;
+                            const hasIssue = !!c.has_delivery_error || !!c.has_pending_outbox;
                             return (
                                 <tr key={c.id} className="border-b border-border/60 hover:bg-muted/60" data-testid="cases-row">
                                     <td className="p-4 font-mono text-sm">{c.id.slice(0, 8)}...</td>
@@ -302,9 +374,28 @@ export default function CaseList() {
                                     <td className="p-4 text-sm">{branchName}</td>
                                     <td className="p-4 text-sm">{c.channel}</td>
                                     <td className="p-4 text-sm">{c.assigned_to_name || "-"}</td>
-                                    <td className="p-4 text-sm truncate max-w-xs">{c.user_message || "-"}</td>
+                                    <td className="p-4 text-sm max-w-xs">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="truncate max-w-[180px]">{c.last_message_preview || c.user_message || "-"}</span>
+                                            {needsReply && (
+                                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-100 text-yellow-800">
+                                                    NEW
+                                                </span>
+                                            )}
+                                            {isLive && (
+                                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-800">
+                                                    LIVE
+                                                </span>
+                                            )}
+                                            {hasIssue && (
+                                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-800">
+                                                    ⚠️
+                                                </span>
+                                            )}
+                                        </div>
+                                    </td>
                                     <td className="p-4 text-sm text-muted-foreground">
-                                        {new Date(c.created_at).toLocaleString("ru-RU")}
+                                        {new Date(lastActivity).toLocaleString("ru-RU")}
                                     </td>
                                     <td className="p-4">
                                         <Link

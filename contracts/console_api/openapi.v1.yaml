@@ -139,6 +139,10 @@ paths:
           schema:
             type: string
             enum: [pending, active, resolved]
+        - name: q
+          in: query
+          schema:
+            type: string
         - name: branch_id
           in: query
           schema:
@@ -149,6 +153,25 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: phone
+          in: query
+          schema:
+            type: string
+        - name: has_delivery_error
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: has_pending_outbox
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: last_activity_since
+          in: query
+          schema:
+            type: string
+            format: date-time
         - name: date_from
           in: query
           schema:
@@ -944,6 +967,34 @@ components:
           type: array
           items:
             type: object
+          nullable: true
+        last_inbound_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_outbound_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_activity_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_activity_channel:
+          type: string
+          enum: [whatsapp, telegram, console, system]
+          nullable: true
+        last_message_preview:
+          type: string
+          nullable: true
+        needs_reply:
+          type: boolean
+          nullable: true
+        has_delivery_error:
+          type: boolean
+          nullable: true
+        has_pending_outbox:
+          type: boolean
           nullable: true
         telegram_trail:
           $ref: "#/components/schemas/TelegramTrail"

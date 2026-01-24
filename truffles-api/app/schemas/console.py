@@ -104,6 +104,15 @@ class ConsoleCase(BaseModel):
     customer_remote_jid: Optional[str] = None
     # Decision trace
     decision_trace: Optional[list[dict]] = None
+    # Inbox health
+    last_inbound_at: Optional[str] = None
+    last_outbound_at: Optional[str] = None
+    last_activity_at: Optional[str] = None
+    last_activity_channel: Optional[str] = None
+    last_message_preview: Optional[str] = None
+    needs_reply: Optional[bool] = None
+    has_delivery_error: Optional[bool] = None
+    has_pending_outbox: Optional[bool] = None
     # Telegram trail (for escalation visibility)
     telegram_trail: Optional[ConsoleTelegramTrail] = None
 

@@ -636,6 +636,7 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 - `last_inbound_at`, `last_outbound_at`
 - `last_message_preview`
 - `unread_count` (после `agent_last_viewed_at`)
+- `needs_reply` (last inbound > last outbound)
 - `has_delivery_error`, `has_pending_outbox`
 - `last_activity_channel`
 

@@ -133,7 +133,7 @@ def notify_client_manager_status(
         client_id=conversation.client_id,
         role="assistant",
         content=message,
-        message_metadata={"system": True, "event": f"manager_{status}"},
+        message_metadata={"system": True, "event": f"manager_{status}", "source": "system"},
     )
 
     sent = send_bot_response(
@@ -390,6 +390,7 @@ def process_manager_message(
         client_id=conversation.client_id,
         role="manager",
         content=message_text,
+        message_metadata={"source": "telegram"},
     )
 
     # Update handover with manager response
@@ -553,7 +554,7 @@ def process_manager_media(
         client_id=conversation.client_id,
         role="manager",
         content=content,
-        message_metadata={"media": media_meta},
+        message_metadata={"media": media_meta, "source": "telegram"},
     )
 
     telegram = TelegramService(bot_token)

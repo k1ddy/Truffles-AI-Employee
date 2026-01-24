@@ -217,12 +217,13 @@ POST /console/v1/cases/{case_id}/return
   - `source="telegram"` (manager replies)
   - `source="console"` (web replies)
 - На уровне кейса вычисляются агрегаты:
-  - `last_inbound_at`, `last_outbound_at`
-  - `last_message_preview` (snippet)
-  - `last_activity_channel` (`whatsapp|telegram|console`)
-  - `unread_count` (сообщения после `agent_last_viewed_at`)
-  - `has_delivery_error`, `has_pending_outbox`
-  - `health` (ok/degraded/error) + `health_reason`
+- `last_inbound_at`, `last_outbound_at`
+- `last_message_preview` (snippet)
+- `last_activity_channel` (`whatsapp|telegram|console`)
+- `needs_reply` (last inbound > last outbound)
+- `unread_count` (сообщения после `agent_last_viewed_at`) — **Phase 2** после трекинга просмотра
+- `has_delivery_error`, `has_pending_outbox`
+- `health` (ok/degraded/error) + `health_reason`
 - Inbox сортируется по `last_inbound_at desc` (самые “живые” сверху).
 - В UI:
   - бейдж `NEW` (unread_count > 0)

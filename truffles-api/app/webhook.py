@@ -583,6 +583,7 @@ async def handle_webhook(request: WebhookRequest, db: Session = Depends(get_db))
     message_metadata = metadata.model_dump(exclude_none=True) if metadata else {}
     if message_id:
         message_metadata["message_id"] = message_id
+    message_metadata["source"] = "whatsapp"
     save_message(
         db,
         conversation.id,

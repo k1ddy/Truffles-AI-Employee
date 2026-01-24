@@ -11,8 +11,8 @@
 
 ## Scope
 - Контракты Inbox/Case Health в OpenAPI (listCases + Case schema).
-- Backend: агрегаты `last_inbound_at`, `last_outbound_at`, `last_message_preview`, `unread_count`,
-  `has_delivery_error`, `has_pending_outbox`, `last_activity_channel`.
+- Backend: агрегаты `last_inbound_at`, `last_outbound_at`, `last_message_preview`, `last_activity_channel`,
+  `needs_reply`, `has_delivery_error`, `has_pending_outbox`. (`unread_count` — Phase 2 после трекинга просмотра)
 - Поиск/фильтры: `q` (phone/name/id), `phone`, `has_unread`, `has_delivery_error`, `last_activity_since`.
 - UI Inbox: сортировка по `last_inbound_at`, бейджи `NEW/LIVE/⚠️`, быстрый поиск.
 - Диагностика: Case Health блок в Case View.

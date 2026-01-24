@@ -106,6 +106,8 @@
 
 ### 2026-01-24 — Unified Inbox + Case Health (PLAN)
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-inbox-health-search.md`
+- Checks: `pytest -q truffles-api/tests/test_console_inbox_helpers.py` → `5 passed`; `npm --prefix console-web run generate:api`
+- Evidence: local checks only (CI pending)
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
