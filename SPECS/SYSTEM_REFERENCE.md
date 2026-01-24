@@ -809,6 +809,19 @@ python3 ops/diagnose.py chaos-sim \
 - Негативные pack‑кейсы обязаны падать в `sync_client.py --validate`.
 - При неполных данных — fail‑closed (эскалация/уточнение), без “выдумки”.
 
+### 5.8.2 Протокол разбора фейлов (pattern‑based)
+
+**Цель:** фиксить причины, а не отдельные кейсы.
+
+1) Кластеризовать фейлы по паттернам (lang_mix + noise + intent + gate).
+2) Сверить с каноном:  
+   - канон не соответствует → обновить `SPECS/*` (Top Architect);  
+   - канон OK, но evaluator слишком строгий → поправить evaluator (false‑positive).
+3) Если это дефект логики → отдельный Task Package + минимальный фикс + регресс.
+4) Проверка: smoke (20–50) → полный прогон → evidence в `STATE.md`.
+
+**Quality‑violations:** см. `SPECS/CONSULTANT.md` (service_not_offered / safe_consult_only / hard_law_bypass / pending_gate_broken / goal_drop).
+
 ### 5.9 Safety‑контур (обязательная защита)
 
 **Правило:** автопрогоны не пишут живым людям.

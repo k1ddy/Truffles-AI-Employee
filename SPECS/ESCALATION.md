@@ -154,6 +154,7 @@ _Статус реализации и evidence — в `STATE.md`._
 - Создан handover в БД
 - Уведомление в Telegram с кнопками [Беру] [Вернуть боту] [Не могу]
 - Бот отвечает только статусными/подтверждающими сообщениями (pending_ack/pending_close/status)
+- Любые booking/info/consult/multi‑intent **не** должны запускать решения; в `pending` только pending‑ответы.
 - После `pending_ack` — восстановление контекста + **re‑entry** (старые слоты требуют подтверждения)
 
 **Реализация:** `truffles-api/app/services/state_service.py` (`escalate_to_pending`) + `truffles-api/app/services/escalation_service.py` (`send_telegram_notification`)

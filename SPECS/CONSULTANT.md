@@ -127,6 +127,11 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Decision trace/meta: `stage=booking_interrupt`, `booking_info_interrupt=true`, `booking_info_intents` сохраняются.
 - Если сообщение не относится к записи и нет booking‑сигнала → поставить booking на паузу до явного запроса записи.
 
+**Pending guard (P0):**
+- Если `state ∈ {pending, manager_active}` → отвечаем **только** статусом/подтверждением (pending_status/pending_wait/pending_ack/pending_close).
+- Любые multi‑intent и booking/info/consult игнорируются до выхода из `pending`; цель записи не сбрасываем, а ставим на паузу.
+- Trace/meta: `stage=pending_guard/pending_status/pending_wait`, `action ∈ {pending_status,pending_wait,pending_ack,pending_close}`.
+
 **Consult clarify (pack-first + LLM fallback, safe):**
 - Consult canon: сначала playbook из `client_pack.consult_playbooks`; если нет playbook и это beauty‑тема без Hard‑LAW — разрешён LLM‑совет (общие рекомендации).
 - LLM‑совет **не имеет права** говорить о наличии услуг, ценах, условиях салона. Только общая бьюти‑консультация.
@@ -154,6 +159,11 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Перечисление способов оплаты разрешено **только** при `client_pack.policy.payment_info.allow=true`.
 - Если правила/списка нет — эскалация (без “оплатите вот так”).
 - Подтверждение оплаты/возвраты/проверка транзакции — всегда Hard‑LAW.
+
+**Service availability (not offered) [P0]:**
+- Если запрос на услугу/процедуру не найден в каталоге → отвечаем явно “не оказываем”, без выдуманных фактов/цен/условий.
+- Разрешён мягкий redirect: предложить выбрать услугу из каталога или перейти к записи.
+- Meta: `intent=service_not_found`, `fact_source=service_matcher|service_semantic_matcher`, `llm_used=false`.
 
 **Consult vs medical (граница):**
 - Общие вопросы “чувствительность/уход” → consult‑playbook, если нет явных мед‑триггеров.
@@ -184,6 +194,13 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Если запрошена цена без услуги → уточнить услугу, **но** адрес/часы остаются в ответе.
 - Порядок слов не влияет на класс ответа.
 - Класс ответа всегда `info_bundle`, даже при перефразе или follow‑up без явной услуги.
+
+**Quality‑violations (для тестирования, P0):**
+- `service_not_offered`: ответ подразумевает наличие отсутствующей услуги или даёт цену/условия.
+- `safe_consult_only`: LLM‑совет вне playbook или с медицинскими/Hard‑LAW триггерами.
+- `hard_law_bypass`: ответ вместо эскалации при Hard‑LAW.
+- `pending_gate_broken`: в `pending/manager_active` выдан не‑pending ответ.
+- `goal_drop`: потеря `expected_reply_type/current_goal` без причины после перебивки.
 
 ## LLM‑first понимание + Response Guard [P0]
 

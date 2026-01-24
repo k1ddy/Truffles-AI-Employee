@@ -7,6 +7,8 @@
 - Scope:
   - Chaos-sim: RAG audit артефакты (`rag_debug.jsonl`, `rag_summary.json`) + RAG findings в `report.md`.
   - Evaluator: пост-анализ RAG паттернов (без изменения pass/fail).
+  - Canon: уточнить multi-intent/pending/policy и качества (service_not_offered, safe_consult_only).
+  - Тест-протокол: описать корректность/разбор фейлов по паттернам (без правок runtime-логики).
   - Память/персонализация остаются отключены; задел фиксируем в доке.
 - Out of scope:
   - Любые изменения логики консультирования/политик/knowledge packs.
@@ -16,14 +18,21 @@
 - Touch-list:
   - `ops/diagnose.py`
   - `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md`
+  - `SPECS/CONSULTANT.md`
+  - `SPECS/ESCALATION.md`
+  - `SPECS/SYSTEM_REFERENCE.md`
 - Plan:
   1) Обновить Task Package под RAG-аудит.
   2) Добавить `--rag-audit` и генерацию `rag_debug.jsonl`/`rag_summary.json`.
   3) Добавить блок RAG Quality Findings в `report.md` (Top-N паттернов).
-  4) Smoke chaos-sim (20-50 кейсов) и проверка артефактов.
+  4) Уточнить канон multi-intent/pending/policy + service_not_offered/safe_consult_only.
+  5) Зафиксировать протокол корректности тестов и разбора фейлов.
+  6) Smoke chaos-sim (20-50 кейсов) и проверка артефактов.
 - DoD:
   - `rag_debug.jsonl` и `rag_summary.json` создаются при `--rag-audit`.
   - `report.md` включает RAG Quality Findings и Top-N паттернов.
+  - Canon обновлён: multi-intent/pending/policy + quality violations (без изменения поведения).
+  - Протокол корректности тестов и фиксации по паттернам описан в `SPECS/SYSTEM_REFERENCE.md`.
   - Core-логика бота не меняется.
   - Smoke chaos-sim завершился с артефактами.
 - Checks:
