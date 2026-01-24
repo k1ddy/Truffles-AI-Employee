@@ -93,7 +93,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 **Case view**
 - UI: `console-web/src/app/cases/[id]/page.tsx`
 - API: `GET /console/v1/cases/{id}`, `POST /take`, `POST /resolve`
-- Target (planned): блок Case Health (последние inbound/outbound + статус доставки).
+- Case Health: последние inbound/outbound + delivery flags.
 
 **Calendar (Записи)**
 - UI: `console-web/src/app/calendar/page.tsx`
@@ -110,7 +110,9 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 
 **Ops**
 - UI: `console-web/src/components/OpsPage.tsx`
-- API: `GET /console/v1/health`, `/console/v1/metrics/daily`, `/console/v1/telegram/health`
+- API: `GET /console/v1/health`, `/console/v1/metrics/daily`, `/console/v1/telegram/health`,
+  `GET /console/v1/ops/outbox`, `POST /console/v1/ops/outbox/retry`
+- RBAC: owner/admin/support
 
 ---
 
