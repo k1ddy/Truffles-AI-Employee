@@ -29,7 +29,7 @@ export default function ChatInterface({
     canSend = true
 }: ChatInterfaceProps) {
     const [inputValue, setInputValue] = useState("");
-    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
     const lastMessageIdRef = useRef<string | null>(null);
     const queryClient = useQueryClient();
 
@@ -41,7 +41,9 @@ export default function ChatInterface({
         const latestId = messages[0]?.id || null;
         if (latestId && latestId !== lastMessageIdRef.current) {
             lastMessageIdRef.current = latestId;
-            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            if (scrollContainerRef.current) {
+                scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+            }
         }
     }, [messages]);
 
@@ -66,6 +68,11 @@ export default function ChatInterface({
             queryClient.setQueryData(["messages", caseId], (old: { items: Message[] } | undefined) => ({
                 items: [optimisticMessage, ...(old?.items || [])],
             }));
+
+            // Scroll to bottom on optimistic update
+            if (scrollContainerRef.current) {
+                scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+            }
 
             return { previousMessages };
         },
@@ -125,7 +132,10 @@ export default function ChatInterface({
     return (
         <div className="flex flex-col h-[500px] bg-muted rounded-lg border border-border/60">
             {/* Messages area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div
+                ref={scrollContainerRef}
+                className="flex-1 overflow-y-auto p-4 space-y-4"
+            >
                 {sortedMessages.length === 0 ? (
                     <div className="text-center text-muted-foreground my-auto">
                         Нет сообщений
@@ -160,7 +170,6 @@ export default function ChatInterface({
                         );
                     })
                 )}
-                <div ref={messagesEndRef} />
             </div>
 
             {/* Input area */}
