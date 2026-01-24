@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
 from app.models.appointment import Appointment
+from app.models.appointment_audit import AppointmentAudit
 from app.models.appointment_service import AppointmentService as AppointmentServiceModel
 from app.models.branch import Branch
 from app.models.calendar_block import CalendarBlock
@@ -35,6 +36,10 @@ class AppointmentNotFoundError(Exception):
 
 class SpecialistNotFoundError(Exception):
     """Raised when a specialist is not found."""
+
+
+class BranchNotFoundError(Exception):
+    """Raised when a branch is not found."""
 
 
 @dataclass
@@ -195,7 +200,7 @@ class SchedulingService:
         self,
         client_id: UUID,
         branch_id: UUID,
-        specialist_id: UUID,
+        specialist_id: Optional[UUID],
         start_at: datetime,
         end_at: datetime,
         customer_name: Optional[str] = None,
@@ -204,28 +209,37 @@ class SchedulingService:
         notes: Optional[str] = None,
         created_by: Optional[UUID] = None,
         conversation_id: Optional[UUID] = None,
+        status: str = "CONFIRMED",
+        source: str = "console",
+        confirmation_policy: Optional[str] = None,
+        audit: Optional[Dict[str, Any]] = None,
+        commit: bool = True,
     ) -> Appointment:
-        specialist = self.db.query(Specialist).filter(
-            Specialist.id == specialist_id,
-            Specialist.is_active == True,
-        ).first()
+        specialist = None
+        if specialist_id:
+            specialist = self.db.query(Specialist).filter(
+                Specialist.id == specialist_id,
+                Specialist.is_active == True,
+            ).first()
 
-        if not specialist:
-            raise SpecialistNotFoundError(f"Specialist {specialist_id} not found")
+            if not specialist:
+                raise SpecialistNotFoundError(f"Specialist {specialist_id} not found")
 
         branch = self._get_branch(branch_id)
-        confirmation_policy = "manager"
-        if branch and isinstance(branch.booking_settings, dict):
-            confirmation_policy = branch.booking_settings.get("confirmation_policy", "manager")
+        if not branch:
+            raise BranchNotFoundError(f"Branch {branch_id} not found")
+        resolved_confirmation = confirmation_policy or "manager"
+        if isinstance(branch.booking_settings, dict):
+            resolved_confirmation = branch.booking_settings.get("confirmation_policy", resolved_confirmation)
 
         appointment = Appointment(
             client_id=client_id,
             branch_id=branch_id,
             specialist_id=specialist_id,
             conversation_id=conversation_id,
-            status="CONFIRMED",
-            source="console",
-            confirmation_policy=confirmation_policy,
+            status=status,
+            source=source,
+            confirmation_policy=resolved_confirmation,
             start_at=start_at,
             end_at=end_at,
             customer_name=customer_name,
@@ -253,7 +267,26 @@ class SchedulingService:
                     buffer_after_min=service_match.buffer_after_min if service_match else 0,
                 )
                 self.db.add(appointment_service)
-            self.db.commit()
+            if audit:
+                audit_entry = AppointmentAudit(
+                    appointment=appointment,
+                    actor_type=audit.get("actor_type", "system"),
+                    actor_id=audit.get("actor_id"),
+                    channel=audit.get("channel", "system"),
+                    action=audit.get("action", "create"),
+                    prev_status=audit.get("prev_status"),
+                    new_status=appointment.status,
+                    prev_version=audit.get("prev_version"),
+                    new_version=appointment.version,
+                    payload=audit.get("payload", {}),
+                    trace_id=audit.get("trace_id"),
+                    correlation_id=audit.get("correlation_id"),
+                )
+                self.db.add(audit_entry)
+            if commit:
+                self.db.commit()
+            else:
+                self.db.flush()
             self.db.refresh(appointment)
         except IntegrityError as exc:
             self.db.rollback()
