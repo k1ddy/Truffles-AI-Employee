@@ -1,3 +1,4 @@
+import re
 import secrets
 from datetime import date as dt_date
 from datetime import datetime, time, timezone
@@ -6,11 +7,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import and_, func
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Agent, AgentIdentity, Branch, ClientSettings, Conversation, Handover, Message, User
+from app.models import Agent, AgentIdentity, Branch, ClientSettings, Conversation, Handover, Message, OutboxMessage, User
 from app.schemas.console import (
     ConsoleAgentIdentity,
     ConsoleAgentInfo,
@@ -191,6 +192,106 @@ def _build_telegram_trail(
 
 def _build_sync_status(status: str, detail: Optional[str] = None) -> ConsoleSyncStatus:
     return ConsoleSyncStatus(status=status, detail=detail)
+
+
+def _normalize_phone_digits(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    return re.sub(r"\D+", "", value)
+
+
+def _looks_like_uuid(value: str) -> Optional[UUID]:
+    try:
+        return UUID(value)
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _resolve_last_activity_channel(
+    *,
+    role: Optional[str],
+    metadata: Optional[dict],
+    conversation_channel: Optional[str],
+) -> Optional[str]:
+    if not role:
+        return None
+    if role == "user":
+        return conversation_channel or "whatsapp"
+    if role == "manager":
+        source = None
+        if isinstance(metadata, dict):
+            source = metadata.get("source")
+        if source in ("telegram", "console"):
+            return source
+        return "console"
+    if role in ("assistant", "system"):
+        source = None
+        if isinstance(metadata, dict):
+            source = metadata.get("source")
+        if source == "system":
+            return "system"
+        return conversation_channel or "whatsapp"
+    return None
+
+
+def _fetch_case_health(db: Session, conversation: Conversation) -> dict:
+    latest_message = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation.id)
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+    last_inbound_at = (
+        db.query(func.max(Message.created_at))
+        .filter(Message.conversation_id == conversation.id, Message.role == "user")
+        .scalar()
+    )
+    last_outbound_at = (
+        db.query(func.max(Message.created_at))
+        .filter(
+            Message.conversation_id == conversation.id,
+            Message.role.in_(["assistant", "manager", "system"]),
+        )
+        .scalar()
+    )
+    outbox_stats = (
+        db.query(
+            func.sum(
+                case(
+                    (OutboxMessage.status.in_(["PENDING", "PROCESSING"]), 1),
+                    else_=0,
+                )
+            ).label("pending_count"),
+            func.sum(
+                case(
+                    (OutboxMessage.status == "FAILED", 1),
+                    else_=0,
+                )
+            ).label("failed_count"),
+        )
+        .filter(OutboxMessage.conversation_id == conversation.id)
+        .first()
+    )
+    pending_count = outbox_stats.pending_count if outbox_stats else 0
+    failed_count = outbox_stats.failed_count if outbox_stats else 0
+    last_activity_at = latest_message.created_at if latest_message else None
+    last_activity_channel = _resolve_last_activity_channel(
+        role=latest_message.role if latest_message else None,
+        metadata=latest_message.message_metadata if latest_message else None,
+        conversation_channel=conversation.channel,
+    )
+    return {
+        "last_inbound_at": last_inbound_at,
+        "last_outbound_at": last_outbound_at,
+        "last_activity_at": last_activity_at,
+        "last_activity_channel": last_activity_channel,
+        "last_message_preview": latest_message.content if latest_message else None,
+        "needs_reply": bool(
+            last_inbound_at and (not last_outbound_at or last_inbound_at > last_outbound_at)
+        ),
+        "has_delivery_error": bool(failed_count and failed_count > 0),
+        "has_pending_outbox": bool(pending_count and pending_count > 0),
+    }
 
 
 def _sync_telegram_after_take(
@@ -397,6 +498,22 @@ def _parse_date_param(name: str, value: Optional[str]) -> Optional[dt_date]:
         ) from exc
 
 
+def _parse_datetime_param(name: str, value: Optional[str]) -> Optional[datetime]:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"Invalid {name} (expected ISO 8601)",
+        ) from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def _parse_cursor_param(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
@@ -542,8 +659,13 @@ async def link_agent_telegram(
 async def list_cases(
     request: Request,
     status: Optional[str] = None,
+    q: Optional[str] = None,
     branch_id: Optional[str] = None,
     assigned_to_me: bool = False,
+    phone: Optional[str] = None,
+    has_delivery_error: bool = False,
+    has_pending_outbox: bool = False,
+    last_activity_since: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     cursor: Optional[str] = None,
@@ -555,8 +677,13 @@ async def list_cases(
         request,
         {
             "status",
+            "q",
             "branch_id",
             "assigned_to_me",
+            "phone",
+            "has_delivery_error",
+            "has_pending_outbox",
+            "last_activity_since",
             "date_from",
             "date_to",
             "cursor",
@@ -569,6 +696,17 @@ async def list_cases(
         request.query_params.get("assigned_to_me"),
         default=assigned_to_me,
     )
+    has_delivery_error = _parse_bool_param(
+        "has_delivery_error",
+        request.query_params.get("has_delivery_error"),
+        default=has_delivery_error,
+    )
+    has_pending_outbox = _parse_bool_param(
+        "has_pending_outbox",
+        request.query_params.get("has_pending_outbox"),
+        default=has_pending_outbox,
+    )
+    last_activity_since_dt = _parse_datetime_param("last_activity_since", last_activity_since)
     
     # Base query
     query = (
@@ -580,6 +718,74 @@ async def list_cases(
             Conversation.client_id == context.client.id,
         )
     )
+
+    latest_message_subq = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            Message.created_at.label("created_at"),
+            Message.role.label("role"),
+            Message.content.label("content"),
+            Message.message_metadata.label("metadata"),
+            func.row_number()
+            .over(
+                partition_by=Message.conversation_id,
+                order_by=Message.created_at.desc(),
+            )
+            .label("rn"),
+        )
+        .subquery()
+    )
+
+    last_inbound_subq = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            func.max(Message.created_at).label("last_inbound_at"),
+        )
+        .filter(Message.role == "user")
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+    last_outbound_subq = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            func.max(Message.created_at).label("last_outbound_at"),
+        )
+        .filter(Message.role.in_(["assistant", "manager", "system"]))
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+    outbox_subq = (
+        db.query(
+            OutboxMessage.conversation_id.label("conversation_id"),
+            func.sum(
+                case(
+                    (OutboxMessage.status.in_(["PENDING", "PROCESSING"]), 1),
+                    else_=0,
+                )
+            ).label("pending_count"),
+            func.sum(
+                case(
+                    (OutboxMessage.status == "FAILED", 1),
+                    else_=0,
+                )
+            ).label("failed_count"),
+        )
+        .group_by(OutboxMessage.conversation_id)
+        .subquery()
+    )
+
+    query = query.outerjoin(
+        latest_message_subq,
+        and_(
+            latest_message_subq.c.conversation_id == Conversation.id,
+            latest_message_subq.c.rn == 1,
+        ),
+    )
+    query = query.outerjoin(last_inbound_subq, last_inbound_subq.c.conversation_id == Conversation.id)
+    query = query.outerjoin(last_outbound_subq, last_outbound_subq.c.conversation_id == Conversation.id)
+    query = query.outerjoin(outbox_subq, outbox_subq.c.conversation_id == Conversation.id)
 
     # Branch filter (RBAC + Request)
     allowed_branch_ids = {b.id for b in context.branches}
@@ -617,7 +823,48 @@ async def list_cases(
     
     # Assigned to me
     if assigned_to_me:
-        query = query.filter(Handover.assigned_to_name == context.agent.name)
+        query = query.filter(
+            or_(
+                Handover.assigned_to == str(context.agent.id),
+                and_(
+                    Handover.assigned_to.is_(None),
+                    Handover.assigned_to_name == context.agent.name,
+                ),
+            )
+        )
+
+    # Search filters
+    if q:
+        query_value = q.strip()
+        if query_value:
+            conditions = []
+            maybe_uuid = _looks_like_uuid(query_value)
+            if maybe_uuid:
+                conditions.append(Handover.id == maybe_uuid)
+            digits = _normalize_phone_digits(query_value)
+            if digits:
+                conditions.append(
+                    func.regexp_replace(User.phone, r"\D", "", "g").ilike(f"%{digits}%")
+                )
+            conditions.append(User.name.ilike(f"%{query_value}%"))
+            if conditions:
+                query = query.filter(or_(*conditions))
+
+    if phone:
+        digits = _normalize_phone_digits(phone)
+        if digits:
+            query = query.filter(
+                func.regexp_replace(User.phone, r"\D", "", "g").ilike(f"%{digits}%")
+            )
+
+    if has_delivery_error:
+        query = query.filter(outbox_subq.c.failed_count > 0)
+
+    if has_pending_outbox:
+        query = query.filter(outbox_subq.c.pending_count > 0)
+
+    if last_activity_since_dt:
+        query = query.filter(latest_message_subq.c.created_at >= last_activity_since_dt)
 
     # Sorting & Pagination (Cursor based on created_at)
     query = query.order_by(Handover.created_at.desc())
@@ -627,7 +874,19 @@ async def list_cases(
         query = query.filter(Handover.created_at < cursor_date)
 
     # Select handover + conversation + customer
-    items = query.with_entities(Handover, Conversation, User).limit(limit + 1).all()
+    items = query.with_entities(
+        Handover,
+        Conversation,
+        User,
+        latest_message_subq.c.created_at.label("last_activity_at"),
+        latest_message_subq.c.role.label("last_activity_role"),
+        latest_message_subq.c.content.label("last_message_preview"),
+        latest_message_subq.c.metadata.label("last_message_metadata"),
+        last_inbound_subq.c.last_inbound_at,
+        last_outbound_subq.c.last_outbound_at,
+        outbox_subq.c.pending_count,
+        outbox_subq.c.failed_count,
+    ).limit(limit + 1).all()
     
     has_more = len(items) > limit
     if has_more:
@@ -654,8 +913,34 @@ async def list_cases(
                 customer_name=user.name if user else None,
                 customer_phone=user.phone if user else None,
                 customer_remote_jid=user.remote_jid if user else None,
+                last_inbound_at=last_inbound_at.isoformat() if last_inbound_at else None,
+                last_outbound_at=last_outbound_at.isoformat() if last_outbound_at else None,
+                last_activity_at=last_activity_at.isoformat() if last_activity_at else None,
+                last_activity_channel=_resolve_last_activity_channel(
+                    role=last_activity_role,
+                    metadata=last_message_metadata,
+                    conversation_channel=conversation.channel,
+                ),
+                last_message_preview=last_message_preview,
+                needs_reply=bool(
+                    last_inbound_at and (not last_outbound_at or last_inbound_at > last_outbound_at)
+                ),
+                has_delivery_error=bool(failed_count and failed_count > 0),
+                has_pending_outbox=bool(pending_count and pending_count > 0),
             )
-            for handover, conversation, user in items
+            for (
+                handover,
+                conversation,
+                user,
+                last_activity_at,
+                last_activity_role,
+                last_message_preview,
+                last_message_metadata,
+                last_inbound_at,
+                last_outbound_at,
+                pending_count,
+                failed_count,
+            ) in items
         ],
         cursor=next_cursor,
         has_more=has_more,
@@ -1230,6 +1515,8 @@ async def get_case(
             chat_id=chat_id,
         )
 
+    case_health = _fetch_case_health(db, conversation) if conversation else {}
+
     # Check branch access (skip if branch_id is None or agent is admin/owner)
     allowed_branch_ids = {b.id for b in context.branches}
     if branch_id is not None and branch_id not in allowed_branch_ids:
@@ -1254,6 +1541,14 @@ async def get_case(
         customer_phone=customer_phone,
         customer_remote_jid=customer_remote_jid,
         decision_trace=decision_trace,
+        last_inbound_at=case_health.get("last_inbound_at").isoformat() if case_health.get("last_inbound_at") else None,
+        last_outbound_at=case_health.get("last_outbound_at").isoformat() if case_health.get("last_outbound_at") else None,
+        last_activity_at=case_health.get("last_activity_at").isoformat() if case_health.get("last_activity_at") else None,
+        last_activity_channel=case_health.get("last_activity_channel"),
+        last_message_preview=case_health.get("last_message_preview"),
+        needs_reply=case_health.get("needs_reply"),
+        has_delivery_error=case_health.get("has_delivery_error"),
+        has_pending_outbox=case_health.get("has_pending_outbox"),
         telegram_trail=telegram_trail,
     )
 
@@ -1338,6 +1633,7 @@ async def send_manager_message(
             role="manager",
             content=body.content,
             created_at=datetime.now(timezone.utc),
+            message_metadata={"source": "console"},
         )
         db.add(new_message)
 

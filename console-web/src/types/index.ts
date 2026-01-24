@@ -36,6 +36,15 @@ export interface Case {
     customer_remote_jid?: string | null;
     // Telegram trail (TG-01)
     telegram_trail?: TelegramTrail | null;
+    // Inbox health
+    last_inbound_at?: string | null;
+    last_outbound_at?: string | null;
+    last_activity_at?: string | null;
+    last_activity_channel?: string | null;
+    last_message_preview?: string | null;
+    needs_reply?: boolean | null;
+    has_delivery_error?: boolean | null;
+    has_pending_outbox?: boolean | null;
 }
 
 export interface Message {

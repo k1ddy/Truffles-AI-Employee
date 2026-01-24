@@ -522,6 +522,18 @@ export interface components {
             customer_phone?: string | null;
             customer_remote_jid?: string | null;
             decision_trace?: Record<string, never>[] | null;
+            /** Format: date-time */
+            last_inbound_at?: string | null;
+            /** Format: date-time */
+            last_outbound_at?: string | null;
+            /** Format: date-time */
+            last_activity_at?: string | null;
+            /** @enum {string|null} */
+            last_activity_channel?: "whatsapp" | "telegram" | "console" | "system" | null;
+            last_message_preview?: string | null;
+            needs_reply?: boolean | null;
+            has_delivery_error?: boolean | null;
+            has_pending_outbox?: boolean | null;
             telegram_trail?: components["schemas"]["TelegramTrail"];
         };
         CaseListResponse: {
@@ -1039,8 +1051,13 @@ export interface operations {
         parameters: {
             query?: {
                 status?: "pending" | "active" | "resolved";
+                q?: string;
                 branch_id?: string;
                 assigned_to_me?: boolean;
+                phone?: string;
+                has_delivery_error?: boolean;
+                has_pending_outbox?: boolean;
+                last_activity_since?: string;
                 date_from?: string;
                 date_to?: string;
                 /** @description Pagination cursor (opaque) */

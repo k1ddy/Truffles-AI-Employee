@@ -281,6 +281,50 @@ export default function CaseView({ caseId }: CaseViewProps) {
                         </div>
                     </div>
 
+                    {/* Case Health */}
+                    <div className="border-t border-border/60 pt-4">
+                        <h3 className="font-medium text-muted-foreground mb-2">📌 Case Health</h3>
+                        <div className="space-y-2 text-xs">
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted-foreground">Последнее входящее:</span>
+                                <span>
+                                    {caseDetail.last_inbound_at
+                                        ? new Date(caseDetail.last_inbound_at).toLocaleString("ru-RU")
+                                        : "—"}
+                                </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted-foreground">Последнее исходящее:</span>
+                                <span>
+                                    {caseDetail.last_outbound_at
+                                        ? new Date(caseDetail.last_outbound_at).toLocaleString("ru-RU")
+                                        : "—"}
+                                </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-muted-foreground">Канал активности:</span>
+                                <span>{caseDetail.last_activity_channel || "—"}</span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {caseDetail.needs_reply && (
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-100 text-yellow-800">
+                                        NEW
+                                    </span>
+                                )}
+                                {caseDetail.has_pending_outbox && (
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-800">
+                                        QUEUED
+                                    </span>
+                                )}
+                                {caseDetail.has_delivery_error && (
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-800">
+                                        FAILED
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Decision Trace Section */}
                     {caseDetail.decision_trace && caseDetail.decision_trace.length > 0 && (
                         <div className="border-t border-border/60 pt-4">
