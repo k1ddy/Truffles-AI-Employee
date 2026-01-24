@@ -24,7 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 LIVECHECK_SUITES = {
     "ca01-core": [
@@ -176,6 +176,34 @@ LIVECHECK_SUITES = {
                 {
                     "message": "сколько стоит маникюр?",
                     "expect_booking_interrupt": True,
+                },
+            ],
+        }
+    ],
+    "ca05-booking-commit": [
+        {
+            "case_id": "CA05_BOOKING_COMMIT",
+            "steps": [
+                {
+                    "message": "хочу записаться",
+                    "expect_expected_reply_type": "service_choice",
+                    "expect_llm_used": False,
+                },
+                {
+                    "message": "маникюр",
+                    "expect_expected_reply_type": "time",
+                    "expect_booking_service": "маникюр",
+                    "expect_llm_used": False,
+                },
+                {
+                    "message": "__BOOKING_TIME__",
+                    "expect_expected_reply_type": "name",
+                    "suppress_marker": True,
+                },
+                {
+                    "message": "__BOOKING_NAME__",
+                    "expect_booking_commit": True,
+                    "suppress_marker": True,
                 },
             ],
         }
@@ -2501,6 +2529,74 @@ def _fetch_outbox_rows(db_user, client_id, inbound_message_id, limit=5):
         rows.append(row)
     return rows, None
 
+
+def _fetch_appointment_row(db_user, appointment_id):
+    if not appointment_id:
+        return None, None
+    safe_id = _escape_sql_literal(appointment_id)
+    query = (
+        "SELECT json_build_object("
+        "'id', id, "
+        "'status', status, "
+        "'source', source, "
+        "'start_at', start_at, "
+        "'end_at', end_at, "
+        "'customer_name', customer_name, "
+        "'customer_phone', customer_phone, "
+        "'branch_id', branch_id, "
+        "'client_id', client_id, "
+        "'conversation_id', conversation_id"
+        ") "
+        "FROM appointments "
+        f"WHERE id = '{safe_id}';"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not row:
+        return None, None
+    try:
+        return json.loads(row), None
+    except Exception:
+        return None, "appointment row parse failed"
+
+
+def _fetch_appointment_audit_rows(db_user, appointment_id, limit=5):
+    if not appointment_id:
+        return [], None
+    safe_id = _escape_sql_literal(appointment_id)
+    query = (
+        "SELECT json_build_object("
+        "'id', id, "
+        "'action', action, "
+        "'actor_type', actor_type, "
+        "'channel', channel, "
+        "'created_at', created_at, "
+        "'trace_id', trace_id, "
+        "'correlation_id', correlation_id, "
+        "'payload', payload"
+        ") "
+        "FROM appointment_audit "
+        f"WHERE appointment_id = '{safe_id}' "
+        "ORDER BY created_at DESC "
+        f"LIMIT {int(max(limit, 1))};"
+    )
+    rows_raw, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not rows_raw:
+        return [], None
+    rows = []
+    for line in rows_raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            continue
+    return rows, None
+
 def _fetch_branch_meta(db_user, branch_id):
     if not branch_id:
         return None, None
@@ -4301,6 +4397,23 @@ def _run_trace_bundle(args):
         handle.write(output + "\n")
     print(json.dumps({"output": args.output, "count": len(bundles)}, ensure_ascii=False))
 
+
+def _resolve_booking_commit_steps(case):
+    now = datetime.now(timezone.utc) + timedelta(days=2)
+    now = now.replace(minute=0, second=0, microsecond=0)
+    booking_time = now.strftime("%Y-%m-%d %H:%M")
+    booking_name = "Алия"
+    steps = []
+    for step in case.get("steps") or []:
+        message = step.get("message") or ""
+        if message == "__BOOKING_TIME__":
+            message = booking_time
+        elif message == "__BOOKING_NAME__":
+            message = booking_name
+        steps.append({**step, "message": message})
+    return steps, {"booking_time": booking_time, "booking_name": booking_name}
+
+
 def _run_livecheck_ca05_booking(args, context):
     rng = context["rng"]
     case = context["cases"][0]
@@ -4541,6 +4654,215 @@ def _run_livecheck_ca05_booking(args, context):
         "conversation_id": conv_id,
         "results": results,
         "reset": reset_summary,
+    }
+    return summary
+
+
+def _run_livecheck_ca05_booking_commit(args, context):
+    rng = context["rng"]
+    case = context["cases"][0]
+    steps, booking_values = _resolve_booking_commit_steps(case)
+    if not steps:
+        raise SystemExit("livecheck-auto: CA05 booking-commit missing steps")
+    timestamp = context["timestamp"]
+    webhook_url = context["webhook_url"]
+    base_url = context["base_url"]
+    webhook_secret = context["webhook_secret"]
+    admin_token = context["admin_token"]
+    instance_id = context["instance_id"]
+    remote_jid = context["remote_jid"]
+    db_user = context["db_user"]
+    client_meta = context.get("client_meta") or {}
+    client_id = client_meta.get("client_id")
+    allowlist_jids = context["allowlist_jids"]
+    allow_non_allowlist = context.get("allow_non_allowlist")
+    fail_fast_after = context.get("fail_fast_after")
+    outbox_url = f"{base_url}/admin/outbox/process"
+    outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
+    min_wait = max(min(args.min_wait, args.max_wait), outbox_wait_seconds)
+    max_wait = max(max(args.min_wait, args.max_wait), outbox_wait_seconds)
+
+    if not remote_jid or (remote_jid not in allowlist_jids and not allow_non_allowlist):
+        raise SystemExit("livecheck-auto: CA05 booking-commit remote_jid not in allowlist")
+
+    results = []
+    conv_id = None
+    appointment_id = None
+    appointment_row = None
+    audit_rows = None
+    booking_commit_trace = None
+    outbox_summary = None
+    outbox_rows = None
+
+    for idx, step in enumerate(steps, start=1):
+        base_text = step.get("message") or ""
+        if not base_text:
+            raise SystemExit("livecheck-auto: CA05 booking-commit empty step message")
+        text = _apply_noise(base_text, rng, args.noise)
+        marker = f"LC:AUTO:CA05-COMMIT:{timestamp}:{idx:02d}"
+        include_marker = not step.get("suppress_marker")
+        message = f"{text} [{marker}]" if include_marker else text
+        message_id = f"LC-AUTO-{timestamp}-CA05C-{idx:02d}-{uuid.uuid4().hex[:8]}"
+        sent_at = datetime.now(timezone.utc).isoformat()
+
+        metadata = {
+            "sender": "LivecheckAuto",
+            "timestamp": int(time.time()),
+            "messageId": message_id,
+            "remoteJid": remote_jid,
+        }
+        if instance_id:
+            metadata["instanceId"] = instance_id
+        payload = {"body": {"messageType": "text", "message": message, "metadata": metadata}}
+
+        status = "dry_run"
+        response_status = None
+        response_body = None
+        response_error = None
+        if not args.dry_run:
+            response_status, response_body, response_error = _send_webhook_payload(
+                webhook_url, payload, webhook_secret, args.timeout
+            )
+            status = "sent" if response_status and 200 <= response_status < 300 else "error"
+        print(
+            json.dumps(
+                {
+                    "case_id": case["case_id"],
+                    "step": idx,
+                    "marker": marker,
+                    "message_id": message_id,
+                    "remote_jid": remote_jid,
+                    "text": message,
+                    "sent_at": sent_at,
+                    "status": status,
+                    "http_status": response_status,
+                    "error": response_error,
+                    "response": (response_body or "")[:200] if response_body else None,
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        meta = None
+        conv_meta = None
+        conv_error = None
+        if not args.dry_run:
+            _post_admin_outbox_with_wait(
+                outbox_url,
+                admin_token,
+                args.timeout,
+                outbox_wait_seconds,
+            )
+            conv_id, meta, error = _poll_decision_meta(
+                db_user,
+                message_id,
+                args.poll_timeout,
+                args.poll_interval,
+                fail_fast_after=fail_fast_after,
+            )
+            if error:
+                raise SystemExit(f"livecheck-auto: CA05 booking-commit decision_meta poll failed ({error})")
+            conv_meta, conv_error = _fetch_conversation_meta(db_user, conv_id)
+
+        conv_context = conv_meta.get("context") if isinstance(conv_meta, dict) else None
+        expected_reply_type = conv_context.get("expected_reply_type") if isinstance(conv_context, dict) else None
+        booking_state = conv_context.get("booking") if isinstance(conv_context, dict) else None
+        trace_list = conv_context.get("decision_trace") if isinstance(conv_context, dict) else None
+        booking_commit_trace = None
+        for entry in reversed(_trace_as_list(trace_list)):
+            if entry.get("stage") == "booking_commit":
+                booking_commit_trace = entry
+                break
+
+        if not args.dry_run:
+            expected_reply = step.get("expect_expected_reply_type")
+            if expected_reply and expected_reply_type != expected_reply:
+                raise SystemExit(
+                    "livecheck-auto: CA05 booking-commit expected_reply_type mismatch "
+                    f"({expected_reply_type})"
+                )
+            expected_llm = step.get("expect_llm_used")
+            if expected_llm is not None and (meta or {}).get("llm_used") is not expected_llm:
+                raise SystemExit("livecheck-auto: CA05 booking-commit llm_used mismatch")
+            expected_service = step.get("expect_booking_service")
+            if expected_service:
+                service = None
+                if isinstance(booking_state, dict):
+                    service = booking_state.get("service")
+                if not service or expected_service not in str(service).lower():
+                    raise SystemExit("livecheck-auto: CA05 booking-commit booking.service mismatch")
+            if step.get("expect_booking_commit"):
+                appointment_id = (meta or {}).get("appointment_id") or (
+                    booking_commit_trace or {}
+                ).get("appointment_id")
+                if not appointment_id:
+                    raise SystemExit("livecheck-auto: CA05 booking-commit appointment_id missing")
+                appointment_row, appointment_error = _fetch_appointment_row(db_user, appointment_id)
+                if appointment_error:
+                    raise SystemExit(
+                        f"livecheck-auto: CA05 booking-commit appointment fetch failed ({appointment_error})"
+                    )
+                if not appointment_row:
+                    raise SystemExit("livecheck-auto: CA05 booking-commit appointment row missing")
+                audit_rows, audit_error = _fetch_appointment_audit_rows(
+                    db_user, appointment_id, limit=3
+                )
+                if audit_error:
+                    raise SystemExit(
+                        f"livecheck-auto: CA05 booking-commit appointment_audit fetch failed ({audit_error})"
+                    )
+                if not audit_rows:
+                    raise SystemExit("livecheck-auto: CA05 booking-commit appointment_audit missing")
+                outbox_summary, outbox_error = _fetch_outbox_summary(
+                    db_user, client_id, message_id
+                )
+                if outbox_error:
+                    raise SystemExit(
+                        f"livecheck-auto: CA05 booking-commit outbox summary failed ({outbox_error})"
+                    )
+                if not outbox_summary or not outbox_summary.get("count"):
+                    raise SystemExit("livecheck-auto: CA05 booking-commit outbox missing")
+                outbox_rows, outbox_rows_error = _fetch_outbox_rows(
+                    db_user, client_id, message_id, limit=3
+                )
+                if outbox_rows_error:
+                    raise SystemExit(
+                        f"livecheck-auto: CA05 booking-commit outbox rows failed ({outbox_rows_error})"
+                    )
+                if outbox_summary.get("status") == "FAILED":
+                    raise SystemExit("livecheck-auto: CA05 booking-commit outbox status FAILED")
+                if not booking_commit_trace:
+                    raise SystemExit("livecheck-auto: CA05 booking-commit trace missing")
+
+        results.append(
+            {
+                "step": idx,
+                "message_id": message_id,
+                "conversation_id": conv_id,
+                "expected_reply_type": expected_reply_type,
+                "booking_service": booking_state.get("service") if isinstance(booking_state, dict) else None,
+                "appointment_id": appointment_id,
+                "appointment_status": appointment_row.get("status") if isinstance(appointment_row, dict) else None,
+                "appointment_audit_action": audit_rows[0].get("action")
+                if isinstance(audit_rows, list) and audit_rows
+                else None,
+                "trace_booking_commit": bool(booking_commit_trace),
+                "outbox_status": outbox_summary.get("status") if isinstance(outbox_summary, dict) else None,
+                "llm_used": (meta or {}).get("llm_used"),
+                "error": conv_error,
+            }
+        )
+
+        if idx < len(steps):
+            time.sleep(rng.uniform(min_wait, max_wait))
+
+    summary = {
+        "suite": "ca05-booking-commit",
+        "case_id": case["case_id"],
+        "conversation_id": conv_id,
+        "booking_time": booking_values.get("booking_time"),
+        "booking_name": booking_values.get("booking_name"),
+        "results": results,
     }
     return summary
 
@@ -5251,6 +5573,7 @@ def _run_livecheck_auto(args):
         "ca03-info",
         "ca04-service",
         "ca05-booking",
+        "ca05-booking-commit",
         "ca06-consult",
         "ca07-ood",
         "ca08-state",
@@ -5278,6 +5601,11 @@ def _run_livecheck_auto(args):
         return
     if args.suite == "ca05-booking":
         summary = _run_livecheck_ca05_booking(args, context)
+        summary.update(common)
+        print(json.dumps({"summary": summary}, ensure_ascii=False))
+        return
+    if args.suite == "ca05-booking-commit":
+        summary = _run_livecheck_ca05_booking_commit(args, context)
         summary.update(common)
         print(json.dumps({"summary": summary}, ensure_ascii=False))
         return
@@ -6042,6 +6370,30 @@ def _render_suite_lines(suite):
             ("booking_info_interrupt", "booking_info_interrupt"),
             ("booking_info_intents", "booking_info_intents"),
             ("trace_booking_interrupt", "trace_booking_interrupt"),
+            ("llm_used", "llm_used"),
+        ]
+        lines.extend(_render_table(columns, results))
+        return lines
+
+    if suite_name == "ca05-booking-commit" and isinstance(results, list):
+        booking_time = summary.get("booking_time")
+        booking_name = summary.get("booking_name")
+        if booking_time:
+            lines.append(f"- booking_time: `{_format_cell(booking_time)}`")
+        if booking_name:
+            lines.append(f"- booking_name: `{_format_cell(booking_name)}`")
+        lines.append("")
+        columns = [
+            ("step", "step"),
+            ("message_id", "message_id"),
+            ("conversation_id", "conversation_id"),
+            ("expected_reply_type", "expected_reply_type"),
+            ("booking_service", "booking_service"),
+            ("appointment_id", "appointment_id"),
+            ("appointment_status", "appointment_status"),
+            ("appointment_audit_action", "appointment_audit_action"),
+            ("trace_booking_commit", "trace_booking_commit"),
+            ("outbox_status", "outbox_status"),
             ("llm_used", "llm_used"),
         ]
         lines.extend(_render_table(columns, results))

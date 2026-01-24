@@ -1,7 +1,7 @@
 # TP-2026-01-24 — Control Plane Phase 1 (Layout + Context + Roles)
 
 - **Название/цель:** внедрить Phase 1 UX каркас: sidebar + top context bar, role‑based navigation, и fail‑closed tenant selection в Console UI.
-- **Canon refs:** `SPECS/CONTROL_PLANE.md` (pending merge), `SPECS/MULTI_TENANT.md`, `SPECS/ESCALATION.md`, `docs/CONSOLE_GUIDE.md`, `STRATEGY/REQUIREMENTS.md`, `STATE.md`.
+- **Canon refs:** `SPECS/CONTROL_PLANE.md`, `SPECS/MULTI_TENANT.md`, `SPECS/ESCALATION.md`, `docs/CONSOLE_GUIDE.md`, `STRATEGY/REQUIREMENTS.md`, `STATE.md`.
 
 ## Invariant
 - Никаких изменений в backend API/контрактах.
@@ -22,6 +22,7 @@
 ## Touch-list
 - `console-web/src/app/layout.tsx`
 - `console-web/src/app/page.tsx`
+- `console-web/src/app/providers.tsx`
 - `console-web/src/components/ConsoleShell.tsx`
 - `docs/CONSOLE_GUIDE.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase1.md`

@@ -31,6 +31,7 @@
 | `console-web/.env.e2e.example` | Шаблон env для console‑e2e | Frontend/QA |
 | `console-web/public/brand/` | Бренд‑ассеты консоли (логотипы) | Frontend |
 | `docs/CONSOLE_GUIDE.md` | Guide по Console (API, тесты, дебаг) | Frontend/Backend |
+| `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
 | `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |
 | `docs/REPORTS/` | Отчёты по прогонам/изменениям | Brain/Architect |
 | `docs/REPORTS/2026-01-24-consult-quality.md` | Отчёт: consult quality + chaos‑sim | Brain/Architect |
@@ -52,7 +53,10 @@
 - `docs/TASK_PACKAGES/TP-2026-01-24-calendar-local-provider-phase2.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-calendar-backfill-phase3.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-calendar-bot-integration-phase4.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-canon.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-knowledge-studio-dec.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase1.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-trace-booking-commit.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-console-telegram-sync-fixes.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-inbox-health-search.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-consult-quality-core-v1.md`
@@ -171,6 +175,7 @@
 | `SPECS/CONSULTANT.md` | Поведение бота (info/consult/booking) |
 | `SPECS/ESCALATION.md` | Эскалация, статусы, SLA‑поведение |
 | `SPECS/ARCHITECTURE.md` | Рантайм‑архитектура и Decision Graph |
+| `SPECS/CONTROL_PLANE.md` | Канон консоли как Control Plane (UX/роли/онбординг) |
 | `docs/SESSION_START_PROMPT.txt` | Минимальный протокол старта и проверки фактов |
 | `TECH.md` | Доступы, команды, где что работает |
 | `truffles-api/app/routers/webhook/` | Входящие WhatsApp (direct + legacy). Модули: `_legacy.py`, `booking.py`, `branch_selection.py`, `context_manager.py`, `decision.py`, `dedup.py`, `guards.py`, `http.py`, `info.py`, `media.py`, `outbox.py`, `parsing.py`, `pending.py`, `policy.py`, `response.py`, `router_sla.py`, `secrets.py`, `session_memory.py`, `shield.py`, `trace.py`. |

@@ -7,7 +7,9 @@
 ## СЕССИОННЫЙ СНИМОК (читать первым)
 
 **NOW (1 экран)**
-- PLAN: Control Plane Phase 1 UI (layout + context bar + role-based nav + selection gating) — branch `feat/control-plane-phase1-ui`; lint blocked: `npm --prefix console-web run lint` → `next: not found`.
+- DONE: Control Plane канон зафиксирован (`SPECS/CONTROL_PLANE.md`), roadmap приведён к Web‑first; Task Package `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-canon.md`. Evidence: doc updates in repo.
+- DONE: DEC‑014 (Knowledge Studio publish pipeline) и DEC‑015 (capabilities model) зафиксированы в `docs/IMPERIUM_DECISIONS.yaml`. Evidence: doc updates in repo.
+- PLAN: Phase 1 Control Plane UI (layout + context + roles) — branch `feat/control-plane-phase1-ui`; lint blocked: `npm --prefix console-web run lint` → `next: not found`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
@@ -147,6 +149,12 @@
 - Status: code committed on `feat/calendar-bot-integration-2026-01-24` (commit `c0f0a1b8`), pending CI/live-check.
 - Checks: `python3 -m compileall truffles-api/app/routers/webhook/booking.py truffles-api/app/services/appointment_service.py` OK; `pytest -q truffles-api/tests/test_booking_appointments.py` skipped (missing `dateparser` locally).
 - Evidence: локальные проверки только (no CI/live-check).
+
+### 2026-01-24 — Trace booking_commit retention + booking livecheck (PLAN)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-trace-booking-commit.md`
+- Scope: pinned retention for `booking_commit` + livecheck suite checking appointments/appointment_audit/outbox.
+- Checks: local `pytest -q truffles-api/tests/test_webhook_trace.py` (2 passed).
+- Evidence: pending CI/live-check.
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.
