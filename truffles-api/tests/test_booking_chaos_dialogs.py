@@ -7,6 +7,7 @@ from app.models import Client, ClientSettings, Conversation, User
 from app.models.branch import Branch
 from app.routers import webhook as webhook_router
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
+from app.services.result import Result
 from app.services.state_machine import ConversationState
 
 
@@ -110,6 +111,8 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
         "effective_booking_mode": "collect_preferences",
     }
 
+    llm_result = Result.success((None, "low_confidence"))
+
     with patch(
         "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(
@@ -123,7 +126,8 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
         "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
     ), patch(
-        "app.routers.webhook._legacy.generate_bot_response"
+        "app.routers.webhook._legacy.generate_bot_response",
+        return_value=llm_result,
     ), patch(
         "app.routers.webhook.booking._create_booking_appointment",
         return_value=(appointment_stub, dict(appointment_meta)),
