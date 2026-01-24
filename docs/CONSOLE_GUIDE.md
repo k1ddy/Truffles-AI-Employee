@@ -72,6 +72,14 @@ Rules:
 - Выбор хранится в localStorage (`console:client_id`, `console:branch_id`) и передаётся в `X-Client-Id` / `X-Branch-Id`.
 - Навигация в сайдбаре режется по роли (owner/admin/manager/support).
 
+**Phase 2 UI contract (Provisioning + Capabilities, planned):**
+- Доступ только для Platform Admin (RBAC gate).
+- Provisioning Wizard: бизнес‑профиль → филиалы → команда → интеграции → knowledge (handoff в Knowledge Studio) → live‑check.
+- Go/No‑Go gate: без обязательных данных филиала (по provisioning‑схеме) publish блокируется; UI показывает missing fields.
+- Capabilities UI: показывает effective capabilities (client + branch overrides), редактирование через schema‑validated форму,
+  сохранение в `/console/v1/admin/capabilities` с `schema_version` и audit.
+- Fail‑closed: без явного tenant‑контекста действия недоступны.
+
 **Common symptom:** “Only 1–2 cases shown / no slots.”  
 Usually means the admin is mapped to the wrong `client_id` or the wrong client was selected.
 
