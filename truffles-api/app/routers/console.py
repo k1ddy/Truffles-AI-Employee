@@ -6,8 +6,8 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import ValidationError
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 
@@ -16,14 +16,15 @@ from app.models import (
     Agent,
     AgentIdentity,
     Branch,
-    ClientSettings,
     ClientCapability,
+    ClientSettings,
     Conversation,
     Handover,
     Message,
     OutboxMessage,
     User,
 )
+from app.schemas.capabilities import CAPABILITIES_SCHEMA_VERSION, CapabilitiesPayload
 from app.schemas.console import (
     ConsoleAgentIdentity,
     ConsoleAgentInfo,
@@ -64,7 +65,6 @@ from app.schemas.console import (
     ConsoleTelegramVerifyRequest,
     ConsoleTelegramVerifyResponse,
 )
-from app.schemas.capabilities import CAPABILITIES_SCHEMA_VERSION, CapabilitiesPayload
 from app.schemas.outbox_payload import validate_outbox_payload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
 from app.services.audit_service import record_audit_event

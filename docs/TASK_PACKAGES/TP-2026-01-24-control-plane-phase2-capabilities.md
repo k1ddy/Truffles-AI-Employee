@@ -31,6 +31,7 @@
 - `truffles-api/app/routers/console.py`
 - `contracts/capabilities/capabilities.v1.jsonschema`
 - `contracts/console_api/openapi.v1.yaml`
+- `.github/workflows/ci.yml`
 - `console-web/src/types/api.generated.ts`
 - `SPECS/MULTI_TENANT.md`
 - `docs/CONSOLE_GUIDE.md`
