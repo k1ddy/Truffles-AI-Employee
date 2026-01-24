@@ -155,13 +155,17 @@ def _build_telegram_link(
     internal_id = chat_id_str[4:]
     if not internal_id.isdigit():
         return None
-    target_id = topic_id or message_id
-    if not target_id:
+    if not message_id:
         return None
-    target_str = str(target_id)
+    target_str = str(message_id)
     if not target_str.isdigit():
         return None
-    return f"https://t.me/c/{internal_id}/{target_str}"
+    link = f"https://t.me/c/{internal_id}/{target_str}"
+    if topic_id:
+        topic_str = str(topic_id)
+        if topic_str.isdigit():
+            link = f"{link}?thread={topic_str}"
+    return link
 
 
 def _build_telegram_desktop_link(
@@ -172,12 +176,13 @@ def _build_telegram_desktop_link(
     if not chat_id:
         return None
     chat_id_str = str(chat_id).strip()
-    if not chat_id_str or not chat_id_str.lstrip("-").isdigit():
+    if chat_id_str.startswith("-100"):
+        chat_id_str = chat_id_str[4:]
+    if not chat_id_str or not chat_id_str.isdigit():
         return None
-    target_id = topic_id or message_id
-    if not target_id:
+    if not message_id:
         return None
-    target_str = str(target_id)
+    target_str = str(message_id)
     if not target_str.isdigit():
         return None
     return f"tg://openmessage?chat_id={chat_id_str}&message_id={target_str}"
@@ -539,6 +544,26 @@ def _parse_cursor_param(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _parse_sort_param(name: str, value: Optional[str], default: str = "last_activity") -> str:
+    if value is None or str(value).strip() == "":
+        return default
+    normalized = str(value).strip().lower()
+    if normalized not in {"last_activity", "created_at"}:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
+    return normalized
+
+
+def _resolve_case_sort_cursor(
+    *,
+    sort_by: str,
+    last_activity_at: Optional[datetime],
+    created_at: datetime,
+) -> datetime:
+    if sort_by == "last_activity":
+        return last_activity_at or created_at
+    return created_at
+
+
 _OUTBOX_STATUS_MAP = {
     "pending": "PENDING",
     "processing": "PROCESSING",
@@ -795,6 +820,7 @@ async def list_cases(
     has_delivery_error: bool = False,
     has_pending_outbox: bool = False,
     last_activity_since: Optional[str] = None,
+    sort_by: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     cursor: Optional[str] = None,
@@ -813,6 +839,7 @@ async def list_cases(
             "has_delivery_error",
             "has_pending_outbox",
             "last_activity_since",
+            "sort_by",
             "date_from",
             "date_to",
             "cursor",
@@ -836,6 +863,7 @@ async def list_cases(
         default=has_pending_outbox,
     )
     last_activity_since_dt = _parse_datetime_param("last_activity_since", last_activity_since)
+    sort_by_value = _parse_sort_param("sort_by", request.query_params.get("sort_by"))
     
     # Base query
     query = (
@@ -995,12 +1023,16 @@ async def list_cases(
     if last_activity_since_dt:
         query = query.filter(latest_message_subq.c.created_at >= last_activity_since_dt)
 
-    # Sorting & Pagination (Cursor based on created_at)
-    query = query.order_by(Handover.created_at.desc())
-    
+    # Sorting & Pagination (Cursor based on selected sort)
+    sort_expr = Handover.created_at
+    if sort_by_value == "last_activity":
+        sort_expr = func.coalesce(latest_message_subq.c.created_at, Handover.created_at)
+
+    query = query.order_by(sort_expr.desc(), Handover.created_at.desc())
+
     cursor_date = _parse_cursor_param(cursor)
     if cursor_date is not None:
-        query = query.filter(Handover.created_at < cursor_date)
+        query = query.filter(sort_expr < cursor_date)
 
     # Select handover + conversation + customer
     items = query.with_entities(
@@ -1020,7 +1052,25 @@ async def list_cases(
     has_more = len(items) > limit
     if has_more:
         items = items[:limit]
-        next_cursor = items[-1][0].created_at.isoformat()
+        (
+            last_handover,
+            _last_conversation,
+            _last_user,
+            last_activity_at,
+            _last_activity_role,
+            _last_message_preview,
+            _last_message_metadata,
+            _last_inbound_at,
+            _last_outbound_at,
+            _pending_count,
+            _failed_count,
+        ) = items[-1]
+        cursor_value = _resolve_case_sort_cursor(
+            sort_by=sort_by_value,
+            last_activity_at=last_activity_at,
+            created_at=last_handover.created_at,
+        )
+        next_cursor = cursor_value.isoformat()
     else:
         next_cursor = None
 

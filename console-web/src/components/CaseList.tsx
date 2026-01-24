@@ -108,6 +108,8 @@ export default function CaseList() {
             if (filters.hasPendingOutbox) params.append("has_pending_outbox", "true");
             if (filters.dateFrom) params.append("date_from", filters.dateFrom);
             if (filters.dateTo) params.append("date_to", filters.dateTo);
+            if (filters.sortBy === "activity") params.append("sort_by", "last_activity");
+            if (filters.sortBy === "created_at") params.append("sort_by", "created_at");
             if (cursor) params.append("cursor", cursor);
             params.append("limit", "20");
 
@@ -395,7 +397,12 @@ export default function CaseList() {
                                         </div>
                                     </td>
                                     <td className="p-4 text-sm text-muted-foreground">
-                                        {new Date(lastActivity).toLocaleString("ru-RU")}
+                                        <div className="flex flex-col">
+                                            <span>{new Date(lastActivity).toLocaleString("ru-RU")}</span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {c.last_activity_channel || "—"}
+                                            </span>
+                                        </div>
                                     </td>
                                     <td className="p-4">
                                         <Link
