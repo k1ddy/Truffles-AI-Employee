@@ -752,18 +752,41 @@ def _handle_consult_flow(
             consult_meta["consult_question"] = consult_question
     if service_availability_decision and service_availability_decision.action == "reply":
         service_reply = service_availability_decision.response
-        if service_reply:
-            service_availability_used = True
-            service_meta = (
-                service_availability_decision.meta
-                if isinstance(service_availability_decision.meta, dict)
-                else {}
-            )
-            consult_meta.setdefault("source", "service_availability")
-            consult_meta["service_decision_intent"] = service_availability_decision.intent
-            if service_meta:
-                consult_meta.setdefault("service_query", service_meta.get("service_query"))
-                consult_meta.setdefault("service_query_source", service_meta.get("service_query_source"))
+            if service_reply:
+                service_availability_used = True
+                service_meta = (
+                    service_availability_decision.meta
+                    if isinstance(service_availability_decision.meta, dict)
+                    else {}
+                )
+                service_fact_source = service_meta.get("fact_source")
+                if service_fact_source in {"truth", "service_matcher", "multi_truth"}:
+                    if service_fact_source == "truth":
+                        matcher_trace = {
+                            "stage": "truth_gate",
+                            "decision": service_availability_decision.action,
+                            "intent": service_availability_decision.intent,
+                            "state": conversation.state,
+                        }
+                    elif service_fact_source == "service_matcher":
+                        matcher_trace = {
+                            "stage": "service_matcher",
+                            "decision": service_availability_decision.intent,
+                            "state": conversation.state,
+                        }
+                    else:
+                        matcher_trace = {
+                            "stage": "multi_truth",
+                            "decision": "reply",
+                            "state": conversation.state,
+                        }
+                    matcher_trace.update(service_meta)
+                    legacy._record_decision_trace(conversation, matcher_trace)
+                consult_meta.setdefault("source", "service_availability")
+                consult_meta["service_decision_intent"] = service_availability_decision.intent
+                if service_meta:
+                    consult_meta.setdefault("service_query", service_meta.get("service_query"))
+                    consult_meta.setdefault("service_query_source", service_meta.get("service_query_source"))
                 # Preserve fact metadata from service_matcher replies for downstream contracts/tests.
                 for key in (
                     "fact_source",
