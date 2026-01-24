@@ -106,12 +106,12 @@
 4. **Tenant‑scoping тесты**: unit + contract, запрет cross‑tenant.
 **Как проверяем:** contract tests + tenant‑scoping unit tests + CI evidence.
 
-### Фаза 3 — UX для админов (Telegram‑first, затем Web)
+### Фаза 3 — UX для админов (Web‑first, Telegram‑fallback)
 **Почему:** операционная эффективность и контроль SLA.
 **Что делаем:**
-1. **Telegram как официальный UI**: статусы pending/active/resolved, карточка заявки, SLA‑сообщения.
-2. **Минимальный web‑админ** через `/admin/*` API (monitoring/knowledge‑backlog).
-3. **Dashboard** (P2/P3) после стабилизации ядра.
+1. **Web Console как официальный UI**: RBAC, очередь, аудит, SLA, настройки.
+2. **Telegram как paging/fallback**: уведомления и быстрые действия, синхронизация с Console.
+3. **Ops‑админ через `/admin/*` + Dashboard** (P2/P3) после стабилизации ядра.
 **Как проверяем:** trace pending‑SLA, `/admin/health`, ручной smoke.
 
 ### Фаза 4 — Auto‑Learning (после реальных данных)
