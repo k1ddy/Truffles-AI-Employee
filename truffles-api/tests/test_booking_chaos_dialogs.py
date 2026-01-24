@@ -144,6 +144,9 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
         "app.routers.webhook._legacy._extract_service_hint",
         side_effect=_stub_service_hint,
     ), patch(
+        "app.routers.webhook._legacy._get_recent_service_hint",
+        return_value="маникюр",
+    ), patch(
         "app.routers.webhook._legacy.interpret_expected_reply",
         return_value=stub_answer,
     ), patch(
