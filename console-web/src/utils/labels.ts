@@ -61,24 +61,36 @@ export function getSlaIndicator(createdAt: string): SlaIndicator {
 
 // Booking status labels (for calendar)
 export function getBookingStatusLabel(status: string): string {
+    const normalized = status.toLowerCase();
     const labels: Record<string, string> = {
         pending: "ожидает",
+        draft: "черновик",
+        hold: "бронь",
+        pending_confirmation: "ожидает подтверждения",
         confirmed: "подтверждена",
+        checked_in: "клиент пришел",
+        reschedule_requested: "нужен перенос",
         cancelled: "отменена",
         completed: "завершена",
         no_show: "не пришёл",
     };
-    return labels[status] || status;
+    return labels[normalized] || status;
 }
 
 // Booking status colors (for calendar badges)
 export function getBookingStatusColor(status: string): string {
+    const normalized = status.toLowerCase();
     const colors: Record<string, string> = {
         pending: "bg-yellow-100 text-yellow-800",
+        draft: "bg-muted text-muted-foreground",
+        hold: "bg-yellow-100 text-yellow-800",
+        pending_confirmation: "bg-yellow-100 text-yellow-800",
         confirmed: "bg-green-100 text-green-800",
+        checked_in: "bg-green-100 text-green-800",
+        reschedule_requested: "bg-orange-100 text-orange-800",
         cancelled: "bg-muted text-muted-foreground",
         completed: "bg-secondary text-secondary-foreground",
         no_show: "bg-red-100 text-red-800",
     };
-    return colors[status] || "bg-muted text-muted-foreground";
+    return colors[normalized] || "bg-muted text-muted-foreground";
 }
