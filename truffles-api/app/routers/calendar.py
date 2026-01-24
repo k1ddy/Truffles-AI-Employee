@@ -5,8 +5,8 @@ Provides endpoints for slots, bookings, and Google Calendar OAuth.
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
-
 from zoneinfo import ZoneInfo
+
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
