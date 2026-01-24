@@ -57,6 +57,7 @@ Rules:
 - All queries filter by `context.client.id`.
 - If multiple clients → `X-Client-Id` is mandatory.
 - Non‑admin/owner users are restricted to their branch.
+- Provisioning: role=manager requires `branch_id` (branch‑scoped access only).
 - Если один `sub` связан с несколькими клиентами → API вернёт
   `CLIENT_SELECTION_REQUIRED` (нужен `X-Client-Id`) либо надо убрать дубликаты.
 
@@ -73,12 +74,15 @@ Rules:
 - Навигация в сайдбаре режется по роли (owner/admin/manager/support).
 
 **Phase 2 UI contract (Provisioning + Capabilities, planned):**
-- RBAC gate: owner/admin/support (platform admin role TBD).
-- Provisioning Wizard: бизнес‑профиль → филиалы → команда → интеграции → knowledge (handoff в Knowledge Studio) → live‑check.
-- Go/No‑Go gate: без обязательных данных филиала (по provisioning‑схеме) publish блокируется; UI показывает missing fields.
+- RBAC gate: owner/admin write; support read‑only (no provisioning/capabilities writes).
+- Provisioning flow: Create Branch (Draft) → Integrations (`instance_id`) → Team → Telegram (`telegram_chat_id`)
+  → Knowledge (`knowledge_tag` / branch‑pack) → Booking (`working_hours` / `booking_settings` / specialists) → Go/No‑Go.
+- Go/No‑Go gate: проверяем только поля, нужные для включённых capabilities; без `instance_id` ветка остаётся draft.
 - Capabilities UI: показывает effective capabilities (client + branch overrides), редактирование через schema‑validated форму,
   сохранение в `/console/v1/admin/capabilities` с `schema_version` и audit.
-- API: `GET/PATCH /console/v1/admin/capabilities` (client через `X-Client-Id`, branch через `branch_id`).
+- API provisioning: `POST /console/v1/admin/companies|clients|branches|agents`,
+  `PATCH /console/v1/admin/branches/{branch_id}`.
+- API capabilities: `GET/PATCH /console/v1/admin/capabilities` (client через `X-Client-Id`, branch через `branch_id`).
 - Schema: `contracts/capabilities/capabilities.v1.jsonschema`.
 - Fail‑closed: без явного tenant‑контекста действия недоступны.
 

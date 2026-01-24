@@ -3,7 +3,7 @@ import secrets
 from datetime import date as dt_date
 from datetime import datetime, time, timezone
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
@@ -15,9 +15,12 @@ from app.database import get_db
 from app.models import (
     Agent,
     AgentIdentity,
+    AgentMembership,
     Branch,
+    Client,
     ClientCapability,
     ClientSettings,
+    Company,
     Conversation,
     Handover,
     Message,
@@ -26,6 +29,9 @@ from app.models import (
 )
 from app.schemas.capabilities import CAPABILITIES_SCHEMA_VERSION, CapabilitiesPayload
 from app.schemas.console import (
+    ConsoleAgent,
+    ConsoleAgentCreateRequest,
+    ConsoleAgentCreateResponse,
     ConsoleAgentIdentity,
     ConsoleAgentInfo,
     ConsoleAgentListResponse,
@@ -33,6 +39,9 @@ from app.schemas.console import (
     ConsoleAuditEvent,
     ConsoleAuditListResponse,
     ConsoleBranch,
+    ConsoleBranchCreateRequest,
+    ConsoleBranchCreateResponse,
+    ConsoleBranchUpdateRequest,
     ConsoleCapabilitiesPatchRequest,
     ConsoleCapabilitiesRecord,
     ConsoleCapabilitiesResponse,
@@ -40,6 +49,12 @@ from app.schemas.console import (
     ConsoleCaseActionResponse,
     ConsoleCaseActionSync,
     ConsoleCaseListResponse,
+    ConsoleClient,
+    ConsoleClientCreateRequest,
+    ConsoleClientCreateResponse,
+    ConsoleCompany,
+    ConsoleCompanyCreateRequest,
+    ConsoleCompanyCreateResponse,
     ConsoleErrorResponse,
     ConsoleHealthResponse,
     ConsoleManagerMessageRequest,
@@ -198,6 +213,70 @@ def _build_telegram_desktop_link(
         if topic_str.isdigit():
             link = f"{link}&thread={topic_str}"
     return link
+
+
+_SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+
+def _normalize_slug(value: Optional[str], field_name: str) -> str:
+    if not value or not isinstance(value, str):
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is required")
+    slug = re.sub(r"\s+", "-", value.strip().lower())
+    if not slug or not _SLUG_PATTERN.fullmatch(slug):
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {field_name}")
+    return slug
+
+
+def _normalize_required_text(value: Optional[str], field_name: str) -> str:
+    if not value or not isinstance(value, str):
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is required")
+    normalized = value.strip()
+    if not normalized:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is required")
+    return normalized
+
+
+def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _ensure_unique_branch_field(
+    db: Session,
+    *,
+    client_id: UUID,
+    field_name: str,
+    value: Optional[str],
+    exclude_branch_id: Optional[UUID] = None,
+) -> None:
+    if not value:
+        return
+    column = getattr(Branch, field_name)
+    query = db.query(Branch).filter(Branch.client_id == client_id, column == value)
+    if exclude_branch_id:
+        query = query.filter(Branch.id != exclude_branch_id)
+    if query.first():
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} already in use")
+
+
+def _serialize_branch(branch: Branch) -> ConsoleBranch:
+    return ConsoleBranch(
+        id=branch.id,
+        slug=branch.slug,
+        name=branch.name,
+        is_active=branch.is_active,
+        instance_id=branch.instance_id,
+        telegram_chat_id=branch.telegram_chat_id,
+        phone=branch.phone,
+        knowledge_tag=branch.knowledge_tag,
+        timezone=branch.timezone,
+        working_hours=branch.working_hours,
+        booking_settings=branch.booking_settings,
+    )
 
 
 def _build_telegram_trail(
@@ -432,14 +511,30 @@ def _notify_client_status(
     return _build_sync_status("failed", detail or "notify_failed")
 
 
+def _require_roles(
+    context: ConsoleAuthContext,
+    *,
+    allowed: tuple[str, ...],
+    message: str,
+) -> None:
+    if context.role not in allowed:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", message)
+
+
 def _require_owner_admin(context: ConsoleAuthContext) -> None:
-    if context.role not in ("owner", "admin"):
-        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin can manage Telegram connector")
+    _require_roles(
+        context,
+        allowed=("owner", "admin"),
+        message="Only owner/admin can manage Telegram connector",
+    )
 
 
 def _require_platform_admin(context: ConsoleAuthContext) -> None:
-    if context.role not in ("owner", "admin", "support"):
-        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin/support can manage capabilities")
+    _require_roles(
+        context,
+        allowed=("owner", "admin", "support"),
+        message="Only owner/admin/support can access admin operations",
+    )
 
 
 def _generate_verification_code() -> str:
@@ -2635,6 +2730,413 @@ async def update_settings(
     )
 
 
+@router.post(
+    "/admin/companies",
+    response_model=ConsoleCompanyCreateResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def create_company(
+    request: Request,
+    body: ConsoleCompanyCreateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleCompanyCreateResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_roles(
+        context,
+        allowed=("owner", "admin"),
+        message="Only owner/admin can manage provisioning",
+    )
+
+    name = _normalize_required_text(body.name, "name")
+    billing_info = body.billing_info or {}
+    now = datetime.now(timezone.utc)
+    company = Company(
+        id=uuid4(),
+        name=name,
+        billing_info=billing_info,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(company)
+    record_audit_event(
+        db,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="company_created",
+        entity_type="company",
+        entity_id=company.id,
+        payload={"name": company.name},
+    )
+    db.commit()
+
+    return ConsoleCompanyCreateResponse(
+        company=ConsoleCompany(
+            id=company.id,
+            name=company.name,
+            billing_info=company.billing_info,
+        )
+    )
+
+
+@router.post(
+    "/admin/clients",
+    response_model=ConsoleClientCreateResponse,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def create_client(
+    request: Request,
+    body: ConsoleClientCreateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleClientCreateResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_roles(
+        context,
+        allowed=("owner", "admin"),
+        message="Only owner/admin can manage provisioning",
+    )
+
+    slug = _normalize_slug(body.slug, "client_slug")
+    existing = db.query(Client).filter(func.lower(Client.name) == slug.lower()).first()
+    if existing:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "client_slug already exists")
+
+    company_id = None
+    if body.company_id:
+        company = db.query(Company).filter(Company.id == body.company_id).first()
+        if not company:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+        company_id = company.id
+
+    status_value = (body.status or "active").strip()
+    now = datetime.now(timezone.utc)
+    client = Client(
+        id=uuid4(),
+        name=slug,
+        status=status_value,
+        config={},
+        created_at=now,
+        updated_at=now,
+        company_id=company_id,
+    )
+    db.add(client)
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="client_created",
+        entity_type="client",
+        entity_id=client.id,
+        payload={
+            "slug": slug,
+            "company_id": str(company_id) if company_id else None,
+        },
+        client_id=client.id,
+    )
+    db.commit()
+
+    return ConsoleClientCreateResponse(
+        client=ConsoleClient(
+            id=client.id,
+            slug=client.name,
+            name=client.name,
+            company_id=client.company_id,
+        )
+    )
+
+
+@router.post(
+    "/admin/branches",
+    response_model=ConsoleBranchCreateResponse,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def create_branch(
+    request: Request,
+    body: ConsoleBranchCreateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleBranchCreateResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_roles(
+        context,
+        allowed=("owner", "admin"),
+        message="Only owner/admin can manage provisioning",
+    )
+
+    client = db.query(Client).filter(Client.id == body.client_id).first()
+    if not client:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+
+    slug = _normalize_slug(body.slug, "branch_slug")
+    name = _normalize_required_text(body.name, "name")
+    instance_id = _normalize_optional_text(body.instance_id)
+    phone = _normalize_optional_text(body.phone)
+    telegram_chat_id = _normalize_optional_text(body.telegram_chat_id)
+    knowledge_tag = _normalize_optional_text(body.knowledge_tag)
+    timezone_value = _normalize_optional_text(body.timezone)
+
+    _ensure_unique_branch_field(db, client_id=client.id, field_name="slug", value=slug)
+    _ensure_unique_branch_field(db, client_id=client.id, field_name="instance_id", value=instance_id)
+    _ensure_unique_branch_field(db, client_id=client.id, field_name="phone", value=phone)
+
+    is_active = body.is_active if body.is_active is not None else bool(instance_id)
+    if is_active and not instance_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "instance_id required to activate branch")
+
+    now = datetime.now(timezone.utc)
+    branch = Branch(
+        id=uuid4(),
+        client_id=client.id,
+        slug=slug,
+        name=name,
+        instance_id=instance_id,
+        phone=phone,
+        telegram_chat_id=telegram_chat_id,
+        knowledge_tag=knowledge_tag,
+        timezone=timezone_value,
+        working_hours=body.working_hours if body.working_hours is not None else {},
+        booking_settings=body.booking_settings if body.booking_settings is not None else {},
+        is_active=is_active,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(branch)
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="branch_created",
+        entity_type="branch",
+        entity_id=branch.id,
+        payload={"slug": slug, "name": name, "is_active": is_active},
+        client_id=client.id,
+        branch_id=branch.id,
+    )
+    db.commit()
+
+    return ConsoleBranchCreateResponse(branch=_serialize_branch(branch))
+
+
+@router.patch(
+    "/admin/branches/{branch_id}",
+    response_model=ConsoleBranch,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def update_branch(
+    branch_id: UUID,
+    request: Request,
+    body: ConsoleBranchUpdateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleBranch:
+    context = get_console_context(request, db, require_selection=False)
+    _require_roles(
+        context,
+        allowed=("owner", "admin"),
+        message="Only owner/admin can manage provisioning",
+    )
+
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+
+    fields_set = body.model_fields_set
+    updated_fields: list[str] = []
+
+    if "slug" in fields_set:
+        slug = _normalize_slug(body.slug, "branch_slug")
+        if slug != branch.slug:
+            _ensure_unique_branch_field(
+                db,
+                client_id=branch.client_id,
+                field_name="slug",
+                value=slug,
+                exclude_branch_id=branch.id,
+            )
+            branch.slug = slug
+        updated_fields.append("slug")
+
+    if "name" in fields_set:
+        branch.name = _normalize_required_text(body.name, "name")
+        updated_fields.append("name")
+
+    instance_id = branch.instance_id
+    if "instance_id" in fields_set:
+        instance_id = _normalize_optional_text(body.instance_id)
+        if instance_id != branch.instance_id:
+            _ensure_unique_branch_field(
+                db,
+                client_id=branch.client_id,
+                field_name="instance_id",
+                value=instance_id,
+                exclude_branch_id=branch.id,
+            )
+            branch.instance_id = instance_id
+        updated_fields.append("instance_id")
+
+    if "phone" in fields_set:
+        phone = _normalize_optional_text(body.phone)
+        if phone != branch.phone:
+            _ensure_unique_branch_field(
+                db,
+                client_id=branch.client_id,
+                field_name="phone",
+                value=phone,
+                exclude_branch_id=branch.id,
+            )
+            branch.phone = phone
+        updated_fields.append("phone")
+
+    if "telegram_chat_id" in fields_set:
+        branch.telegram_chat_id = _normalize_optional_text(body.telegram_chat_id)
+        updated_fields.append("telegram_chat_id")
+
+    if "knowledge_tag" in fields_set:
+        branch.knowledge_tag = _normalize_optional_text(body.knowledge_tag)
+        updated_fields.append("knowledge_tag")
+
+    if "timezone" in fields_set:
+        branch.timezone = _normalize_optional_text(body.timezone)
+        updated_fields.append("timezone")
+
+    if "working_hours" in fields_set:
+        branch.working_hours = body.working_hours if body.working_hours is not None else {}
+        updated_fields.append("working_hours")
+
+    if "booking_settings" in fields_set:
+        branch.booking_settings = body.booking_settings if body.booking_settings is not None else {}
+        updated_fields.append("booking_settings")
+
+    is_active = branch.is_active
+    if "is_active" in fields_set:
+        if body.is_active is None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "is_active cannot be null")
+        is_active = body.is_active
+    elif "instance_id" in fields_set and instance_id is None:
+        is_active = False
+
+    if is_active and not instance_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "instance_id required to activate branch")
+
+    if is_active != branch.is_active:
+        branch.is_active = is_active
+        updated_fields.append("is_active")
+
+    if updated_fields:
+        branch.updated_at = datetime.now(timezone.utc)
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="branch_updated",
+            entity_type="branch",
+            entity_id=branch.id,
+            payload={"updated_fields": updated_fields},
+            client_id=branch.client_id,
+            branch_id=branch.id,
+        )
+        db.commit()
+
+    return _serialize_branch(branch)
+
+
+@router.post(
+    "/admin/agents",
+    response_model=ConsoleAgentCreateResponse,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def create_agent(
+    request: Request,
+    body: ConsoleAgentCreateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleAgentCreateResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_roles(
+        context,
+        allowed=("owner", "admin"),
+        message="Only owner/admin can manage provisioning",
+    )
+
+    client = db.query(Client).filter(Client.id == body.client_id).first()
+    if not client:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+
+    if body.role == "manager" and not body.branch_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id required for manager role")
+
+    branch = None
+    if body.branch_id:
+        branch = (
+            db.query(Branch)
+            .filter(Branch.id == body.branch_id, Branch.client_id == client.id)
+            .first()
+        )
+        if not branch:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+
+    now = datetime.now(timezone.utc)
+    is_active = body.is_active if body.is_active is not None else True
+    agent = Agent(
+        id=uuid4(),
+        client_id=client.id,
+        branch_id=branch.id if branch else None,
+        role=body.role,
+        name=_normalize_optional_text(body.name),
+        is_active=is_active,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(agent)
+
+    membership = AgentMembership(
+        id=uuid4(),
+        agent_id=agent.id,
+        scope="branch" if branch else "client",
+        company_id=client.company_id,
+        client_id=client.id,
+        branch_id=branch.id if branch else None,
+        role=body.role,
+        is_active=is_active,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(membership)
+
+    if body.oidc_subject:
+        identity = AgentIdentity(
+            id=uuid4(),
+            agent_id=agent.id,
+            channel="oidc",
+            external_id=body.oidc_subject,
+            username=body.name,
+            identity_metadata={"linked_from": "admin_api"},
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(identity)
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="agent_created",
+        entity_type="agent",
+        entity_id=agent.id,
+        payload={
+            "role": agent.role,
+            "branch_id": str(agent.branch_id) if agent.branch_id else None,
+            "oidc_linked": bool(body.oidc_subject),
+        },
+        client_id=client.id,
+        branch_id=agent.branch_id,
+    )
+    db.commit()
+
+    return ConsoleAgentCreateResponse(
+        agent=ConsoleAgent(
+            id=agent.id,
+            name=agent.name,
+            role=agent.role,
+            client_id=agent.client_id,
+            branch_id=agent.branch_id,
+            is_active=agent.is_active,
+        )
+    )
+
+
 def _get_latest_capability(
     db: Session,
     *,
@@ -2746,7 +3248,11 @@ async def patch_capabilities(
     db: Session = Depends(get_db),
 ) -> ConsoleCapabilitiesRecord:
     context = get_console_context(request, db)
-    _require_platform_admin(context)
+    _require_roles(
+        context,
+        allowed=("owner", "admin"),
+        message="Only owner/admin can manage capabilities",
+    )
 
     schema_version = body.schema_version or CAPABILITIES_SCHEMA_VERSION
     if schema_version != CAPABILITIES_SCHEMA_VERSION:

@@ -14,7 +14,7 @@ class Branch(Base):
     client_id = Column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
     slug = Column(Text, nullable=False)
     name = Column(Text, nullable=False)
-    instance_id = Column(Text, nullable=False)
+    instance_id = Column(Text)
     phone = Column(Text)
     telegram_chat_id = Column(Text)
     knowledge_tag = Column(Text)

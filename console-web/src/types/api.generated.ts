@@ -455,6 +455,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/companies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create company */
+        post: operations["createAdminCompany"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create client */
+        post: operations["createAdminClient"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create branch */
+        post: operations["createAdminBranch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branches/{branch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update branch */
+        patch: operations["patchAdminBranch"];
+        trace?: never;
+    };
+    "/admin/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create agent */
+        post: operations["createAdminAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/capabilities": {
         parameters: {
             query?: never;
@@ -511,7 +596,10 @@ export interface components {
             role?: "owner" | "admin" | "manager" | "support";
             /** Format: uuid */
             client_id?: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Required when role=manager.
+             */
             branch_id?: string | null;
             is_active?: boolean;
         };
@@ -536,6 +624,23 @@ export interface components {
             is_active?: boolean;
             identities?: components["schemas"]["AgentIdentity"][];
         };
+        Company: {
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            billing_info?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        CompanyCreateRequest: {
+            name: string;
+            billing_info?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        CompanyCreateResponse: {
+            company?: components["schemas"]["Company"];
+        };
         Client: {
             /** Format: uuid */
             id?: string;
@@ -543,6 +648,15 @@ export interface components {
             name?: string;
             /** Format: uuid */
             company_id?: string | null;
+        };
+        ClientCreateRequest: {
+            slug: string;
+            /** Format: uuid */
+            company_id?: string | null;
+            status?: string | null;
+        };
+        ClientCreateResponse: {
+            client?: components["schemas"]["Client"];
         };
         Branch: {
             /** Format: uuid */
@@ -552,6 +666,52 @@ export interface components {
             is_active?: boolean;
             instance_id?: string | null;
             telegram_chat_id?: string | null;
+            phone?: string | null;
+            knowledge_tag?: string | null;
+            timezone?: string | null;
+            working_hours?: {
+                [key: string]: unknown;
+            } | null;
+            booking_settings?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        BranchCreateRequest: {
+            /** Format: uuid */
+            client_id: string;
+            slug: string;
+            name: string;
+            timezone?: string | null;
+            instance_id?: string | null;
+            phone?: string | null;
+            telegram_chat_id?: string | null;
+            knowledge_tag?: string | null;
+            working_hours?: {
+                [key: string]: unknown;
+            } | null;
+            booking_settings?: {
+                [key: string]: unknown;
+            } | null;
+            is_active?: boolean | null;
+        };
+        BranchCreateResponse: {
+            branch?: components["schemas"]["Branch"];
+        };
+        BranchUpdateRequest: {
+            slug?: string | null;
+            name?: string | null;
+            timezone?: string | null;
+            instance_id?: string | null;
+            phone?: string | null;
+            telegram_chat_id?: string | null;
+            knowledge_tag?: string | null;
+            working_hours?: {
+                [key: string]: unknown;
+            } | null;
+            booking_settings?: {
+                [key: string]: unknown;
+            } | null;
+            is_active?: boolean | null;
         };
         MeResponse: {
             agent?: components["schemas"]["Agent"];
@@ -622,6 +782,20 @@ export interface components {
         };
         AgentListResponse: {
             items?: components["schemas"]["AgentWithIdentities"][];
+        };
+        AgentCreateRequest: {
+            /** Format: uuid */
+            client_id: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            /** @enum {string} */
+            role: "owner" | "admin" | "manager" | "support";
+            name?: string | null;
+            is_active?: boolean | null;
+            oidc_subject?: string | null;
+        };
+        AgentCreateResponse: {
+            agent?: components["schemas"]["Agent"];
         };
         Message: {
             /** Format: uuid */
@@ -1786,6 +1960,152 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    createAdminCompany: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanyCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Company created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyCreateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    createAdminClient: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Client created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientCreateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    createAdminBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BranchCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Branch created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BranchCreateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    patchAdminBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BranchUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Branch updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    createAdminAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Agent created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentCreateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationError"];
         };
     };
