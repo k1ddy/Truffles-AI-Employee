@@ -113,6 +113,21 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
 
     llm_result = Result.success((None, "low_confidence"))
 
+    def _stub_service_hint(message_text, _client_slug):
+        if message_text and "маникюр" in message_text.casefold():
+            return "маникюр"
+        return None
+
+    stub_answer = {
+        "ok": False,
+        "payload": {
+            "slot": "",
+            "value": "",
+            "confidence": 0.0,
+        },
+        "error": "stubbed",
+    }
+
     with patch(
         "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(
@@ -125,6 +140,12 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
+    ), patch(
+        "app.routers.webhook._legacy._extract_service_hint",
+        side_effect=_stub_service_hint,
+    ), patch(
+        "app.routers.webhook._legacy.interpret_expected_reply",
+        return_value=stub_answer,
     ), patch(
         "app.routers.webhook._legacy.generate_bot_response",
         return_value=llm_result,
