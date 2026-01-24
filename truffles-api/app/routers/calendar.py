@@ -5,6 +5,7 @@ Provides endpoints for slots, bookings, and Google Calendar OAuth.
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse
@@ -13,12 +14,13 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.logging_config import get_logger
-from app.models.booking import Booking
+from app.models.appointment_service import AppointmentService as AppointmentServiceModel
+from app.models.appointment_sync_state import AppointmentSyncState
 from app.models.specialist import Specialist
-from app.services.booking_service import (
-    BookingConflictError,
-    BookingNotFoundError,
-    BookingService,
+from app.services.appointment_service import (
+    AppointmentConflictError,
+    AppointmentNotFoundError,
+    SchedulingService,
     SpecialistNotFoundError,
 )
 from app.services.console_auth import ConsoleAuthContext, get_console_context
@@ -28,6 +30,13 @@ from app.services.google_calendar_service import GoogleCalendarService
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/calendar", tags=["Calendar"])
+
+def _resolve_calendar_branch(context: ConsoleAuthContext) -> UUID:
+    if context.effective_branch_id:
+        return context.effective_branch_id
+    if len(context.branches) == 1:
+        return context.branches[0].id
+    raise ConsoleAPIError(400, "BRANCH_SELECTION_REQUIRED", "Branch selection required")
 
 
 # ==================== Schemas ====================
@@ -122,6 +131,7 @@ async def list_specialists(
         query = query.filter(Specialist.branch_id.in_(allowed_branch_ids))
     
     specialists = query.order_by(Specialist.name).all()
+    service = SchedulingService(db)
     
     return SpecialistsResponse(
         items=[
@@ -130,7 +140,7 @@ async def list_specialists(
                 name=s.name,
                 branch_id=str(s.branch_id) if s.branch_id else None,
                 branch_name=s.branch.name if s.branch else None,
-                services=s.services or [],
+                services=service.get_specialist_services(s),
                 is_active=s.is_active
             )
             for s in specialists
@@ -155,9 +165,7 @@ async def get_slots(
     context = get_console_context(request, db)
     
     try:
-        parsed_date = datetime.strptime(date, "%Y-%m-%d").replace(
-            tzinfo=timezone(timedelta(hours=5))
-        )
+        parsed_date = datetime.strptime(date, "%Y-%m-%d")
     except ValueError:
         raise ConsoleAPIError(400, "INVALID_DATE", "Date format must be YYYY-MM-DD")
     
@@ -168,15 +176,27 @@ async def get_slots(
     
     if not specialist:
         raise ConsoleAPIError(404, "SPECIALIST_NOT_FOUND", "Specialist not found")
+
+    if specialist.branch_id is None:
+        raise ConsoleAPIError(400, "BRANCH_REQUIRED", "Specialist branch is required")
+
+    if context.branch_restricted and specialist.branch_id not in context.allowed_branch_ids:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
     
-    service = BookingService(db)
+    service = SchedulingService(db)
     
     try:
+        branch_tz = specialist.branch.timezone if specialist.branch and specialist.branch.timezone else "Asia/Almaty"
+        try:
+            tz = ZoneInfo(branch_tz)
+        except Exception:
+            tz = ZoneInfo("Asia/Almaty")
+        parsed_date = parsed_date.replace(tzinfo=tz)
         slots = service.get_available_slots(
             specialist_id=UUID(specialist_id),
             date=parsed_date,
             duration_minutes=duration,
-            client_id=context.client.id
+            client_id=context.client.id,
         )
     except SpecialistNotFoundError:
         raise ConsoleAPIError(404, "SPECIALIST_NOT_FOUND", "Specialist not found")
@@ -223,11 +243,15 @@ async def create_booking(
     if not specialist:
         raise ConsoleAPIError(404, "SPECIALIST_NOT_FOUND", "Specialist not found")
     
-    service = BookingService(db)
+    if specialist.branch_id is None:
+        raise ConsoleAPIError(400, "BRANCH_REQUIRED", "Specialist branch is required")
+
+    service = SchedulingService(db)
     
     try:
-        booking = service.create_booking(
+        booking = service.create_appointment(
             client_id=context.client.id,
+            branch_id=specialist.branch_id,
             specialist_id=UUID(data.specialist_id),
             start_at=data.start_at,
             end_at=data.end_at,
@@ -236,8 +260,7 @@ async def create_booking(
             service_type=data.service_type,
             notes=data.notes,
             created_by=context.agent.id,
-            branch_id=specialist.branch_id,
-            conversation_id=UUID(data.conversation_id) if data.conversation_id else None
+            conversation_id=UUID(data.conversation_id) if data.conversation_id else None,
         )
         
         logger.info(
@@ -259,14 +282,14 @@ async def create_booking(
                 end_at=booking.end_at.isoformat(),
                 customer_name=booking.customer_name,
                 customer_phone=booking.customer_phone,
-                service_type=booking.service_type,
+                service_type=data.service_type,
                 status=booking.status,
-                google_event_id=booking.google_event_id,
+                google_event_id=None,
                 created_at=booking.created_at.isoformat()
             )
         )
         
-    except BookingConflictError as e:
+    except AppointmentConflictError as e:
         raise ConsoleAPIError(
             409,
             "BOOKING_CONFLICT",
@@ -290,7 +313,7 @@ async def list_bookings(
     """Get bookings with filters."""
     context = get_console_context(request, db)
     
-    service = BookingService(db)
+    service = SchedulingService(db)
     
     # Parse dates
     parsed_from = None
@@ -299,23 +322,56 @@ async def list_bookings(
         parsed_from = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     if date_to:
         parsed_to = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+
+    status_filter = None
+    if status:
+        status_norm = status.lower()
+        status_map = {
+            "pending": "PENDING_CONFIRMATION",
+            "confirmed": "CONFIRMED",
+            "cancelled": "CANCELLED",
+            "completed": "COMPLETED",
+            "no_show": "NO_SHOW",
+            "draft": "DRAFT",
+            "hold": "HOLD",
+            "checked_in": "CHECKED_IN",
+            "reschedule_requested": "RESCHEDULE_REQUESTED",
+        }
+        status_filter = status_map.get(status_norm, status.upper())
     
-    bookings = service.get_bookings(
+    bookings = service.get_appointments(
         client_id=context.client.id,
         specialist_id=UUID(specialist_id) if specialist_id else None,
         branch_ids=list(context.allowed_branch_ids) if context.branch_restricted else None,
         date_from=parsed_from,
         date_to=parsed_to,
-        status=status,
+        status=status_filter,
         limit=limit
     )
     
-    # Get specialist names
-    specialist_ids = {b.specialist_id for b in bookings}
+    appointment_ids = [b.id for b in bookings]
+    specialist_ids = {b.specialist_id for b in bookings if b.specialist_id}
     specialists_map = {
         s.id: s.name
         for s in db.query(Specialist).filter(Specialist.id.in_(specialist_ids)).all()
     }
+
+    services_map = {}
+    if appointment_ids:
+        rows = db.query(AppointmentServiceModel).filter(
+            AppointmentServiceModel.appointment_id.in_(appointment_ids)
+        ).all()
+        for row in rows:
+            services_map.setdefault(row.appointment_id, row.service_name)
+
+    sync_map = {}
+    if appointment_ids:
+        rows = db.query(AppointmentSyncState).filter(
+            AppointmentSyncState.appointment_id.in_(appointment_ids),
+            AppointmentSyncState.provider == "google_calendar",
+        ).all()
+        for row in rows:
+            sync_map[row.appointment_id] = row.external_id
     
     return BookingsListResponse(
         items=[
@@ -327,9 +383,9 @@ async def list_bookings(
                 end_at=b.end_at.isoformat(),
                 customer_name=b.customer_name,
                 customer_phone=b.customer_phone,
-                service_type=b.service_type,
+                service_type=services_map.get(b.id),
                 status=b.status,
-                google_event_id=b.google_event_id,
+                google_event_id=sync_map.get(b.id),
                 created_at=b.created_at.isoformat()
             )
             for b in bookings
@@ -347,10 +403,10 @@ async def cancel_booking(
     """Cancel a booking."""
     context = get_console_context(request, db)
     
-    service = BookingService(db)
+    service = SchedulingService(db)
     
     try:
-        booking = service.cancel_booking(
+        booking = service.cancel_appointment(
             booking_id=UUID(booking_id),
             client_id=context.client.id,
             reason=reason
@@ -364,6 +420,20 @@ async def cancel_booking(
             f"Booking cancelled: {booking_id}",
             extra={"context": {"agent": context.agent.name, "reason": reason}}
         )
+
+        service_name = (
+            db.query(AppointmentServiceModel.service_name)
+            .filter(AppointmentServiceModel.appointment_id == booking.id)
+            .scalar()
+        )
+        google_event_id = (
+            db.query(AppointmentSyncState.external_id)
+            .filter(
+                AppointmentSyncState.appointment_id == booking.id,
+                AppointmentSyncState.provider == "google_calendar"
+            )
+            .scalar()
+        )
         
         return BookingActionResponse(
             success=True,
@@ -375,14 +445,14 @@ async def cancel_booking(
                 end_at=booking.end_at.isoformat(),
                 customer_name=booking.customer_name,
                 customer_phone=booking.customer_phone,
-                service_type=booking.service_type,
+                service_type=service_name,
                 status=booking.status,
-                google_event_id=booking.google_event_id,
+                google_event_id=google_event_id,
                 created_at=booking.created_at.isoformat()
             )
         )
         
-    except BookingNotFoundError:
+    except AppointmentNotFoundError:
         raise ConsoleAPIError(404, "BOOKING_NOT_FOUND", "Booking not found")
 
 
@@ -402,14 +472,11 @@ async def google_connect(
     # Only owner/admin can connect calendar
     if context.role not in ("owner", "admin"):
         raise ConsoleAPIError(403, "FORBIDDEN", "Only admin can connect Google Calendar")
-
-    if context.branch_restricted and not context.effective_branch_id:
-        raise ConsoleAPIError(403, "FORBIDDEN", "Branch selection required for Google Calendar")
-    
+    branch_id = _resolve_calendar_branch(context)
     service = GoogleCalendarService(db)
     auth_url = service.get_auth_url(
         client_id=context.client.id,
-        branch_id=context.effective_branch_id
+        branch_id=branch_id
     )
     
     return RedirectResponse(url=auth_url)
@@ -446,11 +513,13 @@ async def google_status(
 ):
     """Check if Google Calendar is connected."""
     context = get_console_context(request, db)
+    branch_id = _resolve_calendar_branch(context)
     
     from app.models.google_calendar_token import GoogleCalendarToken
     
     token = db.query(GoogleCalendarToken).filter(
-        GoogleCalendarToken.client_id == context.client.id
+        GoogleCalendarToken.client_id == context.client.id,
+        GoogleCalendarToken.branch_id == branch_id
     ).first()
     
     return {

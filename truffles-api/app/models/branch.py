@@ -1,7 +1,7 @@
 import uuid
 
 from sqlalchemy import Boolean, Column, ForeignKey, Text
-from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -18,6 +18,9 @@ class Branch(Base):
     phone = Column(Text)
     telegram_chat_id = Column(Text)
     knowledge_tag = Column(Text)
+    timezone = Column(Text)
+    working_hours = Column(JSONB, default=dict)
+    booking_settings = Column(JSONB, default=dict)
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP(timezone=True))
     updated_at = Column(TIMESTAMP(timezone=True))

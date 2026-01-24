@@ -5,8 +5,8 @@ Stores OAuth2 tokens for Google Calendar API access.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import ARRAY, BYTEA, UUID
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -28,6 +28,10 @@ class GoogleCalendarToken(Base):
     refresh_token = Column(Text, nullable=False)
     token_type = Column(String(50), default="Bearer")
     expires_at = Column(DateTime(timezone=True), nullable=False)
+    access_token_enc = Column(BYTEA)
+    refresh_token_enc = Column(BYTEA)
+    encryption_version = Column(Integer, default=1, nullable=False)
+    encrypted_at = Column(DateTime(timezone=True))
     
     # Scopes granted
     scopes = Column(ARRAY(String), default=["https://www.googleapis.com/auth/calendar"])

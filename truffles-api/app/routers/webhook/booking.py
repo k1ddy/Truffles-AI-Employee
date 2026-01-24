@@ -8,11 +8,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Callable
+from zoneinfo import ZoneInfo
 
 import dateparser
 from rapidfuzz import fuzz, process
 
 from app.schemas.webhook import WebhookResponse
+from app.services.appointment_service import SchedulingService
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -693,6 +695,192 @@ def _build_booking_summary(booking: dict, *, refusal_flags: dict | None = None) 
     if legacy._is_refusal_flag_active(refusal_flags, "phone"):
         summary = f"{summary} Телефон: отказ."
     return summary
+
+
+def _normalize_phone_digits(value: str | None) -> str | None:
+    if not value:
+        return None
+    digits = re.sub(r"\D", "", value)
+    return digits or None
+
+
+def _parse_booking_datetime(value: str | None, *, tz_name: str | None, now: datetime) -> datetime | None:
+    if not value or not value.strip():
+        return None
+    settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": now}
+    parsed = dateparser.parse(value, languages=["ru"], settings=settings)
+    if not parsed:
+        return None
+    if parsed.tzinfo is None:
+        tz = timezone.utc
+        if tz_name:
+            try:
+                tz = ZoneInfo(tz_name)
+            except Exception:
+                tz = timezone.utc
+        parsed = parsed.replace(tzinfo=tz)
+    return parsed
+
+
+def _resolve_booking_settings(settings: dict | None) -> tuple[str, str, str]:
+    raw = settings if isinstance(settings, dict) else {}
+    booking_mode = raw.get("booking_mode", "collect_preferences")
+    availability_provider = raw.get("availability_provider", "none")
+    effective_mode = booking_mode
+    if booking_mode == "confirm_slots" and availability_provider in {"none", "", None}:
+        effective_mode = "collect_preferences"
+    return booking_mode, availability_provider, effective_mode
+
+
+def _create_booking_appointment(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User | None,
+    booking_state: dict,
+    now: datetime,
+    saved_message: Message | None,
+) -> tuple[Any | None, dict[str, Any]]:
+    from app.models.appointment import Appointment
+    from app.models.branch import Branch
+    from app.models.service import Service
+    from app.services.appointment_service import (
+        AppointmentConflictError,
+        BranchNotFoundError,
+        SpecialistNotFoundError,
+    )
+
+    meta: dict[str, Any] = {}
+    branch_id = getattr(conversation, "branch_id", None)
+    if not branch_id:
+        meta["appointment_skip_reason"] = "missing_branch"
+        return None, meta
+
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        meta["appointment_skip_reason"] = "branch_not_found"
+        return None, meta
+
+    existing = (
+        db.query(Appointment)
+        .filter(
+            Appointment.conversation_id == conversation.id,
+            Appointment.status.in_(SchedulingService.ACTIVE_STATUSES),
+        )
+        .first()
+    )
+    if existing:
+        meta["appointment_id"] = str(existing.id)
+        meta["appointment_status"] = existing.status
+        meta["appointment_reused"] = True
+        return existing, meta
+
+    booking_mode, availability_provider, effective_mode = _resolve_booking_settings(branch.booking_settings)
+    meta.update(
+        {
+            "booking_mode": booking_mode,
+            "availability_provider": availability_provider,
+            "effective_booking_mode": effective_mode,
+        }
+    )
+    if effective_mode != "collect_preferences":
+        meta["appointment_skip_reason"] = "booking_mode_not_supported"
+        return None, meta
+
+    start_at = _parse_booking_datetime(
+        booking_state.get("datetime"),
+        tz_name=branch.timezone,
+        now=now,
+    )
+    if not start_at:
+        meta["appointment_skip_reason"] = "datetime_parse_failed"
+        return None, meta
+
+    service_name = booking_state.get("service")
+    duration_min = None
+    if service_name:
+        service_row = (
+            db.query(Service)
+            .filter(
+                Service.client_id == conversation.client_id,
+                Service.branch_id == branch_id,
+                Service.name == service_name,
+            )
+            .first()
+        )
+        if service_row and service_row.duration_min:
+            duration_min = service_row.duration_min
+            meta["appointment_duration_source"] = "service"
+
+    if not duration_min:
+        settings = branch.booking_settings if isinstance(branch.booking_settings, dict) else {}
+        duration_min = settings.get("default_duration_min") or settings.get("slot_duration_min")
+        if duration_min:
+            meta["appointment_duration_source"] = "branch_default"
+    if not duration_min:
+        duration_min = SchedulingService.DEFAULT_SLOT_DURATION
+        meta["appointment_duration_source"] = "fallback_default"
+
+    end_at = start_at + timedelta(minutes=int(duration_min))
+
+    customer_name = booking_state.get("name") or getattr(user, "name", None)
+    customer_phone = getattr(user, "phone", None) or _normalize_phone_digits(
+        getattr(user, "remote_jid", None)
+    )
+
+    audit_payload = {
+        "booking": {
+            "service": service_name,
+            "datetime": booking_state.get("datetime"),
+            "name": booking_state.get("name"),
+        },
+        "booking_mode": booking_mode,
+        "availability_provider": availability_provider,
+        "effective_booking_mode": effective_mode,
+    }
+
+    trace_id = None
+    correlation_id = None
+    message_meta = getattr(saved_message, "message_metadata", None)
+    if isinstance(message_meta, dict):
+        trace_id = (message_meta.get("decision_meta") or {}).get("trace_id")
+    if getattr(conversation, "id", None):
+        correlation_id = str(conversation.id)
+
+    try:
+        appointment = SchedulingService(db).create_appointment(
+            client_id=conversation.client_id,
+            branch_id=branch_id,
+            specialist_id=None,
+            start_at=start_at,
+            end_at=end_at,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            service_type=service_name,
+            notes=None,
+            created_by=None,
+            conversation_id=conversation.id,
+            status="PENDING_CONFIRMATION",
+            source="bot",
+            confirmation_policy=None,
+            audit={
+                "actor_type": "bot",
+                "actor_id": getattr(user, "id", None),
+                "channel": "whatsapp",
+                "action": "create",
+                "payload": audit_payload,
+                "trace_id": trace_id,
+                "correlation_id": correlation_id,
+            },
+            commit=False,
+        )
+    except (AppointmentConflictError, SpecialistNotFoundError, BranchNotFoundError):
+        meta["appointment_skip_reason"] = "appointment_create_failed"
+        return None, meta
+
+    meta["appointment_id"] = str(appointment.id)
+    meta["appointment_status"] = appointment.status
+    return appointment, meta
 
 
 @dataclass(frozen=True)
@@ -1476,6 +1664,33 @@ def _handle_booking_flow(
             context_manager = legacy._get_context_manager(context)
             refusal_flags = context_manager.get("refusal_flags")
             booking_summary = _build_booking_summary(booking_state, refusal_flags=refusal_flags)
+
+            appointment = None
+            appointment_meta: dict[str, Any] = {}
+            appointment, appointment_meta = _create_booking_appointment(
+                db=db,
+                conversation=conversation,
+                user=user,
+                booking_state=booking_state,
+                now=now,
+                saved_message=saved_message,
+            )
+            if saved_message and appointment_meta:
+                legacy._update_message_decision_metadata(saved_message, appointment_meta)
+            legacy._record_decision_trace(
+                conversation,
+                {
+                    "stage": "booking_commit",
+                    "decision": "appointment_created" if appointment else "appointment_skipped",
+                    "appointment_id": appointment_meta.get("appointment_id"),
+                    "appointment_status": appointment_meta.get("appointment_status"),
+                    "appointment_reused": appointment_meta.get("appointment_reused"),
+                    "booking_mode": appointment_meta.get("booking_mode"),
+                    "availability_provider": appointment_meta.get("availability_provider"),
+                    "effective_booking_mode": appointment_meta.get("effective_booking_mode"),
+                    "skip_reason": appointment_meta.get("appointment_skip_reason"),
+                },
+            )
             if routing.get("allow_handover_create"):
                 _, reused, telegram_sent = legacy._reuse_active_handover(
                     db=db,
