@@ -11,7 +11,17 @@ from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Agent, AgentIdentity, Branch, ClientSettings, Conversation, Handover, Message, OutboxMessage, User
+from app.models import (
+    Agent,
+    AgentIdentity,
+    Branch,
+    ClientSettings,
+    Conversation,
+    Handover,
+    Message,
+    OutboxMessage,
+    User,
+)
 from app.schemas.console import (
     ConsoleAgentIdentity,
     ConsoleAgentInfo,
