@@ -12,6 +12,8 @@ interface ChatInterfaceProps {
     caseId: string;  // For query invalidation (handover ID)
     isLoading?: boolean;
     canSend?: boolean; // Allow sending messages (case must be active)
+    draft?: string;
+    onDraftChange?: (value: string) => void;
 }
 
 async function sendMessage(conversationId: string, content: string) {
@@ -26,9 +28,14 @@ export default function ChatInterface({
     conversationId,
     caseId,
     isLoading,
-    canSend = true
+    canSend = true,
+    draft,
+    onDraftChange,
 }: ChatInterfaceProps) {
-    const [inputValue, setInputValue] = useState("");
+    const isControlled = typeof onDraftChange === "function";
+    const [internalDraft, setInternalDraft] = useState("");
+    const inputValue = isControlled ? draft ?? "" : internalDraft;
+    const setInputValue = isControlled ? onDraftChange : setInternalDraft;
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const lastMessageIdRef = useRef<string | null>(null);
     const queryClient = useQueryClient();

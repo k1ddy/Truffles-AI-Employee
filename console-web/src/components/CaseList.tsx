@@ -33,6 +33,14 @@ interface CasesResponse {
     has_more?: boolean;
 }
 
+type CaseListVariant = "table" | "compact";
+
+interface CaseListProps {
+    variant?: CaseListVariant;
+    selectedCaseId?: string | null;
+    onSelectCase?: (caseId: string) => void;
+}
+
 // Loading skeleton component
 function TableSkeleton() {
     return (
@@ -50,7 +58,11 @@ function TableSkeleton() {
     );
 }
 
-export default function CaseList() {
+export default function CaseList({
+    variant = "table",
+    selectedCaseId,
+    onSelectCase,
+}: CaseListProps) {
     const { data: session } = useSession();
     const api = useAuthenticatedApi();
 
@@ -67,6 +79,7 @@ export default function CaseList() {
     });
     const [cursor, setCursor] = useState<string | undefined>(undefined);
     const [searchValue, setSearchValue] = useState("");
+    const isCompact = variant === "compact";
 
     useEffect(() => {
         const handle = setTimeout(() => {
@@ -213,7 +226,12 @@ export default function CaseList() {
             </div>
 
             {/* Filter row */}
-            <div className="flex flex-wrap items-center gap-3 mb-4 p-3 bg-muted rounded-lg border border-border/60" data-testid="cases-filters">
+            <div
+                className={`flex flex-wrap items-center gap-3 mb-4 p-3 bg-muted rounded-lg border border-border/60 ${
+                    isCompact ? "flex-col items-start" : ""
+                }`}
+                data-testid="cases-filters"
+            >
                 <input
                     type="text"
                     value={searchValue}
@@ -347,104 +365,191 @@ export default function CaseList() {
                 {data?.has_more && " (есть ещё)"}
             </div>
 
-            {/* Table */}
-            <div className="overflow-x-auto border border-border/60 rounded-lg bg-card" data-testid="cases-table">
-                <table className="w-full text-left border-collapse">
-                    <thead className="bg-muted">
-                        <tr>
-                            <th className="p-4 text-sm font-medium text-muted-foreground">ID</th>
-                            <th className="p-4 text-sm font-medium text-muted-foreground">Статус</th>
-                            <th className="p-4 text-sm font-medium text-muted-foreground">SLA</th>
-                            <th className="p-4 text-sm font-medium text-muted-foreground">Филиал</th>
-                            <th className="p-4 text-sm font-medium text-muted-foreground">Канал</th>
-                            <th className="p-4 text-sm font-medium text-muted-foreground">Назначено</th>
-                            <th className="p-4 text-sm font-medium text-muted-foreground">Сообщение</th>
-                            <th className="p-4 text-sm font-medium text-muted-foreground">Активность</th>
-                            <th className="p-4 text-sm font-medium text-muted-foreground">Действия</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {sortedCases.map((c) => {
-                            const sla = getSlaIndicator(c.created_at);
-                            const branchName = branchMap.get(c.branch_id || "") || "-";
-                            const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
-                            const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
-                            const isLive = lastInbound ? (Date.now() - lastInbound.getTime()) < 5 * 60 * 1000 : false;
-                            const needsReply = !!c.needs_reply;
-                            const hasIssue = !!c.has_delivery_error || !!c.has_pending_outbox;
-                            return (
-                                <tr key={c.id} className="border-b border-border/60 hover:bg-muted/60" data-testid="cases-row">
-                                    <td className="p-4 font-mono text-sm">{c.id.slice(0, 8)}...</td>
-                                    <td className="p-4">
-                                        <span
-                                            className={`px-2 py-1 rounded text-xs font-medium ${c.status === "active"
-                                                ? "bg-green-100 text-green-800"
-                                                : c.status === "pending"
-                                                    ? "bg-yellow-100 text-yellow-800"
-                                                    : "bg-muted text-muted-foreground"
-                                                }`}
-                                        >
-                                            {getStatusLabel(c.status)}
+            {isCompact ? (
+                <div className="flex flex-col gap-2" data-testid="cases-table">
+                    {sortedCases.map((c) => {
+                        const sla = getSlaIndicator(c.created_at);
+                        const branchName = branchMap.get(c.branch_id || "") || "-";
+                        const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
+                        const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
+                        const isLive = lastInbound ? (Date.now() - lastInbound.getTime()) < 5 * 60 * 1000 : false;
+                        const needsReply = !!c.needs_reply;
+                        const hasIssue = !!c.has_delivery_error || !!c.has_pending_outbox;
+                        const contactName = c.customer_name || c.customer_phone || c.customer_remote_jid?.split("@")[0] || "Клиент";
+                        const contactPhone = c.customer_phone || c.customer_remote_jid?.split("@")[0] || "";
+                        const preview = c.last_message_preview || c.user_message || "-";
+                        const isSelected = selectedCaseId === c.id;
+                        const statusClass = c.status === "active"
+                            ? "bg-green-100 text-green-800"
+                            : c.status === "pending"
+                                ? "bg-yellow-100 text-yellow-800"
+                                : "bg-muted text-muted-foreground";
+                        const content = (
+                            <div
+                                className={`rounded-xl border border-border/60 p-3 text-left transition ${
+                                    isSelected ? "border-primary/60 bg-primary/5" : "bg-card hover:bg-muted/60"
+                                }`}
+                            >
+                                <div className="flex items-start justify-between gap-3 mb-2">
+                                    <div>
+                                        <p className="text-sm font-semibold">{contactName}</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            {contactPhone || branchName}
+                                        </p>
+                                    </div>
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${statusClass}`}>
+                                        {getStatusLabel(c.status)}
+                                    </span>
+                                </div>
+                                <p className="text-xs text-muted-foreground mb-2">
+                                    {preview}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                                    <span>{branchName}</span>
+                                    <span>•</span>
+                                    <span>{new Date(lastActivity).toLocaleString("ru-RU")}</span>
+                                    <span className={`px-2 py-0.5 rounded font-semibold ${sla.className}`}>
+                                        {sla.label}
+                                    </span>
+                                    {needsReply && (
+                                        <span className="px-2 py-0.5 rounded font-semibold bg-yellow-100 text-yellow-800">
+                                            NEW
                                         </span>
-                                    </td>
-                                    <td className="p-4">
-                                        <span className={`px-2 py-1 rounded text-xs font-medium ${sla.className}`}>
-                                            {sla.label}
+                                    )}
+                                    {isLive && (
+                                        <span className="px-2 py-0.5 rounded font-semibold bg-green-100 text-green-800">
+                                            LIVE
                                         </span>
-                                    </td>
-                                    <td className="p-4 text-sm">{branchName}</td>
-                                    <td className="p-4 text-sm">{c.channel}</td>
-                                    <td className="p-4 text-sm">{c.assigned_to_name || "-"}</td>
-                                    <td className="p-4 text-sm max-w-xs">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <span className="truncate max-w-[180px]">{c.last_message_preview || c.user_message || "-"}</span>
-                                            {needsReply && (
-                                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-100 text-yellow-800">
-                                                    NEW
-                                                </span>
-                                            )}
-                                            {isLive && (
-                                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-800">
-                                                    LIVE
-                                                </span>
-                                            )}
-                                            {hasIssue && (
-                                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-800">
-                                                    ⚠️
-                                                </span>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="p-4 text-sm text-muted-foreground">
-                                        <div className="flex flex-col">
-                                            <span>{new Date(lastActivity).toLocaleString("ru-RU")}</span>
-                                            <span className="text-xs text-muted-foreground">
-                                                {c.last_activity_channel || "—"}
+                                    )}
+                                    {hasIssue && (
+                                        <span className="px-2 py-0.5 rounded font-semibold bg-red-100 text-red-800">
+                                            ⚠️
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                        return onSelectCase ? (
+                            <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => onSelectCase(c.id)}
+                                className="text-left"
+                                data-testid="cases-row"
+                            >
+                                {content}
+                            </button>
+                        ) : (
+                            <Link key={c.id} href={`/cases/${c.id}`} data-testid="cases-row">
+                                {content}
+                            </Link>
+                        );
+                    })}
+                    {sortedCases.length === 0 && (
+                        <div className="text-center text-muted-foreground py-6" data-testid="cases-empty">
+                            Заявки не найдены по указанным фильтрам.
+                        </div>
+                    )}
+                </div>
+            ) : (
+                <div className="overflow-x-auto border border-border/60 rounded-lg bg-card" data-testid="cases-table">
+                    <table className="w-full text-left border-collapse">
+                        <thead className="bg-muted">
+                            <tr>
+                                <th className="p-4 text-sm font-medium text-muted-foreground">ID</th>
+                                <th className="p-4 text-sm font-medium text-muted-foreground">Статус</th>
+                                <th className="p-4 text-sm font-medium text-muted-foreground">SLA</th>
+                                <th className="p-4 text-sm font-medium text-muted-foreground">Филиал</th>
+                                <th className="p-4 text-sm font-medium text-muted-foreground">Канал</th>
+                                <th className="p-4 text-sm font-medium text-muted-foreground">Назначено</th>
+                                <th className="p-4 text-sm font-medium text-muted-foreground">Сообщение</th>
+                                <th className="p-4 text-sm font-medium text-muted-foreground">Активность</th>
+                                <th className="p-4 text-sm font-medium text-muted-foreground">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {sortedCases.map((c) => {
+                                const sla = getSlaIndicator(c.created_at);
+                                const branchName = branchMap.get(c.branch_id || "") || "-";
+                                const lastInbound = c.last_inbound_at ? new Date(c.last_inbound_at) : null;
+                                const lastActivity = c.last_activity_at || c.last_inbound_at || c.created_at;
+                                const isLive = lastInbound ? (Date.now() - lastInbound.getTime()) < 5 * 60 * 1000 : false;
+                                const needsReply = !!c.needs_reply;
+                                const hasIssue = !!c.has_delivery_error || !!c.has_pending_outbox;
+                                return (
+                                    <tr key={c.id} className="border-b border-border/60 hover:bg-muted/60" data-testid="cases-row">
+                                        <td className="p-4 font-mono text-sm">{c.id.slice(0, 8)}...</td>
+                                        <td className="p-4">
+                                            <span
+                                                className={`px-2 py-1 rounded text-xs font-medium ${c.status === "active"
+                                                    ? "bg-green-100 text-green-800"
+                                                    : c.status === "pending"
+                                                        ? "bg-yellow-100 text-yellow-800"
+                                                        : "bg-muted text-muted-foreground"
+                                                    }`}
+                                            >
+                                                {getStatusLabel(c.status)}
                                             </span>
-                                        </div>
-                                    </td>
-                                    <td className="p-4">
-                                        <Link
-                                            href={`/cases/${c.id}`}
-                                            className="rounded-full bg-primary px-3 py-1 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90"
-                                            data-testid="case-open"
-                                        >
-                                            Открыть
-                                        </Link>
+                                        </td>
+                                        <td className="p-4">
+                                            <span className={`px-2 py-1 rounded text-xs font-medium ${sla.className}`}>
+                                                {sla.label}
+                                            </span>
+                                        </td>
+                                        <td className="p-4 text-sm">{branchName}</td>
+                                        <td className="p-4 text-sm">{c.channel}</td>
+                                        <td className="p-4 text-sm">{c.assigned_to_name || "-"}</td>
+                                        <td className="p-4 text-sm max-w-xs">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span className="truncate max-w-[180px]">{c.last_message_preview || c.user_message || "-"}</span>
+                                                {needsReply && (
+                                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-100 text-yellow-800">
+                                                        NEW
+                                                    </span>
+                                                )}
+                                                {isLive && (
+                                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-800">
+                                                        LIVE
+                                                    </span>
+                                                )}
+                                                {hasIssue && (
+                                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-800">
+                                                        ⚠️
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="p-4 text-sm text-muted-foreground">
+                                            <div className="flex flex-col">
+                                                <span>{new Date(lastActivity).toLocaleString("ru-RU")}</span>
+                                                <span className="text-xs text-muted-foreground">
+                                                    {c.last_activity_channel || "—"}
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td className="p-4">
+                                            <Link
+                                                href={`/cases/${c.id}`}
+                                                className="rounded-full bg-primary px-3 py-1 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90"
+                                                data-testid="case-open"
+                                            >
+                                                Открыть
+                                            </Link>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                            {sortedCases.length === 0 && (
+                                <tr>
+                                    <td colSpan={9} className="p-8 text-center text-muted-foreground" data-testid="cases-empty">
+                                        Заявки не найдены по указанным фильтрам.
                                     </td>
                                 </tr>
-                            );
-                        })}
-                        {sortedCases.length === 0 && (
-                            <tr>
-                                <td colSpan={9} className="p-8 text-center text-muted-foreground" data-testid="cases-empty">
-                                    Заявки не найдены по указанным фильтрам.
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            )}
 
             {/* Load More button */}
             {data?.has_more && (

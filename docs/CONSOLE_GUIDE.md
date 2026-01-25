@@ -109,7 +109,11 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 ## 3) Console Pages → API Endpoints
 
 **Cases (Заявки)**
-- UI: `console-web/src/components/CaseList.tsx`
+- UI: `console-web/src/components/InboxView.tsx` (3‑pane: list → dialog → details)
+- List: `console-web/src/components/CaseList.tsx` (compact)
+- Conversation: `console-web/src/components/CaseConversation.tsx` + `console-web/src/components/ChatInterface.tsx`
+- Details cards: `console-web/src/components/CaseDetailsPanel.tsx` (Context/Explain/Trace/Telegram)
+- Quick Replies: `console-web/src/components/InboxMacros.tsx`
 - API: `GET /console/v1/cases`
 - Data: `handovers` + `conversations` + `users`
 - Paging: cursor зависит от `sort_by` (по умолчанию `last_activity`).
@@ -117,7 +121,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - Health: `last_inbound_at`, `last_outbound_at`, `last_activity_at`, `last_message_preview`, `needs_reply`, `has_delivery_error`, `has_pending_outbox`.
 
 **Case view**
-- UI: `console-web/src/app/cases/[id]/page.tsx`
+- UI: `console-web/src/app/cases/[id]/page.tsx` (deep link into Inbox selection)
 - API: `GET /console/v1/cases/{id}`, `POST /take`, `POST /resolve`
 - Case Health: последние inbound/outbound + delivery flags.
 
