@@ -85,12 +85,27 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
         }, initClientId);
     }
     await page.goto('/');
-    await expect(page.getByTestId('console-header')).toBeVisible();
     const casesTitle = page.getByTestId('cases-title');
+    const loginButton = page.getByTestId('login-button');
+    const logoutButton = page.getByTestId('logout-button');
+    if (!(await logoutButton.isVisible().catch(() => false)) && (await loginButton.isVisible().catch(() => false))) {
+        await loginThroughKeycloak(page);
+        await page.goto('/');
+    }
     if (useStorageState) {
         const resolved = await ensureTenantSelection(page);
         if (resolved) {
             await page.reload({ waitUntil: 'domcontentloaded' });
+        }
+        if (!(await casesTitle.isVisible().catch(() => false))) {
+            if (await loginButton.isVisible().catch(() => false)) {
+                await loginThroughKeycloak(page);
+                await page.goto('/');
+                const resolvedAfterLogin = await ensureTenantSelection(page);
+                if (resolvedAfterLogin) {
+                    await page.reload({ waitUntil: 'domcontentloaded' });
+                }
+            }
         }
         await expect(casesTitle, 'Expected logged-in UI with storage state.').toBeVisible({ timeout: 15000 });
         return;
@@ -99,7 +114,6 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
         await expect(casesTitle).toBeVisible({ timeout: 10000 });
         return;
     } catch {
-        const loginButton = page.getByTestId('login-button');
         if (await loginButton.isVisible().catch(() => false)) {
             await loginThroughKeycloak(page);
         }

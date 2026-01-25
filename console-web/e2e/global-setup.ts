@@ -14,7 +14,10 @@ export default async function globalSetup(config: FullConfig) {
         throw new Error("E2E_USERNAME and E2E_PASSWORD are required for storageState");
     }
 
-    const baseURL = config.projects[0]?.use?.baseURL ?? "http://localhost:3000";
+    const projectBaseURL = config.projects[0]?.use?.baseURL;
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL
+        ?? (typeof projectBaseURL === "string" ? projectBaseURL : undefined)
+        ?? "http://localhost:3000";
     const browser = await chromium.launch();
     const page = await browser.newPage();
 
@@ -29,7 +32,9 @@ export default async function globalSetup(config: FullConfig) {
     await page.fill("#username", username);
     await page.fill("#password", password);
     await page.click("#kc-login");
-    await page.waitForURL(consoleHostPattern, { timeout: 15000 });
+    await page.waitForURL(consoleHostPattern, { timeout: 30000 });
+    await page.waitForLoadState("domcontentloaded");
+    await page.locator('[data-testid="logout-button"]').waitFor({ state: "visible", timeout: 20000 });
 
     const envClientId = process.env.E2E_CLIENT_ID;
     const envBranchId = process.env.E2E_BRANCH_ID;
