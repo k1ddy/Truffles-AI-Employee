@@ -21,6 +21,10 @@ class WebhookMetadata(BaseModel):
         default=None,
         validation_alias=AliasChoices("simulation_llm", "simulationLlm"),
     )
+    simulation_time: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("simulation_time", "simulationTime"),
+    )
     instanceId: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("instanceId", "instance_id", "instance"),

@@ -18,6 +18,7 @@ DECISION_TRACE_MAX = 40
 DECISION_TRACE_CRITICAL_STAGES = {
     "action_gate",
     "booking",
+    "booking_confirm",
     "booking_commit",
     "booking_interrupt",
     "consult_flow",

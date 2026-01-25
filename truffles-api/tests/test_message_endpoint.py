@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -3600,6 +3601,243 @@ def test_expected_reply_type_invalid_choice_keeps_contract():
     assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
     assert meta.get("expected_reply_matched") is False
     assert meta.get("expected_reply_reason") == "invalid_choice"
+
+
+def test_booking_confirm_requires_yes_for_llm_slot():
+    saved_message_1 = Mock()
+    saved_message_1.message_metadata = {}
+    saved_message_2 = Mock()
+    saved_message_2.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "booking": {"active": True, "service": "маникюр", "last_question": "datetime"},
+        },
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    def _make_db():
+        client_query = Mock()
+        client_query.filter.return_value.first.return_value = client
+        settings_query = Mock()
+        settings_query.filter.return_value.first.return_value = settings
+        conversation_query = Mock()
+        conversation_query.filter.return_value.first.return_value = conversation
+        user_query = Mock()
+        user_query.filter.return_value.first.return_value = user
+
+        db = Mock()
+        db.query.side_effect = [
+            client_query,
+            settings_query,
+            conversation_query,
+            user_query,
+        ]
+        db.add = Mock()
+        db.flush = Mock()
+        db.commit = Mock()
+        return db
+
+    payload_confirm = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="после обеда",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-booking-confirm-1",
+                timestamp=1234567899,
+            ),
+        ),
+    )
+    payload_yes = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="да",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-booking-confirm-2",
+                timestamp=1234567900,
+            ),
+        ),
+    )
+
+    llm_payload = {"ok": True, "payload": {"slot": "datetime", "value": "15:00", "confidence": 0.4}}
+
+    with patch.dict(
+        os.environ,
+        {
+            "BOOKING_CONFIRM_ENABLED": "1",
+            "BOOKING_CONFIRM_CONFIDENCE_THRESHOLD": "0.9",
+        },
+    ), patch(
+        "app.routers.webhook.decision._match_expected_reply_candidates",
+        return_value=(False, None, []),
+    ), patch(
+        "app.routers.webhook._legacy.interpret_expected_reply",
+        return_value=llm_payload,
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id",
+        side_effect=[saved_message_1, saved_message_2],
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ), patch(
+        "app.routers.webhook._legacy.generate_bot_response"
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload_confirm,
+                _make_db(),
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+        response_yes = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload_yes,
+                _make_db(),
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert "15:00" in response.bot_response
+    assert "верно" in response.bot_response.casefold()
+    confirmation = conversation.context.get("booking", {}).get("confirmation")
+    assert confirmation and confirmation.get("slot") == "datetime"
+    meta = saved_message_1.message_metadata.get("decision_meta", {})
+    assert meta.get("slot_confirmation_required") is True
+
+    assert response_yes.success is True
+    assert webhook_router.MSG_BOOKING_ASK_NAME in response_yes.bot_response
+    booking_context = conversation.context.get("booking", {})
+    assert booking_context.get("datetime") == "15:00"
+    assert booking_context.get("confirmation") is None
+
+
+def test_booking_slot_lock_keeps_booking_active_on_ood():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "booking": {"active": True, "service": "маникюр", "last_question": "datetime"},
+        },
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="какая погода?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-booking-slot-lock-1",
+                timestamp=1234567901,
+            ),
+        ),
+    )
+
+    domain_result = (DomainIntent.OUT_OF_DOMAIN, 0.1, 0.9, {"out_hits": 1, "strict_in_hits": 0})
+
+    with patch(
+        "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ), patch(
+        "app.routers.webhook._legacy.generate_bot_response"
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert webhook_router.MSG_BOOKING_ASK_DATETIME in response.bot_response
+    assert webhook_router.MSG_BOOKING_REENGAGE not in response.bot_response
+    assert conversation.context.get("booking", {}).get("active") is True
 
 
 def test_multi_truth_reply_handles_hours_and_service_without_booking():
