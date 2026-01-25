@@ -1,4 +1,4 @@
-import CaseList from "@/components/CaseList";
+import InboxView from "@/components/InboxView";
 export default function Home() {
-  return <CaseList />;
+  return <InboxView />;
 }

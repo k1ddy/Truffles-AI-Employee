@@ -19,6 +19,7 @@
 - DONE: Prod version drift monitor — `.github/workflows/monitor-prod-version.yml` (cron alert if `/admin/version.git_commit` differs from main). Evidence: workflow added in repo.
 - DONE: Console contract unexclude `/knowledge/*` — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`; PR #368 https://github.com/k1ddy/Truffles-AI-Employee/pull/368; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21333020110.
 - PLAN: Phase 4 Control Plane (Team + Calendar UI) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`.
+- DONE: Phase 5 Control Plane UI (Inbox 3‑pane + macros + detail cards) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-phase5-inbox-ui.md`. Evidence: local `npm --prefix console-web run lint` + screenshot `docs/REPORTS/2026-01-26-control-plane-inbox.png` (2026‑01‑26).
 - PLAN: Booking signal + slot_extract canon alignment — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-booking-signal-llm-docs.md`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
@@ -85,6 +86,10 @@
 - DONE: Backfill conversations.branch_id (migration `007_backfill_conversations_branch_id.sql`) — instanceId match + single-branch fallback. Applied on prod: `UPDATE 0` (instanceId), `UPDATE 2` (single-branch). Остаток: `conversations.branch_id IS NULL = 325`; 5 conversation имеют `metadata.instanceId='demo'` без branch match. Evidence: SQL outputs 2026-01-23.
 - DONE: Console-web deploy (Phase 2B/Phase 3 UI) — Provisioning Wizard (Settings) + Knowledge Studio page/nav; evidence ниже (2026-01-25).
 - DECISION: Legacy conversations остаются с `branch_id=NULL` (без догадок/массового назначения). Повторный backfill — только по явным маппингам или согласованным default‑branch для клиента.
+
+### 2026-01-26 — Control Plane Phase 5 (Inbox UI)
+- Changes: Inbox 3‑pane layout (list → dialog → details), detail cards (Context/Explain/Trace/Telegram), macros prefill reply input, CaseView refactor to shared components.
+- Evidence: `npm --prefix console-web run lint` → pass; screenshot `docs/REPORTS/2026-01-26-control-plane-inbox.png`.
 
 ### 2026-01-25 — Console UI deploy (Provisioning Wizard + Knowledge Studio)
 - Artifacts: `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-verify.md`, `docs/REPORTS/2026-01-25-control-plane-provisioning.png`.
