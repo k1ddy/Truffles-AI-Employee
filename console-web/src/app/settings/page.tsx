@@ -190,19 +190,40 @@ function mergeCapabilities(base?: CapabilitiesPayload | null, override?: Capabil
         }
     });
 
-    (["availability_provider", "crm_provider", "calendar_provider"] as const).forEach((key) => {
-        const value = overridePayload.providers?.[key];
-        if (value !== null && value !== undefined) {
-            merged.providers[key] = value;
-        }
-    });
+    const availabilityProvider = overridePayload.providers?.availability_provider;
+    if (availabilityProvider !== null && availabilityProvider !== undefined) {
+        merged.providers.availability_provider = availabilityProvider;
+    }
 
-    (["booking_mode", "knowledge_upload", "analytics", "auto_learn"] as const).forEach((key) => {
-        const value = overridePayload.features?.[key];
-        if (value !== null && value !== undefined) {
-            merged.features[key] = value;
-        }
-    });
+    const crmProvider = overridePayload.providers?.crm_provider;
+    if (crmProvider !== null && crmProvider !== undefined) {
+        merged.providers.crm_provider = crmProvider;
+    }
+
+    const calendarProvider = overridePayload.providers?.calendar_provider;
+    if (calendarProvider !== null && calendarProvider !== undefined) {
+        merged.providers.calendar_provider = calendarProvider;
+    }
+
+    const bookingMode = overridePayload.features?.booking_mode;
+    if (bookingMode !== null && bookingMode !== undefined) {
+        merged.features.booking_mode = bookingMode;
+    }
+
+    const knowledgeUpload = overridePayload.features?.knowledge_upload;
+    if (knowledgeUpload !== null && knowledgeUpload !== undefined) {
+        merged.features.knowledge_upload = knowledgeUpload;
+    }
+
+    const analytics = overridePayload.features?.analytics;
+    if (analytics !== null && analytics !== undefined) {
+        merged.features.analytics = analytics;
+    }
+
+    const autoLearn = overridePayload.features?.auto_learn;
+    if (autoLearn !== null && autoLearn !== undefined) {
+        merged.features.auto_learn = autoLearn;
+    }
 
     return merged;
 }
@@ -307,7 +328,7 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
         });
         setAgentForm((prev) => ({
             ...prev,
-            branchId: prev.branchId || branchData.id,
+            branchId: prev.branchId || branchData.id || "",
         }));
     }, [branchData]);
 
@@ -360,7 +381,9 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
             return response.data;
         },
         onSuccess: (data) => {
-            setCompanyId(data.company.id);
+            if (data.company?.id) {
+                setCompanyId(data.company.id);
+            }
             toast.success("Компания создана");
         },
         onError: (error) => {
@@ -374,7 +397,9 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
             return response.data;
         },
         onSuccess: (data) => {
-            setClientId(data.client.id);
+            if (data.client?.id) {
+                setClientId(data.client.id);
+            }
             toast.success("Клиент создан");
         },
         onError: (error) => {
