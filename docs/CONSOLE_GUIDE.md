@@ -30,6 +30,16 @@ Keycloak issues JWT; NextAuth stores session; API validates JWT signature and ma
 
 ---
 
+## 1.5) Console UI Evidence Quickstart
+
+- **Creds:** `/home/zhan/secrets/console-e2e.env` (do not paste values into logs).
+- **Local UI (preferred for new UI):** run `console-web` on `http://127.0.0.1:3000` with `NEXTAUTH_URL` set to that URL and `NEXT_PUBLIC_API_URL` pointing to API; Keycloak redirect allowlist is configured for port 3000.
+- **Port in use:** if `:3000` is already running, coordinate before stopping it; do not switch ports unless Keycloak allowlist is updated.
+- **Prod UI evidence:** capture screenshots only after merge + CI deploy to `https://console.truffles.kz`.
+- **Evidence storage:** save screenshots to `docs/REPORTS/assets/` with date prefix; reference them in the Task Package and update `STATE.md` when DONE.
+
+---
+
 ## 2) Tenancy and RBAC (Critical)
 
 **Key:** один OIDC login может соответствовать нескольким `client_id`.  

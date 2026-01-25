@@ -51,6 +51,17 @@ CONSOLE QUICKSTART (first login)
 
 ---
 
+CONSOLE SECRETS + PORTS (UI evidence)
+- Secrets map (paths only):
+  - `/home/zhan/secrets/console-e2e.env` (E2E_USERNAME/E2E_PASSWORD, KEYCLOAK_*)
+  - `/home/zhan/secrets/console-contract.env` (SCHEMATHESIS_TOKEN)
+  - `/home/zhan/secrets/ghpat.txt` (GitHub auth)
+- Local UI evidence requires `http://127.0.0.1:3000`; Keycloak redirect allowlist is configured for this port.
+- If `:3000` is busy, coordinate before stopping the running console dev server (do not silently kill).
+- If local UI is not available, capture evidence only after merge + CI deploy to prod UI.
+
+---
+
 TESTING CONTRACT (summary)
 - Source of truth: `SPECS/SYSTEM_REFERENCE.md` (Test design rules + LLM testing policy + CA-Matrix).
 - CI usage + skip rules: `TECH.md` → "CI / GitHub Actions (как запускать, зачем и когда)".
