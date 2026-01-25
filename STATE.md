@@ -17,7 +17,7 @@
 - DONE: console-e2e-live CI fix (selection gate + storage state) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-e2e-live-ci-fix.md`; PR #362 https://github.com/k1ddy/Truffles-AI-Employee/pull/362; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21329488754; local check `npm --prefix console-web run test:e2e:smoke` (prod base URL).
 - DONE: Console-web deploy for Team route (build fix + prod /team) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-web-deploy-team.md`; evidence below (2026-01-25).
 - DONE: Prod version drift monitor — `.github/workflows/monitor-prod-version.yml` (cron alert if `/admin/version.git_commit` differs from main). Evidence: workflow added in repo.
-- PLAN: Console contract unexclude `/knowledge/*` — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`.
+- DONE: Console contract unexclude `/knowledge/*` — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`; PR #368 https://github.com/k1ddy/Truffles-AI-Employee/pull/368; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21333020110.
 - PLAN: Phase 4 Control Plane (Team + Calendar UI) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
