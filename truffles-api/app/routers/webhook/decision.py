@@ -334,6 +334,7 @@ from app.services.state_service import (
     apply_simulation_context,
     build_simulation_context,
     escalate_to_pending,
+    get_simulation_time,
     is_simulation_context,
     manager_resolve,
     transition_state,
@@ -3805,6 +3806,9 @@ async def _handle_webhook_payload(
 
     # 4. Update last_message_at (keep previous for session timeout check)
     now = datetime.now(timezone.utc)
+    sim_now = get_simulation_time(conversation) if conversation else None
+    if sim_now:
+        now = sim_now
     policy_type = _get_policy_type(client, client_slug=payload.client_slug)
     policy_pack = _get_policy_pack(client, client_slug=payload.client_slug)
     policy_pack_missing = not isinstance(policy_pack, dict)

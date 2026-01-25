@@ -55,13 +55,16 @@ def _extract_simulation_meta(metadata) -> dict | None:
     sim_mode = getattr(metadata, "simulation_mode", None)
     sim_id = getattr(metadata, "simulation_id", None)
     sim_llm = getattr(metadata, "simulation_llm", None)
-    if sim_mode is None and sim_id is None and sim_llm is None:
+    sim_time = getattr(metadata, "simulation_time", None)
+    if sim_mode is None and sim_id is None and sim_llm is None and sim_time is None:
         return None
     if sim_mode is None:
         sim_mode = True
     payload = {"mode": bool(sim_mode), "id": sim_id}
     if sim_llm is not None:
         payload["llm_allowed"] = bool(sim_llm)
+    if sim_time is not None:
+        payload["time"] = sim_time
     return payload
 
 
@@ -81,17 +84,23 @@ def _get_simulation_context(value) -> dict | None:
         if sim_context.get("mode") is None:
             sim_context = dict(sim_context)
             sim_context["mode"] = True
+        if sim_context.get("time") is None and sim_context.get("simulation_time") is not None:
+            sim_context = dict(sim_context)
+            sim_context["time"] = sim_context.get("simulation_time")
         return sim_context
     sim_mode = context.get("simulation_mode")
     sim_id = context.get("simulation_id")
     sim_llm = context.get("simulation_llm")
-    if sim_mode is None and sim_id is None and sim_llm is None:
+    sim_time = context.get("simulation_time")
+    if sim_mode is None and sim_id is None and sim_llm is None and sim_time is None:
         return None
     if sim_mode is None:
         sim_mode = True
     payload = {"mode": bool(sim_mode), "id": sim_id}
     if sim_llm is not None:
         payload["llm_allowed"] = bool(sim_llm)
+    if sim_time is not None:
+        payload["time"] = sim_time
     return payload
 
 
@@ -108,6 +117,8 @@ def apply_simulation_context(conversation: Conversation, metadata) -> dict | Non
         sim_context["mode"] = sim_meta["mode"]
     if "llm_allowed" in sim_meta:
         sim_context["llm_allowed"] = sim_meta["llm_allowed"]
+    if "time" in sim_meta:
+        sim_context["time"] = sim_meta["time"]
     sim_context.setdefault("source", "webhook_metadata")
     sim_context["updated_at"] = datetime.now(timezone.utc).isoformat()
     updated[SIMULATION_CONTEXT_KEY] = sim_context
@@ -122,6 +133,38 @@ def is_simulation_context(value) -> bool:
     if sim_context.get("mode") is not None:
         return bool(sim_context.get("mode"))
     return True
+
+
+def _parse_simulation_time(value) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.endswith("Z"):
+            raw = f"{raw[:-1]}+00:00"
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    return None
+
+
+def get_simulation_time(value) -> datetime | None:
+    sim_context = _get_simulation_context(value)
+    if not sim_context:
+        return None
+    return _parse_simulation_time(sim_context.get("time") or sim_context.get("simulation_time"))
 
 
 def _build_simulated_topic_id(conversation: Conversation, user: User | None) -> int:
