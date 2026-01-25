@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import axios from "axios";
@@ -103,13 +103,6 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         },
         enabled: !!session && !apiUnavailable,
         retry: false,
-        onError: (error) => {
-            if (isApiUnavailable(error)) {
-                setApiUnavailable(true);
-                return;
-            }
-            handleError(error);
-        },
     });
 
     const historyQuery = useQuery({
@@ -120,14 +113,31 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         },
         enabled: !!session && !apiUnavailable,
         retry: false,
-        onError: (error) => {
-            if (isApiUnavailable(error)) {
-                setApiUnavailable(true);
-                return;
-            }
-            handleError(error);
-        },
     });
+
+    useEffect(() => {
+        const error = currentQuery.error;
+        if (!error || apiUnavailable) {
+            return;
+        }
+        if (isApiUnavailable(error)) {
+            setApiUnavailable(true);
+            return;
+        }
+        handleError(error);
+    }, [currentQuery.error, apiUnavailable, handleError]);
+
+    useEffect(() => {
+        const error = historyQuery.error;
+        if (!error || apiUnavailable) {
+            return;
+        }
+        if (isApiUnavailable(error)) {
+            setApiUnavailable(true);
+            return;
+        }
+        handleError(error);
+    }, [historyQuery.error, apiUnavailable, handleError]);
 
     const currentText = useMemo(() => {
         if (!currentQuery.data) {
