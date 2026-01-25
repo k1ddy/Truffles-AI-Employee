@@ -366,6 +366,37 @@ export type TelegramVerifyResponse = components["schemas"]["TelegramVerifyRespon
 export type TelegramTestRequest = components["schemas"]["TelegramTestRequest"];
 export type TelegramTestResponse = components["schemas"]["TelegramTestResponse"];
 export type TelegramLinkResponse = components["schemas"]["TelegramLinkResponse"];
+export type KnowledgeCurrentResponse = {
+    version_id?: string | null;
+    payload?: unknown;
+    content?: string | null;
+};
+export type KnowledgeValidationResponse = {
+    valid?: boolean;
+    errors?: string[];
+    warnings?: string[];
+    diff?: string | null;
+};
+export type KnowledgePublishResponse = {
+    success?: boolean;
+    version_id?: string | null;
+    published_at?: string | null;
+    message?: string | null;
+};
+export type KnowledgeHistoryItem = {
+    id?: string | null;
+    status?: string | null;
+    created_at?: string | null;
+    published_at?: string | null;
+    summary?: string | null;
+};
+export type KnowledgeHistoryResponse = {
+    items?: KnowledgeHistoryItem[];
+};
+export type KnowledgeRollbackResponse = {
+    success?: boolean;
+    version_id?: string | null;
+};
 
 // Query params
 export type ListCasesParams = operations["listCases"]["parameters"]["query"];
@@ -474,6 +505,20 @@ export const adminApi = {
 export const auditApi = {
     list: (params?: ListAuditParams) =>
         apiClient.get<AuditListResponse>("/audit", { params }),
+};
+
+/** Knowledge endpoints */
+export const knowledgeApi = {
+    getCurrent: () =>
+        apiClient.get<KnowledgeCurrentResponse>("/knowledge/current"),
+    validate: (draftText: string) =>
+        apiClient.post<KnowledgeValidationResponse>("/knowledge/validate", { draft_text: draftText }),
+    publish: (draftText: string) =>
+        apiClient.post<KnowledgePublishResponse>("/knowledge/publish", { draft_text: draftText }),
+    history: () =>
+        apiClient.get<KnowledgeHistoryResponse>("/knowledge/history"),
+    rollback: (versionId: string) =>
+        apiClient.post<KnowledgeRollbackResponse>("/knowledge/rollback", { version_id: versionId }),
 };
 
 // Export default client
