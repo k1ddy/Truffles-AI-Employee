@@ -72,6 +72,25 @@ python3 ops/diagnose.py chaos-sim --count 5 --min-turns 10 --max-turns 12 --nois
   --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_llm
 ```
 
+## Run Continuity (Run-Ledger + Resume)
+
+- Always set `--run-id` and `--output-dir` for any investigation you plan to continue.
+- Use `--resume` to continue the same run (same seed/jid_base/case map).
+- Use `--bundle-on-fail` to auto-save trace bundles for each failure message_id.
+
+Example:
+```
+python3 ops/diagnose.py chaos-sim --run-id demo-run-01 --count 1 --kinds booking --mode llm \
+  --sim-time "2026-01-24T12:00:00+06:00" --bundle-on-fail --output-dir /tmp/chaos_continuity_demo
+
+python3 ops/diagnose.py chaos-sim --resume --run-id demo-run-01 --output-dir /tmp/chaos_continuity_demo
+```
+
+Artifacts:
+- `run.json` (ledger)
+- `report.md` (actionable summary)
+- `bundles/*` (trace bundles on failures)
+
 ## Artifacts to Review
 
 - `cases.jsonl`: generated dialogue turns (what we sent).

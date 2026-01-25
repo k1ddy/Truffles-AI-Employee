@@ -204,6 +204,11 @@
 
 **Правило проверки:** текст ответа не сравниваем — только `decision_meta/trace` (см. `SPECS/SYSTEM_REFERENCE.md` §5.8.1).
 
+**Chaos-sim дисциплина (ops/diagnose.py):**
+- Использовать `docs/runbooks/CHAOS_SIM.md` и фиксировать `--run-id` + `--output-dir`.
+- Для продолжения логической цепочки использовать `--resume` (не стартовать новый run без причины).
+- Артефакты (`run.json`, `report.md`, bundles) сохранять и ссылаться на них в `STATE.md`.
+
 ---
 
 ## 9) Fitness Functions (инварианты, которые нельзя нарушать)

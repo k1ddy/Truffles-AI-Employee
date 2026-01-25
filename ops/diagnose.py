@@ -2311,6 +2311,9 @@ def _parse_chaos_sim_args(argv):
     parser.add_argument("--outbox-wait", type=float, default=None)
     parser.add_argument("--skip-outbox", action="store_true")
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--run-id", default=None)
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--bundle-on-fail", action="store_true")
     parser.add_argument("--simulation-id", default=None)
     parser.add_argument(
         "--sim-time",
@@ -3615,6 +3618,130 @@ def _write_failure_bundle(output_dir, record, container_name):
     with open(log_path, "w", encoding="utf-8") as handle:
         handle.write(log_result.stdout)
 
+
+def _load_json_file(path):
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except Exception:
+        return None
+
+
+def _write_json_file(path, payload):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+
+def _write_trace_bundle_on_fail(output_dir, record, db_user, client_slug, client_meta):
+    message_id = record.get("message_id")
+    if not message_id:
+        return None
+    bundle_dir = os.path.join(output_dir, "bundles")
+    os.makedirs(bundle_dir, exist_ok=True)
+    base = f"{record.get('case_id','case')}_turn{record.get('turn','0')}_{message_id}"
+    output_path = os.path.join(bundle_dir, f"{base}.json")
+    safe_message = _escape_sql_literal(message_id)
+    clauses = ["m.role = 'user'", f"m.metadata->>'messageId' = '{safe_message}'"]
+    if client_slug:
+        safe_slug = _escape_sql_literal(client_slug)
+        clauses.append(f"cl.name = '{safe_slug}'")
+    where_clause = " AND ".join(clauses)
+    rows, error = _fetch_message_bundle_rows(db_user, where_clause, limit=1)
+    if error or not rows:
+        payload = {
+            "query": {"client_slug": client_slug, "message_id": message_id},
+            "error": error or "not_found",
+            "bundles": [],
+        }
+        _write_json_file(output_path, payload)
+        return output_path
+
+    row = rows[0]
+    conv_id = row.get("conversation_id")
+    decision_meta = row.get("decision_meta") if isinstance(row.get("decision_meta"), dict) else {}
+    timing_meta = decision_meta.get("timing") if isinstance(decision_meta, dict) else None
+    timing_snapshot = timing_meta if isinstance(timing_meta, dict) else {}
+    conversation_meta, _ = _fetch_conversation_meta(db_user, conv_id)
+    context = conversation_meta.get("context") if isinstance(conversation_meta, dict) else None
+    decision_trace = _trace_as_list(context.get("decision_trace")) if isinstance(context, dict) else []
+
+    outbox_summary = None
+    outbox_rows = []
+    outbox_latest = None
+    if client_meta and row.get("message_id"):
+        outbox_summary, _ = _fetch_outbox_summary(
+            db_user,
+            client_meta.get("client_id"),
+            row.get("message_id"),
+        )
+        outbox_rows, _ = _fetch_outbox_rows(
+            db_user,
+            client_meta.get("client_id"),
+            row.get("message_id"),
+            limit=5,
+        )
+    if not outbox_rows and conv_id:
+        outbox_latest, _ = _fetch_latest_outbox_for_conversation(db_user, conv_id)
+        if outbox_latest:
+            outbox_latest["payload_meta"] = _extract_outbox_payload_meta(
+                outbox_latest.get("payload_json")
+            )
+            outbox_latest.pop("payload_json", None)
+
+    latency = _compute_outbox_latency(row.get("created_at"), outbox_rows)
+
+    payload = {
+        "query": {"client_slug": client_slug, "message_id": message_id},
+        "bundles": [
+            {
+                "message": {
+                    "message_uuid": row.get("message_uuid"),
+                    "message_id": row.get("message_id"),
+                    "created_at": row.get("created_at"),
+                    "remote_jid": row.get("remote_jid"),
+                    "instance_id": row.get("instance_id"),
+                    "conversation_id": conv_id,
+                    "branch_id": row.get("branch_id"),
+                    "client_slug": row.get("client_slug"),
+                    "conversation_state": row.get("conversation_state"),
+                    "content": row.get("content"),
+                },
+                "decision_meta": decision_meta,
+                "timing": {
+                    "stages": timing_snapshot.get("stages"),
+                    "outbox": timing_snapshot.get("outbox"),
+                    "pipeline_ms": timing_snapshot.get("pipeline_ms"),
+                    "pipeline_started_at": timing_snapshot.get("pipeline_started_at"),
+                    "pipeline_finished_at": timing_snapshot.get("pipeline_finished_at"),
+                },
+                "decision_trace": decision_trace,
+                "conversation": {
+                    "state": conversation_meta.get("state")
+                    if isinstance(conversation_meta, dict)
+                    else None,
+                    "telegram_topic_id": conversation_meta.get("telegram_topic_id")
+                    if isinstance(conversation_meta, dict)
+                    else None,
+                },
+                "outbox": {
+                    "summary": outbox_summary,
+                    "rows": outbox_rows,
+                    "latest": outbox_latest,
+                    "latency_ms": latency,
+                },
+            }
+        ],
+    }
+    _write_json_file(output_path, payload)
+    return output_path
+
+
+def _load_chaos_run_ledger(path):
+    return _load_json_file(path)
+
 def _post_admin_outbox(url, admin_token, timeout):
     headers = {"X-Admin-Token": admin_token} if admin_token else {}
     req = urllib.request.Request(url, data=b"", method="POST", headers=headers)
@@ -3962,6 +4089,64 @@ def _run_webhook_fuzz(args):
     print(json.dumps({"summary": summary}, ensure_ascii=False))
 
 
+def _chaos_failure_bucket(label):
+    infra = {
+        "infra_error",
+        "decision_meta_poll_failed",
+        "missing_decision_meta",
+        "missing_decision_trace",
+        "manager_action_failed",
+        "console_token_missing",
+        "console_token_error",
+    }
+    evaluator = {
+        "action_mismatch",
+        "expected_reply_type_mismatch",
+        "state_mismatch",
+        "handover_status_mismatch",
+        "pending_action_mismatch",
+    }
+    data_pack = {
+        "policy_gate_missing",
+        "fact_source_mismatch",
+        "truth_missing",
+        "service_missing",
+    }
+    if label in infra:
+        return "infra"
+    if label in evaluator:
+        return "evaluator"
+    if label in data_pack:
+        return "data_pack"
+    return "logic"
+
+
+def _chaos_bucket_counts(failures):
+    counts = {"infra": 0, "logic": 0, "evaluator": 0, "data_pack": 0}
+    for record in failures:
+        for label in record.get("failure") or []:
+            bucket = _chaos_failure_bucket(label)
+            counts[bucket] = counts.get(bucket, 0) + 1
+    return counts
+
+
+def _chaos_expected_summary(expected):
+    if not expected:
+        return "expected: none"
+    parts = []
+    if expected.get("expected_reply_type"):
+        parts.append(f"reply={expected.get('expected_reply_type')}")
+    if expected.get("action_any"):
+        parts.append(f"action_any={expected.get('action_any')}")
+    if expected.get("state"):
+        parts.append(f"state={expected.get('state')}")
+    if expected.get("handover_status"):
+        parts.append(f"handover={expected.get('handover_status')}")
+    if not parts:
+        return "expected: none"
+    return "expected: " + ", ".join(parts)
+
+
 def _run_chaos_sim(args):
     if args.count < 1:
         raise SystemExit("chaos-sim: --count must be >= 1")
@@ -3984,31 +4169,51 @@ def _run_chaos_sim(args):
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
 
-    seed = args.seed or int(time.time())
-    rng = random.Random(seed)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     base_url = args.base_url.rstrip("/")
     client_slug = args.client_slug
     webhook_url = f"{base_url}/webhook/{client_slug}"
     webhook_secret = _resolve_webhook_secret(client_slug, args.webhook_secret)
-    simulation_id = args.simulation_id or f"SIM-{timestamp}-{seed}"
-    jid_base = _resolve_chaos_jid_base(simulation_id, seed)
+    run_id = args.run_id
+    if args.resume and not run_id and not args.output_dir:
+        raise SystemExit("chaos-sim: --resume requires --run-id or --output-dir")
     start_time = time.time()
     max_runtime = args.max_runtime
     continue_on_infra = not args.fail_on_infra
 
-    output_dir = args.output_dir or os.path.join(
-        os.getcwd(),
-        "ops",
-        "artifacts",
-        "chaos_sim",
-        timestamp,
-    )
+    if args.output_dir:
+        output_dir = args.output_dir
+    elif run_id:
+        output_dir = os.path.join(os.getcwd(), "ops", "artifacts", "chaos_sim", run_id)
+    else:
+        output_dir = os.path.join(os.getcwd(), "ops", "artifacts", "chaos_sim", timestamp)
     os.makedirs(output_dir, exist_ok=True)
+    run_ledger_path = os.path.join(output_dir, "run.json")
+    run_ledger = None
+    case_progress = {}
+    if args.resume:
+        run_ledger = _load_chaos_run_ledger(run_ledger_path)
+        if not run_ledger:
+            raise SystemExit("chaos-sim: --resume requires run.json in output-dir")
+        if run_id and run_ledger.get("run_id") and run_ledger.get("run_id") != run_id:
+            raise SystemExit("chaos-sim: run-id mismatch for existing run.json")
+        seed = run_ledger.get("seed") or args.seed or int(time.time())
+        simulation_id = run_ledger.get("simulation_id") or args.simulation_id or f"SIM-{timestamp}-{seed}"
+        jid_base = run_ledger.get("jid_base") or _resolve_chaos_jid_base(simulation_id, seed)
+        case_progress = run_ledger.get("case_progress") or {}
+    else:
+        if run_id and os.path.exists(run_ledger_path):
+            raise SystemExit("chaos-sim: run.json already exists; use --resume or new --run-id")
+        seed = args.seed or int(time.time())
+        simulation_id = args.simulation_id or f"SIM-{timestamp}-{seed}"
+        jid_base = _resolve_chaos_jid_base(simulation_id, seed)
+    rng = random.Random(seed)
     events_path = os.path.join(output_dir, "events.jsonl")
-    events_handle = open(events_path, "w", encoding="utf-8")
+    events_mode = "a" if args.resume else "w"
+    events_handle = open(events_path, events_mode, encoding="utf-8")
     failures_partial_path = os.path.join(output_dir, "failures.partial.jsonl")
-    failures_handle = open(failures_partial_path, "w", encoding="utf-8")
+    failures_mode = "a" if args.resume else "w"
+    failures_handle = open(failures_partial_path, failures_mode, encoding="utf-8")
     summary_partial_path = os.path.join(output_dir, "summary.partial.json")
     preflight_path = None
     rag_summary_path = None
@@ -4021,16 +4226,29 @@ def _run_chaos_sim(args):
         failures_handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         failures_handle.flush()
 
+    def _write_run_ledger():
+        if not run_ledger_path or run_ledger is None:
+            return
+        run_ledger["case_progress"] = case_progress
+        run_ledger["processed_cases"] = processed_cases
+        run_ledger["stats"] = stats
+        run_ledger["interrupted"] = interrupted
+        run_ledger["stop_reason"] = stop_reason
+        run_ledger["updated_at"] = datetime.now(timezone.utc).isoformat()
+        _write_json_file(run_ledger_path, run_ledger)
+
     def _write_checkpoint(summary_payload, stats_payload):
         with open(summary_partial_path, "w", encoding="utf-8") as handle:
             json.dump(summary_payload, handle, ensure_ascii=False, indent=2)
         stats_path = os.path.join(output_dir, "stats.json")
         with open(stats_path, "w", encoding="utf-8") as handle:
             json.dump(stats_payload, handle, ensure_ascii=False, indent=2)
+        _write_run_ledger()
 
     def _build_summary_payload():
         return {
             "simulation_id": simulation_id,
+            "run_id": (run_ledger or {}).get("run_id") if run_ledger else run_id,
             "seed": seed,
             "cases": stats["cases"],
             "cases_processed": processed_cases,
@@ -4049,6 +4267,7 @@ def _run_chaos_sim(args):
             "events_path": events_path,
             "failures_partial_path": failures_partial_path,
             "preflight_path": preflight_path,
+            "run_ledger_path": run_ledger_path,
             "max_runtime": max_runtime,
             "continue_on_infra": continue_on_infra,
             "rag_audit": rag_audit,
@@ -4146,12 +4365,51 @@ def _run_chaos_sim(args):
         invalid = sorted(set(kinds) - allowed_kinds)
         if invalid:
             raise SystemExit(f"chaos-sim: invalid --kinds value(s): {', '.join(invalid)}")
-    cases = _chaos_generate_cases(args.count, rng, args.min_turns, args.max_turns, args.noise, kinds=kinds)
+    if args.resume:
+        cases = (run_ledger or {}).get("cases") or []
+        if not cases:
+            raise SystemExit("chaos-sim: run.json missing cases")
+    else:
+        cases = _chaos_generate_cases(args.count, rng, args.min_turns, args.max_turns, args.noise, kinds=kinds)
+        case_progress = {
+            case_item.get("case_id"): {
+                "last_turn": 0,
+                "conversation_id": None,
+                "completed": False,
+            }
+            for case_item in cases
+        }
+        run_ledger = {
+            "run_id": run_id or simulation_id,
+            "simulation_id": simulation_id,
+            "seed": seed,
+            "jid_base": jid_base,
+            "client_slug": client_slug,
+            "run_args": {
+                "mode": args.mode,
+                "noise": args.noise,
+                "min_turns": args.min_turns,
+                "max_turns": args.max_turns,
+                "kinds": kinds,
+                "sim_time": args.sim_time,
+                "console_mode": args.console_mode,
+                "manager_mode": args.manager_mode,
+                "skip_outbox": args.skip_outbox,
+            },
+            "cases": cases,
+            "case_progress": case_progress,
+            "processed_cases": 0,
+            "stats": {},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _write_json_file(run_ledger_path, run_ledger)
     if args.dump_cases:
         cases_path = os.path.join(output_dir, "cases.jsonl")
         with open(cases_path, "w", encoding="utf-8") as handle:
             for case in cases:
                 handle.write(json.dumps(case, ensure_ascii=False) + "\n")
+    failure_path = os.path.join(output_dir, "failures.jsonl")
     failures = []
     failure_counts = {}
     pattern_counts = {}
@@ -4167,7 +4425,17 @@ def _run_chaos_sim(args):
         "manager_resolved": 0,
         "console_resolved": 0,
     }
-    processed_cases = 0
+    if args.resume and run_ledger and isinstance(run_ledger.get("stats"), dict):
+        stats.update({k: v for k, v in run_ledger.get("stats", {}).items() if k in stats})
+    processed_cases = int((run_ledger or {}).get("processed_cases") or 0)
+    if args.resume and os.path.exists(failure_path):
+        failures, _ = _load_jsonl_entries(failure_path)
+        failures = failures or []
+        for record in failures:
+            for label in record.get("failure") or []:
+                failure_counts[label] = failure_counts.get(label, 0) + 1
+            for pattern in record.get("patterns") or []:
+                pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
     _record_event(
         {
             "event": "start",
@@ -4232,8 +4500,18 @@ def _run_chaos_sim(args):
             interrupted = True
             stop_reason = "max_runtime"
             break
+        case_id = case.get("case_id")
+        progress = case_progress.get(case_id) or {
+            "last_turn": 0,
+            "conversation_id": None,
+            "completed": False,
+        }
+        case_progress[case_id] = progress
+        if progress.get("completed"):
+            continue
         remote_jid = _build_remote_jid(case_idx)
-        conversation_id = None
+        conversation_id = progress.get("conversation_id")
+        start_turn = int(progress.get("last_turn") or 0)
         case_infra_failed = False
         for turn_idx, turn in enumerate(case["turns"], start=1):
             if stop_requested:
@@ -4243,6 +4521,8 @@ def _run_chaos_sim(args):
                 interrupted = True
                 stop_reason = "max_runtime"
                 break
+            if start_turn and turn_idx <= start_turn:
+                continue
             if turn.get("type") == "manager":
                 if args.manager_mode == "skip":
                     if turns_handle:
@@ -4474,6 +4754,10 @@ def _run_chaos_sim(args):
                         "status": response_status,
                         "attempts": attempts,
                     }
+                    if args.bundle_on_fail:
+                        record["bundle_path"] = _write_trace_bundle_on_fail(
+                            output_dir, record, db_user, client_slug, client_meta
+                        )
                     failures.append(record)
                     _record_failure(record)
                     _write_failure_bundle(output_dir, record, container_name)
@@ -4526,6 +4810,10 @@ def _run_chaos_sim(args):
                         "failure": ["decision_meta_poll_failed"],
                         "error": poll_error,
                     }
+                    if args.bundle_on_fail:
+                        record["bundle_path"] = _write_trace_bundle_on_fail(
+                            output_dir, record, db_user, client_slug, client_meta
+                        )
                     failures.append(record)
                     _record_failure(record)
                     _bump_failure_counts(["decision_meta_poll_failed"])
@@ -4577,6 +4865,10 @@ def _run_chaos_sim(args):
                         if args.debug or args.debug_all
                         else None,
                     }
+                    if args.bundle_on_fail:
+                        record["bundle_path"] = _write_trace_bundle_on_fail(
+                            output_dir, record, db_user, client_slug, client_meta
+                        )
                     failures.append(record)
                     _record_failure(record)
                     _bump_failure_counts(failures_for_turn)
@@ -4645,6 +4937,12 @@ def _run_chaos_sim(args):
                 log["response"] = response_body[:200]
             print(json.dumps(log, ensure_ascii=False))
 
+            progress["last_turn"] = turn_idx
+            if conversation_id:
+                progress["conversation_id"] = conversation_id
+            case_progress[case_id] = progress
+            _write_run_ledger()
+
             time.sleep(rng.uniform(args.min_wait, args.max_wait))
 
         if case_infra_failed:
@@ -4655,8 +4953,12 @@ def _run_chaos_sim(args):
                     "remote_jid": remote_jid,
                 }
             )
+            _write_run_ledger()
+            continue
         if stop_requested:
             break
+        progress["completed"] = True
+        case_progress[case_id] = progress
         processed_cases += 1
         _write_checkpoint(_build_summary_payload(), stats)
 
@@ -4691,6 +4993,7 @@ def _run_chaos_sim(args):
 
     summary = {
         "simulation_id": simulation_id,
+        "run_id": (run_ledger or {}).get("run_id") if run_ledger else run_id,
         "seed": seed,
         "cases": stats["cases"],
         "cases_processed": processed_cases,
@@ -4709,6 +5012,7 @@ def _run_chaos_sim(args):
         "events_path": events_path,
         "failures_partial_path": failures_partial_path,
         "preflight_path": preflight_path,
+        "run_ledger_path": run_ledger_path,
         "max_runtime": max_runtime,
         "continue_on_infra": continue_on_infra,
         "rag_audit": rag_audit,
@@ -4725,6 +5029,7 @@ def _run_chaos_sim(args):
     with open(report_path, "w", encoding="utf-8") as handle:
         handle.write("# Chaos Simulation Report\n\n")
         handle.write(f"- simulation_id: {simulation_id}\n")
+        handle.write(f"- run_id: {(run_ledger or {}).get('run_id') if run_ledger else run_id}\n")
         handle.write(f"- cases: {stats['cases']}\n")
         handle.write(f"- cases_processed: {processed_cases}\n")
         handle.write(f"- turns: {stats['turns']}\n")
@@ -4744,6 +5049,7 @@ def _run_chaos_sim(args):
         handle.write(f"- failures_partial_path: {failures_partial_path}\n")
         if preflight_path:
             handle.write(f"- preflight_path: {preflight_path}\n")
+        handle.write(f"- run_ledger_path: {run_ledger_path}\n")
         if turns_path:
             handle.write(f"- turns_path: {turns_path}\n\n")
         if failure_counts:
@@ -4755,6 +5061,31 @@ def _run_chaos_sim(args):
             handle.write("## Failure Patterns\n")
             for key, count in sorted(pattern_counts.items(), key=lambda item: -item[1]):
                 handle.write(f"- {key}: {count}\n")
+            handle.write("\n")
+        bucket_counts = _chaos_bucket_counts(failures)
+        if bucket_counts:
+            handle.write("## Failure Buckets\n")
+            for key, count in sorted(bucket_counts.items(), key=lambda item: -item[1]):
+                handle.write(f"- {key}: {count}\n")
+            handle.write("\n")
+        if failures:
+            handle.write("## Failure Details (first 20)\n")
+            for record in failures[:20]:
+                labels = ",".join(record.get("failure") or [])
+                expected_summary = _chaos_expected_summary(record.get("expected") or {})
+                patterns = record.get("patterns") or []
+                pattern_text = "; ".join(patterns[:2]) if patterns else ""
+                bundle_path = record.get("bundle_path")
+                handle.write(
+                    f"- {record.get('case_id')} turn {record.get('turn')} "
+                    f"msg={record.get('message_id')} "
+                    f"labels=[{labels}] {expected_summary}"
+                )
+                if pattern_text:
+                    handle.write(f" patterns={pattern_text}")
+                if bundle_path:
+                    handle.write(f" bundle={bundle_path}")
+                handle.write("\n")
             handle.write("\n")
         if rag_audit and rag_summary:
             handle.write("## RAG Quality Findings\n")
@@ -4782,6 +5113,7 @@ def _run_chaos_sim(args):
                 for item in rag_summary["top_patterns"]:
                     handle.write(f"- {item['pattern']}: {item['count']}\n")
 
+    _write_run_ledger()
     print(json.dumps({"summary": summary}, ensure_ascii=False))
 
 def _run_explain(args):
