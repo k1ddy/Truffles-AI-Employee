@@ -372,8 +372,13 @@ test.describe('Settings Page', () => {
         await expectRowsOrEmpty(page, 'settings-branch-row', 'settings-branches-empty');
     });
 
-    test('should display team members section @smoke', async ({ page }) => {
-        await expect(page.getByTestId('settings-team')).toBeVisible();
-        await expectRowsOrEmpty(page, 'settings-team-row', 'settings-team-empty');
+    test('should display team access @smoke', async ({ page }) => {
+        const teamCard = page.getByTestId('settings-team-link');
+        await expect(teamCard).toBeVisible();
+        const teamLink = teamCard.getByRole('link', { name: /команд/i });
+        await expect(teamLink).toBeVisible();
+        await teamLink.click();
+        await expect(page).toHaveURL('/team');
+        await expect(page.getByTestId('team-page')).toBeVisible();
     });
 });
