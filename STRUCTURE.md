@@ -79,6 +79,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-e2e-team.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-web-deploy-team.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase3-knowledge-studio.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-phase3-knowledge-backend.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-build-info.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-chaos-live-e2e.md`

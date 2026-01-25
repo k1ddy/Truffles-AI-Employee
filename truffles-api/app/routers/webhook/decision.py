@@ -3270,6 +3270,178 @@ def _reuse_active_handover(
     return handover, True, telegram_sent
 
 
+def _handle_knowledge_safe_mode_gate(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    saved_message: Message | None,
+    message_text: str,
+    send_and_save,
+) -> WebhookResponse | None:
+    if not conversation.branch_id:
+        return None
+    branch = (
+        db.query(Branch)
+        .filter(Branch.id == conversation.branch_id)
+        .first()
+    )
+    if not branch or not branch.knowledge_safe_mode:
+        return None
+
+    safe_mode_reason = branch.knowledge_safe_mode_reason
+    if conversation.state != ConversationState.BOT_ACTIVE.value:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "knowledge_safe_mode",
+                "decision": "pending_state",
+                "state": conversation.state,
+                "reason": safe_mode_reason,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="pending_wait",
+            intent=None,
+            source="knowledge_safe_mode",
+            fast_intent=False,
+        )
+        bot_response, sent = send_and_save(MSG_PENDING_WAIT)
+        result_message = (
+            "Safe-mode pending wait sent"
+            if sent
+            else "Safe-mode pending wait failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    handover_message = message_text
+    _, reused, telegram_sent = _reuse_active_handover(
+        db=db,
+        conversation=conversation,
+        user=user,
+        message=handover_message,
+        source="knowledge_safe_mode",
+        intent="safe_mode",
+    )
+    if reused:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "knowledge_safe_mode",
+                "decision": "reused",
+                "state": conversation.state,
+                "telegram_sent": telegram_sent,
+                "reason": safe_mode_reason,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="pending_escalation",
+            intent=None,
+            source="knowledge_safe_mode",
+            fast_intent=False,
+        )
+        bot_response, sent = send_and_save(MSG_ESCALATED)
+        result_message = (
+            "Safe-mode escalation reused"
+            if sent
+            else "Safe-mode escalation reuse failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    result = escalate_to_pending(
+        db=db,
+        conversation=conversation,
+        user_message=handover_message,
+        trigger_type="knowledge_safe_mode",
+        trigger_value=branch.knowledge_tag or str(branch.id),
+    )
+    if result.ok:
+        handover = result.value
+        telegram_sent = send_telegram_notification(
+            db=db,
+            handover=handover,
+            conversation=conversation,
+            user=user,
+            message=handover_message,
+        )
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "knowledge_safe_mode",
+                "decision": "created",
+                "state": conversation.state,
+                "telegram_sent": telegram_sent,
+                "reason": safe_mode_reason,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="pending_escalation",
+            intent=None,
+            source="knowledge_safe_mode",
+            fast_intent=False,
+        )
+        bot_response, sent = send_and_save(MSG_ESCALATED)
+        result_message = (
+            "Safe-mode escalation created"
+            if sent
+            else "Safe-mode escalation send failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    logger.error("Safe-mode escalation failed: %s", result.error)
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "knowledge_safe_mode",
+            "decision": "failed",
+            "state": conversation.state,
+            "error": result.error,
+            "reason": safe_mode_reason,
+        },
+    )
+    _record_message_decision_meta(
+        saved_message,
+        action="pending_escalation",
+        intent=None,
+        source="knowledge_safe_mode",
+        fast_intent=False,
+    )
+    bot_response, sent = send_and_save(MSG_ESCALATED)
+    result_message = (
+        "Safe-mode escalation failed"
+        if sent
+        else "Safe-mode escalation failed to send"
+    )
+    db.commit()
+    return WebhookResponse(
+        success=True,
+        message=result_message,
+        conversation_id=conversation.id,
+        bot_response=bot_response,
+    )
+
+
 def should_offer_low_confidence_retry(conversation: Conversation, now: datetime) -> bool:
     """One clarifying question before creating a handover on low confidence."""
     offered_at = conversation.retry_offered_at
@@ -4302,6 +4474,17 @@ async def _handle_webhook_payload(
         sent = _send_response(final_text)
         _persist_timing_snapshot()
         return final_text, sent
+
+    safe_mode_response = _handle_knowledge_safe_mode_gate(
+        db=db,
+        conversation=conversation,
+        user=user,
+        saved_message=saved_message,
+        message_text=message_text,
+        send_and_save=_send_and_save,
+    )
+    if safe_mode_response:
+        return safe_mode_response
     previous_last_message_at = conversation.last_message_at
     conversation.last_message_at = now
     context = _get_conversation_context(conversation)
