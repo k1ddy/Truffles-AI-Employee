@@ -38,20 +38,23 @@ export default async function globalSetup(config: FullConfig) {
 
     const envClientId = process.env.E2E_CLIENT_ID;
     const envBranchId = process.env.E2E_BRANCH_ID;
+    const meData = await page.evaluate(async () => {
+        const response = await fetch("/api/proxy/me");
+        if (!response.ok) {
+            return null;
+        }
+        return response.json();
+    });
+    const accessibleClients: string[] = [];
+    if (meData?.clients?.length) {
+        accessibleClients.push(...meData.clients.map((client: { id?: string }) => client.id).filter(Boolean));
+    } else if (meData?.client?.id) {
+        accessibleClients.push(meData.client.id as string);
+    }
+
     let selectedClientId = envClientId ?? null;
-    if (!selectedClientId) {
-        const selected = await page.evaluate(async () => {
-            const response = await fetch("/api/proxy/me");
-            if (!response.ok) {
-                return null;
-            }
-            const data = await response.json();
-            if (data?.clients?.length) {
-                return data.clients[0].id as string;
-            }
-            return data?.client?.id ?? null;
-        });
-        selectedClientId = selected;
+    if (!selectedClientId || (accessibleClients.length && !accessibleClients.includes(selectedClientId))) {
+        selectedClientId = accessibleClients[0] ?? null;
     }
     if (selectedClientId) {
         await page.evaluate((id) => {
@@ -61,24 +64,26 @@ export default async function globalSetup(config: FullConfig) {
     }
 
     let selectedBranchId = envBranchId ?? null;
-    if (!selectedBranchId && selectedClientId) {
+    if (selectedClientId) {
         const resolvedBranch = await page.evaluate(async (clientId) => {
             const response = await fetch("/api/proxy/me", {
                 headers: { "X-Client-Id": clientId },
             });
             if (!response.ok) {
-                return null;
+                return { required: false, ids: [] as string[] };
             }
             const data = await response.json();
-            if (!data?.branch_selection_required) {
-                return null;
-            }
-            if (!data?.branches?.length) {
-                return null;
-            }
-            return data.branches[0].id as string;
+            const ids = Array.isArray(data?.branches)
+                ? data.branches.map((branch: { id?: string }) => branch.id).filter(Boolean)
+                : [];
+            return { required: !!data?.branch_selection_required, ids };
         }, selectedClientId);
-        selectedBranchId = resolvedBranch;
+        if (selectedBranchId && !resolvedBranch.ids.includes(selectedBranchId)) {
+            selectedBranchId = null;
+        }
+        if (!selectedBranchId && resolvedBranch.required) {
+            selectedBranchId = resolvedBranch.ids[0] ?? null;
+        }
     }
     if (selectedBranchId) {
         await page.evaluate((id) => {
