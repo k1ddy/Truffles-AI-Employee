@@ -23,6 +23,7 @@ from app.models import (
     Company,
     Conversation,
     Handover,
+    KnowledgeVersion,
     Message,
     OutboxMessage,
     User,
@@ -57,6 +58,15 @@ from app.schemas.console import (
     ConsoleCompanyCreateResponse,
     ConsoleErrorResponse,
     ConsoleHealthResponse,
+    ConsoleKnowledgeCurrentResponse,
+    ConsoleKnowledgeHistoryItem,
+    ConsoleKnowledgeHistoryResponse,
+    ConsoleKnowledgePublishRequest,
+    ConsoleKnowledgePublishResponse,
+    ConsoleKnowledgeRollbackRequest,
+    ConsoleKnowledgeRollbackResponse,
+    ConsoleKnowledgeValidateRequest,
+    ConsoleKnowledgeValidateResponse,
     ConsoleManagerMessageRequest,
     ConsoleManagerMessageResponse,
     ConsoleMeResponse,
@@ -92,6 +102,16 @@ from app.services.console_idempotency import (
     start_idempotency,
 )
 from app.services.escalation_service import resolve_telegram_routing
+from app.services.knowledge_registry_service import (
+    get_current_published,
+    list_history,
+    publish_version,
+    restore_version,
+    sync_qdrant_from_pack,
+    upsert_draft,
+    validate_draft,
+)
+from app.services.knowledge_validation import dump_pack_yaml
 from app.services.manager_message_service import notify_client_manager_status
 from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_take as state_manager_take
@@ -243,6 +263,17 @@ def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _resolve_branch_from_context(context: ConsoleAuthContext) -> Branch:
+    if context.effective_branch_id:
+        for branch in context.branches:
+            if branch.id == context.effective_branch_id:
+                return branch
+        raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+    if len(context.branches) == 1:
+        return context.branches[0]
+    raise ConsoleAPIError(400, "BRANCH_SELECTION_REQUIRED", "Branch selection required")
 
 
 def _ensure_unique_branch_field(
@@ -521,11 +552,15 @@ def _require_roles(
         raise ConsoleAPIError(403, "ACCESS_DENIED", message)
 
 
-def _require_owner_admin(context: ConsoleAuthContext) -> None:
+def _require_owner_admin(
+    context: ConsoleAuthContext,
+    *,
+    message: str = "Only owner/admin can manage Telegram connector",
+) -> None:
     _require_roles(
         context,
         allowed=("owner", "admin"),
-        message="Only owner/admin can manage Telegram connector",
+        message=message,
     )
 
 
@@ -2727,6 +2762,304 @@ async def update_settings(
     return ConsoleSettingsUpdateResponse(
         success=True,
         message=f"Updated: {', '.join(updated_fields)}" if updated_fields else "No changes"
+    )
+
+
+@router.get(
+    "/knowledge/current",
+    response_model=ConsoleKnowledgeCurrentResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_knowledge_current(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleKnowledgeCurrentResponse:
+    context = get_console_context(request, db)
+    branch = _resolve_branch_from_context(context)
+    version = get_current_published(db, branch_id=branch.id)
+    if not version:
+        return ConsoleKnowledgeCurrentResponse(version_id=None, payload=None, content=None)
+    content = version.pack_yaml or dump_pack_yaml(version.payload_json)
+    return ConsoleKnowledgeCurrentResponse(
+        version_id=version.id,
+        payload=version.payload_json,
+        content=content or None,
+    )
+
+
+@router.post(
+    "/knowledge/validate",
+    response_model=ConsoleKnowledgeValidateResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def validate_knowledge(
+    body: ConsoleKnowledgeValidateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleKnowledgeValidateResponse:
+    context = get_console_context(request, db)
+    _require_owner_admin(context, message="Only owner/admin can manage knowledge")
+    branch = _resolve_branch_from_context(context)
+    current = get_current_published(db, branch_id=branch.id)
+    current_payload = current.payload_json if current else None
+    payload, errors, warnings, diff = validate_draft(
+        body.draft_text,
+        current_payload=current_payload,
+    )
+    valid = not errors
+    if payload:
+        upsert_draft(
+            db,
+            branch_id=branch.id,
+            client_id=context.client.id,
+            payload_json=payload,
+            actor_id=context.agent.id,
+        )
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="knowledge_validate",
+            entity_type="branch",
+            entity_id=branch.id,
+            payload={
+                "valid": valid,
+                "errors": errors,
+                "warnings": warnings,
+            },
+            client_id=context.client.id,
+            branch_id=branch.id,
+            actor_id=context.agent.id,
+            actor_name=context.agent.name,
+        )
+        db.commit()
+    return ConsoleKnowledgeValidateResponse(
+        valid=valid,
+        errors=errors,
+        warnings=warnings,
+        diff=diff or None,
+    )
+
+
+@router.post(
+    "/knowledge/publish",
+    response_model=ConsoleKnowledgePublishResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def publish_knowledge(
+    body: ConsoleKnowledgePublishRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleKnowledgePublishResponse:
+    context = get_console_context(request, db)
+    _require_owner_admin(context, message="Only owner/admin can manage knowledge")
+    branch = _resolve_branch_from_context(context)
+
+    current = get_current_published(db, branch_id=branch.id)
+    current_payload = current.payload_json if current else None
+    payload, errors, warnings, _diff = validate_draft(
+        body.draft_text,
+        current_payload=current_payload,
+    )
+    if not payload or errors:
+        raise ConsoleAPIError(
+            400,
+            "KNOWLEDGE_INVALID",
+            "Knowledge validation failed",
+            {"errors": errors, "warnings": warnings},
+        )
+
+    version = publish_version(
+        db,
+        branch=branch,
+        payload_json=payload,
+        actor_id=context.agent.id,
+        source_version_id=current.id if current else None,
+    )
+    db.commit()
+
+    now = datetime.now(timezone.utc)
+    try:
+        sync_qdrant_from_pack(
+            payload,
+            client_slug=context.client.name,
+            branch_id=branch.id,
+            knowledge_tag=branch.knowledge_tag,
+            version_id=version.id,
+        )
+        branch.knowledge_safe_mode = False
+        branch.knowledge_safe_mode_reason = None
+        branch.knowledge_safe_mode_at = now
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="knowledge_publish",
+            entity_type="branch",
+            entity_id=branch.id,
+            payload={
+                "version_id": str(version.id),
+                "warnings": warnings,
+            },
+            client_id=context.client.id,
+            branch_id=branch.id,
+            actor_id=context.agent.id,
+            actor_name=context.agent.name,
+        )
+        db.commit()
+    except Exception as exc:
+        branch.knowledge_safe_mode = True
+        branch.knowledge_safe_mode_reason = str(exc)
+        branch.knowledge_safe_mode_at = now
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="knowledge_publish_failed",
+            entity_type="branch",
+            entity_id=branch.id,
+            payload={
+                "version_id": str(version.id),
+                "error": str(exc),
+            },
+            client_id=context.client.id,
+            branch_id=branch.id,
+            actor_id=context.agent.id,
+            actor_name=context.agent.name,
+        )
+        db.commit()
+        raise ConsoleAPIError(
+            500,
+            "KNOWLEDGE_SYNC_FAILED",
+            "Knowledge publish failed",
+            {"error": str(exc)},
+        ) from exc
+
+    return ConsoleKnowledgePublishResponse(
+        success=True,
+        version_id=version.id,
+        published_at=version.published_at.isoformat() if version.published_at else None,
+        message="Knowledge published",
+    )
+
+
+@router.get(
+    "/knowledge/history",
+    response_model=ConsoleKnowledgeHistoryResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_knowledge_history(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleKnowledgeHistoryResponse:
+    context = get_console_context(request, db)
+    branch = _resolve_branch_from_context(context)
+    items = list_history(db, branch_id=branch.id)
+    return ConsoleKnowledgeHistoryResponse(
+        items=[
+            ConsoleKnowledgeHistoryItem(
+                id=item.id,
+                status=item.status,
+                created_at=item.created_at.isoformat() if item.created_at else None,
+                published_at=item.published_at.isoformat() if item.published_at else None,
+                summary=item.summary,
+            )
+            for item in items
+        ]
+    )
+
+
+@router.post(
+    "/knowledge/rollback",
+    response_model=ConsoleKnowledgeRollbackResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def rollback_knowledge(
+    body: ConsoleKnowledgeRollbackRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleKnowledgeRollbackResponse:
+    context = get_console_context(request, db)
+    _require_owner_admin(context, message="Only owner/admin can manage knowledge")
+    branch = _resolve_branch_from_context(context)
+
+    version = (
+        db.query(KnowledgeVersion)
+        .filter(
+            KnowledgeVersion.id == body.version_id,
+            KnowledgeVersion.branch_id == branch.id,
+        )
+        .first()
+    )
+    if not version:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Knowledge version not found")
+    if version.status == "draft":
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Cannot rollback to draft version")
+
+    restored = restore_version(
+        db,
+        branch=branch,
+        source_version=version,
+        actor_id=context.agent.id,
+    )
+    db.commit()
+
+    now = datetime.now(timezone.utc)
+    try:
+        sync_qdrant_from_pack(
+            version.payload_json,
+            client_slug=context.client.name,
+            branch_id=branch.id,
+            knowledge_tag=branch.knowledge_tag,
+            version_id=restored.id,
+        )
+        branch.knowledge_safe_mode = False
+        branch.knowledge_safe_mode_reason = None
+        branch.knowledge_safe_mode_at = now
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="knowledge_rollback",
+            entity_type="branch",
+            entity_id=branch.id,
+            payload={
+                "from_version_id": str(version.id),
+                "to_version_id": str(restored.id),
+            },
+            client_id=context.client.id,
+            branch_id=branch.id,
+            actor_id=context.agent.id,
+            actor_name=context.agent.name,
+        )
+        db.commit()
+    except Exception as exc:
+        branch.knowledge_safe_mode = True
+        branch.knowledge_safe_mode_reason = str(exc)
+        branch.knowledge_safe_mode_at = now
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="knowledge_rollback_failed",
+            entity_type="branch",
+            entity_id=branch.id,
+            payload={
+                "from_version_id": str(version.id),
+                "to_version_id": str(restored.id),
+                "error": str(exc),
+            },
+            client_id=context.client.id,
+            branch_id=branch.id,
+            actor_id=context.agent.id,
+            actor_name=context.agent.name,
+        )
+        db.commit()
+        raise ConsoleAPIError(
+            500,
+            "KNOWLEDGE_SYNC_FAILED",
+            "Knowledge rollback failed",
+            {"error": str(exc)},
+        ) from exc
+
+    return ConsoleKnowledgeRollbackResponse(
+        success=True,
+        version_id=restored.id,
     )
 
 

@@ -131,6 +131,9 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - API: `GET /console/v1/knowledge/current`, `POST /console/v1/knowledge/validate`,
   `POST /console/v1/knowledge/publish`, `GET /console/v1/knowledge/history`,
   `POST /console/v1/knowledge/rollback`
+- RBAC: owner/admin write; manager/support read-only.
+- Требует branch selection (`X-Branch-Id`).
+- Publish генерирует pack YAML и запускает Qdrant sync; при ошибке включается knowledge safe‑mode (handoff).
 
 **Team (Команда)**
 - UI: `console-web/src/app/team/page.tsx`

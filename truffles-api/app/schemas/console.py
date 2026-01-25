@@ -382,6 +382,55 @@ class ConsoleSettingsUpdateResponse(BaseModel):
     message: str
 
 
+class ConsoleKnowledgeCurrentResponse(BaseModel):
+    version_id: Optional[UUID] = None
+    payload: Optional[dict] = None
+    content: Optional[str] = None
+
+
+class ConsoleKnowledgeValidateRequest(BaseModel):
+    draft_text: str
+
+
+class ConsoleKnowledgeValidateResponse(BaseModel):
+    valid: bool
+    errors: list[str]
+    warnings: list[str]
+    diff: Optional[str] = None
+
+
+class ConsoleKnowledgePublishRequest(BaseModel):
+    draft_text: str
+
+
+class ConsoleKnowledgePublishResponse(BaseModel):
+    success: bool
+    version_id: Optional[UUID] = None
+    published_at: Optional[str] = None
+    message: Optional[str] = None
+
+
+class ConsoleKnowledgeHistoryItem(BaseModel):
+    id: UUID
+    status: str
+    created_at: Optional[str] = None
+    published_at: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class ConsoleKnowledgeHistoryResponse(BaseModel):
+    items: list[ConsoleKnowledgeHistoryItem]
+
+
+class ConsoleKnowledgeRollbackRequest(BaseModel):
+    version_id: UUID
+
+
+class ConsoleKnowledgeRollbackResponse(BaseModel):
+    success: bool
+    version_id: Optional[UUID] = None
+
+
 class ConsoleTelegramHealthResponse(BaseModel):
     status: str
     webhook_alive: bool
