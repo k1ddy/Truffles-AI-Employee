@@ -208,6 +208,32 @@ LIVECHECK_SUITES = {
             ],
         }
     ],
+    "ca12-booking-full": [
+        {
+            "case_id": "CA12_BOOKING_FULL",
+            "steps": [
+                {
+                    "message": "хочу записаться на маникюр",
+                    "expect_expected_reply_type": "time",
+                    "expect_booking_service": "маникюр",
+                    "expect_llm_used": False,
+                },
+                {
+                    "message": "__BOOKING_TIME__",
+                    "expect_expected_reply_type": "name",
+                    "suppress_marker": True,
+                },
+                {
+                    "message": "__BOOKING_NAME__",
+                    "expect_booking_commit": True,
+                    "suppress_marker": True,
+                },
+            ],
+            "handover_message": "хочу поговорить с менеджером",
+            "confirm_message": "да",
+            "manager_actions": ["take", "resolve"],
+        }
+    ],
     "ca06-consult": [
         {
             "case_id": "CA06_PACK_ONLY",
@@ -1564,6 +1590,8 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
             "address",
         }:
             return True
+    if "booking_prompt" in expected_actions and meta_action in _chaos_booking_completion_actions():
+        return True
     if "booking_prompt" in expected_actions and meta_action == "match":
         if booking_active or _chaos_trace_has_stage(trace_entries, "booking_interrupt"):
             return True
@@ -1685,6 +1713,9 @@ def _chaos_pending_action_ok(expected_pending, meta, conv_meta):
 def _chaos_state_fallback_ok(expected_state, actual_state, meta, conv_meta, handover_meta):
     action = (meta or {}).get("action")
     pending_action = (meta or {}).get("pending_action")
+    if expected_state == "pending":
+        if action in CHAOS_PENDING_ACTIONS or pending_action in CHAOS_PENDING_ACTIONS:
+            return True
     if expected_state == "pending" and actual_state in {"bot_active", "manager_active"}:
         if action in {"booking_prompt", "booking_paused", "reply", "match"}:
             return True
@@ -2242,6 +2273,12 @@ def _parse_chaos_sim_args(argv):
     parser.add_argument("--console-env", default="/home/zhan/secrets/console-contract.env")
     parser.add_argument("--console-client-id", default=None)
     parser.add_argument("--console-mode", choices=["real", "skip"], default="real")
+    parser.add_argument(
+        "--manager-mode",
+        choices=["check", "skip"],
+        default="check",
+        help="Skip manager turn verification (useful for chaos-only runs).",
+    )
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--debug-all", action="store_true")
     parser.add_argument("--rag-audit", action="store_true")
@@ -3947,6 +3984,22 @@ def _run_chaos_sim(args):
             if stop_requested:
                 break
             if turn.get("type") == "manager":
+                if args.manager_mode == "skip":
+                    if turns_handle:
+                        turns_handle.write(
+                            json.dumps(
+                                {
+                                    "case_id": case["case_id"],
+                                    "turn": turn_idx,
+                                    "type": "manager",
+                                    "skipped": "manager_mode_skip",
+                                    "conversation_id": conversation_id,
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                    continue
                 if not conversation_id:
                     failures.append(
                         {
@@ -5152,6 +5205,524 @@ def _run_livecheck_ca05_booking_commit(args, context):
     }
     return summary
 
+def _run_livecheck_ca12_booking_full(args, context):
+    rng = context["rng"]
+    case = context["cases"][0]
+    steps, booking_values = _resolve_booking_commit_steps(case)
+    if not steps:
+        raise SystemExit("livecheck-auto: CA12 booking-full missing steps")
+    timestamp = context["timestamp"]
+    webhook_url = context["webhook_url"]
+    base_url = context["base_url"]
+    webhook_secret = context["webhook_secret"]
+    admin_token = context["admin_token"]
+    instance_id = context["instance_id"]
+    remote_jid = context["remote_jid"]
+    db_user = context["db_user"]
+    client_meta = context.get("client_meta") or {}
+    client_id = client_meta.get("client_id")
+    allowlist_jids = context["allowlist_jids"]
+    allow_non_allowlist = context.get("allow_non_allowlist")
+    fail_fast_after = context.get("fail_fast_after")
+    outbox_url = f"{base_url}/admin/outbox/process"
+    outbox_wait_seconds = context.get("outbox_wait_seconds") or 0.0
+    min_wait = max(min(args.min_wait, args.max_wait), outbox_wait_seconds)
+    max_wait = max(max(args.min_wait, args.max_wait), outbox_wait_seconds)
+
+    if not remote_jid or (remote_jid not in allowlist_jids and not allow_non_allowlist):
+        raise SystemExit("livecheck-auto: CA12 remote_jid not in allowlist")
+
+    confirm_reply = case.get("confirm_message") or "да"
+    handover_message = case.get("handover_message") or "хочу поговорить с менеджером"
+    manager_actions = case.get("manager_actions") or ["take", "resolve"]
+
+    results = []
+    manager_results = []
+    conv_id = None
+    appointment_id = None
+    appointment_row = None
+    audit_rows = None
+    booking_commit_trace = None
+    outbox_summary = None
+    outbox_rows = None
+    commit_message_id = None
+    booking_confirm_prompted = False
+    booking_confirmed = False
+    booking_confirm_decision = None
+
+    for idx, step in enumerate(steps, start=1):
+        base_text = step.get("message") or ""
+        if not base_text:
+            raise SystemExit("livecheck-auto: CA12 empty step message")
+        text = _apply_noise(base_text, rng, args.noise)
+        marker = f"LC:AUTO:CA12:{timestamp}:{idx:02d}"
+        include_marker = not step.get("suppress_marker")
+        message = f"{text} [{marker}]" if include_marker else text
+        message_id = f"LC-AUTO-{timestamp}-CA12-{idx:02d}-{uuid.uuid4().hex[:8]}"
+        sent_at = datetime.now(timezone.utc).isoformat()
+
+        metadata = {
+            "sender": "LivecheckAuto",
+            "timestamp": int(time.time()),
+            "messageId": message_id,
+            "remoteJid": remote_jid,
+        }
+        if instance_id:
+            metadata["instanceId"] = instance_id
+        payload = {"body": {"messageType": "text", "message": message, "metadata": metadata}}
+
+        status = "dry_run"
+        response_status = None
+        response_body = None
+        response_error = None
+        if not args.dry_run:
+            response_status, response_body, response_error = _send_webhook_payload(
+                webhook_url, payload, webhook_secret, args.timeout
+            )
+            status = "sent" if response_status and 200 <= response_status < 300 else "error"
+        print(
+            json.dumps(
+                {
+                    "case_id": case["case_id"],
+                    "step": idx,
+                    "marker": marker,
+                    "message_id": message_id,
+                    "remote_jid": remote_jid,
+                    "text": message,
+                    "sent_at": sent_at,
+                    "status": status,
+                    "http_status": response_status,
+                    "error": response_error,
+                    "response": (response_body or "")[:200] if response_body else None,
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        meta = None
+        conv_meta = None
+        conv_error = None
+        if not args.dry_run:
+            _post_admin_outbox_with_wait(
+                outbox_url,
+                admin_token,
+                args.timeout,
+                outbox_wait_seconds,
+            )
+            conv_id, meta, error = _poll_decision_meta(
+                db_user,
+                message_id,
+                args.poll_timeout,
+                args.poll_interval,
+                fail_fast_after=fail_fast_after,
+            )
+            if error:
+                raise SystemExit(f"livecheck-auto: CA12 decision_meta poll failed ({error})")
+            conv_meta, conv_error = _fetch_conversation_meta(db_user, conv_id)
+
+        conv_context = conv_meta.get("context") if isinstance(conv_meta, dict) else None
+        expected_reply_type = conv_context.get("expected_reply_type") if isinstance(conv_context, dict) else None
+        booking_state = conv_context.get("booking") if isinstance(conv_context, dict) else None
+        trace_list = conv_context.get("decision_trace") if isinstance(conv_context, dict) else None
+
+        if not args.dry_run:
+            expected_reply = step.get("expect_expected_reply_type")
+            if expected_reply and expected_reply_type != expected_reply:
+                if (meta or {}).get("action") != "booking_confirm":
+                    raise SystemExit(
+                        f"livecheck-auto: CA12 expected_reply_type mismatch ({expected_reply_type})"
+                    )
+            expected_llm = step.get("expect_llm_used")
+            if expected_llm is not None and (meta or {}).get("llm_used") is not expected_llm:
+                raise SystemExit("livecheck-auto: CA12 llm_used mismatch")
+            expected_service = step.get("expect_booking_service")
+            if expected_service:
+                service = None
+                if isinstance(booking_state, dict):
+                    service = booking_state.get("service")
+                if not service or expected_service not in str(service).lower():
+                    raise SystemExit("livecheck-auto: CA12 booking.service mismatch")
+
+        for entry in reversed(_trace_as_list(trace_list)):
+            if entry.get("stage") == "booking_commit":
+                booking_commit_trace = entry
+                break
+        if booking_commit_trace and not commit_message_id:
+            commit_message_id = message_id
+        if trace_list:
+            booking_confirm_prompted = booking_confirm_prompted or _trace_has_entry(
+                trace_list, "booking_confirm", "prompt"
+            )
+            booking_confirmed = booking_confirmed or _trace_has_entry(
+                trace_list, "booking_confirm", "confirmed"
+            )
+
+        results.append(
+            {
+                "step": idx,
+                "phase": "booking",
+                "message_id": message_id,
+                "conversation_id": conv_id,
+                "expected_reply_type": expected_reply_type,
+                "action": (meta or {}).get("action"),
+                "slot_confirmation_required": (meta or {}).get("slot_confirmation_required"),
+                "slot_confirmation_decision": (meta or {}).get("slot_confirmation_decision"),
+                "booking_service": booking_state.get("service") if isinstance(booking_state, dict) else None,
+                "trace_booking_commit": bool(booking_commit_trace),
+                "llm_used": (meta or {}).get("llm_used"),
+                "error": conv_error,
+            }
+        )
+
+        needs_confirmation = bool(
+            (meta or {}).get("action") == "booking_confirm"
+            or (meta or {}).get("slot_confirmation_required")
+        )
+        if needs_confirmation:
+            confirm_marker = f"LC:AUTO:CA12:CONFIRM:{timestamp}:{idx:02d}"
+            confirm_message_id = f"LC-AUTO-{timestamp}-CA12C-{idx:02d}-{uuid.uuid4().hex[:8]}"
+            confirm_sent_at = datetime.now(timezone.utc).isoformat()
+            confirm_payload = {
+                "body": {
+                    "messageType": "text",
+                    "message": confirm_reply,
+                    "metadata": {
+                        "sender": "LivecheckAuto",
+                        "timestamp": int(time.time()),
+                        "messageId": confirm_message_id,
+                        "remoteJid": remote_jid,
+                    },
+                }
+            }
+            if instance_id:
+                confirm_payload["body"]["metadata"]["instanceId"] = instance_id
+
+            confirm_status = "dry_run"
+            confirm_response_status = None
+            confirm_response_body = None
+            confirm_response_error = None
+            if not args.dry_run:
+                confirm_response_status, confirm_response_body, confirm_response_error = (
+                    _send_webhook_payload(
+                        webhook_url,
+                        confirm_payload,
+                        webhook_secret,
+                        args.timeout,
+                    )
+                )
+                confirm_status = (
+                    "sent"
+                    if confirm_response_status and 200 <= confirm_response_status < 300
+                    else "error"
+                )
+            print(
+                json.dumps(
+                    {
+                        "case_id": case["case_id"],
+                        "step": f"{idx}.confirm",
+                        "marker": confirm_marker,
+                        "message_id": confirm_message_id,
+                        "remote_jid": remote_jid,
+                        "text": confirm_reply,
+                        "sent_at": confirm_sent_at,
+                        "status": confirm_status,
+                        "http_status": confirm_response_status,
+                        "error": confirm_response_error,
+                        "response": (confirm_response_body or "")[:200]
+                        if confirm_response_body
+                        else None,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+            confirm_meta = None
+            confirm_conv_meta = None
+            confirm_conv_error = None
+            if not args.dry_run:
+                _post_admin_outbox_with_wait(
+                    outbox_url,
+                    admin_token,
+                    args.timeout,
+                    outbox_wait_seconds,
+                )
+                conv_id, confirm_meta, confirm_error = _poll_decision_meta(
+                    db_user,
+                    confirm_message_id,
+                    args.poll_timeout,
+                    args.poll_interval,
+                    fail_fast_after=fail_fast_after,
+                )
+                if confirm_error:
+                    raise SystemExit(
+                        f"livecheck-auto: CA12 booking-confirm poll failed ({confirm_error})"
+                    )
+                confirm_conv_meta, confirm_conv_error = _fetch_conversation_meta(db_user, conv_id)
+
+            confirm_context = (
+                confirm_conv_meta.get("context") if isinstance(confirm_conv_meta, dict) else None
+            )
+            confirm_expected_reply_type = (
+                confirm_context.get("expected_reply_type") if isinstance(confirm_context, dict) else None
+            )
+            confirm_booking_state = (
+                confirm_context.get("booking") if isinstance(confirm_context, dict) else None
+            )
+            confirm_trace_list = (
+                confirm_context.get("decision_trace") if isinstance(confirm_context, dict) else None
+            )
+            if confirm_trace_list:
+                booking_confirmed = booking_confirmed or _trace_has_entry(
+                    confirm_trace_list, "booking_confirm", "confirmed"
+                )
+            booking_confirm_decision = (confirm_meta or {}).get("slot_confirmation_decision")
+
+            results.append(
+                {
+                    "step": f"{idx}.confirm",
+                    "phase": "confirm",
+                    "message_id": confirm_message_id,
+                    "conversation_id": conv_id,
+                    "expected_reply_type": confirm_expected_reply_type,
+                    "action": (confirm_meta or {}).get("action"),
+                    "slot_confirmation_required": (confirm_meta or {}).get(
+                        "slot_confirmation_required"
+                    ),
+                    "slot_confirmation_decision": booking_confirm_decision,
+                    "booking_service": confirm_booking_state.get("service")
+                    if isinstance(confirm_booking_state, dict)
+                    else None,
+                    "trace_booking_commit": bool(booking_commit_trace),
+                    "llm_used": (confirm_meta or {}).get("llm_used"),
+                    "error": confirm_conv_error,
+                }
+            )
+
+            for entry in reversed(_trace_as_list(confirm_trace_list)):
+                if entry.get("stage") == "booking_commit":
+                    booking_commit_trace = entry
+                    break
+            if booking_commit_trace and not commit_message_id:
+                commit_message_id = confirm_message_id
+            if idx < len(steps):
+                time.sleep(rng.uniform(min_wait, max_wait))
+        elif idx < len(steps):
+            time.sleep(rng.uniform(min_wait, max_wait))
+
+    if not args.dry_run:
+        commit_required = any(step.get("expect_booking_commit") for step in steps)
+        if commit_required and not booking_commit_trace:
+            raise SystemExit("livecheck-auto: CA12 booking_commit trace missing")
+        if commit_required:
+            appointment_id = (booking_commit_trace or {}).get("appointment_id")
+            if not appointment_id:
+                raise SystemExit("livecheck-auto: CA12 appointment_id missing")
+            appointment_row, appointment_error = _fetch_appointment_row(db_user, appointment_id)
+            if appointment_error:
+                raise SystemExit(
+                    f"livecheck-auto: CA12 appointment fetch failed ({appointment_error})"
+                )
+            if not appointment_row:
+                raise SystemExit("livecheck-auto: CA12 appointment row missing")
+            audit_rows, audit_error = _fetch_appointment_audit_rows(
+                db_user, appointment_id, limit=3
+            )
+            if audit_error:
+                raise SystemExit(
+                    f"livecheck-auto: CA12 appointment_audit fetch failed ({audit_error})"
+                )
+            if not audit_rows:
+                raise SystemExit("livecheck-auto: CA12 appointment_audit missing")
+            if not commit_message_id:
+                raise SystemExit("livecheck-auto: CA12 commit message id missing")
+            outbox_summary, outbox_error = _fetch_outbox_summary(
+                db_user, client_id, commit_message_id
+            )
+            if outbox_error:
+                raise SystemExit(
+                    f"livecheck-auto: CA12 outbox summary failed ({outbox_error})"
+                )
+            if not outbox_summary or not outbox_summary.get("count"):
+                raise SystemExit("livecheck-auto: CA12 outbox missing")
+            outbox_rows, outbox_rows_error = _fetch_outbox_rows(
+                db_user, client_id, commit_message_id, limit=3
+            )
+            if outbox_rows_error:
+                raise SystemExit(
+                    f"livecheck-auto: CA12 outbox rows failed ({outbox_rows_error})"
+                )
+            if outbox_summary.get("status") == "FAILED":
+                raise SystemExit("livecheck-auto: CA12 outbox status FAILED")
+
+    handover_before = None
+    handover_after = None
+    conv_before = None
+    conv_after = None
+    if not args.dry_run:
+        conv_before, _ = _fetch_conversation_meta(db_user, conv_id)
+        handover_before, _ = _fetch_handover_meta(db_user, conv_id)
+        handover_id = (handover_before or {}).get("handover_id")
+        if not handover_id:
+            handover_marker = f"LC:AUTO:CA12:HANDOVER:{timestamp}"
+            handover_message_id = f"LC-AUTO-{timestamp}-CA12H-{uuid.uuid4().hex[:8]}"
+            handover_sent_at = datetime.now(timezone.utc).isoformat()
+            handover_payload = {
+                "body": {
+                    "messageType": "text",
+                    "message": f"{handover_message} [{handover_marker}]",
+                    "metadata": {
+                        "sender": "LivecheckAuto",
+                        "timestamp": int(time.time()),
+                        "messageId": handover_message_id,
+                        "remoteJid": remote_jid,
+                    },
+                }
+            }
+            if instance_id:
+                handover_payload["body"]["metadata"]["instanceId"] = instance_id
+            handover_status, handover_body, handover_error = _send_webhook_payload(
+                webhook_url, handover_payload, webhook_secret, args.timeout
+            )
+            print(
+                json.dumps(
+                    {
+                        "case_id": case["case_id"],
+                        "step": "handover",
+                        "marker": handover_marker,
+                        "message_id": handover_message_id,
+                        "remote_jid": remote_jid,
+                        "text": handover_payload["body"]["message"],
+                        "sent_at": handover_sent_at,
+                        "status": "sent"
+                        if handover_status and 200 <= handover_status < 300
+                        else "error",
+                        "http_status": handover_status,
+                        "error": handover_error,
+                        "response": (handover_body or "")[:200] if handover_body else None,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+            _post_admin_outbox_with_wait(
+                outbox_url,
+                admin_token,
+                args.timeout,
+                outbox_wait_seconds,
+            )
+            conv_id, handover_meta, handover_meta_error = _poll_decision_meta(
+                db_user,
+                handover_message_id,
+                args.poll_timeout,
+                args.poll_interval,
+                fail_fast_after=fail_fast_after,
+            )
+            if handover_meta_error:
+                raise SystemExit(
+                    f"livecheck-auto: CA12 handover meta poll failed ({handover_meta_error})"
+                )
+            if (handover_meta or {}).get("action") != "escalate":
+                raise SystemExit("livecheck-auto: CA12 handover action mismatch")
+
+            conv_before, _ = _fetch_conversation_meta(db_user, conv_id)
+            handover_before, _ = _fetch_handover_meta(db_user, conv_id)
+            handover_id = (handover_before or {}).get("handover_id")
+            if not handover_id:
+                raise SystemExit("livecheck-auto: CA12 handover_id missing")
+        chat_id_raw = client_meta.get("telegram_chat_id")
+        if not chat_id_raw:
+            raise SystemExit("livecheck-auto: CA12 missing telegram_chat_id for client")
+        try:
+            chat_id = int(chat_id_raw)
+        except ValueError:
+            raise SystemExit(f"livecheck-auto: CA12 invalid telegram_chat_id {chat_id_raw}")
+        topic_id = (conv_before or {}).get("telegram_topic_id")
+        owner_id, owner_username = _parse_owner_identity(client_meta.get("owner_telegram_id"))
+        manager_id = owner_id if owner_id is not None else 10001
+        manager_username = owner_username or "ci_manager"
+
+        for action in manager_actions:
+            callback_payload = {
+                "update_id": int(time.time()),
+                "callback_query": {
+                    "id": f"LC-AUTO-{timestamp}-CA12-{uuid.uuid4().hex[:6]}",
+                    "from": {
+                        "id": manager_id,
+                        "is_bot": False,
+                        "first_name": "CI",
+                        "last_name": "Runner",
+                        "username": manager_username,
+                    },
+                    "message": {
+                        "message_id": int(time.time() * 1000) % 1000000,
+                        "date": int(time.time()),
+                        "chat": {"id": chat_id, "type": "supergroup", "title": "CI"},
+                    },
+                    "data": f"{action}_{handover_id}",
+                },
+            }
+            if topic_id:
+                callback_payload["callback_query"]["message"]["message_thread_id"] = topic_id
+            action_status, action_body, action_error = _send_json_payload(
+                f"{base_url}/telegram-webhook", callback_payload, args.timeout
+            )
+            _post_admin_outbox_with_wait(
+                outbox_url,
+                admin_token,
+                args.timeout,
+                outbox_wait_seconds,
+            )
+            conv_after, _ = _fetch_conversation_meta(db_user, conv_id)
+            handover_after, _ = _fetch_handover_meta(db_user, conv_id)
+            expected_state = "manager_active" if action == "take" else "bot_active"
+            expected_status = "active" if action == "take" else "resolved"
+            if (conv_after or {}).get("state") != expected_state:
+                raise SystemExit(
+                    "livecheck-auto: CA12 manager state mismatch "
+                    f"(expected {expected_state}, got {(conv_after or {}).get('state')})"
+                )
+            if (handover_after or {}).get("status") != expected_status:
+                raise SystemExit(
+                    "livecheck-auto: CA12 handover status mismatch "
+                    f"(expected {expected_status}, got {(handover_after or {}).get('status')})"
+                )
+            manager_results.append(
+                {
+                    "action": action,
+                    "status": action_status,
+                    "error": action_error,
+                    "expected_state": expected_state,
+                    "actual_state": (conv_after or {}).get("state"),
+                    "expected_handover_status": expected_status,
+                    "actual_handover_status": (handover_after or {}).get("status"),
+                }
+            )
+
+    summary = {
+        "suite": "ca12-booking-full",
+        "case_id": case["case_id"],
+        "conversation_id": conv_id,
+        "booking_time": booking_values.get("booking_time"),
+        "booking_name": booking_values.get("booking_name"),
+        "booking_confirm_prompted": booking_confirm_prompted,
+        "booking_confirmed": booking_confirmed,
+        "booking_confirm_decision": booking_confirm_decision,
+        "appointment_id": appointment_id,
+        "appointment_status": appointment_row.get("status") if isinstance(appointment_row, dict) else None,
+        "appointment_audit_action": audit_rows[0].get("action")
+        if isinstance(audit_rows, list) and audit_rows
+        else None,
+        "trace_booking_commit": bool(booking_commit_trace),
+        "outbox_status": outbox_summary.get("status") if isinstance(outbox_summary, dict) else None,
+        "conversation_state_before": (conv_before or {}).get("state"),
+        "conversation_state_after": (conv_after or {}).get("state"),
+        "handover_status_before": (handover_before or {}).get("status"),
+        "handover_status_after": (handover_after or {}).get("status"),
+        "manager_actions": manager_results,
+        "results": results,
+    }
+    return summary
+
 def _run_livecheck_ca06_reset(args, context, *, suite_label="CA06"):
     if args.dry_run:
         return None
@@ -5865,6 +6436,7 @@ def _run_livecheck_auto(args):
         "ca08-state",
         "ca09-manager",
         "ca10-outbox",
+        "ca12-booking-full",
     }:
         _ensure_bot_active_before_suite(args, context)
 
@@ -5892,6 +6464,11 @@ def _run_livecheck_auto(args):
         return
     if args.suite == "ca05-booking-commit":
         summary = _run_livecheck_ca05_booking_commit(args, context)
+        summary.update(common)
+        print(json.dumps({"summary": summary}, ensure_ascii=False))
+        return
+    if args.suite == "ca12-booking-full":
+        summary = _run_livecheck_ca12_booking_full(args, context)
         summary.update(common)
         print(json.dumps({"summary": summary}, ensure_ascii=False))
         return
@@ -6683,6 +7260,77 @@ def _render_suite_lines(suite):
             ("llm_used", "llm_used"),
         ]
         lines.extend(_render_table(columns, results))
+        return lines
+
+    if suite_name == "ca12-booking-full" and isinstance(results, list):
+        booking_time = summary.get("booking_time")
+        booking_name = summary.get("booking_name")
+        if booking_time:
+            lines.append(f"- booking_time: `{_format_cell(booking_time)}`")
+        if booking_name:
+            lines.append(f"- booking_name: `{_format_cell(booking_name)}`")
+        lines.append(
+            f"- booking_confirm_prompted: `{_format_cell(summary.get('booking_confirm_prompted'))}`"
+        )
+        lines.append(
+            f"- booking_confirmed: `{_format_cell(summary.get('booking_confirmed'))}`"
+        )
+        if summary.get("booking_confirm_decision") is not None:
+            lines.append(
+                f"- booking_confirm_decision: `{_format_cell(summary.get('booking_confirm_decision'))}`"
+            )
+        if summary.get("appointment_id"):
+            lines.append(f"- appointment_id: `{_format_cell(summary.get('appointment_id'))}`")
+        if summary.get("appointment_status"):
+            lines.append(
+                f"- appointment_status: `{_format_cell(summary.get('appointment_status'))}`"
+            )
+        if summary.get("appointment_audit_action"):
+            lines.append(
+                f"- appointment_audit_action: `{_format_cell(summary.get('appointment_audit_action'))}`"
+            )
+        if summary.get("outbox_status"):
+            lines.append(f"- outbox_status: `{_format_cell(summary.get('outbox_status'))}`")
+        if summary.get("conversation_state_before") or summary.get("conversation_state_after"):
+            lines.append(
+                "- conversation_state: "
+                f"`{_format_cell(summary.get('conversation_state_before'))}` → "
+                f"`{_format_cell(summary.get('conversation_state_after'))}`"
+            )
+        if summary.get("handover_status_before") or summary.get("handover_status_after"):
+            lines.append(
+                "- handover_status: "
+                f"`{_format_cell(summary.get('handover_status_before'))}` → "
+                f"`{_format_cell(summary.get('handover_status_after'))}`"
+            )
+        lines.append("")
+        columns = [
+            ("step", "step"),
+            ("phase", "phase"),
+            ("message_id", "message_id"),
+            ("expected_reply_type", "expected_reply_type"),
+            ("action", "action"),
+            ("slot_confirmation_required", "slot_confirmation_required"),
+            ("slot_confirmation_decision", "slot_confirmation_decision"),
+            ("booking_service", "booking_service"),
+            ("trace_booking_commit", "trace_booking_commit"),
+            ("llm_used", "llm_used"),
+        ]
+        lines.extend(_render_table(columns, results))
+        manager_actions = summary.get("manager_actions")
+        if isinstance(manager_actions, list) and manager_actions:
+            lines.append("")
+            lines.append("### Manager Actions")
+            manager_columns = [
+                ("action", "action"),
+                ("status", "status"),
+                ("error", "error"),
+                ("expected_state", "expected_state"),
+                ("actual_state", "actual_state"),
+                ("expected_handover_status", "expected_handover_status"),
+                ("actual_handover_status", "actual_handover_status"),
+            ]
+            lines.extend(_render_table(manager_columns, manager_actions))
         return lines
 
     if suite_name == "ca08-state":

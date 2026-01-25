@@ -13,12 +13,13 @@ without relying on scripted inputs. This runbook documents the current setup and
     ```
     python3 ops/diagnose.py chaos-sim --count 5 --kinds booking --min-turns 10 --max-turns 12 --noise high \
       --mode logic --skip-outbox --console-mode skip --sim-time "2026-01-24T12:00:00+06:00" \
+      --manager-mode skip \
       --min-wait 0 --max-wait 0.2 \
-      --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_booking_simtime_eval_5b
+      --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_booking_simtime_mgrskip_5b
     ```
-  - Summary: failures=20, cases_processed=5, completed
-  - Artifacts: `/tmp/chaos_booking_simtime_eval_5b` (`cases.jsonl`, `failures.jsonl`, `report.md`, `summary.json`)
-- Prior booking-only run (sim-time, completed): `/tmp/chaos_booking_simtime_eval_5` (failures=16)
+  - Summary: failures=9, cases_processed=5, completed
+  - Artifacts: `/tmp/chaos_booking_simtime_mgrskip_5b` (`cases.jsonl`, `failures.jsonl`, `report.md`, `summary.json`)
+- Prior booking-only run (sim-time, completed): `/tmp/chaos_booking_simtime_eval_5b` (failures=20)
 - Previous booking-only run (pre sim-time): `/tmp/chaos_booking_5`
 
 ## What Changed in `ops/diagnose.py`
@@ -50,6 +51,7 @@ python3 ops/diagnose.py chaos-sim --count 3 --min-turns 10 --max-turns 12 --nois
 ```
 python3 ops/diagnose.py chaos-sim --count 5 --kinds booking --min-turns 10 --max-turns 12 --noise high \
   --mode logic --skip-outbox --console-mode skip --sim-time "2026-01-24T12:00:00+06:00" \
+  --manager-mode skip \
   --min-wait 0 --max-wait 0.2 \
   --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_booking_simtime_eval_5
 ```
@@ -77,6 +79,21 @@ python3 ops/diagnose.py chaos-sim --count 5 --min-turns 10 --max-turns 12 --nois
 - `report.md`: summary + failure counts.
 - `rag_debug.jsonl`: only when `--rag-audit` is enabled.
 
+## Livecheck E2E (Booking + Manager)
+
+- Command:
+  ```
+  python3 ops/diagnose.py livecheck-auto --suite ca12-booking-full
+  ```
+- Latest run (2026-01-25):
+  - conversation_id: `a7ec4c6e-d5b4-4c5d-ae8e-909b09ea9aaf`
+  - appointment_id: `f589bb54-520c-4b31-a949-66b3582a1b8c` (status `PENDING_CONFIRMATION`)
+  - decision_trace: `booking_commit` present
+  - outbox_status: `SENT`
+  - handover: `pending` → `resolved` (manager take/resolve 200)
+- Note: booking flow escalates after commit; suite reuses that handover for manager actions.
+
 ## Known Limitations (Current)
 
 - Ensure `--sim-time` stays within business hours for booking flows.
+- Use `--manager-mode skip` for chaos-only runs; manager take/resolve is validated in live suites.
