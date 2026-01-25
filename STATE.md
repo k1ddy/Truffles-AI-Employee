@@ -20,6 +20,7 @@
 - DONE: Console contract unexclude `/knowledge/*` — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`; PR #368 https://github.com/k1ddy/Truffles-AI-Employee/pull/368; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21333020110.
 - PLAN: Phase 4 Control Plane (Team + Calendar UI) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`.
 - DONE: Phase 5 Control Plane UI (Inbox 3‑pane + macros + detail cards) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-phase5-inbox-ui.md`. Evidence: local `npm --prefix console-web run lint` + screenshot `docs/REPORTS/2026-01-26-control-plane-inbox.png` (2026‑01‑26).
+- PLAN: Booking signal + slot_extract canon alignment — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-booking-signal-llm-docs.md`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
