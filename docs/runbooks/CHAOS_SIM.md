@@ -8,27 +8,29 @@ without relying on scripted inputs. This runbook documents the current setup and
 - Worktree: `/home/zhan/worktrees/slot-lock-booking-confirm`
 - Branch: `feat/slot-lock-booking-confirm`
 - Files touched: `ops/diagnose.py` (evaluator relaxations + `--kinds` filter + `--sim-time`)
-- Latest booking-only run (sim-time, interrupted):
+- Latest booking-only run (sim-time, completed):
   - Command:
     ```
     python3 ops/diagnose.py chaos-sim --count 5 --kinds booking --min-turns 10 --max-turns 12 --noise high \
       --mode logic --skip-outbox --console-mode skip --sim-time "2026-01-24T12:00:00+06:00" \
       --min-wait 0 --max-wait 0.2 \
-      --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_booking_simtime_5
+      --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_booking_simtime_eval_5b
     ```
-  - Summary: failures=14, cases_processed=2, interrupted (signal_2)
-  - Artifacts: `/tmp/chaos_booking_simtime_5` (`cases.jsonl`, `failures.jsonl`, `report.md`, `summary.json`)
-  - Note: API container still on main image; sim-time override requires deploy of this branch to take effect.
+  - Summary: failures=20, cases_processed=5, completed
+  - Artifacts: `/tmp/chaos_booking_simtime_eval_5b` (`cases.jsonl`, `failures.jsonl`, `report.md`, `summary.json`)
+- Prior booking-only run (sim-time, completed): `/tmp/chaos_booking_simtime_eval_5` (failures=16)
 - Previous booking-only run (pre sim-time): `/tmp/chaos_booking_5`
 
 ## What Changed in `ops/diagnose.py`
 
 - Human-like generator already in place (fillers, interruptions, corrections).
 - Evaluator relaxations to reduce false positives for:
-  - booking prompt interruptions,
-  - expected_reply_type mismatch when booking is active,
+  - booking prompt interruptions and multi-intent replies,
+  - clarify-limit escalation during pending/booking completion,
+  - pending responses treated as acceptable booking completion,
+  - ai_response counted as reply/smalltalk,
   - pending action variance (pending_ack/wait/status),
-  - booking-paused/escalation as acceptable outcomes for booking flow.
+  - out_of_domain false positives (now only when action/intent is OOD).
 - New filter: `--kinds` to run only a subset of cases.
 
 Where to look:
@@ -49,7 +51,7 @@ python3 ops/diagnose.py chaos-sim --count 3 --min-turns 10 --max-turns 12 --nois
 python3 ops/diagnose.py chaos-sim --count 5 --kinds booking --min-turns 10 --max-turns 12 --noise high \
   --mode logic --skip-outbox --console-mode skip --sim-time "2026-01-24T12:00:00+06:00" \
   --min-wait 0 --max-wait 0.2 \
-  --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_booking_5
+  --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_booking_simtime_eval_5
 ```
 
 3) Full mix (once booking-only is stable):
