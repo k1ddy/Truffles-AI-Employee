@@ -19,6 +19,7 @@
 | `contracts/capabilities/capabilities.v1.jsonschema` | Канон capabilities (channels/providers/features) | Архитектор/Backend |
 | `contracts/integrations/` | Контракты портов/адаптеров | Архитектор/Backend |
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
+| `.github/workflows/monitor-prod-version.yml` | Cron CI alert: prod `/admin/version` must match main | OPS |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
@@ -79,7 +80,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-e2e-team.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-web-deploy-team.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase3-knowledge-studio.md`
-- `docs/TASK_PACKAGES/TP-2026-01-25-booking-signal-llm-docs.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-phase3-knowledge-backend.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-build-info.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-chaos-live-e2e.md`

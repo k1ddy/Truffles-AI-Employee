@@ -11,6 +11,7 @@ from app.models.company import Company
 from app.models.console_idempotency import ConsoleIdempotencyKey
 from app.models.conversation import Conversation
 from app.models.handover import Handover
+from app.models.knowledge_version import KnowledgeVersion
 from app.models.learned_response import LearnedResponse
 from app.models.message import Message
 from app.models.outbox_message import OutboxMessage
@@ -37,5 +38,6 @@ __all__ = [
     "Prompt",
     "OutboxMessage",
     "LearnedResponse",
+    "KnowledgeVersion",
     "Specialist",
 ]
