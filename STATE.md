@@ -77,7 +77,12 @@
 - DONE: Console branch selection enforcement — `X-Branch-Id` header, UI selector, новые ошибки/контракты (`branch_selection_required`, `BRANCH_SELECTION_REQUIRED`). Evidence: `pytest -q truffles-api/tests/test_console_auth_access.py` → 8 passed.
 - DONE: Audit/outbox tenant keys (branch_id) + outbox tenant_context payload; добавлена миграция `truffles-api/migrations/006_add_outbox_audit_branch_id.sql`; cross-tenant selection tests расширены. Evidence: `pytest -q truffles-api/tests/test_console_auth_access.py` → 11 passed; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21273642769; миграция применена на prod: `UPDATE 6693/9/9`, `outbox_messages.branch_id`/`audit_events.branch_id` columns present; backfill gaps: `outbox_missing_branch=472`, `audit_missing_branch=2` при `conversations_missing_branch=327`.
 - DONE: Backfill conversations.branch_id (migration `007_backfill_conversations_branch_id.sql`) — instanceId match + single-branch fallback. Applied on prod: `UPDATE 0` (instanceId), `UPDATE 2` (single-branch). Остаток: `conversations.branch_id IS NULL = 325`; 5 conversation имеют `metadata.instanceId='demo'` без branch match. Evidence: SQL outputs 2026-01-23.
+- DONE: Console-web deploy (Phase 2B/Phase 3 UI) — Provisioning Wizard (Settings) + Knowledge Studio page/nav; evidence ниже (2026-01-25).
 - DECISION: Legacy conversations остаются с `branch_id=NULL` (без догадок/массового назначения). Повторный backfill — только по явным маппингам или согласованным default‑branch для клиента.
+
+### 2026-01-25 — Console UI deploy (Provisioning Wizard + Knowledge Studio)
+- Evidence: `curl -s https://console.truffles.kz/_next/static/chunks/app/settings/page-848d98901057a280.js | rg "Provisioning Wizard|Build:"` → Provisioning Wizard string present; build info `d1bf60eea73ca9d6599f1f7fe2eaac10c5380b98`, time `2026-01-25T04:16:26Z`.
+- Evidence: `curl -s https://console.truffles.kz/_next/static/chunks/app/knowledge/page-89d2b6b981020310.js | rg "Knowledge Studio"` → string present.
 
 ### 2026-01-23 — Console↔Telegram P0 contract alignment
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
