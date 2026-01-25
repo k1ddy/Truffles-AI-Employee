@@ -194,12 +194,12 @@ FROM agents a WHERE a.name = 'manager';"
 
 ### Standard Restart (no code change)
 ```bash
-ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "REQUIRE_GHCR=1 bash ~/restart_api.sh"
 ```
 
 ### Restart with new image
 ```bash
-ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 REQUIRE_GHCR=1 bash ~/restart_api.sh"
 ```
 
 ### Verify restart
@@ -222,7 +222,7 @@ ssh -p 222 zhan@5.188.241.234 "docker stop truffles-api && docker rm truffles-ap
 ```
 2) **Start new API container** (no embedded workers):
 ```bash
-ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "REQUIRE_GHCR=1 bash ~/restart_api.sh"
 ```
 3) **Start workers**:
 ```bash
@@ -237,6 +237,7 @@ ssh -p 222 zhan@5.188.241.234 "docker ps --format 'table {{.Names}}\t{{.Image}}\
 - If running an old image that still starts workers inside API, set `OUTBOX_WORKER_ENABLED=0` for API and keep `OUTBOX_WORKER_ENABLED=1` for worker containers.
 - Ensure the `.env` file exists; missing env will make worker containers fail to start (or exit immediately).
 - `OTEL_SERVICE_NAME` should be different per container (API/outbox/sentinel) to keep traces clean.
+- Prod API must run from GHCR images only; local docker-compose builds are forbidden on prod.
 
 ## 8. Worker Containers (Outbox/Sentinel)
 

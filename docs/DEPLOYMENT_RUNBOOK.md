@@ -66,10 +66,9 @@ docker compose -f /home/zhan/truffles-main/truffles-api/docker-compose.yml up -d
 
 **Restart API after code changes:**
 ```bash
-cd /home/zhan/truffles-main/truffles-api
-docker-compose build --no-cache
-docker-compose up -d
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 REQUIRE_GHCR=1 bash ~/restart_api.sh"
 ```
+**Note:** prod API must run from GHCR images; local docker-compose build/run for API is forbidden.
 
 **Check logs:**
 ```bash
