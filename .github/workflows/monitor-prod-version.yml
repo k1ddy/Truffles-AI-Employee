@@ -1,0 +1,46 @@
+name: Prod Version Monitor
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Base URL for version check"
+        type: string
+        default: "https://api.truffles.kz"
+      expected_version:
+        description: "Expected version label"
+        type: string
+        default: "main"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve expected commit
+        id: expected
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify prod version
+        env:
+          BASE_URL: ${{ inputs.base_url || 'https://api.truffles.kz' }}
+          EXPECTED_VERSION: ${{ inputs.expected_version || 'main' }}
+          EXPECTED_COMMIT: ${{ steps.expected.outputs.commit }}
+        run: |
+          set -euo pipefail
+          python3 ops/diagnose.py deploy-verify \
+            --base-url "${BASE_URL}" \
+            --expected-commit "${EXPECTED_COMMIT}" \
+            --expected-version "${EXPECTED_VERSION}" \
+            --retries 5 \
+            --sleep 5
