@@ -218,6 +218,23 @@ Pack‑файл — **генерируемый артефакт** при publish
 
 - Никаких “догадок” о tenant‑контексте.
 - Никакого write‑доступа к runtime контейнеру (без `docker cp`, без `-v`).
+
+---
+
+## 14) Production Go/No‑Go (Live Customers)
+
+**DEC‑014:** живые заказчики допускаются только после выполнения чеклиста и фиксации evidence в `STATE.md`.
+
+**Минимум:**
+1) **CI + deploy:** main зелёный, деплой подтверждён; в Settings виден build‑info (SHA/time).
+2) **Provisioning Wizard:** виден в `Settings`, draft‑branch без `instance_id` не активируется; Go/No‑Go gate
+   проверяет только поля включённых capabilities.
+3) **Knowledge safety:** Draft→Validate→Publish→Rollback; publish запрещён при ошибках; safe‑mode при невалидности.
+4) **RBAC/tenancy:** selection_required/branch_selection_required работает; manager только с `branch_id`;
+   support read‑only в provisioning.
+5) **Ops evidence:** decision_meta/trace на каждый inbound; outbox idempotency/auto‑heal; live‑check записан
+   (conversation_id, decision_trace, decision_meta, outbox status).
+6) **Rollback:** описан и проверяем (UI/knowledge/deploy).
 - Никаких хардкодов знаний — только через структурные данные + валидацию.
 - Никаких изменений в core‑поведении без Task Package и evidence.
 
