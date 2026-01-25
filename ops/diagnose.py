@@ -8,6 +8,7 @@
 - Состояние handovers
 """
 import argparse
+import http.client
 import base64
 import glob
 import json
@@ -2254,10 +2255,13 @@ def _parse_chaos_sim_args(argv):
     parser.add_argument("--webhook-secret", default=None)
     parser.add_argument("--admin-token", default=None)
     parser.add_argument("--timeout", type=float, default=15.0)
+    parser.add_argument("--retry-count", type=int, default=2)
+    parser.add_argument("--retry-backoff", type=float, default=0.5)
     parser.add_argument("--poll-timeout", type=float, default=20.0)
     parser.add_argument("--poll-interval", type=float, default=0.6)
     parser.add_argument("--min-wait", type=float, default=0.3)
     parser.add_argument("--max-wait", type=float, default=1.2)
+    parser.add_argument("--max-runtime", type=float, default=None)
     parser.add_argument("--outbox-wait", type=float, default=None)
     parser.add_argument("--skip-outbox", action="store_true")
     parser.add_argument("--output-dir", default=None)
@@ -2279,6 +2283,12 @@ def _parse_chaos_sim_args(argv):
         default="check",
         help="Skip manager turn verification (useful for chaos-only runs).",
     )
+    parser.add_argument(
+        "--fail-on-infra",
+        action="store_true",
+        help="Stop chaos-sim on infra errors (default: continue to next case).",
+    )
+    parser.add_argument("--skip-preflight", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--debug-all", action="store_true")
     parser.add_argument("--rag-audit", action="store_true")
@@ -3459,6 +3469,105 @@ def _send_webhook_payload(url, payload, secret, timeout):
         return exc.code, body, str(exc)
     except urllib.error.URLError as exc:
         return None, "", str(exc)
+    except (TimeoutError, socket.timeout) as exc:
+        return None, "", f"timeout: {exc}"
+    except http.client.RemoteDisconnected as exc:
+        return None, "", f"remote_disconnected: {exc}"
+    except Exception as exc:
+        return None, "", f"{exc.__class__.__name__}: {exc}"
+
+
+def _http_get(url, timeout):
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            return resp.status, body, None
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
+        return exc.code, body, str(exc)
+    except urllib.error.URLError as exc:
+        return None, "", str(exc)
+    except (TimeoutError, socket.timeout) as exc:
+        return None, "", f"timeout: {exc}"
+    except http.client.RemoteDisconnected as exc:
+        return None, "", f"remote_disconnected: {exc}"
+    except Exception as exc:
+        return None, "", f"{exc.__class__.__name__}: {exc}"
+
+
+def _is_infra_error(error):
+    if not error:
+        return False
+    lowered = error.lower()
+    markers = [
+        "remote_disconnected",
+        "timeout",
+        "timed out",
+        "connection refused",
+        "connection reset",
+        "network is unreachable",
+        "temporary failure",
+        "name or service not known",
+        "connection aborted",
+        "broken pipe",
+    ]
+    return any(marker in lowered for marker in markers)
+
+
+def _send_webhook_payload_with_retry(url, payload, secret, timeout, retry_count, retry_backoff):
+    attempts = 0
+    status = None
+    body = ""
+    error = None
+    for attempt in range(retry_count + 1):
+        attempts = attempt + 1
+        status, body, error = _send_webhook_payload(url, payload, secret, timeout)
+        if not error or not _is_infra_error(error):
+            return status, body, error, attempts
+        if attempt < retry_count:
+            time.sleep(retry_backoff * (2 ** attempt))
+    return status, body, error, attempts
+
+
+def _chaos_preflight(base_url, timeout):
+    checks = {}
+    endpoints = {
+        "admin_health": f"{base_url}/admin/health",
+        "admin_version": f"{base_url}/admin/version",
+    }
+    ok = True
+    for name, url in endpoints.items():
+        status, body, error = _http_get(url, timeout)
+        checks[name] = {
+            "status": status,
+            "error": error,
+            "body": (body or "")[:300],
+        }
+        if error or status is None or status >= 500:
+            ok = False
+    return {"ok": ok, "checks": checks}
+
+
+def _write_failure_bundle(output_dir, record, container_name):
+    bundle_dir = os.path.join(output_dir, "failure_bundles")
+    os.makedirs(bundle_dir, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    case_id = record.get("case_id", "case")
+    turn = record.get("turn", "0")
+    base = f"{case_id}_turn{turn}_{stamp}"
+    payload_path = os.path.join(bundle_dir, f"{base}.json")
+    with open(payload_path, "w", encoding="utf-8") as handle:
+        json.dump(record, handle, ensure_ascii=False, indent=2)
+    if not container_name:
+        return
+    since = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    log_result = run_command(["docker", "logs", "--since", since, container_name])
+    if log_result.returncode != 0:
+        return
+    log_path = os.path.join(bundle_dir, f"{base}.log")
+    with open(log_path, "w", encoding="utf-8") as handle:
+        handle.write(log_result.stdout)
 
 def _post_admin_outbox(url, admin_token, timeout):
     headers = {"X-Admin-Token": admin_token} if admin_token else {}
@@ -3618,6 +3727,20 @@ def _run_webhook_fuzz(args):
     skip_outbox = args.skip_outbox or mode == "logic"
 
     container_name, _ = resolve_container_name()
+    if not args.skip_preflight:
+        preflight = _chaos_preflight(base_url, args.timeout)
+        preflight_path = os.path.join(output_dir, "preflight.json")
+        with open(preflight_path, "w", encoding="utf-8") as handle:
+            json.dump(preflight, handle, ensure_ascii=False, indent=2)
+        _record_event(
+            {
+                "event": "preflight",
+                "ok": preflight.get("ok"),
+                "checks": preflight.get("checks"),
+            }
+        )
+        if not preflight.get("ok") and not continue_on_infra:
+            raise SystemExit("chaos-sim: preflight failed")
 
     webhook_secret = (
         args.webhook_secret
@@ -3824,6 +3947,9 @@ def _run_chaos_sim(args):
     webhook_secret = _resolve_webhook_secret(client_slug, args.webhook_secret)
     simulation_id = args.simulation_id or f"SIM-{timestamp}-{seed}"
     jid_base = _resolve_chaos_jid_base(simulation_id, seed)
+    start_time = time.time()
+    max_runtime = args.max_runtime
+    continue_on_infra = not args.fail_on_infra
 
     output_dir = args.output_dir or os.path.join(
         os.getcwd(),
@@ -3833,6 +3959,58 @@ def _run_chaos_sim(args):
         timestamp,
     )
     os.makedirs(output_dir, exist_ok=True)
+    events_path = os.path.join(output_dir, "events.jsonl")
+    events_handle = open(events_path, "w", encoding="utf-8")
+    failures_partial_path = os.path.join(output_dir, "failures.partial.jsonl")
+    failures_handle = open(failures_partial_path, "w", encoding="utf-8")
+    summary_partial_path = os.path.join(output_dir, "summary.partial.json")
+    preflight_path = None
+    rag_summary_path = None
+
+    def _record_event(event):
+        events_handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+        events_handle.flush()
+
+    def _record_failure(record):
+        failures_handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        failures_handle.flush()
+
+    def _write_checkpoint(summary_payload, stats_payload):
+        with open(summary_partial_path, "w", encoding="utf-8") as handle:
+            json.dump(summary_payload, handle, ensure_ascii=False, indent=2)
+        stats_path = os.path.join(output_dir, "stats.json")
+        with open(stats_path, "w", encoding="utf-8") as handle:
+            json.dump(stats_payload, handle, ensure_ascii=False, indent=2)
+
+    def _build_summary_payload():
+        return {
+            "simulation_id": simulation_id,
+            "seed": seed,
+            "cases": stats["cases"],
+            "cases_processed": processed_cases,
+            "turns": stats["turns"],
+            "failures": stats["failures"],
+            "infra_failures": stats["infra_failures"],
+            "infra_retries": stats["infra_retries"],
+            "failure_types": failure_counts,
+            "failure_patterns": pattern_counts,
+            "output_dir": output_dir,
+            "jid_base": jid_base,
+            "client_slug": client_slug,
+            "console_mode": args.console_mode,
+            "llm_mode": args.mode,
+            "turns_path": turns_path,
+            "events_path": events_path,
+            "failures_partial_path": failures_partial_path,
+            "preflight_path": preflight_path,
+            "max_runtime": max_runtime,
+            "continue_on_infra": continue_on_infra,
+            "rag_audit": rag_audit,
+            "rag_debug_path": rag_debug_path,
+            "rag_summary_path": rag_summary_path,
+            "interrupted": interrupted,
+            "stop_reason": stop_reason,
+        }
     turns_path = None
     turns_handle = None
     if args.debug_all:
@@ -3864,6 +4042,20 @@ def _run_chaos_sim(args):
         }
 
     container_name, _ = resolve_container_name()
+    if not args.skip_preflight:
+        preflight = _chaos_preflight(base_url, args.timeout)
+        preflight_path = os.path.join(output_dir, "preflight.json")
+        with open(preflight_path, "w", encoding="utf-8") as handle:
+            json.dump(preflight, handle, ensure_ascii=False, indent=2)
+        _record_event(
+            {
+                "event": "preflight",
+                "ok": preflight.get("ok"),
+                "checks": preflight.get("checks"),
+            }
+        )
+        if not preflight.get("ok") and not continue_on_infra:
+            raise SystemExit("chaos-sim: preflight failed")
     admin_token = args.admin_token or os.environ.get("ALERTS_ADMIN_TOKEN")
     if not admin_token and container_name:
         admin_token = _resolve_env_from_container(container_name, "ALERTS_ADMIN_TOKEN")
@@ -3921,6 +4113,8 @@ def _run_chaos_sim(args):
         "cases": len(cases),
         "turns": 0,
         "failures": 0,
+        "infra_failures": 0,
+        "infra_retries": 0,
         "escalations": 0,
         "lead_captured": 0,
         "booking_failed": 0,
@@ -3928,6 +4122,15 @@ def _run_chaos_sim(args):
         "console_resolved": 0,
     }
     processed_cases = 0
+    _record_event(
+        {
+            "event": "start",
+            "simulation_id": simulation_id,
+            "seed": seed,
+            "cases": len(cases),
+            "client_slug": client_slug,
+        }
+    )
 
     def _bump_failure_counts(labels):
         for label in labels:
@@ -3978,10 +4181,21 @@ def _run_chaos_sim(args):
     for case_idx, case in enumerate(cases, start=1):
         if stop_requested:
             break
+        if max_runtime and time.time() - start_time > max_runtime:
+            stop_requested = True
+            interrupted = True
+            stop_reason = "max_runtime"
+            break
         remote_jid = _build_remote_jid(case_idx)
         conversation_id = None
+        case_infra_failed = False
         for turn_idx, turn in enumerate(case["turns"], start=1):
             if stop_requested:
+                break
+            if max_runtime and time.time() - start_time > max_runtime:
+                stop_requested = True
+                interrupted = True
+                stop_reason = "max_runtime"
                 break
             if turn.get("type") == "manager":
                 if args.manager_mode == "skip":
@@ -4001,14 +4215,14 @@ def _run_chaos_sim(args):
                         )
                     continue
                 if not conversation_id:
-                    failures.append(
-                        {
-                            "case_id": case["case_id"],
-                            "turn": turn_idx,
-                            "type": "manager",
-                            "failure": ["missing_conversation_id"],
-                        }
-                    )
+                    record = {
+                        "case_id": case["case_id"],
+                        "turn": turn_idx,
+                        "type": "manager",
+                        "failure": ["missing_conversation_id"],
+                    }
+                    failures.append(record)
+                    _record_failure(record)
                     _bump_failure_counts(["missing_conversation_id"])
                     stats["failures"] += 1
                     continue
@@ -4034,14 +4248,14 @@ def _run_chaos_sim(args):
                                 + "\n"
                             )
                         continue
-                    failures.append(
-                        {
-                            "case_id": case["case_id"],
-                            "turn": turn_idx,
-                            "type": "manager",
-                            "failure": ["handover_missing"],
-                        }
-                    )
+                    record = {
+                        "case_id": case["case_id"],
+                        "turn": turn_idx,
+                        "type": "manager",
+                        "failure": ["handover_missing"],
+                    }
+                    failures.append(record)
+                    _record_failure(record)
                     _bump_failure_counts(["handover_missing"])
                     stats["failures"] += 1
                     continue
@@ -4053,16 +4267,16 @@ def _run_chaos_sim(args):
                     status, body, error = _send_telegram_callback(action, handover_id)
 
                 if error and error not in {"console_skipped"}:
-                    failures.append(
-                        {
-                            "case_id": case["case_id"],
-                            "turn": turn_idx,
-                            "type": "manager",
-                            "handover_id": handover_id,
-                            "failure": ["manager_action_failed"],
-                            "error": error,
-                        }
-                    )
+                    record = {
+                        "case_id": case["case_id"],
+                        "turn": turn_idx,
+                        "type": "manager",
+                        "handover_id": handover_id,
+                        "failure": ["manager_action_failed"],
+                        "error": error,
+                    }
+                    failures.append(record)
+                    _record_failure(record)
                     _bump_failure_counts(["manager_action_failed"])
                     stats["failures"] += 1
                 if error == "console_skipped":
@@ -4091,31 +4305,31 @@ def _run_chaos_sim(args):
                 expected_state = "manager_active" if action == "take" else "bot_active"
                 expected_status = "active" if action == "take" else "resolved"
                 if (conv_meta or {}).get("state") != expected_state:
-                    failures.append(
-                        {
-                            "case_id": case["case_id"],
-                            "turn": turn_idx,
-                            "type": "manager",
-                            "handover_id": handover_id,
-                            "failure": ["state_mismatch"],
-                            "expected_state": expected_state,
-                            "actual_state": (conv_meta or {}).get("state"),
-                        }
-                    )
+                    record = {
+                        "case_id": case["case_id"],
+                        "turn": turn_idx,
+                        "type": "manager",
+                        "handover_id": handover_id,
+                        "failure": ["state_mismatch"],
+                        "expected_state": expected_state,
+                        "actual_state": (conv_meta or {}).get("state"),
+                    }
+                    failures.append(record)
+                    _record_failure(record)
                     _bump_failure_counts(["state_mismatch"])
                     stats["failures"] += 1
                 if (handover_meta or {}).get("status") != expected_status:
-                    failures.append(
-                        {
-                            "case_id": case["case_id"],
-                            "turn": turn_idx,
-                            "type": "manager",
-                            "handover_id": handover_id,
-                            "failure": ["handover_status_mismatch"],
-                            "expected_status": expected_status,
-                            "actual_status": (handover_meta or {}).get("status"),
-                        }
-                    )
+                    record = {
+                        "case_id": case["case_id"],
+                        "turn": turn_idx,
+                        "type": "manager",
+                        "handover_id": handover_id,
+                        "failure": ["handover_status_mismatch"],
+                        "expected_status": expected_status,
+                        "actual_status": (handover_meta or {}).get("status"),
+                    }
+                    failures.append(record)
+                    _record_failure(record)
                     _bump_failure_counts(["handover_status_mismatch"])
                     stats["failures"] += 1
 
@@ -4177,10 +4391,64 @@ def _run_chaos_sim(args):
             response_status = None
             response_body = None
             response_error = None
+            attempts = 0
             if not args.dry_run:
-                response_status, response_body, response_error = _send_webhook_payload(
-                    webhook_url, payload, webhook_secret, args.timeout
+                response_status, response_body, response_error, attempts = _send_webhook_payload_with_retry(
+                    webhook_url,
+                    payload,
+                    webhook_secret,
+                    args.timeout,
+                    args.retry_count,
+                    args.retry_backoff,
                 )
+                if attempts > 1:
+                    stats["infra_retries"] += max(0, attempts - 1)
+                _record_event(
+                    {
+                        "event": "webhook_send",
+                        "case_id": case["case_id"],
+                        "turn": turn_idx,
+                        "message_id": message_id,
+                        "conversation_id": conversation_id,
+                        "status": response_status,
+                        "error": response_error,
+                        "attempts": attempts,
+                    }
+                )
+                if response_error and _is_infra_error(response_error):
+                    stats["infra_failures"] += 1
+                    record = {
+                        "case_id": case["case_id"],
+                        "turn": turn_idx,
+                        "type": "user",
+                        "text": turn.get("text"),
+                        "message_id": message_id,
+                        "failure": ["infra_error"],
+                        "error": response_error,
+                        "status": response_status,
+                        "attempts": attempts,
+                    }
+                    failures.append(record)
+                    _record_failure(record)
+                    _write_failure_bundle(output_dir, record, container_name)
+                    _bump_failure_counts(["infra_error"])
+                    stats["failures"] += 1
+                    _record_event(
+                        {
+                            "event": "infra_error",
+                            "case_id": case["case_id"],
+                            "turn": turn_idx,
+                            "message_id": message_id,
+                            "error": response_error,
+                        }
+                    )
+                    if not continue_on_infra:
+                        stop_requested = True
+                        interrupted = True
+                        stop_reason = "infra_error"
+                        break
+                    case_infra_failed = True
+                    break
                 if not skip_outbox:
                     outbox_url = f"{base_url}/admin/outbox/process"
                     _post_admin_outbox_with_wait(
@@ -4203,17 +4471,17 @@ def _run_chaos_sim(args):
                     args.poll_interval,
                 )
                 if poll_error:
-                    failures.append(
-                        {
-                            "case_id": case["case_id"],
-                            "turn": turn_idx,
-                            "type": "user",
-                            "text": turn.get("text"),
-                            "message_id": message_id,
-                            "failure": ["decision_meta_poll_failed"],
-                            "error": poll_error,
-                        }
-                    )
+                    record = {
+                        "case_id": case["case_id"],
+                        "turn": turn_idx,
+                        "type": "user",
+                        "text": turn.get("text"),
+                        "message_id": message_id,
+                        "failure": ["decision_meta_poll_failed"],
+                        "error": poll_error,
+                    }
+                    failures.append(record)
+                    _record_failure(record)
                     _bump_failure_counts(["decision_meta_poll_failed"])
                     stats["failures"] += 1
                 if conv_id:
@@ -4255,6 +4523,7 @@ def _run_chaos_sim(args):
                         else None,
                     }
                     failures.append(record)
+                    _record_failure(record)
                     _bump_failure_counts(failures_for_turn)
                     _bump_pattern_counts(pattern_keys)
                     stats["failures"] += 1
@@ -4323,14 +4592,25 @@ def _run_chaos_sim(args):
 
             time.sleep(rng.uniform(args.min_wait, args.max_wait))
 
+        if case_infra_failed:
+            _record_event(
+                {
+                    "event": "case_infra_failed",
+                    "case_id": case["case_id"],
+                    "remote_jid": remote_jid,
+                }
+            )
         if stop_requested:
             break
         processed_cases += 1
+        _write_checkpoint(_build_summary_payload(), stats)
 
     if turns_handle:
         turns_handle.close()
     if rag_debug_handle:
         rag_debug_handle.close()
+    events_handle.close()
+    failures_handle.close()
 
     failure_path = os.path.join(output_dir, "failures.jsonl")
     with open(failure_path, "w", encoding="utf-8") as handle:
@@ -4361,6 +4641,8 @@ def _run_chaos_sim(args):
         "cases_processed": processed_cases,
         "turns": stats["turns"],
         "failures": stats["failures"],
+        "infra_failures": stats["infra_failures"],
+        "infra_retries": stats["infra_retries"],
         "failure_types": failure_counts,
         "failure_patterns": pattern_counts,
         "output_dir": output_dir,
@@ -4369,6 +4651,11 @@ def _run_chaos_sim(args):
         "console_mode": args.console_mode,
         "llm_mode": args.mode,
         "turns_path": turns_path,
+        "events_path": events_path,
+        "failures_partial_path": failures_partial_path,
+        "preflight_path": preflight_path,
+        "max_runtime": max_runtime,
+        "continue_on_infra": continue_on_infra,
         "rag_audit": rag_audit,
         "rag_debug_path": rag_debug_path,
         "rag_summary_path": rag_summary_path,
@@ -4387,6 +4674,8 @@ def _run_chaos_sim(args):
         handle.write(f"- cases_processed: {processed_cases}\n")
         handle.write(f"- turns: {stats['turns']}\n")
         handle.write(f"- failures: {stats['failures']}\n")
+        handle.write(f"- infra_failures: {stats['infra_failures']}\n")
+        handle.write(f"- infra_retries: {stats['infra_retries']}\n")
         handle.write(f"- jid_base: {jid_base}\n")
         handle.write(f"- interrupted: {str(interrupted).lower()}\n")
         if stop_reason:
@@ -4396,6 +4685,10 @@ def _run_chaos_sim(args):
         handle.write(f"- booking_failed: {stats['booking_failed']}\n")
         handle.write(f"- manager_resolved: {stats['manager_resolved']}\n")
         handle.write(f"- console_resolved: {stats['console_resolved']}\n\n")
+        handle.write(f"- events_path: {events_path}\n")
+        handle.write(f"- failures_partial_path: {failures_partial_path}\n")
+        if preflight_path:
+            handle.write(f"- preflight_path: {preflight_path}\n")
         if turns_path:
             handle.write(f"- turns_path: {turns_path}\n\n")
         if failure_counts:
