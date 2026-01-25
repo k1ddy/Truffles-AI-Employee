@@ -186,6 +186,7 @@
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-consultant-chatgpt-like.md`
 - Scope: обновить канон поведения (ChatGPT-like, domain-bound, slot-lock, booking_confirm) + strict LAW escalation.
 - Evidence: pending.
+ - **DONE:** Consultant DoD v1 критерии готовности закреплены в `SPECS/CONSULTANT.md` (раздел “DEFINITION OF DONE — Consultant v1”).
 
 - **Фокус:** P0 Ops hygiene (instanceId inbound, outbox latency, deploy latest CI image); дальше webhook не дробим.
 - **Источник:** анализы из сессии зафиксированы в `STATE.md`; “не записано = не существует”.

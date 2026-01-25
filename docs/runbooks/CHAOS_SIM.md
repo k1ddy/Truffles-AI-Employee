@@ -3,6 +3,8 @@
 Purpose: run realistic (noisy, interrupted) dialog simulations against `/webhook` and evaluate decision_meta/trace
 without relying on scripted inputs. This runbook documents the current setup and how to continue safely.
 
+Acceptance: use `SPECS/CONSULTANT.md` → “DEFINITION OF DONE — Consultant v1” to decide readiness.
+
 ## Current Context (2026-01-25)
 
 - Worktree: `/home/zhan/worktrees/slot-lock-booking-confirm`

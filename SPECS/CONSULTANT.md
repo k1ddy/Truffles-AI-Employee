@@ -64,6 +64,26 @@ _Любые статусы ниже — DERIVED; единственный ист
 
 ---
 
+## DEFINITION OF DONE — Consultant v1 (критерии готовности)
+
+Это **критерии приёмки**, а не факт реализации. Evidence фиксируется в `STATE.md` и run‑артефактах.
+
+1) **Hard‑LAW**: мед/юридические/жалобы/возвраты → только handoff, без советов/офферов.  
+2) **Slot‑lock + booking_confirm**: активная запись не сбрасывается; `booking_commit` только после явного confirm.  
+3) **Booking interrupt**: info/consult перебивка → ответ + возврат к slot‑вопросу; trace `booking_interrupt`.  
+4) **Pending guard**: в `pending/manager_active` только pending‑ответы, без новых действий.  
+5) **Domain‑bound**: facts только из `client_pack`; consult — playbook‑first, LLM‑fallback без салонных фактов.  
+6) **Trace/meta**: каждый inbound пишет `decision_meta` + `decision_trace`, `booking_confirm/booking_commit` сохраняются.  
+7) **Tests (минимум):**
+   - unit: `hard_law_blocks_booking_signal`, `booking_confirm_requires_yes_for_llm_slot`, `booking_slot_lock_keeps_booking_active_on_ood`.
+   - chaos‑sim logic: ≥10 кейсов без infra‑ошибок, residuals ≤5% (с bundles).
+   - chaos‑sim llm: ≥5 кейсов без OOD‑false‑positive на коротких/шумных фразах.
+8) **Livecheck (минимум):** `ca12-booking-full` с evidence (appointments/outbox/trace).  
+9) **Стабильность:** 3 последовательных прогона без новых классов логических ошибок (bucket‑карта стабильна).
+
+Если критерий не выполнен — логика считается “не закрыта”, даже при зелёных отдельных тестах.
+
+# ЧАСТЬ 1: КТО ТАКОЙ КОНСУЛЬТАНТ
 # ЧАСТЬ 1: КТО ТАКОЙ КОНСУЛЬТАНТ
 
 ## Определение
