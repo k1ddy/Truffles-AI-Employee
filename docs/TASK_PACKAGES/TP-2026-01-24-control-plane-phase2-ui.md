@@ -49,7 +49,7 @@
 
 ## Evidence
 - Lint output: `✔ No ESLint warnings or errors`.
-- UI screenshots: **BLOCKED** — Keycloak creds отсутствуют (`E2E_USERNAME`, `E2E_PASSWORD`).
+- UI screenshots: **BLOCKED** — UI не задеплоен на `https://console.truffles.kz`, локальный порт `127.0.0.1:3000` занят текущим console-web (`/home/zhan/truffles-main/console-web`).
 - `STATE.md` update после снимков.
 
 ## Rollback
@@ -59,7 +59,7 @@
 - Изменения backend/DB.
 
 ## Риски/блокеры
-- Нет доступов для UI‑логина (Keycloak) → нельзя снять скриншоты wizard.
+- Нет окружения с новой UI‑веткой (prod не содержит wizard; локальный порт 3000 занят).
 
 ## Branch / Worktree / Merge
 - Branch: `feat/control-plane-phase2-ui`
