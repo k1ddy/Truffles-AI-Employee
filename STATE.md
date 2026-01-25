@@ -13,7 +13,7 @@
 - PLAN: Phase 2 Control Plane (Provisioning + Capabilities) — Task Package `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2.md`.
 - DONE: Phase 2A Capabilities model + admin API — PR #343 https://github.com/k1ddy/Truffles-AI-Employee/pull/343; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21315691684.
 - DONE: Phase 2B Provisioning API — PR #345 https://github.com/k1ddy/Truffles-AI-Employee/pull/345; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21317060790; prod migration `013_allow_branches_instance_id_null.sql` applied (ALTER TABLE branches instance_id DROP NOT NULL); smoke: `PATCH /console/v1/admin/branches/{id}` `is_active=true` without `instance_id` → 400 `INVALID_PARAM` ("instance_id required to activate branch"); draft branch id `ceb8b564-cfa9-410f-bc2d-52614166341e` with `instance_id=NULL`, `is_active=false`.
-- PLAN: Phase 2 UI Provisioning Wizard — branch `feat/control-plane-phase2-ui`; Task Package `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2-ui.md`.
+- DONE: Phase 2 UI Provisioning Wizard — PR #348 https://github.com/k1ddy/Truffles-AI-Employee/pull/348; Evidence: `origin/main` commit `169e58ba` (wizard in `console-web/src/app/settings/page.tsx`) + local UI screenshot `docs/REPORTS/2026-01-25-control-plane-provisioning.png`.
 - PLAN: Phase 4 Control Plane (Team + Calendar UI) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
@@ -66,7 +66,7 @@
 - DONE: TP-2026-01-23 Console Telegram Schemathesis unexclude (/telegram/health) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277995685
 - PLAN: TP-2026-01-23 Telegram protocol docs (Web-first) — in progress
 - DONE: TP-2026-01-25 console-web build fix (Settings TS error resolved) — PR #353 https://github.com/k1ddy/Truffles-AI-Employee/pull/353; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21326322920.
-- FIX READY: TP-2026-01-25 Control Plane Phase 3 (Knowledge Studio UI) — `npm --prefix console-web run lint` + `npm --prefix console-web run build` OK; UI evidence pending deploy.
+- DONE: Phase 3 UI Knowledge Studio — PR #355 https://github.com/k1ddy/Truffles-AI-Employee/pull/355; Evidence: `origin/main` commit `4bb22292` (UI in `console-web/src/app/knowledge/page.tsx`) + prod bundle evidence below (2026-01-25).
 - STOP-LINE: CI run failed — https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21276341412
   - lint job → step "Lint (ruff)" failed: `ruff check app tests`, error `I001 Import block is un-sorted or un-formatted` at `app/routers/console.py:1:1` (ubuntu-latest, Python 3.11.14).
   - console-contract job → step "Schemathesis GET-only smoke" failed: GET `/telegram/health` returned 404 (documented 200/401/403), command `schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml --url https://api.truffles.kz/console/v1 --include-method=GET --checks all --request-timeout 10 --max-examples=3 --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"` (ubuntu-latest, Python 3.11.14).
@@ -82,8 +82,10 @@
 - DECISION: Legacy conversations остаются с `branch_id=NULL` (без догадок/массового назначения). Повторный backfill — только по явным маппингам или согласованным default‑branch для клиента.
 
 ### 2026-01-25 — Console UI deploy (Provisioning Wizard + Knowledge Studio)
+- Artifacts: `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-verify.md`, `docs/REPORTS/2026-01-25-control-plane-provisioning.png`.
 - Evidence: `curl -s https://console.truffles.kz/_next/static/chunks/app/settings/page-848d98901057a280.js | rg "Provisioning Wizard|Build:"` → Provisioning Wizard string present; build info `d1bf60eea73ca9d6599f1f7fe2eaac10c5380b98`, time `2026-01-25T04:16:26Z`.
 - Evidence: `curl -s https://console.truffles.kz/_next/static/chunks/app/knowledge/page-89d2b6b981020310.js | rg "Knowledge Studio"` → string present.
+- Evidence: local UI screenshot `docs/REPORTS/2026-01-25-control-plane-provisioning.png` (Settings → Provisioning Wizard visible).
 
 ### 2026-01-23 — Console↔Telegram P0 contract alignment
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
