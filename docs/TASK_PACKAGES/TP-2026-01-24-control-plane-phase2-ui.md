@@ -44,10 +44,13 @@
 - Ошибки API отображаются в UI, без silent‑fail.
 
 ## Checks
-- `npm --prefix console-web run lint` (если зависимости установлены)
+- `npm --prefix console-web install` (added 510 packages, 2 vulnerabilities: 1 low, 1 moderate)
+- `npm --prefix console-web run lint` → `✔ No ESLint warnings or errors`
 
 ## Evidence
-- Скриншоты UI + краткое описание поведения (manual) + запись в `STATE.md`.
+- Lint output: `✔ No ESLint warnings or errors`.
+- UI screenshots: **BLOCKED** — Keycloak creds отсутствуют (`E2E_USERNAME`, `E2E_PASSWORD`).
+- `STATE.md` update после снимков.
 
 ## Rollback
 - Откатить UI‑изменения через обратный merge.
@@ -56,7 +59,7 @@
 - Изменения backend/DB.
 
 ## Риски/блокеры
-- Нет достаточных данных/доступов для реального provisioning на стенде.
+- Нет доступов для UI‑логина (Keycloak) → нельзя снять скриншоты wizard.
 
 ## Branch / Worktree / Merge
 - Branch: `feat/control-plane-phase2-ui`
