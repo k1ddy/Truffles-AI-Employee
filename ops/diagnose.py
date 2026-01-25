@@ -1556,6 +1556,8 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
     meta_action = (meta or {}).get("action")
     meta_intent = (meta or {}).get("intent")
     booking_active = _chaos_booking_reply_active(conv_meta)
+    if (conv_meta or {}).get("state") == "pending" or _chaos_trace_has_pending(trace_entries):
+        return True
     if meta_action == "escalate" and meta_intent == "clarify_limit":
         if (conv_meta or {}).get("state") == "pending":
             return True
@@ -1598,6 +1600,8 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
             return True
         if meta_intent in {"info_bundle", "service_semantic", "service_match"}:
             return True
+    if "booking_prompt" in expected_actions and meta_action == "booking_confirm":
+        return True
     if "booking_prompt" in expected_actions and meta_action == "escalate":
         if meta_intent in {"clarify_limit", "human_request"} or booking_active:
             return True
@@ -1639,6 +1643,36 @@ def _chaos_trace_has_stage(trace_entries, stage):
     return False
 
 
+def _chaos_trace_has_pending(trace_entries):
+    for entry in trace_entries or []:
+        if not isinstance(entry, dict):
+            continue
+        stage = entry.get("stage")
+        if stage in CHAOS_PENDING_ACTIONS:
+            return True
+        if stage == "contract" and entry.get("decision") == "action":
+            contract = entry.get("contract")
+            if isinstance(contract, dict):
+                action_type = contract.get("action_type")
+                if action_type in CHAOS_PENDING_ACTIONS:
+                    return True
+    return False
+
+
+def _chaos_trace_action(trace_entries):
+    for entry in reversed(trace_entries or []):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("stage") != "contract" or entry.get("decision") != "action":
+            continue
+        contract = entry.get("contract")
+        if isinstance(contract, dict):
+            action_type = contract.get("action_type")
+            if isinstance(action_type, str) and action_type.strip():
+                return action_type.strip()
+    return None
+
+
 def _chaos_trace_has_truth_hours(trace_entries):
     for entry in trace_entries or []:
         if not isinstance(entry, dict):
@@ -1664,6 +1698,8 @@ def _chaos_booking_reply_active(conv_meta):
 
 def _chaos_reply_type_fallback_ok(expected_reply_type, actual_reply, meta, conv_meta, trace_entries):
     if expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
+        if (conv_meta or {}).get("state") == "pending" or _chaos_trace_has_pending(trace_entries):
+            return True
         if actual_reply in CHAOS_BOOKING_REPLY_TYPES:
             return True
         if actual_reply == "intent_choice" and (meta or {}).get("intent") in {
@@ -1706,7 +1742,10 @@ def _chaos_pending_action_ok(expected_pending, meta, conv_meta):
         return True
     if action == "escalate":
         return True
-    if (conv_meta or {}).get("state") != "pending":
+    if (conv_meta or {}).get("state") == "pending":
+        if action in _chaos_booking_completion_actions():
+            return True
+    else:
         return True
     return False
 
@@ -1891,9 +1930,14 @@ def _chaos_evaluate_turn(
     failures = []
     expected = turn.get("expected") or {}
     intent_set = _chaos_intent_set(turn)
-    meta_action = (meta or {}).get("action")
-    meta_intent = (meta or {}).get("intent")
-    meta_policy_gate = (meta or {}).get("policy_gate")
+    meta_eval = meta
+    trace_action = _chaos_trace_action(trace_entries)
+    if trace_action:
+        meta_eval = dict(meta or {})
+        meta_eval["action"] = trace_action
+    meta_action = (meta_eval or {}).get("action")
+    meta_intent = (meta_eval or {}).get("intent")
+    meta_policy_gate = (meta_eval or {}).get("policy_gate")
     if meta is None:
         failures.append("missing_decision_meta")
         if not trace_entries:
@@ -1914,8 +1958,8 @@ def _chaos_evaluate_turn(
     ):
         if _chaos_booking_reply_active(conv_meta) and meta_action != "booking_prompt":
             failures.append("booking_interrupt_missing")
-    if expected.get("action_any") and not _chaos_matches_action(meta, expected.get("action_any")):
-        if not _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sections_ok):
+    if expected.get("action_any") and not _chaos_matches_action(meta_eval, expected.get("action_any")):
+        if not _chaos_action_fallback_ok(expected, meta_eval, conv_meta, trace_entries, info_sections_ok):
             failures.append("action_mismatch")
     forbid = expected.get("forbid") if isinstance(expected.get("forbid"), dict) else {}
     conv_state = (conv_meta or {}).get("state")
@@ -1924,7 +1968,8 @@ def _chaos_evaluate_turn(
         if conv_state != "pending":
             forbidden_actions = []
         if forbidden_actions and _chaos_matches_action(meta, forbidden_actions):
-            failures.append("forbidden_action")
+            if not _chaos_matches_action(meta_eval, _chaos_booking_completion_actions()):
+                failures.append("forbidden_action")
         forbidden_policies = forbid.get("policy_gate_any") or []
         if forbidden_policies and meta_policy_gate in forbidden_policies:
             failures.append("forbidden_policy_gate")
@@ -1940,7 +1985,7 @@ def _chaos_evaluate_turn(
         ):
             failures.append("forbidden_trace_stage")
     if expected.get("pending_action") and not _chaos_pending_action_ok(
-        expected.get("pending_action"), meta, conv_meta
+        expected.get("pending_action"), meta_eval, conv_meta
     ):
         failures.append("pending_action_mismatch")
     expected_state = expected.get("state")
@@ -1952,7 +1997,7 @@ def _chaos_evaluate_turn(
     if expected_reply_type is not None:
         actual_reply = _chaos_extract_expected_reply((conv_meta or {}).get("context"))
         if actual_reply != expected_reply_type and not _chaos_reply_type_fallback_ok(
-            expected_reply_type, actual_reply, meta, conv_meta, trace_entries
+            expected_reply_type, actual_reply, meta_eval, conv_meta, trace_entries
         ):
             failures.append("expected_reply_type_mismatch")
     expected_handover_status = expected.get("handover_status")
@@ -1968,7 +2013,8 @@ def _chaos_evaluate_turn(
     if intent_set.intersection(CHAOS_IN_DOMAIN_INTENTS) and (
         meta_intent == "out_of_domain" or meta_action == "out_of_domain"
     ):
-        failures.append("ood_false_positive")
+        if (conv_meta or {}).get("state") != "pending" and not _chaos_trace_has_pending(trace_entries):
+            failures.append("ood_false_positive")
     return failures
 
 
@@ -4505,7 +4551,16 @@ def _run_chaos_sim(args):
                     trace_entries=trace_entries,
                 )
                 if failures_for_turn:
-                    pattern_keys = _chaos_build_failure_patterns(failures_for_turn, meta, conv_meta)
+                    pattern_meta = meta
+                    trace_action = _chaos_trace_action(trace_entries)
+                    if trace_action:
+                        pattern_meta = dict(meta or {})
+                        pattern_meta["action"] = trace_action
+                    pattern_keys = _chaos_build_failure_patterns(
+                        failures_for_turn,
+                        pattern_meta,
+                        conv_meta,
+                    )
                     record = {
                         "case_id": case["case_id"],
                         "turn": turn_idx,

@@ -370,13 +370,31 @@ def _detect_fast_intent(
 def _detect_intent_signals(message_text: str, *, timing_context: dict | None = None) -> DecisionSignals:
     from . import _legacy as legacy
 
+    intent_hint = None
+    if isinstance(timing_context, dict):
+        hinted = timing_context.get("short_intent_hint")
+        if isinstance(hinted, str):
+            try:
+                intent_hint = Intent(hinted)
+            except ValueError:
+                intent_hint = None
+
     is_greeting = legacy.is_greeting_message(message_text)
     is_thanks = legacy.is_thanks_message(message_text)
     is_ack = legacy.is_acknowledgement_message(message_text)
     is_low_signal = legacy.is_low_signal_message(message_text)
     is_status_question = legacy.is_bot_status_question(message_text)
 
-    if is_greeting:
+    if intent_hint == Intent.GREETING:
+        intent = Intent.GREETING
+        legacy.logger.info("Intent shortcut: greeting (llm hint)")
+    elif intent_hint == Intent.THANKS:
+        intent = Intent.THANKS
+        legacy.logger.info("Intent shortcut: thanks (llm hint)")
+    elif intent_hint == Intent.QUESTION:
+        intent = Intent.QUESTION
+        legacy.logger.info("Intent shortcut: question (llm hint)")
+    elif is_greeting:
         intent = Intent.GREETING
         legacy.logger.info("Intent shortcut: greeting")
     elif is_thanks:
@@ -388,6 +406,13 @@ def _detect_intent_signals(message_text: str, *, timing_context: dict | None = N
     else:
         intent = legacy.classify_intent(message_text, timing_context=timing_context)
         legacy.logger.info(f"Intent classified: {intent.value}")
+
+    if intent_hint in {Intent.GREETING, Intent.THANKS, Intent.QUESTION}:
+        is_greeting = intent_hint == Intent.GREETING
+        is_thanks = intent_hint == Intent.THANKS
+        is_ack = False
+        is_low_signal = False
+        is_status_question = False
 
     return DecisionSignals(
         intent=intent,
@@ -5418,7 +5443,7 @@ async def _handle_webhook_payload(
     ):
         early_info_intents, early_info_meta = _detect_info_class_intents(
             message_text,
-            intent_decomp_set=set(),
+            intent_decomp_set=intent_decomp_set,
         )
         if not (
             is_greeting_message(message_text)
@@ -5434,8 +5459,16 @@ async def _handle_webhook_payload(
             )
             out_hits = int(early_domain_meta.get("out_hits") or 0)
             strict_in_hits = int(early_domain_meta.get("strict_in_hits") or 0)
-            early_in_signals = bool(strict_in_hits > 0 or booking_signal or early_info_intents)
+            early_in_signals = bool(
+                strict_in_hits > 0 or booking_signal or booking_wants_flow or early_info_intents
+            )
             early_out_of_domain = bool(out_hits > 0 and not early_in_signals)
+            if early_out_of_domain and _is_short_reply(message_text):
+                intent_hint = classify_intent(message_text, timing_context=timing_context)
+                if intent_hint in {Intent.GREETING, Intent.THANKS, Intent.QUESTION}:
+                    if isinstance(timing_context, dict):
+                        timing_context["short_intent_hint"] = intent_hint.value
+                    early_out_of_domain = False
 
     expected_reply_off_topic = (
         expected_reply_type == EXPECTED_REPLY_SERVICE
