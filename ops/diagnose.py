@@ -4095,34 +4095,56 @@ def _chaos_failure_bucket(label):
         "decision_meta_poll_failed",
         "missing_decision_meta",
         "missing_decision_trace",
-        "manager_action_failed",
         "console_token_missing",
         "console_token_error",
+    }
+    handoff = {
+        "missing_conversation_id",
+        "handover_missing",
+        "handover_status_mismatch",
+        "state_mismatch",
+        "pending_action_mismatch",
+        "manager_action_failed",
+    }
+    policy = {
+        "policy_gate_mismatch",
+        "policy_gate_false_positive",
+        "forbidden_policy_gate",
+        "forbidden_action",
+        "forbidden_intent",
+        "forbidden_fact_source",
+        "forbidden_trace_stage",
+    }
+    data_pack = {
+        "consult_playbook_mismatch",
+        "info_sections_mismatch",
     }
     evaluator = {
         "action_mismatch",
         "expected_reply_type_mismatch",
-        "state_mismatch",
-        "handover_status_mismatch",
-        "pending_action_mismatch",
-    }
-    data_pack = {
-        "policy_gate_missing",
-        "fact_source_mismatch",
-        "truth_missing",
-        "service_missing",
     }
     if label in infra:
         return "infra"
-    if label in evaluator:
-        return "evaluator"
+    if label in handoff:
+        return "handoff"
+    if label in policy:
+        return "policy"
     if label in data_pack:
         return "data_pack"
+    if label in evaluator:
+        return "evaluator"
     return "logic"
 
 
 def _chaos_bucket_counts(failures):
-    counts = {"infra": 0, "logic": 0, "evaluator": 0, "data_pack": 0}
+    counts = {
+        "infra": 0,
+        "handoff": 0,
+        "policy": 0,
+        "data_pack": 0,
+        "evaluator": 0,
+        "logic": 0,
+    }
     for record in failures:
         for label in record.get("failure") or []:
             bucket = _chaos_failure_bucket(label)
