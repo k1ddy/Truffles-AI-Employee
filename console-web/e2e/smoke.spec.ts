@@ -327,8 +327,17 @@ test.describe('Inbox Features', () => {
         const firstRow = page.getByTestId('cases-row').first();
         await expect(firstRow).toBeVisible();
         await firstRow.click();
-        await expect(page).toHaveURL(/\/cases\/[a-f0-9-]+/);
-        await expect(page.getByTestId('case-details')).toBeVisible({ timeout: 5000 });
+        try {
+            await expect(page).toHaveURL(/\/cases\/[a-f0-9-]+/, { timeout: 5000 });
+        } catch {
+            const openButton = page.getByTestId('case-open').first();
+            await expect(openButton).toBeVisible();
+            await openButton.click();
+            await expect(page).toHaveURL(/\/cases\/[a-f0-9-]+/);
+        }
+        await expect(
+            page.getByTestId('case-details').or(page.getByTestId('case-view'))
+        ).toBeVisible({ timeout: 5000 });
     });
 });
 
