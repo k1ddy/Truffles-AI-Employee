@@ -63,7 +63,7 @@
 - DONE: TP-2026-01-23 Console Telegram CI fix (ruff import order + schemathesis exclude) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277543109
 - DONE: TP-2026-01-23 Console Telegram Schemathesis unexclude (/telegram/health) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277995685
 - PLAN: TP-2026-01-23 Telegram protocol docs (Web-first) — in progress
-- PLAN: TP-2026-01-25 console-web build fix (resolve Settings TS error; unblock console deploy).
+- DONE: TP-2026-01-25 console-web build fix (Settings TS error resolved) — PR #353 https://github.com/k1ddy/Truffles-AI-Employee/pull/353; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21326322920.
 - PLAN: TP-2026-01-25 Control Plane Phase 3 (Knowledge Studio: draft/validate/publish/rollback UI).
 - STOP-LINE: CI run failed — https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21276341412
   - lint job → step "Lint (ruff)" failed: `ruff check app tests`, error `I001 Import block is un-sorted or un-formatted` at `app/routers/console.py:1:1` (ubuntu-latest, Python 3.11.14).
