@@ -385,6 +385,7 @@ def _resolve_datetime_offline(
     message_text: str,
     *,
     client_slug: str | None = None,
+    relative_base: datetime | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {"value": None, "confidence": 0.0, "evidence": {}}
     if not message_text:
@@ -394,7 +395,11 @@ def _resolve_datetime_offline(
     if not normalized:
         return result
 
-    settings = {"PREFER_DATES_FROM": "future"}
+    settings: dict[str, Any] = {"PREFER_DATES_FROM": "future"}
+    if relative_base is not None:
+        if relative_base.tzinfo is None:
+            relative_base = relative_base.replace(tzinfo=timezone.utc)
+        settings["RELATIVE_BASE"] = relative_base
     parsed = dateparser.parse(message_text, languages=["ru"], settings=settings)
     if not parsed and normalized != message_text:
         parsed = dateparser.parse(normalized, languages=["ru"], settings=settings)

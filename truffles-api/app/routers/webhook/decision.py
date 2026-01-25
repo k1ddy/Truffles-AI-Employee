@@ -2470,10 +2470,19 @@ def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
     return None
 
 
-def _extract_datetime(text: str, *, client_slug: str | None = None) -> str | None:
+def _extract_datetime(
+    text: str,
+    *,
+    client_slug: str | None = None,
+    relative_base: datetime | None = None,
+) -> str | None:
     if not text:
         return None
-    resolved = _resolve_datetime_offline(text, client_slug=client_slug)
+    resolved = _resolve_datetime_offline(
+        text,
+        client_slug=client_slug,
+        relative_base=relative_base,
+    )
     if isinstance(resolved, dict):
         value = resolved.get("value")
         if isinstance(value, str) and value.strip():
@@ -2554,13 +2563,21 @@ def _evaluate_booking_signal(
     *,
     client_slug: str | None,
     message_text: str | None,
+    relative_base: datetime | None = None,
 ) -> tuple[bool, dict | None]:
     if not messages:
         return False, None
     if any(_is_booking_request(message) for message in messages):
         return True, None
     has_service = any(_extract_service_hint(message, client_slug) for message in messages)
-    has_datetime = any(_extract_datetime(message, client_slug=client_slug) for message in messages)
+    has_datetime = any(
+        _extract_datetime(
+            message,
+            client_slug=client_slug,
+            relative_base=relative_base,
+        )
+        for message in messages
+    )
     booking_signal = has_service and has_datetime
     if booking_signal and message_text:
         segments = [segment.strip() for segment in re.split(r"[?!\.,;]+", message_text) if segment.strip()]
@@ -5053,6 +5070,7 @@ async def _handle_webhook_payload(
             booking_messages,
             client_slug=payload.client_slug,
             message_text=message_text,
+            relative_base=sim_now,
         )
     else:
         booking_signal = False
