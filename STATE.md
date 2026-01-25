@@ -16,6 +16,7 @@
 - DONE: Phase 2 UI Provisioning Wizard — PR #348 https://github.com/k1ddy/Truffles-AI-Employee/pull/348; Evidence: `origin/main` commit `169e58ba` (wizard in `console-web/src/app/settings/page.tsx`) + local UI screenshot `docs/REPORTS/2026-01-25-control-plane-provisioning.png`.
 - DONE: console-e2e-live CI fix (selection gate + storage state) — PR #362 https://github.com/k1ddy/Truffles-AI-Employee/pull/362; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21329488754; local check `npm --prefix console-web run test:e2e:smoke` (prod base URL).
 - PLAN: Phase 4 Control Plane (Team + Calendar UI) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`.
+- IN_PROGRESS: console-e2e-live CI fix (Keycloak login/storageState) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-e2e-live-ci-fix.md`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
