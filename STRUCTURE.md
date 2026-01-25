@@ -82,6 +82,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-25-chaos-live-e2e.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-sim-time-override.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-thanks-typo-smalltalk.md`
+- `docs/TASK_PACKAGES/TP-2026-01-25-chaos-sim-resilience.md`
 
 ---
 
