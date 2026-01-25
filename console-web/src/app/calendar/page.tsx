@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
 import { useSession } from "next-auth/react";
@@ -101,16 +101,6 @@ export default function CalendarPage() {
         retry: 1,
     });
 
-    // Debug log for specialists loading
-    useEffect(() => {
-        if (specialistsError) {
-            console.error("Specialists load error:", specialistsErrorData);
-        }
-        if (specialistsData) {
-            console.log("Specialists loaded:", specialistsData);
-        }
-    }, [specialistsData, specialistsError, specialistsErrorData]);
-
     const specialists = specialistsData?.items ?? [];
     const currentSpecialist = specialists.find(s => s.id === selectedSpecialist);
     const duration = selectedService?.duration_min || 60;
@@ -191,11 +181,16 @@ export default function CalendarPage() {
     }
 
     return (
-        <div className="max-w-6xl mx-auto p-6">
-            {/* Header */}
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold">Записи</h1>
-                <Link href="/" className="text-primary hover:text-primary/80">
+        <div className="space-y-6" data-testid="calendar-page">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <div className="badge mb-3">Calendar</div>
+                    <h1 className="text-2xl font-semibold">Записи</h1>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                        Подберите слот, подтвердите услугу и создайте запись вручную при необходимости.
+                    </p>
+                </div>
+                <Link href="/" className="btn-ghost">
                     ← Назад к заявкам
                 </Link>
             </div>
@@ -205,7 +200,7 @@ export default function CalendarPage() {
                 <div className="lg:col-span-2 space-y-6">
                     {/* Debug/Error info */}
                     {specialistsError && (
-                        <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 text-destructive">
+                        <div className="card-surface p-4 text-destructive">
                             <h3 className="font-semibold mb-2">Ошибка загрузки мастеров</h3>
                             <pre className="text-xs overflow-auto">
                                 {JSON.stringify(specialistsErrorData, null, 2)}
@@ -214,7 +209,7 @@ export default function CalendarPage() {
                     )}
 
                     {/* Filters */}
-                    <div className="bg-card border border-border/60 rounded-lg p-4 space-y-4">
+                    <div className="card-surface p-4 space-y-4">
                         <h2 className="font-semibold text-lg">Выберите мастера и дату</h2>
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -287,7 +282,7 @@ export default function CalendarPage() {
 
                     {/* Slots Grid */}
                     {selectedSpecialist && (
-                        <div className="bg-card border border-border/60 rounded-lg p-4">
+                        <div className="card-surface p-4">
                             <h2 className="font-semibold text-lg mb-4">
                                 Доступные слоты на {new Date(selectedDate).toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}
                             </h2>
@@ -344,7 +339,7 @@ export default function CalendarPage() {
 
                     {/* Booking Form */}
                     {showForm && selectedSlot && (
-                        <div className="bg-card border border-border/60 rounded-lg p-4">
+                        <div className="card-surface p-4">
                             <h2 className="font-semibold text-lg mb-4">Данные клиента</h2>
 
                             <form onSubmit={handleSubmit} className="space-y-4">
@@ -402,14 +397,14 @@ export default function CalendarPage() {
                                     <button
                                         type="submit"
                                         disabled={createMutation.isPending}
-                                        className="px-6 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
+                                        className="btn-primary disabled:opacity-50"
                                     >
                                         {createMutation.isPending ? "Создаём..." : "Записать клиента"}
                                     </button>
                                     <button
                                         type="button"
                                         onClick={resetForm}
-                                        className="px-6 py-2 bg-muted text-foreground/80 rounded-lg hover:bg-muted/80"
+                                        className="btn-ghost"
                                     >
                                         Отмена
                                     </button>
@@ -421,7 +416,7 @@ export default function CalendarPage() {
 
                 {/* Right: Today's Bookings */}
                 <div className="space-y-6">
-                    <div className="bg-card border border-border/60 rounded-lg p-4">
+                    <div className="card-surface p-4">
                         <h2 className="font-semibold text-lg mb-4">
                             Записи на {new Date(selectedDate).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
                         </h2>
