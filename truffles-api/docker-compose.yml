@@ -66,6 +66,9 @@ services:
     build:
       context: ../console-web
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BUILD_SHA: ${GIT_COMMIT:-unknown}
+        NEXT_PUBLIC_BUILD_TIME: ${BUILD_TIME:-unknown}
     container_name: truffles-console-web
     restart: unless-stopped
     env_file:
