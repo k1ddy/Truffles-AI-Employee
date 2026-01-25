@@ -1,4 +1,5 @@
 import asyncio
+import re
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
@@ -49,7 +50,18 @@ def _make_db(client, settings, conversation, user):
 
 
 def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
-    saved_messages = [Mock() for _ in range(7)]
+    dialogue = [
+        {"text": "привет, можно записаться?", "expect_reply_type": "service_choice"},
+        {"text": "мне бы ногти сделать", "expect_reply_type": "time"},
+        {"text": "а вы бот вообще?", "expect_reply_type": "time"},
+        {"text": "сколько стоит примерно?", "expect_reply_type": "time"},
+        {"text": "завтра после обеда можно?", "expect_reply_type": "name"},
+        {"text": "ой нет, лучше к вечеру, часов в 7", "expect_reply_type": "name"},
+        {"text": "ээ, имя скажу позже", "expect_reply_type": "name"},
+        {"text": "меня зовут Алия", "expect_reply_type": None},
+        {"text": "спасибо", "expect_reply_type": None},
+    ]
+    saved_messages = [Mock() for _ in range(len(dialogue))]
     for saved_message in saved_messages:
         saved_message.message_metadata = {}
 
@@ -76,22 +88,13 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
     )
     user = SimpleNamespace(id="user-123", context={})
 
-    messages = [
-        "Добрый день",
-        "Нужен маникюр",
-        "а вы бот?",
-        "Запишите на завтра 15:00",
-        "ой, пробки жесть",
-        "Меня зовут Алия",
-        "Спасибо",
-    ]
     payloads = []
-    for idx, text in enumerate(messages, start=1):
+    for idx, turn in enumerate(dialogue, start=1):
         payloads.append(
             WebhookRequest(
                 client_slug="demo_salon",
                 body=WebhookBody(
-                    message=text,
+                    message=turn["text"],
                     messageType="text",
                     metadata=WebhookMetadata(
                         remoteJid="77000000000@s.whatsapp.net",
@@ -114,18 +117,34 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
     llm_result = Result.success((None, "low_confidence"))
 
     def _stub_service_hint(message_text, _client_slug):
-        if message_text and "маникюр" in message_text.casefold():
+        if not message_text:
+            return None
+        normalized = message_text.casefold()
+        if re.search(r"маникюр|ногти|ногот", normalized):
             return "маникюр"
+        if "педикюр" in normalized:
+            return "педикюр"
+        if "ресниц" in normalized:
+            return "ресницы"
         return None
 
     def _stub_datetime(message_text):
         if not message_text:
             return None
-        if "15:00" in message_text:
+        normalized = message_text.casefold()
+        if "после обеда" in normalized:
             return "15:00"
-        if "15 00" in message_text:
-            return "15:00"
-        if "завтра" in message_text.casefold():
+        if "вечер" in normalized or "к вечеру" in normalized:
+            return "19:00"
+        match = re.search(r"(\d{1,2})(?:[:. ](\d{2}))?", normalized)
+        if match:
+            hour = int(match.group(1))
+            minute = match.group(2) or "00"
+            if "вечер" in normalized or "после обеда" in normalized:
+                if hour < 12:
+                    hour += 12
+            return f"{hour:02d}:{minute}"
+        if "завтра" in normalized:
             return "завтра"
         return None
 
@@ -159,7 +178,7 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
         side_effect=_stub_datetime,
     ), patch(
         "app.routers.webhook._legacy._get_recent_service_hint",
-        return_value="маникюр",
+        return_value=None,
     ), patch(
         "app.routers.webhook._legacy.interpret_expected_reply",
         return_value=stub_answer,
@@ -173,7 +192,7 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
         "app.routers.webhook._legacy._reuse_active_handover",
         return_value=(None, True, False),
     ):
-        for payload in payloads:
+        for payload, turn in zip(payloads, dialogue):
             asyncio.run(
                 webhook_router._handle_webhook_payload(
                     payload,
@@ -184,6 +203,10 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
                     conversation_id=conversation_id,
                 )
             )
+            if "expect_reply_type" in turn:
+                assert (
+                    conversation.context.get("expected_reply_type") == turn["expect_reply_type"]
+                )
 
     assert create_booking.call_count == 1
     booking_state = create_booking.call_args.kwargs["booking_state"]

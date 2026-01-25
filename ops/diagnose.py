@@ -445,6 +445,32 @@ SAFE_ALLOWLIST_JID = "77015705555@s.whatsapp.net"
 SAFE_ALLOWLIST_CLIENT_SLUG = "demo_salon"
 
 CHAOS_LANG_MODES = ("ru", "kk", "mixed")
+CHAOS_FILLERS = ["слушай", "короче", "ээ", "ну", "если честно"]
+CHAOS_INTERJECTIONS = ["блин", "капец", "ахаха", "мм", "ппц"]
+CHAOS_SERVICE_PATTERNS = [
+    "{service}",
+    "мне бы {service}",
+    "хочу {service}",
+    "{service} надо",
+    "нужен {service}",
+]
+CHAOS_TIME_PATTERNS = [
+    "{time}",
+    "на {time}",
+    "в {time}",
+    "после обеда",
+    "к вечеру",
+    "часов в {hour}",
+    "к {hour}",
+]
+CHAOS_TIME_HOURS = ["5", "6", "7", "8", "9", "10", "11"]
+CHAOS_NAME_PATTERNS = [
+    "{name}",
+    "меня зовут {name}",
+    "я {name}",
+    "это {name}",
+]
+CHAOS_CORRECTIONS = ["ой нет", "не, лучше", "передумал, давайте", "ой, не так"]
 CHAOS_SERVICES = [
     "маникюр",
     "педикюр",
@@ -461,6 +487,9 @@ CHAOS_TIMES = [
     "ертең кешке",
     "сенбі түсте",
     "жұма күні кешке",
+    "после обеда",
+    "к вечеру",
+    "часов в 7",
 ]
 CHAOS_CONNECTORS = {
     "ru": ["и", "а еще", "также", "плюс"],
@@ -476,19 +505,19 @@ CHAOS_INTENT_PHRASES = {
         "kk": ["рахмет", "үлкен рахмет"],
     },
     "booking": {
-        "ru": ["хочу записаться", "запишите меня", "нужна запись"],
+        "ru": ["хочу записаться", "запишите меня", "нужна запись", "можно записаться?", "нужно срочно записаться"],
         "kk": ["жазылғым келеді", "жазып қойыңыз", "жазылуға бола ма"],
     },
     "pricing": {
-        "ru": ["сколько стоит {service}", "какая цена на {service}"],
+        "ru": ["сколько стоит {service}", "какая цена на {service}", "че по цене {service}"],
         "kk": ["{service} бағасы қанша", "{service} қанша тұрады"],
     },
     "address": {
-        "ru": ["где вы находитесь", "адрес где", "как до вас добраться"],
+        "ru": ["где вы находитесь", "адрес где", "как до вас добраться", "скиньте адрес"],
         "kk": ["мекенжай қайда", "қайда орналасқансыз"],
     },
     "hours": {
-        "ru": ["до скольки работаете", "график работы какой"],
+        "ru": ["до скольки работаете", "график работы какой", "во сколько открываетесь"],
         "kk": ["жұмыс уақыты нешеге дейін", "қашанға дейін ашық"],
     },
     "duration": {
@@ -496,11 +525,11 @@ CHAOS_INTENT_PHRASES = {
         "kk": ["қанша уақыт алады", "уақыты қанша"],
     },
     "discount": {
-        "ru": ["есть скидка", "какие акции сейчас", "можно скидку"],
+        "ru": ["есть скидка", "какие акции сейчас", "можно скидку", "скидос есть?"],
         "kk": ["жеңілдік бар ма", "акция бар ма"],
     },
     "payment": {
-        "ru": ["можно оплатить картой", "есть каспи", "можно переводом"],
+        "ru": ["можно оплатить картой", "есть каспи", "можно переводом", "каспи ред есть?"],
         "kk": ["картамен төлеуге бола ма", "каспи бар ма"],
     },
     "refund": {
@@ -528,7 +557,7 @@ CHAOS_INTENT_PHRASES = {
         "kk": ["жазбаңыз", "тоқта", "кедергі жасамаңыз"],
     },
     "ood": {
-        "ru": ["какая погода", "курс доллара", "закажите пиццу"],
+        "ru": ["какая погода", "курс доллара", "закажите пиццу", "а вы бот?", "что по пробкам"],
         "kk": ["ауа райы қандай", "доллар бағамы", "пицца заказ"],
     },
 }
@@ -638,6 +667,18 @@ def _chaos_apply_noise(rng, text, level):
     return noisy
 
 
+def _chaos_humanize_message(rng, text, lang_mode):
+    if not text:
+        return text
+    if rng.random() < 0.35:
+        text = f"{_chaos_pick(rng, CHAOS_FILLERS)} {text}"
+    if rng.random() < 0.25:
+        text = f"{text} {_chaos_pick(rng, CHAOS_INTERJECTIONS)}"
+    if lang_mode == "mixed" and rng.random() < 0.2:
+        text = f"{text} {_chaos_pick(rng, NOISE_SUFFIXES)}"
+    return text
+
+
 def _chaos_render_intent(
     rng,
     intent_key,
@@ -649,11 +690,19 @@ def _chaos_render_intent(
     include_service=True,
 ):
     if intent_key == "service":
-        return service or _chaos_pick(rng, CHAOS_SERVICES)
+        value = service or _chaos_pick(rng, CHAOS_SERVICES)
+        pattern = _chaos_pick(rng, CHAOS_SERVICE_PATTERNS)
+        return pattern.format(service=value)
     if intent_key == "time":
-        return time_value or _chaos_pick(rng, CHAOS_TIMES)
+        value = time_value or _chaos_pick(rng, CHAOS_TIMES)
+        pattern = _chaos_pick(rng, CHAOS_TIME_PATTERNS)
+        if "{hour}" in pattern:
+            return pattern.format(hour=_chaos_pick(rng, CHAOS_TIME_HOURS))
+        return pattern.format(time=value)
     if intent_key == "name":
-        return name or _chaos_pick(rng, CHAOS_NAMES)
+        value = name or _chaos_pick(rng, CHAOS_NAMES)
+        pattern = _chaos_pick(rng, CHAOS_NAME_PATTERNS)
+        return pattern.format(name=value)
     phrase = _chaos_pick_phrase(rng, intent_key, lang_mode)
     if "{service}" in phrase:
         if include_service and service:
@@ -687,6 +736,7 @@ def _chaos_build_message(
             )
         )
     text = _chaos_join_parts(rng, [part for part in parts if part], lang_mode)
+    text = _chaos_humanize_message(rng, text, lang_mode)
     return _chaos_apply_noise(rng, text, noise)
 
 
@@ -889,6 +939,27 @@ def _chaos_build_booking_case(rng, case_id, min_turns, max_turns, noise):
                 {
                     "action_any": ["reply"],
                     "booking_interrupt": True,
+                    "expected_reply_type": expected_reply_type,
+                    "state": "bot_active",
+                },
+            )
+        )
+
+    if rng.random() < 0.45:
+        correction_prefix = _chaos_pick(rng, CHAOS_CORRECTIONS)
+        correction_time = _chaos_build_message(
+            rng,
+            ["time"],
+            lang_mode=lang_mode,
+            time_value=time_value,
+            noise=noise,
+        )
+        turns.append(
+            _chaos_make_turn(
+                f"{correction_prefix}, {correction_time}",
+                ["time"],
+                {
+                    "action_any": ["booking_prompt"],
                     "expected_reply_type": expected_reply_type,
                     "state": "bot_active",
                 },
@@ -1984,6 +2055,7 @@ def _parse_chaos_sim_args(argv):
     parser.add_argument("--skip-outbox", action="store_true")
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--simulation-id", default=None)
+    parser.add_argument("--dump-cases", action="store_true")
     parser.add_argument("--console-base-url", default=os.environ.get("CONSOLE_API_BASE_URL"))
     parser.add_argument("--console-token", default=None)
     parser.add_argument("--console-env", default="/home/zhan/secrets/console-contract.env")
@@ -3612,6 +3684,11 @@ def _run_chaos_sim(args):
         console_headers["X-Client-Id"] = client_meta.get("client_id")
 
     cases = _chaos_generate_cases(args.count, rng, args.min_turns, args.max_turns, args.noise)
+    if args.dump_cases:
+        cases_path = os.path.join(output_dir, "cases.jsonl")
+        with open(cases_path, "w", encoding="utf-8") as handle:
+            for case in cases:
+                handle.write(json.dumps(case, ensure_ascii=False) + "\n")
     failures = []
     failure_counts = {}
     pattern_counts = {}

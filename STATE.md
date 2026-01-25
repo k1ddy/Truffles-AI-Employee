@@ -171,7 +171,7 @@
 - **DONE:** GAP-017 Branch isolation evidence (branch_routing + RAG fallback + policy_gate + demo handover/Telegram) — см. запись 2026-01-14.
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **OPEN-1:** Branch routing stickiness: instanceId inbound не переопределяет existing conversation.branch_id; outbound уходит через client.config.instance_id (demo_salon). Evidence 2026-01-20 ниже.
-- **OPEN-2:** GAP-023 Chaos dialog testing (noise/interruptions) отсутствует — зафиксировано в `docs/IMPERIUM_GAPS.yaml`; нужен seeded chaos‑eval tier на 10–15 ходов.
+- **DONE:** GAP-023 Chaos dialog testing (noise/interruptions) — human-like chaos generator + booking chaos unit suite (TP-2026-01-25-human-dialog-tests; pytest `truffles-api/tests/test_booking_chaos_dialogs.py` → 1 passed; chaos-sim dry-run artifacts `/tmp/chaos_human/cases.jsonl`).
 - **OPEN-3:** GAP-024 Долгосрочная память (context profile) отложена — код‑скелет есть, флаг OFF; см. `docs/IMPERIUM_GAPS.yaml`.
 - **PLAN (no evidence):** P0 “бот не знает, что отвечать” → расширить RU/KZ/mixed лексиконы и диалоги в packs + покрыть детерминированным webhook‑fuzz (см. Task Package ниже).
 - **PLAN (no evidence):** Task Package `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` — chaos‑sim + consult quality (multi‑intent, safe advice).
