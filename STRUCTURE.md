@@ -71,6 +71,9 @@
 - `docs/TASK_PACKAGES/TP-2026-01-24-ops-outbox-delivery.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-telegram-desktop-link-fix.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-human-dialog-tests.md`
+- `docs/TASK_PACKAGES/TP-2026-01-25-prod-gonogo-dec.md`
+- `docs/TASK_PACKAGES/TP-2026-01-25-console-web-build-fix.md`
+- `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase3-knowledge-studio.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-build-info.md`
 
 ---

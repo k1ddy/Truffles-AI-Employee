@@ -43,6 +43,7 @@
 - FIX READY (CA-11): booking_interrupt/multi_truth retention при trace_len=40; PR #197 https://github.com/k1ddy/Truffles-AI-Employee/pull/197; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21110933209; SQL evidence conv_id da9519fd-bdab-4f22-966a-0c535f3ea6a1 msg_id ca11-3-1768735290143673848 trace_len=40 stages booking_interrupt+multi_truth present (simulated inbound via /webhook on local container, TEST_MODE=1) — см. запись 2026-01-18 ниже.
 - STOP‑LINE: были нарушения процесса (очистка decision_trace ради evidence, изменение STATE.md не ролью Brain) — зафиксировано ниже.
 - DONE: Onboarding contract добавлен в `docs/PROCESSES.md` (instanceId обязателен; 1 номер=1 филиал; mandatory data + safe-mode + no-go). Evidence: commit `f3b29e40`.
+- DONE: DEC-014 Production Go/No-Go (готовность к живым заказчикам) — PR #351 https://github.com/k1ddy/Truffles-AI-Employee/pull/351 (DEC registry + Control Plane section).
 - DONE: Response Composer v1 (ack+CTA из pack, response_variant_id в meta) — PR #299 https://github.com/k1ddy/Truffles-AI-Employee/pull/299; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21208785389.
 - DONE: DEC‑012 Observability contract + OTel/Tempo (log‑contract + timing in decision_meta/outbox + trace‑bundle). Evidence: CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21272005538 (livecheck+long green); trace‑bundle `/tmp/trace_bundle_dec012.json` msg_id `LC-AUTO-20260123-021831-CA08-d4500f1b` conv_id `ea6406d3-1459-4a2d-8097-b62ee53a21bb` trace_id `5cbe3473c5a48fff7f95636eaab66d15`, timing stages policy_gate_ms/send_ms, outbox_id `dd58b7d1-a0a5-459f-9c79-f339b91395f1` status SENT; Tempo metric `/tmp/tempo_metrics_dec012.txt` (tempo_distributor_spans_received_total=3.057152e+06); OTel logs `/tmp/otel_outbox.log`, `/tmp/otel_sentinel.log`.
 - TODO: Определить схему обязательных данных филиала + валидацию (поля, формат, чек‑лист).
@@ -53,7 +54,8 @@
 - DONE: `/console/v1/me` теперь возвращает `selection_required=true`, `clients_count=2` для E2E. Evidence: curl + jq.
 - BLOCKERS: Playwright smoke на prod UI падает из‑за `CLIENT_SELECTION_REQUIRED` (prod console-web не отправляет `X-Client-Id`). Evidence: `npm run test:e2e:smoke` + docker logs `ConsoleAPIError: CLIENT_SELECTION_REQUIRED`.
 - BLOCKER: Console Settings bundle в проде без Provisioning Wizard (JS `/_next/static/chunks/app/settings/page-9b2ca6f4c97af6a3.js` не содержит wizard‑строк; `curl https://console.truffles.kz/settings` → `x-nextjs-cache: HIT`). Evidence: curl+rg 2026‑01‑25.
-- PLAN: TP-2026-01-25 console build info (Settings header build SHA/time for deploy diagnosis); lint passed; PR pending.
+- BLOCKER: console-web Docker build fails on TS error in `console-web/src/app/settings/page.tsx:196` (providers union mismatch) → deploy blocked. Evidence: `docker compose ... --build console-web` 2026‑01‑25.
+- DONE: TP-2026-01-25 console build info (Settings header build SHA/time + build args) — PR #350 https://github.com/k1ddy/Truffles-AI-Employee/pull/350; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21325944139.
 - DONE: Console query‑params validation (unknown params + enums + dates + limit) + cursor tolerant + OpenAPI 400/403 + `INVALID_PARAM` error registry. Evidence: CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21270247679; Schemathesis GET-only smoke on prod (seed 68493311863361754745919126795202296800) — 580 passed, warnings for missing test data on `/cases/{case_id}` + `/cases/{case_id}/messages` and schema mismatch (see below).
 - DONE: Schemathesis seeds added for `/cases/{case_id}` + `/cases/{case_id}/messages` (stable IDs in `contracts/console_api/schemathesis.toml`), warnings resolved.
 - DONE: TP-2026-01-23 Console↔Telegram P0 contract alignment (OpenAPI + API + UI + docs) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277543109
@@ -62,6 +64,8 @@
 - DONE: TP-2026-01-23 Console Telegram CI fix (ruff import order + schemathesis exclude) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277543109
 - DONE: TP-2026-01-23 Console Telegram Schemathesis unexclude (/telegram/health) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277995685
 - PLAN: TP-2026-01-23 Telegram protocol docs (Web-first) — in progress
+- PLAN: TP-2026-01-25 console-web build fix (resolve Settings TS error; unblock console deploy).
+- PLAN: TP-2026-01-25 Control Plane Phase 3 (Knowledge Studio: draft/validate/publish/rollback UI).
 - STOP-LINE: CI run failed — https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21276341412
   - lint job → step "Lint (ruff)" failed: `ruff check app tests`, error `I001 Import block is un-sorted or un-formatted` at `app/routers/console.py:1:1` (ubuntu-latest, Python 3.11.14).
   - console-contract job → step "Schemathesis GET-only smoke" failed: GET `/telegram/health` returned 404 (documented 200/401/403), command `schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml --url https://api.truffles.kz/console/v1 --include-method=GET --checks all --request-timeout 10 --max-examples=3 --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"` (ubuntu-latest, Python 3.11.14).
