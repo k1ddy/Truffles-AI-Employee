@@ -1532,6 +1532,10 @@ export default function SettingsPage() {
     const [testTarget, setTestTarget] = useState<string | null>(null);
     const [linkTarget, setLinkTarget] = useState<string | null>(null);
     const [linkTokens, setLinkTokens] = useState<Record<string, AgentLinkData>>({});
+    const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA;
+    const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME;
+    const buildShaLabel = buildSha ? buildSha.slice(0, 7) : "unknown";
+    const buildTimeLabel = buildTime ?? "unknown";
 
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["settings"],
@@ -1662,6 +1666,10 @@ export default function SettingsPage() {
                 <Link href="/" className="text-primary hover:text-primary/80">
                     ← Назад в Inbox
                 </Link>
+            </div>
+            <div className="mb-4 text-xs text-muted-foreground" data-testid="settings-build-info">
+                Build: <span className="font-mono" title={buildSha ?? "unknown"}>{buildShaLabel}</span> |{" "}
+                <span className="font-mono">{buildTimeLabel}</span>
             </div>
 
             <ProvisioningWizard session={session} />

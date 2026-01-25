@@ -51,6 +51,8 @@
 - DONE: Console E2E seed (stable IDs) через `console_e2e_seed.py` с `E2E_SUBJECT` из JWT. Evidence: output IDs (company/client/branch/agent/handover).
 - DONE: `/console/v1/me` теперь возвращает `selection_required=true`, `clients_count=2` для E2E. Evidence: curl + jq.
 - BLOCKERS: Playwright smoke на prod UI падает из‑за `CLIENT_SELECTION_REQUIRED` (prod console-web не отправляет `X-Client-Id`). Evidence: `npm run test:e2e:smoke` + docker logs `ConsoleAPIError: CLIENT_SELECTION_REQUIRED`.
+- BLOCKER: Console Settings bundle в проде без Provisioning Wizard (JS `/_next/static/chunks/app/settings/page-9b2ca6f4c97af6a3.js` не содержит wizard‑строк; `curl https://console.truffles.kz/settings` → `x-nextjs-cache: HIT`). Evidence: curl+rg 2026‑01‑25.
+- PLAN: TP-2026-01-25 console build info (Settings header build SHA/time for deploy diagnosis); lint passed; PR pending.
 - DONE: Console query‑params validation (unknown params + enums + dates + limit) + cursor tolerant + OpenAPI 400/403 + `INVALID_PARAM` error registry. Evidence: CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21270247679; Schemathesis GET-only smoke on prod (seed 68493311863361754745919126795202296800) — 580 passed, warnings for missing test data on `/cases/{case_id}` + `/cases/{case_id}/messages` and schema mismatch (see below).
 - DONE: Schemathesis seeds added for `/cases/{case_id}` + `/cases/{case_id}/messages` (stable IDs in `contracts/console_api/schemathesis.toml`), warnings resolved.
 - DONE: TP-2026-01-23 Console↔Telegram P0 contract alignment (OpenAPI + API + UI + docs) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21277543109
