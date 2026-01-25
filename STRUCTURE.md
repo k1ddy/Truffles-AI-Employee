@@ -32,6 +32,7 @@
 | `console-web/.env.e2e.example` | Шаблон env для console‑e2e | Frontend/QA |
 | `console-web/public/brand/` | Бренд‑ассеты консоли (логотипы) | Frontend |
 | `docs/CONSOLE_GUIDE.md` | Guide по Console (API, тесты, дебаг) | Frontend/Backend |
+| `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
 | `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |
 | `docs/REPORTS/` | Отчёты по прогонам/изменениям | Brain/Architect |
@@ -63,11 +64,13 @@
 - `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-trace-booking-commit.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-consultant-chatgpt-like.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-slot-lock-booking-confirm.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-console-telegram-sync-fixes.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-inbox-health-search.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-consult-quality-core-v1.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-ops-outbox-delivery.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-telegram-desktop-link-fix.md`
+- `docs/TASK_PACKAGES/TP-2026-01-25-human-dialog-tests.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-prod-gonogo-dec.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-web-build-fix.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase3-knowledge-studio.md`

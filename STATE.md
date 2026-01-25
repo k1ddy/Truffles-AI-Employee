@@ -48,6 +48,7 @@
 - DONE: DEC‑012 Observability contract + OTel/Tempo (log‑contract + timing in decision_meta/outbox + trace‑bundle). Evidence: CI run https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21272005538 (livecheck+long green); trace‑bundle `/tmp/trace_bundle_dec012.json` msg_id `LC-AUTO-20260123-021831-CA08-d4500f1b` conv_id `ea6406d3-1459-4a2d-8097-b62ee53a21bb` trace_id `5cbe3473c5a48fff7f95636eaab66d15`, timing stages policy_gate_ms/send_ms, outbox_id `dd58b7d1-a0a5-459f-9c79-f339b91395f1` status SENT; Tempo metric `/tmp/tempo_metrics_dec012.txt` (tempo_distributor_spans_received_total=3.057152e+06); OTel logs `/tmp/otel_outbox.log`, `/tmp/otel_sentinel.log`.
 - TODO: Определить схему обязательных данных филиала + валидацию (поля, формат, чек‑лист).
 - TODO: Автоматизация онбординга (provisioning API/console): создание tenant+branch, mapping instanceId/phone, генерация webhook, go/no‑go gate.
+- DONE: Slot‑lock + booking_confirm реализация (PR #347 https://github.com/k1ddy/Truffles-AI-Employee/pull/347; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21317474044; live-check ca05-booking-commit conv_id c1b61036-10ad-459d-89ab-294f146f9056 msg_id LC-AUTO-20260125-012127-CA05C-04-8b5299bc appointment_id 3a90e292-cb90-4515-bdad-70228e34225e outbox_id a294692d-b7da-49bb-a880-d544f325d580 decision_trace booking_commit appointment_status PENDING_CONFIRMATION; appointment_audit action=create trace_id e9598c220347b4f4c41826647f80a925).
 - DONE: Console DB миграция `005_add_agent_memberships.sql` на проде (CREATE TABLE + 4 индекса + backfill). Evidence: `docker exec -i truffles_postgres_1 psql "$DATABASE_URL" < 005_add_agent_memberships.sql` → `CREATE TABLE` + `CREATE INDEX` + `INSERT 0 6`.
 - DONE: Console E2E seed (stable IDs) через `console_e2e_seed.py` с `E2E_SUBJECT` из JWT. Evidence: output IDs (company/client/branch/agent/handover).
 - DONE: `/console/v1/me` теперь возвращает `selection_required=true`, `clients_count=2` для E2E. Evidence: curl + jq.
@@ -179,7 +180,9 @@
 - **DONE:** GAP-017 Branch isolation evidence (branch_routing + RAG fallback + policy_gate + demo handover/Telegram) — см. запись 2026-01-14.
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **OPEN-1:** Branch routing stickiness: instanceId inbound не переопределяет existing conversation.branch_id; outbound уходит через client.config.instance_id (demo_salon). Evidence 2026-01-20 ниже.
-- **OPEN-2:** GAP-023 Chaos dialog testing (noise/interruptions) отсутствует — зафиксировано в `docs/IMPERIUM_GAPS.yaml`; нужен seeded chaos‑eval tier на 10–15 ходов.
+- **DONE:** GAP-023 Chaos dialog testing (noise/interruptions) — human-like chaos generator + booking chaos unit suite (TP-2026-01-25-human-dialog-tests; pytest `truffles-api/tests/test_booking_chaos_dialogs.py` → 1 passed; chaos-sim dry-run artifacts `/tmp/chaos_human/cases.jsonl`).
+- **DONE:** chaos-sim evaluator relaxations + `--kinds` filter; booking-only logic run (count 5) shows failures dominated by off-hours truth_gate. Evidence: `/tmp/chaos_booking_5` (report + cases/failures).
+- **OPEN:** chaos-sim simulation-time override added in code (needs deploy); booking-only run with `--sim-time` still hits off-hours on current container. Evidence: `/tmp/chaos_booking_simtime_5` (summary.json, interrupted).
 - **OPEN-3:** GAP-024 Долгосрочная память (context profile) отложена — код‑скелет есть, флаг OFF; см. `docs/IMPERIUM_GAPS.yaml`.
 - **PLAN (no evidence):** P0 “бот не знает, что отвечать” → расширить RU/KZ/mixed лексиконы и диалоги в packs + покрыть детерминированным webhook‑fuzz (см. Task Package ниже).
 - **PLAN (no evidence):** Task Package `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` — chaos‑sim + consult quality (multi‑intent, safe advice).

@@ -1,0 +1,80 @@
+# CHAOS-SIM — Human-Like Dialog Runs
+
+Purpose: run realistic (noisy, interrupted) dialog simulations against `/webhook` and evaluate decision_meta/trace
+without relying on scripted inputs. This runbook documents the current setup and how to continue safely.
+
+## Current Context (2026-01-25)
+
+- Worktree: `/home/zhan/worktrees/slot-lock-booking-confirm`
+- Branch: `feat/slot-lock-booking-confirm`
+- Files touched: `ops/diagnose.py` (evaluator relaxations + `--kinds` filter + `--sim-time`)
+- Latest booking-only run (sim-time, interrupted):
+  - Command:
+    ```
+    python3 ops/diagnose.py chaos-sim --count 5 --kinds booking --min-turns 10 --max-turns 12 --noise high \
+      --mode logic --skip-outbox --console-mode skip --sim-time "2026-01-24T12:00:00+06:00" \
+      --min-wait 0 --max-wait 0.2 \
+      --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_booking_simtime_5
+    ```
+  - Summary: failures=14, cases_processed=2, interrupted (signal_2)
+  - Artifacts: `/tmp/chaos_booking_simtime_5` (`cases.jsonl`, `failures.jsonl`, `report.md`, `summary.json`)
+  - Note: API container still on main image; sim-time override requires deploy of this branch to take effect.
+- Previous booking-only run (pre sim-time): `/tmp/chaos_booking_5`
+
+## What Changed in `ops/diagnose.py`
+
+- Human-like generator already in place (fillers, interruptions, corrections).
+- Evaluator relaxations to reduce false positives for:
+  - booking prompt interruptions,
+  - expected_reply_type mismatch when booking is active,
+  - pending action variance (pending_ack/wait/status),
+  - booking-paused/escalation as acceptable outcomes for booking flow.
+- New filter: `--kinds` to run only a subset of cases.
+
+Where to look:
+- Generator and evaluators: `ops/diagnose.py`
+- Key helpers: `_chaos_action_fallback_ok`, `_chaos_reply_type_fallback_ok`,
+  `_chaos_pending_action_ok`, `_chaos_state_fallback_ok`.
+
+## Quick Runs (Recommended)
+
+1) Dry-run generator only (no webhook):
+```
+python3 ops/diagnose.py chaos-sim --count 3 --min-turns 10 --max-turns 12 --noise high \
+  --mode logic --dry-run --dump-cases --output-dir /tmp/chaos_human
+```
+
+2) Booking-only sanity (logic mode, 5–10 cases):
+```
+python3 ops/diagnose.py chaos-sim --count 5 --kinds booking --min-turns 10 --max-turns 12 --noise high \
+  --mode logic --skip-outbox --console-mode skip --sim-time "2026-01-24T12:00:00+06:00" \
+  --min-wait 0 --max-wait 0.2 \
+  --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_booking_5
+```
+
+3) Full mix (once booking-only is stable):
+```
+python3 ops/diagnose.py chaos-sim --count 20 --min-turns 10 --max-turns 12 --noise high \
+  --mode logic --skip-outbox --console-mode skip --sim-time "2026-01-24T12:00:00+06:00" \
+  --min-wait 0 --max-wait 0.2 \
+  --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_full
+```
+
+4) LLM mode (requires keys and budget):
+```
+python3 ops/diagnose.py chaos-sim --count 5 --min-turns 10 --max-turns 12 --noise high \
+  --mode llm --skip-outbox --console-mode skip --sim-time "2026-01-24T12:00:00+06:00" \
+  --min-wait 0 --max-wait 0.2 \
+  --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_llm
+```
+
+## Artifacts to Review
+
+- `cases.jsonl`: generated dialogue turns (what we sent).
+- `failures.jsonl`: per-turn evaluation failures with expected vs actual.
+- `report.md`: summary + failure counts.
+- `rag_debug.jsonl`: only when `--rag-audit` is enabled.
+
+## Known Limitations (Current)
+
+- Ensure `--sim-time` stays within business hours for booking flows.

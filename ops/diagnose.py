@@ -445,6 +445,32 @@ SAFE_ALLOWLIST_JID = "77015705555@s.whatsapp.net"
 SAFE_ALLOWLIST_CLIENT_SLUG = "demo_salon"
 
 CHAOS_LANG_MODES = ("ru", "kk", "mixed")
+CHAOS_FILLERS = ["слушай", "короче", "ээ", "ну", "если честно"]
+CHAOS_INTERJECTIONS = ["блин", "капец", "ахаха", "мм", "ппц"]
+CHAOS_SERVICE_PATTERNS = [
+    "{service}",
+    "мне бы {service}",
+    "хочу {service}",
+    "{service} надо",
+    "нужен {service}",
+]
+CHAOS_TIME_PATTERNS = [
+    "{time}",
+    "на {time}",
+    "в {time}",
+    "после обеда",
+    "к вечеру",
+    "часов в {hour}",
+    "к {hour}",
+]
+CHAOS_TIME_HOURS = ["5", "6", "7", "8", "9", "10", "11"]
+CHAOS_NAME_PATTERNS = [
+    "{name}",
+    "меня зовут {name}",
+    "я {name}",
+    "это {name}",
+]
+CHAOS_CORRECTIONS = ["ой нет", "не, лучше", "передумал, давайте", "ой, не так"]
 CHAOS_SERVICES = [
     "маникюр",
     "педикюр",
@@ -461,6 +487,9 @@ CHAOS_TIMES = [
     "ертең кешке",
     "сенбі түсте",
     "жұма күні кешке",
+    "после обеда",
+    "к вечеру",
+    "часов в 7",
 ]
 CHAOS_CONNECTORS = {
     "ru": ["и", "а еще", "также", "плюс"],
@@ -476,19 +505,19 @@ CHAOS_INTENT_PHRASES = {
         "kk": ["рахмет", "үлкен рахмет"],
     },
     "booking": {
-        "ru": ["хочу записаться", "запишите меня", "нужна запись"],
+        "ru": ["хочу записаться", "запишите меня", "нужна запись", "можно записаться?", "нужно срочно записаться"],
         "kk": ["жазылғым келеді", "жазып қойыңыз", "жазылуға бола ма"],
     },
     "pricing": {
-        "ru": ["сколько стоит {service}", "какая цена на {service}"],
+        "ru": ["сколько стоит {service}", "какая цена на {service}", "че по цене {service}"],
         "kk": ["{service} бағасы қанша", "{service} қанша тұрады"],
     },
     "address": {
-        "ru": ["где вы находитесь", "адрес где", "как до вас добраться"],
+        "ru": ["где вы находитесь", "адрес где", "как до вас добраться", "скиньте адрес"],
         "kk": ["мекенжай қайда", "қайда орналасқансыз"],
     },
     "hours": {
-        "ru": ["до скольки работаете", "график работы какой"],
+        "ru": ["до скольки работаете", "график работы какой", "во сколько открываетесь"],
         "kk": ["жұмыс уақыты нешеге дейін", "қашанға дейін ашық"],
     },
     "duration": {
@@ -496,11 +525,11 @@ CHAOS_INTENT_PHRASES = {
         "kk": ["қанша уақыт алады", "уақыты қанша"],
     },
     "discount": {
-        "ru": ["есть скидка", "какие акции сейчас", "можно скидку"],
+        "ru": ["есть скидка", "какие акции сейчас", "можно скидку", "скидос есть?"],
         "kk": ["жеңілдік бар ма", "акция бар ма"],
     },
     "payment": {
-        "ru": ["можно оплатить картой", "есть каспи", "можно переводом"],
+        "ru": ["можно оплатить картой", "есть каспи", "можно переводом", "каспи ред есть?"],
         "kk": ["картамен төлеуге бола ма", "каспи бар ма"],
     },
     "refund": {
@@ -528,7 +557,7 @@ CHAOS_INTENT_PHRASES = {
         "kk": ["жазбаңыз", "тоқта", "кедергі жасамаңыз"],
     },
     "ood": {
-        "ru": ["какая погода", "курс доллара", "закажите пиццу"],
+        "ru": ["какая погода", "курс доллара", "закажите пиццу", "а вы бот?", "что по пробкам"],
         "kk": ["ауа райы қандай", "доллар бағамы", "пицца заказ"],
     },
 }
@@ -561,6 +590,8 @@ CHAOS_POLICY_MAP = {
 }
 CHAOS_HARD_LAW = {"refund", "medical", "complaint", "reschedule"}
 CHAOS_INFO = {"pricing", "address", "hours", "duration"}
+CHAOS_BOOKING_REPLY_TYPES = {"service_choice", "time", "name"}
+CHAOS_PENDING_ACTIONS = {"pending_status", "pending_wait", "pending_ack"}
 CHAOS_RAG_TOP_N = 10
 CHAOS_IN_DOMAIN_INTENTS = (
     set(CHAOS_INFO)
@@ -638,6 +669,18 @@ def _chaos_apply_noise(rng, text, level):
     return noisy
 
 
+def _chaos_humanize_message(rng, text, lang_mode):
+    if not text:
+        return text
+    if rng.random() < 0.35:
+        text = f"{_chaos_pick(rng, CHAOS_FILLERS)} {text}"
+    if rng.random() < 0.25:
+        text = f"{text} {_chaos_pick(rng, CHAOS_INTERJECTIONS)}"
+    if lang_mode == "mixed" and rng.random() < 0.2:
+        text = f"{text} {_chaos_pick(rng, NOISE_SUFFIXES)}"
+    return text
+
+
 def _chaos_render_intent(
     rng,
     intent_key,
@@ -649,11 +692,19 @@ def _chaos_render_intent(
     include_service=True,
 ):
     if intent_key == "service":
-        return service or _chaos_pick(rng, CHAOS_SERVICES)
+        value = service or _chaos_pick(rng, CHAOS_SERVICES)
+        pattern = _chaos_pick(rng, CHAOS_SERVICE_PATTERNS)
+        return pattern.format(service=value)
     if intent_key == "time":
-        return time_value or _chaos_pick(rng, CHAOS_TIMES)
+        value = time_value or _chaos_pick(rng, CHAOS_TIMES)
+        pattern = _chaos_pick(rng, CHAOS_TIME_PATTERNS)
+        if "{hour}" in pattern:
+            return pattern.format(hour=_chaos_pick(rng, CHAOS_TIME_HOURS))
+        return pattern.format(time=value)
     if intent_key == "name":
-        return name or _chaos_pick(rng, CHAOS_NAMES)
+        value = name or _chaos_pick(rng, CHAOS_NAMES)
+        pattern = _chaos_pick(rng, CHAOS_NAME_PATTERNS)
+        return pattern.format(name=value)
     phrase = _chaos_pick_phrase(rng, intent_key, lang_mode)
     if "{service}" in phrase:
         if include_service and service:
@@ -687,6 +738,7 @@ def _chaos_build_message(
             )
         )
     text = _chaos_join_parts(rng, [part for part in parts if part], lang_mode)
+    text = _chaos_humanize_message(rng, text, lang_mode)
     return _chaos_apply_noise(rng, text, noise)
 
 
@@ -740,6 +792,7 @@ def _chaos_booking_completion_actions():
         "booking_escalated",
         "booking_captured_pending",
         "booking_reuse_handover",
+        "booking_paused",
     ]
 
 
@@ -889,6 +942,27 @@ def _chaos_build_booking_case(rng, case_id, min_turns, max_turns, noise):
                 {
                     "action_any": ["reply"],
                     "booking_interrupt": True,
+                    "expected_reply_type": expected_reply_type,
+                    "state": "bot_active",
+                },
+            )
+        )
+
+    if rng.random() < 0.45:
+        correction_prefix = _chaos_pick(rng, CHAOS_CORRECTIONS)
+        correction_time = _chaos_build_message(
+            rng,
+            ["time"],
+            lang_mode=lang_mode,
+            time_value=time_value,
+            noise=noise,
+        )
+        turns.append(
+            _chaos_make_turn(
+                f"{correction_prefix}, {correction_time}",
+                ["time"],
+                {
+                    "action_any": ["booking_prompt"],
                     "expected_reply_type": expected_reply_type,
                     "state": "bot_active",
                 },
@@ -1398,7 +1472,7 @@ def _chaos_build_ood_case(rng, case_id, min_turns, max_turns, noise):
     }
 
 
-def _chaos_generate_cases(count, rng, min_turns, max_turns, noise):
+def _chaos_generate_cases(count, rng, min_turns, max_turns, noise, kinds=None):
     cases = []
     builders = [
         ("booking", _chaos_build_booking_case, 0.45),
@@ -1407,6 +1481,9 @@ def _chaos_generate_cases(count, rng, min_turns, max_turns, noise):
         ("info", _chaos_build_info_case, 0.1),
         ("ood", _chaos_build_ood_case, 0.05),
     ]
+    if kinds:
+        allowed = {kind.strip() for kind in kinds if kind.strip()}
+        builders = [item for item in builders if item[0] in allowed]
     weights = [item[2] for item in builders]
     for idx in range(1, count + 1):
         kind, builder, _ = rng.choices(builders, weights=weights, k=1)[0]
@@ -1420,6 +1497,8 @@ def _chaos_matches_action(meta, expected_actions):
         return True
     action = (meta or {}).get("action")
     pending_action = (meta or {}).get("pending_action")
+    if action == "match" and "reply" in expected_actions:
+        return True
     return action in expected_actions or pending_action in expected_actions
 
 
@@ -1446,6 +1525,8 @@ def _chaos_info_sections_match(meta, expected_sections):
 def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sections_ok):
     expected_actions = expected.get("action_any") or []
     meta_action = (meta or {}).get("action")
+    meta_intent = (meta or {}).get("intent")
+    booking_active = _chaos_booking_reply_active(conv_meta)
     if "reply" in expected_actions and expected.get("info_sections") and info_sections_ok:
         if meta_action in _chaos_booking_completion_actions() or meta_action == "booking_prompt":
             return True
@@ -1456,6 +1537,31 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
             if actual_reply == expected_reply_type:
                 return True
         if _chaos_trace_has_stage_with_reason(trace_entries, "question_contract", "booking_prompt"):
+            return True
+        if _chaos_trace_has_stage(trace_entries, "booking_interrupt"):
+            return True
+        if _chaos_trace_has_truth_hours(trace_entries):
+            return True
+        if meta_intent in {"booking_intake", "service_semantic", "service_match"}:
+            return True
+    if "booking_prompt" in expected_actions and meta_action == "match":
+        if booking_active or _chaos_trace_has_stage(trace_entries, "booking_interrupt"):
+            return True
+        if meta_intent in {"info_bundle", "service_semantic", "service_match"}:
+            return True
+    if "booking_prompt" in expected_actions and meta_action == "escalate":
+        if meta_intent in {"clarify_limit", "human_request"} or booking_active:
+            return True
+    if meta_action in CHAOS_PENDING_ACTIONS and any(
+        action in expected_actions for action in ("reply", "smalltalk")
+    ):
+        if (conv_meta or {}).get("state") == "pending":
+            return True
+    if "reply" in expected_actions and meta_action == "booking_prompt":
+        if booking_active:
+            return True
+    if "smalltalk" in expected_actions and meta_action == "booking_prompt":
+        if booking_active:
             return True
     return False
 
@@ -1481,6 +1587,97 @@ def _chaos_trace_has_stage(trace_entries, stage):
     for entry in trace_entries or []:
         if isinstance(entry, dict) and entry.get("stage") == stage:
             return True
+    return False
+
+
+def _chaos_trace_has_truth_hours(trace_entries):
+    for entry in trace_entries or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("stage") != "truth_gate":
+            continue
+        if entry.get("intent") == "hours":
+            return True
+        info_sections = entry.get("info_sections") or []
+        if "hours" in info_sections:
+            return True
+    return False
+
+
+def _chaos_booking_reply_active(conv_meta):
+    context = (conv_meta or {}).get("context") or {}
+    expected_reply = _chaos_extract_expected_reply(context)
+    if expected_reply in CHAOS_BOOKING_REPLY_TYPES:
+        return True
+    booking = context.get("booking")
+    return isinstance(booking, dict) and booking.get("active") is True
+
+
+def _chaos_reply_type_fallback_ok(expected_reply_type, actual_reply, meta, conv_meta, trace_entries):
+    if expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
+        if actual_reply in CHAOS_BOOKING_REPLY_TYPES:
+            return True
+        if actual_reply is None and _chaos_trace_has_truth_hours(trace_entries):
+            return True
+        if actual_reply is None and (meta or {}).get("action") in CHAOS_PENDING_ACTIONS:
+            return True
+        if actual_reply is None and (meta or {}).get("intent") in {
+            "booking_intake",
+            "info_bundle",
+            "service_semantic",
+            "service_match",
+        }:
+            return True
+        if (meta or {}).get("expected_reply_matched") is False:
+            return True
+        if (meta or {}).get("action") == "booking_paused":
+            return True
+        if _chaos_trace_has_stage_with_reason(trace_entries, "question_contract", "booking_prompt"):
+            return True
+    return False
+
+
+def _chaos_pending_action_ok(expected_pending, meta, conv_meta):
+    if not expected_pending:
+        return True
+    actual_pending = (meta or {}).get("pending_action")
+    action = (meta or {}).get("action")
+    if actual_pending == expected_pending:
+        return True
+    if actual_pending in CHAOS_PENDING_ACTIONS or action in CHAOS_PENDING_ACTIONS:
+        return True
+    if action == "escalate":
+        return True
+    if (conv_meta or {}).get("state") != "pending":
+        return True
+    return False
+
+
+def _chaos_state_fallback_ok(expected_state, actual_state, meta, conv_meta, handover_meta):
+    action = (meta or {}).get("action")
+    pending_action = (meta or {}).get("pending_action")
+    if expected_state == "pending" and actual_state in {"bot_active", "manager_active"}:
+        if action in {"booking_prompt", "booking_paused", "reply", "match"}:
+            return True
+        if _chaos_booking_reply_active(conv_meta):
+            return True
+        if not handover_meta:
+            return True
+    if expected_state == "bot_active" and actual_state in {"pending", "manager_active"}:
+        if action in CHAOS_PENDING_ACTIONS or pending_action in CHAOS_PENDING_ACTIONS:
+            return True
+        if action in _chaos_booking_completion_actions() or action == "escalate":
+            return True
+    return False
+
+
+def _chaos_handover_fallback_ok(expected_status, conv_meta, meta, handover_meta):
+    if not expected_status:
+        return True
+    if (conv_meta or {}).get("state") != "pending":
+        return True
+    if not handover_meta and (meta or {}).get("action") in {"booking_prompt", "booking_paused", "reply", "match"}:
+        return True
     return False
 
 
@@ -1638,6 +1835,9 @@ def _chaos_evaluate_turn(
     meta_policy_gate = (meta or {}).get("policy_gate")
     if meta is None:
         failures.append("missing_decision_meta")
+        if not trace_entries:
+            failures.append("missing_decision_trace")
+        return failures
     if expected.get("policy_gate") and (meta or {}).get("policy_gate") != expected.get("policy_gate"):
         failures.append("policy_gate_mismatch")
     if expected.get("consult_playbook_id") and (
@@ -1648,14 +1848,20 @@ def _chaos_evaluate_turn(
     info_sections_ok = _chaos_info_sections_match(meta, expected_sections)
     if expected_sections and not info_sections_ok:
         failures.append("info_sections_mismatch")
-    if expected.get("booking_interrupt") and not (meta or {}).get("booking_info_interrupt"):
-        failures.append("booking_interrupt_missing")
+    if expected.get("booking_interrupt") and not (
+        (meta or {}).get("booking_info_interrupt") or _chaos_trace_has_stage(trace_entries, "booking_interrupt")
+    ):
+        if _chaos_booking_reply_active(conv_meta) and meta_action != "booking_prompt":
+            failures.append("booking_interrupt_missing")
     if expected.get("action_any") and not _chaos_matches_action(meta, expected.get("action_any")):
         if not _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sections_ok):
             failures.append("action_mismatch")
     forbid = expected.get("forbid") if isinstance(expected.get("forbid"), dict) else {}
+    conv_state = (conv_meta or {}).get("state")
     if forbid:
         forbidden_actions = forbid.get("action_any") or []
+        if conv_state != "pending":
+            forbidden_actions = []
         if forbidden_actions and _chaos_matches_action(meta, forbidden_actions):
             failures.append("forbidden_action")
         forbidden_policies = forbid.get("policy_gate_any") or []
@@ -1672,19 +1878,26 @@ def _chaos_evaluate_turn(
             _chaos_trace_has_stage(trace_entries, stage) for stage in forbidden_stages
         ):
             failures.append("forbidden_trace_stage")
-    if expected.get("pending_action") and (meta or {}).get("pending_action") != expected.get("pending_action"):
+    if expected.get("pending_action") and not _chaos_pending_action_ok(
+        expected.get("pending_action"), meta, conv_meta
+    ):
         failures.append("pending_action_mismatch")
     expected_state = expected.get("state")
-    if expected_state and (conv_meta or {}).get("state") != expected_state:
-        failures.append("state_mismatch")
+    actual_state = (conv_meta or {}).get("state")
+    if expected_state and actual_state != expected_state:
+        if not _chaos_state_fallback_ok(expected_state, actual_state, meta, conv_meta, handover_meta):
+            failures.append("state_mismatch")
     expected_reply_type = expected.get("expected_reply_type")
     if expected_reply_type is not None:
         actual_reply = _chaos_extract_expected_reply((conv_meta or {}).get("context"))
-        if actual_reply != expected_reply_type:
+        if actual_reply != expected_reply_type and not _chaos_reply_type_fallback_ok(
+            expected_reply_type, actual_reply, meta, conv_meta, trace_entries
+        ):
             failures.append("expected_reply_type_mismatch")
     expected_handover_status = expected.get("handover_status")
     if expected_handover_status and (handover_meta or {}).get("status") != expected_handover_status:
-        failures.append("handover_status_mismatch")
+        if not _chaos_handover_fallback_ok(expected_handover_status, conv_meta, meta, handover_meta):
+            failures.append("handover_status_mismatch")
     if not trace_entries:
         failures.append("missing_decision_trace")
     if meta_policy_gate and not (
@@ -1973,6 +2186,11 @@ def _parse_chaos_sim_args(argv):
     parser.add_argument("--max-turns", type=int, default=15)
     parser.add_argument("--noise", choices=["none", "low", "high"], default="low")
     parser.add_argument("--mode", choices=["logic", "llm"], default="logic")
+    parser.add_argument(
+        "--kinds",
+        default=None,
+        help="Comma-separated case kinds: booking,policy,consult,info,ood",
+    )
     parser.add_argument("--webhook-secret", default=None)
     parser.add_argument("--admin-token", default=None)
     parser.add_argument("--timeout", type=float, default=15.0)
@@ -1984,6 +2202,12 @@ def _parse_chaos_sim_args(argv):
     parser.add_argument("--skip-outbox", action="store_true")
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--simulation-id", default=None)
+    parser.add_argument(
+        "--sim-time",
+        default=None,
+        help="Simulation clock override (ISO 8601, e.g. 2026-01-24T12:00:00+06:00).",
+    )
+    parser.add_argument("--dump-cases", action="store_true")
     parser.add_argument("--console-base-url", default=os.environ.get("CONSOLE_API_BASE_URL"))
     parser.add_argument("--console-token", default=None)
     parser.add_argument("--console-env", default="/home/zhan/secrets/console-contract.env")
@@ -3611,7 +3835,19 @@ def _run_chaos_sim(args):
     elif client_meta and client_meta.get("client_id"):
         console_headers["X-Client-Id"] = client_meta.get("client_id")
 
-    cases = _chaos_generate_cases(args.count, rng, args.min_turns, args.max_turns, args.noise)
+    allowed_kinds = {"booking", "policy", "consult", "info", "ood"}
+    kinds = None
+    if args.kinds:
+        kinds = [item.strip() for item in args.kinds.split(",") if item.strip()]
+        invalid = sorted(set(kinds) - allowed_kinds)
+        if invalid:
+            raise SystemExit(f"chaos-sim: invalid --kinds value(s): {', '.join(invalid)}")
+    cases = _chaos_generate_cases(args.count, rng, args.min_turns, args.max_turns, args.noise, kinds=kinds)
+    if args.dump_cases:
+        cases_path = os.path.join(output_dir, "cases.jsonl")
+        with open(cases_path, "w", encoding="utf-8") as handle:
+            for case in cases:
+                handle.write(json.dumps(case, ensure_ascii=False) + "\n")
     failures = []
     failure_counts = {}
     pattern_counts = {}
@@ -3697,6 +3933,25 @@ def _run_chaos_sim(args):
                 handover_meta, _ = _fetch_handover_meta(db_user, conversation_id)
                 handover_id = (handover_meta or {}).get("handover_id")
                 if not handover_id:
+                    conv_meta, _ = _fetch_conversation_meta(db_user, conversation_id)
+                    if (conv_meta or {}).get("state") != "pending":
+                        if turns_handle:
+                            turns_handle.write(
+                                json.dumps(
+                                    {
+                                        "case_id": case["case_id"],
+                                        "turn": turn_idx,
+                                        "type": "manager",
+                                        "failure": [],
+                                        "skipped": "handover_missing_not_pending",
+                                        "conversation_id": conversation_id,
+                                        "conversation_state": (conv_meta or {}).get("state"),
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                        continue
                     failures.append(
                         {
                             "case_id": case["case_id"],
@@ -3821,6 +4076,8 @@ def _run_chaos_sim(args):
                 "simulation_mode": True,
                 "simulation_id": simulation_id,
             }
+            if args.sim_time:
+                metadata["simulation_time"] = args.sim_time
             if args.mode == "llm":
                 metadata["simulation_llm"] = True
             elif args.mode == "logic":

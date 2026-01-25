@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -65,6 +66,25 @@ _LAYOUT_SWAP_MAP = str.maketrans(
 class SlotCandidate:
     text: str
     flags: tuple[str, ...]
+
+
+def _is_env_enabled(value: str | None, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _get_booking_confirm_threshold() -> float:
+    raw = os.environ.get("BOOKING_CONFIRM_CONFIDENCE_THRESHOLD", "0.9")
+    try:
+        threshold = float(raw)
+    except (TypeError, ValueError):
+        return 0.9
+    return max(0.0, min(threshold, 1.0))
+
+
+def _is_booking_confirm_enabled() -> bool:
+    return _is_env_enabled(os.environ.get("BOOKING_CONFIRM_ENABLED"), default=False)
 
 
 def _looks_like_layout_swap(text: str) -> bool:
@@ -148,6 +168,32 @@ def _set_booking_context(context: dict, booking: dict) -> dict:
     context = dict(context)
     context["booking"] = booking
     return context
+
+
+def _get_booking_confirmation(booking: dict) -> dict | None:
+    confirmation = booking.get("confirmation") if isinstance(booking, dict) else None
+    if isinstance(confirmation, dict):
+        return dict(confirmation)
+    return None
+
+
+def _set_booking_confirmation(booking: dict, confirmation: dict | None) -> dict:
+    booking = dict(booking)
+    if confirmation:
+        booking["confirmation"] = confirmation
+    else:
+        booking.pop("confirmation", None)
+    return booking
+
+
+def _build_booking_confirmation_prompt(slot_key: str, value: str) -> str:
+    if slot_key == "service":
+        return f"Я понял: услуга — {value}. Верно?"
+    if slot_key == "datetime":
+        return f"Я понял дату и время: {value}. Верно?"
+    if slot_key == "name":
+        return f"Я правильно понял, вас зовут {value}?"
+    return f"Подтвердите, пожалуйста: {value}. Верно?"
 
 
 def _set_service_hint(context: dict, service: str, now: datetime) -> dict:
@@ -442,6 +488,8 @@ def _validate_name_slot(
     normalized = legacy._normalize_text(cleaned)
     tokens = normalized.split()
     if not tokens or len(tokens) > 3:
+        return None
+    if allow_freeform and len(tokens) > 2:
         return None
     if any(len(token) < 2 for token in tokens):
         return None
@@ -1443,10 +1491,183 @@ def _handle_booking_flow(
                 booking_logged=booking_logged,
             )
 
+        confirmation = _get_booking_confirmation(booking_state)
+        if confirmation:
+            from app.services.ai_service import classify_confirmation
+
+            slot_key = confirmation.get("slot")
+            slot_value = confirmation.get("value")
+            decision = classify_confirmation(message_text or "")
+            if decision in {"yes", "no"}:
+                booking_state = dict(booking_state)
+                if decision == "yes" and slot_key in BOOKING_SLOT_ORDER and slot_value:
+                    booking_state[slot_key] = str(slot_value).strip()
+                if decision == "no" and slot_key in BOOKING_SLOT_ORDER:
+                    booking_state[slot_key] = None
+                booking_state = _set_booking_confirmation(booking_state, None)
+                context = legacy._set_booking_context(context, booking_state)
+                legacy._set_conversation_context(conversation, context)
+                legacy._record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "booking_confirm",
+                        "decision": "confirmed" if decision == "yes" else "rejected",
+                        "slot": slot_key,
+                        "value": slot_value,
+                        "confidence": confirmation.get("confidence"),
+                        "source": confirmation.get("source"),
+                    },
+                )
+                if saved_message:
+                    legacy._update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "slot_confirmation_decision": decision,
+                            "slot": slot_key,
+                            "slot_value": slot_value,
+                        },
+                    )
+                if decision == "no":
+                    context_manager = legacy._get_context_manager(context)
+                    refusal_flags = context_manager.get("refusal_flags")
+                    booking_state, prompt = legacy._next_booking_prompt(
+                        booking_state, refusal_flags=refusal_flags
+                    )
+                    if prompt:
+                        booking_expected = legacy._expected_reply_for_booking_question(
+                            booking_state.get("last_question")
+                        )
+                        if booking_expected:
+                            context = legacy._set_expected_reply_context(
+                                conversation=conversation,
+                                saved_message=saved_message,
+                                context=context,
+                                expected_reply_type=booking_expected,
+                                reason="booking_confirm_reject",
+                                now=now,
+                            )
+                        legacy._record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "booking",
+                                "decision": "prompt",
+                                "state": conversation.state,
+                                "missing_slot": booking_state.get("last_question"),
+                                "source": "booking_confirm",
+                            },
+                        )
+                        legacy._record_message_decision_meta(
+                            saved_message,
+                            action="booking_prompt",
+                            intent="booking",
+                            source="booking_confirm",
+                            fast_intent=False,
+                        )
+                        bot_response = legacy._combine_sidecar(
+                            prompt, multi_intent_booking_followup
+                        )
+                        bot_response, sent = send_and_save(bot_response)
+                        result_message = (
+                            "Booking slot requested" if sent else "Booking slot response failed"
+                        )
+                        log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
+                        booking_logged = True
+                        db.commit()
+                        return BookingFlowResult(
+                            response=WebhookResponse(
+                                success=True,
+                                message=result_message,
+                                conversation_id=conversation.id,
+                                bot_response=bot_response,
+                            ),
+                            booking_t0=booking_t0,
+                            booking_logged=booking_logged,
+                        )
+                booking_messages = []
+            else:
+                if slot_key and slot_value:
+                    prompt = _build_booking_confirmation_prompt(slot_key, str(slot_value).strip())
+                else:
+                    prompt = "Подтвердите, пожалуйста, данные для записи. Верно?"
+                confirmation = dict(confirmation)
+                confirmation["asked_at"] = now.isoformat()
+                booking_state = _set_booking_confirmation(dict(booking_state), confirmation)
+                context = legacy._set_booking_context(context, booking_state)
+                legacy._set_conversation_context(conversation, context)
+                legacy._record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "booking_confirm",
+                        "decision": "prompt",
+                        "slot": slot_key,
+                        "value": slot_value,
+                        "confidence": confirmation.get("confidence"),
+                        "source": confirmation.get("source"),
+                    },
+                )
+                legacy._record_message_decision_meta(
+                    saved_message,
+                    action="booking_confirm",
+                    intent="booking",
+                    source="booking",
+                    fast_intent=False,
+                )
+                if saved_message:
+                    slot_snapshot = {
+                        "service": booking_state.get("service"),
+                        "datetime": booking_state.get("datetime"),
+                        "name": booking_state.get("name"),
+                    }
+                    legacy._update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "slot_confirmation_required": True,
+                            "slot": slot_key,
+                            "slot_value": slot_value,
+                            "slot_confidence": confirmation.get("confidence"),
+                            "slot_source": confirmation.get("source"),
+                            "slot_lock": True,
+                            "slot_snapshot": slot_snapshot,
+                        },
+                    )
+                bot_response = legacy._combine_sidecar(prompt, multi_intent_booking_followup)
+                bot_response, sent = send_and_save(bot_response)
+                result_message = (
+                    "Booking confirmation requested"
+                    if sent
+                    else "Booking confirmation response failed"
+                )
+                log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
+                booking_logged = True
+                db.commit()
+                return BookingFlowResult(
+                    response=WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    ),
+                    booking_t0=booking_t0,
+                    booking_logged=booking_logged,
+                )
+
         booking_related = any(
             legacy._is_booking_related_message(msg, client_slug) for msg in booking_messages
         )
-        if booking_active and not booking_signal and not booking_related:
+        last_question = booking_state.get("last_question")
+        slot_lock_active = bool(
+            booking_active
+            and (
+                expected_reply_type
+                in {
+                    legacy.EXPECTED_REPLY_SERVICE,
+                    legacy.EXPECTED_REPLY_TIME,
+                    legacy.EXPECTED_REPLY_NAME,
+                }
+                or last_question in BOOKING_SLOT_ORDER
+            )
+        )
+        if booking_active and not booking_signal and not booking_related and not slot_lock_active:
             booking_state = {"active": False}
             context = legacy._set_booking_context(context, booking_state)
             legacy._set_conversation_context(conversation, context)
@@ -1538,6 +1759,12 @@ def _handle_booking_flow(
                             )
             refusal_flags = context_manager.get("refusal_flags")
             booking_state, prompt = legacy._next_booking_prompt(booking_state, refusal_flags=refusal_flags)
+            slot_lock_reprompt = bool(slot_lock_active and not booking_related and not booking_signal)
+            if slot_lock_reprompt and prompt:
+                if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
+                    prompt = legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC
+                else:
+                    prompt = legacy._combine_sidecar(prompt, legacy.MSG_BOOKING_SLOT_LOCK_STUB)
             context = legacy._set_booking_context(context, booking_state)
             legacy._set_conversation_context(conversation, context)
             booking_expected = legacy._expected_reply_for_booking_question(booking_state.get("last_question"))
@@ -1634,6 +1861,20 @@ def _handle_booking_flow(
                     source="booking",
                     fast_intent=False,
                 )
+                if saved_message:
+                    slot_snapshot = {
+                        "service": booking_state.get("service"),
+                        "datetime": booking_state.get("datetime"),
+                        "name": booking_state.get("name"),
+                    }
+                    legacy._update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "slot_lock": slot_lock_active,
+                            "slot_snapshot": slot_snapshot,
+                            "slot_confirmation_required": False,
+                        },
+                    )
                 bot_response = legacy._combine_sidecar(prompt, policy_price_sidecar)
                 bot_response = legacy._combine_sidecar(bot_response, multi_intent_booking_followup)
                 if consult_return_pending:
