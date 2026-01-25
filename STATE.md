@@ -15,6 +15,7 @@
 - DONE: Phase 2B Provisioning API — PR #345 https://github.com/k1ddy/Truffles-AI-Employee/pull/345; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21317060790; prod migration `013_allow_branches_instance_id_null.sql` applied (ALTER TABLE branches instance_id DROP NOT NULL); smoke: `PATCH /console/v1/admin/branches/{id}` `is_active=true` without `instance_id` → 400 `INVALID_PARAM` ("instance_id required to activate branch"); draft branch id `ceb8b564-cfa9-410f-bc2d-52614166341e` with `instance_id=NULL`, `is_active=false`.
 - DONE: Phase 2 UI Provisioning Wizard — PR #348 https://github.com/k1ddy/Truffles-AI-Employee/pull/348; Evidence: `origin/main` commit `169e58ba` (wizard in `console-web/src/app/settings/page.tsx`) + local UI screenshot `docs/REPORTS/2026-01-25-control-plane-provisioning.png`.
 - PLAN: Phase 4 Control Plane (Team + Calendar UI) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`.
+- IN_PROGRESS: console-e2e-live CI fix (Keycloak login/storageState) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-e2e-live-ci-fix.md`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
