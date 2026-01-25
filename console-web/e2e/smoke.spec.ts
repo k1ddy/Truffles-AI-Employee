@@ -324,11 +324,11 @@ test.describe('Inbox Features', () => {
             await expect(emptyState).toBeVisible();
             return;
         }
-        const openButton = page.getByTestId('case-open').first();
-        await expect(openButton).toBeVisible();
-        await openButton.click();
+        const firstRow = page.getByTestId('cases-row').first();
+        await expect(firstRow).toBeVisible();
+        await firstRow.click();
         await expect(page).toHaveURL(/\/cases\/[a-f0-9-]+/);
-        await expect(page.getByTestId('case-view')).toBeVisible({ timeout: 5000 });
+        await expect(page.getByTestId('case-details')).toBeVisible({ timeout: 5000 });
     });
 });
 
