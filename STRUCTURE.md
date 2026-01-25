@@ -77,6 +77,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-25-prod-gonogo-dec.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-web-build-fix.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-e2e-team.md`
+- `docs/TASK_PACKAGES/TP-2026-01-25-console-web-deploy-team.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase3-knowledge-studio.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-booking-signal-llm-docs.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`

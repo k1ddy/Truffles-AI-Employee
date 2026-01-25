@@ -274,7 +274,10 @@ function UsersPanel({
                                             Отправьте боту <span className="font-mono">/start {linkData.token}</span>
                                         </div>
                                         <div className="text-muted-foreground">
-                                            Истекает: {new Date(linkData.expires_at).toLocaleString("ru-RU")}
+                                            Истекает:{" "}
+                                            {linkData.expires_at
+                                                ? new Date(linkData.expires_at).toLocaleString("ru-RU")
+                                                : "—"}
                                         </div>
                                     </div>
                                 )}

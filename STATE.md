@@ -15,9 +15,9 @@
 - DONE: Phase 2B Provisioning API — PR #345 https://github.com/k1ddy/Truffles-AI-Employee/pull/345; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21317060790; prod migration `013_allow_branches_instance_id_null.sql` applied (ALTER TABLE branches instance_id DROP NOT NULL); smoke: `PATCH /console/v1/admin/branches/{id}` `is_active=true` without `instance_id` → 400 `INVALID_PARAM` ("instance_id required to activate branch"); draft branch id `ceb8b564-cfa9-410f-bc2d-52614166341e` with `instance_id=NULL`, `is_active=false`.
 - DONE: Phase 2 UI Provisioning Wizard — PR #348 https://github.com/k1ddy/Truffles-AI-Employee/pull/348; Evidence: `origin/main` commit `169e58ba` (wizard in `console-web/src/app/settings/page.tsx`) + local UI screenshot `docs/REPORTS/2026-01-25-control-plane-provisioning.png`.
 - DONE: console-e2e-live CI fix (selection gate + storage state) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-e2e-live-ci-fix.md`; PR #362 https://github.com/k1ddy/Truffles-AI-Employee/pull/362; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21329488754; local check `npm --prefix console-web run test:e2e:smoke` (prod base URL).
+- DONE: Console-web deploy for Team route (build fix + prod /team) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-web-deploy-team.md`; evidence below (2026-01-25).
 - PLAN: Phase 4 Control Plane (Team + Calendar UI) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`.
 - PLAN: Booking signal + slot_extract canon alignment — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-booking-signal-llm-docs.md`.
-- BLOCKER: `/team` route returns 404 in prod (Team page missing) — `curl -I https://console.truffles.kz/team` → 404.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
@@ -89,7 +89,8 @@
 - Evidence: `curl -s https://console.truffles.kz/_next/static/chunks/app/settings/page-848d98901057a280.js | rg "Provisioning Wizard|Build:"` → Provisioning Wizard string present; build info `d1bf60eea73ca9d6599f1f7fe2eaac10c5380b98`, time `2026-01-25T04:16:26Z`.
 - Evidence: `curl -s https://console.truffles.kz/_next/static/chunks/app/knowledge/page-89d2b6b981020310.js | rg "Knowledge Studio"` → string present.
 - Evidence: `curl -s https://console.truffles.kz/calendar | rg -o "/_next/static/chunks/app/calendar/page-[^\"']+\\.js"` → `/_next/static/chunks/app/calendar/page-b546e27fdffece8c.js`; `curl -s https://console.truffles.kz/_next/static/chunks/app/calendar/page-b546e27fdffece8c.js | rg -i "Записи|календар"` → Calendar page strings present.
-- Evidence: `curl -I https://console.truffles.kz/team` → HTTP 404 (Team page missing in prod).
+- Evidence: `curl -I https://console.truffles.kz/team` → HTTP 200; `curl -s https://console.truffles.kz/team | rg -o "/_next/static/chunks/app/team/page-[^\"']+\\.js"` → `/_next/static/chunks/app/team/page-c4b8e410cc9b434a.js`.
+- Evidence: Settings build info updated to `4e025cc9409e7a73878973d25edb296079ac14f5` (`2026-01-25T09:14:29Z`) via `curl -s https://console.truffles.kz/_next/static/chunks/app/settings/page-a6bf5343e8242773.js | rg "Build:"`.
 - Evidence: local UI screenshot `docs/REPORTS/2026-01-25-control-plane-provisioning.png` (Settings → Provisioning Wizard visible).
 
 ### 2026-01-23 — Console↔Telegram P0 contract alignment
