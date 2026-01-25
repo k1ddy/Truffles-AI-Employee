@@ -68,6 +68,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-24-consult-quality-core-v1.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-ops-outbox-delivery.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-telegram-desktop-link-fix.md`
+- `docs/TASK_PACKAGES/TP-2026-01-25-prod-gonogo-dec.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-build-info.md`
 
 ---
