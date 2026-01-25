@@ -138,10 +138,14 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Decision trace/meta: `stage=booking_interrupt`, `booking_info_interrupt=true`, `booking_info_intents` сохраняются.
 - Если сообщение не относится к записи и нет booking-сигнала → не сбрасываем booking; отвечаем нейтрально и повторяем slot-вопрос.
 
+**Booking signal (P0):**
+- Сигнал записи считается активным, если есть `current_goal=booking` или `expected_reply_type`, либо LLM-Intent/slots показывают запись (service/master/time/name) с достаточной уверенностью.
+- Hard‑LAW/Policy/opt‑out/pending гейты выше booking: если они сработали, booking‑signal игнорируется до явного запроса записи.
+
 **Slot-lock + booking_confirm (P0):**
 - При активной записи `expected_reply_type` фиксируется и не сбрасывается перебивками/провокациями.
 - `expected_reply_type` меняется только при успешном заполнении слота, явной отмене записи, или переходе в `pending`.
-- Каждый вход проходит `slot_extract` (LLM) + `slot_validate` (детерминированно); при низкой уверенности — переспрашиваем.
+- Каждый вход **в booking‑контексте** проходит `slot_extract` (LLM) + `slot_validate` (детерминированно); при низкой уверенности — переспрашиваем.
 - При сомнении обязателен `booking_confirm`: краткое резюме (дата/время/мастер/услуга/имя) + вопрос "верно?".
 - `booking_commit` допускается только после явного подтверждения слотов.
 
