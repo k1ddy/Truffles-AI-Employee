@@ -970,6 +970,10 @@ def normalize_for_matching(text: str) -> str:
     normalized = re.sub(r"\s+", " ", normalized)
     # Make matching robust: "ок?" -> "ок", "салам!" -> "салам"
     normalized = re.sub(r"^[^\w]+|[^\w]+$", "", normalized)
+    if not normalized:
+        return ""
+    # Collapse repeated characters to make short-phrase matching typo-tolerant.
+    normalized = re.sub(r"(.)\1{1,}", r"\1", normalized)
     return normalized
 
 
@@ -1566,7 +1570,19 @@ def is_greeting_message(text: str) -> bool:
 
 
 def is_thanks_message(text: str) -> bool:
-    return normalize_for_matching(text) in THANKS_PHRASES
+    if not text:
+        return False
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return False
+    if normalized in THANKS_PHRASES:
+        return True
+    tokens = normalized.split()
+    if len(tokens) == 2 and tokens[0] in THANKS_PHRASES:
+        if "?" in text or any(ch.isdigit() for ch in text):
+            return False
+        return True
+    return False
 
 
 def is_low_signal_message(text: str) -> bool:
