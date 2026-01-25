@@ -440,6 +440,36 @@ export const settingsApi = {
         apiClient.patch<components["schemas"]["SettingsUpdateResponse"]>("/settings", data),
 };
 
+function buildClientHeader(clientId?: string): Record<string, string> | undefined {
+    if (!clientId) {
+        return undefined;
+    }
+    return { "X-Client-Id": clientId };
+}
+
+/** Admin provisioning endpoints */
+export const adminApi = {
+    createCompany: (data: components["schemas"]["CompanyCreateRequest"]) =>
+        apiClient.post<components["schemas"]["CompanyCreateResponse"]>("/admin/companies", data),
+    createClient: (data: components["schemas"]["ClientCreateRequest"]) =>
+        apiClient.post<components["schemas"]["ClientCreateResponse"]>("/admin/clients", data),
+    createBranch: (data: components["schemas"]["BranchCreateRequest"]) =>
+        apiClient.post<components["schemas"]["BranchCreateResponse"]>("/admin/branches", data),
+    patchBranch: (branchId: string, data: components["schemas"]["BranchUpdateRequest"]) =>
+        apiClient.patch<components["schemas"]["Branch"]>(`/admin/branches/${branchId}`, data),
+    createAgent: (data: components["schemas"]["AgentCreateRequest"]) =>
+        apiClient.post<components["schemas"]["AgentCreateResponse"]>("/admin/agents", data),
+    getCapabilities: (params: { branch_id?: string; clientId?: string }) =>
+        apiClient.get<components["schemas"]["CapabilitiesResponse"]>("/admin/capabilities", {
+            params: params.branch_id ? { branch_id: params.branch_id } : undefined,
+            headers: buildClientHeader(params.clientId),
+        }),
+    patchCapabilities: (data: components["schemas"]["CapabilitiesPatchRequest"], clientId?: string) =>
+        apiClient.patch<components["schemas"]["CapabilitiesRecord"]>("/admin/capabilities", data, {
+            headers: buildClientHeader(clientId),
+        }),
+};
+
 /** Audit endpoints */
 export const auditApi = {
     list: (params?: ListAuditParams) =>

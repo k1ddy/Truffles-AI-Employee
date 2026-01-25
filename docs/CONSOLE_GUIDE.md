@@ -73,12 +73,12 @@ Rules:
 - Выбор хранится в localStorage (`console:client_id`, `console:branch_id`) и передаётся в `X-Client-Id` / `X-Branch-Id`.
 - Навигация в сайдбаре режется по роли (owner/admin/manager/support).
 
-**Phase 2 UI contract (Provisioning + Capabilities, planned):**
-- RBAC gate: owner/admin write; support read‑only (no provisioning/capabilities writes).
+**Phase 2 UI contract (Provisioning + Capabilities):**
+- UI location: `Settings → Provisioning Wizard` (owner/admin write; support read‑only, остальные без доступа).
 - Provisioning flow: Create Branch (Draft) → Integrations (`instance_id`) → Team → Telegram (`telegram_chat_id`)
   → Knowledge (`knowledge_tag` / branch‑pack) → Booking (`working_hours` / `booking_settings` / specialists) → Go/No‑Go.
 - Go/No‑Go gate: проверяем только поля, нужные для включённых capabilities; без `instance_id` ветка остаётся draft.
-- Capabilities UI: показывает effective capabilities (client + branch overrides), редактирование через schema‑validated форму,
+- Capabilities UI: tri‑state редактор (inherit/enable/disable), effective‑view (client + branch overrides),
   сохранение в `/console/v1/admin/capabilities` с `schema_version` и audit.
 - API provisioning: `POST /console/v1/admin/companies|clients|branches|agents`,
   `PATCH /console/v1/admin/branches/{branch_id}`.
