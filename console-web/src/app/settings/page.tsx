@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
-import { adminApi, agentsApi, authApi, telegramApi } from "@/lib/api-client";
+import { adminApi, authApi, telegramApi } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -19,27 +19,6 @@ interface Branch {
     telegram_chat_id?: string | null;
 }
 
-interface Agent {
-    id: string;
-    name: string | null;
-    role: string;
-    is_active: boolean;
-    identities?: AgentIdentity[];
-}
-
-interface AgentIdentity {
-    channel: "telegram";
-    external_id: string;
-    username?: string | null;
-    linked_at?: string | null;
-}
-
-interface AgentLinkData {
-    token: string;
-    deep_link?: string | null;
-    bot_username?: string | null;
-    expires_at: string;
-}
 
 interface BotConfig {
     reminder_timeout_1: number | null;
@@ -65,25 +44,6 @@ async function fetchSettings(): Promise<SettingsData> {
     return response.data;
 }
 
-async function fetchAgents(): Promise<{ items: Agent[] }> {
-    const response = await agentsApi.list();
-    const data = response.data || {};
-    return { items: (data.items || []) as unknown as Agent[] };
-}
-
-function RoleBadge({ role }: { role: string }) {
-    const styles: Record<string, string> = {
-        owner: "bg-purple-100 text-purple-800",
-        admin: "bg-secondary text-secondary-foreground",
-        manager: "bg-green-100 text-green-800",
-        support: "bg-muted text-muted-foreground",
-    };
-    return (
-        <span className={`px-2 py-1 rounded text-xs font-medium ${styles[role] || "bg-muted text-muted-foreground"}`}>
-            {role}
-        </span>
-    );
-}
 
 function ConfigCard({ label, value, type = "text" }: { label: string; value: string | number | boolean | null; type?: string }) {
     let displayValue: React.ReactNode = value;
@@ -1555,8 +1515,6 @@ export default function SettingsPage() {
     const { handleError } = useErrorHandler();
     const [verifyTarget, setVerifyTarget] = useState<string | null>(null);
     const [testTarget, setTestTarget] = useState<string | null>(null);
-    const [linkTarget, setLinkTarget] = useState<string | null>(null);
-    const [linkTokens, setLinkTokens] = useState<Record<string, AgentLinkData>>({});
     const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA;
     const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME;
     const buildShaLabel = buildSha ? buildSha.slice(0, 7) : "unknown";
@@ -1565,12 +1523,6 @@ export default function SettingsPage() {
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["settings"],
         queryFn: fetchSettings,
-        enabled: !!session,
-    });
-
-    const { data: agentsData, isLoading: agentsLoading, error: agentsError, refetch: refetchAgents } = useQuery({
-        queryKey: ["agents"],
-        queryFn: fetchAgents,
         enabled: !!session,
     });
 
@@ -1617,26 +1569,6 @@ export default function SettingsPage() {
         },
         onSettled: () => {
             setTestTarget(null);
-        },
-    });
-
-    const linkMutation = useMutation({
-        mutationFn: async (agentId: string) => {
-            const { data } = await agentsApi.linkTelegram(agentId);
-            return { data, agentId };
-        },
-        onMutate: (agentId) => {
-            setLinkTarget(agentId);
-        },
-        onSuccess: ({ data, agentId }) => {
-            setLinkTokens((prev) => ({ ...prev, [agentId]: data as unknown as AgentLinkData }));
-            toast.success("Ссылка для Telegram создана");
-        },
-        onError: (error) => {
-            handleError(error);
-        },
-        onSettled: () => {
-            setLinkTarget(null);
         },
     });
 
@@ -1875,111 +1807,17 @@ export default function SettingsPage() {
                 </div>
             </div>
 
-            {/* Team Members - Full Width */}
-            <div className="bg-card border border-border/60 rounded-lg p-5 mt-6" data-testid="settings-team">
-                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    👥 Команда
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {agentsLoading && (
-                        <p className="text-muted-foreground text-center py-4 col-span-3" data-testid="settings-team-empty">
-                            Загрузка команды...
+            <div className="card-surface p-5 mt-6" data-testid="settings-team-link">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-lg font-semibold mb-1">Команда</h2>
+                        <p className="text-sm text-muted-foreground">
+                            Пользователи и специалисты перенесены в отдельный раздел.
                         </p>
-                    )}
-                    {!agentsLoading && agentsError && (
-                        <div className="text-center py-4 col-span-3">
-                            <p className="text-muted-foreground" data-testid="settings-team-empty">
-                                Команда недоступна
-                            </p>
-                            <button
-                                type="button"
-                                className="mt-2 rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted"
-                                onClick={() => refetchAgents()}
-                            >
-                                Повторить
-                            </button>
-                        </div>
-                    )}
-                    {!agentsLoading && !agentsError && agentsData?.items.map((agent) => {
-                        const telegramIdentity = agent.identities?.find((identity) => identity.channel === "telegram");
-                        const linkData = linkTokens[agent.id];
-                        const displayHandle = telegramIdentity?.username
-                            ? `@${telegramIdentity.username}`
-                            : telegramIdentity?.external_id;
-
-                        return (
-                            <div
-                                key={agent.id}
-                                className="flex flex-col gap-2 p-3 bg-muted rounded"
-                                data-testid="settings-team-row"
-                            >
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-9 h-9 bg-secondary rounded-full flex items-center justify-center text-secondary-foreground font-medium">
-                                            {agent.name?.charAt(0).toUpperCase() || "?"}
-                                        </div>
-                                        <span className="font-medium">{agent.name || "Без имени"}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <RoleBadge role={agent.role} />
-                                        <span
-                                            className={`w-2 h-2 rounded-full ${agent.is_active ? "bg-green-500" : "bg-muted"
-                                                }`}
-                                        ></span>
-                                    </div>
-                                </div>
-                                <div className="flex items-center justify-between text-xs">
-                                    <span className="text-muted-foreground">Telegram:</span>
-                                    <span className={telegramIdentity ? "font-medium" : "text-muted-foreground"}>
-                                        {telegramIdentity ? displayHandle : "не подключен"}
-                                    </span>
-                                </div>
-                                <div className="flex items-center justify-between gap-2">
-                                    <button
-                                        type="button"
-                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                        onClick={() => linkMutation.mutate(agent.id)}
-                                        disabled={linkTarget === agent.id}
-                                        data-testid="settings-team-link"
-                                    >
-                                        {linkTarget === agent.id
-                                            ? "Генерация..."
-                                            : telegramIdentity
-                                                ? "Переподключить"
-                                                : "Подключить Telegram"}
-                                    </button>
-                                    {telegramIdentity?.linked_at && (
-                                        <span className="text-xs text-muted-foreground">
-                                            {new Date(telegramIdentity.linked_at).toLocaleDateString("ru-RU")}
-                                        </span>
-                                    )}
-                                </div>
-                                {linkData && (
-                                    <div className="text-xs bg-background p-2 rounded border border-border/60 space-y-1">
-                                        <div>
-                                            Код: <span className="font-mono">{linkData.token}</span>
-                                        </div>
-                                        {linkData.deep_link && (
-                                            <Link className="text-primary underline" href={linkData.deep_link} target="_blank">
-                                                Открыть в Telegram
-                                            </Link>
-                                        )}
-                                        <div className="text-muted-foreground">
-                                            Отправьте боту <span className="font-mono">/start {linkData.token}</span>
-                                        </div>
-                                        <div className="text-muted-foreground">
-                                            Истекает: {new Date(linkData.expires_at).toLocaleString("ru-RU")}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })}
-                    {!agentsLoading && !agentsError && agentsData?.items.length === 0 && (
-                        <p className="text-muted-foreground text-center py-4 col-span-3" data-testid="settings-team-empty">
-                            Нет участников команды
-                        </p>
-                    )}
+                    </div>
+                    <Link className="btn-ghost" href="/team">
+                        Открыть команду
+                    </Link>
                 </div>
             </div>
         </div>

@@ -132,6 +132,12 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
   `POST /console/v1/knowledge/publish`, `GET /console/v1/knowledge/history`,
   `POST /console/v1/knowledge/rollback`
 
+**Team (Команда)**
+- UI: `console-web/src/app/team/page.tsx`
+- API: `GET /console/v1/agents` (owner/admin), `GET /console/v1/settings` (manager read-only),
+  `GET /calendar/specialists`
+- Data: `agents`, `agent_identities`, `specialists`
+
 **Settings**
 - UI: `console-web/src/app/settings/page.tsx`
 - API: `GET/PATCH /console/v1/settings`
@@ -205,7 +211,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 3) Заполнить `client_settings.telegram_bot_token`.
 4) Настроить ChatFlow webhook: `/webhook/{client_slug}?webhook_secret=...`.
 5) Настроить Telegram webhook: `https://api.truffles.kz/telegram-webhook`.
-6) В Console → Settings → Team: подключить Telegram для каждого менеджера (token → `/start <token>`).
+6) В Console → Team → Users: подключить Telegram для каждого менеджера (token → `/start <token>`).
 7) В Console → Settings/Ops: Verify/Test (client + branch scope).
 
 **Ожидаемый результат (после онбординга):**
