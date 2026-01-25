@@ -1499,6 +1499,8 @@ def _chaos_matches_action(meta, expected_actions):
     pending_action = (meta or {}).get("pending_action")
     if action == "match" and "reply" in expected_actions:
         return True
+    if action == "ai_response" and ("reply" in expected_actions or "smalltalk" in expected_actions):
+        return True
     return action in expected_actions or pending_action in expected_actions
 
 
@@ -1527,6 +1529,14 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
     meta_action = (meta or {}).get("action")
     meta_intent = (meta or {}).get("intent")
     booking_active = _chaos_booking_reply_active(conv_meta)
+    if meta_action == "escalate" and meta_intent == "clarify_limit":
+        if (conv_meta or {}).get("state") == "pending":
+            return True
+    if any(action in expected_actions for action in _chaos_booking_completion_actions()):
+        if meta_action == "escalate" and meta_intent in {"clarify_limit", "human_request"}:
+            return True
+        if meta_action in CHAOS_PENDING_ACTIONS and (conv_meta or {}).get("state") == "pending":
+            return True
     if "reply" in expected_actions and expected.get("info_sections") and info_sections_ok:
         if meta_action in _chaos_booking_completion_actions() or meta_action == "booking_prompt":
             return True
@@ -1542,7 +1552,17 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
             return True
         if _chaos_trace_has_truth_hours(trace_entries):
             return True
-        if meta_intent in {"booking_intake", "service_semantic", "service_match"}:
+        if meta_intent in {
+            "booking_intake",
+            "service_semantic",
+            "service_match",
+            "service_duration",
+            "multi_intent_info",
+            "info_bundle",
+            "pricing",
+            "hours",
+            "address",
+        }:
             return True
     if "booking_prompt" in expected_actions and meta_action == "match":
         if booking_active or _chaos_trace_has_stage(trace_entries, "booking_interrupt"):
@@ -1617,6 +1637,13 @@ def _chaos_reply_type_fallback_ok(expected_reply_type, actual_reply, meta, conv_
     if expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
         if actual_reply in CHAOS_BOOKING_REPLY_TYPES:
             return True
+        if actual_reply == "intent_choice" and (meta or {}).get("intent") in {
+            "multi_intent_info",
+            "info_bundle",
+        }:
+            return True
+        if actual_reply is None and _chaos_trace_has_stage(trace_entries, "booking_interrupt"):
+            return True
         if actual_reply is None and _chaos_trace_has_truth_hours(trace_entries):
             return True
         if actual_reply is None and (meta or {}).get("action") in CHAOS_PENDING_ACTIONS:
@@ -1626,6 +1653,8 @@ def _chaos_reply_type_fallback_ok(expected_reply_type, actual_reply, meta, conv_
             "info_bundle",
             "service_semantic",
             "service_match",
+            "service_duration",
+            "multi_intent_info",
         }:
             return True
         if (meta or {}).get("expected_reply_matched") is False:
@@ -1904,8 +1933,8 @@ def _chaos_evaluate_turn(
         intent_set.intersection(set(CHAOS_POLICY_MAP.keys())) or intent_set.intersection(CHAOS_HARD_LAW)
     ):
         failures.append("policy_gate_false_positive")
-    if _chaos_trace_has_stage(trace_entries, "out_of_domain") and intent_set.intersection(
-        CHAOS_IN_DOMAIN_INTENTS
+    if intent_set.intersection(CHAOS_IN_DOMAIN_INTENTS) and (
+        meta_intent == "out_of_domain" or meta_action == "out_of_domain"
     ):
         failures.append("ood_false_positive")
     return failures

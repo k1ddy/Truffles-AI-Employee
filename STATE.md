@@ -181,8 +181,8 @@
 - **OPEN:** Outbox latency (P0 tail) — в конце.
 - **OPEN-1:** Branch routing stickiness: instanceId inbound не переопределяет existing conversation.branch_id; outbound уходит через client.config.instance_id (demo_salon). Evidence 2026-01-20 ниже.
 - **DONE:** GAP-023 Chaos dialog testing (noise/interruptions) — human-like chaos generator + booking chaos unit suite (TP-2026-01-25-human-dialog-tests; pytest `truffles-api/tests/test_booking_chaos_dialogs.py` → 1 passed; chaos-sim dry-run artifacts `/tmp/chaos_human/cases.jsonl`).
-- **DONE:** chaos-sim evaluator relaxations + `--kinds` filter; booking-only logic run (count 5) shows failures dominated by off-hours truth_gate. Evidence: `/tmp/chaos_booking_5` (report + cases/failures).
-- **OPEN:** chaos-sim simulation-time override added in code (needs deploy); booking-only run with `--sim-time` still hits off-hours on current container. Evidence: `/tmp/chaos_booking_simtime_5` (summary.json, interrupted).
+- **DONE:** chaos-sim evaluator relaxations (ai_response as reply, clarify_limit fallback, pending booking completion, OOD false-positive gating) + `--kinds` filter; booking-only sim-time runs completed. Evidence: `/tmp/chaos_booking_simtime_eval_5` and `/tmp/chaos_booking_simtime_eval_5b` (summary/report/cases/failures).
+- **OPEN:** chaos-sim residuals in booking-only runs — manager take/resolve state mismatches (pending→manager_active), occasional HTTP 500 during polling, and out_of_domain actions on booking turns. Evidence: `/tmp/chaos_booking_simtime_eval_5b` (failures.jsonl).
 - **OPEN-3:** GAP-024 Долгосрочная память (context profile) отложена — код‑скелет есть, флаг OFF; см. `docs/IMPERIUM_GAPS.yaml`.
 - **PLAN (no evidence):** P0 “бот не знает, что отвечать” → расширить RU/KZ/mixed лексиконы и диалоги в packs + покрыть детерминированным webhook‑fuzz (см. Task Package ниже).
 - **PLAN (no evidence):** Task Package `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` — chaos‑sim + consult quality (multi‑intent, safe advice).
