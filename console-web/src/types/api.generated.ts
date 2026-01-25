@@ -455,6 +455,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/companies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create company */
+        post: operations["createAdminCompany"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create client */
+        post: operations["createAdminClient"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create branch */
+        post: operations["createAdminBranch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branches/{branch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update branch */
+        patch: operations["patchAdminBranch"];
+        trace?: never;
+    };
+    "/admin/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create agent */
+        post: operations["createAdminAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/capabilities": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** Get effective capabilities */
+        get: operations["getAdminCapabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Upsert capabilities record */
+        patch: operations["patchAdminCapabilities"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -490,7 +596,10 @@ export interface components {
             role?: "owner" | "admin" | "manager" | "support";
             /** Format: uuid */
             client_id?: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Required when role=manager.
+             */
             branch_id?: string | null;
             is_active?: boolean;
         };
@@ -515,6 +624,23 @@ export interface components {
             is_active?: boolean;
             identities?: components["schemas"]["AgentIdentity"][];
         };
+        Company: {
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            billing_info?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        CompanyCreateRequest: {
+            name: string;
+            billing_info?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        CompanyCreateResponse: {
+            company?: components["schemas"]["Company"];
+        };
         Client: {
             /** Format: uuid */
             id?: string;
@@ -522,6 +648,15 @@ export interface components {
             name?: string;
             /** Format: uuid */
             company_id?: string | null;
+        };
+        ClientCreateRequest: {
+            slug: string;
+            /** Format: uuid */
+            company_id?: string | null;
+            status?: string | null;
+        };
+        ClientCreateResponse: {
+            client?: components["schemas"]["Client"];
         };
         Branch: {
             /** Format: uuid */
@@ -531,6 +666,52 @@ export interface components {
             is_active?: boolean;
             instance_id?: string | null;
             telegram_chat_id?: string | null;
+            phone?: string | null;
+            knowledge_tag?: string | null;
+            timezone?: string | null;
+            working_hours?: {
+                [key: string]: unknown;
+            } | null;
+            booking_settings?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        BranchCreateRequest: {
+            /** Format: uuid */
+            client_id: string;
+            slug: string;
+            name: string;
+            timezone?: string | null;
+            instance_id?: string | null;
+            phone?: string | null;
+            telegram_chat_id?: string | null;
+            knowledge_tag?: string | null;
+            working_hours?: {
+                [key: string]: unknown;
+            } | null;
+            booking_settings?: {
+                [key: string]: unknown;
+            } | null;
+            is_active?: boolean | null;
+        };
+        BranchCreateResponse: {
+            branch?: components["schemas"]["Branch"];
+        };
+        BranchUpdateRequest: {
+            slug?: string | null;
+            name?: string | null;
+            timezone?: string | null;
+            instance_id?: string | null;
+            phone?: string | null;
+            telegram_chat_id?: string | null;
+            knowledge_tag?: string | null;
+            working_hours?: {
+                [key: string]: unknown;
+            } | null;
+            booking_settings?: {
+                [key: string]: unknown;
+            } | null;
+            is_active?: boolean | null;
         };
         MeResponse: {
             agent?: components["schemas"]["Agent"];
@@ -601,6 +782,20 @@ export interface components {
         };
         AgentListResponse: {
             items?: components["schemas"]["AgentWithIdentities"][];
+        };
+        AgentCreateRequest: {
+            /** Format: uuid */
+            client_id: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            /** @enum {string} */
+            role: "owner" | "admin" | "manager" | "support";
+            name?: string | null;
+            is_active?: boolean | null;
+            oidc_subject?: string | null;
+        };
+        AgentCreateResponse: {
+            agent?: components["schemas"]["Agent"];
         };
         Message: {
             /** Format: uuid */
@@ -715,6 +910,71 @@ export interface components {
         SettingsUpdateResponse: {
             success?: boolean;
             message?: string;
+        };
+        CapabilitiesPayload: {
+            domain_slug?: string | null;
+            channels: components["schemas"]["CapabilityChannels"];
+            providers: components["schemas"]["CapabilityProviders"];
+            features: components["schemas"]["CapabilityFeatures"];
+        };
+        CapabilityChannels: {
+            whatsapp?: boolean | null;
+            telegram?: boolean | null;
+            instagram?: boolean | null;
+        };
+        CapabilityProviders: {
+            /** @enum {string|null} */
+            availability_provider?: "none" | "google_calendar" | "bitrix" | "amocrm" | "manual" | null;
+            /** @enum {string|null} */
+            crm_provider?: "none" | "amocrm" | "bitrix" | "custom" | null;
+            /** @enum {string|null} */
+            calendar_provider?: "none" | "google_calendar" | "local" | null;
+        };
+        CapabilityFeatures: {
+            /** @enum {string|null} */
+            booking_mode?: "collect_preferences" | "confirm_slots" | null;
+            knowledge_upload?: boolean | null;
+            analytics?: boolean | null;
+            auto_learn?: boolean | null;
+        };
+        CapabilitiesRecord: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            client_id?: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            /** @enum {string} */
+            scope?: "client" | "branch";
+            /** @enum {string} */
+            status?: "active" | "disabled";
+            schema_version?: string;
+            payload?: components["schemas"]["CapabilitiesPayload"];
+            /** Format: uuid */
+            created_by?: string | null;
+            /** Format: date-time */
+            created_at?: string | null;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        CapabilitiesResponse: {
+            /** Format: uuid */
+            client_id?: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            effective?: components["schemas"]["CapabilitiesPayload"];
+            client_capabilities?: components["schemas"]["CapabilitiesRecord"];
+            branch_capabilities?: components["schemas"]["CapabilitiesRecord"];
+        };
+        CapabilitiesPatchRequest: {
+            /** @enum {string} */
+            scope: "client" | "branch";
+            /** Format: uuid */
+            branch_id?: string | null;
+            /** @enum {string|null} */
+            status?: "active" | "disabled" | null;
+            schema_version?: string | null;
+            payload: components["schemas"]["CapabilitiesPayload"];
         };
         TelegramTrail: {
             message_id?: number | null;
@@ -1026,6 +1286,8 @@ export interface components {
         client_id_header: string;
         /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
         branch_id_header: string;
+        /** @description Optional branch override for effective capabilities. */
+        branch_id_query: string;
         /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
         case_id: string;
         /** @example f0b1a4c7-8f33-4f92-9b1f-9fe0f3d3e7b1 */
@@ -1693,6 +1955,213 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    createAdminCompany: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanyCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Company created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyCreateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    createAdminClient: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Client created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientCreateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    createAdminBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BranchCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Branch created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BranchCreateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    patchAdminBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BranchUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Branch updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    createAdminAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Agent created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentCreateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    getAdminCapabilities: {
+        parameters: {
+            query?: {
+                /** @description Optional branch override for effective capabilities. */
+                branch_id?: components["parameters"]["branch_id_query"];
+            };
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Capabilities response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilitiesResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    patchAdminCapabilities: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CapabilitiesPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated capabilities record */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilitiesRecord"];
                 };
             };
             400: components["responses"]["BadRequest"];

@@ -57,6 +57,7 @@ Rules:
 - All queries filter by `context.client.id`.
 - If multiple clients → `X-Client-Id` is mandatory.
 - Non‑admin/owner users are restricted to their branch.
+- Provisioning: role=manager requires `branch_id` (branch‑scoped access only).
 - Если один `sub` связан с несколькими клиентами → API вернёт
   `CLIENT_SELECTION_REQUIRED` (нужен `X-Client-Id`) либо надо убрать дубликаты.
 
@@ -72,12 +73,17 @@ Rules:
 - Выбор хранится в localStorage (`console:client_id`, `console:branch_id`) и передаётся в `X-Client-Id` / `X-Branch-Id`.
 - Навигация в сайдбаре режется по роли (owner/admin/manager/support).
 
-**Phase 2 UI contract (Provisioning + Capabilities, planned):**
-- Доступ только для Platform Admin (RBAC gate).
-- Provisioning Wizard: бизнес‑профиль → филиалы → команда → интеграции → knowledge (handoff в Knowledge Studio) → live‑check.
-- Go/No‑Go gate: без обязательных данных филиала (по provisioning‑схеме) publish блокируется; UI показывает missing fields.
-- Capabilities UI: показывает effective capabilities (client + branch overrides), редактирование через schema‑validated форму,
+**Phase 2 UI contract (Provisioning + Capabilities):**
+- UI location: `Settings → Provisioning Wizard` (owner/admin write; support read‑only, остальные без доступа).
+- Provisioning flow: Create Branch (Draft) → Integrations (`instance_id`) → Team → Telegram (`telegram_chat_id`)
+  → Knowledge (`knowledge_tag` / branch‑pack) → Booking (`working_hours` / `booking_settings` / specialists) → Go/No‑Go.
+- Go/No‑Go gate: проверяем только поля, нужные для включённых capabilities; без `instance_id` ветка остаётся draft.
+- Capabilities UI: tri‑state редактор (inherit/enable/disable), effective‑view (client + branch overrides),
   сохранение в `/console/v1/admin/capabilities` с `schema_version` и audit.
+- API provisioning: `POST /console/v1/admin/companies|clients|branches|agents`,
+  `PATCH /console/v1/admin/branches/{branch_id}`.
+- API capabilities: `GET/PATCH /console/v1/admin/capabilities` (client через `X-Client-Id`, branch через `branch_id`).
+- Schema: `contracts/capabilities/capabilities.v1.jsonschema`.
 - Fail‑closed: без явного tenant‑контекста действия недоступны.
 
 **Common symptom:** “Only 1–2 cases shown / no slots.”  
@@ -117,6 +123,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 **Settings**
 - UI: `console-web/src/app/settings/page.tsx`
 - API: `GET/PATCH /console/v1/settings`
+- Build info: Settings header shows `NEXT_PUBLIC_BUILD_SHA` and `NEXT_PUBLIC_BUILD_TIME` for deploy diagnosis.
 
 **Audit**
 - UI: `console-web/src/app/audit/page.tsx`

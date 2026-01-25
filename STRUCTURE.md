@@ -16,6 +16,7 @@
 | `contracts/console_api/schemathesis.toml` | Seed/overrides для Schemathesis contract smoke | Backend/QA |
 | `contracts/events/` | Контракты событий (outbox) | Архитектор/Backend |
 | `contracts/tenancy/tenant_context.v1.jsonschema` | Канон tenant_context (company/client/branch) | Архитектор/Backend |
+| `contracts/capabilities/capabilities.v1.jsonschema` | Канон capabilities (channels/providers/features) | Архитектор/Backend |
 | `contracts/integrations/` | Контракты портов/адаптеров | Архитектор/Backend |
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
@@ -58,6 +59,9 @@
 - `docs/TASK_PACKAGES/TP-2026-01-24-knowledge-studio-dec.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase1.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2-capabilities.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2-provisioning.md`
+- `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-trace-booking-commit.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-consultant-chatgpt-like.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-slot-lock-booking-confirm.md`
@@ -67,6 +71,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-24-ops-outbox-delivery.md`
 - `docs/TASK_PACKAGES/TP-2026-01-24-telegram-desktop-link-fix.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-human-dialog-tests.md`
+- `docs/TASK_PACKAGES/TP-2026-01-25-console-build-info.md`
 
 ---
 

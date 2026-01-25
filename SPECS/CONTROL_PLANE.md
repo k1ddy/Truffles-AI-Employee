@@ -24,12 +24,12 @@
 
 **Платформа (Truffles):**
 - **Platform Admin** — управление тенантами и модулями, доступ к Ops по всей системе.
-- **Platform Support** — диагностика/помощь, без коммерческих/плановых изменений.
+- **Platform Support** — диагностика/помощь, read‑only в provisioning (без create/update).
 
 **Клиент (бизнес):**
 - **Owner** — полный доступ (знания, команда, интеграции, заявки, настройки).
 - **Admin** — всё, кроме коммерческих/плановых настроек.
-- **Manager** — заявки, календарь, ограниченные операционные настройки.
+- **Manager** — заявки, календарь, ограниченные операционные настройки (branch‑scoped, `branch_id` обязателен).
 - **Specialist/Master** — только календарь/слоты (опционально).
 - **Viewer/Analyst** — read‑only (опционально).
 
@@ -61,15 +61,16 @@
 
 ## 5) Онбординг и Provisioning (Platform Admin)
 
-**Provisioning Wizard** как стандарт:
-1) Профиль бизнеса: название/город/таймзона, `domain_slug`.
-2) Филиалы: адрес, телефон, `instance_id`, `telegram_chat_id`.
-3) Команда: Owner/Admin/Manager, Telegram linking.
-4) Интеграции: каналы, календарь, CRM.
-5) Knowledge: загрузка/валидация/preview/publish.
-6) Live‑check: тестовое сообщение + проверка Inbox/Ops.
+**Provisioning flow (Web‑first)** как стандарт:
+1) Create Branch (Draft): name, slug, timezone (default ok), остальное optional (`is_active=false` без `instance_id`).
+2) Integrations: `instance_id` (WA) → включаем WhatsApp‑channel.
+3) Team: владельцы/админы (доступ в Console).
+4) Telegram: связка бота → `telegram_chat_id` → включаем Telegram‑capability.
+5) Knowledge: `knowledge_tag` / branch‑pack → publish.
+6) Booking: `working_hours` / `booking_settings` / specialists → включаем booking‑capability.
+7) Go/No‑Go: проверяем только поля, нужные для включённых capabilities.
 
-**Go/No‑Go gate:** обязательные данные филиала заполнены, иначе publish запрещён.
+**Go/No‑Go gate:** обязательные поля проверяются по включённым capabilities; без `instance_id` ветка остаётся draft.
 
 ---
 

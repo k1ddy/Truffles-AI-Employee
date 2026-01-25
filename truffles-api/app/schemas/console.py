@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.schemas.capabilities import CapabilitiesPayload
+
 
 class ConsoleError(BaseModel):
     code: str
@@ -41,6 +43,12 @@ class ConsoleAgentWithIdentities(BaseModel):
     identities: list[ConsoleAgentIdentity] = []
 
 
+class ConsoleCompany(BaseModel):
+    id: UUID
+    name: str
+    billing_info: Optional[dict] = None
+
+
 class ConsoleClient(BaseModel):
     id: UUID
     slug: str
@@ -55,6 +63,74 @@ class ConsoleBranch(BaseModel):
     is_active: bool
     instance_id: Optional[str] = None
     telegram_chat_id: Optional[str] = None
+    phone: Optional[str] = None
+    knowledge_tag: Optional[str] = None
+    timezone: Optional[str] = None
+    working_hours: Optional[dict] = None
+    booking_settings: Optional[dict] = None
+
+
+class ConsoleCompanyCreateRequest(BaseModel):
+    name: str
+    billing_info: Optional[dict] = None
+
+
+class ConsoleCompanyCreateResponse(BaseModel):
+    company: ConsoleCompany
+
+
+class ConsoleClientCreateRequest(BaseModel):
+    slug: str
+    company_id: Optional[UUID] = None
+    status: Optional[str] = "active"
+
+
+class ConsoleClientCreateResponse(BaseModel):
+    client: ConsoleClient
+
+
+class ConsoleBranchCreateRequest(BaseModel):
+    client_id: UUID
+    slug: str
+    name: str
+    timezone: Optional[str] = None
+    instance_id: Optional[str] = None
+    phone: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    knowledge_tag: Optional[str] = None
+    working_hours: Optional[dict] = None
+    booking_settings: Optional[dict] = None
+    is_active: Optional[bool] = None
+
+
+class ConsoleBranchCreateResponse(BaseModel):
+    branch: ConsoleBranch
+
+
+class ConsoleBranchUpdateRequest(BaseModel):
+    slug: Optional[str] = None
+    name: Optional[str] = None
+    timezone: Optional[str] = None
+    instance_id: Optional[str] = None
+    phone: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    knowledge_tag: Optional[str] = None
+    working_hours: Optional[dict] = None
+    booking_settings: Optional[dict] = None
+    is_active: Optional[bool] = None
+
+
+class ConsoleAgentCreateRequest(BaseModel):
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    role: Literal["owner", "admin", "manager", "support"]
+    name: Optional[str] = None
+    is_active: Optional[bool] = True
+    oidc_subject: Optional[str] = None
+
+
+class ConsoleAgentCreateResponse(BaseModel):
+    agent: ConsoleAgent
 
 
 class ConsoleMeResponse(BaseModel):
@@ -251,6 +327,35 @@ class ConsoleSettingsResponse(BaseModel):
     branches: list[ConsoleBranch]
     agents: list[ConsoleAgentInfo]
     bot_config: Optional[ConsoleBotConfig] = None
+
+
+class ConsoleCapabilitiesRecord(BaseModel):
+    id: UUID
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    scope: Literal["client", "branch"]
+    status: Literal["active", "disabled"]
+    schema_version: str
+    payload: CapabilitiesPayload
+    created_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleCapabilitiesResponse(BaseModel):
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    effective: CapabilitiesPayload
+    client_capabilities: Optional[ConsoleCapabilitiesRecord] = None
+    branch_capabilities: Optional[ConsoleCapabilitiesRecord] = None
+
+
+class ConsoleCapabilitiesPatchRequest(BaseModel):
+    scope: Literal["client", "branch"]
+    branch_id: Optional[UUID] = None
+    status: Optional[Literal["active", "disabled"]] = None
+    schema_version: Optional[str] = None
+    payload: CapabilitiesPayload
 
 
 class ConsoleAgentListResponse(BaseModel):
