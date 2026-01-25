@@ -86,6 +86,12 @@ Rules:
 - Schema: `contracts/capabilities/capabilities.v1.jsonschema`.
 - Fail‑closed: без явного tenant‑контекста действия недоступны.
 
+**Phase 3 UI contract (Knowledge Studio):**
+- UI location: `Knowledge` (owner/admin write; manager read‑only).
+- Flow: Draft → Validate → Preview Diff → Publish → History → Rollback.
+- Publish gate: ошибки блокируют publish; warnings требуют явного подтверждения.
+- Fail‑closed: без tenant‑контекста действия недоступны.
+
 **Common symptom:** “Only 1–2 cases shown / no slots.”  
 Usually means the admin is mapped to the wrong `client_id` or the wrong client was selected.
 
@@ -119,6 +125,12 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - UI: `console-web/src/app/calendar/page.tsx`
 - API: `/calendar/specialists`, `/calendar/slots`, `/calendar/bookings`
 - Data: `specialists`, `bookings`
+
+**Knowledge (Знания)**
+- UI: `console-web/src/app/knowledge/page.tsx`
+- API: `GET /console/v1/knowledge/current`, `POST /console/v1/knowledge/validate`,
+  `POST /console/v1/knowledge/publish`, `GET /console/v1/knowledge/history`,
+  `POST /console/v1/knowledge/rollback`
 
 **Settings**
 - UI: `console-web/src/app/settings/page.tsx`
