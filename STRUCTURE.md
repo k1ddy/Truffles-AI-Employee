@@ -75,6 +75,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-web-build-fix.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase3-knowledge-studio.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-build-info.md`
+- `docs/TASK_PACKAGES/TP-2026-01-25-chaos-live-e2e.md`
 
 ---
 
