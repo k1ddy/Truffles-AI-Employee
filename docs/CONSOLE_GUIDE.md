@@ -123,6 +123,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 **Settings**
 - UI: `console-web/src/app/settings/page.tsx`
 - API: `GET/PATCH /console/v1/settings`
+- Build info: Settings header shows `NEXT_PUBLIC_BUILD_SHA` and `NEXT_PUBLIC_BUILD_TIME` for deploy diagnosis.
 
 **Audit**
 - UI: `console-web/src/app/audit/page.tsx`
