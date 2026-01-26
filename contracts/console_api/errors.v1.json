@@ -136,6 +136,17 @@
             },
             "retryable": false
         },
+        "ONBOARDING_STEP_REQUIRED": {
+            "http_status": 409,
+            "message_template": "Complete previous onboarding step",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Show missing onboarding requirements"
+            },
+            "retryable": false
+        },
         "NOT_ASSIGNED": {
             "http_status": 403,
             "message_template": "You must take the case before performing this action",
