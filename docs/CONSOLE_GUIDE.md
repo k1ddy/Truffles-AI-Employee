@@ -101,16 +101,14 @@ Rules:
 - Publish gate: ошибки блокируют publish; warnings требуют явного подтверждения.
 - Fail‑closed: без tenant‑контекста действия недоступны.
 
-**Plan: Company → Client → Branch selection (UI + API)**
-1) **API data:** расширить `/console/v1/me` — добавить `companies[]` (id/name) и `company_name` для client.
-   Обновить `truffles-api/app/routers/console.py`, `truffles-api/app/schemas/console.py`,
-   `contracts/console_api/openapi.v1.yaml`, `console-web/src/types/api.generated.ts`.
-2) **UI filter:** добавить `console:company_id` и селект Company в `ConsoleShell`.
-   Фильтровать `clients[]` по выбранной компании и показывать Company name в Context Bar.
-3) **Fail‑closed:** добавить `X-Company-Id` (или `X-Org-Id`) в API и
-   `COMPANY_SELECTION_REQUIRED` в `console_auth.py`, прокинуть заголовок в `console-web/src/lib/api-client.ts`.
-4) **E2E/Docs:** обновить storageState для multi‑company, добавить e2e сценарий,
-   обновить `docs/CONSOLE_GUIDE.md`/`SPECS/CONTROL_PLANE.md`.
+**Company → Client → Branch selection (UI + API, implemented)**
+- `/console/v1/me` возвращает `companies[]`, `company_selection_required`, `selected_company_id`;
+  у client доступен `company_name`.
+- UI хранит `console:company_id` и фильтрует `clients[]` по выбранной компании;
+  селект Company в `ConsoleShell` и gate — первый шаг перед client/branch.
+- Заголовок `X-Company-Id` прокидывается в API через `console-web/src/lib/api-client.ts`
+  и `/api/proxy/*`.
+- E2E учитывает `company-select`/`context-company-select` и `E2E_COMPANY_ID`.
 
 **Common symptom:** “Only 1–2 cases shown / no slots.”  
 Usually means the admin is mapped to the wrong `client_id` or the wrong client was selected.
