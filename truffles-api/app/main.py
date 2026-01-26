@@ -23,7 +23,18 @@ from app.logging_config import (
     setup_logging,
 )
 from app.models import Conversation, Handover, Message, User
-from app.routers import admin, alerts, calendar, callback, console, message, reminders, telegram_webhook, webhook
+from app.routers import (
+    admin,
+    alerts,
+    calendar,
+    callback,
+    console,
+    message,
+    provider_gateway,
+    reminders,
+    telegram_webhook,
+    webhook,
+)
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
 
 load_dotenv()
@@ -92,6 +103,7 @@ app.include_router(message.router)
 app.include_router(callback.router)
 app.include_router(reminders.router)
 app.include_router(webhook.router)
+app.include_router(provider_gateway.router)
 app.include_router(telegram_webhook.router)
 app.include_router(alerts.router)
 app.include_router(admin.router)

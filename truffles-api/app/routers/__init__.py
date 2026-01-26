@@ -1,1 +1,10 @@
-__all__ = ["alerts", "calendar", "console", "message", "callback", "reminders", "webhook"]
+__all__ = [
+    "alerts",
+    "calendar",
+    "console",
+    "message",
+    "callback",
+    "provider_gateway",
+    "reminders",
+    "webhook",
+]

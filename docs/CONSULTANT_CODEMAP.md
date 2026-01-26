@@ -20,6 +20,17 @@
 - **Order matters.** State/pending/LAW/policy gates can override any LLM meaning. This keeps the system safe and deterministic.
 - If you change stage order, you change bot behavior. See `SPECS/SYSTEM_REFERENCE.md` → “Decision pipeline”.
 
+## 1.1) Ingress adapters (ChatFlow + Provider Gateway)
+
+**ChatFlow webhook**
+- `truffles-api/app/routers/webhook/http.py` → `/webhook` + `/webhook/{client_slug}`
+- Normalizes payload and calls `_handle_webhook_payload`.
+
+**Provider Gateway (shadow)**
+- `truffles-api/app/routers/provider_gateway.py` → `POST /provider/inbound` (gated by `PROVIDER_GATEWAY_INBOUND_ENABLED`)
+- Validates `ProviderInbound`, translates to `WebhookRequest` via `truffles-api/app/services/provider_gateway_service.py`,
+  then calls the same `_handle_webhook_payload`.
+
 ---
 
 ## 2) Gates & safety (hard control layer)
