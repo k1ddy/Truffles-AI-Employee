@@ -117,7 +117,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 **Живой хост — канон (in-domain):**
 - **3 исхода:** факт‑ответ (info/consult), booking intake, эскалация.
 - **Fact‑answer (info):** только факты из `client_pack`; LLM может **только перефразировать** эти факты.
-- **Consult:** pack‑first (`consult_playbooks`), LLM‑советы только по общему beauty‑уходу (без фактов о салоне).
+- **Consult:** pack‑first (`consult_playbooks`); LLM‑советы только из `allowed_advice`, без фактов о бизнесе.
 - **Booking intake:** сбор слотов записи (`expected_reply_type`); при перебивке — факт‑ответ и возврат к последнему booking‑вопросу.
 - **Hard‑LAW:** оплата (подтверждение/проверка/возвраты), медицинка, жалобы, переносы → только эскалация, без рекомендаций/офферов.
 - **Policy‑gates:** скидки и способы оплаты разрешены **только** по явным правилам в `client_pack`; иначе эскалация.
@@ -158,15 +158,22 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Trace/meta: `stage=pending_guard/pending_status/pending_wait`, `action ∈ {pending_status,pending_wait,pending_ack,pending_close}`.
 
 **Consult clarify (pack-first + LLM fallback, safe):**
-- Consult canon: сначала playbook из `client_pack.consult_playbooks`; если нет playbook и это beauty‑тема без Hard‑LAW — разрешён LLM‑совет (общие рекомендации).
-- LLM‑совет **не имеет права** говорить о наличии услуг, ценах, условиях салона. Только общая бьюти‑консультация.
-- Если в сообщении есть вопрос "оказываете ли X" и услуги нет в каталоге → чёткий ответ "у нас нет" + мягкая альтернатива. ЛLM‑совет может идти **после** этого ответа.
-- Если explicit info/booking (pricing/duration/location/hours/booking) и услуга распознана → short‑circuit в info/booking (без уточнения).
-- Если playbook не найден и услуги нет → максимум 2 уточнения (`clarify_limit=2`), `expected_reply_type=service_choice`; после лимита без услуги → эскалация с reason `consult_no_service`.
+- Consult canon: сначала playbook из `client_pack.consult_playbooks`; если playbook/topic не найден — уточнение или эскалация (LLM‑совет только внутри `allowed_advice`).
+- LLM‑совет **не имеет права** заявлять факты о наличии/ценах/условиях бизнеса. Только общие рекомендации, разрешенные playbook.
+- Если запрос требует недостающих фактов (service/policy/price/duration) и факты не доступны в pack/tools → уточнение или handoff, без предположений.
+- Если explicit info/booking и факт подтвержден pack/tools → short‑circuit в info/booking (без лишнего consult).
+- `clarify_limit=2` максимум; после лимита без topic/facts → эскалация с reason `consult_no_topic`.
 - Hard‑LAW/Policy/opt‑out/human выше consult: если сработало — consult‑playbook/LLM не применяется.
-- Если есть consult‑интент вместе с pricing/match → consult‑ответ обязателен, цены/матч допускаются только после consult и при наличии услуги в каталоге.
+- Если есть consult‑интент вместе с pricing/info → consult‑ответ идёт первым, факты добавляются только при наличии в pack/tools.
 - Вариант ответа playbook выбирается детерминированно (hash от `conversation_id + playbook_id`) — без дрейфа.
-- Trace/meta: `stage=consult_flow` (`decision=consult_clarify|consult_escalate|short_circuit|consult_llm`), `clarify_attempt`, `expected_reply_type=service_choice`, `consult_playbook_id`, `consult_variant_id`, `tips_used`, `source=pack|llm`.
+- Trace/meta: `stage=consult_flow` (`decision=consult_clarify|consult_escalate|short_circuit|consult_pack`), `clarify_attempt`,
+  `consult_topic_id`, `consult_playbook_id`, `consult_variant_id`, `consult_source=pack|llm`, `consult_risk_class`, `consult_confidence`.
+
+**Consult schema (domain-agnostic, no dictionaries):**
+- Pack schema: `contracts/consult/consult_playbook.v1.jsonschema` (topics, allowed_advice, required_questions, risk_tags).
+- LLM output contract: `contracts/consult/consult_controller_output.v1.jsonschema` (intent, topic_id, confidence, risk_class, actions, slots).
+- Topic resolution: semantic retrieval over pack topics → Top‑K candidates → LLM selects `topic_id`; no phrase dictionaries.
+- Deterministic commit: low confidence / missing facts / risk high → clarify or handoff; never answer outside `allowed_advice`.
 
 **CTA после инфо‑ответа (standalone, вне booking):**
 - После ответа на цены/длительность/часы/адрес — добавить мягкий CTA: “Хотите записаться?”.
@@ -239,8 +246,8 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Semantic resolver (embeddings) подтверждает смысл; ключевые слова/якоря — только fallback.
 - LLM‑контроллер — основной арбитр смысла; словари/якоря не расширяем ради покрытия, только для safety‑gate и минимальных якорей.
 - LLM **не создаёт факты**. Факты об услугах/ценах/наличии берутся только из tools/packs.
-- LLM может давать **общие beauty‑рекомендации** (consult) без медицины и без заявлений о наличии услуг/цен/условий салона.
-- Response Guard обязателен: ответ = ack + facts + next_step; лишнее → fallback/clarify.
+- LLM может давать **общие рекомендации** (consult) только из `allowed_advice`; факты о бизнесе — только из pack/tools.
+- Response Guard обязателен: ответ = ack + facts + next_step; лишнее → fallback/clarify/handoff.
 - Валидатор ответа:
   - оплата (подтверждение/проверка/возвраты)/медицинка/жалобы/переносы → **override на эскалацию**;
   - скидки/способы оплаты → **только** если policy‑gate разрешён и правило совпало, иначе эскалация.

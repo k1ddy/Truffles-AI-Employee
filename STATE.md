@@ -146,7 +146,6 @@
 - Docs: consult flow map + resolver fallback in `docs/CONSULTANT_CODEMAP.md`, `SPECS/SYSTEM_REFERENCE.md`.
 - Deploy (GHCR main): `PULL_IMAGE=1 ... restart_api.sh` → `/admin/version` version=main git_commit `8455f7dda50bddafd6574ca4ab6cbb030890905e`; `docker exec truffles-api python3 -c "import sys; print(sys.version)"` → 3.11.14.
 - Docs: `STRUCTURE.md` updated with consult contracts + generic pack scaffolds.
-
 ### 2026-01-23 — Console↔Telegram P0 contract alignment
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
 - Checks: `pytest -q truffles-api/tests/test_console_telegram_helpers.py` → `4 passed in 2.64s`
