@@ -34,6 +34,7 @@
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
+| `truffles-api/migrations/015_add_inbox_events.sql` | Migration: inbox_events (durable inbox store) | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
@@ -96,6 +97,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-26-provider-contracts-v1.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbound-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-outbound-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbox-event.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-docs-selection-runbooks.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`

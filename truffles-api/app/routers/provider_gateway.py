@@ -11,6 +11,7 @@ from app.logging_config import get_logger
 from app.routers.webhook import _legacy as legacy
 from app.schemas.provider_gateway import ProviderInbound, ProviderStatus
 from app.schemas.webhook import WebhookResponse
+from app.services.inbox_event_service import record_inbox_event
 from app.services.provider_gateway_service import translate_provider_inbound, update_outbox_status_from_provider
 
 logger = get_logger("provider_gateway")
@@ -29,6 +30,14 @@ def _is_provider_inbound_enabled() -> bool:
 
 def _is_provider_status_enabled() -> bool:
     return _is_env_enabled(os.environ.get("PROVIDER_GATEWAY_STATUS_ENABLED"), default=False)
+
+
+def _is_provider_inbox_enabled() -> bool:
+    return _is_env_enabled(os.environ.get("PROVIDER_GATEWAY_INBOX_ENABLED"), default=False)
+
+
+def _is_provider_inbox_required() -> bool:
+    return _is_env_enabled(os.environ.get("PROVIDER_GATEWAY_INBOX_REQUIRED"), default=False)
 
 
 def _enforce_gateway_token(request: Request) -> None:
@@ -67,6 +76,16 @@ async def handle_provider_inbound(request: Request, db: Session = Depends(get_db
             extra={"context": {"error": str(exc)}},
         )
         return WebhookResponse(success=False, message="Invalid provider inbound payload")
+
+    if _is_provider_inbox_enabled():
+        ok, result = record_inbox_event(db, payload=payload, raw_payload=payload_json)
+        if not ok and result != "duplicate":
+            logger.warning(
+                "Provider inbox event record failed",
+                extra={"context": {"error": result}},
+            )
+            if _is_provider_inbox_required():
+                return WebhookResponse(success=False, message=f"inbox_event:{result}")
 
     webhook_payload, error = translate_provider_inbound(payload)
     if error:

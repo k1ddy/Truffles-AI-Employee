@@ -30,6 +30,8 @@
 - `truffles-api/app/routers/provider_gateway.py` → `POST /provider/inbound` (gated by `PROVIDER_GATEWAY_INBOUND_ENABLED`)
 - Validates `ProviderInbound`, translates to `WebhookRequest` via `truffles-api/app/services/provider_gateway_service.py`,
   then calls the same `_handle_webhook_payload`.
+- If `PROVIDER_GATEWAY_INBOX_ENABLED=1`, the inbound handler records a durable `inbox_events` row
+  before passing control to the webhook pipeline.
 
 ---
 
