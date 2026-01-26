@@ -95,6 +95,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-26-provider-gateway-architecture.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-provider-contracts-v1.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbound-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-outbound-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-docs-selection-runbooks.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`

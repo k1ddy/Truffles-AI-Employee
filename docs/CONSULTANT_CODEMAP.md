@@ -145,6 +145,8 @@
 
 **Behavior impact:**
 - Idempotent sends; retries; state changes tracked in `outbox_messages`.
+- When `PROVIDER_GATEWAY_OUTBOUND_ENABLED=1`, outbox event sends use `ProviderGatewayAdapter` and emit
+  `provider_outbound` payloads; status callbacks update outbox meta via `/provider/status`.
 
 ---
 
