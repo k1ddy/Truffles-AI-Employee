@@ -73,6 +73,9 @@ from app.schemas.console import (
     ConsoleMessage,
     ConsoleMessageListResponse,
     ConsoleMetricsDailyResponse,
+    ConsoleOnboardingAdvanceRequest,
+    ConsoleOnboardingStatusResponse,
+    ConsoleOnboardingStepStatus,
     ConsoleOutboxCounts,
     ConsoleOutboxItem,
     ConsoleOutboxListResponse,
@@ -113,6 +116,12 @@ from app.services.knowledge_registry_service import (
 )
 from app.services.knowledge_validation import dump_pack_yaml
 from app.services.manager_message_service import notify_client_manager_status
+from app.services.onboarding_state import (
+    OnboardingStep,
+    advance_onboarding_step,
+    build_onboarding_status,
+    ensure_onboarding_step,
+)
 from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
@@ -142,6 +151,10 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
             is_active=branch.is_active,
             instance_id=branch.instance_id,
             telegram_chat_id=branch.telegram_chat_id,
+            onboarding_state=branch.onboarding_state,
+            onboarding_updated_at=branch.onboarding_updated_at.isoformat()
+            if branch.onboarding_updated_at
+            else None,
         )
         for branch in context.branches
     ]
@@ -325,7 +338,44 @@ def _serialize_branch(branch: Branch) -> ConsoleBranch:
         timezone=branch.timezone,
         working_hours=branch.working_hours,
         booking_settings=branch.booking_settings,
+        onboarding_state=branch.onboarding_state,
+        onboarding_updated_at=branch.onboarding_updated_at.isoformat()
+        if branch.onboarding_updated_at
+        else None,
     )
+
+
+def _serialize_onboarding_status(
+    branch: Branch,
+    status,
+) -> ConsoleOnboardingStatusResponse:
+    return ConsoleOnboardingStatusResponse(
+        branch_id=branch.id,
+        current_step=status.current_step.value,
+        steps=[
+            ConsoleOnboardingStepStatus(
+                id=step.id.value,
+                status=step.status,
+                required=step.required,
+                missing=step.missing,
+            )
+            for step in status.steps
+        ],
+        updated_at=branch.onboarding_updated_at.isoformat()
+        if branch.onboarding_updated_at
+        else None,
+    )
+
+
+def _resolve_branch_for_onboarding(
+    context: ConsoleAuthContext, *, branch_id: Optional[UUID]
+) -> Branch:
+    if branch_id:
+        for branch in context.branches:
+            if branch.id == branch_id:
+                return branch
+        raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+    return _resolve_branch_from_context(context)
 
 
 def _build_telegram_trail(
@@ -2618,6 +2668,7 @@ async def verify_telegram_connector(
         )
         if not branch:
             raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        ensure_onboarding_step(db, branch, OnboardingStep.TELEGRAM)
 
     bot_token, chat_id, resolved_branch_id = _resolve_telegram_action_target(
         settings=settings,
@@ -2703,6 +2754,7 @@ async def send_telegram_test(
         )
         if not branch:
             raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        ensure_onboarding_step(db, branch, OnboardingStep.TELEGRAM)
 
     bot_token, chat_id, resolved_branch_id = _resolve_telegram_action_target(
         settings=settings,
@@ -2821,6 +2873,56 @@ async def update_settings(
 
 
 @router.get(
+    "/onboarding/status",
+    response_model=ConsoleOnboardingStatusResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_onboarding_status(
+    request: Request,
+    branch_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleOnboardingStatusResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin/support can access onboarding",
+    )
+    branch = _resolve_branch_for_onboarding(context, branch_id=branch_id)
+    status = build_onboarding_status(db, branch)
+    return _serialize_onboarding_status(branch, status)
+
+
+@router.post(
+    "/onboarding/advance",
+    response_model=ConsoleOnboardingStatusResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 409: {"model": ConsoleErrorResponse}},
+)
+async def advance_onboarding(
+    body: ConsoleOnboardingAdvanceRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleOnboardingStatusResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage onboarding",
+    )
+    branch = _resolve_branch_for_onboarding(context, branch_id=body.branch_id)
+    status = advance_onboarding_step(
+        db,
+        branch,
+        OnboardingStep(body.step_id),
+        actor=context.agent,
+    )
+    db.commit()
+    return _serialize_onboarding_status(branch, status)
+
+
+@router.get(
     "/knowledge/current",
     response_model=ConsoleKnowledgeCurrentResponse,
     responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
@@ -2861,6 +2963,7 @@ async def validate_knowledge(
         message="Only owner/admin can manage knowledge",
     )
     branch = _resolve_branch_from_context(context)
+    ensure_onboarding_step(db, branch, OnboardingStep.KNOWLEDGE)
     current = get_current_published(db, branch_id=branch.id)
     current_payload = current.payload_json if current else None
     payload, errors, warnings, diff = validate_draft(
@@ -2919,6 +3022,7 @@ async def publish_knowledge(
         message="Only owner/admin can manage knowledge",
     )
     branch = _resolve_branch_from_context(context)
+    ensure_onboarding_step(db, branch, OnboardingStep.KNOWLEDGE)
 
     current = get_current_published(db, branch_id=branch.id)
     current_payload = current.payload_json if current else None
@@ -3303,6 +3407,8 @@ async def create_branch(
         working_hours=body.working_hours if body.working_hours is not None else {},
         booking_settings=body.booking_settings if body.booking_settings is not None else {},
         is_active=is_active,
+        onboarding_state=OnboardingStep.BRANCH_DRAFT.value,
+        onboarding_updated_at=now,
         created_at=now,
         updated_at=now,
     )
@@ -3346,6 +3452,15 @@ async def update_branch(
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
 
     fields_set = body.model_fields_set
+    if "instance_id" in fields_set:
+        ensure_onboarding_step(db, branch, OnboardingStep.INTEGRATIONS)
+    if "telegram_chat_id" in fields_set:
+        ensure_onboarding_step(db, branch, OnboardingStep.TELEGRAM)
+    if "knowledge_tag" in fields_set:
+        ensure_onboarding_step(db, branch, OnboardingStep.KNOWLEDGE)
+    if "working_hours" in fields_set or "booking_settings" in fields_set:
+        ensure_onboarding_step(db, branch, OnboardingStep.BOOKING)
+
     updated_fields: list[str] = []
 
     if "slug" in fields_set:
@@ -3478,6 +3593,16 @@ async def create_agent(
         )
         if not branch:
             raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+
+    branch_for_onboarding = branch
+    if not branch_for_onboarding and context.effective_branch_id:
+        branch_for_onboarding = (
+            db.query(Branch)
+            .filter(Branch.id == context.effective_branch_id, Branch.client_id == client.id)
+            .first()
+        )
+    if branch_for_onboarding:
+        ensure_onboarding_step(db, branch_for_onboarding, OnboardingStep.TEAM)
 
     now = datetime.now(timezone.utc)
     is_active = body.is_active if body.is_active is not None else True

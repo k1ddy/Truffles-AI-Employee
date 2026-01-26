@@ -88,6 +88,8 @@ Rules:
 - Provisioning flow: Create Branch (Draft) → Integrations (`instance_id`) → Team → Telegram (`telegram_chat_id`)
   → Knowledge (`knowledge_tag` / branch‑pack) → Booking (`working_hours` / `booking_settings` / specialists) → Go/No‑Go.
 - Go/No‑Go gate: проверяем только поля, нужные для включённых capabilities; без `instance_id` ветка остаётся draft.
+- Server‑side onboarding: `/console/v1/onboarding/status` и `/console/v1/onboarding/advance`, порядок шагов enforced API.
+- Ошибка порядка: `ONBOARDING_STEP_REQUIRED` (409) с `required_step/current_step/missing`.
 - Capabilities UI: tri‑state редактор (inherit/enable/disable), effective‑view (client + branch overrides),
   сохранение в `/console/v1/admin/capabilities` с `schema_version` и audit.
 - API provisioning: `POST /console/v1/admin/companies|clients|branches|agents`,

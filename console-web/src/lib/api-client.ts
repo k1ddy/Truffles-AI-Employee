@@ -59,6 +59,7 @@ export const ErrorCodes = {
     CASE_ALREADY_RESOLVED: "CASE_ALREADY_RESOLVED",
     NOT_ASSIGNED: "NOT_ASSIGNED",
     CASE_NOT_ACTIVE: "CASE_NOT_ACTIVE",
+    ONBOARDING_STEP_REQUIRED: "ONBOARDING_STEP_REQUIRED",
     VALIDATION_ERROR: "VALIDATION_ERROR",
     MESSAGE_TOO_LONG: "MESSAGE_TOO_LONG",
     OUTBOX_FAILED: "OUTBOX_FAILED",
@@ -227,6 +228,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
     CASE_NOT_ACTIVE: {
         http_status: 400,
         ui_behavior: { action: "refresh_item", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    ONBOARDING_STEP_REQUIRED: {
+        http_status: 409,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
         retryable: false,
     },
     VALIDATION_ERROR: {
@@ -576,6 +582,16 @@ export const adminApi = {
         apiClient.patch<components["schemas"]["CapabilitiesRecord"]>("/admin/capabilities", data, {
             headers: buildClientHeader(clientId),
         }),
+};
+
+/** Onboarding endpoints */
+export const onboardingApi = {
+    status: (branchId?: string) =>
+        apiClient.get<components["schemas"]["OnboardingStatusResponse"]>("/onboarding/status", {
+            params: branchId ? { branch_id: branchId } : undefined,
+        }),
+    advance: (data: components["schemas"]["OnboardingAdvanceRequest"]) =>
+        apiClient.post<components["schemas"]["OnboardingStatusResponse"]>("/onboarding/advance", data),
 };
 
 /** Audit endpoints */

@@ -69,6 +69,8 @@ class ConsoleBranch(BaseModel):
     timezone: Optional[str] = None
     working_hours: Optional[dict] = None
     booking_settings: Optional[dict] = None
+    onboarding_state: Optional[str] = None
+    onboarding_updated_at: Optional[str] = None
 
 
 class ConsoleCompanyCreateRequest(BaseModel):
@@ -119,6 +121,38 @@ class ConsoleBranchUpdateRequest(BaseModel):
     working_hours: Optional[dict] = None
     booking_settings: Optional[dict] = None
     is_active: Optional[bool] = None
+
+
+OnboardingStepId = Literal[
+    "branch_draft",
+    "integrations",
+    "team",
+    "telegram",
+    "knowledge",
+    "booking",
+    "go_no_go",
+]
+
+OnboardingStepStatusValue = Literal["complete", "available", "locked", "skipped"]
+
+
+class ConsoleOnboardingStepStatus(BaseModel):
+    id: OnboardingStepId
+    status: OnboardingStepStatusValue
+    required: bool
+    missing: list[str] = []
+
+
+class ConsoleOnboardingStatusResponse(BaseModel):
+    branch_id: UUID
+    current_step: OnboardingStepId
+    steps: list[ConsoleOnboardingStepStatus]
+    updated_at: Optional[str] = None
+
+
+class ConsoleOnboardingAdvanceRequest(BaseModel):
+    branch_id: UUID
+    step_id: OnboardingStepId
 
 
 class ConsoleAgentCreateRequest(BaseModel):

@@ -101,6 +101,14 @@
 
 **Go/No‑Go gate:** обязательные поля проверяются по включённым capabilities; без `instance_id` ветка остаётся draft.
 
+**Server‑side onboarding state machine (branch‑scoped):**
+- Шаги: `branch_draft → integrations → team → telegram → knowledge → booking → go_no_go`.
+- Проверка порядка выполняется на API (не только UI).
+- API:
+  - `GET /console/v1/onboarding/status?branch_id=...`
+  - `POST /console/v1/onboarding/advance`
+- Ошибка порядка: `ONBOARDING_STEP_REQUIRED` (409), с `required_step/current_step`.
+
 ---
 
 ## 6) Capabilities (модули клиента)
