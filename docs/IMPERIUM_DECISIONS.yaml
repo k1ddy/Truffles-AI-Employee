@@ -68,3 +68,7 @@ decisions:
     area: "capabilities_model"
     choice: "SEPARATE_TABLE_JSONB_SCHEMA"
     statement: "Client capabilities live in a dedicated table with JSONB payload + schema_version; scope supports client-level defaults and branch-level overrides; effective capabilities are merged at read time, not stored in client_settings."
+  - id: "DEC-016"
+    area: "provider_gateway_architecture"
+    choice: "GATEWAY_SNAPSHOT"
+    statement: "Provider Gateway + Channel Adapters become the only ingress/egress to external channels; Inbox/Outbox are durable, idempotent, and retryable with DLQ; Knowledge Gateway serves signed per-tenant snapshots (pack-only) so core never reads raw KB; all decisions require tenant_context and are provider-agnostic."

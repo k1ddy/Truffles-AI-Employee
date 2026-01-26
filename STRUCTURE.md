@@ -92,6 +92,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-phase3-knowledge-backend.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-phase5-inbox-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-rbac-matrix.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-provider-gateway-architecture.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-provider-contracts-v1.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-docs-selection-runbooks.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`
@@ -486,6 +487,7 @@ truffles-api/
 | Файл | Что тестирует |
 |------|---------------|
 | `truffles-api/tests/test_cases.json` | Тестовые сценарии диалогов |
+| `truffles-api/tests/test_console_rbac.py` | Unit: Console RBAC matrix guards |
 | `truffles-api/tests/test_console_telegram_connector.py` | Unit: Console Telegram verify/test helpers |
 | `truffles-api/tests/test_console_telegram_helpers.py` | Unit: Console Telegram trail helpers |
 | `truffles-api/tests/test_webhook_booking.py` | Unit: expected_reply_type и booking slot validators |

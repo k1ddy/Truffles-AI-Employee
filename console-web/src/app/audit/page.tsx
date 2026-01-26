@@ -2,6 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
+import AccessDenied from "@/components/AccessDenied";
+import { authApi, canAccessConsole } from "@/lib/api-client";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 
@@ -64,10 +66,22 @@ function EventTypeBadge({ type }: { type: string }) {
 export default function AuditPage() {
     const { data: session } = useSession();
 
+    const { data: meData, isLoading: meLoading } = useQuery({
+        queryKey: ["console-me"],
+        queryFn: async () => {
+            const response = await authApi.getMe();
+            return response.data;
+        },
+        enabled: !!session,
+    });
+
+    const role = meData?.agent?.role ?? "manager";
+    const canReadAudit = canAccessConsole(role, "audit", "read");
+
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["audit"],
         queryFn: fetchAuditEvents,
-        enabled: !!session,
+        enabled: !!session && canReadAudit,
     });
 
     if (!session) {
@@ -75,6 +89,20 @@ export default function AuditPage() {
             <div className="p-8 text-center text-muted-foreground">
                 Войдите в систему для просмотра журнала.
             </div>
+        );
+    }
+
+    if (meLoading) {
+        return (
+            <div className="p-8 text-center text-muted-foreground">
+                Загрузка роли...
+            </div>
+        );
+    }
+
+    if (!canReadAudit) {
+        return (
+            <AccessDenied message="Эта роль не имеет доступа к журналу." />
         );
     }
 

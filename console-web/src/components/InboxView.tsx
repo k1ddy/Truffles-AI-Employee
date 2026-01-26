@@ -2,11 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { useSession } from "next-auth/react";
 import CaseList from "@/components/CaseList";
 import CaseConversation from "@/components/CaseConversation";
 import CaseDetailsPanel from "@/components/CaseDetailsPanel";
 import InboxMacros from "@/components/InboxMacros";
+import AccessDenied from "@/components/AccessDenied";
 import { useCaseData } from "@/hooks/useCaseData";
+import { authApi, canAccessConsole } from "@/lib/api-client";
 
 interface InboxViewProps {
     initialCaseId?: string | null;
@@ -14,8 +18,22 @@ interface InboxViewProps {
 
 export default function InboxView({ initialCaseId }: InboxViewProps) {
     const router = useRouter();
+    const { data: session } = useSession();
     const [selectedCaseId, setSelectedCaseId] = useState(initialCaseId ?? "");
     const [draft, setDraft] = useState("");
+
+    const { data: meData } = useQuery({
+        queryKey: ["console-me"],
+        queryFn: async () => {
+            const response = await authApi.getMe();
+            return response.data;
+        },
+        enabled: !!session,
+    });
+
+    const role = meData?.agent?.role ?? "manager";
+    const canReadInbox = canAccessConsole(role, "inbox", "read");
+    const canWriteInbox = canAccessConsole(role, "inbox", "write");
 
     useEffect(() => {
         if (initialCaseId) {
@@ -36,7 +54,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
         messagesLoading,
     } = useCaseData(selectedCaseId);
 
-    const canSend = Boolean(caseDetail && caseDetail.status === "active");
+    const canSend = Boolean(caseDetail && caseDetail.status === "active" && canWriteInbox);
 
     const handleSelectCase = (caseId: string) => {
         setSelectedCaseId(caseId);
@@ -73,6 +91,12 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
         </div>
     );
 
+    if (!canReadInbox) {
+        return (
+            <AccessDenied message="Эта роль не имеет доступа к Inbox." />
+        );
+    }
+
     return (
         <div className="space-y-6" data-testid="inbox-view">
             <div>
@@ -103,6 +127,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                 messages={messages}
                                 messagesLoading={messagesLoading}
                                 canSend={canSend}
+                                canWrite={canWriteInbox}
                                 draft={draft}
                                 onDraftChange={setDraft}
                             />

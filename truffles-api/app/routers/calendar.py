@@ -23,7 +23,7 @@ from app.services.appointment_service import (
     SchedulingService,
     SpecialistNotFoundError,
 )
-from app.services.console_auth import ConsoleAuthContext, get_console_context
+from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_errors import ConsoleAPIError
 from app.services.google_calendar_service import GoogleCalendarService
 
@@ -114,6 +114,7 @@ async def list_specialists(
 ):
     """Get all specialists for the client."""
     context = get_console_context(request, db)
+    require_console_permission(context, "calendar", "read")
     
     query = db.query(Specialist).filter(
         Specialist.client_id == context.client.id,
@@ -163,6 +164,7 @@ async def get_slots(
     Combines working hours, existing bookings, and Google Calendar.
     """
     context = get_console_context(request, db)
+    require_console_permission(context, "calendar", "read")
     
     try:
         parsed_date = datetime.strptime(date, "%Y-%m-%d")
@@ -233,6 +235,7 @@ async def create_booking(
     Concurrency-safe: uses FOR UPDATE NOWAIT to prevent double-booking.
     """
     context = get_console_context(request, db)
+    require_console_permission(context, "calendar", "write")
     
     # Verify specialist belongs to client
     specialist = db.query(Specialist).filter(
@@ -312,6 +315,7 @@ async def list_bookings(
 ):
     """Get bookings with filters."""
     context = get_console_context(request, db)
+    require_console_permission(context, "calendar", "read")
     
     service = SchedulingService(db)
     
@@ -402,6 +406,7 @@ async def cancel_booking(
 ):
     """Cancel a booking."""
     context = get_console_context(request, db)
+    require_console_permission(context, "calendar", "write")
     
     service = SchedulingService(db)
     
@@ -468,10 +473,12 @@ async def google_connect(
     Redirects to Google consent screen.
     """
     context = get_console_context(request, db)
-    
-    # Only owner/admin can connect calendar
-    if context.role not in ("owner", "admin"):
-        raise ConsoleAPIError(403, "FORBIDDEN", "Only admin can connect Google Calendar")
+    require_console_permission(
+        context,
+        "settings",
+        "write",
+        message="Only owner/admin can connect Google Calendar",
+    )
     branch_id = _resolve_calendar_branch(context)
     service = GoogleCalendarService(db)
     auth_url = service.get_auth_url(
@@ -513,6 +520,7 @@ async def google_status(
 ):
     """Check if Google Calendar is connected."""
     context = get_console_context(request, db)
+    require_console_permission(context, "settings", "read")
     branch_id = _resolve_calendar_branch(context)
     
     from app.models.google_calendar_token import GoogleCalendarToken
