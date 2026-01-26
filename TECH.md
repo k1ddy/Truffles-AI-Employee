@@ -136,6 +136,8 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `MEDIA_STORAGE_WARN_BYTES` — порог алерта по объёму (default: 5GB).
 - `QDRANT_COLLECTION` — коллекция Qdrant (default: truffles_knowledge; при `TEST_MODE=1` и пустом env → truffles_knowledge_ci).
 - `KNOWLEDGE_SNAPSHOT_CONSUMER_ENABLED` — включает shadow-consumer для consult snapshot (default: false).
+- `KNOWLEDGE_SNAPSHOT_CONSULT_MODE` — режим consult snapshot: `shadow|fallback|strict` (default: shadow).
+- `KNOWLEDGE_SNAPSHOT_CONSULT_ALLOWLIST` — список `client_slug` для canary/cutover (через запятую).
 - `BOOKING_CONFIRM_ENABLED` — включить LLM-first slot_extract + booking_confirm (default: false).
 - `BOOKING_CONFIRM_CONFIDENCE_THRESHOLD` — порог уверенности для подтверждения слота (default: 0.9).
 - `CALENDAR_TOKEN_ENC_KEY` — ключ pgcrypto для шифрования OAuth токенов календаря (обязателен после включения sync).

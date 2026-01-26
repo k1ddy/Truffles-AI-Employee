@@ -18,6 +18,29 @@ def is_snapshot_consumer_enabled() -> bool:
     return _is_env_enabled(os.environ.get("KNOWLEDGE_SNAPSHOT_CONSUMER_ENABLED"), default=False)
 
 
+def get_consult_snapshot_mode() -> str:
+    raw = (os.environ.get("KNOWLEDGE_SNAPSHOT_CONSULT_MODE") or "").strip().lower()
+    if raw in {"fallback", "strict", "shadow"}:
+        return raw
+    return "shadow"
+
+
+def _parse_allowlist(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    return {item.strip().lower() for item in value.split(",") if item.strip()}
+
+
+def is_consult_snapshot_allowlisted(client_slug: str | None) -> bool:
+    allowlist = _parse_allowlist(os.environ.get("KNOWLEDGE_SNAPSHOT_CONSULT_ALLOWLIST"))
+    if not allowlist:
+        return False
+    if "*" in allowlist or "all" in allowlist:
+        return True
+    normalized = (client_slug or "").strip().lower()
+    return bool(normalized and normalized in allowlist)
+
+
 @dataclass(frozen=True)
 class ConsultSnapshotShadowResult:
     playbook: ConsultPlaybook | None
@@ -29,12 +52,13 @@ class ConsultSnapshotShadowResult:
     playbook_present: bool
 
 
-def build_consult_snapshot_shadow(
+def _build_consult_snapshot(
     db,
     *,
     client_id: str | None,
     branch_id: str | None,
     client_slug: str | None = None,
+    source: str,
 ) -> ConsultSnapshotShadowResult:
     if not client_id:
         return ConsultSnapshotShadowResult(
@@ -51,7 +75,7 @@ def build_consult_snapshot_shadow(
         client_id=client_id,
         branch_id=branch_id,
         client_slug=client_slug,
-        source="consult_snapshot_shadow",
+        source=source,
     )
     snapshot, error = build_knowledge_snapshot(db, tenant_context=tenant_context)
     if error:
@@ -114,8 +138,43 @@ def build_consult_snapshot_shadow(
     )
 
 
+def build_consult_snapshot(
+    db,
+    *,
+    client_id: str | None,
+    branch_id: str | None,
+    client_slug: str | None = None,
+) -> ConsultSnapshotShadowResult:
+    return _build_consult_snapshot(
+        db,
+        client_id=client_id,
+        branch_id=branch_id,
+        client_slug=client_slug,
+        source="consult_snapshot_consumer",
+    )
+
+
+def build_consult_snapshot_shadow(
+    db,
+    *,
+    client_id: str | None,
+    branch_id: str | None,
+    client_slug: str | None = None,
+) -> ConsultSnapshotShadowResult:
+    return _build_consult_snapshot(
+        db,
+        client_id=client_id,
+        branch_id=branch_id,
+        client_slug=client_slug,
+        source="consult_snapshot_shadow",
+    )
+
+
 __all__ = [
     "ConsultSnapshotShadowResult",
+    "build_consult_snapshot",
     "build_consult_snapshot_shadow",
+    "get_consult_snapshot_mode",
+    "is_consult_snapshot_allowlisted",
     "is_snapshot_consumer_enabled",
 ]

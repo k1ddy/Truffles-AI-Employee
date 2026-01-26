@@ -518,7 +518,10 @@ def _handle_consult_flow(
     )
     from app.services.knowledge_service import resolve_consult_topic_candidates
     from app.services.knowledge_snapshot_consumer import (
+        build_consult_snapshot,
         build_consult_snapshot_shadow,
+        get_consult_snapshot_mode,
+        is_consult_snapshot_allowlisted,
         is_snapshot_consumer_enabled,
     )
 
@@ -572,13 +575,16 @@ def _handle_consult_flow(
     consult_pack_intent_signal = bool(consult_intent or consult_context_active)
     consult_snapshot_result = None
     consult_snapshot_meta: dict[str, Any] | None = None
+    consult_snapshot_mode = "shadow"
+    consult_snapshot_source = None
+    consult_snapshot_cutover = False
 
-    def _build_consult_snapshot_trace(result) -> dict[str, Any]:
+    def _build_consult_snapshot_trace(result, *, mode: str) -> dict[str, Any]:
         error = result.error or result.playbook_error
         trace: dict[str, Any] = {
             "stage": "consult_snapshot",
             "decision": "ok" if not error else "error",
-            "mode": "shadow",
+            "mode": mode,
             "consult_playbook_present": result.playbook_present,
         }
         if result.snapshot_id:
@@ -593,9 +599,10 @@ def _handle_consult_flow(
             trace["consult_playbook_error"] = result.playbook_error
         return trace
 
-    def _build_consult_snapshot_meta(result) -> dict[str, Any]:
+    def _build_consult_snapshot_meta(result, *, mode: str, source: str | None) -> dict[str, Any]:
         meta: dict[str, Any] = {
-            "consult_snapshot_source": "shadow",
+            "consult_snapshot_mode": mode,
+            "consult_snapshot_source": source or mode,
             "consult_snapshot_playbook_present": result.playbook_present,
         }
         if result.snapshot_id:
@@ -610,23 +617,114 @@ def _handle_consult_flow(
             meta["consult_snapshot_playbook_error"] = result.playbook_error
         return meta
 
-    if consult_pack_intent_signal and is_snapshot_consumer_enabled():
+    playbook = None
+    _pack_error = None
+
+    def _resolve_branch_id() -> str | None:
         branch_id = None
         if isinstance(timing_context, dict):
             branch_id = timing_context.get("branch_id")
         if not branch_id and conversation.branch_id:
             branch_id = conversation.branch_id
-        consult_snapshot_result = build_consult_snapshot_shadow(
-            db,
-            client_id=str(conversation.client_id) if conversation.client_id else None,
-            branch_id=str(branch_id) if branch_id else None,
-            client_slug=client_slug,
+        return str(branch_id) if branch_id else None
+
+    if consult_pack_intent_signal:
+        consult_snapshot_mode = get_consult_snapshot_mode()
+        consult_snapshot_cutover = bool(
+            consult_snapshot_mode in {"fallback", "strict"}
+            and is_consult_snapshot_allowlisted(client_slug)
         )
-        consult_snapshot_meta = _build_consult_snapshot_meta(consult_snapshot_result)
-        legacy._record_decision_trace(
-            conversation,
-            _build_consult_snapshot_trace(consult_snapshot_result),
-        )
+        if consult_snapshot_cutover:
+            consult_snapshot_result = build_consult_snapshot(
+                db,
+                client_id=str(conversation.client_id) if conversation.client_id else None,
+                branch_id=_resolve_branch_id(),
+                client_slug=client_slug,
+            )
+            consult_snapshot_source = "snapshot"
+            consult_snapshot_meta = _build_consult_snapshot_meta(
+                consult_snapshot_result,
+                mode=consult_snapshot_mode,
+                source=consult_snapshot_source,
+            )
+            legacy._record_decision_trace(
+                conversation,
+                _build_consult_snapshot_trace(
+                    consult_snapshot_result,
+                    mode=consult_snapshot_mode,
+                ),
+            )
+            if consult_snapshot_result.playbook:
+                playbook = consult_snapshot_result.playbook
+            elif consult_snapshot_mode == "fallback":
+                playbook, _pack_error = load_consult_playbook(client_slug)
+                consult_snapshot_source = "fallback" if playbook else "missing"
+                consult_snapshot_meta["consult_snapshot_source"] = consult_snapshot_source
+            else:
+                consult_snapshot_source = "missing"
+                consult_snapshot_meta["consult_snapshot_source"] = consult_snapshot_source
+                consult_guard = {"reason": "snapshot_missing"}
+                if message_text:
+                    clarify_prompt = legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC
+                    clarify_count = legacy._register_clarify_attempt(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        intent="consult",
+                        now=now,
+                        reason="snapshot_missing",
+                    )
+                    consult_meta = {
+                        "consult_intent": True,
+                        "consult_question": consult_question or message_text,
+                        "consult_guard": consult_guard,
+                        "clarify_attempt": {"intent": "consult", "count": clarify_count},
+                        "clarify_reason": "snapshot_missing",
+                        "consult_source": "pack",
+                        "source": "pack",
+                    }
+                    if not booking_goal_locked:
+                        context = legacy._get_conversation_context(conversation)
+                        context = legacy._set_expected_reply_context(
+                            conversation=conversation,
+                            saved_message=saved_message,
+                            context=context,
+                            expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                            reason="snapshot_missing",
+                            now=now,
+                        )
+                        consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+                    consult_decision = DemoSalonDecision(
+                        action="reply",
+                        response=clarify_prompt,
+                        intent="consult_reply",
+                        meta=consult_meta,
+                    )
+                    consult_flow_override = "consult_clarify"
+                    consult_signal = True
+                    consult_intent = True
+                    consult_pack_used = True
+        elif is_snapshot_consumer_enabled():
+            consult_snapshot_result = build_consult_snapshot_shadow(
+                db,
+                client_id=str(conversation.client_id) if conversation.client_id else None,
+                branch_id=_resolve_branch_id(),
+                client_slug=client_slug,
+            )
+            consult_snapshot_meta = _build_consult_snapshot_meta(
+                consult_snapshot_result,
+                mode="shadow",
+                source="shadow",
+            )
+            legacy._record_decision_trace(
+                conversation,
+                _build_consult_snapshot_trace(
+                    consult_snapshot_result,
+                    mode="shadow",
+                ),
+            )
+
+    if consult_pack_intent_signal and playbook is None and not consult_snapshot_cutover:
+        playbook, _pack_error = load_consult_playbook(client_slug)
 
     def _missing_fact_requirements(requirements: list[str]) -> list[str]:
         missing: list[str] = []
