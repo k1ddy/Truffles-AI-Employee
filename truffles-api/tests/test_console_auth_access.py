@@ -5,9 +5,9 @@ import pytest
 
 from app.services.console_auth import (
     _build_access_map,
-    _resolve_company_selection,
     _resolve_branch_selection,
     _resolve_client_selection,
+    _resolve_company_selection,
     _resolve_role,
 )
 from app.services.console_errors import ConsoleAPIError
