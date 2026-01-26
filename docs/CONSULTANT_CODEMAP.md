@@ -93,6 +93,7 @@
 **Consult (pack-first, domain-agnostic)**
 - Entry point: `truffles-api/app/routers/webhook/response.py` → `_handle_consult_flow`
 - Pack load + schema validate: `truffles-api/app/services/consult_pack_service.py` (load/validate) + `truffles-api/app/schemas/consult.py`
+- Shadow snapshot consumer: `truffles-api/app/services/knowledge_snapshot_consumer.py` builds/validates consult playbook from snapshot and records `consult_snapshot` trace (env-gated, no behavior change).
 - Topic resolver: `truffles-api/app/services/knowledge_service.py` → `resolve_consult_topic_candidates`
 - LLM controller (topic select JSON): `truffles-api/app/services/ai_service.py` → `generate_consult_controller_output`
 - Playbook first; LLM advice only for general beauty care and non‑medical topics (legacy fallback only when no pack decision).
