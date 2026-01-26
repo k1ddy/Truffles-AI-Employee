@@ -35,6 +35,9 @@ Keycloak issues JWT; NextAuth stores session; API validates JWT signature and ma
 **Key:** один OIDC login может соответствовать нескольким `client_id`.  
 Console uses `agent_identities` to map OIDC `sub` → `agents` → `client_id`.
 
+**Company selection (если компаний несколько):**
+- `/console/v1/me` возвращает `companies[]` и `company_selection_required`.
+
 **Client selection (если клиентов несколько):**
 - `/console/v1/me` возвращает `clients[]` и `selection_required`.
 - API требует заголовок `X-Client-Id`, если клиентов > 1.
@@ -47,15 +50,16 @@ Console uses `agent_identities` to map OIDC `sub` → `agents` → `client_id`.
 **Access scope is enforced here:**
 `truffles-api/app/services/console_auth.py` → `get_console_context()`
 
-**Note (current limitation):**
-Org-level access реализован частично: есть `agent_memberships` и RBAC, но company/branch selection в UI
-ограничен выбором клиента. Полная модель Company → Client → Branch — по DEC-011.
+**Note (current implementation):**
+Org-level selection поддерживает Company → Client → Branch (UI + API). При нескольких компаниях требуется
+`X-Company-Id` и включается `company_selection_required`.
 
 Rules:
 - `sub` must exist in `agent_identities` (channel=`oidc`).
 - Agent must be `is_active`.
 - All queries filter by `context.client.id`.
-- If multiple clients → `X-Client-Id` is mandatory.
+- If multiple companies → `X-Company-Id` is mandatory.
+- If multiple clients → `X-Client-Id` is mandatory (внутри выбранной компании).
 - Non‑admin/owner users are restricted to their branch.
 - Provisioning: role=manager requires `branch_id` (branch‑scoped access only).
 - Если один `sub` связан с несколькими клиентами → API вернёт
@@ -64,13 +68,14 @@ Rules:
 **Tenant UX contract (short):**
 - Контекст (Company / Client / Branch) всегда виден в UI.
 - Selector показывается только если есть выбор (2+).
-- Ошибки должны быть объяснимы: “Выберите клиента/филиал”.
+- Ошибки должны быть объяснимы: “Выберите компанию/клиента/филиал”.
 - Fail‑closed: без валидного контекста запросы не выполняются.
 
 **Phase 1 UI contract (Control Plane):**
 - Верхний Context Bar показывает Company/Client/Branch.
-- При `selection_required` / `branch_selection_required` UI блокирует контент и требует выбор.
-- Выбор хранится в localStorage (`console:client_id`, `console:branch_id`) и передаётся в `X-Client-Id` / `X-Branch-Id`.
+- При `company_selection_required` / `selection_required` / `branch_selection_required` UI блокирует контент и требует выбор.
+- Выбор хранится в localStorage (`console:company_id`, `console:client_id`, `console:branch_id`) и передаётся в
+  `X-Company-Id` / `X-Client-Id` / `X-Branch-Id`.
 - Навигация в сайдбаре режется по роли (owner/admin/manager/support).
 
 **Phase 2 UI contract (Provisioning + Capabilities):**
@@ -371,6 +376,11 @@ curl -s -X POST "$KEYCLOAK_TOKEN_URL" \
 - `/console/v1/me` вернул `selection_required=true` → выбрать клиента или передать `X-Client-Id`.
 - Очистить `localStorage` ключ `console:client_id`, если выбранный клиент удалён.
 - Решение: оставить одну связку `agent_identities` для нужного клиента или использовать `X-Client-Id`.
+
+**400 COMPANY_SELECTION_REQUIRED**
+- Доступно несколько компаний.
+- `/console/v1/me` вернул `company_selection_required=true` → выбрать компанию или передать `X-Company-Id`.
+- Очистить `localStorage` ключ `console:company_id`, если выбранная компания удалена.
 
 **400 BRANCH_SELECTION_REQUIRED**
 - Роль branch‑scoped и доступно несколько филиалов.

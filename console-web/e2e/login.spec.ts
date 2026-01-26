@@ -57,6 +57,14 @@ async function selectClientIfNeeded(page: import('@playwright/test').Page) {
     await selectOptionIfNeeded(contextSelector);
 }
 
+async function selectCompanyIfNeeded(page: import('@playwright/test').Page) {
+    if (await selectFromGate(page, 'company-select', 'company-select-confirm')) {
+        return;
+    }
+    const contextSelector = page.getByTestId('context-company-select');
+    await selectOptionIfNeeded(contextSelector);
+}
+
 async function selectBranchIfNeeded(page: import('@playwright/test').Page) {
     if (await selectFromGate(page, 'branch-select', 'branch-select-confirm')) {
         return;
@@ -83,6 +91,7 @@ test.describe('Smoke Test: Login Flow', () => {
         await page.click('#kc-login');
         await page.waitForURL(consoleHostPattern);
         await expect(page.getByRole('button', { name: /выйти/i })).toBeVisible({ timeout: 10000 });
+        await selectCompanyIfNeeded(page);
         await selectClientIfNeeded(page);
         await selectBranchIfNeeded(page);
         await expect(page.getByTestId('cases-title')).toBeVisible({ timeout: 10000 });
@@ -97,6 +106,7 @@ test.describe('Smoke Test: Login Flow', () => {
         await page.click('#kc-login');
         await page.waitForURL(consoleHostPattern);
         await expect(page.getByRole('button', { name: /выйти/i })).toBeVisible({ timeout: 10000 });
+        await selectCompanyIfNeeded(page);
         await selectClientIfNeeded(page);
         await selectBranchIfNeeded(page);
         await page.getByRole('button', { name: /выйти/i }).click();

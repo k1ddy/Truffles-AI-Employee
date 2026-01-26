@@ -91,6 +91,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-25-thanks-typo-smalltalk.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-chaos-sim-resilience.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-prod-deploy-guard.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-company-selection.md`
 
 ---
 

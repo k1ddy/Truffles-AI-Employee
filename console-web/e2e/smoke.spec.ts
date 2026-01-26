@@ -97,12 +97,17 @@ async function selectFromGate(
 }
 
 async function resolveSelectionGate(page: import('@playwright/test').Page) {
+    if (await selectFromGate(page, 'company-select', 'company-select-confirm')) {
+        await page.waitForLoadState('domcontentloaded');
+    }
     if (await selectFromGate(page, 'client-select', 'client-select-confirm')) {
         await page.waitForLoadState('domcontentloaded');
     }
     if (await selectFromGate(page, 'branch-select', 'branch-select-confirm')) {
         await page.waitForLoadState('domcontentloaded');
     }
+    const contextCompany = page.getByTestId('context-company-select');
+    await selectOptionIfNeeded(contextCompany);
     const contextClient = page.getByTestId('context-client-select');
     await selectOptionIfNeeded(contextClient);
     const contextBranch = page.getByTestId('context-branch-select');
@@ -193,46 +198,83 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
     }
 }
 
-async function fetchMe(page: import('@playwright/test').Page, clientId?: string | null) {
-    return page.evaluate(async (id) => {
+async function fetchMe(
+    page: import('@playwright/test').Page,
+    companyId?: string | null,
+    clientId?: string | null,
+) {
+    return page.evaluate(async ({ company, client }) => {
         const headers: Record<string, string> = {};
-        if (id) {
-            headers['X-Client-Id'] = id;
+        if (company) {
+            headers['X-Company-Id'] = company;
+        }
+        if (client) {
+            headers['X-Client-Id'] = client;
         }
         const response = await fetch('/api/proxy/me', { headers });
         if (!response.ok) {
             return null;
         }
         return response.json();
-    }, clientId ?? null);
+    }, { company: companyId ?? null, client: clientId ?? null });
 }
 
-async function fetchMeWithRetry(page: import('@playwright/test').Page, clientId?: string | null) {
-    let data = await fetchMe(page, clientId);
+async function fetchMeWithRetry(
+    page: import('@playwright/test').Page,
+    companyId?: string | null,
+    clientId?: string | null,
+) {
+    let data = await fetchMe(page, companyId, clientId);
     for (let attempt = 0; !data && attempt < 2; attempt += 1) {
         await page.waitForTimeout(1000);
-        data = await fetchMe(page, clientId);
+        data = await fetchMe(page, companyId, clientId);
     }
     return data;
 }
 
 async function ensureTenantSelection(page: import('@playwright/test').Page): Promise<boolean> {
     const stored = await page.evaluate(() => ({
+        companyId: window.localStorage.getItem('console:company_id'),
         clientId: window.localStorage.getItem('console:client_id'),
         branchId: window.localStorage.getItem('console:branch_id'),
     }));
+    const envCompanyId = process.env.E2E_COMPANY_ID;
     const envClientId = process.env.E2E_CLIENT_ID;
     const envBranchId = process.env.E2E_BRANCH_ID;
 
-    let nextClientId = stored.clientId || envClientId || null;
     let changed = false;
 
+    let nextCompanyId = stored.companyId || envCompanyId || null;
     const data = await fetchMeWithRetry(page);
+    const accessibleCompanies: string[] = [];
+    if (data?.companies?.length) {
+        accessibleCompanies.push(
+            ...data.companies.map((company: { id?: string }) => company.id).filter(Boolean)
+        );
+    } else if (data?.client?.company_id) {
+        accessibleCompanies.push(data.client.company_id as string);
+    }
+    if (!nextCompanyId || (accessibleCompanies.length && !accessibleCompanies.includes(nextCompanyId))) {
+        nextCompanyId = accessibleCompanies[0] ?? null;
+    }
+    if (nextCompanyId && nextCompanyId !== stored.companyId) {
+        await page.evaluate((id) => {
+            window.localStorage.setItem('console:company_id', id);
+            window.localStorage.removeItem('console:client_id');
+            window.localStorage.removeItem('console:branch_id');
+        }, nextCompanyId);
+        changed = true;
+    }
+
+    let nextClientId = stored.clientId || envClientId || null;
+    const clientData = await fetchMeWithRetry(page, nextCompanyId);
     const accessibleClients: string[] = [];
-    if (data?.clients?.length) {
-        accessibleClients.push(...data.clients.map((client: { id?: string }) => client.id).filter(Boolean));
-    } else if (data?.client?.id) {
-        accessibleClients.push(data.client.id as string);
+    if (clientData?.clients?.length) {
+        accessibleClients.push(
+            ...clientData.clients.map((client: { id?: string }) => client.id).filter(Boolean)
+        );
+    } else if (clientData?.client?.id) {
+        accessibleClients.push(clientData.client.id as string);
     }
     if (!nextClientId || (accessibleClients.length && !accessibleClients.includes(nextClientId))) {
         nextClientId = accessibleClients[0] ?? null;
@@ -249,7 +291,7 @@ async function ensureTenantSelection(page: import('@playwright/test').Page): Pro
     if (!stored.branchId) {
         let nextBranchId = envBranchId || null;
         if (nextClientId) {
-            const branchData = await fetchMeWithRetry(page, nextClientId);
+            const branchData = await fetchMeWithRetry(page, nextCompanyId, nextClientId);
             const branchIds = Array.isArray(branchData?.branches)
                 ? branchData.branches.map((branch: { id?: string }) => branch.id).filter(Boolean)
                 : [];

@@ -2,12 +2,21 @@ import axios, { AxiosInstance } from "axios";
 
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
 const BRANCH_ID_STORAGE_KEY = "console:branch_id";
+const COMPANY_ID_STORAGE_KEY = "console:company_id";
 
 function getSelectedClientId(): string | undefined {
     if (typeof window === "undefined") {
         return undefined;
     }
     const stored = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    return stored || undefined;
+}
+
+function getSelectedCompanyId(): string | undefined {
+    if (typeof window === "undefined") {
+        return undefined;
+    }
+    const stored = window.localStorage.getItem(COMPANY_ID_STORAGE_KEY);
     return stored || undefined;
 }
 
@@ -23,6 +32,10 @@ function attachIdempotencyKey(client: AxiosInstance): AxiosInstance {
     client.interceptors.request.use((config) => {
         const headers = config.headers ?? {};
         config.headers = headers;
+        const selectedCompanyId = getSelectedCompanyId();
+        if (selectedCompanyId && !headers["X-Company-Id"]) {
+            headers["X-Company-Id"] = selectedCompanyId;
+        }
         const selectedClientId = getSelectedClientId();
         if (selectedClientId && !headers["X-Client-Id"]) {
             headers["X-Client-Id"] = selectedClientId;

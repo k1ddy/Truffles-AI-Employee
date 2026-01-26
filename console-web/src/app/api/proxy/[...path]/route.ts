@@ -39,6 +39,7 @@ export async function GET(
     const url = new URL(request.url);
     const queryString = url.search;
     const targetUrl = `${API_BASE_URL}/${apiPath}${queryString}`;
+    const companyId = request.headers.get('x-company-id');
     const clientId = request.headers.get('x-client-id');
     const branchId = request.headers.get('x-branch-id');
 
@@ -48,6 +49,7 @@ export async function GET(
             headers: {
                 'Authorization': `Bearer ${session.accessToken}`,
                 'Content-Type': 'application/json',
+                ...(companyId ? { 'X-Company-Id': companyId } : {}),
                 ...(clientId ? { 'X-Client-Id': clientId } : {}),
                 ...(branchId ? { 'X-Branch-Id': branchId } : {}),
             },
@@ -85,6 +87,7 @@ export async function POST(
     const apiPath = path.join('/');
     const targetUrl = `${API_BASE_URL}/${apiPath}`;
     const body = await request.text();
+    const companyId = request.headers.get('x-company-id');
     const clientId = request.headers.get('x-client-id');
     const branchId = request.headers.get('x-branch-id');
 
@@ -97,6 +100,7 @@ export async function POST(
                 'Authorization': `Bearer ${session.accessToken}`,
                 'Content-Type': 'application/json',
                 ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+                ...(companyId ? { 'X-Company-Id': companyId } : {}),
                 ...(clientId ? { 'X-Client-Id': clientId } : {}),
                 ...(branchId ? { 'X-Branch-Id': branchId } : {}),
             },

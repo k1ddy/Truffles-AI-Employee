@@ -125,6 +125,15 @@ def _get_idempotency_key(request: Request) -> Optional[str]:
 
 
 def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
+    companies_by_id = {company.id: company for company in context.companies}
+    companies = [
+        ConsoleCompany(
+            id=company.id,
+            name=company.name,
+            billing_info=company.billing_info,
+        )
+        for company in context.companies
+    ]
     branches = [
         ConsoleBranch(
             id=branch.id,
@@ -142,6 +151,9 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
             "slug": client.name,
             "name": client.name,
             "company_id": client.company_id,
+            "company_name": companies_by_id.get(client.company_id).name
+            if client.company_id and client.company_id in companies_by_id
+            else None,
         }
         for client in (context.accessible_clients or [])
     ]
@@ -150,6 +162,9 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
         "slug": context.client.name,
         "name": context.client.name,
         "company_id": context.client.company_id,
+        "company_name": companies_by_id.get(context.client.company_id).name
+        if context.client.company_id and context.client.company_id in companies_by_id
+        else None,
     } if context.client else None
     return ConsoleMeResponse(
         agent={
@@ -163,8 +178,11 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
         client=active_client,
         branches=branches,
         clients=clients,
+        companies=companies,
+        company_selection_required=context.company_selection_required,
         selection_required=context.selection_required,
         branch_selection_required=context.branch_selection_required,
+        selected_company_id=context.selected_company_id,
         selected_branch_id=context.effective_branch_id,
     )
 
@@ -3172,6 +3190,7 @@ async def create_client(
             slug=client.name,
             name=client.name,
             company_id=client.company_id,
+            company_name=company.name if company else None,
         )
     )
 
