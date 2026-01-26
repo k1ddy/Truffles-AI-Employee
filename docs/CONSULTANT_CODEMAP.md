@@ -69,6 +69,7 @@
 - Domain facts + service availability: `truffles-api/app/services/demo_salon_knowledge.py`
 - Truth pack (facts/policy): `truffles-api/app/knowledge/<client_slug>/SALON_TRUTH.yaml`
 - Consult playbooks (care advice): `truffles-api/app/knowledge/<client_slug>/CONSULT_PLAYBOOK.yaml`
+- Knowledge Snapshot Gateway (shadow): `truffles-api/app/routers/knowledge_gateway.py` + `truffles-api/app/services/knowledge_snapshot_service.py`
 - Consult contracts: `truffles-api/app/schemas/consult.py` (runtime validation), `contracts/consult/consult_playbook.v1.jsonschema`
 - Generic pack scaffold (CI/tests): `truffles-api/app/knowledge/generic/*`
 - EVAL cases: `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
