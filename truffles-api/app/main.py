@@ -29,6 +29,7 @@ from app.routers import (
     calendar,
     callback,
     console,
+    knowledge_gateway,
     message,
     provider_gateway,
     reminders,
@@ -104,6 +105,7 @@ app.include_router(callback.router)
 app.include_router(reminders.router)
 app.include_router(webhook.router)
 app.include_router(provider_gateway.router)
+app.include_router(knowledge_gateway.router)
 app.include_router(telegram_webhook.router)
 app.include_router(alerts.router)
 app.include_router(admin.router)

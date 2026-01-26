@@ -98,6 +98,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbound-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-outbound-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbox-event.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-docs-selection-runbooks.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`
