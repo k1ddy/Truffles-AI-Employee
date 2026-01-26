@@ -517,6 +517,10 @@ def _handle_consult_flow(
         get_demo_salon_service_hint,
     )
     from app.services.knowledge_service import resolve_consult_topic_candidates
+    from app.services.knowledge_snapshot_consumer import (
+        build_consult_snapshot_shadow,
+        is_snapshot_consumer_enabled,
+    )
 
     from . import _legacy as legacy
 
@@ -566,6 +570,63 @@ def _handle_consult_flow(
     consult_risk_class = None
     consult_guard: dict[str, Any] | None = None
     consult_pack_intent_signal = bool(consult_intent or consult_context_active)
+    consult_snapshot_result = None
+    consult_snapshot_meta: dict[str, Any] | None = None
+
+    def _build_consult_snapshot_trace(result) -> dict[str, Any]:
+        error = result.error or result.playbook_error
+        trace: dict[str, Any] = {
+            "stage": "consult_snapshot",
+            "decision": "ok" if not error else "error",
+            "mode": "shadow",
+            "consult_playbook_present": result.playbook_present,
+        }
+        if result.snapshot_id:
+            trace["snapshot_id"] = result.snapshot_id
+        if result.version_id:
+            trace["version_id"] = result.version_id
+        if result.sha256:
+            trace["sha256"] = result.sha256
+        if result.error:
+            trace["error"] = result.error
+        if result.playbook_error:
+            trace["consult_playbook_error"] = result.playbook_error
+        return trace
+
+    def _build_consult_snapshot_meta(result) -> dict[str, Any]:
+        meta: dict[str, Any] = {
+            "consult_snapshot_source": "shadow",
+            "consult_snapshot_playbook_present": result.playbook_present,
+        }
+        if result.snapshot_id:
+            meta["consult_snapshot_id"] = result.snapshot_id
+        if result.version_id:
+            meta["consult_snapshot_version_id"] = result.version_id
+        if result.sha256:
+            meta["consult_snapshot_sha256"] = result.sha256
+        if result.error:
+            meta["consult_snapshot_error"] = result.error
+        if result.playbook_error:
+            meta["consult_snapshot_playbook_error"] = result.playbook_error
+        return meta
+
+    if consult_pack_intent_signal and is_snapshot_consumer_enabled():
+        branch_id = None
+        if isinstance(timing_context, dict):
+            branch_id = timing_context.get("branch_id")
+        if not branch_id and conversation.branch_id:
+            branch_id = conversation.branch_id
+        consult_snapshot_result = build_consult_snapshot_shadow(
+            db,
+            client_id=str(conversation.client_id) if conversation.client_id else None,
+            branch_id=str(branch_id) if branch_id else None,
+            client_slug=client_slug,
+        )
+        consult_snapshot_meta = _build_consult_snapshot_meta(consult_snapshot_result)
+        legacy._record_decision_trace(
+            conversation,
+            _build_consult_snapshot_trace(consult_snapshot_result),
+        )
 
     def _missing_fact_requirements(requirements: list[str]) -> list[str]:
         missing: list[str] = []
@@ -1077,17 +1138,19 @@ def _handle_consult_flow(
                             intent_decomp_payload["consult_topic"] = consult_topic
                         if consult_question:
                             intent_decomp_payload["consult_question"] = consult_question
-        if consult_decision:
-            consult_meta = consult_decision.meta if isinstance(consult_decision.meta, dict) else {}
-            consult_meta = dict(consult_meta)
-            consult_signal = True
-        if consult_intent and not consult_short_circuit:
-            consult_signal = True
-            consult_meta["consult_intent"] = True
-            if consult_topic:
-                consult_meta["consult_topic"] = consult_topic
-            if consult_question:
-                consult_meta["consult_question"] = consult_question
+    if consult_decision:
+        consult_meta = consult_decision.meta if isinstance(consult_decision.meta, dict) else {}
+        consult_meta = dict(consult_meta)
+        consult_signal = True
+    if consult_intent and not consult_short_circuit:
+        consult_signal = True
+        consult_meta["consult_intent"] = True
+        if consult_topic:
+            consult_meta["consult_topic"] = consult_topic
+        if consult_question:
+            consult_meta["consult_question"] = consult_question
+    if consult_decision and consult_snapshot_meta:
+        consult_meta.update(consult_snapshot_meta)
     if service_availability_decision and service_availability_decision.action == "reply":
         service_reply = service_availability_decision.response
         if service_reply:
