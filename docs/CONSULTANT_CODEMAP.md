@@ -172,6 +172,7 @@
 
 **Topic resolution (semantic + controller)**
 - `truffles-api/app/services/knowledge_service.py:81-141` → `resolve_consult_topic_candidates` (embeddings + top-k).
+- If embeddings fail, resolver falls back to lexical token matching (still `consult_topic_resolver` trace).
 - `truffles-api/app/services/ai_service.py:1593-1679` → `generate_consult_controller_output` (LLM JSON, strict schema).
 - Selection order in consult flow: controller topic → semantic top-1 (score >= 0.6) → intent_decomp topic.
   `truffles-api/app/routers/webhook/response.py:657-673`.

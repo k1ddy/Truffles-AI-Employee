@@ -1,6 +1,7 @@
 import hashlib
 import math
 import os
+import re
 import time
 from typing import Callable, List
 
@@ -67,6 +68,79 @@ def _build_consult_topic_text(topic: ConsultTopic) -> str:
     return ". ".join(cleaned)
 
 
+def _tokenize_consult_text(text: str) -> list[str]:
+    cleaned = re.sub(r"[^\w\s]", " ", text.casefold())
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        return []
+    return [token for token in cleaned.split() if len(token) >= 3]
+
+
+def _fuzzy_token_match(token: str, candidate: str) -> bool:
+    if token == candidate:
+        return True
+    if len(token) >= 4 and len(candidate) >= 4:
+        if token[:4] == candidate[:4]:
+            return True
+        if token in candidate or candidate in token:
+            return True
+    return False
+
+
+def _fallback_consult_topic_candidates(
+    message_text: str,
+    topics: list[ConsultTopic],
+    *,
+    top_k: int,
+    timing_context: dict | None,
+    error: str | None = None,
+    start_time: float | None = None,
+) -> list[dict]:
+    started = start_time or time.monotonic()
+    message_tokens = _tokenize_consult_text(message_text)
+    if len(message_tokens) < 2:
+        _log_timing(
+            "consult_topic_resolver_ms",
+            (time.monotonic() - started) * 1000,
+            timing_context=timing_context,
+            extra={"candidates": 0, "fallback": "lexical", "reason": "too_short", "error": error},
+        )
+        return []
+    candidates: list[dict] = []
+    for topic in topics:
+        topic_text = _build_consult_topic_text(topic)
+        if not topic_text:
+            continue
+        topic_tokens = _tokenize_consult_text(topic_text)
+        if not topic_tokens:
+            continue
+        matches = 0
+        for token in message_tokens:
+            if any(_fuzzy_token_match(token, topic_token) for topic_token in topic_tokens):
+                matches += 1
+        if matches <= 0:
+            continue
+        score = round(matches / min(len(message_tokens), 3), 4)
+        candidates.append(
+            {
+                "topic_id": topic.id,
+                "title": topic.title,
+                "summary": topic.summary,
+                "score": score,
+                "source": "lexical",
+            }
+        )
+    candidates.sort(key=lambda item: item["score"], reverse=True)
+    top_candidates = candidates[: max(top_k, 1)]
+    _log_timing(
+        "consult_topic_resolver_ms",
+        (time.monotonic() - started) * 1000,
+        timing_context=timing_context,
+        extra={"candidates": len(top_candidates), "fallback": "lexical", "error": error},
+    )
+    return top_candidates
+
+
 def _cosine_similarity(vector_a: list[float], vector_b: list[float]) -> float:
     if not vector_a or not vector_b or len(vector_a) != len(vector_b):
         return 0.0
@@ -108,17 +182,18 @@ def resolve_consult_topic_candidates(
                 _CONSULT_TOPIC_CACHE[cache_key] = topic_vectors
         query_vector = embedder(message_text)
     except Exception as exc:
-        _log_timing(
-            "consult_topic_resolver_ms",
-            (time.monotonic() - start) * 1000,
-            timing_context=timing_context,
-            extra={"candidates": 0, "error": str(exc)},
-        )
         alert_warning(
             "Consult topic embedding failed",
             {"client_slug": client_slug, "error": str(exc)},
         )
-        return []
+        return _fallback_consult_topic_candidates(
+            message_text,
+            topics,
+            top_k=top_k,
+            timing_context=timing_context,
+            error=str(exc),
+            start_time=start,
+        )
     candidates: list[dict] = []
     for topic, topic_vector in zip(topics, topic_vectors):
         score = _cosine_similarity(query_vector, topic_vector)

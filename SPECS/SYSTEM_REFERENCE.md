@@ -1052,6 +1052,9 @@ chatflow_service → WhatsApp
 | 17 | **Booking flow** (`booking._handle_booking_flow`) | booking_signal/booking_active | Reply/interrupt | `stage=booking`, `stage=booking_interrupt`, `stage=truth_gate` |
 | 18 | **LLM primary + fallback** (`response._handle_llm_primary`) | LLM path enabled | ai_response/clarify/escalate | `stage=llm_guard`, `stage=ai_response`, `stage=llm_degradation` |
 
+**Consult topic resolver**
+- `truffles-api/app/services/knowledge_service.py` uses embeddings for topic candidates; if embeddings fail, it falls back to lexical token matching (same `consult_topic_resolver` trace stage).
+
 ### Determinism Inventory (лексиконы + правила)
 **Rules‑as‑data (packs):**
 - `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`  
