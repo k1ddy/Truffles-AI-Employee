@@ -16,6 +16,8 @@
 - DONE: Phase 2 UI Provisioning Wizard — PR #348 https://github.com/k1ddy/Truffles-AI-Employee/pull/348; Evidence: `origin/main` commit `169e58ba` (wizard in `console-web/src/app/settings/page.tsx`) + local UI screenshot `docs/REPORTS/2026-01-25-control-plane-provisioning.png`.
 - DONE: Company → Client → Branch selection (UI + API) — PR #376 https://github.com/k1ddy/Truffles-AI-Employee/pull/376; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21347221780.
 - PLAN: Control Plane RBAC matrix + enforcement — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-rbac-matrix.md`.
+- PLAN: Control Plane TP‑B Onboarding state machine — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-onboarding-state-machine.md`.
+- PLAN: Control Plane TP‑C Destructive‑change safeguards — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-destructive-guards.md`.
 - DONE: Phase 3 backend Knowledge Studio pipeline (validate/publish/history/rollback + safe-mode) — PR #365 https://github.com/k1ddy/Truffles-AI-Employee/pull/365; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21331694794.
 - DONE: console-e2e-live CI fix (selection gate + storage state) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-e2e-live-ci-fix.md`; PR #362 https://github.com/k1ddy/Truffles-AI-Employee/pull/362; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21329488754; local check `npm --prefix console-web run test:e2e:smoke` (prod base URL).
 - DONE: Console-web deploy for Team route (build fix + prod /team) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-web-deploy-team.md`; evidence below (2026-01-25).
