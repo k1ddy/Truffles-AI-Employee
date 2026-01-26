@@ -8,13 +8,11 @@ import Image from "next/image";
 import Link from "next/link";
 
 import LoginButton from "@/components/LoginButton";
-import { authApi } from "@/lib/api-client";
+import { authApi, canAccessConsole, type ConsoleAction, type ConsoleRole, type ConsoleSection } from "@/lib/api-client";
 
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
 const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 const COMPANY_ID_STORAGE_KEY = "console:company_id";
-
-type Role = "owner" | "admin" | "manager" | "support";
 
 type ClientSummary = {
     id?: string;
@@ -34,7 +32,7 @@ type BranchSummary = {
 };
 
 type ConsoleMe = {
-    agent?: { role?: Role | null };
+    agent?: { role?: ConsoleRole | null };
     client?: ClientSummary | null;
     clients?: ClientSummary[];
     companies?: CompanySummary[];
@@ -49,21 +47,22 @@ type ConsoleMe = {
 type NavItem = {
     label: string;
     href: string;
-    roles: Role[];
+    section: ConsoleSection;
+    action?: ConsoleAction;
     testId: string;
 };
 
 const NAV_ITEMS: NavItem[] = [
-    { label: "Заявки", href: "/", roles: ["owner", "admin", "manager", "support"], testId: "nav-cases" },
-    { label: "Записи", href: "/calendar", roles: ["owner", "admin", "manager"], testId: "nav-calendar" },
-    { label: "Знания", href: "/knowledge", roles: ["owner", "admin", "manager"], testId: "nav-knowledge" },
-    { label: "Команда", href: "/team", roles: ["owner", "admin", "manager"], testId: "nav-team" },
-    { label: "Статус", href: "/ops", roles: ["owner", "admin", "support"], testId: "nav-ops" },
-    { label: "Журнал", href: "/audit", roles: ["owner", "admin", "support"], testId: "nav-audit" },
-    { label: "Настройки", href: "/settings", roles: ["owner", "admin"], testId: "nav-settings" },
+    { label: "Заявки", href: "/", section: "inbox", action: "read", testId: "nav-cases" },
+    { label: "Записи", href: "/calendar", section: "calendar", action: "read", testId: "nav-calendar" },
+    { label: "Знания", href: "/knowledge", section: "knowledge", action: "read", testId: "nav-knowledge" },
+    { label: "Команда", href: "/team", section: "team", action: "read", testId: "nav-team" },
+    { label: "Статус", href: "/ops", section: "ops", action: "read", testId: "nav-ops" },
+    { label: "Журнал", href: "/audit", section: "audit", action: "read", testId: "nav-audit" },
+    { label: "Настройки", href: "/settings", section: "settings", action: "read", testId: "nav-settings" },
 ];
 
-const ROLE_LABELS: Record<Role, string> = {
+const ROLE_LABELS: Record<ConsoleRole, string> = {
     owner: "Owner",
     admin: "Admin",
     manager: "Manager",
@@ -385,7 +384,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
 
     const role = data?.agent?.role ?? "manager";
     const navItems = useMemo(
-        () => NAV_ITEMS.filter((item) => item.roles.includes(role)),
+        () => NAV_ITEMS.filter((item) => canAccessConsole(role, item.section, item.action ?? "read")),
         [role]
     );
 

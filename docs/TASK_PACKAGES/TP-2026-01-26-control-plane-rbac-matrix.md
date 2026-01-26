@@ -7,15 +7,16 @@
 - **Touch-list (ожидаемо):**
   - `SPECS/CONTROL_PLANE.md` (RBAC matrix + принцип доступа)
   - `docs/CONSOLE_GUIDE.md` (role runbooks + доступы)
-  - `truffles-api/app/services/console_auth.py`
-  - `truffles-api/app/routers/console.py`
-  - `truffles-api/app/schemas/console.py` (если нужны новые поля)
-  - `truffles-api/tests/test_console_auth_access.py`
-  - `truffles-api/tests/test_console_rbac.py` (новые тесты)
-  - `console-web/src/components/ConsoleShell.tsx`
-  - `console-web/src/app/*` (ограничение действий по роли)
-  - `console-web/src/lib/api-client.ts` (если нужен новый error code)
-  - `contracts/console_api/openapi.v1.yaml` (если меняются ошибки/ответы)
+- `truffles-api/app/services/console_auth.py`
+- `truffles-api/app/routers/console.py`
+- `truffles-api/app/routers/calendar.py`
+- `truffles-api/app/schemas/console.py` (если нужны новые поля)
+- `truffles-api/tests/test_console_auth_access.py`
+- `truffles-api/tests/test_console_rbac.py` (новые тесты)
+- `console-web/src/components/ConsoleShell.tsx`
+- `console-web/src/app/*` (ограничение действий по роли)
+- `console-web/src/lib/api-client.ts` (RBAC helpers для UI, error code updates)
+- `contracts/console_api/openapi.v1.yaml` (если меняются ошибки/ответы)
 - **Plan:**
   1) Снять фактические права из кода (console_auth + console routes) и зафиксировать RBAC‑матрицу в `SPECS/CONTROL_PLANE.md`.
   2) Ввести единые helper‑guards для console endpoints (role × action) и привести маршруты к матрице.

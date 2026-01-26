@@ -42,6 +42,23 @@
   membership‑scope + роль owner/admin/support.
 - Specialist/Viewer пока не реализованы в RBAC.
 
+**RBAC matrix (runtime, enforced in API/UI):**
+
+| Раздел | Read | Write |
+|--------|------|-------|
+| Inbox (Cases) | owner/admin/manager/support | owner/admin/manager |
+| Knowledge | owner/admin/manager | owner/admin |
+| Team | owner/admin | owner/admin |
+| Calendar | owner/admin/manager | owner/admin/manager |
+| Settings | owner/admin | owner/admin |
+| Ops | owner/admin/support | owner/admin |
+| Audit | owner/admin/support | — |
+| Provisioning (`/console/v1/admin/*`) | owner/admin/support (read) | owner/admin |
+
+Примечания:
+- Support = read‑only для Ops/Provisioning; write‑операции доступны только owner/admin.
+- Team/Settings скрыты для manager/support; read‑only команда не предоставляется.
+
 ---
 
 ## 3) Tenant‑контекст и UX выбора (обязательный канон)

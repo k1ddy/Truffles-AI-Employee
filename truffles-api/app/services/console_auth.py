@@ -43,6 +43,40 @@ class ConsoleAuthContext:
 
 _jwks_client: Optional[PyJWKClient] = None
 _role_priority = {"owner": 0, "admin": 1, "manager": 2, "support": 3}
+_console_rbac_matrix: dict[str, dict[str, tuple[str, ...]]] = {
+    "inbox": {
+        "read": ("owner", "admin", "manager", "support"),
+        "write": ("owner", "admin", "manager"),
+    },
+    "knowledge": {
+        "read": ("owner", "admin", "manager"),
+        "write": ("owner", "admin"),
+    },
+    "team": {
+        "read": ("owner", "admin"),
+        "write": ("owner", "admin"),
+    },
+    "calendar": {
+        "read": ("owner", "admin", "manager"),
+        "write": ("owner", "admin", "manager"),
+    },
+    "settings": {
+        "read": ("owner", "admin"),
+        "write": ("owner", "admin"),
+    },
+    "ops": {
+        "read": ("owner", "admin", "support"),
+        "write": ("owner", "admin"),
+    },
+    "audit": {
+        "read": ("owner", "admin", "support"),
+        "write": (),
+    },
+    "provisioning": {
+        "read": ("owner", "admin", "support"),
+        "write": ("owner", "admin"),
+    },
+}
 
 
 @dataclass
@@ -51,6 +85,28 @@ class _AccessEntry:
     scopes: set[str] = field(default_factory=set)
     branch_ids: set[UUID] = field(default_factory=set)
     agent_ids: set[UUID] = field(default_factory=set)
+
+
+def has_console_permission(role: str, section: str, action: str) -> bool:
+    allowed = _console_rbac_matrix.get(section, {}).get(action)
+    if allowed is None:
+        return False
+    return role in allowed
+
+
+def require_console_permission(
+    context: "ConsoleAuthContext",
+    section: str,
+    action: str,
+    *,
+    message: Optional[str] = None,
+) -> None:
+    if not has_console_permission(context.role, section, action):
+        raise ConsoleAPIError(
+            403,
+            "ACCESS_DENIED",
+            message or f"Access denied for {section}:{action}",
+        )
 
 
 def _get_bearer_token(request: Request) -> str:

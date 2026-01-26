@@ -14,6 +14,7 @@ interface CaseConversationProps {
     messages: Message[];
     messagesLoading: boolean;
     canSend: boolean;
+    canWrite: boolean;
     draft?: string;
     onDraftChange?: (value: string) => void;
     onResolved?: () => void;
@@ -47,6 +48,7 @@ export default function CaseConversation({
     messages,
     messagesLoading,
     canSend,
+    canWrite,
     draft,
     onDraftChange,
     onResolved,
@@ -130,23 +132,31 @@ export default function CaseConversation({
                     </div>
 
                     <div className="flex gap-2">
-                        {isPending && (
-                            <button
-                                onClick={() => takeMutation.mutate()}
-                                disabled={takeMutation.isPending}
-                                className="bg-primary text-primary-foreground px-4 py-2 rounded hover:bg-primary/90 disabled:opacity-50"
-                            >
-                                {takeMutation.isPending ? "Берём..." : "Взять заявку"}
-                            </button>
-                        )}
-                        {isActive && (
-                            <button
-                                onClick={() => resolveMutation.mutate()}
-                                disabled={resolveMutation.isPending}
-                                className="bg-foreground text-background px-4 py-2 rounded hover:bg-foreground/90 disabled:opacity-50"
-                            >
-                                {resolveMutation.isPending ? "Закрываем..." : "Закрыть заявку"}
-                            </button>
+                        {canWrite ? (
+                            <>
+                                {isPending && (
+                                    <button
+                                        onClick={() => takeMutation.mutate()}
+                                        disabled={takeMutation.isPending}
+                                        className="bg-primary text-primary-foreground px-4 py-2 rounded hover:bg-primary/90 disabled:opacity-50"
+                                    >
+                                        {takeMutation.isPending ? "Берём..." : "Взять заявку"}
+                                    </button>
+                                )}
+                                {isActive && (
+                                    <button
+                                        onClick={() => resolveMutation.mutate()}
+                                        disabled={resolveMutation.isPending}
+                                        className="bg-foreground text-background px-4 py-2 rounded hover:bg-foreground/90 disabled:opacity-50"
+                                    >
+                                        {resolveMutation.isPending ? "Закрываем..." : "Закрыть заявку"}
+                                    </button>
+                                )}
+                            </>
+                        ) : (
+                            <span className="text-xs text-muted-foreground self-center">
+                                Read-only доступ
+                            </span>
                         )}
                     </div>
                 </div>

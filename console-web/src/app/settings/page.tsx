@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
-import { adminApi, authApi, telegramApi } from "@/lib/api-client";
+import { adminApi, authApi, canAccessConsole, telegramApi, type ConsoleRole } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import type { components } from "@/types/api.generated";
+import AccessDenied from "@/components/AccessDenied";
 
 interface Branch {
     id: string;
@@ -74,7 +75,7 @@ type ProvisioningAgent = components["schemas"]["Agent"];
 type CapabilitiesPayload = components["schemas"]["CapabilitiesPayload"];
 type CapabilitiesResponse = components["schemas"]["CapabilitiesResponse"];
 
-type AgentRole = "owner" | "admin" | "manager" | "support";
+type AgentRole = ConsoleRole;
 
 const DEFAULT_TIMEZONE = "Asia/Almaty";
 
@@ -229,7 +230,7 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
     });
 
     const role = meData?.agent?.role ?? "manager";
-    const canEdit = role === "owner" || role === "admin";
+    const canEdit = canAccessConsole(role, "settings", "write");
 
     const [stepIndex, setStepIndex] = useState(0);
     const [companyName, setCompanyName] = useState("");
@@ -1520,10 +1521,23 @@ export default function SettingsPage() {
     const buildShaLabel = buildSha ? buildSha.slice(0, 7) : "unknown";
     const buildTimeLabel = buildTime ?? "unknown";
 
+    const { data: meData, isLoading: meLoading } = useQuery({
+        queryKey: ["console-me"],
+        queryFn: async () => {
+            const response = await authApi.getMe();
+            return response.data;
+        },
+        enabled: !!session,
+    });
+
+    const role = meData?.agent?.role ?? "manager";
+    const canReadSettings = canAccessConsole(role, "settings", "read");
+    const canWriteSettings = canAccessConsole(role, "settings", "write");
+
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["settings"],
         queryFn: fetchSettings,
-        enabled: !!session,
+        enabled: !!session && canReadSettings,
     });
 
     const verifyMutation = useMutation({
@@ -1577,6 +1591,20 @@ export default function SettingsPage() {
             <div className="p-8 text-center text-muted-foreground">
                 Пожалуйста, войдите для просмотра настроек.
             </div>
+        );
+    }
+
+    if (meLoading) {
+        return (
+            <div className="p-8 text-center text-muted-foreground">
+                Загрузка роли...
+            </div>
+        );
+    }
+
+    if (!canReadSettings) {
+        return (
+            <AccessDenied message="Эта роль не имеет доступа к настройкам." />
         );
     }
 
@@ -1701,7 +1729,7 @@ export default function SettingsPage() {
                                     payload: { scope: "client" },
                                 })
                             }
-                            disabled={verifyTarget === "client"}
+                            disabled={verifyTarget === "client" || !canWriteSettings}
                             data-testid="settings-telegram-verify"
                         >
                             {verifyTarget === "client" ? "Отправка..." : "Verify"}
@@ -1716,11 +1744,14 @@ export default function SettingsPage() {
                                     payload: { scope: "client" },
                                 })
                             }
-                            disabled={testTarget === "client"}
+                            disabled={testTarget === "client" || !canWriteSettings}
                             data-testid="settings-telegram-test"
                         >
                             {testTarget === "client" ? "Отправка..." : "Send test"}
                         </button>
+                        {!canWriteSettings && (
+                            <span className="text-xs text-muted-foreground">Только owner/admin</span>
+                        )}
                     </div>
                 </div>
 
@@ -1777,7 +1808,7 @@ export default function SettingsPage() {
                                                 payload: { scope: "branch", branch_id: branch.id },
                                             })
                                         }
-                                        disabled={!branch.telegram_chat_id || verifyTarget === branch.id}
+                                        disabled={!branch.telegram_chat_id || verifyTarget === branch.id || !canWriteSettings}
                                         data-testid="settings-branch-verify"
                                     >
                                         {verifyTarget === branch.id ? "Отправка..." : "Verify"}
@@ -1792,7 +1823,7 @@ export default function SettingsPage() {
                                                 payload: { scope: "branch", branch_id: branch.id },
                                             })
                                         }
-                                        disabled={!branch.telegram_chat_id || testTarget === branch.id}
+                                        disabled={!branch.telegram_chat_id || testTarget === branch.id || !canWriteSettings}
                                         data-testid="settings-branch-test"
                                     >
                                         {testTarget === branch.id ? "Отправка..." : "Send test"}

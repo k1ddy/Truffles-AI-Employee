@@ -471,6 +471,7 @@ truffles-api/
 | Файл | Что тестирует |
 |------|---------------|
 | `truffles-api/tests/test_cases.json` | Тестовые сценарии диалогов |
+| `truffles-api/tests/test_console_rbac.py` | Unit: Console RBAC matrix guards |
 | `truffles-api/tests/test_console_telegram_connector.py` | Unit: Console Telegram verify/test helpers |
 | `truffles-api/tests/test_console_telegram_helpers.py` | Unit: Console Telegram trail helpers |
 | `truffles-api/tests/test_webhook_booking.py` | Unit: expected_reply_type и booking slot validators |
