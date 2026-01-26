@@ -50,8 +50,9 @@
 
 - Контекст **Company → Client → Branch** всегда виден.
 - Selector показывается только при наличии выбора.
-- При `selection_required` / `branch_selection_required` — блокирующее состояние.
-- Ошибки понятны: “Выберите клиента/филиал”, “Нет доступа”.
+- При `company_selection_required` / `selection_required` / `branch_selection_required` — блокирующее состояние.
+- При нескольких компаниях `X-Company-Id` обязателен (fail‑closed).
+- Ошибки понятны: “Выберите компанию/клиента/филиал”, “Нет доступа”.
 
 **Implementation note (2026‑01‑27):**
 - UI показывает Company как `company_id` (без имени и без выбора), selection gate есть только для client/branch.

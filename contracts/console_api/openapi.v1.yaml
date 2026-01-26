@@ -1326,6 +1326,9 @@ components:
           type: string
           format: uuid
           nullable: true
+        company_name:
+          type: string
+          nullable: true
 
     ClientCreateRequest:
       type: object
@@ -1478,10 +1481,20 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Client"
+        companies:
+          type: array
+          items:
+            $ref: "#/components/schemas/Company"
+        company_selection_required:
+          type: boolean
         selection_required:
           type: boolean
         branch_selection_required:
           type: boolean
+        selected_company_id:
+          type: string
+          format: uuid
+          nullable: true
         selected_branch_id:
           type: string
           format: uuid

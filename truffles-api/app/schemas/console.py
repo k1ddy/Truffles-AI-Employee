@@ -54,6 +54,7 @@ class ConsoleClient(BaseModel):
     slug: str
     name: Optional[str] = None
     company_id: Optional[UUID] = None
+    company_name: Optional[str] = None
 
 
 class ConsoleBranch(BaseModel):
@@ -138,8 +139,11 @@ class ConsoleMeResponse(BaseModel):
     client: Optional[ConsoleClient] = None
     branches: list[ConsoleBranch]
     clients: list[ConsoleClient] = []
+    companies: list[ConsoleCompany] = []
+    company_selection_required: bool = False
     selection_required: bool = False
     branch_selection_required: bool = False
+    selected_company_id: Optional[UUID] = None
     selected_branch_id: Optional[UUID] = None
 
 
