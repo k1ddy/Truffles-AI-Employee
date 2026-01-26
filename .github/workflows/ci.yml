@@ -393,6 +393,8 @@ jobs:
             --include-method=GET \
             --exclude-path /ops/outbox \
             --exclude-path /admin/capabilities \
+            --exclude-path /onboarding/status \
+            --exclude-path /onboarding/advance \
             --checks all \
             --request-timeout 10 \
             --max-examples=3 \

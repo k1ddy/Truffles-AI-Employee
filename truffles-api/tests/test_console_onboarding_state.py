@@ -3,9 +3,9 @@ from unittest.mock import Mock
 
 import pytest
 
+import app.services.onboarding_state as onboarding_state
 from app.schemas.capabilities import CapabilitiesPayload
 from app.services.console_errors import ConsoleAPIError
-import app.services.onboarding_state as onboarding_state
 from app.services.onboarding_state import (
     OnboardingInputs,
     OnboardingStep,
