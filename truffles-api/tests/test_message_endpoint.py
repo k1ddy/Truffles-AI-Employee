@@ -15,6 +15,7 @@ from app.database import get_db
 from app.main import app
 from app.models import Branch, Client, ClientSettings, Conversation, User
 from app.routers import webhook as webhook_router
+from app.routers.webhook.session_memory import _is_session_reset_only_message
 from app.schemas.consult import ConsultControllerOutput
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookResponse
@@ -2032,6 +2033,11 @@ def test_consult_snapshot_cutover_strict_clarifies():
         for entry in trace
         if isinstance(entry, dict)
     )
+
+
+def test_session_reset_marker_is_stripped():
+    text = "начнем сначала [LC:AUTO:CA05:RESET:20260126-123000]"
+    assert _is_session_reset_only_message(text) is True
 
 
 def test_booking_info_interrupt_appends_prompt():

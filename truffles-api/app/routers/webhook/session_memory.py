@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 from pydantic import ValidationError
@@ -173,7 +174,8 @@ def _should_reset_session_memory(message_text: str | None) -> bool:
 def _is_session_reset_only_message(message_text: str | None) -> bool:
     if not message_text:
         return False
-    normalized = normalize_for_matching(message_text)
+    cleaned = re.sub(r"\[[^\]]+\]", " ", message_text)
+    normalized = normalize_for_matching(cleaned)
     if not normalized:
         return False
     from . import _legacy as legacy
