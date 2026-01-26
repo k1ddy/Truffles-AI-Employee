@@ -516,11 +516,11 @@ def _handle_consult_flow(
         get_demo_salon_service_decision,
         get_demo_salon_service_hint,
     )
+    from app.services.knowledge_service import resolve_consult_topic_candidates
     from app.services.knowledge_snapshot_consumer import (
         build_consult_snapshot_shadow,
         is_snapshot_consumer_enabled,
     )
-    from app.services.knowledge_service import resolve_consult_topic_candidates
 
     from . import _legacy as legacy
 
