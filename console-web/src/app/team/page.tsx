@@ -7,9 +7,10 @@ import Link from "next/link";
 import toast from "react-hot-toast";
 
 import api from "@/lib/api";
-import { agentsApi, authApi, settingsApi } from "@/lib/api-client";
+import { agentsApi, authApi, canAccessConsole, settingsApi, type ConsoleRole } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import type { components } from "@/types/api.generated";
+import AccessDenied from "@/components/AccessDenied";
 
 type SessionData = ReturnType<typeof useSession>["data"];
 
@@ -33,14 +34,12 @@ type SpecialistsResponse = {
 
 type TeamTab = "users" | "specialists";
 
-type Role = "owner" | "admin" | "manager" | "support";
-
 type TeamBranch = { id?: string; name?: string };
 
 type TeamClient = { id?: string; name?: string };
 
 type TeamMe = {
-    agent?: { role?: Role | null };
+    agent?: { role?: ConsoleRole | null };
     client?: TeamClient | null;
     branches?: TeamBranch[];
     selected_branch_id?: string | null;
@@ -94,19 +93,19 @@ function UsersPanel({
     branches,
 }: {
     session: SessionData;
-    role: Role;
+    role: ConsoleRole;
     branches: TeamBranch[];
 }) {
     const { handleError } = useErrorHandler();
     const queryClient = useQueryClient();
-    const canManage = role === "owner" || role === "admin";
+    const canManage = canAccessConsole(role, "team", "write");
     const [linkTokens, setLinkTokens] = useState<Record<string, TelegramLinkResponse>>({});
     const [linkTarget, setLinkTarget] = useState<string | null>(null);
 
     const settingsQuery = useQuery({
         queryKey: ["settings"],
         queryFn: async () => (await settingsApi.get()).data,
-        enabled: !!session,
+        enabled: !!session && canManage,
     });
 
     const agentsQuery = useQuery({
@@ -299,7 +298,7 @@ function SpecialistsPanel({
 }: {
     session: SessionData;
     branches: TeamBranch[];
-    role: Role;
+    role: ConsoleRole;
     selectedBranchId: string;
     onSelectBranch: (value: string) => void;
 }) {
@@ -429,7 +428,8 @@ export default function TeamPage() {
     });
 
     const branches = (meQuery.data?.branches ?? []) as TeamBranch[];
-    const role = (meQuery.data?.agent?.role ?? "manager") as Role;
+    const role = (meQuery.data?.agent?.role ?? "manager") as ConsoleRole;
+    const canReadTeam = canAccessConsole(role, "team", "read");
 
     useEffect(() => {
         if (!selectedBranchId && role === "manager" && meQuery.data?.selected_branch_id) {
@@ -445,6 +445,20 @@ export default function TeamPage() {
         );
     }
 
+    if (meQuery.isLoading) {
+        return (
+            <div className="p-8 text-center text-muted-foreground">
+                Загрузка роли...
+            </div>
+        );
+    }
+
+    if (!canReadTeam) {
+        return (
+            <AccessDenied message="Эта роль не имеет доступа к команде." />
+        );
+    }
+
     return (
         <div className="space-y-6" data-testid="team-page">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -456,12 +470,16 @@ export default function TeamPage() {
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Link className="btn-ghost" href="/knowledge">
-                        Knowledge Studio
-                    </Link>
-                    <Link className="btn-primary" href="/settings">
-                        Provisioning
-                    </Link>
+                    {canAccessConsole(role, "knowledge", "read") && (
+                        <Link className="btn-ghost" href="/knowledge">
+                            Knowledge Studio
+                        </Link>
+                    )}
+                    {canAccessConsole(role, "settings", "read") && (
+                        <Link className="btn-primary" href="/settings">
+                            Provisioning
+                        </Link>
+                    )}
                 </div>
             </div>
 

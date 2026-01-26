@@ -3,6 +3,10 @@
 import CaseConversation from "./CaseConversation";
 import CaseDetailsPanel from "./CaseDetailsPanel";
 import { useCaseData } from "@/hooks/useCaseData";
+import { useQuery } from "@tanstack/react-query";
+import { useSession } from "next-auth/react";
+import AccessDenied from "@/components/AccessDenied";
+import { authApi, canAccessConsole } from "@/lib/api-client";
 
 interface CaseViewProps {
     caseId: string;
@@ -24,6 +28,7 @@ function CaseViewSkeleton() {
 }
 
 export default function CaseView({ caseId }: CaseViewProps) {
+    const { data: session } = useSession();
     const {
         caseDetail,
         caseLoading,
@@ -32,6 +37,23 @@ export default function CaseView({ caseId }: CaseViewProps) {
         messages,
         messagesLoading,
     } = useCaseData(caseId);
+
+    const { data: meData } = useQuery({
+        queryKey: ["console-me"],
+        queryFn: async () => {
+            const response = await authApi.getMe();
+            return response.data;
+        },
+        enabled: !!session,
+    });
+
+    const role = meData?.agent?.role ?? "manager";
+    const canReadInbox = canAccessConsole(role, "inbox", "read");
+    const canWriteInbox = canAccessConsole(role, "inbox", "write");
+
+    if (!canReadInbox) {
+        return <AccessDenied message="Эта роль не имеет доступа к заявкам." />;
+    }
 
     if (caseLoading) {
         return <CaseViewSkeleton />;
@@ -60,7 +82,7 @@ export default function CaseView({ caseId }: CaseViewProps) {
         );
     }
 
-    const canReply = caseDetail.status === "active";
+    const canReply = caseDetail.status === "active" && canWriteInbox;
 
     return (
         <div className="grid grid-cols-3 gap-6" data-testid="case-view">
@@ -71,6 +93,7 @@ export default function CaseView({ caseId }: CaseViewProps) {
                     messages={messages}
                     messagesLoading={messagesLoading}
                     canSend={canReply}
+                    canWrite={canWriteInbox}
                 />
             </div>
             <CaseDetailsPanel caseDetail={caseDetail} />

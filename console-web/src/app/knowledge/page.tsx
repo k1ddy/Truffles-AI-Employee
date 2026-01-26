@@ -5,8 +5,9 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import axios from "axios";
 import toast from "react-hot-toast";
-import { authApi, knowledgeApi, type KnowledgeHistoryItem } from "@/lib/api-client";
+import { authApi, canAccessConsole, knowledgeApi, type KnowledgeHistoryItem } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
+import AccessDenied from "@/components/AccessDenied";
 
 type SessionData = ReturnType<typeof useSession>["data"];
 
@@ -93,7 +94,12 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     });
 
     const role = meData?.agent?.role ?? "manager";
-    const canEdit = role === "owner" || role === "admin";
+    const canRead = canAccessConsole(role, "knowledge", "read");
+    const canEdit = canAccessConsole(role, "knowledge", "write");
+
+    if (!canRead) {
+        return <AccessDenied message="Эта роль не имеет доступа к знаниям." />;
+    }
 
     const currentQuery = useQuery({
         queryKey: ["knowledge-current"],

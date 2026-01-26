@@ -7,6 +7,8 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { getBookingStatusLabel, getBookingStatusColor } from "@/utils/labels";
+import AccessDenied from "@/components/AccessDenied";
+import { authApi, canAccessConsole } from "@/lib/api-client";
 
 interface Specialist {
     id: string;
@@ -83,6 +85,19 @@ export default function CalendarPage() {
     const { data: session } = useSession();
     const queryClient = useQueryClient();
 
+    const { data: meData } = useQuery({
+        queryKey: ["console-me"],
+        queryFn: async () => {
+            const response = await authApi.getMe();
+            return response.data;
+        },
+        enabled: !!session,
+    });
+
+    const role = meData?.agent?.role ?? "manager";
+    const canReadCalendar = canAccessConsole(role, "calendar", "read");
+    const canWriteCalendar = canAccessConsole(role, "calendar", "write");
+
     // Form state
     const [selectedSpecialist, setSelectedSpecialist] = useState<string>("");
     const [selectedDate, setSelectedDate] = useState<string>(formatDate(new Date()));
@@ -97,7 +112,7 @@ export default function CalendarPage() {
     const { data: specialistsData, isError: specialistsError, error: specialistsErrorData } = useQuery({
         queryKey: ["specialists"],
         queryFn: fetchSpecialists,
-        enabled: !!session,
+        enabled: !!session && canReadCalendar,
         retry: 1,
     });
 
@@ -108,7 +123,7 @@ export default function CalendarPage() {
     const { data: slotsData, isLoading: slotsLoading } = useQuery({
         queryKey: ["slots", selectedSpecialist, selectedDate, duration],
         queryFn: () => fetchSlots(selectedSpecialist, selectedDate, duration),
-        enabled: !!session && !!selectedSpecialist && !!selectedDate,
+        enabled: !!session && canReadCalendar && !!selectedSpecialist && !!selectedDate,
     });
 
     const slots = slotsData?.slots ?? [];
@@ -116,7 +131,7 @@ export default function CalendarPage() {
     const { data: bookingsData, isLoading: bookingsLoading } = useQuery({
         queryKey: ["bookings", selectedDate],
         queryFn: () => fetchBookings(selectedDate),
-        enabled: !!session,
+        enabled: !!session && canReadCalendar,
     });
 
     const bookings = bookingsData?.items ?? [];
@@ -149,14 +164,14 @@ export default function CalendarPage() {
     };
 
     const handleSlotClick = (slot: TimeSlot) => {
-        if (!slot.available) return;
+        if (!slot.available || !canWriteCalendar) return;
         setSelectedSlot(slot);
         setShowForm(true);
     };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedSlot || !selectedSpecialist) return;
+        if (!selectedSlot || !selectedSpecialist || !canWriteCalendar) return;
 
         const startAt = new Date(selectedSlot.start);
         const endAt = new Date(selectedSlot.end);
@@ -180,6 +195,12 @@ export default function CalendarPage() {
         );
     }
 
+    if (!canReadCalendar) {
+        return (
+            <AccessDenied message="Эта роль не имеет доступа к календарю." />
+        );
+    }
+
     return (
         <div className="space-y-6" data-testid="calendar-page">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -189,6 +210,11 @@ export default function CalendarPage() {
                     <p className="mt-2 text-sm text-muted-foreground">
                         Подберите слот, подтвердите услугу и создайте запись вручную при необходимости.
                     </p>
+                    {!canWriteCalendar && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                            Read-only доступ: создание и отмена записей недоступны.
+                        </p>
+                    )}
                 </div>
                 <Link href="/" className="btn-ghost">
                     ← Назад к заявкам

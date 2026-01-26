@@ -78,6 +78,64 @@ export const ErrorCodes = {
 
 export type ErrorCode = keyof typeof ErrorCodes;
 
+export type ConsoleRole = "owner" | "admin" | "manager" | "support";
+export type ConsoleSection =
+    | "inbox"
+    | "knowledge"
+    | "team"
+    | "calendar"
+    | "settings"
+    | "ops"
+    | "audit"
+    | "provisioning";
+export type ConsoleAction = "read" | "write";
+
+export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRole[]>> = {
+    inbox: {
+        read: ["owner", "admin", "manager", "support"],
+        write: ["owner", "admin", "manager"],
+    },
+    knowledge: {
+        read: ["owner", "admin", "manager"],
+        write: ["owner", "admin"],
+    },
+    team: {
+        read: ["owner", "admin"],
+        write: ["owner", "admin"],
+    },
+    calendar: {
+        read: ["owner", "admin", "manager"],
+        write: ["owner", "admin", "manager"],
+    },
+    settings: {
+        read: ["owner", "admin"],
+        write: ["owner", "admin"],
+    },
+    ops: {
+        read: ["owner", "admin", "support"],
+        write: ["owner", "admin"],
+    },
+    audit: {
+        read: ["owner", "admin", "support"],
+        write: [],
+    },
+    provisioning: {
+        read: ["owner", "admin", "support"],
+        write: ["owner", "admin"],
+    },
+};
+
+export function canAccessConsole(
+    role: ConsoleRole | null | undefined,
+    section: ConsoleSection,
+    action: ConsoleAction,
+): boolean {
+    if (!role) {
+        return false;
+    }
+    return ConsoleRBAC[section][action].includes(role);
+}
+
 /** UI action types from errors.v1.json */
 export type UIAction =
     | "redirect_login"

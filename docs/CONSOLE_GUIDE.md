@@ -138,6 +138,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - Paging: cursor зависит от `sort_by` (по умолчанию `last_activity`).
 - Filters: `status`, `branch_id`, `assigned_to_me`, `q`, `phone`, `has_delivery_error`, `has_pending_outbox`, `sort_by`.
 - Health: `last_inbound_at`, `last_outbound_at`, `last_activity_at`, `last_message_preview`, `needs_reply`, `has_delivery_error`, `has_pending_outbox`.
+- RBAC: owner/admin/manager/support read; owner/admin/manager write (take/resolve/send).
 
 **Case view**
 - UI: `console-web/src/app/cases/[id]/page.tsx` (deep link into Inbox selection)
@@ -148,36 +149,39 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - UI: `console-web/src/app/calendar/page.tsx`
 - API: `/calendar/specialists`, `/calendar/slots`, `/calendar/bookings`
 - Data: `specialists`, `bookings`
+- RBAC: owner/admin/manager read/write.
 
 **Knowledge (Знания)**
 - UI: `console-web/src/app/knowledge/page.tsx`
 - API: `GET /console/v1/knowledge/current`, `POST /console/v1/knowledge/validate`,
   `POST /console/v1/knowledge/publish`, `GET /console/v1/knowledge/history`,
   `POST /console/v1/knowledge/rollback`
-- RBAC: owner/admin write; manager/support read-only.
+- RBAC: owner/admin write; manager read-only; support no access.
 - Требует branch selection (`X-Branch-Id`).
 - Publish генерирует pack YAML и запускает Qdrant sync; при ошибке включается knowledge safe‑mode (handoff).
 
 **Team (Команда)**
 - UI: `console-web/src/app/team/page.tsx`
-- API: `GET /console/v1/agents` (owner/admin), `GET /console/v1/settings` (manager read-only),
-  `GET /calendar/specialists`
+- API: `GET /console/v1/agents` (owner/admin), `GET /calendar/specialists`
+- RBAC: owner/admin only (Team UI).
 - Data: `agents`, `agent_identities`, `specialists`
 
 **Settings**
 - UI: `console-web/src/app/settings/page.tsx`
 - API: `GET/PATCH /console/v1/settings`
+- RBAC: owner/admin only.
 - Build info: Settings header shows `NEXT_PUBLIC_BUILD_SHA` and `NEXT_PUBLIC_BUILD_TIME` for deploy diagnosis.
 
 **Audit**
 - UI: `console-web/src/app/audit/page.tsx`
 - API: `GET /console/v1/audit`
+- RBAC: owner/admin/support (read-only).
 
 **Ops**
 - UI: `console-web/src/components/OpsPage.tsx`
 - API: `GET /console/v1/health`, `/console/v1/metrics/daily`, `/console/v1/telegram/health`,
   `GET /console/v1/ops/outbox`, `POST /console/v1/ops/outbox/retry`
-- RBAC: owner/admin/support
+- RBAC: owner/admin/support read; owner/admin write (retry/verify/test).
 
 ---
 
@@ -189,7 +193,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - Health: `GET /console/v1/telegram/health` (Console API).
 - Verify: `POST /console/v1/telegram/verify` (owner/admin).
 - Test: `POST /console/v1/telegram/test` (owner/admin).
-- Agent linking: `GET /console/v1/agents` + `POST /console/v1/agents/{id}/telegram/link`.
+- Agent linking: `GET /console/v1/agents` + `POST /console/v1/agents/{id}/telegram/link` (self‑link allowed for any role; owner/admin can link others).
 - Case trail: `GET /console/v1/cases/{id}` returns `telegram_trail`.
 - Case actions: `POST /console/v1/cases/{id}/take|resolve|return` return `sync` status.
 - Branch routing: `GET /console/v1/settings` returns `branches[].telegram_chat_id` + `branches[].instance_id`.
@@ -272,7 +276,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - Поддерживает branches/agents/knowledge, следит за Telegram linking и операционными настройками.
 
 **Manager (branch):**
-- Branch‑scoped, нужен `branch_id`; доступ: Cases + Calendar, Knowledge read‑only.
+- Branch‑scoped, нужен `branch_id`; доступ: Cases + Calendar, Knowledge read‑only; Team/Settings недоступны.
 - Обязательно выбрать филиал (или получить `branch_selection_required`).
 - Рабочий цикл: взять заявку → ответить клиенту → resolve/return.
 

@@ -94,7 +94,7 @@ from app.schemas.outbox_payload import validate_outbox_payload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
 from app.services.audit_service import record_audit_event
 from app.services.capabilities_service import merge_capabilities, payload_to_dict
-from app.services.console_auth import ConsoleAuthContext, get_console_context
+from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
 from app.services.console_idempotency import (
     finalize_idempotency,
@@ -736,9 +736,16 @@ _OUTBOX_STATUS_MAP = {
 }
 
 
-def _require_ops_access(context: ConsoleAuthContext) -> None:
-    if context.role not in ("owner", "admin", "support"):
-        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin/support can access ops")
+def _require_ops_access(context: ConsoleAuthContext, *, action: str = "read") -> None:
+    message = "Only owner/admin/support can access ops"
+    if action == "write":
+        message = "Only owner/admin can manage ops"
+    require_console_permission(
+        context,
+        "ops",
+        action,
+        message=message,
+    )
 
 
 def _normalize_outbox_status(status: Optional[str]) -> str:
@@ -861,8 +868,12 @@ async def get_me(request: Request, db: Session = Depends(get_db)) -> ConsoleMeRe
 )
 async def list_agents(request: Request, db: Session = Depends(get_db)) -> ConsoleAgentListResponse:
     context = get_console_context(request, db)
-    if context.role not in ("owner", "admin"):
-        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin can view agents")
+    require_console_permission(
+        context,
+        "team",
+        "read",
+        message="Only owner/admin can view agents",
+    )
 
     agents = (
         db.query(Agent)
@@ -993,6 +1004,7 @@ async def list_cases(
     db: Session = Depends(get_db),
 ) -> ConsoleCaseListResponse:
     context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "read")
     _reject_unknown_query_params(
         request,
         {
@@ -1300,6 +1312,7 @@ async def take_case(
     case_id: UUID, request: Request, db: Session = Depends(get_db)
 ) -> ConsoleCaseActionResponse:
     context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
     idempotency_key = _get_idempotency_key(request)
     idempotency = start_idempotency(
         db,
@@ -1468,6 +1481,7 @@ async def resolve_case(
     case_id: UUID, request: Request, db: Session = Depends(get_db)
 ) -> ConsoleCaseActionResponse:
     context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
     idempotency_key = _get_idempotency_key(request)
     idempotency = start_idempotency(
         db,
@@ -1608,6 +1622,7 @@ async def return_case(
     case_id: UUID, request: Request, db: Session = Depends(get_db)
 ) -> ConsoleCaseActionResponse:
     context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
     idempotency_key = _get_idempotency_key(request)
     idempotency = start_idempotency(
         db,
@@ -1753,6 +1768,7 @@ async def get_case_messages(
     db: Session = Depends(get_db)
 ) -> ConsoleMessageListResponse:
     context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "read")
     _reject_unknown_query_params(request, {"cursor", "limit"})
     _validate_limit(limit)
     
@@ -1805,6 +1821,7 @@ async def get_case(
 ) -> ConsoleCase:
     """Get single case details by ID."""
     context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "read")
     
     case = db.query(Handover).filter(
         Handover.id == case_id,
@@ -1917,6 +1934,7 @@ async def send_manager_message(
     logger = get_logger("console_send_message")
     
     context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
     idempotency = None
     idempotency_key = _get_idempotency_key(request)
     
@@ -2142,7 +2160,7 @@ async def list_outbox(
 ) -> ConsoleOutboxListResponse:
     """List outbox queue entries for ops."""
     context = get_console_context(request, db)
-    _require_ops_access(context)
+    _require_ops_access(context, action="read")
 
     _reject_unknown_query_params(request, {"status", "cursor", "limit"})
     _validate_limit(limit)
@@ -2213,7 +2231,10 @@ async def retry_outbox(
 ) -> ConsoleOutboxRetryResponse:
     """Retry failed outbox messages."""
     context = get_console_context(request, db)
-    _require_ops_access(context)
+    _require_ops_access(
+        context,
+        action="write",
+    )
 
     ids = [entry for entry in (body.ids or []) if entry]
     if not ids:
@@ -2283,6 +2304,7 @@ async def list_audit_events(
     from app.services.audit_service import AuditEvent
     
     context = get_console_context(request, db)
+    require_console_permission(context, "audit", "read")
     
     _reject_unknown_query_params(request, {"entity_type", "entity_id", "cursor", "limit"})
     _validate_limit(limit)
@@ -2351,6 +2373,7 @@ async def get_settings(
     from app.schemas.console import ConsoleBotConfig, ConsoleSettingsResponse
     
     context = get_console_context(request, db)
+    require_console_permission(context, "settings", "read")
     
     # Get all branches for the client
     branches = db.query(Branch).filter(Branch.client_id == context.client.id).all()
@@ -2415,6 +2438,7 @@ async def get_metrics_daily(
     from app.schemas.console import ConsoleMetricsDailyResponse
     
     context = get_console_context(request, db)
+    require_console_permission(context, "ops", "read")
     
     _reject_unknown_query_params(request, {"date"})
 
@@ -2492,6 +2516,7 @@ async def get_telegram_health(
     from app.services.telegram_service import TelegramService
 
     context = get_console_context(request, db)
+    require_console_permission(context, "ops", "read")
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == context.client.id).first()
 
     if not settings or not settings.telegram_bot_token:
@@ -2575,7 +2600,12 @@ async def verify_telegram_connector(
     from app.services.telegram_service import TelegramService
 
     context = get_console_context(request, db)
-    _require_owner_admin(context)
+    require_console_permission(
+        context,
+        "settings",
+        "write",
+        message="Only owner/admin can manage Telegram connector",
+    )
 
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == context.client.id).first()
     branch = None
@@ -2655,7 +2685,12 @@ async def send_telegram_test(
     from app.services.telegram_service import TelegramService
 
     context = get_console_context(request, db)
-    _require_owner_admin(context)
+    require_console_permission(
+        context,
+        "settings",
+        "write",
+        message="Only owner/admin can manage Telegram connector",
+    )
 
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == context.client.id).first()
     branch = None
@@ -2734,10 +2769,12 @@ async def update_settings(
     from app.schemas.console import ConsoleSettingsUpdateRequest, ConsoleSettingsUpdateResponse
     
     context = get_console_context(request, db)
-    
-    # Only owner/admin can update settings
-    if context.role not in ("owner", "admin"):
-        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin can update settings")
+    require_console_permission(
+        context,
+        "settings",
+        "write",
+        message="Only owner/admin can update settings",
+    )
     
     # Get client settings
     from app.models import ClientSettings
@@ -2793,6 +2830,7 @@ async def get_knowledge_current(
     db: Session = Depends(get_db),
 ) -> ConsoleKnowledgeCurrentResponse:
     context = get_console_context(request, db)
+    require_console_permission(context, "knowledge", "read")
     branch = _resolve_branch_from_context(context)
     version = get_current_published(db, branch_id=branch.id)
     if not version:
@@ -2816,7 +2854,12 @@ async def validate_knowledge(
     db: Session = Depends(get_db),
 ) -> ConsoleKnowledgeValidateResponse:
     context = get_console_context(request, db)
-    _require_owner_admin(context, message="Only owner/admin can manage knowledge")
+    require_console_permission(
+        context,
+        "knowledge",
+        "write",
+        message="Only owner/admin can manage knowledge",
+    )
     branch = _resolve_branch_from_context(context)
     current = get_current_published(db, branch_id=branch.id)
     current_payload = current.payload_json if current else None
@@ -2869,7 +2912,12 @@ async def publish_knowledge(
     db: Session = Depends(get_db),
 ) -> ConsoleKnowledgePublishResponse:
     context = get_console_context(request, db)
-    _require_owner_admin(context, message="Only owner/admin can manage knowledge")
+    require_console_permission(
+        context,
+        "knowledge",
+        "write",
+        message="Only owner/admin can manage knowledge",
+    )
     branch = _resolve_branch_from_context(context)
 
     current = get_current_published(db, branch_id=branch.id)
@@ -2968,6 +3016,7 @@ async def list_knowledge_history(
     db: Session = Depends(get_db),
 ) -> ConsoleKnowledgeHistoryResponse:
     context = get_console_context(request, db)
+    require_console_permission(context, "knowledge", "read")
     branch = _resolve_branch_from_context(context)
     items = list_history(db, branch_id=branch.id)
     return ConsoleKnowledgeHistoryResponse(
@@ -2995,7 +3044,12 @@ async def rollback_knowledge(
     db: Session = Depends(get_db),
 ) -> ConsoleKnowledgeRollbackResponse:
     context = get_console_context(request, db)
-    _require_owner_admin(context, message="Only owner/admin can manage knowledge")
+    require_console_permission(
+        context,
+        "knowledge",
+        "write",
+        message="Only owner/admin can manage knowledge",
+    )
     branch = _resolve_branch_from_context(context)
 
     version = (
@@ -3092,9 +3146,10 @@ async def create_company(
     db: Session = Depends(get_db),
 ) -> ConsoleCompanyCreateResponse:
     context = get_console_context(request, db, require_selection=False)
-    _require_roles(
+    require_console_permission(
         context,
-        allowed=("owner", "admin"),
+        "provisioning",
+        "write",
         message="Only owner/admin can manage provisioning",
     )
 
@@ -3140,9 +3195,10 @@ async def create_client(
     db: Session = Depends(get_db),
 ) -> ConsoleClientCreateResponse:
     context = get_console_context(request, db, require_selection=False)
-    _require_roles(
+    require_console_permission(
         context,
-        allowed=("owner", "admin"),
+        "provisioning",
+        "write",
         message="Only owner/admin can manage provisioning",
     )
 
@@ -3206,9 +3262,10 @@ async def create_branch(
     db: Session = Depends(get_db),
 ) -> ConsoleBranchCreateResponse:
     context = get_console_context(request, db, require_selection=False)
-    _require_roles(
+    require_console_permission(
         context,
-        allowed=("owner", "admin"),
+        "provisioning",
+        "write",
         message="Only owner/admin can manage provisioning",
     )
 
@@ -3277,9 +3334,10 @@ async def update_branch(
     db: Session = Depends(get_db),
 ) -> ConsoleBranch:
     context = get_console_context(request, db, require_selection=False)
-    _require_roles(
+    require_console_permission(
         context,
-        allowed=("owner", "admin"),
+        "provisioning",
+        "write",
         message="Only owner/admin can manage provisioning",
     )
 
@@ -3397,9 +3455,10 @@ async def create_agent(
     db: Session = Depends(get_db),
 ) -> ConsoleAgentCreateResponse:
     context = get_console_context(request, db, require_selection=False)
-    _require_roles(
+    require_console_permission(
         context,
-        allowed=("owner", "admin"),
+        "provisioning",
+        "write",
         message="Only owner/admin can manage provisioning",
     )
 
@@ -3540,7 +3599,12 @@ async def get_capabilities(
     db: Session = Depends(get_db),
 ) -> ConsoleCapabilitiesResponse:
     context = get_console_context(request, db)
-    _require_platform_admin(context)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin/support can access provisioning",
+    )
 
     if branch_id:
         branch = (
@@ -3600,9 +3664,10 @@ async def patch_capabilities(
     db: Session = Depends(get_db),
 ) -> ConsoleCapabilitiesRecord:
     context = get_console_context(request, db)
-    _require_roles(
+    require_console_permission(
         context,
-        allowed=("owner", "admin"),
+        "provisioning",
+        "write",
         message="Only owner/admin can manage capabilities",
     )
 
