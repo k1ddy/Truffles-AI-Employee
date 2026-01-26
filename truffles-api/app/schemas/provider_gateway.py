@@ -55,3 +55,65 @@ class ProviderInbound(BaseModel):
     auth: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     extensions: dict[str, Any] | None = None
+
+
+class ProviderOutboundRecipient(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = None
+    phone: str | None = None
+    jid: str | None = None
+    display_name: str | None = None
+
+
+class ProviderOutboundMedia(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    media_type: str
+    source_url: str | None = None
+    signed_url: str | None = None
+    expires_at: str | None = None
+    sha256: str | None = None
+    size_bytes: int | None = None
+    mime_type: str | None = None
+    filename: str | None = None
+    caption: str | None = None
+
+
+class ProviderOutboundContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str | None = None
+    media: ProviderOutboundMedia | None = None
+
+
+class ProviderOutbound(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outbox_id: str = Field(..., min_length=1)
+    provider: str = Field(..., min_length=1)
+    channel: str = Field(..., min_length=1)
+    tenant_context: TenantContext
+    to: ProviderOutboundRecipient
+    content: ProviderOutboundContent
+    idempotency_key: str = Field(..., min_length=1)
+    callback_url: str | None = None
+    requested_at: str | None = None
+    metadata: dict[str, Any] | None = None
+    extensions: dict[str, Any] | None = None
+
+
+class ProviderStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(..., min_length=1)
+    channel: str = Field(..., min_length=1)
+    provider_message_id: str = Field(..., min_length=1)
+    tenant_context: TenantContext
+    status: str = Field(..., min_length=1)
+    status_at: str = Field(..., min_length=1)
+    outbox_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    raw_ref: str | None = None
+    extensions: dict[str, Any] | None = None

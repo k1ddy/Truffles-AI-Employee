@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.logging_config import get_logger
 from app.routers.webhook import _legacy as legacy
-from app.schemas.provider_gateway import ProviderInbound
+from app.schemas.provider_gateway import ProviderInbound, ProviderStatus
 from app.schemas.webhook import WebhookResponse
-from app.services.provider_gateway_service import translate_provider_inbound
+from app.services.provider_gateway_service import translate_provider_inbound, update_outbox_status_from_provider
 
 logger = get_logger("provider_gateway")
 router = APIRouter()
@@ -25,6 +25,10 @@ def _is_env_enabled(value: str | None, default: bool = False) -> bool:
 
 def _is_provider_inbound_enabled() -> bool:
     return _is_env_enabled(os.environ.get("PROVIDER_GATEWAY_INBOUND_ENABLED"), default=False)
+
+
+def _is_provider_status_enabled() -> bool:
+    return _is_env_enabled(os.environ.get("PROVIDER_GATEWAY_STATUS_ENABLED"), default=False)
 
 
 def _enforce_gateway_token(request: Request) -> None:
@@ -76,4 +80,42 @@ async def handle_provider_inbound(request: Request, db: Session = Depends(get_db
     )
 
 
-__all__ = ["handle_provider_inbound", "router"]
+@router.post("/provider/status")
+async def handle_provider_status(request: Request, db: Session = Depends(get_db)):
+    if not _is_provider_status_enabled():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+    _enforce_gateway_token(request)
+
+    try:
+        payload_json = await request.json()
+    except Exception as exc:
+        logger.warning(
+            "Provider status payload is not valid JSON",
+            extra={"context": {"error": str(exc)}},
+        )
+        return {"success": False, "message": "Invalid JSON payload"}
+
+    if not isinstance(payload_json, dict):
+        return {"success": False, "message": "Invalid payload format"}
+
+    try:
+        payload = ProviderStatus.model_validate(payload_json)
+    except ValidationError as exc:
+        logger.warning(
+            "Provider status validation failed",
+            extra={"context": {"error": str(exc)}},
+        )
+        return {"success": False, "message": "Invalid provider status payload"}
+
+    ok, message = update_outbox_status_from_provider(db, status=payload)
+    if not ok:
+        status_code = status.HTTP_400_BAD_REQUEST
+        if message == "outbox_not_found":
+            status_code = status.HTTP_404_NOT_FOUND
+        raise HTTPException(status_code=status_code, detail=message)
+
+    return {"success": True, "message": "ok"}
+
+
+__all__ = ["handle_provider_inbound", "handle_provider_status", "router"]
