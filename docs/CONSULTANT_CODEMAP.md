@@ -54,8 +54,10 @@
 
 **Code blocks:**
 - Domain facts + service availability: `truffles-api/app/services/demo_salon_knowledge.py`
-- Packs: `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`
-- Consult playbooks (care advice): `SALON_TRUTH.yaml` → `consult_playbooks`
+- Truth pack (facts/policy): `truffles-api/app/knowledge/<client_slug>/SALON_TRUTH.yaml`
+- Consult playbooks (care advice): `truffles-api/app/knowledge/<client_slug>/CONSULT_PLAYBOOK.yaml`
+- Consult contracts: `truffles-api/app/schemas/consult.py` (runtime validation), `contracts/consult/consult_playbook.v1.jsonschema`
+- Generic pack scaffold (CI/tests): `truffles-api/app/knowledge/generic/*`
 - EVAL cases: `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
 
 **Behavior impact:**
@@ -74,9 +76,12 @@
 - `truffles-api/app/routers/webhook/info.py`
 - Info bundle aggregation (address/hours/parking/etc). Keeps class carryover.
 
-**Consult**
-- `truffles-api/app/routers/webhook/response.py` → `_handle_consult_flow`
-- Playbook first; LLM advice only for general beauty care and non‑medical topics.
+**Consult (pack-first, domain-agnostic)**
+- Entry point: `truffles-api/app/routers/webhook/response.py` → `_handle_consult_flow`
+- Pack load + schema validate: `truffles-api/app/services/consult_pack_service.py` (load/validate) + `truffles-api/app/schemas/consult.py`
+- Topic resolver: `truffles-api/app/services/knowledge_service.py` → `resolve_consult_topic_candidates`
+- LLM controller (topic select JSON): `truffles-api/app/services/ai_service.py` → `generate_consult_controller_output`
+- Playbook first; LLM advice only for general beauty care and non‑medical topics (legacy fallback only when no pack decision).
 
 **Behavior impact:**
 - Booking keeps goal across interruptions; consult replies can be returned with booking follow‑up.
@@ -88,6 +93,7 @@
 
 **Code blocks:**
 - LLM + rewrite: `truffles-api/app/services/ai_service.py`
+- Consult controller (LLM JSON for topic/intent): `truffles-api/app/services/ai_service.py`
 - RAG/embeddings: `truffles-api/app/services/knowledge_service.py` + Qdrant
 - Response composition/guard: `truffles-api/app/routers/webhook/response.py`
 
@@ -147,10 +153,48 @@
 
 **Code blocks:**
 - Chaos sim runner + evaluator: `ops/diagnose.py` (`chaos-sim`)
+- Livecheck auto (CA suites): `ops/diagnose.py` (`livecheck-auto`)
 - Eval tests: `truffles-api/tests/test_demo_salon_eval.py` (uses `EVAL.yaml`)
 
 **Behavior impact:**
 - Simulates 10–15 turn dialogs with noise and mixed languages, validates behavior by trace/meta (not by text).
+
+---
+
+## Consult pack flow (current behavior, line-accurate)
+
+**Decision entry (consult branch in main pipeline)**
+- `truffles-api/app/routers/webhook/decision.py:6332` → `_handle_consult_flow(...)` is invoked before multi-intent routing.
+
+**Pack load + schema validation**
+- `truffles-api/app/services/consult_pack_service.py:22-163` → load/validate pack, build deterministic reply.
+- `truffles-api/app/schemas/consult.py:37-120` → playbook + controller output schemas (validate/guard).
+
+**Topic resolution (semantic + controller)**
+- `truffles-api/app/services/knowledge_service.py:81-141` → `resolve_consult_topic_candidates` (embeddings + top-k).
+- `truffles-api/app/services/ai_service.py:1593-1679` → `generate_consult_controller_output` (LLM JSON, strict schema).
+- Selection order in consult flow: controller topic → semantic top-1 (score >= 0.6) → intent_decomp topic.
+  `truffles-api/app/routers/webhook/response.py:657-673`.
+
+**Explicit info short-circuit**
+- If explicit info intent present, consult flow records `consult_flow` short_circuit and returns to info/booking flow.
+  `truffles-api/app/routers/webhook/response.py:583-692`.
+
+**Service availability integration (facts)**
+- service_matcher/truth/multi_truth response is merged into consult meta and can be combined with consult reply.
+  `truffles-api/app/routers/webhook/response.py:1090-1162`.
+
+**Consult trace/meta**
+- consult_flow decision + reason recorded here:
+  `truffles-api/app/routers/webhook/response.py:1228-1257`.
+- consult_context is set for goal preservation:
+  `truffles-api/app/routers/webhook/response.py:1259-1289`.
+
+**Tests + livecheck probes**
+- Pack meta/trace: `truffles-api/tests/test_message_endpoint.py:855-991`
+- Pack flow trace/meta (controller + resolver): `truffles-api/tests/test_message_endpoint.py:1109-1256`
+- Livecheck: CA06 consult suite in `ops/diagnose.py` (ACK skipped to avoid trace override):
+  `ops/diagnose.py:6936-6938`
 
 ---
 
@@ -161,4 +205,3 @@
 3) For flow change: check `booking.py`, `info.py`, `response.py` (consult).
 4) For facts: check `demo_salon_knowledge.py` + `SALON_TRUTH.yaml`.
 5) Verify with `ops/diagnose.py chaos-sim` and/or `pytest truffles-api/tests/test_demo_salon_eval.py`.
-

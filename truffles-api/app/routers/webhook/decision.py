@@ -4023,11 +4023,13 @@ async def _handle_webhook_payload(
     sim_now = get_simulation_time(conversation) if conversation else None
     if sim_now:
         now = sim_now
+    from . import _legacy as legacy
+
     policy_type = _get_policy_type(client, client_slug=payload.client_slug)
     policy_pack = _get_policy_pack(client, client_slug=payload.client_slug)
     policy_pack_missing = not isinstance(policy_pack, dict)
     policy_source = "policy_pack" if not policy_pack_missing else "policy_gate"
-    policy_handler = _get_policy_handler(client, client_slug=payload.client_slug)
+    policy_handler = legacy._get_policy_handler(client, client_slug=payload.client_slug)
     hard_law_sections = set(_resolve_hard_law_sections(policy_pack))
     quiet_hours_notice: str | None = None
     if conversation.state == ConversationState.BOT_ACTIVE.value:
@@ -6336,6 +6338,7 @@ async def _handle_webhook_payload(
         client_slug=payload.client_slug,
         policy_type=policy_type,
         policy_pack=policy_pack,
+        policy_handler=policy_handler,
         routing=routing,
         bypass_domain_flows=bypass_domain_flows,
         booking_wants_flow=booking_wants_flow,

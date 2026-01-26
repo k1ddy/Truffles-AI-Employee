@@ -1,0 +1,173 @@
+version: v1
+topics:
+  - id: hair_aftercolor
+    title: Уход после окрашивания
+    summary: Общие рекомендации по уходу за окрашенными волосами и сохранению цвета.
+    allowed_advice:
+      - Мягкий шампунь и кондиционер без агрессивного очищения.
+      - Регулярная увлажняющая маска для поддержания мягкости.
+      - Термозащита при сушке или укладке.
+    required_questions:
+      - Какой у вас тип волос и как давно было окрашивание?
+    optional_questions:
+      - "Что для вас важнее: сохранить оттенок или восстановить качество?"
+    disallowed_claims:
+      - Конкретные услуги, цены или условия салона.
+    fact_requirements: []
+    risk_tags:
+      - none
+    clarify_limit: 2
+    escalate_when:
+      - clarify_limit_exceeded
+    next_step: Если хотите, можем обсудить фото-пример.
+
+  - id: hair_damage
+    title: Восстановление поврежденных волос
+    summary: Общие рекомендации по уходу за сухими и ломкими волосами.
+    allowed_advice:
+      - Щадящее очищение и регулярное увлажнение.
+      - Восстанавливающие маски или сыворотки по ощущениям.
+      - Снизить температуру укладки и использовать термозащиту.
+    required_questions:
+      - "Что именно беспокоит: сухость, ломкость или пушение?"
+    optional_questions:
+      - "После чего появились изменения: окрашивание, укладка или сезон?"
+    disallowed_claims:
+      - Конкретные услуги, цены или условия салона.
+    fact_requirements: []
+    risk_tags:
+      - none
+    clarify_limit: 2
+    escalate_when:
+      - clarify_limit_exceeded
+    next_step: Если хотите, можем обсудить фото-пример.
+
+  - id: hair_color_choice
+    title: Подбор оттенка
+    summary: Общий подход к выбору оттенка и образа.
+    allowed_advice:
+      - Начать с оттенка, близкого к натуральному, и корректировать постепенно.
+      - Ориентироваться на тёплый или холодный подтон кожи.
+      - Рассмотреть мягкие техники с плавными переходами.
+    required_questions:
+      - Какой у вас натуральный цвет и были ли недавние окрашивания?
+    optional_questions:
+      - Хочется более спокойный или заметный образ?
+    disallowed_claims:
+      - Конкретные услуги, цены или условия салона.
+    fact_requirements: []
+    risk_tags:
+      - none
+    clarify_limit: 2
+    escalate_when:
+      - clarify_limit_exceeded
+    next_step: Если хотите, можем обсудить фото-пример.
+
+  - id: nails_care
+    title: Уход за ногтями
+    summary: Общий уход за ногтями и кожей рук.
+    allowed_advice:
+      - Регулярное увлажнение кутикулы и крем для рук.
+      - Щадящее снятие и паузы при сильном истончении.
+      - Перчатки при контакте с бытовой химией.
+    required_questions:
+      - "Что сейчас больше беспокоит: ломкость, слоение или сухость?"
+    optional_questions:
+      - Носите ли вы покрытие регулярно?
+    disallowed_claims:
+      - Конкретные услуги, цены или условия салона.
+    fact_requirements: []
+    risk_tags:
+      - none
+    clarify_limit: 2
+    escalate_when:
+      - clarify_limit_exceeded
+    next_step: Если хотите, можем обсудить фото-пример.
+
+  - id: brows_lashes_care
+    title: Уход за бровями и ресницами
+    summary: Базовый уход за бровями и ресницами без процедур.
+    allowed_advice:
+      - Мягкое очищение без трения.
+      - Увлажнение кожи вокруг и аккуратное расчесывание.
+      - Избегать активного трения и агрессивного снятия макияжа.
+    required_questions:
+      - Уход нужен после процедуры или в повседневной рутине?
+    optional_questions:
+      - Есть ли чувствительность кожи вокруг глаз?
+    disallowed_claims:
+      - Конкретные услуги, цены или условия салона.
+    fact_requirements: []
+    risk_tags:
+      - none
+    clarify_limit: 2
+    escalate_when:
+      - clarify_limit_exceeded
+    next_step: Если хотите, можем обсудить фото-пример.
+
+  - id: sensitive_skin
+    title: Чувствительная кожа
+    summary: Мягкий уход для чувствительной кожи и снижение раздражения.
+    allowed_advice:
+      - Выбирать щадящие процедуры и мягкое очищение.
+      - Пробовать новые средства по одному и наблюдать реакцию.
+      - Избегать агрессивных пилингов и скрабов.
+    required_questions:
+      - Где проявляется чувствительность и как давно?
+    optional_questions:
+      - Есть ли известные триггеры или процедуры, на которые реагируете?
+    disallowed_claims:
+      - Конкретные услуги, цены или условия салона.
+    fact_requirements: []
+    risk_tags:
+      - none
+    clarify_limit: 2
+    escalate_when:
+      - clarify_limit_exceeded
+    next_step: Если хотите, можем обсудить фото-пример.
+
+  - id: style_reference
+    title: Референс и стиль
+    summary: Обсуждение желаемого образа по фото или референсу.
+    allowed_advice:
+      - Сначала выбрать направление и уровень контраста.
+      - Обсудить технику, которая даст похожее ощущение.
+      - Начать с мягкого варианта и оценить результат.
+    required_questions:
+      - "Что именно в референсе нравится: форма, цвет или текстура?"
+    optional_questions:
+      - Хотите максимально похоже или адаптацию под вас?
+    disallowed_claims:
+      - Конкретные услуги, цены или условия салона.
+    fact_requirements: []
+    risk_tags:
+      - none
+    clarify_limit: 2
+    escalate_when:
+      - clarify_limit_exceeded
+    next_step: Если хотите, можем обсудить фото-пример.
+
+  - id: general_consult
+    title: Общий совет
+    summary: Общий ориентир по выбору зоны или услуги.
+    allowed_advice:
+      - Начать с щадящего варианта.
+      - Ориентироваться на желаемый эффект.
+      - Подобрать базовый уход и посмотреть ощущения.
+    required_questions:
+      - Какая зона или услуга вас интересует?
+    optional_questions:
+      - Есть ли особенности, о которых важно знать?
+    disallowed_claims:
+      - Конкретные услуги, цены или условия салона.
+    fact_requirements: []
+    risk_tags:
+      - none
+    clarify_limit: 2
+    escalate_when:
+      - clarify_limit_exceeded
+    next_step: Если хотите, можем обсудить фото-пример.
+
+default_policy:
+  clarify_limit: 2
+  escalate_on_low_confidence: false
