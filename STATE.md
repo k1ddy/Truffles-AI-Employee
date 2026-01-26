@@ -24,7 +24,7 @@
 - DONE: Control Plane docs refresh (tenancy code-backed notes + selection plan + role runbooks) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-docs-selection-runbooks.md`. Evidence: doc updates in repo.
 - PLAN: Phase 4 Control Plane (Team + Calendar UI) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`.
 - DONE: Consult DoD (domain-agnostic, pack-first, no dictionaries) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-dod.md`; evidence: `SPECS/CONSULTANT.md`, `contracts/consult/consult_playbook.v1.jsonschema`, `contracts/consult/consult_controller_output.v1.jsonschema`.
-- PLAN: Consult implementation (domain-agnostic, no dictionaries) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-implementation.md`.
+- DONE: Consult implementation (domain-agnostic, pack-first, no dictionaries) — PR #378 https://github.com/k1ddy/Truffles-AI-Employee/pull/378; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21348230551; live-check CA06 consult bundles `/tmp/trace_bundle_ca06_pack_only_20260126_ok.json`, `/tmp/trace_bundle_ca06_short_circuit_20260126_ok.json`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
@@ -124,6 +124,18 @@
 - Canon update: consult guard rules + schema references in `SPECS/CONSULTANT.md`.
 - Evidence: doc/contract updates in repo (paths above).
 - Generic pack scaffold for CI/tests: `truffles-api/app/knowledge/generic/CONSULT_PLAYBOOK.yaml`, `knowledge/generic/faq.md`.
+
+### 2026-01-26 — Consult implementation (domain-agnostic pack flow)
+- PR #378 merged (commit `8455f7dd`): consult pack flow wired with semantic resolver + controller output + guard/clarify/escalate trace/meta; legacy consult path retained when no playbook.
+- Resolver fallback: `resolve_consult_topic_candidates` uses embeddings and falls back to lexical token matching on embed failures (same `consult_topic_resolver` trace).
+- CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21348230551 (core-eval PASS).
+- Live-check CA06 consult (demo_salon, `ops/diagnose.py livecheck-auto --suite ca06-consult --client-slug demo_salon --noise none --remote-jid 77015705555@s.whatsapp.net`):
+  - conversation_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+  - `LC-AUTO-20260126-050146-01-c22b3ac6` → consult_flow consult_reply, `consult_playbook_id=hair_damage`, `consult_selector=semantic`, `llm_used=false`; outbox_id `45d9d9de-af6b-4971-b5c9-f066dab1f822` status SENT
+  - `LC-AUTO-20260126-050146-02-ad2af127` → consult_flow short_circuit (explicit_info) with `consult_playbook_id=nails_care`; decision_meta `fact_source=truth`, `llm_used=false`; outbox_id `5fcde4bc-e91f-4a72-88ae-856eb87b05ab` status SENT
+  - Trace bundles: `/tmp/trace_bundle_ca06_pack_only_20260126_ok.json`, `/tmp/trace_bundle_ca06_short_circuit_20260126_ok.json`.
+- Docs: consult flow map + resolver fallback in `docs/CONSULTANT_CODEMAP.md`, `SPECS/SYSTEM_REFERENCE.md`.
+- Deploy (GHCR main): `PULL_IMAGE=1 ... restart_api.sh` → `/admin/version` version=main git_commit `2665eb68fa000017beb780f3798ff5d38676823d`; `docker exec truffles-api python3 -c "import sys; print(sys.version)"` → 3.11.14.
 
 ### 2026-01-23 — Console↔Telegram P0 contract alignment
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
