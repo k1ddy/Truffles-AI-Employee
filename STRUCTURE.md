@@ -19,6 +19,12 @@
 | `contracts/capabilities/capabilities.v1.jsonschema` | Канон capabilities (channels/providers/features) | Архитектор/Backend |
 | `contracts/consult/consult_playbook.v1.jsonschema` | Канон схемы consult playbooks (domain‑agnostic) | Архитектор/Backend |
 | `contracts/consult/consult_controller_output.v1.jsonschema` | Канон контракта consult LLM‑контроллера | Архитектор/Backend |
+| `contracts/integrations/provider_inbound.v1.jsonschema` | Provider inbound envelope (gateway) | Архитектор/Backend |
+| `contracts/integrations/provider_outbound.v1.jsonschema` | Provider outbound envelope (gateway) | Архитектор/Backend |
+| `contracts/integrations/media_send.v1.jsonschema` | Media send payload (signed URL) | Архитектор/Backend |
+| `contracts/integrations/knowledge_snapshot.v1.jsonschema` | Knowledge snapshot payload (signed) | Архитектор/Backend |
+| `contracts/events/inbox_event.v1.jsonschema` | Inbox durable event (ingest) | Архитектор/Backend |
+| `contracts/events/provider_status.v1.jsonschema` | Provider status callback event | Архитектор/Backend |
 | `contracts/integrations/` | Контракты портов/адаптеров | Архитектор/Backend |
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
 | `.github/workflows/monitor-prod-version.yml` | Cron CI alert: prod `/admin/version` must match main | OPS |
@@ -29,6 +35,7 @@
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
 | `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
+| `truffles-api/migrations/015_add_inbox_events.sql` | Migration: inbox_events (durable inbox store) | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
@@ -89,6 +96,11 @@
 - `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-rbac-matrix.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-onboarding-state-machine.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-provider-gateway-architecture.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-provider-contracts-v1.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbound-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-outbound-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbox-event.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-docs-selection-runbooks.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`

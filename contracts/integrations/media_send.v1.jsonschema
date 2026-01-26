@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/integrations/media_send.v1.jsonschema",
+  "title": "Media Send v1",
+  "type": "object",
+  "required": ["media_id", "tenant_context", "media_type"],
+  "properties": {
+    "media_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tenant_context": {
+      "$ref": "../tenancy/tenant_context.v1.jsonschema"
+    },
+    "media_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_url": {
+      "type": ["string", "null"],
+      "format": "uri"
+    },
+    "signed_url": {
+      "type": ["string", "null"],
+      "format": "uri"
+    },
+    "expires_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": ["string", "null"]
+    },
+    "size_bytes": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "mime_type": {
+      "type": ["string", "null"]
+    },
+    "filename": {
+      "type": ["string", "null"]
+    },
+    "caption": {
+      "type": ["string", "null"]
+    },
+    "metadata": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "extensions": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    }
+  },
+  "anyOf": [
+    {"required": ["source_url"]},
+    {"required": ["signed_url"]}
+  ],
+  "additionalProperties": false
+}

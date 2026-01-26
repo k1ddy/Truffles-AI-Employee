@@ -11,6 +11,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.adapters.chatflow import ChatFlowAdapter
+from app.adapters.provider_gateway import ProviderGatewayAdapter
 from app.logging_config import get_logger, record_outbox_latency, start_span
 from app.models import Conversation, OutboxMessage, User
 from app.ports.messaging import MessageOptions
@@ -59,6 +60,14 @@ def _coerce_outbox_created_at(value: datetime | None) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value
+
+def _is_env_enabled(value: str | None, default: bool = True) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+def _use_provider_gateway_outbound() -> bool:
+    return _is_env_enabled(os.environ.get("PROVIDER_GATEWAY_OUTBOUND_ENABLED"), default=False)
 
 def _is_outbox_event(payload_json: dict | None) -> bool:
     return isinstance(payload_json, dict) and payload_json.get("schema_version") == "outbox.v1"
@@ -799,17 +808,53 @@ async def _process_outbox_rows(
                     )
                     results["failed"] += 1
                     return
-                adapter = ChatFlowAdapter()
-                options = MessageOptions(
-                    instance_id=instance_id,
-                    idempotency_key=idempotency_key,
-                )
+                use_gateway = _use_provider_gateway_outbound()
+                provider_name = payload_json.get("provider") or "chatflow"
+                channel_name = payload_json.get("channel") or "whatsapp"
+                if use_gateway:
+                    adapter = ProviderGatewayAdapter()
+                    options = MessageOptions(
+                        idempotency_key=idempotency_key,
+                        extra={
+                            "outbox_id": outbox_id_str,
+                            "tenant_context": payload_json.get("tenant_context"),
+                            "provider": provider_name,
+                            "channel": channel_name,
+                            "callback_url": os.environ.get("PROVIDER_GATEWAY_STATUS_CALLBACK_URL"),
+                            "metadata": {
+                                "event_type": payload_json.get("event_type"),
+                                "conversation_id": payload_json.get("conversation_id"),
+                                "client_id": payload_json.get("client_id"),
+                                "branch_id": payload_json.get("branch_id"),
+                                "instance_id": instance_id,
+                            },
+                        },
+                    )
+                else:
+                    adapter = ChatFlowAdapter()
+                    options = MessageOptions(
+                        instance_id=instance_id,
+                        idempotency_key=idempotency_key,
+                    )
                 with start_span("outbox.send", context=span_context) as span:
                     result = adapter.send_text(remote_jid, text, options)
                 if span is not None:
                     span.set_attribute("send.ok", result.is_ok())
                 if not result.is_ok():
-                    raise RuntimeError(f"ChatFlow delivery failed: {result.error}")
+                    raise RuntimeError(f"Outbound delivery failed: {result.error}")
+                if use_gateway and outbox_id_str:
+                    sent = result.unwrap()
+                    _merge_outbox_meta(
+                        outbox_id_str,
+                        {
+                            "provider_gateway": {
+                                "provider": provider_name,
+                                "channel": channel_name,
+                                "message_id": sent.message_id,
+                                "response": sent.provider_response,
+                            }
+                        },
+                    )
             else:
                 validated_payload, payload_error = validate_outbox_payload(payload_json)
                 if payload_error:
