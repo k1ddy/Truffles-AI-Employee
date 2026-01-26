@@ -17,6 +17,8 @@
 | `contracts/events/` | Контракты событий (outbox) | Архитектор/Backend |
 | `contracts/tenancy/tenant_context.v1.jsonschema` | Канон tenant_context (company/client/branch) | Архитектор/Backend |
 | `contracts/capabilities/capabilities.v1.jsonschema` | Канон capabilities (channels/providers/features) | Архитектор/Backend |
+| `contracts/consult/consult_playbook.v1.jsonschema` | Канон схемы consult playbooks (domain‑agnostic) | Архитектор/Backend |
+| `contracts/consult/consult_controller_output.v1.jsonschema` | Канон контракта consult LLM‑контроллера | Архитектор/Backend |
 | `contracts/integrations/` | Контракты портов/адаптеров | Архитектор/Backend |
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
 | `.github/workflows/monitor-prod-version.yml` | Cron CI alert: prod `/admin/version` must match main | OPS |
@@ -89,6 +91,8 @@
 - `docs/TASK_PACKAGES/TP-2026-01-25-thanks-typo-smalltalk.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-chaos-sim-resilience.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-prod-deploy-guard.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-dod.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-implementation.md`
 
 ---
 
@@ -119,6 +123,7 @@
 - Решения/GAP: `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml`.
 - Outbox payload contract: `contracts/events/outbox.webhook_payload.v1.jsonschema`.
 - Runtime pack: `truffles-api/app/knowledge/demo_salon/*`; RAG docs: `knowledge/demo_salon/*`.
+- Generic pack scaffold (CI/tests): `truffles-api/app/knowledge/generic/*`; RAG docs: `knowledge/generic/*`.
 - Derived/статусы: `docs/TECH_STATUS.md`, `SUMMARY.md`, `docs/IMPERIUM_CONTEXT.yaml` (не канон).
 
 ---
@@ -165,6 +170,8 @@
 - `docs/runbooks/TRACE_BUNDLE.md` — bundle диагностика (trace/meta/outbox latency).
 - `truffles-api/app/knowledge/<client_slug>/*` — runtime pack (truth/policy/eval).
 - `knowledge/<client_slug>/*` — канон RAG‑контента клиента.
+- `truffles-api/app/knowledge/generic/*` — generic pack scaffold (CI/tests, no niche).
+- `knowledge/generic/*` — generic RAG docs (CI/tests).
 
 **DERIVED (рабочие копии/сводки; не источник истины):**
 - `SUMMARY.md`, `docs/IMPERIUM_CONTEXT.yaml`, `docs/TECH_STATUS.md`.
@@ -251,6 +258,8 @@
 | `truffles-api/migrations/008_add_agent_link_tokens.sql` | linking tokens для Telegram |
 | `truffles-api/app/knowledge/<client_slug>/*` | Truth/policy/eval packs |
 | `knowledge/<client_slug>/*` | Канон RAG‑контента |
+| `truffles-api/app/knowledge/generic/*` | Generic pack scaffold (CI/tests) |
+| `knowledge/generic/*` | Generic RAG docs (CI/tests) |
 
 ---
 

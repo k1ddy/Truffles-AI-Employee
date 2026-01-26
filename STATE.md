@@ -14,11 +14,15 @@
 - DONE: Phase 2A Capabilities model + admin API — PR #343 https://github.com/k1ddy/Truffles-AI-Employee/pull/343; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21315691684.
 - DONE: Phase 2B Provisioning API — PR #345 https://github.com/k1ddy/Truffles-AI-Employee/pull/345; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21317060790; prod migration `013_allow_branches_instance_id_null.sql` applied (ALTER TABLE branches instance_id DROP NOT NULL); smoke: `PATCH /console/v1/admin/branches/{id}` `is_active=true` without `instance_id` → 400 `INVALID_PARAM` ("instance_id required to activate branch"); draft branch id `ceb8b564-cfa9-410f-bc2d-52614166341e` with `instance_id=NULL`, `is_active=false`.
 - DONE: Phase 2 UI Provisioning Wizard — PR #348 https://github.com/k1ddy/Truffles-AI-Employee/pull/348; Evidence: `origin/main` commit `169e58ba` (wizard in `console-web/src/app/settings/page.tsx`) + local UI screenshot `docs/REPORTS/2026-01-25-control-plane-provisioning.png`.
+- DONE: Phase 3 backend Knowledge Studio pipeline (validate/publish/history/rollback + safe-mode) — PR #365 https://github.com/k1ddy/Truffles-AI-Employee/pull/365; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21331694794.
 - DONE: console-e2e-live CI fix (selection gate + storage state) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-e2e-live-ci-fix.md`; PR #362 https://github.com/k1ddy/Truffles-AI-Employee/pull/362; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21329488754; local check `npm --prefix console-web run test:e2e:smoke` (prod base URL).
 - DONE: Console-web deploy for Team route (build fix + prod /team) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-web-deploy-team.md`; evidence below (2026-01-25).
 - DONE: Prod version drift monitor — `.github/workflows/monitor-prod-version.yml` (cron alert if `/admin/version.git_commit` differs from main). Evidence: workflow added in repo.
 - DONE: Console contract unexclude `/knowledge/*` — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`; PR #368 https://github.com/k1ddy/Truffles-AI-Employee/pull/368; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21333020110.
+- DONE: Phase 5 Inbox UX (3-pane + Explain/Trace + Macros) — PR #372 https://github.com/k1ddy/Truffles-AI-Employee/pull/372; Evidence: prod console-web build SHA `9f40b3303c3abaafdf76abe3b39fce3c93f9323f` + build time `2026-01-25T22:15:53Z` (docker exec) + UI confirmation.
 - PLAN: Phase 4 Control Plane (Team + Calendar UI) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`.
+- DONE: Consult DoD (domain-agnostic, pack-first, no dictionaries) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-dod.md`; evidence: `SPECS/CONSULTANT.md`, `contracts/consult/consult_playbook.v1.jsonschema`, `contracts/consult/consult_controller_output.v1.jsonschema`.
+- PLAN: Consult implementation (domain-agnostic, no dictionaries) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-implementation.md`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
@@ -58,8 +62,8 @@
 - DONE: Console E2E seed (stable IDs) через `console_e2e_seed.py` с `E2E_SUBJECT` из JWT. Evidence: output IDs (company/client/branch/agent/handover).
 - DONE: `/console/v1/me` теперь возвращает `selection_required=true`, `clients_count=2` для E2E. Evidence: curl + jq.
 - BLOCKERS: Playwright smoke на prod UI падает из‑за `CLIENT_SELECTION_REQUIRED` (prod console-web не отправляет `X-Client-Id`). Evidence: `npm run test:e2e:smoke` + docker logs `ConsoleAPIError: CLIENT_SELECTION_REQUIRED`.
-- BLOCKER: Console Settings bundle в проде без Provisioning Wizard (JS `/_next/static/chunks/app/settings/page-9b2ca6f4c97af6a3.js` не содержит wizard‑строк; `curl https://console.truffles.kz/settings` → `x-nextjs-cache: HIT`). Evidence: curl+rg 2026‑01‑25.
-- BLOCKER: console-web Docker build fails on TS error in `console-web/src/app/settings/page.tsx:196` (providers union mismatch) → deploy blocked. Evidence: `docker compose ... --build console-web` 2026‑01‑25.
+- DONE: Console Settings bundle now includes Provisioning Wizard in prod (build updated). Evidence: console-web build SHA `9f40b3303c3abaafdf76abe3b39fce3c93f9323f` + build time `2026-01-25T22:15:53Z` (docker exec); UI confirmation 2026-01-26.
+- DONE: console-web Docker build error resolved (Settings TS error) — PR #353 https://github.com/k1ddy/Truffles-AI-Employee/pull/353; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21326322920.
 - DONE: TP-2026-01-25 console build info (Settings header build SHA/time + build args) — PR #350 https://github.com/k1ddy/Truffles-AI-Employee/pull/350; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21325944139.
 - DONE: Console query‑params validation (unknown params + enums + dates + limit) + cursor tolerant + OpenAPI 400/403 + `INVALID_PARAM` error registry. Evidence: CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21270247679; Schemathesis GET-only smoke on prod (seed 68493311863361754745919126795202296800) — 580 passed, warnings for missing test data on `/cases/{case_id}` + `/cases/{case_id}/messages` and schema mismatch (see below).
 - DONE: Schemathesis seeds added for `/cases/{case_id}` + `/cases/{case_id}/messages` (stable IDs in `contracts/console_api/schemathesis.toml`), warnings resolved.
@@ -93,6 +97,30 @@
 - Evidence: `curl -I https://console.truffles.kz/team` → HTTP 200; `curl -s https://console.truffles.kz/team | rg -o "/_next/static/chunks/app/team/page-[^\"']+\\.js"` → `/_next/static/chunks/app/team/page-c4b8e410cc9b434a.js`.
 - Evidence: Settings build info updated to `4e025cc9409e7a73878973d25edb296079ac14f5` (`2026-01-25T09:14:29Z`) via `curl -s https://console.truffles.kz/_next/static/chunks/app/settings/page-a6bf5343e8242773.js | rg "Build:"`.
 - Evidence: local UI screenshot `docs/REPORTS/2026-01-25-control-plane-provisioning.png` (Settings → Provisioning Wizard visible).
+
+### 2026-01-26 — Control Plane Go/No-Go verification (prod)
+- CI: main green — https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21340292769.
+- Evidence: Settings bundle `/_next/static/chunks/app/settings/page-127e279dd8bb3891.js` содержит `Provisioning Wizard` + build info `9f40b3303c3abaafdf76abe3b39fce3c93f9323f` / `2026-01-25T22:15:53Z`.
+- RBAC evidence: создан Manager (branch-scoped) и Support с OIDC связкой через admin API; creds сохранены в `/home/zhan/secrets/console-rbac-accounts-2026-01-26.json`.
+- RBAC check (manager): `GET /console/v1/me` → `role=manager`, `branch_id=b7f75692-951e-421a-aae6-f5db97394799`, `selection_required=false`, `branch_selection_required=false` (headers `/tmp/manager_me.*`); `POST /console/v1/admin/companies` → 403 ACCESS_DENIED (`/tmp/manager_admin_companies.*`).
+- RBAC check (support): `GET /console/v1/me` → `role=support` (`/tmp/support_me.*`); `POST /console/v1/admin/companies` → 403 ACCESS_DENIED (`/tmp/support_admin_companies.*`).
+- Knowledge safety (branch `2e9f5a9d-50a2-4b07-8e54-da2cac2ac751`): `POST /console/v1/knowledge/validate` → `valid=true` (`/tmp/knowledge_validate_ok.*`); `POST /console/v1/knowledge/publish` → 200 `version_id=f5a658c2-582a-41cd-aab1-5bce06452828` (`/tmp/knowledge_publish_ok.*`); `POST /console/v1/knowledge/rollback` → 200 `version_id=cfb77889-8631-403e-9763-cf2702b0d7ec` (`/tmp/knowledge_rollback.*`); history shows published+archived (`/tmp/knowledge_history3.*`); `GET /console/v1/knowledge/current` returns published version (`/tmp/knowledge_current2.*`).
+- Knowledge invalid publish: `POST /console/v1/knowledge/publish` with `client_pack: {}` → 400 `KNOWLEDGE_INVALID` (`/tmp/knowledge_publish.*`).
+
+### 2026-01-25 — LLM inbound trace (demo_salon)
+- Live-check: `ops/diagnose.py send-and-explain` + `trace-bundle` (demo_salon), marker `LC-LLM-FLOW-20260125-221234`.
+- Evidence: trace bundle `/tmp/trace_bundle_llm_flow.json`; `message_id` `3EB0A592AF3A16118E2548`, `message_uuid` `7bca8319-bb60-4d86-966a-67d1f42c1437`, `conversation_id` `10049e90-5805-425f-841b-c0c9419c9c30`, `trace_id` `61153e870b649ef07128a3264e757343`.
+- decision_meta: `action=reply`, `source=truth_gate`, `intent=objection_price`, `llm_used=false`, `rag_reason=overridden_by_gate`.
+- LLM timing (routing): `controller_llm_ms=2805.17`, `multi_intent_llm_ms=1511.85`.
+- Outbox: `outbox_id` `39f2759c-f445-427f-9800-ed8a6dd65083`, `status=SENT`, `outbox.latency_ms.inbound_to_outbox_ms=10541.99`.
+- Doc: detailed E2E path + code refs in `docs/CONSULTANT_CODEMAP.md`.
+
+### 2026-01-26 — Consult DoD schema (domain-agnostic)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-dod.md`.
+- Added contracts: `contracts/consult/consult_playbook.v1.jsonschema`, `contracts/consult/consult_controller_output.v1.jsonschema`.
+- Canon update: consult guard rules + schema references in `SPECS/CONSULTANT.md`.
+- Evidence: doc/contract updates in repo (paths above).
+- Generic pack scaffold for CI/tests: `truffles-api/app/knowledge/generic/CONSULT_PLAYBOOK.yaml`, `knowledge/generic/faq.md`.
 
 ### 2026-01-23 — Console↔Telegram P0 contract alignment
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
