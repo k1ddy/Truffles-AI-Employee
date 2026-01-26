@@ -136,6 +136,39 @@ behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → p
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
 ```
 
+### Target (DEC-016) — Provider Gateway + Knowledge Snapshot (channel-agnostic)
+```
+Channel (WhatsApp / Instagram DM / Telegram / future)
+    ↓
+Provider Gateway (signature verify, normalize payload, rate limit, channel mapping)
+    ↓
+Inbox Service (durable event + idempotency + dedupe, raw_inbound stored)
+    ↓
+Decision Core (stateless) → Knowledge Gateway (signed tenant snapshot, version pinned)
+    ↓
+Outbox Service (transactional outbox, retries, DLQ, status mapping)
+    ↓
+Provider Gateway (outbound send, provider idempotency key)
+    ↓
+Provider status callbacks → Outbox status update
+```
+
+**Boundaries (must-hold):**
+- Core never reads raw KB; only `knowledge_snapshot` for tenant/version.
+- Provider-specific logic lives only in Provider Gateway/Adapters.
+- tenant_context required for every inbound/outbound/event.
+
+**Contracts (v1, required):**
+- `provider_inbound.v1` (provider, channel, provider_message_id, tenant_context, sender, receiver, message, media, timestamp, signature, raw_ref).
+- `provider_outbound.v1` (outbox_id, provider, channel, tenant_context, to, content, media, idempotency_key, callback_url).
+- `provider_status.v1` (provider_message_id, outbox_id, status, error_code, timestamp).
+- `knowledge_snapshot.v1` (tenant_context, version_id, schema_version, sha256, expires_at, packs: truth/policy/consult/services).
+- `inbox_event.v1` (event_id, tenant_context, provider_message_id, received_at, raw_ref).
+
+**Provider swap rules:**
+- Adapter contract tests + mock provider are mandatory (Fitness P1 #11).
+- Canary by tenant only (DEC-004) + rollback by toggling adapter mapping.
+
 #### Outbox payload contract + action gate
 - **Контракт payload:** валидируем перед enqueue (см. `contracts/events/outbox.webhook_payload.v1.jsonschema` и `truffles-api/app/schemas/outbox_payload.py`).  
 - **Поведение при ошибке:** `decision_trace.stage=outbox_payload_guard`, `decision_meta.action=error`, outbox не ставится в очередь.  

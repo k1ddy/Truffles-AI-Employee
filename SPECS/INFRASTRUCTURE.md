@@ -29,6 +29,31 @@ _Исторический снимок. Актуальный статус и evi
 
 ---
 
+# ЧАСТЬ 0: ЦЕЛЕВЫЕ ИНВАРИАНТЫ (DEC-016)
+
+## Надёжность inbox/outbox (must-have)
+- **Inbox durability:** каждое inbound-сообщение пишется в durable storage (event log) до принятия решения.
+- **Idempotency:** inbound dedupe по `(provider_message_id, tenant_context)`, outbound dedupe по `(outbox_id, provider_id)`.
+- **Retry + DLQ:** outbox retries с backoff, после лимита — DLQ + алерт.
+- **Auto-heal:** stuck PROCESSING возвращается в очередь (P0 фитнес).
+- **Status mapping:** provider status callbacks нормализуются в единый статус (queued/sent/failed/seen).
+
+## Изоляция данных (tenant-safety)
+- **tenant_context везде:** любой read/write требует `company_id/client_id/branch_id`.
+- **KB isolation:** отдельные коллекции Qdrant по tenant или жёсткие фильтры + per-tenant cache keys.
+- **Knowledge snapshot:** ядро читает только подписанный snapshot (hash+version pinning).
+
+## Провайдеры и масштабирование
+- **Provider Gateway:** единственный ingress/egress наружу; канал-адаптеры без логики домена.
+- **Swap safety:** adapter contract tests + mock provider обязательны.
+- **Horizontal scale:** inbox/outbox workers масштабируются по consumer groups.
+
+## Наблюдаемость и алерты
+- Метрики: inbox lag, outbox retry rate, DLQ size, provider error rate, p90/p99 latency.
+- Логи/trace: correlation ключи `message_id/outbox_id/trace_id` обязательны.
+- Алерты: превышение SLA, рост DLQ, рост ошибок провайдера.
+
+# ЧАСТЬ 1: ТЕКУЩЕЕ СОСТОЯНИЕ (DERIVED)
 # ЧАСТЬ 1: ТЕКУЩЕЕ СОСТОЯНИЕ (DERIVED)
 
 _Раздел‑снимок. Канон требований — ниже; статус и evidence — в `STATE.md`._
