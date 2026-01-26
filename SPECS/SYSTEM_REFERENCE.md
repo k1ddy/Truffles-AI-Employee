@@ -902,6 +902,7 @@ python3 ops/diagnose.py chaos-sim \
 - Fallback: если allowlist < 4, `pool-a` запускает все suites последовательно, `pool-b/c/d` пропускаются.
 - Артефакты: `livecheck-artifacts-<group>/*` + `livecheck-evidence-<group>.md`.
 - **Livecheck Only (workflow):** `.github/workflows/livecheck-only.yml` — ручной rerun без полного CI; делает `deploy-verify` и гоняет suites (параллельно).
+- **CA06/CA07:** `livecheck-auto` не отправляет ACK, чтобы не затирать `consult_flow`/`out_of_domain` trace.
 **Evidence artifact:** `livecheck-evidence.md` (генерируется из jsonl + gate через `ops/diagnose.py emit-evidence`).
 **CA‑03 (ca03-info):** truth‑first info_bundle → `decision_meta.fact_source=truth`, `info_sections`+`fact_intents`, `info_combined` (address+hours), `llm_used=false`, `source` ∈ {`truth_gate`,`class_router`}, trace `stage` ∈ {`truth_gate`,`info_class`}.
 **CA‑04 (ca04-service):** service matcher → `decision_meta.action=reply`, `intent` ∈ {`service_match`,`service_not_found`}, `fact_source=service_matcher`, `fact_intents` contains `service_match`/`service_not_found`, `source=service_matcher`, `llm_used=false`, trace `stage=service_matcher`, `decision` = intent, `fact_source=service_matcher`.
@@ -1050,6 +1051,9 @@ chatflow_service → WhatsApp
 | 16 | **Info flow** (`info._handle_info_flow`) | info_class intents | Reply / truth‑gate | `stage=info_class`, `stage=truth_gate` |
 | 17 | **Booking flow** (`booking._handle_booking_flow`) | booking_signal/booking_active | Reply/interrupt | `stage=booking`, `stage=booking_interrupt`, `stage=truth_gate` |
 | 18 | **LLM primary + fallback** (`response._handle_llm_primary`) | LLM path enabled | ai_response/clarify/escalate | `stage=llm_guard`, `stage=ai_response`, `stage=llm_degradation` |
+
+**Consult topic resolver**
+- `truffles-api/app/services/knowledge_service.py` uses embeddings for topic candidates; if embeddings fail, it falls back to lexical token matching (same `consult_topic_resolver` trace stage).
 
 ### Determinism Inventory (лексиконы + правила)
 **Rules‑as‑data (packs):**

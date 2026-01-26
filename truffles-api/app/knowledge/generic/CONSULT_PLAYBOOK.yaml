@@ -1,0 +1,49 @@
+version: v1
+topics:
+  - id: general_guidance
+    title: General guidance
+    summary: Safe, non-domain-specific guidance based on user goals and constraints.
+    allowed_advice:
+      - Ask clarifying questions before giving specific steps.
+      - Suggest simple, low-risk steps that do not require domain facts.
+      - Encourage the user to consult a specialist if unsure.
+    required_questions:
+      - What outcome are you trying to achieve?
+    optional_questions:
+      - Are there any constraints or preferences?
+    disallowed_claims:
+      - Guaranteed outcomes or promises.
+      - Claims about services, prices, or policies.
+    fact_requirements: []
+    risk_tags:
+      - none
+    clarify_limit: 2
+    escalate_when:
+      - unknown_topic
+      - clarify_limit_exceeded
+    next_step: If you want, I can connect you with a specialist.
+
+  - id: safety_check
+    title: Safety check
+    summary: Route potentially risky topics to a human specialist.
+    allowed_advice:
+      - Recommend contacting a specialist for safety-critical questions.
+      - Avoid giving procedural or medical guidance.
+    required_questions: []
+    optional_questions:
+      - Is anyone at risk or affected?
+    disallowed_claims:
+      - Medical, legal, or payment advice.
+    fact_requirements: []
+    risk_tags:
+      - safety
+    clarify_limit: 1
+    escalate_when:
+      - risk_high
+      - needs_human
+      - clarify_limit_exceeded
+    next_step: I will connect you with a specialist to help.
+
+default_policy:
+  clarify_limit: 2
+  escalate_on_low_confidence: true

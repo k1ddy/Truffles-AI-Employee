@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger, record_llm_time, record_rag_time, start_span
 from app.models import Client, Message, Prompt
+from app.schemas.consult import ConsultControllerOutput, ConsultTopic, validate_consult_controller_output
 from app.services.alert_service import alert_error
 from app.services.knowledge_service import format_knowledge_context, search_knowledge
 from app.services.llm import OpenAIProvider
@@ -216,6 +217,10 @@ RAG_REWRITE_TIMEOUT_SECONDS = float(os.environ.get("RAG_REWRITE_TIMEOUT_SECONDS"
 RAG_REWRITE_MAX_TOKENS = int(os.environ.get("RAG_REWRITE_MAX_TOKENS", "80"))
 MULTI_INTENT_TIMEOUT_SECONDS = float(os.environ.get("MULTI_INTENT_TIMEOUT_SECONDS", "1.2"))
 MULTI_INTENT_MAX_TOKENS = int(os.environ.get("MULTI_INTENT_MAX_TOKENS", "120"))
+CONSULT_CONTROLLER_TIMEOUT_SECONDS = float(
+    os.environ.get("CONSULT_CONTROLLER_TIMEOUT_SECONDS", "1.8")
+)
+CONSULT_CONTROLLER_MAX_TOKENS = int(os.environ.get("CONSULT_CONTROLLER_MAX_TOKENS", "220"))
 ASR_PRIMARY_PROVIDER = os.environ.get("ASR_PRIMARY_PROVIDER", "elevenlabs")
 ASR_FALLBACK_PROVIDER = os.environ.get("ASR_FALLBACK_PROVIDER", "openai_whisper")
 ASR_TIMEOUT_SECONDS = float(os.environ.get("ASR_TIMEOUT_SECONDS", "6"))
@@ -1548,6 +1553,153 @@ def detect_multi_intent(
         "consult_topic": consult_topic,
         "consult_question": consult_question,
     }
+
+
+def _build_consult_topic_payload(
+    topics: list[ConsultTopic],
+    candidates: list[dict] | None,
+) -> list[dict]:
+    topic_map = {topic.id: topic for topic in topics}
+    ordered_ids: list[str] = []
+    if isinstance(candidates, list):
+        for item in candidates:
+            topic_id = item.get("topic_id") if isinstance(item, dict) else None
+            if isinstance(topic_id, str) and topic_id in topic_map and topic_id not in ordered_ids:
+                ordered_ids.append(topic_id)
+    if not ordered_ids:
+        ordered_ids = [topic.id for topic in topics]
+    payload: list[dict] = []
+    for topic_id in ordered_ids:
+        topic = topic_map.get(topic_id)
+        if not topic:
+            continue
+        entry = {
+            "id": topic.id,
+            "title": topic.title,
+            "summary": topic.summary,
+            "risk_tags": topic.risk_tags,
+        }
+        if isinstance(candidates, list):
+            for item in candidates:
+                if isinstance(item, dict) and item.get("topic_id") == topic_id:
+                    score = item.get("score")
+                    if isinstance(score, (int, float)):
+                        entry["score"] = round(float(score), 4)
+                    break
+        payload.append(entry)
+    return payload
+
+
+def generate_consult_controller_output(
+    *,
+    message_text: str,
+    topics: list[ConsultTopic],
+    candidates: list[dict] | None = None,
+    consult_question: str | None = None,
+    timing_context: dict | None = None,
+) -> Result[ConsultControllerOutput]:
+    if not message_text or not topics:
+        return Result.failure("consult_controller_missing_input", code="invalid_input")
+    if not OPENAI_API_KEY:
+        return Result.failure("consult_controller_disabled", code="llm_disabled")
+    if not _should_attempt_llm(
+        timing_context,
+        timeout_seconds=CONSULT_CONTROLLER_TIMEOUT_SECONDS,
+        stage="consult_controller_llm",
+    ):
+        return Result.failure("consult_controller_skipped", code="llm_skip")
+
+    topic_payload = _build_consult_topic_payload(topics, candidates)
+    if not topic_payload:
+        return Result.failure("consult_controller_empty_topics", code="topics_empty")
+
+    system_prompt = (
+        "Ты выбираешь тему консультации для ответа по playbook. "
+        "Верни ТОЛЬКО JSON строго вида "
+        '{"intent":"consult|info|booking|handoff|out_of_domain","topic_id":"...",'
+        '"confidence":0-1,"risk_class":"low|medium|high|blocked","actions":["answer|clarify|handoff"],'
+        '"slots":{...},"notes":"..."}.\n'
+        "Выбери topic_id ТОЛЬКО из списка кандидатов ниже. "
+        "Если ни один не подходит — topic_id=\"unknown\", intent=\"out_of_domain\", "
+        "actions=[\"handoff\"], confidence<=0.4.\n"
+        "Если сообщение рискованное (медицинка/юридическое/оплата/безопасность) — "
+        "risk_class=high или blocked и actions содержит handoff.\n"
+        "Если уверен в теме — actions включает answer. Если нужен уточняющий вопрос — clarify.\n"
+        "slots используй только для кратких значений из сообщения клиента."
+    )
+    user_payload = {
+        "message": message_text,
+        "consult_question": consult_question or "",
+        "candidates": topic_payload,
+    }
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=True)},
+    ]
+
+    llm = get_llm_provider()
+    llm_start = time.monotonic()
+    try:
+        response = llm.generate(
+            messages,
+            temperature=0.0,
+            max_tokens=CONSULT_CONTROLLER_MAX_TOKENS,
+            model=FAST_MODEL,
+            timeout_seconds=CONSULT_CONTROLLER_TIMEOUT_SECONDS,
+        )
+    except httpx.TimeoutException as exc:
+        _log_timing(
+            "consult_controller_llm_ms",
+            (time.monotonic() - llm_start) * 1000,
+            timing_context=timing_context,
+            extra={
+                "model_name": FAST_MODEL,
+                "model_tier": "fast",
+                "timeout": True,
+                "timeout_seconds": CONSULT_CONTROLLER_TIMEOUT_SECONDS,
+            },
+        )
+        logger.warning(f"Consult controller timeout after {CONSULT_CONTROLLER_TIMEOUT_SECONDS}s: {exc}")
+        return Result.failure("consult_controller_timeout", code="timeout")
+    except Exception as exc:
+        _log_timing(
+            "consult_controller_llm_ms",
+            (time.monotonic() - llm_start) * 1000,
+            timing_context=timing_context,
+            extra={"model_name": FAST_MODEL, "model_tier": "fast", "timeout": False, "error": str(exc)},
+        )
+        logger.warning(f"Consult controller failed: {exc}")
+        return Result.failure("consult_controller_failed", code="llm_failed")
+
+    _log_timing(
+        "consult_controller_llm_ms",
+        (time.monotonic() - llm_start) * 1000,
+        timing_context=timing_context,
+        extra={"model_name": FAST_MODEL, "model_tier": "fast", "timeout": False},
+    )
+
+    content = (response.content or "").strip()
+    if not content:
+        return Result.failure("consult_controller_empty", code="empty_response")
+    payload = None
+    try:
+        payload = json.loads(content)
+    except Exception:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                payload = json.loads(match.group(0))
+            except Exception:
+                payload = None
+    if not isinstance(payload, dict):
+        return Result.failure("consult_controller_invalid_json", code="invalid_json")
+
+    model, error = validate_consult_controller_output(payload)
+    if error:
+        return Result.failure(error, code="invalid_schema")
+    if not isinstance(model, ConsultControllerOutput):
+        return Result.failure("consult_controller_invalid_schema", code="invalid_schema")
+    return Result.success(model)
 
 
 def is_acknowledgement_message(text: str) -> bool:

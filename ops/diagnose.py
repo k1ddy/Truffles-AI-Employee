@@ -6933,8 +6933,8 @@ def _run_livecheck_auto(args):
             ack_message_id = None
             ack_text = None
             ack_status = None
-            # Skip ACK for CA07 to avoid overwriting the OOD trace with fast_intent.
-            if args.suite != "ca07-ood":
+            # Skip ACK for CA06/CA07 to avoid overwriting consult/OOD traces.
+            if args.suite not in {"ca06-consult", "ca07-ood"}:
                 ack_marker = f"LC:ACK:{case['case_id']}:{timestamp}:{idx:02d}"
                 ack_message_id = f"LC-ACK-{timestamp}-{idx:02d}-{uuid.uuid4().hex[:8]}"
                 ack_text = args.ack_text or "ок"

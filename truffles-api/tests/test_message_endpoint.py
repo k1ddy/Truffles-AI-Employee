@@ -15,6 +15,7 @@ from app.database import get_db
 from app.main import app
 from app.models import Branch, Client, ClientSettings, Conversation, User
 from app.routers import webhook as webhook_router
+from app.schemas.consult import ConsultControllerOutput
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookResponse
 from app.services import escalation_service
@@ -851,7 +852,7 @@ def test_truth_gate_sets_decision_meta():
     assert truth_updates["llm_timeout"] is False
 
 
-def test_consult_short_circuit_writes_decision_meta():
+def test_consult_pack_writes_decision_meta():
     saved_message = Mock()
     saved_message.message_metadata = {}
 
@@ -974,13 +975,16 @@ def test_consult_short_circuit_writes_decision_meta():
     assert meta.get("branch_id") is None
 
     trace = conversation.context.get("decision_trace", [])
+    if settings.branch_resolution_mode != "disabled":
+        assert any(
+            entry.get("stage") in {"branch_selection", "branch_routing"}
+            for entry in trace
+            if isinstance(entry, dict)
+        )
     assert any(
-        entry.get("stage") == "branch_routing"
-        for entry in trace
-        if isinstance(entry, dict)
-    )
-    assert any(
-        entry.get("stage") == "consult_flow" and entry.get("decision") == "short_circuit"
+        entry.get("stage") == "consult_flow"
+        and entry.get("decision") == "consult_reply"
+        and entry.get("reason") in {"service_availability", "consult_pack"}
         for entry in trace
         if isinstance(entry, dict)
     )
@@ -1100,6 +1104,170 @@ def test_consult_precedence_over_booking_flow():
     assert meta.get("consult_intent") is True
     assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
     mock_llm.assert_not_called()
+
+
+def test_consult_pack_flow_records_trace_and_meta():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="generic", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    def _query(model):
+        query = Mock()
+        query.filter.return_value.first.return_value = None
+        query.filter.return_value.all.return_value = []
+        model_name = getattr(model, "__name__", None)
+        if model is Branch:
+            query.filter.return_value.first.return_value = None
+            return query
+        if model is Branch.phone:
+            query.filter.return_value.all.return_value = []
+            return query
+        if model_name == "Client":
+            query.filter.return_value.first.return_value = client
+        elif model_name == "ClientSettings":
+            query.filter.return_value.first.return_value = settings
+        elif model_name == "Conversation":
+            query.filter.return_value.first.return_value = conversation
+        elif model_name == "User":
+            query.filter.return_value.first.return_value = user
+        return query
+
+    db = Mock()
+    db.query.side_effect = _query
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="generic",
+        body=WebhookBody(
+            message="Подскажите, что можно сделать для улучшения ухода?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-consult-pack-1",
+                timestamp=1234567893,
+            ),
+        ),
+    )
+
+    intent_decomp = {
+        "multi_intent": False,
+        "primary_intent": "other",
+        "secondary_intents": [],
+        "intents": ["other"],
+        "service_query": "",
+        "consult_intent": True,
+        "consult_topic": "",
+        "consult_question": "что можно сделать для улучшения ухода",
+    }
+    topic_candidates = [
+        {
+            "topic_id": "general_guidance",
+            "title": "General guidance",
+            "summary": "Safe guidance",
+            "score": 0.91,
+        }
+    ]
+    controller_output = ConsultControllerOutput(
+        intent="consult",
+        topic_id="general_guidance",
+        confidence=0.92,
+        risk_class="low",
+        actions=["answer"],
+        slots={"goal": "care"},
+        notes="",
+    )
+    controller_result = Result.success(controller_output)
+
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.services.knowledge_service.resolve_consult_topic_candidates",
+        return_value=topic_candidates,
+    ), patch(
+        "app.services.ai_service.generate_consult_controller_output",
+        return_value=controller_result,
+    ) as mock_controller, patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.generate_bot_response"
+    ) as mock_llm:
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response
+    mock_controller.assert_called_once()
+    mock_llm.assert_not_called()
+
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("consult_intent") is True
+    assert meta.get("consult_topic_id") == "general_guidance"
+    assert meta.get("consult_playbook_id") == "general_guidance"
+    assert meta.get("consult_source") == "pack"
+    assert meta.get("consult_selector") == "controller"
+    assert meta.get("consult_confidence") == pytest.approx(0.92)
+    assert meta.get("consult_risk_class") == "low"
+    assert meta.get("consult_controller_used") is True
+    assert meta.get("consult_controller_error") is None
+
+    trace = conversation.context.get("decision_trace", [])
+    assert any(
+        entry.get("stage") == "consult_topic_resolver"
+        for entry in trace
+        if isinstance(entry, dict)
+    )
+    assert any(
+        entry.get("stage") == "consult_controller"
+        and entry.get("decision") == "ok"
+        and entry.get("topic_id") == "general_guidance"
+        for entry in trace
+        if isinstance(entry, dict)
+    )
+    assert any(
+        entry.get("stage") == "consult_flow"
+        and entry.get("decision") == "consult_reply"
+        and entry.get("reason") == "consult_pack"
+        for entry in trace
+        if isinstance(entry, dict)
+    )
 
 
 def test_booking_info_interrupt_appends_prompt():
