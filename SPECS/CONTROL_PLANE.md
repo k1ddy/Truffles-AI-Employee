@@ -35,6 +35,13 @@
 
 **Принцип:** UI и навигация режутся по роли, чтобы не было шума.
 
+**Runtime roles (impl):**
+- В коде реально используются: `owner`, `admin`, `manager`, `support`
+  (см. `truffles-api/app/services/console_auth.py`).
+- Platform Admin/Support — концепт уровня доступа; фактически доступ задаётся
+  membership‑scope + роль owner/admin/support.
+- Specialist/Viewer пока не реализованы в RBAC.
+
 ---
 
 ## 3) Tenant‑контекст и UX выбора (обязательный канон)
@@ -46,6 +53,10 @@
 - При `company_selection_required` / `selection_required` / `branch_selection_required` — блокирующее состояние.
 - При нескольких компаниях `X-Company-Id` обязателен (fail‑closed).
 - Ошибки понятны: “Выберите компанию/клиента/филиал”, “Нет доступа”.
+
+**Implementation note (2026‑01‑27):**
+- UI показывает Company как `company_id` (без имени и без выбора), selection gate есть только для client/branch.
+- Детальный план Company→Client→Branch selection закреплён в `docs/CONSOLE_GUIDE.md`.
 
 ---
 
@@ -60,7 +71,7 @@
 
 ---
 
-## 5) Онбординг и Provisioning (Platform Admin)
+## 5) Онбординг и Provisioning (owner/admin с platform‑scope)
 
 **Provisioning flow (Web‑first)** как стандарт:
 1) Create Branch (Draft): name, slug, timezone (default ok), остальное optional (`is_active=false` без `instance_id`).

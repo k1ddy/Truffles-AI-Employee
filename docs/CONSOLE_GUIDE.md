@@ -50,9 +50,14 @@ Console uses `agent_identities` to map OIDC `sub` → `agents` → `client_id`.
 **Access scope is enforced here:**
 `truffles-api/app/services/console_auth.py` → `get_console_context()`
 
-**Note (current implementation):**
-Org-level selection поддерживает Company → Client → Branch (UI + API). При нескольких компаниях требуется
-`X-Company-Id` и включается `company_selection_required`.
+**Current implementation (code‑backed):**
+- Context Bar рендерится в `console-web/src/components/ConsoleShell.tsx` и показывает Company/Client/Branch
+  (company name при наличии, иначе краткий id).
+- Gate основан на `/console/v1/me` (`company_selection_required`/`selection_required`/`branch_selection_required`);
+  выбор хранится в `console:company_id` / `console:client_id` / `console:branch_id` и триггерит refetch.
+- Если `branch_selection_required=false`, UI позволяет “Все филиалы” (пустой `branch_id`) в селекте.
+- Заголовки `X-Company-Id` / `X-Client-Id` / `X-Branch-Id` прокидываются в API через proxy.
+- `/console/v1/me` формируется в `truffles-api/app/routers/console.py`, контекст — в `console_auth.py`.
 
 Rules:
 - `sub` must exist in `agent_identities` (channel=`oidc`).
@@ -96,6 +101,17 @@ Rules:
 - Flow: Draft → Validate → Preview Diff → Publish → History → Rollback.
 - Publish gate: ошибки блокируют publish; warnings требуют явного подтверждения.
 - Fail‑closed: без tenant‑контекста действия недоступны.
+
+**Plan: Company → Client → Branch selection (UI + API)**
+1) **API data:** расширить `/console/v1/me` — добавить `companies[]` (id/name) и `company_name` для client.
+   Обновить `truffles-api/app/routers/console.py`, `truffles-api/app/schemas/console.py`,
+   `contracts/console_api/openapi.v1.yaml`, `console-web/src/types/api.generated.ts`.
+2) **UI filter:** добавить `console:company_id` и селект Company в `ConsoleShell`.
+   Фильтровать `clients[]` по выбранной компании и показывать Company name в Context Bar.
+3) **Fail‑closed:** добавить `X-Company-Id` (или `X-Org-Id`) в API и
+   `COMPANY_SELECTION_REQUIRED` в `console_auth.py`, прокинуть заголовок в `console-web/src/lib/api-client.ts`.
+4) **E2E/Docs:** обновить storageState для multi‑company, добавить e2e сценарий,
+   обновить `docs/CONSOLE_GUIDE.md`/`SPECS/CONTROL_PLANE.md`.
 
 **Common symptom:** “Only 1–2 cases shown / no slots.”  
 Usually means the admin is mapped to the wrong `client_id` or the wrong client was selected.
@@ -238,6 +254,29 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - `client_settings.telegram_bot_token` задан и webhook установлен.
 - Агент связал Telegram через `/start <token>`.
 - `POST /console/v1/cases/{id}/take|resolve|return` идёт через `state_service`.
+
+**Role runbooks (short)**
+
+**Global admin (platform):**
+- Доступ: owner/admin + membership на уровне компании (см. `agent_memberships`), без отдельной platform‑role.
+- Создать Company/Client/Branch/Agent в Provisioning Wizard или через `/console/v1/admin/*`.
+- Проверить обязательные поля: `instance_id`, `telegram_chat_id`, `knowledge_tag`, `working_hours`, `booking_settings`.
+- Связать OIDC `sub` → `agent_identities`; для manager обязателен `branch_id`.
+- Go/No‑Go: `/console/v1/knowledge/validate|publish`, `/console/v1/telegram/verify`, /cases take/resolve.
+
+**Owner (client):**
+- Управляет знаниями, командой, интеграциями, включением capabilities.
+- Workflow: Settings → Provisioning Wizard, Knowledge → Validate/Publish, Team → Users (link Telegram).
+- Проверки: Telegram Verify/Test (client/branch), branch selection gate, Go/No‑Go.
+
+**Admin (client):**
+- Почти как owner, но без коммерческих/плановых настроек.
+- Поддерживает branches/agents/knowledge, следит за Telegram linking и операционными настройками.
+
+**Manager (branch):**
+- Branch‑scoped, нужен `branch_id`; доступ: Cases + Calendar, Knowledge read‑only.
+- Обязательно выбрать филиал (или получить `branch_selection_required`).
+- Рабочий цикл: взять заявку → ответить клиенту → resolve/return.
 
 **Where to change code:**
 - API endpoint + mapping: `truffles-api/app/routers/console.py`
