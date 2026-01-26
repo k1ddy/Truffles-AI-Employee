@@ -8,6 +8,7 @@ from app.models.client import Client
 from app.models.client_capability import ClientCapability
 from app.models.client_settings import ClientSettings
 from app.models.company import Company
+from app.models.console_confirmation import ConsoleConfirmation
 from app.models.console_idempotency import ConsoleIdempotencyKey
 from app.models.conversation import Conversation
 from app.models.handover import Handover
@@ -36,6 +37,7 @@ __all__ = [
     "Handover",
     "InboxEvent",
     "ClientSettings",
+    "ConsoleConfirmation",
     "ConsoleIdempotencyKey",
     "Prompt",
     "OutboxMessage",

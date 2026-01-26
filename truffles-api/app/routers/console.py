@@ -56,6 +56,8 @@ from app.schemas.console import (
     ConsoleCompany,
     ConsoleCompanyCreateRequest,
     ConsoleCompanyCreateResponse,
+    ConsoleConfirmationCreateRequest,
+    ConsoleConfirmationResponse,
     ConsoleErrorResponse,
     ConsoleHealthResponse,
     ConsoleKnowledgeCurrentResponse,
@@ -98,6 +100,7 @@ from app.services.agent_link_service import build_telegram_deep_link, create_age
 from app.services.audit_service import record_audit_event
 from app.services.capabilities_service import merge_capabilities, payload_to_dict
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
+from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
 from app.services.console_idempotency import (
     finalize_idempotency,
@@ -2922,6 +2925,41 @@ async def advance_onboarding(
     return _serialize_onboarding_status(branch, status)
 
 
+@router.post(
+    "/confirmations",
+    response_model=ConsoleConfirmationResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def create_console_confirmation(
+    body: ConsoleConfirmationCreateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleConfirmationResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "settings",
+        "write",
+        message="Only owner/admin can request confirmations",
+    )
+    confirmation = create_confirmation(
+        db,
+        context,
+        action=body.action,
+        target_type=body.target_type,
+        target_id=body.target_id,
+        reason=body.reason,
+    )
+    db.commit()
+    return ConsoleConfirmationResponse(
+        confirmation_id=confirmation.id,
+        action=confirmation.action,
+        target_type=confirmation.target_type,
+        target_id=confirmation.target_id,
+        expires_at=confirmation.expires_at.isoformat(),
+    )
+
+
 @router.get(
     "/knowledge/current",
     response_model=ConsoleKnowledgeCurrentResponse,
@@ -3140,7 +3178,12 @@ async def list_knowledge_history(
 @router.post(
     "/knowledge/rollback",
     response_model=ConsoleKnowledgeRollbackResponse,
-    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+    responses={
+        400: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+        409: {"model": ConsoleErrorResponse},
+    },
 )
 async def rollback_knowledge(
     body: ConsoleKnowledgeRollbackRequest,
@@ -3155,6 +3198,15 @@ async def rollback_knowledge(
         message="Only owner/admin can manage knowledge",
     )
     branch = _resolve_branch_from_context(context)
+
+    confirmation = require_confirmation(
+        db,
+        context,
+        confirmation_id=body.confirmation_id,
+        action="knowledge_rollback",
+        target_type="knowledge_version",
+        target_id=body.version_id,
+    )
 
     version = (
         db.query(KnowledgeVersion)
@@ -3189,6 +3241,15 @@ async def rollback_knowledge(
         branch.knowledge_safe_mode = False
         branch.knowledge_safe_mode_reason = None
         branch.knowledge_safe_mode_at = now
+        mark_confirmation_used(
+            db,
+            context,
+            confirmation,
+            action="knowledge_rollback",
+            target_type="knowledge_version",
+            target_id=body.version_id,
+            outcome="success",
+        )
         record_audit_event(
             db,
             actor=context.agent,
@@ -3209,6 +3270,15 @@ async def rollback_knowledge(
         branch.knowledge_safe_mode = True
         branch.knowledge_safe_mode_reason = str(exc)
         branch.knowledge_safe_mode_at = now
+        mark_confirmation_used(
+            db,
+            context,
+            confirmation,
+            action="knowledge_rollback",
+            target_type="knowledge_version",
+            target_id=body.version_id,
+            outcome="sync_failed",
+        )
         record_audit_event(
             db,
             actor=context.agent,
@@ -3431,7 +3501,7 @@ async def create_branch(
 @router.patch(
     "/admin/branches/{branch_id}",
     response_model=ConsoleBranch,
-    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}, 409: {"model": ConsoleErrorResponse}},
 )
 async def update_branch(
     branch_id: UUID,
@@ -3450,6 +3520,9 @@ async def update_branch(
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+
+    confirmation = None
+    previous_instance_id = branch.instance_id
 
     fields_set = body.model_fields_set
     if "instance_id" in fields_set:
@@ -3538,6 +3611,22 @@ async def update_branch(
     if is_active and not instance_id:
         raise ConsoleAPIError(400, "INVALID_PARAM", "instance_id required to activate branch")
 
+    requires_confirmation = False
+    if "is_active" in fields_set and is_active is False and branch.is_active:
+        requires_confirmation = True
+    if "instance_id" in fields_set and instance_id is None and previous_instance_id is not None:
+        requires_confirmation = True
+
+    if requires_confirmation:
+        confirmation = require_confirmation(
+            db,
+            context,
+            confirmation_id=body.confirmation_id,
+            action="branch_deactivate",
+            target_type="branch",
+            target_id=branch.id,
+        )
+
     if is_active != branch.is_active:
         branch.is_active = is_active
         updated_fields.append("is_active")
@@ -3554,6 +3643,15 @@ async def update_branch(
             client_id=branch.client_id,
             branch_id=branch.id,
         )
+        if confirmation:
+            mark_confirmation_used(
+                db,
+                context,
+                confirmation,
+                action="branch_deactivate",
+                target_type="branch",
+                target_id=branch.id,
+            )
         db.commit()
 
     return _serialize_branch(branch)

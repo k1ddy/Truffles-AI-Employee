@@ -60,6 +60,7 @@ export const ErrorCodes = {
     NOT_ASSIGNED: "NOT_ASSIGNED",
     CASE_NOT_ACTIVE: "CASE_NOT_ACTIVE",
     ONBOARDING_STEP_REQUIRED: "ONBOARDING_STEP_REQUIRED",
+    CONFIRMATION_REQUIRED: "CONFIRMATION_REQUIRED",
     VALIDATION_ERROR: "VALIDATION_ERROR",
     MESSAGE_TOO_LONG: "MESSAGE_TOO_LONG",
     OUTBOX_FAILED: "OUTBOX_FAILED",
@@ -231,6 +232,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
         retryable: false,
     },
     ONBOARDING_STEP_REQUIRED: {
+        http_status: 409,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    CONFIRMATION_REQUIRED: {
         http_status: 409,
         ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
         retryable: false,
@@ -594,6 +600,12 @@ export const onboardingApi = {
         apiClient.post<components["schemas"]["OnboardingStatusResponse"]>("/onboarding/advance", data),
 };
 
+/** Confirmation endpoints */
+export const confirmationsApi = {
+    create: (data: components["schemas"]["ConfirmationCreateRequest"]) =>
+        apiClient.post<components["schemas"]["ConfirmationResponse"]>("/confirmations", data),
+};
+
 /** Audit endpoints */
 export const auditApi = {
     list: (params?: ListAuditParams) =>
@@ -610,8 +622,11 @@ export const knowledgeApi = {
         apiClient.post<KnowledgePublishResponse>("/knowledge/publish", { draft_text: draftText }),
     history: () =>
         apiClient.get<KnowledgeHistoryResponse>("/knowledge/history"),
-    rollback: (versionId: string) =>
-        apiClient.post<KnowledgeRollbackResponse>("/knowledge/rollback", { version_id: versionId }),
+    rollback: (versionId: string, confirmationId?: string) =>
+        apiClient.post<KnowledgeRollbackResponse>("/knowledge/rollback", {
+            version_id: versionId,
+            confirmation_id: confirmationId,
+        }),
 };
 
 // Export default client

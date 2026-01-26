@@ -109,6 +109,11 @@
   - `POST /console/v1/onboarding/advance`
 - Ошибка порядка: `ONBOARDING_STEP_REQUIRED` (409), с `required_step/current_step`.
 
+**Destructive safeguards (console):**
+- Любые разрушительные действия требуют подтверждения (reason + TTL).
+- API: `POST /console/v1/confirmations` → `confirmation_id`.
+- Примеры: knowledge rollback (`action=knowledge_rollback`), branch deactivate / instance disconnect (`action=branch_deactivate`).
+
 ---
 
 ## 6) Capabilities (модули клиента)
