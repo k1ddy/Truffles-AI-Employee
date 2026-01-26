@@ -44,6 +44,26 @@ async function selectClientIfNeeded(page: import('@playwright/test').Page) {
     const contextSelector = page.getByTestId('context-client-select');
     if (await gateSelector.isVisible().catch(() => false)) {
         await selectOptionIfNeeded(gateSelector);
+        const confirm = page.getByTestId('client-select-confirm');
+        if (await confirm.isVisible().catch(() => false)) {
+            await confirm.click();
+        }
+        return;
+    }
+    if (await contextSelector.isVisible().catch(() => false)) {
+        await selectOptionIfNeeded(contextSelector);
+    }
+}
+
+async function selectCompanyIfNeeded(page: import('@playwright/test').Page) {
+    const gateSelector = page.getByTestId('company-select');
+    const contextSelector = page.getByTestId('context-company-select');
+    if (await gateSelector.isVisible().catch(() => false)) {
+        await selectOptionIfNeeded(gateSelector);
+        const confirm = page.getByTestId('company-select-confirm');
+        if (await confirm.isVisible().catch(() => false)) {
+            await confirm.click();
+        }
         return;
     }
     if (await contextSelector.isVisible().catch(() => false)) {
@@ -56,6 +76,10 @@ async function selectBranchIfNeeded(page: import('@playwright/test').Page) {
     const contextSelector = page.getByTestId('context-branch-select');
     if (await gateSelector.isVisible().catch(() => false)) {
         await selectOptionIfNeeded(gateSelector);
+        const confirm = page.getByTestId('branch-select-confirm');
+        if (await confirm.isVisible().catch(() => false)) {
+            await confirm.click();
+        }
         return;
     }
     if (await contextSelector.isVisible().catch(() => false)) {
@@ -72,6 +96,7 @@ test('setup auth @smoke', async ({ page }) => {
     await page.click('#kc-login');
     await page.waitForURL(consoleHostPattern);
     await expect(page.getByRole('button', { name: /выйти/i })).toBeVisible({ timeout: 10000 });
+    await selectCompanyIfNeeded(page);
     await selectClientIfNeeded(page);
     await selectBranchIfNeeded(page);
     await expect(page.getByTestId('cases-title')).toBeVisible({ timeout: 10000 });

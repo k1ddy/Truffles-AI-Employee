@@ -7,6 +7,7 @@ from app.services.console_auth import (
     _build_access_map,
     _resolve_branch_selection,
     _resolve_client_selection,
+    _resolve_company_selection,
     _resolve_role,
 )
 from app.services.console_errors import ConsoleAPIError
@@ -145,6 +146,48 @@ def test_resolve_client_selection_auto_for_single_client():
     )
 
     assert selected_client_id == client.id
+    assert selection_required is False
+
+
+def test_resolve_company_selection_requires_company_when_multiple():
+    company_a = uuid4()
+    company_b = uuid4()
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        _resolve_company_selection(
+            {company_a, company_b},
+            selected_company_id=None,
+            require_selection=True,
+        )
+
+    assert exc_info.value.code == "COMPANY_SELECTION_REQUIRED"
+
+
+def test_resolve_company_selection_rejects_mismatched_company():
+    allowed_company = uuid4()
+    selected_company_id = uuid4()
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        _resolve_company_selection(
+            {allowed_company},
+            selected_company_id=selected_company_id,
+            require_selection=True,
+        )
+
+    assert exc_info.value.code == "TENANT_MISMATCH"
+    assert exc_info.value.status_code == 403
+
+
+def test_resolve_company_selection_auto_for_single_company():
+    company_id = uuid4()
+
+    selected_company_id, selection_required = _resolve_company_selection(
+        {company_id},
+        selected_company_id=None,
+        require_selection=True,
+    )
+
+    assert selected_company_id == company_id
     assert selection_required is False
 
 

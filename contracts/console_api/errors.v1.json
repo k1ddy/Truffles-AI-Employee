@@ -47,6 +47,17 @@
             },
             "retryable": false
         },
+        "COMPANY_SELECTION_REQUIRED": {
+            "http_status": 400,
+            "message_template": "Company selection required",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Prompt to select a company before loading data"
+            },
+            "retryable": false
+        },
         "BRANCH_SELECTION_REQUIRED": {
             "http_status": 400,
             "message_template": "Branch selection required",

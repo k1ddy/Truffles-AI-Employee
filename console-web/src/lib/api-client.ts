@@ -10,12 +10,21 @@ import type { components, operations } from "@/types/api.generated";
 
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
 const BRANCH_ID_STORAGE_KEY = "console:branch_id";
+const COMPANY_ID_STORAGE_KEY = "console:company_id";
 
 function getSelectedClientId(): string | undefined {
     if (typeof window === "undefined") {
         return undefined;
     }
     const stored = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    return stored || undefined;
+}
+
+function getSelectedCompanyId(): string | undefined {
+    if (typeof window === "undefined") {
+        return undefined;
+    }
+    const stored = window.localStorage.getItem(COMPANY_ID_STORAGE_KEY);
     return stored || undefined;
 }
 
@@ -41,6 +50,7 @@ export const ErrorCodes = {
     TOKEN_EXPIRED: "TOKEN_EXPIRED",
     ACCESS_DENIED: "ACCESS_DENIED",
     CLIENT_SELECTION_REQUIRED: "CLIENT_SELECTION_REQUIRED",
+    COMPANY_SELECTION_REQUIRED: "COMPANY_SELECTION_REQUIRED",
     BRANCH_SELECTION_REQUIRED: "BRANCH_SELECTION_REQUIRED",
     TENANT_MISMATCH: "TENANT_MISMATCH",
     BRANCH_ACCESS_DENIED: "BRANCH_ACCESS_DENIED",
@@ -112,6 +122,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
         retryable: false,
     },
     CLIENT_SELECTION_REQUIRED: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    COMPANY_SELECTION_REQUIRED: {
         http_status: 400,
         ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
         retryable: false,
@@ -318,6 +333,10 @@ export function createApiClient(): AxiosInstance {
     client.interceptors.request.use((config) => {
         const headers = config.headers ?? {};
         config.headers = headers;
+        const selectedCompanyId = getSelectedCompanyId();
+        if (selectedCompanyId && !headers["X-Company-Id"]) {
+            headers["X-Company-Id"] = selectedCompanyId;
+        }
         const selectedClientId = getSelectedClientId();
         if (selectedClientId && !headers["X-Client-Id"]) {
             headers["X-Client-Id"] = selectedClientId;

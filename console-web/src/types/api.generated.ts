@@ -758,6 +758,7 @@ export interface components {
             name?: string;
             /** Format: uuid */
             company_id?: string | null;
+            company_name?: string | null;
         };
         ClientCreateRequest: {
             slug: string;
@@ -828,8 +829,12 @@ export interface components {
             client?: components["schemas"]["Client"];
             branches?: components["schemas"]["Branch"][];
             clients?: components["schemas"]["Client"][];
+            companies?: components["schemas"]["Company"][];
+            company_selection_required?: boolean;
             selection_required?: boolean;
             branch_selection_required?: boolean;
+            /** Format: uuid */
+            selected_company_id?: string | null;
             /** Format: uuid */
             selected_branch_id?: string | null;
         };
