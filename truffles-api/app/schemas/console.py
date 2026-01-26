@@ -121,6 +121,7 @@ class ConsoleBranchUpdateRequest(BaseModel):
     working_hours: Optional[dict] = None
     booking_settings: Optional[dict] = None
     is_active: Optional[bool] = None
+    confirmation_id: Optional[UUID] = None
 
 
 OnboardingStepId = Literal[
@@ -153,6 +154,25 @@ class ConsoleOnboardingStatusResponse(BaseModel):
 class ConsoleOnboardingAdvanceRequest(BaseModel):
     branch_id: UUID
     step_id: OnboardingStepId
+
+
+ConfirmationAction = Literal["knowledge_rollback", "branch_deactivate"]
+ConfirmationTargetType = Literal["knowledge_version", "branch"]
+
+
+class ConsoleConfirmationCreateRequest(BaseModel):
+    action: ConfirmationAction
+    target_type: ConfirmationTargetType
+    target_id: UUID
+    reason: str
+
+
+class ConsoleConfirmationResponse(BaseModel):
+    confirmation_id: UUID
+    action: ConfirmationAction
+    target_type: ConfirmationTargetType
+    target_id: UUID
+    expires_at: str
 
 
 class ConsoleAgentCreateRequest(BaseModel):
@@ -462,6 +482,7 @@ class ConsoleKnowledgeHistoryResponse(BaseModel):
 
 class ConsoleKnowledgeRollbackRequest(BaseModel):
     version_id: UUID
+    confirmation_id: Optional[UUID] = None
 
 
 class ConsoleKnowledgeRollbackResponse(BaseModel):

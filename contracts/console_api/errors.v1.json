@@ -36,6 +36,17 @@
             },
             "retryable": false
         },
+        "CONFIRMATION_REQUIRED": {
+            "http_status": 409,
+            "message_template": "Confirmation required",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Prompt user to confirm destructive action"
+            },
+            "retryable": false
+        },
         "CLIENT_SELECTION_REQUIRED": {
             "http_status": 400,
             "message_template": "Client selection required",

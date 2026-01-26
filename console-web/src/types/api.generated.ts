@@ -477,6 +477,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/confirmations": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request confirmation for destructive actions */
+        post: operations["createConfirmation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge/current": {
         parameters: {
             query?: never;
@@ -851,6 +873,8 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             is_active?: boolean | null;
+            /** Format: uuid */
+            confirmation_id?: string | null;
         };
         BranchCreateResponse: {
             branch?: components["schemas"]["Branch"];
@@ -893,6 +917,27 @@ export interface components {
             branch_id: string;
             /** @enum {string} */
             step_id: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
+        };
+        /** @enum {string} */
+        ConfirmationAction: "knowledge_rollback" | "branch_deactivate";
+        /** @enum {string} */
+        ConfirmationTargetType: "knowledge_version" | "branch";
+        ConfirmationCreateRequest: {
+            action: components["schemas"]["ConfirmationAction"];
+            target_type: components["schemas"]["ConfirmationTargetType"];
+            /** Format: uuid */
+            target_id: string;
+            reason: string;
+        };
+        ConfirmationResponse: {
+            /** Format: uuid */
+            confirmation_id: string;
+            action: components["schemas"]["ConfirmationAction"];
+            target_type: components["schemas"]["ConfirmationTargetType"];
+            /** Format: uuid */
+            target_id: string;
+            /** Format: date-time */
+            expires_at: string;
         };
         MeResponse: {
             agent?: components["schemas"]["Agent"];
@@ -1140,6 +1185,8 @@ export interface components {
         KnowledgeRollbackRequest: {
             /** Format: uuid */
             version_id: string;
+            /** Format: uuid */
+            confirmation_id?: string | null;
         };
         KnowledgeRollbackResponse: {
             success?: boolean;
@@ -1517,6 +1564,27 @@ export interface components {
                  *         "message": "Complete previous onboarding step",
                  *         "details": {
                  *           "required_step": "integrations"
+                 *         },
+                 *         "trace_id": "abc123"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description Confirmation required for destructive action */
+        ConfirmationRequired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "CONFIRMATION_REQUIRED",
+                 *         "message": "Confirmation required",
+                 *         "details": {
+                 *           "action": "knowledge_rollback"
                  *         },
                  *         "trace_id": "abc123"
                  *       }
@@ -2059,6 +2127,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["ConfirmationRequired"];
         };
     };
     listOutbox: {
@@ -2248,6 +2317,39 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["OnboardingStepRequired"];
+        };
+    };
+    createConfirmation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Confirmation created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getKnowledgeCurrent: {
@@ -2556,6 +2658,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["ConfirmationRequired"];
             422: components["responses"]["ValidationError"];
         };
     };

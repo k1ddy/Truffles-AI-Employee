@@ -35,7 +35,10 @@
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
 | `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
+| `truffles-api/app/services/console_confirmations.py` | Confirmation safeguards for destructive Console actions | Backend |
+| `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |
 | `truffles-api/migrations/015_add_inbox_events.sql` | Migration: inbox_events (durable inbox store) | Backend/OPS |
+| `truffles-api/migrations/016_add_console_confirmations.sql` | Migration: console_confirmations (destructive safeguards) | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
@@ -95,6 +98,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-phase5-inbox-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-rbac-matrix.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-onboarding-state-machine.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-destructive-safeguards.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-provider-gateway-architecture.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-provider-contracts-v1.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbound-shadow.md`

@@ -94,6 +94,8 @@ Rules:
   сохранение в `/console/v1/admin/capabilities` с `schema_version` и audit.
 - API provisioning: `POST /console/v1/admin/companies|clients|branches|agents`,
   `PATCH /console/v1/admin/branches/{branch_id}`.
+- Destructive change guard: branch deactivation / instance_id removal требуют подтверждения
+  (`POST /console/v1/confirmations` с action=`branch_deactivate` → `confirmation_id`).
 - API capabilities: `GET/PATCH /console/v1/admin/capabilities` (client через `X-Client-Id`, branch через `branch_id`).
 - Schema: `contracts/capabilities/capabilities.v1.jsonschema`.
 - Fail‑closed: без явного tenant‑контекста действия недоступны.
@@ -160,6 +162,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
   `POST /console/v1/knowledge/rollback`
 - RBAC: owner/admin write; manager read-only; support no access.
 - Требует branch selection (`X-Branch-Id`).
+- Rollback требует подтверждения: `POST /console/v1/confirmations` (action=`knowledge_rollback`) → `confirmation_id`.
 - Publish генерирует pack YAML и запускает Qdrant sync; при ошибке включается knowledge safe‑mode (handoff).
 
 **Team (Команда)**

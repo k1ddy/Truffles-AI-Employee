@@ -5,7 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import axios from "axios";
 import toast from "react-hot-toast";
-import { authApi, canAccessConsole, knowledgeApi, type KnowledgeHistoryItem } from "@/lib/api-client";
+import { authApi, canAccessConsole, confirmationsApi, knowledgeApi, type KnowledgeHistoryItem } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import AccessDenied from "@/components/AccessDenied";
 
@@ -77,6 +77,8 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const [lastValidatedDraft, setLastValidatedDraft] = useState<string | null>(null);
     const [lastPublishAt, setLastPublishAt] = useState<string | null>(null);
     const [lastRollbackAt, setLastRollbackAt] = useState<string | null>(null);
+    const [showRollbackConfirm, setShowRollbackConfirm] = useState(false);
+    const [rollbackReason, setRollbackReason] = useState("");
     const [validation, setValidation] = useState<ValidationState>({
         ran: false,
         errors: [],
@@ -97,17 +99,13 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const canRead = canAccessConsole(role, "knowledge", "read");
     const canEdit = canAccessConsole(role, "knowledge", "write");
 
-    if (!canRead) {
-        return <AccessDenied message="Эта роль не имеет доступа к знаниям." />;
-    }
-
     const currentQuery = useQuery({
         queryKey: ["knowledge-current"],
         queryFn: async () => {
             const response = await knowledgeApi.getCurrent();
             return response.data;
         },
-        enabled: !!session && !apiUnavailable,
+        enabled: !!session && !apiUnavailable && canRead,
         retry: false,
     });
 
@@ -117,7 +115,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             const response = await knowledgeApi.history();
             return response.data;
         },
-        enabled: !!session && !apiUnavailable,
+        enabled: !!session && !apiUnavailable && canRead,
         retry: false,
     });
 
@@ -218,8 +216,15 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     });
 
     const rollbackMutation = useMutation({
-        mutationFn: async () => {
-            const response = await knowledgeApi.rollback(selectedVersionId);
+        mutationFn: async (reason: string) => {
+            const confirmation = await confirmationsApi.create({
+                action: "knowledge_rollback",
+                target_type: "knowledge_version",
+                target_id: selectedVersionId,
+                reason,
+            });
+            const confirmationId = confirmation.data.confirmation_id;
+            const response = await knowledgeApi.rollback(selectedVersionId, confirmationId);
             return response.data;
         },
         onSuccess: () => {
@@ -227,6 +232,8 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             toast.success("Версия восстановлена");
             currentQuery.refetch();
             historyQuery.refetch();
+            setShowRollbackConfirm(false);
+            setRollbackReason("");
         },
         onError: (error) => {
             if (isApiUnavailable(error)) {
@@ -247,6 +254,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     };
 
     const currentStep = KNOWLEDGE_STEPS[stepIndex];
+
+    if (!canRead) {
+        return <AccessDenied message="Эта роль не имеет доступа к знаниям." />;
+    }
 
     return (
         <div className="space-y-6" data-testid="knowledge-studio">
@@ -544,7 +555,13 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             <button
                                 type="button"
                                 className="btn-primary"
-                                onClick={() => rollbackMutation.mutate()}
+                                onClick={() => {
+                                    if (!selectedVersionId) {
+                                        toast.error("Выберите версию для rollback");
+                                        return;
+                                    }
+                                    setShowRollbackConfirm(true);
+                                }}
                                 disabled={!canEdit || apiUnavailable || !selectedVersionId || rollbackMutation.isPending}
                             >
                                 {rollbackMutation.isPending ? "Откат..." : "Выполнить rollback"}
@@ -575,6 +592,56 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                     </div>
                 </div>
             </div>
+
+            {showRollbackConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="card-surface w-full max-w-lg space-y-4 p-6">
+                        <div>
+                            <h3 className="text-lg font-semibold">Подтвердите rollback</h3>
+                            <p className="text-sm text-muted-foreground">
+                                Версия: {selectedVersionId || "—"}. Откат изменит активные знания и требует причины.
+                            </p>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium">Причина</label>
+                            <textarea
+                                className="min-h-[90px] w-full rounded-lg border border-border/60 bg-background p-3 text-sm"
+                                value={rollbackReason}
+                                onChange={(event) => setRollbackReason(event.target.value)}
+                                placeholder="Например: ошибка в опубликованном pack, откат до стабильной версии"
+                            />
+                        </div>
+                        <div className="flex flex-wrap justify-end gap-2">
+                            <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={() => {
+                                    setShowRollbackConfirm(false);
+                                    setRollbackReason("");
+                                }}
+                                disabled={rollbackMutation.isPending}
+                            >
+                                Отмена
+                            </button>
+                            <button
+                                type="button"
+                                className="btn-primary"
+                                onClick={() => {
+                                    const reason = rollbackReason.trim();
+                                    if (!reason) {
+                                        toast.error("Укажите причину");
+                                        return;
+                                    }
+                                    rollbackMutation.mutate(reason);
+                                }}
+                                disabled={rollbackMutation.isPending}
+                            >
+                                {rollbackMutation.isPending ? "Подтверждение..." : "Подтвердить rollback"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
