@@ -25,6 +25,7 @@
 - DONE: Control Plane docs refresh (tenancy code-backed notes + selection plan + role runbooks) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-docs-selection-runbooks.md`. Evidence: doc updates in repo.
 - PLAN: Phase 4 Control Plane (Team + Calendar UI) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`.
 - PLAN: Provider Gateway + Knowledge Gateway architecture (DEC-016) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-provider-gateway-architecture.md`.
+- PLAN: Provider Gateway contracts v1 — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-provider-contracts-v1.md`.
 - DONE: Consult DoD (domain-agnostic, pack-first, no dictionaries) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-dod.md`; evidence: `SPECS/CONSULTANT.md`, `contracts/consult/consult_playbook.v1.jsonschema`, `contracts/consult/consult_controller_output.v1.jsonschema`.
 - DONE: Consult implementation (domain-agnostic, pack-first, no dictionaries) — PR #378 https://github.com/k1ddy/Truffles-AI-Employee/pull/378; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21348230551; live-check CA06 consult bundles `/tmp/trace_bundle_ca06_pack_only_20260126_ok.json`, `/tmp/trace_bundle_ca06_short_circuit_20260126_ok.json`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).

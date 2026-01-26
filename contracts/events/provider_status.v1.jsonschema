@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/events/provider_status.v1.jsonschema",
+  "title": "Provider Status v1",
+  "type": "object",
+  "required": [
+    "provider",
+    "channel",
+    "provider_message_id",
+    "tenant_context",
+    "status",
+    "status_at"
+  ],
+  "properties": {
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "channel": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider_message_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "outbox_id": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "tenant_context": {
+      "$ref": "../tenancy/tenant_context.v1.jsonschema"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["queued", "sent", "delivered", "read", "failed", "rejected"]
+    },
+    "status_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "error_code": {
+      "type": ["string", "null"]
+    },
+    "error_message": {
+      "type": ["string", "null"]
+    },
+    "raw_ref": {
+      "type": ["string", "null"]
+    },
+    "extensions": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
