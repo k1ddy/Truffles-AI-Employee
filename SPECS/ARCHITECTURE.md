@@ -286,6 +286,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Цель: **LLM даёт смысл**, но commit решения проходит через deterministic validators.
 - Выход LLM (IntentContract): `intent`, `slots`, `language`, `emotion`, `confidence`, `risk_signals`.
 - Booking slot extract: LLM выделяет `service/master/time/name` в JSON; при низкой уверенности → `booking_confirm`.
+- `slot_extract` вызывается только при активном booking‑signal (expected_reply_type/current_goal=booking или LLM intent/slots указывают на запись); Hard‑LAW/pending/opt‑out блокируют slot_extract.
 - Semantic resolver подтверждает/опровергает; расхождения фиксируются в trace/meta (proposed vs committed).
 - Факты извлекаются **только** через tools/packs; LLM не создаёт факты.
 - Response Guard обязателен: текст = ack + facts + next_step, иначе fallback.
@@ -308,6 +309,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 
 ### Slot extraction + confirmation (P0)
 - Stages: `slot_extract` (LLM JSON), `slot_validate` (детерминированно), `booking_confirm` (подтверждение слотов).
+- Запуск `slot_extract` — только при активном booking‑signal; в остальных случаях слоты не извлекаем.
 - Slot-lock: активный `expected_reply_type` сохраняется при перебивках; смена только на заполнение слота/отмену/`pending`.
 - decision_trace: `stage=slot_extract|slot_validate|booking_confirm` с `decision` и `slot_summary`.
 - decision_meta: `slot_source`, `slot_confidence`, `slot_confirmation_required`, `slot_summary`.

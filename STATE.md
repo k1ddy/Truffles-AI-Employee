@@ -14,15 +14,26 @@
 - DONE: Phase 2A Capabilities model + admin API — PR #343 https://github.com/k1ddy/Truffles-AI-Employee/pull/343; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21315691684.
 - DONE: Phase 2B Provisioning API — PR #345 https://github.com/k1ddy/Truffles-AI-Employee/pull/345; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21317060790; prod migration `013_allow_branches_instance_id_null.sql` applied (ALTER TABLE branches instance_id DROP NOT NULL); smoke: `PATCH /console/v1/admin/branches/{id}` `is_active=true` without `instance_id` → 400 `INVALID_PARAM` ("instance_id required to activate branch"); draft branch id `ceb8b564-cfa9-410f-bc2d-52614166341e` with `instance_id=NULL`, `is_active=false`.
 - DONE: Phase 2 UI Provisioning Wizard — PR #348 https://github.com/k1ddy/Truffles-AI-Employee/pull/348; Evidence: `origin/main` commit `169e58ba` (wizard in `console-web/src/app/settings/page.tsx`) + local UI screenshot `docs/REPORTS/2026-01-25-control-plane-provisioning.png`.
+- DONE: Company → Client → Branch selection (UI + API) — PR #376 https://github.com/k1ddy/Truffles-AI-Employee/pull/376; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21347221780.
+- DONE: Control Plane RBAC matrix + enforcement — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-rbac-matrix.md`; PR #383 https://github.com/k1ddy/Truffles-AI-Employee/pull/383; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21350326905.
+- PLAN: TP‑B Onboarding state machine (server‑side order enforcement + `/onboarding/status` + `/onboarding/advance` + wizard gating). Local: `pytest -q truffles-api/tests/test_console_onboarding_state.py` → 4 passed; `npm --prefix console-web run lint` → FAIL (pre‑existing `console-web/src/app/knowledge/page.tsx` hooks order). Evidence pending CI.
 - DONE: Phase 3 backend Knowledge Studio pipeline (validate/publish/history/rollback + safe-mode) — PR #365 https://github.com/k1ddy/Truffles-AI-Employee/pull/365; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21331694794.
 - DONE: console-e2e-live CI fix (selection gate + storage state) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-e2e-live-ci-fix.md`; PR #362 https://github.com/k1ddy/Truffles-AI-Employee/pull/362; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21329488754; local check `npm --prefix console-web run test:e2e:smoke` (prod base URL).
 - DONE: Console-web deploy for Team route (build fix + prod /team) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-web-deploy-team.md`; evidence below (2026-01-25).
 - DONE: Prod version drift monitor — `.github/workflows/monitor-prod-version.yml` (cron alert if `/admin/version.git_commit` differs from main). Evidence: workflow added in repo.
 - DONE: Console contract unexclude `/knowledge/*` — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`; PR #368 https://github.com/k1ddy/Truffles-AI-Employee/pull/368; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21333020110.
 - DONE: Phase 5 Inbox UX (3-pane + Explain/Trace + Macros) — PR #372 https://github.com/k1ddy/Truffles-AI-Employee/pull/372; Evidence: prod console-web build SHA `9f40b3303c3abaafdf76abe3b39fce3c93f9323f` + build time `2026-01-25T22:15:53Z` (docker exec) + UI confirmation.
+- DONE: Control Plane docs refresh (tenancy code-backed notes + selection plan + role runbooks) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-docs-selection-runbooks.md`. Evidence: doc updates in repo.
 - PLAN: Phase 4 Control Plane (Team + Calendar UI) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`.
+- PLAN: Provider Gateway + Knowledge Gateway architecture (DEC-016) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-provider-gateway-architecture.md`.
+- PLAN: Provider Gateway contracts v1 — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-provider-contracts-v1.md`.
+- DONE: Provider Gateway inbound (shadow endpoint + adapter) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbound-shadow.md`; PR #387 https://github.com/k1ddy/Truffles-AI-Employee/pull/387; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21352725432.
+- DONE: Provider Gateway outbound + status (shadow) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-outbound-shadow.md`; PR #388 https://github.com/k1ddy/Truffles-AI-Employee/pull/388; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21353906345.
+- DONE: Provider Gateway inbox event (shadow durable inbox) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbox-event.md`; PR #390 https://github.com/k1ddy/Truffles-AI-Employee/pull/390; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21354490093.
+- DONE: Knowledge Snapshot Gateway (shadow) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`; PR #391 https://github.com/k1ddy/Truffles-AI-Employee/pull/391; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21355208597.
+- DONE: Knowledge Snapshot consumer (shadow) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`; PR #392 https://github.com/k1ddy/Truffles-AI-Employee/pull/392; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21356194957.
 - DONE: Consult DoD (domain-agnostic, pack-first, no dictionaries) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-dod.md`; evidence: `SPECS/CONSULTANT.md`, `contracts/consult/consult_playbook.v1.jsonschema`, `contracts/consult/consult_controller_output.v1.jsonschema`.
-- PLAN: Consult implementation (domain-agnostic, no dictionaries) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-implementation.md`.
+- DONE: Consult implementation (domain-agnostic, pack-first, no dictionaries) — PR #378 https://github.com/k1ddy/Truffles-AI-Employee/pull/378; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21348230551; live-check CA06 consult bundles `/tmp/trace_bundle_ca06_pack_only_20260126_ok.json`, `/tmp/trace_bundle_ca06_short_circuit_20260126_ok.json`.
 - DONE: Webhook refactor checkpoint — модульный пакет `truffles-api/app/routers/webhook/` (PR #92‑#107 merged).
 - DONE: Low-signal guard → off-topic reply (PR #108 merged; E744/E745 in core).
 - DONE: Small talk ответы → коротко + мягкий редирект (greeting/thanks/ack).
@@ -106,6 +117,7 @@
 - RBAC check (support): `GET /console/v1/me` → `role=support` (`/tmp/support_me.*`); `POST /console/v1/admin/companies` → 403 ACCESS_DENIED (`/tmp/support_admin_companies.*`).
 - Knowledge safety (branch `2e9f5a9d-50a2-4b07-8e54-da2cac2ac751`): `POST /console/v1/knowledge/validate` → `valid=true` (`/tmp/knowledge_validate_ok.*`); `POST /console/v1/knowledge/publish` → 200 `version_id=f5a658c2-582a-41cd-aab1-5bce06452828` (`/tmp/knowledge_publish_ok.*`); `POST /console/v1/knowledge/rollback` → 200 `version_id=cfb77889-8631-403e-9763-cf2702b0d7ec` (`/tmp/knowledge_rollback.*`); history shows published+archived (`/tmp/knowledge_history3.*`); `GET /console/v1/knowledge/current` returns published version (`/tmp/knowledge_current2.*`).
 - Knowledge invalid publish: `POST /console/v1/knowledge/publish` with `client_pack: {}` → 400 `KNOWLEDGE_INVALID` (`/tmp/knowledge_publish.*`).
+- Live-check (WA, allowlist): `ops/diagnose.py livecheck-auto --suite ca01-core` on `demo_salon`, remote_jid `77785890765@s.whatsapp.net` (allowlist from `truffles-api` env). Output: conversation_id `ea6406d3-1459-4a2d-8097-b62ee53a21bb`; message_ids `LC-AUTO-20260126-030246-01-dd14dc81`, `LC-AUTO-20260126-030246-02-34b09954`, `LC-AUTO-20260126-030246-03-d0ae7f13`, `LC-AUTO-20260126-030246-04-baacd582`; ack ids `LC-ACK-20260126-030246-01-e778b3c4`, `LC-ACK-20260126-030246-02-639898b6`, `LC-ACK-20260126-030246-03-fea0d06b`, `LC-ACK-20260126-030246-04-250d24da`; decision_meta action=escalate, policy_gate=hard_law, telegram=sent (stdout).
 
 ### 2026-01-25 — LLM inbound trace (demo_salon)
 - Live-check: `ops/diagnose.py send-and-explain` + `trace-bundle` (demo_salon), marker `LC-LLM-FLOW-20260125-221234`.
@@ -122,6 +134,18 @@
 - Evidence: doc/contract updates in repo (paths above).
 - Generic pack scaffold for CI/tests: `truffles-api/app/knowledge/generic/CONSULT_PLAYBOOK.yaml`, `knowledge/generic/faq.md`.
 
+### 2026-01-26 — Consult implementation (domain-agnostic pack flow)
+- PR #378 merged (commit `8455f7dd`): consult pack flow wired with semantic resolver + controller output + guard/clarify/escalate trace/meta; legacy consult path retained when no playbook.
+- Resolver fallback: `resolve_consult_topic_candidates` uses embeddings and falls back to lexical token matching on embed failures (same `consult_topic_resolver` trace).
+- CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21348230551 (core-eval PASS).
+- Live-check CA06 consult (demo_salon, `ops/diagnose.py livecheck-auto --suite ca06-consult --client-slug demo_salon --noise none --remote-jid 77015705555@s.whatsapp.net`):
+  - conversation_id `b8c559d1-f8cd-4173-ae70-0a9683833e48`
+  - `LC-AUTO-20260126-050146-01-c22b3ac6` → consult_flow consult_reply, `consult_playbook_id=hair_damage`, `consult_selector=semantic`, `llm_used=false`; outbox_id `45d9d9de-af6b-4971-b5c9-f066dab1f822` status SENT
+  - `LC-AUTO-20260126-050146-02-ad2af127` → consult_flow short_circuit (explicit_info) with `consult_playbook_id=nails_care`; decision_meta `fact_source=truth`, `llm_used=false`; outbox_id `5fcde4bc-e91f-4a72-88ae-856eb87b05ab` status SENT
+  - Trace bundles: `/tmp/trace_bundle_ca06_pack_only_20260126_ok.json`, `/tmp/trace_bundle_ca06_short_circuit_20260126_ok.json`.
+- Docs: consult flow map + resolver fallback in `docs/CONSULTANT_CODEMAP.md`, `SPECS/SYSTEM_REFERENCE.md`.
+- Deploy (GHCR main): `PULL_IMAGE=1 ... restart_api.sh` → `/admin/version` version=main git_commit `8455f7dda50bddafd6574ca4ab6cbb030890905e`; `docker exec truffles-api python3 -c "import sys; print(sys.version)"` → 3.11.14.
+- Docs: `STRUCTURE.md` updated with consult contracts + generic pack scaffolds.
 ### 2026-01-23 — Console↔Telegram P0 contract alignment
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
 - Checks: `pytest -q truffles-api/tests/test_console_telegram_helpers.py` → `4 passed in 2.64s`

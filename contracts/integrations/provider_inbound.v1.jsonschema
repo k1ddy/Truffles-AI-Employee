@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/integrations/provider_inbound.v1.jsonschema",
+  "title": "Provider Inbound v1",
+  "type": "object",
+  "required": [
+    "provider",
+    "channel",
+    "provider_message_id",
+    "tenant_context",
+    "received_at",
+    "sender",
+    "receiver",
+    "message"
+  ],
+  "properties": {
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "channel": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider_message_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tenant_context": {
+      "$ref": "../tenancy/tenant_context.v1.jsonschema"
+    },
+    "received_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sender": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "phone": {"type": ["string", "null"]},
+        "jid": {"type": ["string", "null"]},
+        "display_name": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "receiver": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "phone": {"type": ["string", "null"]},
+        "jid": {"type": ["string", "null"]},
+        "instance_id": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "message": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {"type": "string", "minLength": 1},
+        "text": {"type": ["string", "null"]},
+        "media": {
+          "type": ["object", "null"],
+          "properties": {
+            "media_type": {"type": "string"},
+            "url": {"type": ["string", "null"], "format": "uri"},
+            "signed_url": {"type": ["string", "null"], "format": "uri"},
+            "expires_at": {"type": ["string", "null"], "format": "date-time"},
+            "sha256": {"type": ["string", "null"]},
+            "size_bytes": {"type": ["integer", "null"], "minimum": 0},
+            "mime_type": {"type": ["string", "null"]},
+            "filename": {"type": ["string", "null"]},
+            "caption": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        },
+        "payload": {"type": ["object", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "raw_ref": {
+      "type": ["string", "null"],
+      "description": "Pointer to raw inbound payload in storage."
+    },
+    "dedupe_key": {
+      "type": ["string", "null"]
+    },
+    "auth": {
+      "type": ["object", "null"],
+      "properties": {
+        "algorithm": {"type": "string"},
+        "signature": {"type": "string"},
+        "key_id": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "metadata": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "extensions": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

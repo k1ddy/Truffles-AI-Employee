@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
-import { telegramApi } from "@/lib/api-client";
+import { authApi, canAccessConsole, telegramApi } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import toast from "react-hot-toast";
+import AccessDenied from "@/components/AccessDenied";
 
 interface HealthData {
     status: string;
@@ -134,17 +135,31 @@ export default function OpsPage() {
     const [telegramAction, setTelegramAction] = useState<"verify" | "test" | null>(null);
     const [outboxStatus, setOutboxStatus] = useState<OutboxStatusFilter>("failed");
 
+    const { data: meData, isLoading: meLoading } = useQuery({
+        queryKey: ["console-me"],
+        queryFn: async () => {
+            const response = await authApi.getMe();
+            return response.data;
+        },
+        enabled: !!session,
+    });
+
+    const role = meData?.agent?.role ?? "manager";
+    const canReadOps = canAccessConsole(role, "ops", "read");
+    const canWriteOps = canAccessConsole(role, "ops", "write");
+    const canWriteSettings = canAccessConsole(role, "settings", "write");
+
     const { data: health, isLoading: healthLoading, refetch: refetchHealth } = useQuery({
         queryKey: ["health"],
         queryFn: fetchHealth,
-        enabled: !!session,
+        enabled: !!session && canReadOps,
         refetchInterval: 30000,
     });
 
     const { data: metrics, isLoading: metricsLoading, error: metricsError } = useQuery({
         queryKey: ["metrics-daily"],
         queryFn: fetchMetrics,
-        enabled: !!session,
+        enabled: !!session && canReadOps,
         refetchInterval: 60000,
     });
 
@@ -152,14 +167,14 @@ export default function OpsPage() {
     const { data: telegramHealth } = useQuery({
         queryKey: ["telegram-health"],
         queryFn: fetchTelegramHealth,
-        enabled: !!session,
+        enabled: !!session && canReadOps,
         refetchInterval: 30000,
     });
 
     const { data: outboxData, isLoading: outboxLoading, error: outboxError, refetch: refetchOutbox } = useQuery({
         queryKey: ["ops-outbox", outboxStatus],
         queryFn: () => fetchOutbox(outboxStatus),
-        enabled: !!session,
+        enabled: !!session && canReadOps,
         refetchInterval: 30000,
     });
 
@@ -255,6 +270,20 @@ export default function OpsPage() {
             <div className="p-8 text-center text-muted-foreground">
                 Войдите в систему для просмотра статуса.
             </div>
+        );
+    }
+
+    if (meLoading) {
+        return (
+            <div className="p-8 text-center text-muted-foreground">
+                Загрузка роли...
+            </div>
+        );
+    }
+
+    if (!canReadOps) {
+        return (
+            <AccessDenied message="Эта роль не имеет доступа к Ops." />
         );
     }
 
@@ -383,7 +412,7 @@ export default function OpsPage() {
                         type="button"
                         className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={() => telegramVerify.mutate()}
-                        disabled={telegramAction !== null}
+                        disabled={telegramAction !== null || !canWriteSettings}
                         data-testid="ops-telegram-verify"
                     >
                         {telegramAction === "verify" ? "Отправка..." : "Verify"}
@@ -392,11 +421,14 @@ export default function OpsPage() {
                         type="button"
                         className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={() => telegramTest.mutate()}
-                        disabled={telegramAction !== null}
+                        disabled={telegramAction !== null || !canWriteSettings}
                         data-testid="ops-telegram-test"
                     >
                         {telegramAction === "test" ? "Отправка..." : "Send test"}
                     </button>
+                    {!canWriteSettings && (
+                        <span className="text-xs text-muted-foreground">Только owner/admin</span>
+                    )}
                 </div>
             </div>
 
@@ -441,10 +473,13 @@ export default function OpsPage() {
                             type="button"
                             className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                             onClick={() => outboxRetry.mutate(undefined)}
-                            disabled={outboxRetry.isPending}
+                            disabled={outboxRetry.isPending || !canWriteOps}
                         >
                             {outboxRetry.isPending ? "Ретрай..." : "Retry failed"}
                         </button>
+                    )}
+                    {!canWriteOps && (
+                        <span className="text-xs text-muted-foreground">Ретрай доступен только owner/admin</span>
                     )}
                 </div>
                 {outboxLoading ? (
@@ -501,7 +536,7 @@ export default function OpsPage() {
                                                     type="button"
                                                     className="text-xs text-primary hover:text-primary/80 disabled:opacity-50"
                                                     onClick={() => outboxRetry.mutate([item.id])}
-                                                    disabled={outboxRetry.isPending}
+                                                    disabled={outboxRetry.isPending || !canWriteOps}
                                                 >
                                                     Retry
                                                 </button>

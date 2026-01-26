@@ -47,6 +47,17 @@
             },
             "retryable": false
         },
+        "COMPANY_SELECTION_REQUIRED": {
+            "http_status": 400,
+            "message_template": "Company selection required",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Prompt to select a company before loading data"
+            },
+            "retryable": false
+        },
         "BRANCH_SELECTION_REQUIRED": {
             "http_status": 400,
             "message_template": "Branch selection required",
@@ -122,6 +133,17 @@
                 "toast": true,
                 "toast_type": "info",
                 "description": "Refresh case, update status badge"
+            },
+            "retryable": false
+        },
+        "ONBOARDING_STEP_REQUIRED": {
+            "http_status": 409,
+            "message_template": "Complete previous onboarding step",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "warning",
+                "description": "Show missing onboarding requirements"
             },
             "retryable": false
         },

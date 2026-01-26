@@ -10,12 +10,21 @@ import type { components, operations } from "@/types/api.generated";
 
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
 const BRANCH_ID_STORAGE_KEY = "console:branch_id";
+const COMPANY_ID_STORAGE_KEY = "console:company_id";
 
 function getSelectedClientId(): string | undefined {
     if (typeof window === "undefined") {
         return undefined;
     }
     const stored = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    return stored || undefined;
+}
+
+function getSelectedCompanyId(): string | undefined {
+    if (typeof window === "undefined") {
+        return undefined;
+    }
+    const stored = window.localStorage.getItem(COMPANY_ID_STORAGE_KEY);
     return stored || undefined;
 }
 
@@ -41,6 +50,7 @@ export const ErrorCodes = {
     TOKEN_EXPIRED: "TOKEN_EXPIRED",
     ACCESS_DENIED: "ACCESS_DENIED",
     CLIENT_SELECTION_REQUIRED: "CLIENT_SELECTION_REQUIRED",
+    COMPANY_SELECTION_REQUIRED: "COMPANY_SELECTION_REQUIRED",
     BRANCH_SELECTION_REQUIRED: "BRANCH_SELECTION_REQUIRED",
     TENANT_MISMATCH: "TENANT_MISMATCH",
     BRANCH_ACCESS_DENIED: "BRANCH_ACCESS_DENIED",
@@ -49,6 +59,7 @@ export const ErrorCodes = {
     CASE_ALREADY_RESOLVED: "CASE_ALREADY_RESOLVED",
     NOT_ASSIGNED: "NOT_ASSIGNED",
     CASE_NOT_ACTIVE: "CASE_NOT_ACTIVE",
+    ONBOARDING_STEP_REQUIRED: "ONBOARDING_STEP_REQUIRED",
     VALIDATION_ERROR: "VALIDATION_ERROR",
     MESSAGE_TOO_LONG: "MESSAGE_TOO_LONG",
     OUTBOX_FAILED: "OUTBOX_FAILED",
@@ -67,6 +78,64 @@ export const ErrorCodes = {
 } as const;
 
 export type ErrorCode = keyof typeof ErrorCodes;
+
+export type ConsoleRole = "owner" | "admin" | "manager" | "support";
+export type ConsoleSection =
+    | "inbox"
+    | "knowledge"
+    | "team"
+    | "calendar"
+    | "settings"
+    | "ops"
+    | "audit"
+    | "provisioning";
+export type ConsoleAction = "read" | "write";
+
+export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRole[]>> = {
+    inbox: {
+        read: ["owner", "admin", "manager", "support"],
+        write: ["owner", "admin", "manager"],
+    },
+    knowledge: {
+        read: ["owner", "admin", "manager"],
+        write: ["owner", "admin"],
+    },
+    team: {
+        read: ["owner", "admin"],
+        write: ["owner", "admin"],
+    },
+    calendar: {
+        read: ["owner", "admin", "manager"],
+        write: ["owner", "admin", "manager"],
+    },
+    settings: {
+        read: ["owner", "admin"],
+        write: ["owner", "admin"],
+    },
+    ops: {
+        read: ["owner", "admin", "support"],
+        write: ["owner", "admin"],
+    },
+    audit: {
+        read: ["owner", "admin", "support"],
+        write: [],
+    },
+    provisioning: {
+        read: ["owner", "admin", "support"],
+        write: ["owner", "admin"],
+    },
+};
+
+export function canAccessConsole(
+    role: ConsoleRole | null | undefined,
+    section: ConsoleSection,
+    action: ConsoleAction,
+): boolean {
+    if (!role) {
+        return false;
+    }
+    return ConsoleRBAC[section][action].includes(role);
+}
 
 /** UI action types from errors.v1.json */
 export type UIAction =
@@ -116,6 +185,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
         ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
         retryable: false,
     },
+    COMPANY_SELECTION_REQUIRED: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
     BRANCH_SELECTION_REQUIRED: {
         http_status: 400,
         ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
@@ -154,6 +228,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
     CASE_NOT_ACTIVE: {
         http_status: 400,
         ui_behavior: { action: "refresh_item", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    ONBOARDING_STEP_REQUIRED: {
+        http_status: 409,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
         retryable: false,
     },
     VALIDATION_ERROR: {
@@ -318,6 +397,10 @@ export function createApiClient(): AxiosInstance {
     client.interceptors.request.use((config) => {
         const headers = config.headers ?? {};
         config.headers = headers;
+        const selectedCompanyId = getSelectedCompanyId();
+        if (selectedCompanyId && !headers["X-Company-Id"]) {
+            headers["X-Company-Id"] = selectedCompanyId;
+        }
         const selectedClientId = getSelectedClientId();
         if (selectedClientId && !headers["X-Client-Id"]) {
             headers["X-Client-Id"] = selectedClientId;
@@ -499,6 +582,16 @@ export const adminApi = {
         apiClient.patch<components["schemas"]["CapabilitiesRecord"]>("/admin/capabilities", data, {
             headers: buildClientHeader(clientId),
         }),
+};
+
+/** Onboarding endpoints */
+export const onboardingApi = {
+    status: (branchId?: string) =>
+        apiClient.get<components["schemas"]["OnboardingStatusResponse"]>("/onboarding/status", {
+            params: branchId ? { branch_id: branchId } : undefined,
+        }),
+    advance: (data: components["schemas"]["OnboardingAdvanceRequest"]) =>
+        apiClient.post<components["schemas"]["OnboardingStatusResponse"]>("/onboarding/advance", data),
 };
 
 /** Audit endpoints */

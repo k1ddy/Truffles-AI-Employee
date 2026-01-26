@@ -24,6 +24,8 @@ class Branch(Base):
     timezone = Column(Text)
     working_hours = Column(JSONB, default=dict)
     booking_settings = Column(JSONB, default=dict)
+    onboarding_state = Column(Text)
+    onboarding_updated_at = Column(TIMESTAMP(timezone=True))
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP(timezone=True))
     updated_at = Column(TIMESTAMP(timezone=True))

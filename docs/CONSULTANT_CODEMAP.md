@@ -180,6 +180,19 @@ truth gate provided a safe response.
 - **Order matters.** State/pending/LAW/policy gates can override any LLM meaning. This keeps the system safe and deterministic.
 - If you change stage order, you change bot behavior. See `SPECS/SYSTEM_REFERENCE.md` → “Decision pipeline”.
 
+## 1.1) Ingress adapters (ChatFlow + Provider Gateway)
+
+**ChatFlow webhook**
+- `truffles-api/app/routers/webhook/http.py` → `/webhook` + `/webhook/{client_slug}`
+- Normalizes payload and calls `_handle_webhook_payload`.
+
+**Provider Gateway (shadow)**
+- `truffles-api/app/routers/provider_gateway.py` → `POST /provider/inbound` (gated by `PROVIDER_GATEWAY_INBOUND_ENABLED`)
+- Validates `ProviderInbound`, translates to `WebhookRequest` via `truffles-api/app/services/provider_gateway_service.py`,
+  then calls the same `_handle_webhook_payload`.
+- If `PROVIDER_GATEWAY_INBOX_ENABLED=1`, the inbound handler records a durable `inbox_events` row
+  before passing control to the webhook pipeline.
+
 ---
 
 ## 2) Gates & safety (hard control layer)
@@ -214,8 +227,11 @@ truth gate provided a safe response.
 
 **Code blocks:**
 - Domain facts + service availability: `truffles-api/app/services/demo_salon_knowledge.py`
-- Packs: `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`
-- Consult playbooks (care advice): `SALON_TRUTH.yaml` → `consult_playbooks`
+- Truth pack (facts/policy): `truffles-api/app/knowledge/<client_slug>/SALON_TRUTH.yaml`
+- Consult playbooks (care advice): `truffles-api/app/knowledge/<client_slug>/CONSULT_PLAYBOOK.yaml`
+- Knowledge Snapshot Gateway (shadow): `truffles-api/app/routers/knowledge_gateway.py` + `truffles-api/app/services/knowledge_snapshot_service.py`
+- Consult contracts: `truffles-api/app/schemas/consult.py` (runtime validation), `contracts/consult/consult_playbook.v1.jsonschema`
+- Generic pack scaffold (CI/tests): `truffles-api/app/knowledge/generic/*`
 - EVAL cases: `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
 
 **Behavior impact:**
@@ -234,9 +250,13 @@ truth gate provided a safe response.
 - `truffles-api/app/routers/webhook/info.py`
 - Info bundle aggregation (address/hours/parking/etc). Keeps class carryover.
 
-**Consult**
-- `truffles-api/app/routers/webhook/response.py` → `_handle_consult_flow`
-- Playbook first; LLM advice only for general beauty care and non‑medical topics.
+**Consult (pack-first, domain-agnostic)**
+- Entry point: `truffles-api/app/routers/webhook/response.py` → `_handle_consult_flow`
+- Pack load + schema validate: `truffles-api/app/services/consult_pack_service.py` (load/validate) + `truffles-api/app/schemas/consult.py`
+- Shadow snapshot consumer: `truffles-api/app/services/knowledge_snapshot_consumer.py` builds/validates consult playbook from snapshot and records `consult_snapshot` trace (env-gated, no behavior change).
+- Topic resolver: `truffles-api/app/services/knowledge_service.py` → `resolve_consult_topic_candidates`
+- LLM controller (topic select JSON): `truffles-api/app/services/ai_service.py` → `generate_consult_controller_output`
+- Playbook first; LLM advice only for general beauty care and non‑medical topics (legacy fallback only when no pack decision).
 
 **Behavior impact:**
 - Booking keeps goal across interruptions; consult replies can be returned with booking follow‑up.
@@ -256,6 +276,7 @@ truth gate provided a safe response.
 
 **Code blocks:**
 - LLM + rewrite: `truffles-api/app/services/ai_service.py`
+- Consult controller (LLM JSON for topic/intent): `truffles-api/app/services/ai_service.py`
 - RAG/embeddings: `truffles-api/app/services/knowledge_service.py` + Qdrant
 - Response composition/guard: `truffles-api/app/routers/webhook/response.py`
 
@@ -297,6 +318,8 @@ truth gate provided a safe response.
 
 **Behavior impact:**
 - Idempotent sends; retries; state changes tracked in `outbox_messages`.
+- When `PROVIDER_GATEWAY_OUTBOUND_ENABLED=1`, outbox event sends use `ProviderGatewayAdapter` and emit
+  `provider_outbound` payloads; status callbacks update outbox meta via `/provider/status`.
 
 ---
 
@@ -316,10 +339,49 @@ truth gate provided a safe response.
 
 **Code blocks:**
 - Chaos sim runner + evaluator: `ops/diagnose.py` (`chaos-sim`)
+- Livecheck auto (CA suites): `ops/diagnose.py` (`livecheck-auto`)
 - Eval tests: `truffles-api/tests/test_demo_salon_eval.py` (uses `EVAL.yaml`)
 
 **Behavior impact:**
 - Simulates 10–15 turn dialogs with noise and mixed languages, validates behavior by trace/meta (not by text).
+
+---
+
+## Consult pack flow (current behavior, line-accurate)
+
+**Decision entry (consult branch in main pipeline)**
+- `truffles-api/app/routers/webhook/decision.py:6332` → `_handle_consult_flow(...)` is invoked before multi-intent routing.
+
+**Pack load + schema validation**
+- `truffles-api/app/services/consult_pack_service.py:22-163` → load/validate pack, build deterministic reply.
+- `truffles-api/app/schemas/consult.py:37-120` → playbook + controller output schemas (validate/guard).
+
+**Topic resolution (semantic + controller)**
+- `truffles-api/app/services/knowledge_service.py:81-141` → `resolve_consult_topic_candidates` (embeddings + top-k).
+- If embeddings fail, resolver falls back to lexical token matching (still `consult_topic_resolver` trace).
+- `truffles-api/app/services/ai_service.py:1593-1679` → `generate_consult_controller_output` (LLM JSON, strict schema).
+- Selection order in consult flow: controller topic → semantic top-1 (score >= 0.6) → intent_decomp topic.
+  `truffles-api/app/routers/webhook/response.py:657-673`.
+
+**Explicit info short-circuit**
+- If explicit info intent present, consult flow records `consult_flow` short_circuit and returns to info/booking flow.
+  `truffles-api/app/routers/webhook/response.py:583-692`.
+
+**Service availability integration (facts)**
+- service_matcher/truth/multi_truth response is merged into consult meta and can be combined with consult reply.
+  `truffles-api/app/routers/webhook/response.py:1090-1162`.
+
+**Consult trace/meta**
+- consult_flow decision + reason recorded here:
+  `truffles-api/app/routers/webhook/response.py:1228-1257`.
+- consult_context is set for goal preservation:
+  `truffles-api/app/routers/webhook/response.py:1259-1289`.
+
+**Tests + livecheck probes**
+- Pack meta/trace: `truffles-api/tests/test_message_endpoint.py:855-991`
+- Pack flow trace/meta (controller + resolver): `truffles-api/tests/test_message_endpoint.py:1109-1256`
+- Livecheck: CA06 consult suite in `ops/diagnose.py` (ACK skipped to avoid trace override):
+  `ops/diagnose.py:6936-6938`
 
 ---
 

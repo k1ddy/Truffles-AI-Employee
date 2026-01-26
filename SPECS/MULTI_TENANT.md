@@ -19,9 +19,9 @@ _Любые статусы ниже — DERIVED; единственный ист
 
 | Компонент | Статус |
 |-----------|--------|
-| Таблица companies | ✅ СУЩЕСТВУЕТ (не используется) |
-| Org-level RBAC (company memberships/roles) | 📋 ПЛАН |
-| Console org-level selection (company/client/branch) | 📋 ПЛАН |
+| Таблица companies | ✅ СУЩЕСТВУЕТ (используется в Console selection) |
+| Org-level RBAC (company memberships/roles) | ⚠️ ЧАСТИЧНО: membership scopes в console_auth; UI для управления нет |
+| Console org-level selection (company/client/branch) | ✅ РЕАЛИЗОВАНО (Company→Client→Branch + X-Company-Id gate) |
 | Таблица clients | ✅ РАБОТАЕТ |
 | Таблица branches | ⚠️ ПОДКЛЮЧЕНА: routing/Telegram по branch есть; RAG strict branch‑filter (без fallback), нужен backfill |
 | Таблица client_settings | ✅ РАБОТАЕТ |
@@ -33,7 +33,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 | Онбординг скрипт | ⚠️ РУЧНОЙ (onboard_client.py отсутствует; sync_client.py только для KB) |
 | Счётчик сообщений | 📋 ПЛАН |
 | Dashboard для заказчика | 📋 ПЛАН |
-| Console org‑уровень (Company/Client/Branch) | ⚠️ ЧАСТИЧНО: multi‑client selection есть, membership/RBAC нет |
+| Console org‑уровень (Company/Client/Branch) | ✅ Company/Client/Branch selection + company gate; memberships admin UI — TODO |
 
 ---
 

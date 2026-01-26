@@ -19,6 +19,12 @@
 | `contracts/capabilities/capabilities.v1.jsonschema` | Канон capabilities (channels/providers/features) | Архитектор/Backend |
 | `contracts/consult/consult_playbook.v1.jsonschema` | Канон схемы consult playbooks (domain‑agnostic) | Архитектор/Backend |
 | `contracts/consult/consult_controller_output.v1.jsonschema` | Канон контракта consult LLM‑контроллера | Архитектор/Backend |
+| `contracts/integrations/provider_inbound.v1.jsonschema` | Provider inbound envelope (gateway) | Архитектор/Backend |
+| `contracts/integrations/provider_outbound.v1.jsonschema` | Provider outbound envelope (gateway) | Архитектор/Backend |
+| `contracts/integrations/media_send.v1.jsonschema` | Media send payload (signed URL) | Архитектор/Backend |
+| `contracts/integrations/knowledge_snapshot.v1.jsonschema` | Knowledge snapshot payload (signed) | Архитектор/Backend |
+| `contracts/events/inbox_event.v1.jsonschema` | Inbox durable event (ingest) | Архитектор/Backend |
+| `contracts/events/provider_status.v1.jsonschema` | Provider status callback event | Архитектор/Backend |
 | `contracts/integrations/` | Контракты портов/адаптеров | Архитектор/Backend |
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
 | `.github/workflows/monitor-prod-version.yml` | Cron CI alert: prod `/admin/version` must match main | OPS |
@@ -28,6 +34,8 @@
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
+| `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
+| `truffles-api/migrations/015_add_inbox_events.sql` | Migration: inbox_events (durable inbox store) | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
@@ -41,6 +49,7 @@
 | `docs/REPORTS/` | Отчёты по прогонам/изменениям | Brain/Architect |
 | `docs/REPORTS/2026-01-24-consult-quality.md` | Отчёт: consult quality + chaos‑sim | Brain/Architect |
 | `docs/REPORTS/2026-01-25-control-plane-provisioning.png` | Скрин: Provisioning Wizard (Settings) | Brain/Architect |
+| `docs/REPORTS/2026-01-26-control-plane-inbox.png` | Скрин: Inbox 3‑pane (Phase 5) | Brain/Architect |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
@@ -83,16 +92,28 @@
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-web-deploy-team.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase3-knowledge-studio.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-phase3-knowledge-backend.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-phase5-inbox-ui.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-rbac-matrix.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-onboarding-state-machine.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-provider-gateway-architecture.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-provider-contracts-v1.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbound-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-outbound-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbox-event.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-docs-selection-runbooks.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-build-info.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-implementation.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-chaos-live-e2e.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-sim-time-override.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-thanks-typo-smalltalk.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-chaos-sim-resilience.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-prod-deploy-guard.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-dod.md`
-- `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-implementation.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-company-selection.md`
 
 ---
 
@@ -475,6 +496,7 @@ truffles-api/
 | Файл | Что тестирует |
 |------|---------------|
 | `truffles-api/tests/test_cases.json` | Тестовые сценарии диалогов |
+| `truffles-api/tests/test_console_rbac.py` | Unit: Console RBAC matrix guards |
 | `truffles-api/tests/test_console_telegram_connector.py` | Unit: Console Telegram verify/test helpers |
 | `truffles-api/tests/test_console_telegram_helpers.py` | Unit: Console Telegram trail helpers |
 | `truffles-api/tests/test_webhook_booking.py` | Unit: expected_reply_type и booking slot validators |

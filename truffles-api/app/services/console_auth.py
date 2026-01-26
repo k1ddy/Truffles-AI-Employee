@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import Request
 from sqlalchemy.orm import Session
 
-from app.models import Agent, AgentIdentity, AgentMembership, Branch, Client
+from app.models import Agent, AgentIdentity, AgentMembership, Branch, Client, Company
 from app.services.console_errors import ConsoleAPIError
 
 try:
@@ -27,6 +27,9 @@ class ConsoleAuthContext:
     client: Client
     branches: list[Branch]
     accessible_clients: list[Client]
+    companies: list[Company]
+    company_selection_required: bool
+    selected_company_id: Optional[UUID]
     selection_required: bool
     role: str
     allowed_branch_ids: set[UUID]
@@ -40,6 +43,40 @@ class ConsoleAuthContext:
 
 _jwks_client: Optional[PyJWKClient] = None
 _role_priority = {"owner": 0, "admin": 1, "manager": 2, "support": 3}
+_console_rbac_matrix: dict[str, dict[str, tuple[str, ...]]] = {
+    "inbox": {
+        "read": ("owner", "admin", "manager", "support"),
+        "write": ("owner", "admin", "manager"),
+    },
+    "knowledge": {
+        "read": ("owner", "admin", "manager"),
+        "write": ("owner", "admin"),
+    },
+    "team": {
+        "read": ("owner", "admin"),
+        "write": ("owner", "admin"),
+    },
+    "calendar": {
+        "read": ("owner", "admin", "manager"),
+        "write": ("owner", "admin", "manager"),
+    },
+    "settings": {
+        "read": ("owner", "admin"),
+        "write": ("owner", "admin"),
+    },
+    "ops": {
+        "read": ("owner", "admin", "support"),
+        "write": ("owner", "admin"),
+    },
+    "audit": {
+        "read": ("owner", "admin", "support"),
+        "write": (),
+    },
+    "provisioning": {
+        "read": ("owner", "admin", "support"),
+        "write": ("owner", "admin"),
+    },
+}
 
 
 @dataclass
@@ -48,6 +85,28 @@ class _AccessEntry:
     scopes: set[str] = field(default_factory=set)
     branch_ids: set[UUID] = field(default_factory=set)
     agent_ids: set[UUID] = field(default_factory=set)
+
+
+def has_console_permission(role: str, section: str, action: str) -> bool:
+    allowed = _console_rbac_matrix.get(section, {}).get(action)
+    if allowed is None:
+        return False
+    return role in allowed
+
+
+def require_console_permission(
+    context: "ConsoleAuthContext",
+    section: str,
+    action: str,
+    *,
+    message: Optional[str] = None,
+) -> None:
+    if not has_console_permission(context.role, section, action):
+        raise ConsoleAPIError(
+            403,
+            "ACCESS_DENIED",
+            message or f"Access denied for {section}:{action}",
+        )
 
 
 def _get_bearer_token(request: Request) -> str:
@@ -152,6 +211,16 @@ def _parse_client_header(request: Request) -> Optional[UUID]:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid X-Client-Id header") from exc
 
 
+def _parse_company_header(request: Request) -> Optional[UUID]:
+    raw_company_id = request.headers.get("x-company-id")
+    if not raw_company_id:
+        return None
+    try:
+        return UUID(raw_company_id)
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid X-Company-Id header") from exc
+
+
 def _parse_branch_header(request: Request) -> Optional[UUID]:
     raw_branch_id = request.headers.get("x-branch-id")
     if not raw_branch_id:
@@ -182,6 +251,27 @@ def _resolve_client_selection(
         if require_selection:
             raise ConsoleAPIError(400, "CLIENT_SELECTION_REQUIRED", "Client selection required")
     return selected_client_id, selection_required
+
+
+def _resolve_company_selection(
+    accessible_company_ids: set[UUID],
+    *,
+    selected_company_id: Optional[UUID],
+    require_selection: bool,
+) -> tuple[Optional[UUID], bool]:
+    company_selection_required = False
+    if selected_company_id:
+        if selected_company_id not in accessible_company_ids:
+            if require_selection:
+                raise ConsoleAPIError(403, "TENANT_MISMATCH", "Company access denied")
+            selected_company_id = None
+    elif len(accessible_company_ids) == 1:
+        selected_company_id = next(iter(accessible_company_ids))
+    elif len(accessible_company_ids) > 1:
+        company_selection_required = True
+        if require_selection:
+            raise ConsoleAPIError(400, "COMPANY_SELECTION_REQUIRED", "Company selection required")
+    return selected_company_id, company_selection_required
 
 
 def _resolve_branch_selection(
@@ -372,6 +462,38 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
     if not accessible_clients:
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Client not found for agent")
 
+    accessible_company_ids = {client.company_id for client in accessible_clients if client.company_id}
+    companies: list[Company] = []
+    if accessible_company_ids:
+        companies = (
+            db.query(Company)
+            .filter(Company.id.in_(accessible_company_ids))
+            .order_by(Company.name.asc())
+            .all()
+        )
+    selected_company_id: Optional[UUID] = None
+    company_selection_required = False
+    if accessible_company_ids:
+        try:
+            selected_company_id = _parse_company_header(request)
+        except ConsoleAPIError:
+            if require_selection:
+                raise
+            selected_company_id = None
+        selected_company_id, company_selection_required = _resolve_company_selection(
+            accessible_company_ids,
+            selected_company_id=selected_company_id,
+            require_selection=require_selection,
+        )
+        if selected_company_id:
+            accessible_clients = [
+                client for client in accessible_clients if client.company_id == selected_company_id
+            ]
+            allowed_client_ids = {client.id for client in accessible_clients}
+            access_map = {client_id: entry for client_id, entry in access_map.items() if client_id in allowed_client_ids}
+            if not accessible_clients:
+                raise ConsoleAPIError(403, "ACCESS_DENIED", "No client for selected company")
+
     try:
         selected_client_id = _parse_client_header(request)
     except ConsoleAPIError:
@@ -431,6 +553,9 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
         client=selected_client,
         branches=branches,
         accessible_clients=accessible_clients,
+        companies=companies,
+        company_selection_required=company_selection_required,
+        selected_company_id=selected_company_id,
         selection_required=selection_required,
         role=effective_role,
         allowed_branch_ids=allowed_branch_ids,

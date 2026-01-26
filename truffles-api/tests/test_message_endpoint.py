@@ -13,7 +13,9 @@ from fastapi.testclient import TestClient
 
 from app.database import get_db
 from app.main import app
+from app.models import Branch, Client, ClientSettings, Conversation, User
 from app.routers import webhook as webhook_router
+from app.schemas.consult import ConsultControllerOutput
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookResponse
 from app.services import escalation_service
@@ -30,6 +32,7 @@ from app.services.intent_service import (
     is_opt_out_message,
     is_strong_out_of_domain,
 )
+from app.services.knowledge_snapshot_consumer import ConsultSnapshotShadowResult
 from app.services.message_service import select_handover_user_message
 from app.services.result import Result
 from app.services.state_machine import ConversationState
@@ -307,7 +310,7 @@ def test_policy_gate_escalates_without_llm():
         branch_id=None,
         context={},
     )
-    user = SimpleNamespace(id="user-123", context={})
+    user = SimpleNamespace(id="user-123", context={}, user_metadata={})
 
     client_query = Mock()
     client_query.filter.return_value.first.return_value = client
@@ -317,9 +320,28 @@ def test_policy_gate_escalates_without_llm():
     conversation_query.filter.return_value.first.return_value = conversation
     user_query = Mock()
     user_query.filter.return_value.first.return_value = user
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = None
+    branch_phone_query = Mock()
+    branch_phone_query.filter.return_value.all.return_value = []
+
+    def _query(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Conversation:
+            return conversation_query
+        if model is User:
+            return user_query
+        if model is Branch:
+            return branch_query
+        if model is Branch.phone:
+            return branch_phone_query
+        return Mock()
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _query
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -740,7 +762,7 @@ def test_truth_gate_sets_decision_meta():
         branch_id=branch_id,
         context={},
     )
-    user = SimpleNamespace(id="user-123", context={})
+    user = SimpleNamespace(id="user-123", context={}, user_metadata={})
 
     client_query = Mock()
     client_query.filter.return_value.first.return_value = client
@@ -750,9 +772,28 @@ def test_truth_gate_sets_decision_meta():
     conversation_query.filter.return_value.first.return_value = conversation
     user_query = Mock()
     user_query.filter.return_value.first.return_value = user
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = None
+    branch_phone_query = Mock()
+    branch_phone_query.filter.return_value.all.return_value = []
+
+    def _query(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Conversation:
+            return conversation_query
+        if model is User:
+            return user_query
+        if model is Branch:
+            return branch_query
+        if model is Branch.phone:
+            return branch_phone_query
+        return Mock()
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _query
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -812,7 +853,7 @@ def test_truth_gate_sets_decision_meta():
     assert truth_updates["llm_timeout"] is False
 
 
-def test_consult_short_circuit_writes_decision_meta():
+def test_consult_pack_writes_decision_meta():
     saved_message = Mock()
     saved_message.message_metadata = {}
 
@@ -837,19 +878,31 @@ def test_consult_short_circuit_writes_decision_meta():
         branch_id=None,
         context={},
     )
-    user = SimpleNamespace(id="user-123", context={})
+    user = SimpleNamespace(id="user-123", context={}, user_metadata={})
 
-    client_query = Mock()
-    client_query.filter.return_value.first.return_value = client
-    settings_query = Mock()
-    settings_query.filter.return_value.first.return_value = settings
-    conversation_query = Mock()
-    conversation_query.filter.return_value.first.return_value = conversation
-    user_query = Mock()
-    user_query.filter.return_value.first.return_value = user
+    def _query(model):
+        query = Mock()
+        query.filter.return_value.first.return_value = None
+        query.filter.return_value.all.return_value = []
+        model_name = getattr(model, "__name__", None)
+        if model is Branch:
+            query.filter.return_value.first.return_value = None
+            return query
+        if model is Branch.phone:
+            query.filter.return_value.all.return_value = []
+            return query
+        if model_name == "Client":
+            query.filter.return_value.first.return_value = client
+        elif model_name == "ClientSettings":
+            query.filter.return_value.first.return_value = settings
+        elif model_name == "Conversation":
+            query.filter.return_value.first.return_value = conversation
+        elif model_name == "User":
+            query.filter.return_value.first.return_value = user
+        return query
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _query
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -923,13 +976,16 @@ def test_consult_short_circuit_writes_decision_meta():
     assert meta.get("branch_id") is None
 
     trace = conversation.context.get("decision_trace", [])
+    if settings.branch_resolution_mode != "disabled":
+        assert any(
+            entry.get("stage") in {"branch_selection", "branch_routing"}
+            for entry in trace
+            if isinstance(entry, dict)
+        )
     assert any(
-        entry.get("stage") == "branch_routing"
-        for entry in trace
-        if isinstance(entry, dict)
-    )
-    assert any(
-        entry.get("stage") == "consult_flow" and entry.get("decision") == "short_circuit"
+        entry.get("stage") == "consult_flow"
+        and entry.get("decision") == "consult_reply"
+        and entry.get("reason") in {"service_availability", "consult_pack"}
         for entry in trace
         if isinstance(entry, dict)
     )
@@ -961,19 +1017,25 @@ def test_consult_precedence_over_booking_flow():
         branch_id=None,
         context={"booking": {"active": True}},
     )
-    user = SimpleNamespace(id="user-123", context={})
+    user = SimpleNamespace(id="user-123", context={}, user_metadata={})
 
-    client_query = Mock()
-    client_query.filter.return_value.first.return_value = client
-    settings_query = Mock()
-    settings_query.filter.return_value.first.return_value = settings
-    conversation_query = Mock()
-    conversation_query.filter.return_value.first.return_value = conversation
-    user_query = Mock()
-    user_query.filter.return_value.first.return_value = user
+    def _query(model):
+        query = Mock()
+        query.filter.return_value.first.return_value = None
+        query.filter.return_value.all.return_value = []
+        model_name = getattr(model, "__name__", None)
+        if model_name == "Client":
+            query.filter.return_value.first.return_value = client
+        elif model_name == "ClientSettings":
+            query.filter.return_value.first.return_value = settings
+        elif model_name == "Conversation":
+            query.filter.return_value.first.return_value = conversation
+        elif model_name == "User":
+            query.filter.return_value.first.return_value = user
+        return query
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _query
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -1045,6 +1107,632 @@ def test_consult_precedence_over_booking_flow():
     mock_llm.assert_not_called()
 
 
+def test_consult_pack_flow_records_trace_and_meta():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="generic", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={}, user_metadata={})
+
+    def _query(model):
+        query = Mock()
+        query.filter.return_value.first.return_value = None
+        query.filter.return_value.all.return_value = []
+        model_name = getattr(model, "__name__", None)
+        if model is Branch:
+            query.filter.return_value.first.return_value = None
+            return query
+        if model is Branch.phone:
+            query.filter.return_value.all.return_value = []
+            return query
+        if model_name == "Client":
+            query.filter.return_value.first.return_value = client
+        elif model_name == "ClientSettings":
+            query.filter.return_value.first.return_value = settings
+        elif model_name == "Conversation":
+            query.filter.return_value.first.return_value = conversation
+        elif model_name == "User":
+            query.filter.return_value.first.return_value = user
+        return query
+
+    db = Mock()
+    db.query.side_effect = _query
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="generic",
+        body=WebhookBody(
+            message="Подскажите, что можно сделать для улучшения ухода?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-consult-pack-1",
+                timestamp=1234567893,
+            ),
+        ),
+    )
+
+    intent_decomp = {
+        "multi_intent": False,
+        "primary_intent": "other",
+        "secondary_intents": [],
+        "intents": ["other"],
+        "service_query": "",
+        "consult_intent": True,
+        "consult_topic": "",
+        "consult_question": "что можно сделать для улучшения ухода",
+    }
+    topic_candidates = [
+        {
+            "topic_id": "general_guidance",
+            "title": "General guidance",
+            "summary": "Safe guidance",
+            "score": 0.91,
+        }
+    ]
+    controller_output = ConsultControllerOutput(
+        intent="consult",
+        topic_id="general_guidance",
+        confidence=0.92,
+        risk_class="low",
+        actions=["answer"],
+        slots={"goal": "care"},
+        notes="",
+    )
+    controller_result = Result.success(controller_output)
+
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.services.knowledge_service.resolve_consult_topic_candidates",
+        return_value=topic_candidates,
+    ), patch(
+        "app.services.ai_service.generate_consult_controller_output",
+        return_value=controller_result,
+    ) as mock_controller, patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.generate_bot_response"
+    ) as mock_llm:
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response
+    mock_controller.assert_called_once()
+    mock_llm.assert_not_called()
+
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("consult_intent") is True
+    assert meta.get("consult_topic_id") == "general_guidance"
+    assert meta.get("consult_playbook_id") == "general_guidance"
+    assert meta.get("consult_source") == "pack"
+    assert meta.get("consult_selector") == "controller"
+    assert meta.get("consult_confidence") == pytest.approx(0.92)
+    assert meta.get("consult_risk_class") == "low"
+    assert meta.get("consult_controller_used") is True
+    assert meta.get("consult_controller_error") is None
+
+    trace = conversation.context.get("decision_trace", [])
+    assert any(
+        entry.get("stage") == "consult_topic_resolver"
+        for entry in trace
+        if isinstance(entry, dict)
+    )
+    assert any(
+        entry.get("stage") == "consult_controller"
+        and entry.get("decision") == "ok"
+        and entry.get("topic_id") == "general_guidance"
+        for entry in trace
+        if isinstance(entry, dict)
+    )
+    assert any(
+        entry.get("stage") == "consult_flow"
+        and entry.get("decision") == "consult_reply"
+        and entry.get("reason") == "consult_pack"
+        for entry in trace
+        if isinstance(entry, dict)
+    )
+
+
+def test_consult_snapshot_shadow_disabled():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="generic", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=uuid4(),
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={}, user_metadata={})
+
+    def _query(model):
+        query = Mock()
+        query.filter.return_value.first.return_value = None
+        query.filter.return_value.all.return_value = []
+        model_name = getattr(model, "__name__", None)
+        if model is Branch:
+            query.filter.return_value.first.return_value = None
+            return query
+        if model is Branch.phone:
+            query.filter.return_value.all.return_value = []
+            return query
+        if model_name == "Client":
+            query.filter.return_value.first.return_value = client
+        elif model_name == "ClientSettings":
+            query.filter.return_value.first.return_value = settings
+        elif model_name == "Conversation":
+            query.filter.return_value.first.return_value = conversation
+        elif model_name == "User":
+            query.filter.return_value.first.return_value = user
+        return query
+
+    db = Mock()
+    db.query.side_effect = _query
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="generic",
+        body=WebhookBody(
+            message="Подскажите, как ухаживать после процедуры?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-consult-snapshot-disabled",
+                timestamp=1234567893,
+            ),
+        ),
+    )
+
+    intent_decomp = {
+        "multi_intent": False,
+        "primary_intent": "other",
+        "secondary_intents": [],
+        "intents": ["other"],
+        "service_query": "",
+        "consult_intent": True,
+        "consult_topic": "",
+        "consult_question": "как ухаживать после процедуры",
+    }
+    topic_candidates = [
+        {
+            "topic_id": "general_guidance",
+            "title": "General guidance",
+            "summary": "Safe guidance",
+            "score": 0.91,
+        }
+    ]
+    controller_output = ConsultControllerOutput(
+        intent="consult",
+        topic_id="general_guidance",
+        confidence=0.92,
+        risk_class="low",
+        actions=["answer"],
+        slots={"goal": "care"},
+        notes="",
+    )
+    controller_result = Result.success(controller_output)
+
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.services.knowledge_service.resolve_consult_topic_candidates",
+        return_value=topic_candidates,
+    ), patch(
+        "app.services.ai_service.generate_consult_controller_output",
+        return_value=controller_result,
+    ) as mock_controller, patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.generate_bot_response"
+    ) as mock_llm, patch(
+        "app.services.knowledge_snapshot_consumer.is_snapshot_consumer_enabled",
+        return_value=False,
+    ), patch(
+        "app.services.knowledge_snapshot_consumer.build_consult_snapshot_shadow"
+    ) as mock_snapshot:
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    mock_controller.assert_called_once()
+    mock_llm.assert_not_called()
+    mock_snapshot.assert_not_called()
+
+    trace = conversation.context.get("decision_trace", [])
+    assert not any(
+        entry.get("stage") == "consult_snapshot"
+        for entry in trace
+        if isinstance(entry, dict)
+    )
+
+
+def test_consult_snapshot_shadow_records_trace_and_meta():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="generic", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=uuid4(),
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={}, user_metadata={})
+
+    def _query(model):
+        query = Mock()
+        query.filter.return_value.first.return_value = None
+        query.filter.return_value.all.return_value = []
+        model_name = getattr(model, "__name__", None)
+        if model is Branch:
+            query.filter.return_value.first.return_value = None
+            return query
+        if model is Branch.phone:
+            query.filter.return_value.all.return_value = []
+            return query
+        if model_name == "Client":
+            query.filter.return_value.first.return_value = client
+        elif model_name == "ClientSettings":
+            query.filter.return_value.first.return_value = settings
+        elif model_name == "Conversation":
+            query.filter.return_value.first.return_value = conversation
+        elif model_name == "User":
+            query.filter.return_value.first.return_value = user
+        return query
+
+    db = Mock()
+    db.query.side_effect = _query
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="generic",
+        body=WebhookBody(
+            message="Подскажите, как ухаживать после процедуры?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-consult-snapshot-enabled",
+                timestamp=1234567893,
+            ),
+        ),
+    )
+
+    intent_decomp = {
+        "multi_intent": False,
+        "primary_intent": "other",
+        "secondary_intents": [],
+        "intents": ["other"],
+        "service_query": "",
+        "consult_intent": True,
+        "consult_topic": "",
+        "consult_question": "как ухаживать после процедуры",
+    }
+    topic_candidates = [
+        {
+            "topic_id": "general_guidance",
+            "title": "General guidance",
+            "summary": "Safe guidance",
+            "score": 0.91,
+        }
+    ]
+    controller_output = ConsultControllerOutput(
+        intent="consult",
+        topic_id="general_guidance",
+        confidence=0.92,
+        risk_class="low",
+        actions=["answer"],
+        slots={"goal": "care"},
+        notes="",
+    )
+    controller_result = Result.success(controller_output)
+    snapshot_result = ConsultSnapshotShadowResult(
+        playbook=None,
+        error=None,
+        snapshot_id="snap-1",
+        version_id="version-1",
+        sha256="sha-256",
+        playbook_error=None,
+        playbook_present=True,
+    )
+
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.services.knowledge_service.resolve_consult_topic_candidates",
+        return_value=topic_candidates,
+    ), patch(
+        "app.services.ai_service.generate_consult_controller_output",
+        return_value=controller_result,
+    ) as mock_controller, patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.generate_bot_response"
+    ) as mock_llm, patch(
+        "app.services.knowledge_snapshot_consumer.is_snapshot_consumer_enabled",
+        return_value=True,
+    ), patch(
+        "app.services.knowledge_snapshot_consumer.build_consult_snapshot_shadow",
+        return_value=snapshot_result,
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    mock_controller.assert_called_once()
+    mock_llm.assert_not_called()
+
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("consult_snapshot_id") == "snap-1"
+    assert meta.get("consult_snapshot_version_id") == "version-1"
+    assert meta.get("consult_snapshot_playbook_present") is True
+
+    trace = conversation.context.get("decision_trace", [])
+    assert any(
+        entry.get("stage") == "consult_snapshot"
+        and entry.get("decision") == "ok"
+        and entry.get("version_id") == "version-1"
+        for entry in trace
+        if isinstance(entry, dict)
+    )
+
+
+def test_consult_snapshot_shadow_records_error():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="generic", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={}, user_metadata={})
+
+    def _query(model):
+        query = Mock()
+        query.filter.return_value.first.return_value = None
+        query.filter.return_value.all.return_value = []
+        model_name = getattr(model, "__name__", None)
+        if model is Branch:
+            query.filter.return_value.first.return_value = None
+            return query
+        if model is Branch.phone:
+            query.filter.return_value.all.return_value = []
+            return query
+        if model_name == "Client":
+            query.filter.return_value.first.return_value = client
+        elif model_name == "ClientSettings":
+            query.filter.return_value.first.return_value = settings
+        elif model_name == "Conversation":
+            query.filter.return_value.first.return_value = conversation
+        elif model_name == "User":
+            query.filter.return_value.first.return_value = user
+        return query
+
+    db = Mock()
+    db.query.side_effect = _query
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="generic",
+        body=WebhookBody(
+            message="Подскажите, как ухаживать после процедуры?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-consult-snapshot-error",
+                timestamp=1234567893,
+            ),
+        ),
+    )
+
+    intent_decomp = {
+        "multi_intent": False,
+        "primary_intent": "other",
+        "secondary_intents": [],
+        "intents": ["other"],
+        "service_query": "",
+        "consult_intent": True,
+        "consult_topic": "",
+        "consult_question": "как ухаживать после процедуры",
+    }
+    topic_candidates = [
+        {
+            "topic_id": "general_guidance",
+            "title": "General guidance",
+            "summary": "Safe guidance",
+            "score": 0.91,
+        }
+    ]
+    controller_output = ConsultControllerOutput(
+        intent="consult",
+        topic_id="general_guidance",
+        confidence=0.92,
+        risk_class="low",
+        actions=["answer"],
+        slots={"goal": "care"},
+        notes="",
+    )
+    controller_result = Result.success(controller_output)
+    snapshot_result = ConsultSnapshotShadowResult(
+        playbook=None,
+        error="missing_branch_id",
+        snapshot_id=None,
+        version_id=None,
+        sha256=None,
+        playbook_error=None,
+        playbook_present=False,
+    )
+
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.services.knowledge_service.resolve_consult_topic_candidates",
+        return_value=topic_candidates,
+    ), patch(
+        "app.services.ai_service.generate_consult_controller_output",
+        return_value=controller_result,
+    ) as mock_controller, patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.generate_bot_response"
+    ) as mock_llm, patch(
+        "app.services.knowledge_snapshot_consumer.is_snapshot_consumer_enabled",
+        return_value=True,
+    ), patch(
+        "app.services.knowledge_snapshot_consumer.build_consult_snapshot_shadow",
+        return_value=snapshot_result,
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    mock_controller.assert_called_once()
+    mock_llm.assert_not_called()
+
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("consult_snapshot_error") == "missing_branch_id"
+
+    trace = conversation.context.get("decision_trace", [])
+    assert any(
+        entry.get("stage") == "consult_snapshot"
+        and entry.get("decision") == "error"
+        and entry.get("error") == "missing_branch_id"
+        for entry in trace
+        if isinstance(entry, dict)
+    )
+
+
 def test_booking_info_interrupt_appends_prompt():
     saved_message = Mock()
     saved_message.message_metadata = {}
@@ -1072,17 +1760,23 @@ def test_booking_info_interrupt_appends_prompt():
     )
     user = SimpleNamespace(id="user-123", context={})
 
-    client_query = Mock()
-    client_query.filter.return_value.first.return_value = client
-    settings_query = Mock()
-    settings_query.filter.return_value.first.return_value = settings
-    conversation_query = Mock()
-    conversation_query.filter.return_value.first.return_value = conversation
-    user_query = Mock()
-    user_query.filter.return_value.first.return_value = user
+    def _query(model):
+        query = Mock()
+        query.filter.return_value.first.return_value = None
+        query.filter.return_value.all.return_value = []
+        model_name = getattr(model, "__name__", None)
+        if model_name == "Client":
+            query.filter.return_value.first.return_value = client
+        elif model_name == "ClientSettings":
+            query.filter.return_value.first.return_value = settings
+        elif model_name == "Conversation":
+            query.filter.return_value.first.return_value = conversation
+        elif model_name == "User":
+            query.filter.return_value.first.return_value = user
+        return query
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _query
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -1204,9 +1898,28 @@ def test_booking_time_service_question_keeps_time_contract():
     conversation_query.filter.return_value.first.return_value = conversation
     user_query = Mock()
     user_query.filter.return_value.first.return_value = user
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = None
+    branch_phone_query = Mock()
+    branch_phone_query.filter.return_value.all.return_value = []
+
+    def _query(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Conversation:
+            return conversation_query
+        if model is User:
+            return user_query
+        if model is Branch:
+            return branch_query
+        if model is Branch.phone:
+            return branch_phone_query
+        return Mock()
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _query
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -1333,9 +2046,28 @@ def test_service_carryover_applies_for_pricing():
     conversation_query.filter.return_value.first.return_value = conversation
     user_query = Mock()
     user_query.filter.return_value.first.return_value = user
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = None
+    branch_phone_query = Mock()
+    branch_phone_query.filter.return_value.all.return_value = []
+
+    def _query(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Conversation:
+            return conversation_query
+        if model is User:
+            return user_query
+        if model is Branch:
+            return branch_query
+        if model is Branch.phone:
+            return branch_phone_query
+        return Mock()
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _query
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -1455,9 +2187,28 @@ def test_semantic_service_matcher_handles_low_confidence_match():
     conversation_query.filter.return_value.first.return_value = conversation
     user_query = Mock()
     user_query.filter.return_value.first.return_value = user
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = None
+    branch_phone_query = Mock()
+    branch_phone_query.filter.return_value.all.return_value = []
+
+    def _query(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Conversation:
+            return conversation_query
+        if model is User:
+            return user_query
+        if model is Branch:
+            return branch_query
+        if model is Branch.phone:
+            return branch_phone_query
+        return Mock()
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _query
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -1548,9 +2299,28 @@ def test_semantic_service_matcher_handles_low_confidence_suggest():
     conversation_query.filter.return_value.first.return_value = conversation
     user_query = Mock()
     user_query.filter.return_value.first.return_value = user
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = None
+    branch_phone_query = Mock()
+    branch_phone_query.filter.return_value.all.return_value = []
+
+    def _query(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Conversation:
+            return conversation_query
+        if model is User:
+            return user_query
+        if model is Branch:
+            return branch_query
+        if model is Branch.phone:
+            return branch_phone_query
+        return Mock()
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _query
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -2490,6 +3260,12 @@ def test_hard_law_gate_pre_llm_uses_policy_pack():
         "app.routers.webhook._legacy._get_user_branch_preference",
         return_value=None,
     ), patch(
+        "app.routers.webhook.http._lookup_sender_branch",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.branch_selection._get_active_branches",
+        return_value=[],
+    ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
     ):
@@ -2510,6 +3286,134 @@ def test_hard_law_gate_pre_llm_uses_policy_pack():
     assert meta.get("policy_gate") == "hard_law"
     assert meta.get("risk_level") == "high"
     assert meta.get("source") == "policy_pack"
+
+
+@pytest.mark.parametrize(
+    "message,policy_section,keywords",
+    [
+        ("похоже грибок на ногте, можно записаться?", "medical", ["грибок"]),
+        ("пойду в суд, это незаконно, хочу записаться", "legal", ["суд", "незаконно"]),
+    ],
+)
+def test_hard_law_blocks_booking_signal(message, policy_section, keywords):
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    policy_pack = {
+        "hard_law": {"sections": [policy_section]},
+        policy_section: {
+            "keywords": keywords,
+            "response": "Передал менеджеру.",
+            "risk_level": "high",
+            "intent": policy_section,
+        },
+    }
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={"policy_pack": policy_pack})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="hybrid",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    def _query(model):
+        query = Mock()
+        query.filter.return_value.first.return_value = None
+        query.filter.return_value.all.return_value = []
+        model_name = getattr(model, "__name__", None)
+        if model_name == "Client":
+            query.filter.return_value.first.return_value = client
+        elif model_name == "ClientSettings":
+            query.filter.return_value.first.return_value = settings
+        elif model_name == "Conversation":
+            query.filter.return_value.first.return_value = conversation
+        elif model_name == "User":
+            query.filter.return_value.first.return_value = user
+        return query
+
+    db = Mock()
+    db.query.side_effect = _query
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message=message,
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000002@s.whatsapp.net",
+                messageId=f"msg-hard-law-{policy_section}",
+                timestamp=1234567892,
+            ),
+        ),
+    )
+
+    with patch(
+        "app.routers.webhook._legacy.detect_multi_intent",
+        side_effect=AssertionError("detect_multi_intent called"),
+    ), patch(
+        "app.routers.webhook._legacy._reuse_active_handover",
+        return_value=(None, False, False),
+    ), patch(
+        "app.routers.webhook._legacy.escalate_to_pending",
+        return_value=SimpleNamespace(ok=True, value=SimpleNamespace()),
+    ), patch(
+        "app.routers.webhook._legacy.send_telegram_notification",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id",
+        return_value=saved_message,
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.http._lookup_sender_branch",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.branch_selection._get_active_branches",
+        return_value=[],
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("policy_gate") == "hard_law"
+    assert meta.get("policy_section") == policy_section
+    assert meta.get("action") == "escalate"
+    assert meta.get("source") == "policy_pack"
+    assert conversation.context.get("expected_reply_type") is None
 
 
 def test_audio_transcription_failure_returns_prompt():
@@ -3603,6 +4507,120 @@ def test_expected_reply_type_invalid_choice_keeps_contract():
     assert meta.get("expected_reply_reason") == "invalid_choice"
 
 
+def test_short_intent_hint_bypasses_early_ood():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    def _query(model):
+        query = Mock()
+        query.filter.return_value.first.return_value = None
+        query.filter.return_value.all.return_value = []
+        model_name = getattr(model, "__name__", None)
+        if model_name == "Client":
+            query.filter.return_value.first.return_value = client
+        elif model_name == "ClientSettings":
+            query.filter.return_value.first.return_value = settings
+        elif model_name == "Conversation":
+            query.filter.return_value.first.return_value = conversation
+        elif model_name == "User":
+            query.filter.return_value.first.return_value = user
+        return query
+
+    db = Mock()
+    db.query.side_effect = _query
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="рахмет",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-short-intent-1",
+                timestamp=1234567897,
+            ),
+        ),
+    )
+
+    intent_decomp = {
+        "multi_intent": False,
+        "primary_intent": "other",
+        "secondary_intents": [],
+        "intents": ["other"],
+        "service_query": "",
+        "consult_intent": False,
+        "consult_topic": "",
+        "consult_question": "",
+    }
+
+    domain_result = (DomainIntent.OUT_OF_DOMAIN, 0.1, 0.9, {"out_hits": 1, "strict_in_hits": 0})
+
+    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.routers.webhook._legacy.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.routers.webhook.decision.classify_intent", return_value=Intent.THANKS
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook.http._lookup_sender_branch", return_value=None
+    ), patch(
+        "app.routers.webhook.branch_selection._get_active_branches", return_value=[]
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy._extract_service_hint", return_value=None
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response == webhook_router.THANKS_RESPONSE
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("action") != "out_of_domain"
+
+
 def test_booking_confirm_requires_yes_for_llm_slot():
     saved_message_1 = Mock()
     saved_message_1.message_metadata = {}
@@ -3644,14 +4662,28 @@ def test_booking_confirm_requires_yes_for_llm_slot():
         conversation_query.filter.return_value.first.return_value = conversation
         user_query = Mock()
         user_query.filter.return_value.first.return_value = user
+        branch_query = Mock()
+        branch_query.filter.return_value.first.return_value = None
+        branch_phone_query = Mock()
+        branch_phone_query.filter.return_value.all.return_value = []
+
+        def _query(model):
+            if model is Client:
+                return client_query
+            if model is ClientSettings:
+                return settings_query
+            if model is Conversation:
+                return conversation_query
+            if model is User:
+                return user_query
+            if model is Branch:
+                return branch_query
+            if model is Branch.phone:
+                return branch_phone_query
+            return Mock()
 
         db = Mock()
-        db.query.side_effect = [
-            client_query,
-            settings_query,
-            conversation_query,
-            user_query,
-        ]
+        db.query.side_effect = _query
         db.add = Mock()
         db.flush = Mock()
         db.commit = Mock()
@@ -3689,6 +4721,7 @@ def test_booking_confirm_requires_yes_for_llm_slot():
         {
             "BOOKING_CONFIRM_ENABLED": "1",
             "BOOKING_CONFIRM_CONFIDENCE_THRESHOLD": "0.9",
+            "TZ": "UTC",
         },
     ), patch(
         "app.routers.webhook.decision._match_expected_reply_candidates",
@@ -3721,6 +4754,14 @@ def test_booking_confirm_requires_yes_for_llm_slot():
                 conversation_id=conversation_id,
             )
         )
+        assert response.success is True
+        assert "15:00" in response.bot_response
+        assert "верно" in response.bot_response.casefold()
+        confirmation = conversation.context.get("booking", {}).get("confirmation")
+        assert confirmation and confirmation.get("slot") == "datetime"
+        meta = saved_message_1.message_metadata.get("decision_meta", {})
+        assert meta.get("slot_confirmation_required") is True
+
         response_yes = asyncio.run(
             webhook_router._handle_webhook_payload(
                 payload_yes,
@@ -3731,14 +4772,6 @@ def test_booking_confirm_requires_yes_for_llm_slot():
                 conversation_id=conversation_id,
             )
         )
-
-    assert response.success is True
-    assert "15:00" in response.bot_response
-    assert "верно" in response.bot_response.casefold()
-    confirmation = conversation.context.get("booking", {}).get("confirmation")
-    assert confirmation and confirmation.get("slot") == "datetime"
-    meta = saved_message_1.message_metadata.get("decision_meta", {})
-    assert meta.get("slot_confirmation_required") is True
 
     assert response_yes.success is True
     assert webhook_router.MSG_BOOKING_ASK_NAME in response_yes.bot_response
@@ -3785,9 +4818,28 @@ def test_booking_slot_lock_keeps_booking_active_on_ood():
     conversation_query.filter.return_value.first.return_value = conversation
     user_query = Mock()
     user_query.filter.return_value.first.return_value = user
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = None
+    branch_phone_query = Mock()
+    branch_phone_query.filter.return_value.all.return_value = []
+
+    def _query(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Conversation:
+            return conversation_query
+        if model is User:
+            return user_query
+        if model is Branch:
+            return branch_query
+        if model is Branch.phone:
+            return branch_phone_query
+        return Mock()
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _query
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()

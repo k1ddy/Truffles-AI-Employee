@@ -35,6 +35,9 @@ Keycloak issues JWT; NextAuth stores session; API validates JWT signature and ma
 **Key:** один OIDC login может соответствовать нескольким `client_id`.  
 Console uses `agent_identities` to map OIDC `sub` → `agents` → `client_id`.
 
+**Company selection (если компаний несколько):**
+- `/console/v1/me` возвращает `companies[]` и `company_selection_required`.
+
 **Client selection (если клиентов несколько):**
 - `/console/v1/me` возвращает `clients[]` и `selection_required`.
 - API требует заголовок `X-Client-Id`, если клиентов > 1.
@@ -47,15 +50,21 @@ Console uses `agent_identities` to map OIDC `sub` → `agents` → `client_id`.
 **Access scope is enforced here:**
 `truffles-api/app/services/console_auth.py` → `get_console_context()`
 
-**Note (current limitation):**
-Org-level access реализован частично: есть `agent_memberships` и RBAC, но company/branch selection в UI
-ограничен выбором клиента. Полная модель Company → Client → Branch — по DEC-011.
+**Current implementation (code‑backed):**
+- Context Bar рендерится в `console-web/src/components/ConsoleShell.tsx` и показывает Company/Client/Branch
+  (company name при наличии, иначе краткий id).
+- Gate основан на `/console/v1/me` (`company_selection_required`/`selection_required`/`branch_selection_required`);
+  выбор хранится в `console:company_id` / `console:client_id` / `console:branch_id` и триггерит refetch.
+- Если `branch_selection_required=false`, UI позволяет “Все филиалы” (пустой `branch_id`) в селекте.
+- Заголовки `X-Company-Id` / `X-Client-Id` / `X-Branch-Id` прокидываются в API через proxy.
+- `/console/v1/me` формируется в `truffles-api/app/routers/console.py`, контекст — в `console_auth.py`.
 
 Rules:
 - `sub` must exist in `agent_identities` (channel=`oidc`).
 - Agent must be `is_active`.
 - All queries filter by `context.client.id`.
-- If multiple clients → `X-Client-Id` is mandatory.
+- If multiple companies → `X-Company-Id` is mandatory.
+- If multiple clients → `X-Client-Id` is mandatory (внутри выбранной компании).
 - Non‑admin/owner users are restricted to their branch.
 - Provisioning: role=manager requires `branch_id` (branch‑scoped access only).
 - Если один `sub` связан с несколькими клиентами → API вернёт
@@ -64,13 +73,14 @@ Rules:
 **Tenant UX contract (short):**
 - Контекст (Company / Client / Branch) всегда виден в UI.
 - Selector показывается только если есть выбор (2+).
-- Ошибки должны быть объяснимы: “Выберите клиента/филиал”.
+- Ошибки должны быть объяснимы: “Выберите компанию/клиента/филиал”.
 - Fail‑closed: без валидного контекста запросы не выполняются.
 
 **Phase 1 UI contract (Control Plane):**
 - Верхний Context Bar показывает Company/Client/Branch.
-- При `selection_required` / `branch_selection_required` UI блокирует контент и требует выбор.
-- Выбор хранится в localStorage (`console:client_id`, `console:branch_id`) и передаётся в `X-Client-Id` / `X-Branch-Id`.
+- При `company_selection_required` / `selection_required` / `branch_selection_required` UI блокирует контент и требует выбор.
+- Выбор хранится в localStorage (`console:company_id`, `console:client_id`, `console:branch_id`) и передаётся в
+  `X-Company-Id` / `X-Client-Id` / `X-Branch-Id`.
 - Навигация в сайдбаре режется по роли (owner/admin/manager/support).
 
 **Phase 2 UI contract (Provisioning + Capabilities):**
@@ -78,6 +88,8 @@ Rules:
 - Provisioning flow: Create Branch (Draft) → Integrations (`instance_id`) → Team → Telegram (`telegram_chat_id`)
   → Knowledge (`knowledge_tag` / branch‑pack) → Booking (`working_hours` / `booking_settings` / specialists) → Go/No‑Go.
 - Go/No‑Go gate: проверяем только поля, нужные для включённых capabilities; без `instance_id` ветка остаётся draft.
+- Server‑side onboarding: `/console/v1/onboarding/status` и `/console/v1/onboarding/advance`, порядок шагов enforced API.
+- Ошибка порядка: `ONBOARDING_STEP_REQUIRED` (409) с `required_step/current_step/missing`.
 - Capabilities UI: tri‑state редактор (inherit/enable/disable), effective‑view (client + branch overrides),
   сохранение в `/console/v1/admin/capabilities` с `schema_version` и audit.
 - API provisioning: `POST /console/v1/admin/companies|clients|branches|agents`,
@@ -91,6 +103,15 @@ Rules:
 - Flow: Draft → Validate → Preview Diff → Publish → History → Rollback.
 - Publish gate: ошибки блокируют publish; warnings требуют явного подтверждения.
 - Fail‑closed: без tenant‑контекста действия недоступны.
+
+**Company → Client → Branch selection (UI + API, implemented)**
+- `/console/v1/me` возвращает `companies[]`, `company_selection_required`, `selected_company_id`;
+  у client доступен `company_name`.
+- UI хранит `console:company_id` и фильтрует `clients[]` по выбранной компании;
+  селект Company в `ConsoleShell` и gate — первый шаг перед client/branch.
+- Заголовок `X-Company-Id` прокидывается в API через `console-web/src/lib/api-client.ts`
+  и `/api/proxy/*`.
+- E2E учитывает `company-select`/`context-company-select` и `E2E_COMPANY_ID`.
 
 **Common symptom:** “Only 1–2 cases shown / no slots.”  
 Usually means the admin is mapped to the wrong `client_id` or the wrong client was selected.
@@ -109,15 +130,20 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 ## 3) Console Pages → API Endpoints
 
 **Cases (Заявки)**
-- UI: `console-web/src/components/CaseList.tsx`
+- UI: `console-web/src/components/InboxView.tsx` (3‑pane: list → dialog → details)
+- List: `console-web/src/components/CaseList.tsx` (compact)
+- Conversation: `console-web/src/components/CaseConversation.tsx` + `console-web/src/components/ChatInterface.tsx`
+- Details cards: `console-web/src/components/CaseDetailsPanel.tsx` (Context/Explain/Trace/Telegram)
+- Quick Replies: `console-web/src/components/InboxMacros.tsx`
 - API: `GET /console/v1/cases`
 - Data: `handovers` + `conversations` + `users`
 - Paging: cursor зависит от `sort_by` (по умолчанию `last_activity`).
 - Filters: `status`, `branch_id`, `assigned_to_me`, `q`, `phone`, `has_delivery_error`, `has_pending_outbox`, `sort_by`.
 - Health: `last_inbound_at`, `last_outbound_at`, `last_activity_at`, `last_message_preview`, `needs_reply`, `has_delivery_error`, `has_pending_outbox`.
+- RBAC: owner/admin/manager/support read; owner/admin/manager write (take/resolve/send).
 
 **Case view**
-- UI: `console-web/src/app/cases/[id]/page.tsx`
+- UI: `console-web/src/app/cases/[id]/page.tsx` (deep link into Inbox selection)
 - API: `GET /console/v1/cases/{id}`, `POST /take`, `POST /resolve`
 - Case Health: последние inbound/outbound + delivery flags.
 
@@ -125,36 +151,39 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - UI: `console-web/src/app/calendar/page.tsx`
 - API: `/calendar/specialists`, `/calendar/slots`, `/calendar/bookings`
 - Data: `specialists`, `bookings`
+- RBAC: owner/admin/manager read/write.
 
 **Knowledge (Знания)**
 - UI: `console-web/src/app/knowledge/page.tsx`
 - API: `GET /console/v1/knowledge/current`, `POST /console/v1/knowledge/validate`,
   `POST /console/v1/knowledge/publish`, `GET /console/v1/knowledge/history`,
   `POST /console/v1/knowledge/rollback`
-- RBAC: owner/admin write; manager/support read-only.
+- RBAC: owner/admin write; manager read-only; support no access.
 - Требует branch selection (`X-Branch-Id`).
 - Publish генерирует pack YAML и запускает Qdrant sync; при ошибке включается knowledge safe‑mode (handoff).
 
 **Team (Команда)**
 - UI: `console-web/src/app/team/page.tsx`
-- API: `GET /console/v1/agents` (owner/admin), `GET /console/v1/settings` (manager read-only),
-  `GET /calendar/specialists`
+- API: `GET /console/v1/agents` (owner/admin), `GET /calendar/specialists`
+- RBAC: owner/admin only (Team UI).
 - Data: `agents`, `agent_identities`, `specialists`
 
 **Settings**
 - UI: `console-web/src/app/settings/page.tsx`
 - API: `GET/PATCH /console/v1/settings`
+- RBAC: owner/admin only.
 - Build info: Settings header shows `NEXT_PUBLIC_BUILD_SHA` and `NEXT_PUBLIC_BUILD_TIME` for deploy diagnosis.
 
 **Audit**
 - UI: `console-web/src/app/audit/page.tsx`
 - API: `GET /console/v1/audit`
+- RBAC: owner/admin/support (read-only).
 
 **Ops**
 - UI: `console-web/src/components/OpsPage.tsx`
 - API: `GET /console/v1/health`, `/console/v1/metrics/daily`, `/console/v1/telegram/health`,
   `GET /console/v1/ops/outbox`, `POST /console/v1/ops/outbox/retry`
-- RBAC: owner/admin/support
+- RBAC: owner/admin/support read; owner/admin write (retry/verify/test).
 
 ---
 
@@ -166,7 +195,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - Health: `GET /console/v1/telegram/health` (Console API).
 - Verify: `POST /console/v1/telegram/verify` (owner/admin).
 - Test: `POST /console/v1/telegram/test` (owner/admin).
-- Agent linking: `GET /console/v1/agents` + `POST /console/v1/agents/{id}/telegram/link`.
+- Agent linking: `GET /console/v1/agents` + `POST /console/v1/agents/{id}/telegram/link` (self‑link allowed for any role; owner/admin can link others).
 - Case trail: `GET /console/v1/cases/{id}` returns `telegram_trail`.
 - Case actions: `POST /console/v1/cases/{id}/take|resolve|return` return `sync` status.
 - Branch routing: `GET /console/v1/settings` returns `branches[].telegram_chat_id` + `branches[].instance_id`.
@@ -229,6 +258,29 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - `client_settings.telegram_bot_token` задан и webhook установлен.
 - Агент связал Telegram через `/start <token>`.
 - `POST /console/v1/cases/{id}/take|resolve|return` идёт через `state_service`.
+
+**Role runbooks (short)**
+
+**Global admin (platform):**
+- Доступ: owner/admin + membership на уровне компании (см. `agent_memberships`), без отдельной platform‑role.
+- Создать Company/Client/Branch/Agent в Provisioning Wizard или через `/console/v1/admin/*`.
+- Проверить обязательные поля: `instance_id`, `telegram_chat_id`, `knowledge_tag`, `working_hours`, `booking_settings`.
+- Связать OIDC `sub` → `agent_identities`; для manager обязателен `branch_id`.
+- Go/No‑Go: `/console/v1/knowledge/validate|publish`, `/console/v1/telegram/verify`, /cases take/resolve.
+
+**Owner (client):**
+- Управляет знаниями, командой, интеграциями, включением capabilities.
+- Workflow: Settings → Provisioning Wizard, Knowledge → Validate/Publish, Team → Users (link Telegram).
+- Проверки: Telegram Verify/Test (client/branch), branch selection gate, Go/No‑Go.
+
+**Admin (client):**
+- Почти как owner, но без коммерческих/плановых настроек.
+- Поддерживает branches/agents/knowledge, следит за Telegram linking и операционными настройками.
+
+**Manager (branch):**
+- Branch‑scoped, нужен `branch_id`; доступ: Cases + Calendar, Knowledge read‑only; Team/Settings недоступны.
+- Обязательно выбрать филиал (или получить `branch_selection_required`).
+- Рабочий цикл: взять заявку → ответить клиенту → resolve/return.
 
 **Where to change code:**
 - API endpoint + mapping: `truffles-api/app/routers/console.py`
@@ -367,6 +419,11 @@ curl -s -X POST "$KEYCLOAK_TOKEN_URL" \
 - `/console/v1/me` вернул `selection_required=true` → выбрать клиента или передать `X-Client-Id`.
 - Очистить `localStorage` ключ `console:client_id`, если выбранный клиент удалён.
 - Решение: оставить одну связку `agent_identities` для нужного клиента или использовать `X-Client-Id`.
+
+**400 COMPANY_SELECTION_REQUIRED**
+- Доступно несколько компаний.
+- `/console/v1/me` вернул `company_selection_required=true` → выбрать компанию или передать `X-Company-Id`.
+- Очистить `localStorage` ключ `console:company_id`, если выбранная компания удалена.
 
 **400 BRANCH_SELECTION_REQUIRED**
 - Роль branch‑scoped и доступно несколько филиалов.

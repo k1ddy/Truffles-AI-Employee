@@ -433,6 +433,50 @@ export interface paths {
         patch: operations["updateSettings"];
         trace?: never;
     };
+    "/onboarding/status": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** Get onboarding status */
+        get: operations["getOnboardingStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/onboarding/advance": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Advance onboarding step */
+        post: operations["advanceOnboarding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge/current": {
         parameters: {
             query?: never;
@@ -758,6 +802,7 @@ export interface components {
             name?: string;
             /** Format: uuid */
             company_id?: string | null;
+            company_name?: string | null;
         };
         ClientCreateRequest: {
             slug: string;
@@ -785,6 +830,9 @@ export interface components {
             booking_settings?: {
                 [key: string]: unknown;
             } | null;
+            onboarding_state?: string | null;
+            /** Format: date-time */
+            onboarding_updated_at?: string | null;
         };
         BranchCreateRequest: {
             /** Format: uuid */
@@ -823,13 +871,40 @@ export interface components {
             } | null;
             is_active?: boolean | null;
         };
+        OnboardingStepStatus: {
+            /** @enum {string} */
+            id: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
+            /** @enum {string} */
+            status: "complete" | "available" | "locked" | "skipped";
+            required: boolean;
+            missing?: string[];
+        };
+        OnboardingStatusResponse: {
+            /** Format: uuid */
+            branch_id: string;
+            /** @enum {string} */
+            current_step: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
+            steps: components["schemas"]["OnboardingStepStatus"][];
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        OnboardingAdvanceRequest: {
+            /** Format: uuid */
+            branch_id: string;
+            /** @enum {string} */
+            step_id: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
+        };
         MeResponse: {
             agent?: components["schemas"]["Agent"];
             client?: components["schemas"]["Client"];
             branches?: components["schemas"]["Branch"][];
             clients?: components["schemas"]["Client"][];
+            companies?: components["schemas"]["Company"][];
+            company_selection_required?: boolean;
             selection_required?: boolean;
             branch_selection_required?: boolean;
+            /** Format: uuid */
+            selected_company_id?: string | null;
             /** Format: uuid */
             selected_branch_id?: string | null;
         };
@@ -1429,6 +1504,27 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description Onboarding step required before this action */
+        OnboardingStepRequired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "ONBOARDING_STEP_REQUIRED",
+                 *         "message": "Complete previous onboarding step",
+                 *         "details": {
+                 *           "required_step": "integrations"
+                 *         },
+                 *         "trace_id": "abc123"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
         /** @description Request validation error */
         ValidationError: {
             headers: {
@@ -1446,7 +1542,7 @@ export interface components {
         client_id_header: string;
         /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
         branch_id_header: string;
-        /** @description Optional branch override for effective capabilities. */
+        /** @description Optional branch override for branch-scoped operations. */
         branch_id_query: string;
         /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
         case_id: string;
@@ -1557,6 +1653,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["OnboardingStepRequired"];
         };
     };
     listCases: {
@@ -1928,6 +2025,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["OnboardingStepRequired"];
         };
     };
     sendTelegramTest: {
@@ -2088,6 +2186,70 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    getOnboardingStatus: {
+        parameters: {
+            query?: {
+                /** @description Optional branch override for branch-scoped operations. */
+                branch_id?: components["parameters"]["branch_id_query"];
+            };
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Onboarding status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingStatusResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    advanceOnboarding: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnboardingAdvanceRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated onboarding status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingStatusResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["OnboardingStepRequired"];
+        };
+    };
     getKnowledgeCurrent: {
         parameters: {
             query?: never;
@@ -2146,6 +2308,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["OnboardingStepRequired"];
         };
     };
     publishKnowledge: {
@@ -2178,6 +2341,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["OnboardingStepRequired"];
         };
     };
     listKnowledgeHistory: {
@@ -2330,6 +2494,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["OnboardingStepRequired"];
             422: components["responses"]["ValidationError"];
         };
     };
@@ -2359,6 +2524,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["OnboardingStepRequired"];
             422: components["responses"]["ValidationError"];
         };
     };
@@ -2425,7 +2591,7 @@ export interface operations {
     getAdminCapabilities: {
         parameters: {
             query?: {
-                /** @description Optional branch override for effective capabilities. */
+                /** @description Optional branch override for branch-scoped operations. */
                 branch_id?: components["parameters"]["branch_id_query"];
             };
             header?: {

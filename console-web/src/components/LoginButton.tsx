@@ -12,6 +12,7 @@ export default function LoginButton() {
                 <button
                     onClick={() => {
                         if (typeof window !== "undefined") {
+                            window.localStorage.removeItem("console:company_id")
                             window.localStorage.removeItem("console:client_id")
                             window.localStorage.removeItem("console:branch_id")
                         }

@@ -54,6 +54,7 @@ class ConsoleClient(BaseModel):
     slug: str
     name: Optional[str] = None
     company_id: Optional[UUID] = None
+    company_name: Optional[str] = None
 
 
 class ConsoleBranch(BaseModel):
@@ -68,6 +69,8 @@ class ConsoleBranch(BaseModel):
     timezone: Optional[str] = None
     working_hours: Optional[dict] = None
     booking_settings: Optional[dict] = None
+    onboarding_state: Optional[str] = None
+    onboarding_updated_at: Optional[str] = None
 
 
 class ConsoleCompanyCreateRequest(BaseModel):
@@ -120,6 +123,38 @@ class ConsoleBranchUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
 
 
+OnboardingStepId = Literal[
+    "branch_draft",
+    "integrations",
+    "team",
+    "telegram",
+    "knowledge",
+    "booking",
+    "go_no_go",
+]
+
+OnboardingStepStatusValue = Literal["complete", "available", "locked", "skipped"]
+
+
+class ConsoleOnboardingStepStatus(BaseModel):
+    id: OnboardingStepId
+    status: OnboardingStepStatusValue
+    required: bool
+    missing: list[str] = []
+
+
+class ConsoleOnboardingStatusResponse(BaseModel):
+    branch_id: UUID
+    current_step: OnboardingStepId
+    steps: list[ConsoleOnboardingStepStatus]
+    updated_at: Optional[str] = None
+
+
+class ConsoleOnboardingAdvanceRequest(BaseModel):
+    branch_id: UUID
+    step_id: OnboardingStepId
+
+
 class ConsoleAgentCreateRequest(BaseModel):
     client_id: UUID
     branch_id: Optional[UUID] = None
@@ -138,8 +173,11 @@ class ConsoleMeResponse(BaseModel):
     client: Optional[ConsoleClient] = None
     branches: list[ConsoleBranch]
     clients: list[ConsoleClient] = []
+    companies: list[ConsoleCompany] = []
+    company_selection_required: bool = False
     selection_required: bool = False
     branch_selection_required: bool = False
+    selected_company_id: Optional[UUID] = None
     selected_branch_id: Optional[UUID] = None
 
 

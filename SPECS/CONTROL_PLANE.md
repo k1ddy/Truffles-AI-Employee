@@ -35,6 +35,30 @@
 
 **Принцип:** UI и навигация режутся по роли, чтобы не было шума.
 
+**Runtime roles (impl):**
+- В коде реально используются: `owner`, `admin`, `manager`, `support`
+  (см. `truffles-api/app/services/console_auth.py`).
+- Platform Admin/Support — концепт уровня доступа; фактически доступ задаётся
+  membership‑scope + роль owner/admin/support.
+- Specialist/Viewer пока не реализованы в RBAC.
+
+**RBAC matrix (runtime, enforced in API/UI):**
+
+| Раздел | Read | Write |
+|--------|------|-------|
+| Inbox (Cases) | owner/admin/manager/support | owner/admin/manager |
+| Knowledge | owner/admin/manager | owner/admin |
+| Team | owner/admin | owner/admin |
+| Calendar | owner/admin/manager | owner/admin/manager |
+| Settings | owner/admin | owner/admin |
+| Ops | owner/admin/support | owner/admin |
+| Audit | owner/admin/support | — |
+| Provisioning (`/console/v1/admin/*`) | owner/admin/support (read) | owner/admin |
+
+Примечания:
+- Support = read‑only для Ops/Provisioning; write‑операции доступны только owner/admin.
+- Team/Settings скрыты для manager/support; read‑only команда не предоставляется.
+
 ---
 
 ## 3) Tenant‑контекст и UX выбора (обязательный канон)
@@ -43,8 +67,13 @@
 
 - Контекст **Company → Client → Branch** всегда виден.
 - Selector показывается только при наличии выбора.
-- При `selection_required` / `branch_selection_required` — блокирующее состояние.
-- Ошибки понятны: “Выберите клиента/филиал”, “Нет доступа”.
+- При `company_selection_required` / `selection_required` / `branch_selection_required` — блокирующее состояние.
+- При нескольких компаниях `X-Company-Id` обязателен (fail‑closed).
+- Ошибки понятны: “Выберите компанию/клиента/филиал”, “Нет доступа”.
+
+**Implementation note (2026‑01‑27):**
+- UI показывает Company как `company_id` (без имени и без выбора), selection gate есть только для client/branch.
+- Детальный план Company→Client→Branch selection закреплён в `docs/CONSOLE_GUIDE.md`.
 
 ---
 
@@ -59,7 +88,7 @@
 
 ---
 
-## 5) Онбординг и Provisioning (Platform Admin)
+## 5) Онбординг и Provisioning (owner/admin с platform‑scope)
 
 **Provisioning flow (Web‑first)** как стандарт:
 1) Create Branch (Draft): name, slug, timezone (default ok), остальное optional (`is_active=false` без `instance_id`).
@@ -71,6 +100,14 @@
 7) Go/No‑Go: проверяем только поля, нужные для включённых capabilities.
 
 **Go/No‑Go gate:** обязательные поля проверяются по включённым capabilities; без `instance_id` ветка остаётся draft.
+
+**Server‑side onboarding state machine (branch‑scoped):**
+- Шаги: `branch_draft → integrations → team → telegram → knowledge → booking → go_no_go`.
+- Проверка порядка выполняется на API (не только UI).
+- API:
+  - `GET /console/v1/onboarding/status?branch_id=...`
+  - `POST /console/v1/onboarding/advance`
+- Ошибка порядка: `ONBOARDING_STEP_REQUIRED` (409), с `required_step/current_step`.
 
 ---
 

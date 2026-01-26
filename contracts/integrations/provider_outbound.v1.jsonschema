@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truffles.ai/contracts/integrations/provider_outbound.v1.jsonschema",
+  "title": "Provider Outbound v1",
+  "type": "object",
+  "required": [
+    "outbox_id",
+    "provider",
+    "channel",
+    "tenant_context",
+    "to",
+    "content",
+    "idempotency_key"
+  ],
+  "properties": {
+    "outbox_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "channel": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tenant_context": {
+      "$ref": "../tenancy/tenant_context.v1.jsonschema"
+    },
+    "to": {
+      "type": "object",
+      "properties": {
+        "id": {"type": ["string", "null"]},
+        "phone": {"type": ["string", "null"]},
+        "jid": {"type": ["string", "null"]},
+        "display_name": {"type": ["string", "null"]}
+      },
+      "anyOf": [
+        {"required": ["id"]},
+        {"required": ["phone"]},
+        {"required": ["jid"]}
+      ],
+      "additionalProperties": false
+    },
+    "content": {
+      "type": "object",
+      "properties": {
+        "text": {"type": ["string", "null"]},
+        "media": {
+          "type": ["object", "null"],
+          "properties": {
+            "media_type": {"type": "string"},
+            "source_url": {"type": ["string", "null"], "format": "uri"},
+            "signed_url": {"type": ["string", "null"], "format": "uri"},
+            "expires_at": {"type": ["string", "null"], "format": "date-time"},
+            "sha256": {"type": ["string", "null"]},
+            "size_bytes": {"type": ["integer", "null"], "minimum": 0},
+            "mime_type": {"type": ["string", "null"]},
+            "filename": {"type": ["string", "null"]},
+            "caption": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "callback_url": {
+      "type": ["string", "null"],
+      "format": "uri"
+    },
+    "requested_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "metadata": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "extensions": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

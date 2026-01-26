@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
-import { adminApi, authApi, telegramApi } from "@/lib/api-client";
+import { adminApi, authApi, canAccessConsole, onboardingApi, telegramApi, type ConsoleRole } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import type { components } from "@/types/api.generated";
+import AccessDenied from "@/components/AccessDenied";
 
 interface Branch {
     id: string;
@@ -73,20 +74,35 @@ type ProvisioningBranch = components["schemas"]["Branch"];
 type ProvisioningAgent = components["schemas"]["Agent"];
 type CapabilitiesPayload = components["schemas"]["CapabilitiesPayload"];
 type CapabilitiesResponse = components["schemas"]["CapabilitiesResponse"];
+type OnboardingStatus = components["schemas"]["OnboardingStatusResponse"];
+type OnboardingStepStatus = components["schemas"]["OnboardingStepStatus"];
 
-type AgentRole = "owner" | "admin" | "manager" | "support";
+type AgentRole = ConsoleRole;
 
 const DEFAULT_TIMEZONE = "Asia/Almaty";
 
 const WIZARD_STEPS = [
-    { id: "branch", label: "Филиал", hint: "Draft" },
+    { id: "branch_draft", label: "Филиал", hint: "Draft" },
     { id: "integrations", label: "Интеграции", hint: "instance_id" },
     { id: "team", label: "Команда", hint: "Owner/Admin" },
     { id: "telegram", label: "Telegram", hint: "chat_id" },
     { id: "knowledge", label: "Knowledge", hint: "pack" },
     { id: "booking", label: "Booking", hint: "calendar" },
-    { id: "go", label: "Go/No-Go", hint: "capabilities" },
+    { id: "go_no_go", label: "Go/No-Go", hint: "capabilities" },
 ] as const;
+
+const MISSING_LABELS: Record<string, string> = {
+    instance_id: "instance_id (WhatsApp)",
+    owner_admin: "Owner/Admin",
+    telegram_chat_id: "telegram_chat_id",
+    knowledge_tag: "knowledge_tag",
+    knowledge_published: "Knowledge publish",
+    working_hours: "working_hours",
+    booking_settings: "booking_settings",
+    specialists: "specialists",
+    capabilities: "capabilities",
+    branch_active: "Филиал активен",
+};
 
 type WizardStepId = (typeof WIZARD_STEPS)[number]["id"];
 
@@ -229,9 +245,10 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
     });
 
     const role = meData?.agent?.role ?? "manager";
-    const canEdit = role === "owner" || role === "admin";
+    const canEdit = canAccessConsole(role, "settings", "write");
 
     const [stepIndex, setStepIndex] = useState(0);
+    const [autoStepSync, setAutoStepSync] = useState(true);
     const [companyName, setCompanyName] = useState("");
     const [companyId, setCompanyId] = useState("");
     const [billingInfo, setBillingInfo] = useState("");
@@ -292,6 +309,10 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
         }));
     }, [branchData]);
 
+    useEffect(() => {
+        setAutoStepSync(true);
+    }, [branchData?.id]);
+
     const { data: capabilitiesData, isLoading: capabilitiesLoading, error: capabilitiesError, refetch: refetchCapabilities } = useQuery({
         queryKey: ["admin-capabilities", clientId, branchData?.id],
         queryFn: async () => {
@@ -302,6 +323,18 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
             return response.data as CapabilitiesResponse;
         },
         enabled: !!session && !!clientId && !!branchData?.id,
+    });
+
+    const { data: onboardingStatus, refetch: refetchOnboarding } = useQuery({
+        queryKey: ["onboarding-status", branchData?.id],
+        queryFn: async () => {
+            if (!branchData?.id) {
+                return null;
+            }
+            const response = await onboardingApi.status(branchData.id);
+            return response.data as OnboardingStatus;
+        },
+        enabled: !!session && !!branchData?.id,
     });
 
     useEffect(() => {
@@ -334,6 +367,15 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
             return next;
         });
     }, [branchData, capabilitiesData, capabilitiesTouched]);
+
+    useEffect(() => {
+        if (!autoStepSync || !onboardingStatus?.steps?.length) {
+            return;
+        }
+        const nextIndex = onboardingStatus.steps.findIndex((step) => step.status === "available");
+        setStepIndex(nextIndex >= 0 ? nextIndex : WIZARD_STEPS.length - 1);
+        setAutoStepSync(false);
+    }, [autoStepSync, onboardingStatus]);
 
     const createCompanyMutation = useMutation({
         mutationFn: async (payload: components["schemas"]["CompanyCreateRequest"]) => {
@@ -374,6 +416,7 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
         },
         onSuccess: (data) => {
             setBranchData(data.branch as ProvisioningBranch);
+            refetchOnboarding();
             toast.success("Филиал создан");
         },
         onError: (error) => {
@@ -391,6 +434,7 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
         },
         onSuccess: (data) => {
             setBranchData(data as ProvisioningBranch);
+            refetchOnboarding();
             toast.success("Филиал обновлён");
         },
         onError: (error) => {
@@ -410,6 +454,7 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
         onSuccess: (data) => {
             setCreatedAgents((prev) => [data.agent as ProvisioningAgent, ...prev]);
             queryClient.invalidateQueries({ queryKey: ["agents"] });
+            refetchOnboarding();
             toast.success("Пользователь добавлен");
         },
         onError: (error) => {
@@ -425,6 +470,7 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
         onSuccess: (data) => {
             setCapabilitiesSavedAt(data.updated_at ?? new Date().toISOString());
             refetchCapabilities();
+            refetchOnboarding();
             toast.success("Capabilities сохранены");
         },
         onError: (error) => {
@@ -432,20 +478,78 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
         },
     });
 
+    const resolveNextStepIndex = (status?: OnboardingStatus | null) => {
+        if (!status?.steps?.length) {
+            return 0;
+        }
+        const nextIndex = status.steps.findIndex((step) => step.status === "available");
+        return nextIndex >= 0 ? nextIndex : WIZARD_STEPS.length - 1;
+    };
+
+    const advanceOnboardingMutation = useMutation({
+        mutationFn: async (stepId: WizardStepId) => {
+            if (!branchData?.id) {
+                throw new Error("BRANCH_REQUIRED");
+            }
+            const response = await onboardingApi.advance({
+                branch_id: branchData.id,
+                step_id: stepId,
+            });
+            return response.data as OnboardingStatus;
+        },
+        onSuccess: (data) => {
+            queryClient.setQueryData(["onboarding-status", branchData?.id], data);
+            setStepIndex(resolveNextStepIndex(data));
+            setAutoStepSync(false);
+            refetchOnboarding();
+        },
+        onError: (error) => {
+            if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
+                toast.error("Сначала создайте филиал");
+                return;
+            }
+            handleError(error);
+        },
+    });
+
+    const stepStateById = useMemo(() => {
+        const map: Partial<Record<WizardStepId, OnboardingStepStatus>> = {};
+        if (onboardingStatus?.steps?.length) {
+            onboardingStatus.steps.forEach((step) => {
+                map[step.id as WizardStepId] = step;
+            });
+        }
+        return map;
+    }, [onboardingStatus]);
+
     const stepStatus = useMemo(() => {
+        if (onboardingStatus?.steps?.length) {
+            const status: Record<WizardStepId, boolean> = {
+                branch_draft: false,
+                integrations: false,
+                team: false,
+                telegram: false,
+                knowledge: false,
+                booking: false,
+                go_no_go: false,
+            };
+            onboardingStatus.steps.forEach((step) => {
+                status[step.id as WizardStepId] = step.status === "complete" || step.status === "skipped";
+            });
+            return status;
+        }
         const hasWorkingHours = isNonEmptyRecord(branchData?.working_hours);
         const hasBookingSettings = isNonEmptyRecord(branchData?.booking_settings);
-        const status: Record<WizardStepId, boolean> = {
-            branch: !!branchData?.id,
+        return {
+            branch_draft: !!branchData?.id,
             integrations: !!branchData?.instance_id,
             team: createdAgents.length > 0,
             telegram: !!branchData?.telegram_chat_id,
             knowledge: !!branchData?.knowledge_tag,
             booking: hasWorkingHours && hasBookingSettings,
-            go: !!capabilitiesSavedAt,
+            go_no_go: !!capabilitiesSavedAt,
         };
-        return status;
-    }, [branchData, createdAgents.length, capabilitiesSavedAt]);
+    }, [onboardingStatus, branchData, createdAgents.length, capabilitiesSavedAt]);
 
     const capabilitiesPreview = useMemo(() => {
         const clientPayload = capabilitiesData?.client_capabilities?.payload ?? null;
@@ -722,6 +826,11 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
     };
 
     const currentStep = WIZARD_STEPS[stepIndex];
+    const currentStepState = stepStateById[currentStep.id];
+    const currentStepMissing = currentStepState?.missing ?? [];
+    const currentStepMissingLabels = currentStepMissing.map((item) => MISSING_LABELS[item] ?? item);
+    const currentStepLocked = currentStepState?.status === "locked";
+    const advanceBlocked = currentStepLocked || (currentStepState?.required && currentStepMissing.length > 0);
 
     return (
         <div className="card-surface p-6 mb-8" data-testid="provisioning-wizard">
@@ -840,13 +949,25 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
                 {WIZARD_STEPS.map((step, index) => {
                     const active = index === stepIndex;
                     const completed = stepStatus[step.id];
+                    const stepState = stepStateById[step.id];
+                    const locked = stepState?.status === "locked";
+                    const statusLabel = stepState?.status === "skipped"
+                        ? "Пропущено"
+                        : completed
+                            ? "Готово"
+                            : step.hint;
                     return (
                         <button
                             key={step.id}
                             type="button"
                             onClick={() => setStepIndex(index)}
+                            disabled={locked}
                             className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-left transition ${
-                                active ? "border-primary bg-primary text-primary-foreground" : "border-border/60 bg-card hover:bg-muted"
+                                active
+                                    ? "border-primary bg-primary text-primary-foreground"
+                                    : locked
+                                        ? "border-border/40 bg-muted text-muted-foreground cursor-not-allowed"
+                                        : "border-border/60 bg-card hover:bg-muted"
                             }`}
                         >
                             <div className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold ${
@@ -857,7 +978,7 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
                             <div>
                                 <div className="text-sm font-semibold">{step.label}</div>
                                 <div className={`text-xs ${active ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-                                    {completed ? "Готово" : step.hint}
+                                    {statusLabel}
                                 </div>
                             </div>
                         </button>
@@ -878,7 +999,14 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
                     )}
                 </div>
 
-                {currentStep.id === "branch" && (
+                {currentStepMissing.length > 0 && (
+                    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        <div className="font-semibold">Нужно завершить перед продолжением:</div>
+                        <div className="mt-1">{currentStepMissingLabels.join(", ")}</div>
+                    </div>
+                )}
+
+                {currentStep.id === "branch_draft" && (
                     <div className="space-y-4">
                         <p className="text-sm text-muted-foreground">
                             Draft филиал создаётся без instance_id. После создания можно заполнять интеграции и знания.
@@ -1156,7 +1284,7 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
                     </div>
                 )}
 
-                {currentStep.id === "go" && (
+                {currentStep.id === "go_no_go" && (
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             <div className="space-y-4">
@@ -1499,10 +1627,15 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
                     <button
                         type="button"
                         className="btn-primary"
-                        onClick={() => setStepIndex((prev) => Math.min(prev + 1, WIZARD_STEPS.length - 1))}
-                        disabled={stepIndex === WIZARD_STEPS.length - 1 || (stepIndex === 0 && !branchData?.id)}
+                        onClick={() => advanceOnboardingMutation.mutate(currentStep.id)}
+                        disabled={
+                            stepIndex === WIZARD_STEPS.length - 1
+                            || (stepIndex === 0 && !branchData?.id)
+                            || advanceBlocked
+                            || advanceOnboardingMutation.isPending
+                        }
                     >
-                        Далее
+                        {advanceOnboardingMutation.isPending ? "Проверка..." : "Далее"}
                     </button>
                 </div>
             </div>
@@ -1520,10 +1653,23 @@ export default function SettingsPage() {
     const buildShaLabel = buildSha ? buildSha.slice(0, 7) : "unknown";
     const buildTimeLabel = buildTime ?? "unknown";
 
+    const { data: meData, isLoading: meLoading } = useQuery({
+        queryKey: ["console-me"],
+        queryFn: async () => {
+            const response = await authApi.getMe();
+            return response.data;
+        },
+        enabled: !!session,
+    });
+
+    const role = meData?.agent?.role ?? "manager";
+    const canReadSettings = canAccessConsole(role, "settings", "read");
+    const canWriteSettings = canAccessConsole(role, "settings", "write");
+
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["settings"],
         queryFn: fetchSettings,
-        enabled: !!session,
+        enabled: !!session && canReadSettings,
     });
 
     const verifyMutation = useMutation({
@@ -1577,6 +1723,20 @@ export default function SettingsPage() {
             <div className="p-8 text-center text-muted-foreground">
                 Пожалуйста, войдите для просмотра настроек.
             </div>
+        );
+    }
+
+    if (meLoading) {
+        return (
+            <div className="p-8 text-center text-muted-foreground">
+                Загрузка роли...
+            </div>
+        );
+    }
+
+    if (!canReadSettings) {
+        return (
+            <AccessDenied message="Эта роль не имеет доступа к настройкам." />
         );
     }
 
@@ -1701,7 +1861,7 @@ export default function SettingsPage() {
                                     payload: { scope: "client" },
                                 })
                             }
-                            disabled={verifyTarget === "client"}
+                            disabled={verifyTarget === "client" || !canWriteSettings}
                             data-testid="settings-telegram-verify"
                         >
                             {verifyTarget === "client" ? "Отправка..." : "Verify"}
@@ -1716,11 +1876,14 @@ export default function SettingsPage() {
                                     payload: { scope: "client" },
                                 })
                             }
-                            disabled={testTarget === "client"}
+                            disabled={testTarget === "client" || !canWriteSettings}
                             data-testid="settings-telegram-test"
                         >
                             {testTarget === "client" ? "Отправка..." : "Send test"}
                         </button>
+                        {!canWriteSettings && (
+                            <span className="text-xs text-muted-foreground">Только owner/admin</span>
+                        )}
                     </div>
                 </div>
 
@@ -1777,7 +1940,7 @@ export default function SettingsPage() {
                                                 payload: { scope: "branch", branch_id: branch.id },
                                             })
                                         }
-                                        disabled={!branch.telegram_chat_id || verifyTarget === branch.id}
+                                        disabled={!branch.telegram_chat_id || verifyTarget === branch.id || !canWriteSettings}
                                         data-testid="settings-branch-verify"
                                     >
                                         {verifyTarget === branch.id ? "Отправка..." : "Verify"}
@@ -1792,7 +1955,7 @@ export default function SettingsPage() {
                                                 payload: { scope: "branch", branch_id: branch.id },
                                             })
                                         }
-                                        disabled={!branch.telegram_chat_id || testTarget === branch.id}
+                                        disabled={!branch.telegram_chat_id || testTarget === branch.id || !canWriteSettings}
                                         data-testid="settings-branch-test"
                                     >
                                         {testTarget === branch.id ? "Отправка..." : "Send test"}
