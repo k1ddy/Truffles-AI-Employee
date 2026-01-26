@@ -86,6 +86,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-phase3-knowledge-backend.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-phase5-inbox-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-rbac-matrix.md`
+- `docs/TASK_PACKAGES/TP-2026-01-26-provider-gateway-architecture.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-docs-selection-runbooks.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`
