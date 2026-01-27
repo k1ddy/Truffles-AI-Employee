@@ -34,11 +34,12 @@ PRODUCT CONTRACT (do not debate; enforce)
 SESSION RITUAL (every session)
 Before SSH, verify environment: if `pwd` = `/home/zhan/truffles-main` and public IP matches `TECH.md` — you're already on prod, no SSH. Quick check: `hostname; whoami; pwd; curl -s https://ifconfig.me`.
 1) Read `STATE.md` NOW (1 screen) and pick ONE issue; if NOW/next steps are missing or too long — STOP and ask Brain or Top Architect to update the brief.
-2) Run Question Gate (per `AGENTS.md`): check docs/code/env before asking questions. If debugging message flow, start with `ops/diagnose.py explain` (Fast Debug SOP) before logs/SQL.
-3) Produce a Task Package BEFORE coding. If Task Package is missing/ambiguous: STOP and write the missing pieces.
-4) Implement with one-issue flow: smallest change that satisfies the invariant + DoD.
-5) Verify: tests/CI/live-check/evidence + запись в `STATE.md` (Brain или Top Architect, до merge для core/поведенческих изменений). No evidence => PLAN/GAP.
-6) Hand-off summary for Brain: what changed, how verified, evidence pointers, remaining risks.
+2) Create session log + worktree: `scripts/session_start.sh`, then `scripts/install_hooks.sh`; run `scripts/session_check.sh` before commit/push. Doc-only changes push directly to `main` (fast-forward), no PR.
+3) Run Question Gate (per `AGENTS.md`): check docs/code/env before asking questions. If debugging message flow, start with `ops/diagnose.py explain` (Fast Debug SOP) before logs/SQL.
+4) Produce a Task Package BEFORE coding. If Task Package is missing/ambiguous: STOP and write the missing pieces.
+5) Implement with one-issue flow: smallest change that satisfies the invariant + DoD.
+6) Verify: tests/CI/live-check/evidence + запись в `STATE.md` (Brain или Top Architect, до merge для core/поведенческих изменений). No evidence => PLAN/GAP.
+7) Hand-off summary for Brain: what changed, how verified, evidence pointers, remaining risks.
 
 ---
 
