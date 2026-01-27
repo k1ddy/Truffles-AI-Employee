@@ -109,11 +109,18 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const branchIsValid = selectedBranchId
         ? branches.some((branch) => branch.id === selectedBranchId)
         : false;
-    const branchSelectionRequired = branches.length > 1 && !branchIsValid;
+    const branchSelectionRequired = branches.length > 0 && !branchIsValid;
+    const branchGateMessage = selectedBranchId && !branchIsValid
+        ? "Выбранный филиал недоступен. Выберите доступный филиал."
+        : "Управление знаниями выполняется отдельно для каждого филиала.";
 
     useEffect(() => {
-        setBranchId(selectedBranchId ?? "");
-    }, [selectedBranchId]);
+        if (!selectedBranchId || !branchIsValid) {
+            setBranchId("");
+            return;
+        }
+        setBranchId(selectedBranchId);
+    }, [selectedBranchId, branchIsValid]);
 
     const currentQuery = useQuery({
         queryKey: ["knowledge-current"],
@@ -280,9 +287,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             <div className="card-surface max-w-xl p-8" data-testid="knowledge-branch-gate">
                 <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Требуется выбор</p>
                 <h2 className="text-2xl font-semibold mt-3 mb-4">Выберите филиал</h2>
-                <p className="text-sm text-muted-foreground mb-6">
-                    Управление знаниями выполняется отдельно для каждого филиала.
-                </p>
+                <p className="text-sm text-muted-foreground mb-6">{branchGateMessage}</p>
                 <select
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                     value={branchId}

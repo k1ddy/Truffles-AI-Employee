@@ -98,12 +98,53 @@ function formatCompanyLabel(companyName?: string | null, companyId?: string | nu
     return "—";
 }
 
-function findBranchName(branches: BranchSummary[] | undefined, branchId: string | null | undefined): string {
+function formatClientLabel(client?: ClientSummary | null): string {
+    if (!client) {
+        return "—";
+    }
+    if (client.name) {
+        return client.name;
+    }
+    if (client.id) {
+        return client.id.slice(0, 8);
+    }
+    return "—";
+}
+
+function findBranchName(
+    branches: BranchSummary[] | undefined,
+    branchId: string | null | undefined,
+    allowAllBranches = false
+): string {
     if (!branchId || !branches?.length) {
+        if (allowAllBranches && branches?.length) {
+            return "Все филиалы";
+        }
         return "—";
     }
     const match = branches.find((branch) => branch.id === branchId);
-    return match?.name ?? "—";
+    if (match?.name) {
+        return match.name;
+    }
+    if (branchId) {
+        return branchId.slice(0, 8);
+    }
+    return "—";
+}
+
+function buildContextSummary(me: ConsoleMe): string {
+    const companyId = me.selected_company_id ?? me.client?.company_id ?? null;
+    const companyName = (me.companies ?? []).find((company) => company.id === companyId)?.name
+        ?? me.client?.company_name
+        ?? null;
+    const companyLabel = formatCompanyLabel(companyName, companyId ?? null);
+    const clientLabel = formatClientLabel(me.client);
+    const branchLabel = findBranchName(
+        me.branches,
+        me.selected_branch_id ?? null,
+        !me.branch_selection_required
+    );
+    return `Контекст: ${companyLabel} / ${clientLabel} / ${branchLabel}`;
 }
 
 function SelectionGate({
@@ -311,7 +352,7 @@ function ContextBar({
                         ))}
                     </select>
                 ) : (
-                    <span className="text-sm font-semibold">{me.client?.name ?? "—"}</span>
+                    <span className="text-sm font-semibold">{formatClientLabel(me.client)}</span>
                 )}
             </div>
             <div className="flex flex-col gap-1 min-w-[180px]">
@@ -333,7 +374,7 @@ function ContextBar({
                     </select>
                 ) : (
                     <span className="text-sm font-semibold">
-                        {findBranchName(branches, branchId)}
+                        {findBranchName(branches, branchId, allowAllBranches)}
                     </span>
                 )}
             </div>
@@ -398,6 +439,14 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const [contextNotice, setContextNotice] = useState<string | null>(null);
     const contextBusy = isSubmitting || isFetching;
 
+    const setContextNoticeFromData = (nextData?: ConsoleMe | null) => {
+        if (nextData) {
+            setContextNotice(buildContextSummary(nextData));
+            return;
+        }
+        setContextNotice("Контекст обновлён");
+    };
+
     useEffect(() => {
         if (!contextNotice) {
             return undefined;
@@ -431,9 +480,9 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             writeLocalStorage(COMPANY_ID_STORAGE_KEY, companyId);
             writeLocalStorage(CLIENT_ID_STORAGE_KEY, null);
             writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
-            await refetch();
+            const result = await refetch();
             queryClient.invalidateQueries();
-            setContextNotice("Контекст обновлён");
+            setContextNoticeFromData(result.data as ConsoleMe | undefined);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -449,9 +498,9 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         try {
             writeLocalStorage(CLIENT_ID_STORAGE_KEY, clientId);
             writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
-            await refetch();
+            const result = await refetch();
             queryClient.invalidateQueries();
-            setContextNotice("Контекст обновлён");
+            setContextNoticeFromData(result.data as ConsoleMe | undefined);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -466,9 +515,9 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         setIsSubmitting(true);
         try {
             writeLocalStorage(BRANCH_ID_STORAGE_KEY, branchId);
-            await refetch();
+            const result = await refetch();
             queryClient.invalidateQueries();
-            setContextNotice("Контекст обновлён");
+            setContextNoticeFromData(result.data as ConsoleMe | undefined);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -498,9 +547,9 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         setIsSubmitting(true);
         try {
             writeLocalStorage(BRANCH_ID_STORAGE_KEY, branchId);
-            await refetch();
+            const result = await refetch();
             queryClient.invalidateQueries();
-            setContextNotice("Контекст обновлён");
+            setContextNoticeFromData(result.data as ConsoleMe | undefined);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
