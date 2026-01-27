@@ -1,0 +1,22 @@
+# SESSION 2026-01-27-session-id-guard-a1 — Session id guard
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-session-id-guard-a1.md
+- branch: feat/2026-01-27-session-id-guard-a1
+- worktree: /home/zhan/worktrees/2026-01-27-session-id-guard-a1
+- base_ref: origin/main
+- scope: enforce unique session_id + agent suffix in session_start and docs.
+- done:
+  - Enforced session_id format and collision checks in session_start.
+  - Documented agent suffix requirement in AGENTS and session start prompt.
+  - Ran bash -n scripts/session_start.sh.
+- next:
+  - Commit and open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-session-id-guard-a1.md
+  - scripts/session_start.sh
+  - AGENTS.md
+  - docs/SESSION_START_PROMPT.txt
+  - bash -n scripts/session_start.sh
+- last_updated: 2026-01-27
