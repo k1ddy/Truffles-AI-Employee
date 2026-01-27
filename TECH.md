@@ -33,6 +33,7 @@ hostname; whoami; pwd; curl -s https://ifconfig.me
 | truffles-api | truffles-api_truffles-api | Python API (FastAPI) |
 | truffles-outbox | truffles-api_truffles-api | Outbox worker (ACK-first delivery) |
 | truffles-sentinel | truffles-api_truffles-api | Sentinel worker (health/self-heal) |
+| truffles-knowledge-gateway | truffles-api_truffles-api | Knowledge snapshot gateway (shadow) |
 | truffles_postgres_1 | postgres:15-alpine | PostgreSQL |
 | truffles_redis_1 | redis:7-alpine | Redis |
 | truffles_qdrant_1 | qdrant/qdrant:latest | Vector DB |
@@ -105,6 +106,11 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `POST /admin/media/cleanup` — TTL‑очистка `/home/zhan/truffles-media` (admin token)
 - `POST /reminders/process` — обработка напоминаний
 
+### Knowledge Gateway (shadow, internal)
+- URL: `http://127.0.0.1:8010`
+- `GET /health` — статус сервиса
+- `POST /knowledge/snapshot` — выдача snapshot (требует `KNOWLEDGE_SNAPSHOT_ENABLED=1`)
+
 **WhatsApp Webhook URL (ChatFlow):**
 `https://api.truffles.kz/webhook/{client_slug}?webhook_secret=<SECRET>`
 
@@ -143,6 +149,11 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `PROVIDER_GATEWAY_STATUS_CALLBACK_URL` — callback URL для статусов отправки.
 - `PROVIDER_GATEWAY_TOKEN` — токен для inbound/outbound/status.
 - `QDRANT_COLLECTION` — коллекция Qdrant (default: truffles_knowledge; при `TEST_MODE=1` и пустом env → truffles_knowledge_ci).
+- `KNOWLEDGE_SNAPSHOT_ENABLED` — включает `/knowledge/snapshot` (gateway service).
+- `KNOWLEDGE_SNAPSHOT_TOKEN` — токен для gateway snapshot (header `X-Knowledge-Snapshot-Token`).
+- `KNOWLEDGE_SNAPSHOT_TTL_SECONDS` — TTL snapshot (сек).
+- `KNOWLEDGE_SNAPSHOT_HMAC_KEY` — HMAC‑секрет подписи snapshot.
+- `KNOWLEDGE_SNAPSHOT_KEY_ID` — key id для подписи snapshot (optional).
 - `KNOWLEDGE_SNAPSHOT_CONSUMER_ENABLED` — включает shadow-consumer для consult snapshot (default: false).
 - `KNOWLEDGE_SNAPSHOT_CONSULT_MODE` — режим consult snapshot: `shadow|fallback|strict` (default: shadow).
 - `KNOWLEDGE_SNAPSHOT_CONSULT_ALLOWLIST` — список `client_slug` для canary/cutover (через запятую).
@@ -477,6 +488,12 @@ ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:mai
 После деплоя обязательно перезапустить воркеры на том же образе, чтобы не было дрейфа:
 ```bash
 ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env bash /home/zhan/truffles-main/scripts/restart_workers.sh"
+```
+
+### Knowledge Gateway (shadow)
+```bash
+ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env PULL_IMAGE=1 REQUIRE_GHCR=1 bash /home/zhan/truffles-main/scripts/restart_knowledge_gateway.sh"
+ssh -p 222 zhan@5.188.241.234 "curl -s http://127.0.0.1:8010/health"
 ```
 
 ### Перезапуск API (без обновления кода)

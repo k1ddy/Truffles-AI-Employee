@@ -1,0 +1,23 @@
+# SESSION 2026-01-27-knowledge-gateway-service-arch — Session 2026-01-27-knowledge-gateway-service-arch
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-knowledge-gateway-service.md
+- branch: feat/2026-01-27-knowledge-gateway-service-arch
+- worktree: /home/zhan/worktrees/2026-01-27-knowledge-gateway-service-arch
+- base_ref: origin/main
+- scope: knowledge gateway service (shadow container)
+- done:
+  - Added knowledge_gateway_app with /health and snapshot router.
+  - Added restart_knowledge_gateway.sh and updated TECH/ARCH/STRUCTURE.
+  - Added /health test and updated snapshot gateway tests.
+  - Built local image truffles-knowledge-gateway:20260127 and started container on 8010.
+  - Verified /health and /knowledge/snapshot response saved in /tmp.
+- next:
+  - Run session_check.sh, commit, push, open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-knowledge-gateway-service.md
+  - pytest -q truffles-api/tests/test_knowledge_snapshot_gateway.py
+  - /tmp/knowledge_gateway_snapshot_20260127_140612.json
+  - curl -s http://127.0.0.1:8010/health
+- last_updated: 2026-01-27
