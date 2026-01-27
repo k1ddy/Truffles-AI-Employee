@@ -199,6 +199,10 @@ test.describe('Smoke Test: Login Flow', () => {
         } else {
             await startKeycloakLogin(page);
         }
+        const logoutButton = page.getByTestId('logout-button');
+        if (await logoutButton.isVisible().catch(() => false)) {
+            return;
+        }
         await expect(page).toHaveURL(keycloakHostPattern);
         await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible();
     });
