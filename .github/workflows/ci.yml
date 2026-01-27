@@ -385,9 +385,49 @@ jobs:
               env_file.write(f"SCHEMATHESIS_TOKEN={token}\\n")
           PY
 
+      - name: Resolve console selection headers
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          token = os.environ["SCHEMATHESIS_TOKEN"]
+          req = urllib.request.Request(
+              "https://api.truffles.kz/console/v1/me",
+              headers={"Authorization": f"Bearer {token}"},
+          )
+          try:
+              with urllib.request.urlopen(req) as resp:
+                  data = json.load(resp)
+          except Exception as exc:
+              print(f"Selection headers skipped: {exc}")
+              raise SystemExit(0)
+
+          client = data.get("client") or {}
+          branches = data.get("branches") or []
+          client_id = client.get("id")
+          branch_id = branches[0].get("id") if branches else None
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              if client_id:
+                  env_file.write(f"SCHEMATHESIS_CLIENT_ID={client_id}\\n")
+              if branch_id:
+                  env_file.write(f"SCHEMATHESIS_BRANCH_ID={branch_id}\\n")
+          PY
+
       - name: Schemathesis GET-only smoke
         if: steps.guard.outputs.skip != 'true'
         run: |
+          headers=(--header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}")
+          if [ -n "${SCHEMATHESIS_CLIENT_ID:-}" ]; then
+            headers+=(--header "X-Client-Id: ${SCHEMATHESIS_CLIENT_ID}")
+          fi
+          if [ -n "${SCHEMATHESIS_BRANCH_ID:-}" ]; then
+            headers+=(--header "X-Branch-Id: ${SCHEMATHESIS_BRANCH_ID}")
+          fi
+
           schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml \
             --url https://api.truffles.kz/console/v1 \
             --include-method=GET \
@@ -398,7 +438,7 @@ jobs:
             --checks all \
             --request-timeout 10 \
             --max-examples=3 \
-            --header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}"
+            "${headers[@]}"
 
   console-k6:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_k6 == 'true' }}

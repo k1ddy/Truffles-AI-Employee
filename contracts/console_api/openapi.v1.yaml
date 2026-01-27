@@ -149,6 +149,7 @@ paths:
           in: query
           schema:
             type: string
+            maxLength: 128
         - name: branch_id
           in: query
           schema:
@@ -1355,6 +1356,7 @@ components:
           format: uuid
         name:
           type: string
+          nullable: true
         role:
           type: string
           enum: [owner, admin, manager, support]

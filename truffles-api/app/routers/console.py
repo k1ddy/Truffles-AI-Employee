@@ -414,6 +414,24 @@ def _normalize_phone_digits(value: Optional[str]) -> str:
     return re.sub(r"\D+", "", value)
 
 
+def _normalize_search_query(
+    field_name: str,
+    value: Optional[str],
+    *,
+    max_length: int = 128,
+) -> Optional[str]:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    if not trimmed:
+        return None
+    if len(trimmed) > max_length:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} too long")
+    if not trimmed.isprintable():
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {field_name}")
+    return trimmed
+
+
 def _looks_like_uuid(value: str) -> Optional[UUID]:
     try:
         return UUID(value)
@@ -1221,21 +1239,18 @@ async def list_cases(
         )
 
     # Search filters
-    if q:
-        query_value = q.strip()
-        if query_value:
-            conditions = []
-            maybe_uuid = _looks_like_uuid(query_value)
-            if maybe_uuid:
-                conditions.append(Handover.id == maybe_uuid)
-            digits = _normalize_phone_digits(query_value)
-            if digits:
-                conditions.append(
-                    func.regexp_replace(User.phone, r"\D", "", "g").ilike(f"%{digits}%")
-                )
-            conditions.append(User.name.ilike(f"%{query_value}%"))
-            if conditions:
-                query = query.filter(or_(*conditions))
+    query_value = _normalize_search_query("q", q)
+    if query_value:
+        conditions = []
+        maybe_uuid = _looks_like_uuid(query_value)
+        if maybe_uuid:
+            conditions.append(Handover.id == maybe_uuid)
+        digits = _normalize_phone_digits(query_value)
+        if digits:
+            conditions.append(func.regexp_replace(User.phone, r"\D", "", "g").ilike(f"%{digits}%"))
+        conditions.append(User.name.ilike(f"%{query_value}%"))
+        if conditions:
+            query = query.filter(or_(*conditions))
 
     if phone:
         digits = _normalize_phone_digits(phone)
