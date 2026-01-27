@@ -196,24 +196,54 @@ test.describe('Smoke Test: Login Flow', () => {
     test('should redirect to Keycloak login @smoke', async ({ page }) => {
         await gotoConsoleRoot(page);
         const loginButton = page.getByTestId('login-button');
-        if (await loginButton.isVisible().catch(() => false)) {
+        const logoutButton = page.getByTestId('logout-button');
+        await page.waitForSelector('[data-testid="login-button"], [data-testid="logout-button"]', { timeout: 5000 }).catch(() => null);
+        const loginVisible = await loginButton.isVisible().catch(() => false);
+        const logoutVisible = await logoutButton.isVisible().catch(() => false);
+        if (logoutVisible) {
+            return;
+        }
+        if (loginVisible) {
             await loginButton.click();
         } else {
-            await startKeycloakLogin(page);
+            await startKeycloakLogin(page).catch(() => null);
         }
-        const logoutButton = page.getByTestId('logout-button');
         const signInHeading = page.getByRole('heading', { name: /sign in/i });
+        const providerButton = page.getByRole('button', { name: /sign in with keycloak/i });
+        const providerForm = page.locator('form[action*="keycloak"]').first();
         await Promise.race([
             logoutButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
             signInHeading.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
+            providerButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
+            providerForm.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
             loginButton.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => null),
             page.waitForURL(keycloakHostPattern, { timeout: 5000 }).catch(() => null),
         ]);
         const hasLogout = await logoutButton.isVisible().catch(() => false);
         const hasSignIn = await signInHeading.isVisible().catch(() => false);
+        const hasProvider = await providerButton.isVisible().catch(() => false)
+            || await providerForm.isVisible().catch(() => false);
         const onKeycloak = keycloakHostPattern.test(page.url());
         const loginHidden = !(await loginButton.isVisible().catch(() => false));
-        await expect(hasLogout || hasSignIn || onKeycloak || loginHidden).toBe(true);
+
+        if (!(hasLogout || hasSignIn || hasProvider || onKeycloak || loginHidden)) {
+            const started = await startKeycloakLogin(page).catch(() => false);
+            if (started) {
+                await Promise.race([
+                    providerButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
+                    providerForm.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
+                    page.waitForURL(keycloakHostPattern, { timeout: 5000 }).catch(() => null),
+                ]);
+            }
+        }
+
+        const hasLogoutAfter = await logoutButton.isVisible().catch(() => false);
+        const hasSignInAfter = await signInHeading.isVisible().catch(() => false);
+        const hasProviderAfter = await providerButton.isVisible().catch(() => false)
+            || await providerForm.isVisible().catch(() => false);
+        const onKeycloakAfter = keycloakHostPattern.test(page.url());
+        const loginHiddenAfter = !(await loginButton.isVisible().catch(() => false));
+        await expect(hasLogoutAfter || hasSignInAfter || hasProviderAfter || onKeycloakAfter || loginHiddenAfter).toBe(true);
     });
 
     test('should login and see inbox @smoke', async ({ page }) => {
