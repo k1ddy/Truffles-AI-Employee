@@ -42,7 +42,7 @@ Before SSH, verify environment: if `pwd` = `/home/zhan/truffles-main` and public
 4) Run Question Gate (per `AGENTS.md`): check docs/code/env before asking questions. If debugging message flow, start with `ops/diagnose.py explain` (Fast Debug SOP) before logs/SQL.
 5) Implement with one-issue flow: smallest change that satisfies the invariant + DoD.
 6) Verify: tests/CI/live-check/evidence + запись в `STATE.md` (Brain или Top Architect, до merge для core/поведенческих изменений). No evidence => PLAN/GAP.
-7) Hand-off summary for Brain: what changed, how verified, evidence pointers, remaining risks.
+7) Hand-off summary for Brain: what changed, how verified, evidence pointers, remaining risks (summary must match actual diff).
 
 ---
 

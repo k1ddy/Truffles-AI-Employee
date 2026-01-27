@@ -38,6 +38,38 @@ if [[ -z "$session_file" ]]; then
   exit 1
 fi
 
+current_status=$(grep -E "^- status: " "$session_file" | head -n1 | sed 's/^- status: //')
+session_id=$(basename "$session_file")
+session_id=${session_id#SESSION-}
+session_id=${session_id%.md}
+
+index_file="$repo_root/docs/SESSION_INDEX.md"
+
+if [[ "$current_status" == "done" ]]; then
+  if [[ "$status" != "done" ]]; then
+    echo "ERROR: Session already done; cannot change status." >&2
+    exit 1
+  fi
+  if [[ -n "$add_done" || -n "$add_next" ]]; then
+    echo "ERROR: Session already done; cannot append notes." >&2
+    exit 1
+  fi
+  if [[ ! -f "$index_file" ]]; then
+    echo "ERROR: docs/SESSION_INDEX.md missing." >&2
+    exit 1
+  fi
+  if grep -q "^| ${session_id} | done |" "$index_file"; then
+    echo "Session already done; no updates."
+    exit 0
+  fi
+  if grep -q "^| ${session_id} |" "$index_file"; then
+    echo "ERROR: Session already done but SESSION_INDEX is not done; fix in the original commit." >&2
+    exit 1
+  fi
+  echo "ERROR: Session already done but missing from SESSION_INDEX." >&2
+  exit 1
+fi
+
 update_line() {
   local key="$1"
   local value="$2"
@@ -74,11 +106,6 @@ append_note "- next" "$add_next" "$session_file"
 worktree=$(grep -E "^- worktree: " "$session_file" | head -n1 | sed 's/^- worktree: //')
 task_package=$(grep -E "^- task_package: " "$session_file" | head -n1 | sed 's/^- task_package: //')
 
-session_id=$(basename "$session_file")
-session_id=${session_id#SESSION-}
-session_id=${session_id%.md}
-
-index_file="$repo_root/docs/SESSION_INDEX.md"
 row="| ${session_id} | ${status} | ${branch} | ${worktree} | ${task_package} | $(date +%F) |"
 
 if grep -q "^| ${session_id} |" "$index_file"; then
