@@ -154,6 +154,8 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
     await page.goto('/');
     const loginButton = page.getByTestId('login-button');
     const logoutButton = page.getByTestId('logout-button');
+    const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
+    const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
     await page.waitForSelector('[data-testid="login-button"], [data-testid="logout-button"]', { timeout: 15000 });
     if (!(await logoutButton.isVisible().catch(() => false)) && (await loginButton.isVisible().catch(() => false))) {
         await loginThroughKeycloak(page);
@@ -161,8 +163,6 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
     }
     await resolveSelectionGate(page);
     const casesTitle = page.getByTestId('cases-title');
-    const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
-    const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
     if (useStorageState) {
         const resolved = await ensureTenantSelection(page);
         if (resolved) {
@@ -187,6 +187,7 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
                     if (await casesTitle.isVisible().catch(() => false)) return true;
                     if (await selectionGate.isVisible().catch(() => false)) return true;
                     if (await contextGate.isVisible().catch(() => false)) return true;
+                    if (await loginButton.isVisible().catch(() => false)) return true;
                     return false;
                 },
                 { timeout: 20000 }
