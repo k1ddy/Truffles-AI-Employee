@@ -12,6 +12,9 @@
 | `AGENTS.md` | Принципы работы, роли, ошибки | Архитектор (каждую сессию) |
 | `STRUCTURE.md` | Этот файл — карта проекта | Оба (каждую сессию) |
 | `TECH.md` | Доступы, команды, данные сервера | Кодер |
+| `docs/SESSION_INDEX.md` | Индекс активных сессий (single source of truth) | Архитектор/Brain/Hands |
+| `docs/SESSIONS/` | Логи сессий (контекст, планы, worktree/branch) | Архитектор/Brain/Hands |
+| `docs/SESSIONS/SESSION_TEMPLATE.md` | Шаблон сессионного лога | Архитектор/Brain/Hands |
 | `contracts/` | Канон контрактов (Console API, ошибки) | Архитектор/Frontend |
 | `contracts/console_api/schemathesis.toml` | Seed/overrides для Schemathesis contract smoke | Backend/QA |
 | `contracts/events/` | Контракты событий (outbox) | Архитектор/Backend |
@@ -27,9 +30,17 @@
 | `contracts/events/provider_status.v1.jsonschema` | Provider status callback event | Архитектор/Backend |
 | `contracts/integrations/` | Контракты портов/адаптеров | Архитектор/Backend |
 | `.pre-commit-config.yaml` | Pre-commit hooks (gitleaks secret scan) | Кодер |
+| `.githooks/` | Обязательные git hooks (session_check + session_gate) | Все роли |
 | `.github/workflows/monitor-prod-version.yml` | Cron CI alert: prod `/admin/version` must match main | OPS |
+| `.github/workflows/session-gate.yml` | CI gate: session log + doc-only policy | Brain/Architect |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
+| `scripts/session_start.sh` | Создать worktree/branch и session log | Все роли |
+| `scripts/session_check.sh` | Проверка сессии перед commit/push | Все роли |
+| `scripts/session_end.sh` | Закрытие сессии + index обновление | Все роли |
+| `scripts/session_audit.sh` | Аудит сессий (статусы/сироты) | Brain/Architect |
+| `scripts/session_gate.sh` | Gate для doc-only и session log | Brain/Architect |
+| `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
@@ -58,6 +69,7 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-verify-test.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-ui.md`

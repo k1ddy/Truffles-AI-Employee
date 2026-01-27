@@ -1,0 +1,18 @@
+name: Session Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  session-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Session gate
+        run: |
+          bash scripts/session_gate.sh --mode ci --target-branch "${GITHUB_BASE_REF}" --base "origin/${GITHUB_BASE_REF}" --head "${GITHUB_SHA}"
