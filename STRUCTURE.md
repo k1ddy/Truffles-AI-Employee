@@ -43,6 +43,7 @@
 | `scripts/session_gate.sh` | Gate для doc-only и session log | Brain/Architect |
 | `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
 | `scripts/restart_knowledge_gateway.sh` | Перезапуск Knowledge Gateway (shadow) | OPS |
+| `scripts/restart_provider_gateway.sh` | Перезапуск Provider Gateway (shadow) | OPS |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
@@ -51,6 +52,7 @@
 | `truffles-api/app/services/console_confirmations.py` | Confirmation safeguards for destructive Console actions | Backend |
 | `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |
 | `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |
+| `truffles-api/app/provider_gateway_app.py` | Отдельный app для Provider Gateway | Backend |
 | `truffles-api/migrations/015_add_inbox_events.sql` | Migration: inbox_events (durable inbox store) | Backend/OPS |
 | `truffles-api/migrations/016_add_console_confirmations.sql` | Migration: console_confirmations (destructive safeguards) | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
@@ -121,6 +123,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-outbound-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-media-pipeline.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbox-event.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`

@@ -1,0 +1,23 @@
+# SESSION 2026-01-27-provider-gateway-service-arch — Session 2026-01-27-provider-gateway-service-arch
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md
+- branch: feat/2026-01-27-provider-gateway-service-arch
+- worktree: /home/zhan/worktrees/2026-01-27-provider-gateway-service-arch
+- base_ref: origin/main
+- scope: provider gateway shadow service (app + container + docs + evidence)
+- done:
+  - Session created.
+  - Added provider_gateway_app with /health and router include.
+  - Added restart_provider_gateway.sh and updated TECH/ARCH/STRUCTURE.
+  - Added /health test for provider gateway app.
+  - Built local image truffles-provider-gateway:20260127 and started container on 8011.
+  - Verified /health response and recorded evidence.
+- next:
+  - Open PR and run CI.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md
+  - /tmp/provider_gateway_health_20260127_151028.json
+  - pytest -q truffles-api/tests/test_provider_gateway_app.py
+- last_updated: 2026-01-27
