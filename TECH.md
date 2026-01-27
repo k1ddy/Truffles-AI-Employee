@@ -134,6 +134,14 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `MEDIA_STORAGE_DIR` — базовый каталог медиа (default: /home/zhan/truffles-media).
 - `MEDIA_CLEANUP_TTL_DAYS` — TTL очистки локальных медиа (default: 7).
 - `MEDIA_STORAGE_WARN_BYTES` — порог алерта по объёму (default: 5GB).
+- `PROVIDER_GATEWAY_INBOUND_ENABLED` — включает `POST /provider/inbound` (global).
+- `PROVIDER_GATEWAY_INBOX_ENABLED` — пишет `inbox_events` для provider inbound.
+- `PROVIDER_GATEWAY_INBOX_REQUIRED` — если `1`, inbound отвечает ошибкой при сбое записи `inbox_events`.
+- `PROVIDER_GATEWAY_STATUS_ENABLED` — включает `POST /provider/status`.
+- `PROVIDER_GATEWAY_OUTBOUND_ENABLED` — отправка outbox через Provider Gateway (global; требует `PROVIDER_GATEWAY_OUTBOUND_URL`).
+- `PROVIDER_GATEWAY_OUTBOUND_URL` — URL provider gateway outbound endpoint.
+- `PROVIDER_GATEWAY_STATUS_CALLBACK_URL` — callback URL для статусов отправки.
+- `PROVIDER_GATEWAY_TOKEN` — токен для inbound/outbound/status.
 - `QDRANT_COLLECTION` — коллекция Qdrant (default: truffles_knowledge; при `TEST_MODE=1` и пустом env → truffles_knowledge_ci).
 - `KNOWLEDGE_SNAPSHOT_CONSUMER_ENABLED` — включает shadow-consumer для consult snapshot (default: false).
 - `KNOWLEDGE_SNAPSHOT_CONSULT_MODE` — режим consult snapshot: `shadow|fallback|strict` (default: shadow).

@@ -20,6 +20,9 @@ Contract guardrails
   - Legacy webhook payloads validated by `app.schemas.outbox_payload.OutboxPayloadContract`.
 - Invalid payload → `decision_trace.stage=outbox_payload_guard`, `decision_meta.action=error`, no outbox enqueue.
 - Timing evidence: `decision_meta.timing.outbox` + `outbox_messages.meta.timing`.
+- Provider Gateway:
+  - `PROVIDER_GATEWAY_INBOUND_ENABLED=1` + `PROVIDER_GATEWAY_INBOX_ENABLED=1` → `inbox_events` recorded on `/provider/inbound`.
+  - `PROVIDER_GATEWAY_OUTBOUND_ENABLED=1` routes **all** outbox sends through Provider Gateway (global).
 
 ```bash
 curl -sG http://localhost:9090/api/v1/query --data-urlencode \

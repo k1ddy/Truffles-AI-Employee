@@ -347,6 +347,19 @@ truth gate provided a safe response.
 
 ---
 
+## Consult snapshot strict cutover (canary)
+
+**How to enable (demo_salon):**
+- Ensure published `knowledge_versions` payload includes `consult_playbook`.
+- Set env: `KNOWLEDGE_SNAPSHOT_CONSUMER_ENABLED=1`, `KNOWLEDGE_SNAPSHOT_CONSULT_MODE=strict`,
+  `KNOWLEDGE_SNAPSHOT_CONSULT_ALLOWLIST=demo_salon`.
+
+**Behavior impact:**
+- Consult uses snapshot playbook only for allowlisted tenants.
+- Missing playbook → clarify (no fallback to file packs in strict mode).
+
+---
+
 ## Consult pack flow (current behavior, line-accurate)
 
 **Decision entry (consult branch in main pipeline)**
