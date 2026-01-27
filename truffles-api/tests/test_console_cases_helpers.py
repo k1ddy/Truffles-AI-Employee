@@ -22,6 +22,21 @@ def test_parse_sort_param_rejects_invalid():
         console_router._parse_sort_param("sort_by", "oops")
 
 
+def test_normalize_search_query():
+    assert console_router._normalize_search_query("q", None) is None
+    assert console_router._normalize_search_query("q", "   ") is None
+    assert console_router._normalize_search_query("q", "  Alice  ") == "Alice"
+
+
+def test_normalize_search_query_rejects_invalid():
+    with pytest.raises(ConsoleAPIError):
+        console_router._normalize_search_query("q", "a" * 129)
+    with pytest.raises(ConsoleAPIError):
+        console_router._normalize_search_query("q", "bad\x00value")
+    with pytest.raises(ConsoleAPIError):
+        console_router._normalize_search_query("q", "line\nbreak")
+
+
 def test_resolve_case_sort_cursor():
     created_at = datetime.now(timezone.utc)
     last_activity = created_at - timedelta(minutes=5)

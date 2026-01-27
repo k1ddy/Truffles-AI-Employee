@@ -121,6 +121,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-dod.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-company-selection.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-console-contract-stabilization.md`
 
 ---
 

@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ from app.services.chatflow_service import (
 )
 from app.services.learning_service import add_to_knowledge, get_client_slug, is_owner_response
 from app.services.message_service import save_message
+from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.state_service import is_simulation_context
 from app.services.state_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
@@ -73,6 +75,26 @@ def _update_media_metadata(message, updates: dict) -> None:
     media_meta.update(updates)
     metadata["media"] = media_meta
     message.message_metadata = metadata
+
+
+def _is_env_enabled(value: Optional[str], default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _extract_signed_url_expires_at(signed_url: str) -> Optional[str]:
+    if not signed_url:
+        return None
+    try:
+        parsed = urlparse(signed_url)
+        expires_values = parse_qs(parsed.query or "").get("expires")
+        if not expires_values:
+            return None
+        expires = int(expires_values[0])
+        return datetime.fromtimestamp(expires, tz=timezone.utc).isoformat()
+    except Exception:
+        return None
 
 
 def is_probably_whatsapp_jid(value: Optional[str]) -> bool:
@@ -641,6 +663,79 @@ def process_manager_media(
     )
     if not instance_id:
         return False, "Instance ID not found", took_handover, handover
+    use_outbox_send = _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False)
+    if use_outbox_send:
+        now = datetime.now(timezone.utc)
+        idempotency_key = build_inbound_message_id(
+            str(telegram_message_id) if telegram_message_id else None,
+            remote_jid,
+            int(now.timestamp()),
+            caption or content,
+        )
+        media_meta_payload = {
+            "media_type": media_type,
+            "signed_url": signed_url,
+            "expires_at": _extract_signed_url_expires_at(signed_url),
+            "sha256": sha256,
+            "size_bytes": file_size or download_result.get("size_bytes"),
+            "mime_type": mime_type,
+            "filename": file_name,
+        }
+        outbox_payload = {
+            "schema_version": "outbox.v1",
+            "event_type": "whatsapp.send_media",
+            "idempotency_key": idempotency_key,
+            "client_id": str(conversation.client_id),
+            "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
+            "tenant_context": {
+                "client_id": str(conversation.client_id),
+                "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
+                "client_slug": client_slug,
+                "instance_id": instance_id,
+                "source": "manager_media",
+            },
+            "conversation_id": str(conversation.id),
+            "channel": "whatsapp",
+            "created_at": now.isoformat(),
+            "payload": {
+                "remote_jid": remote_jid,
+                "instance_id": instance_id,
+                "idempotency_key": idempotency_key,
+                "media_type": media_type,
+                "media_url": signed_url,
+                "caption": caption,
+                "media_meta": media_meta_payload,
+            },
+        }
+        enqueued = enqueue_outbox_message(
+            db,
+            client_id=conversation.client_id,
+            conversation_id=conversation.id,
+            inbound_message_id=idempotency_key,
+            payload_json=outbox_payload,
+            branch_id=conversation.branch_id,
+        )
+        if saved_message:
+            _update_media_metadata(
+                saved_message,
+                {
+                    "outbox_enqueued": enqueued,
+                    "outbox_event_type": "whatsapp.send_media",
+                    "outbox_idempotency_key": idempotency_key,
+                },
+            )
+        if not enqueued:
+            logger.info(
+                "Outbox media send skipped (duplicate)",
+                extra={
+                    "context": {
+                        "conversation_id": str(conversation.id),
+                        "remote_jid": remote_jid,
+                        "idempotency_key": idempotency_key,
+                    }
+                },
+            )
+        return True, f"Media queued for client (conversation {conversation.id})", took_handover, handover
 
     sent = send_whatsapp_media(
         instance_id,
