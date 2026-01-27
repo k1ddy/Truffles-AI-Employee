@@ -54,7 +54,9 @@ def record_inbox_event(
     if not received_at:
         return False, "invalid_received_at"
 
-    tenant_context_payload = TenantContext.model_validate(tenant_context).model_dump(exclude_none=True)
+    tenant_context_payload = TenantContext.model_validate(tenant_context).model_dump(
+        mode="json", exclude_none=True
+    )
     event_id = uuid4()
     stmt = (
         insert(InboxEvent)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -57,3 +58,25 @@ def test_record_inbox_event_invalid_received_at():
 
     assert ok is False
     assert result == "invalid_received_at"
+
+
+def test_record_inbox_event_serializes_tenant_context():
+    db = Mock()
+    client = SimpleNamespace(name="demo_salon")
+    db.query.return_value.filter.return_value.first.return_value = client
+
+    def _execute(stmt):
+        params = stmt.compile().params
+        json.dumps(params["tenant_context"])
+        return SimpleNamespace(rowcount=1)
+
+    db.execute.side_effect = _execute
+
+    payload_dict = _payload_dict()
+    payload = ProviderInbound.model_validate(payload_dict)
+
+    ok, result = record_inbox_event(db, payload=payload, raw_payload=payload_dict)
+
+    assert ok is True
+    assert result not in {"duplicate", "db_error"}
+    db.commit.assert_called_once()
