@@ -76,7 +76,7 @@ async function selectOptionIfNeeded(
     } else {
         await selector.selectOption({ index: 1 });
     }
-    await expect(selector).not.toHaveValue("");
+    await expect(selector).not.toHaveValue('');
     return true;
 }
 
@@ -112,6 +112,39 @@ async function resolveSelectionGate(page: import('@playwright/test').Page) {
     await selectOptionIfNeeded(contextClient);
     const contextBranch = page.getByTestId('context-branch-select');
     await selectOptionIfNeeded(contextBranch);
+}
+
+async function clearStoredContext(page: import('@playwright/test').Page) {
+    await page.evaluate(() => {
+        window.localStorage.removeItem('console:company_id');
+        window.localStorage.removeItem('console:client_id');
+        window.localStorage.removeItem('console:branch_id');
+    });
+}
+
+async function retryProfileLoad(page: import('@playwright/test').Page) {
+    const retry = page.getByTestId('me-retry');
+    if (!(await retry.isVisible().catch(() => false))) {
+        return false;
+    }
+    await clearStoredContext(page);
+    await retry.click();
+    await page.waitForTimeout(500);
+    return true;
+}
+
+async function casesTitleOrContextVisible(
+    page: import('@playwright/test').Page,
+    selectionGate: import('@playwright/test').Locator,
+    contextGate: import('@playwright/test').Locator,
+    loginButton: import('@playwright/test').Locator,
+) {
+    const casesTitle = page.getByTestId('cases-title');
+    if (await casesTitle.isVisible().catch(() => false)) return true;
+    if (await selectionGate.isVisible().catch(() => false)) return true;
+    if (await contextGate.isVisible().catch(() => false)) return true;
+    if (await loginButton.isVisible().catch(() => false)) return true;
+    return false;
 }
 
 async function startKeycloakLogin(page: import('@playwright/test').Page) {
@@ -157,68 +190,53 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
     const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
     const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
     await page.waitForSelector('[data-testid="login-button"], [data-testid="logout-button"]', { timeout: 15000 });
+
     if (!(await logoutButton.isVisible().catch(() => false)) && (await loginButton.isVisible().catch(() => false))) {
         await loginThroughKeycloak(page);
         await page.goto('/');
     }
-    await resolveSelectionGate(page);
-    const casesTitle = page.getByTestId('cases-title');
+
     if (useStorageState) {
         const resolved = await ensureTenantSelection(page);
         if (resolved) {
             await page.reload({ waitUntil: 'domcontentloaded' });
-            await resolveSelectionGate(page);
         }
-        if (!(await casesTitle.isVisible().catch(() => false))) {
-            if (await loginButton.isVisible().catch(() => false)) {
-                await loginThroughKeycloak(page);
-                await page.goto('/');
-                await resolveSelectionGate(page);
-                const resolvedAfterLogin = await ensureTenantSelection(page);
-                if (resolvedAfterLogin) {
-                    await page.reload({ waitUntil: 'domcontentloaded' });
-                    await resolveSelectionGate(page);
-                }
-            }
-        }
-        await expect
-            .poll(
-                async () => {
-                    if (await casesTitle.isVisible().catch(() => false)) return true;
-                    if (await selectionGate.isVisible().catch(() => false)) return true;
-                    if (await contextGate.isVisible().catch(() => false)) return true;
-                    if (await loginButton.isVisible().catch(() => false)) return true;
-                    return false;
-                },
-                { timeout: 20000 }
-            )
-            .toBe(true);
-        return;
+        await resolveSelectionGate(page);
     }
-    try {
-        await expect(casesTitle).toBeVisible({ timeout: 10000 });
-        return;
-    } catch {
+
+    if (!(await casesTitleOrContextVisible(page, selectionGate, contextGate, loginButton))) {
         if (await loginButton.isVisible().catch(() => false)) {
             await loginThroughKeycloak(page);
+            await page.goto('/');
+            await resolveSelectionGate(page);
+            const resolvedAfterLogin = await ensureTenantSelection(page);
+            if (resolvedAfterLogin) {
+                await page.reload({ waitUntil: 'domcontentloaded' });
+            }
         }
-        await page.goto('/');
-        const resolved = await ensureTenantSelection(page);
-        if (resolved) {
-            await page.reload({ waitUntil: 'domcontentloaded' });
-        }
-        await expect
-            .poll(
-                async () => {
-                    if (await casesTitle.isVisible().catch(() => false)) return true;
-                    if (await selectionGate.isVisible().catch(() => false)) return true;
-                    if (await contextGate.isVisible().catch(() => false)) return true;
-                    return false;
-                },
-                { timeout: 20000 }
-            )
-            .toBe(true);
     }
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        const retried = await retryProfileLoad(page);
+        if (retried) {
+            const resolved = await ensureTenantSelection(page);
+            if (resolved) {
+                await page.reload({ waitUntil: 'domcontentloaded' });
+            }
+            await resolveSelectionGate(page);
+        }
+        if (await casesTitleOrContextVisible(page, selectionGate, contextGate, loginButton)) {
+            return;
+        }
+        await page.waitForTimeout(1000);
+    }
+
+    await expect
+        .poll(
+            async () => casesTitleOrContextVisible(page, selectionGate, contextGate, loginButton),
+            { timeout: 20000 }
+        )
+        .toBe(true);
 }
 
 async function fetchMe(

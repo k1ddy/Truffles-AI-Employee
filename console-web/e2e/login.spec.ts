@@ -29,7 +29,7 @@ async function selectOptionIfNeeded(
     } else {
         await selector.selectOption({ index: 1 });
     }
-    await expect(selector).not.toHaveValue("");
+    await expect(selector).not.toHaveValue('');
     return true;
 }
 
@@ -73,6 +73,49 @@ async function selectBranchIfNeeded(page: import('@playwright/test').Page) {
     await selectOptionIfNeeded(contextSelector);
 }
 
+async function clearStoredContext(page: import('@playwright/test').Page) {
+    await page.evaluate(() => {
+        window.localStorage.removeItem('console:company_id');
+        window.localStorage.removeItem('console:client_id');
+        window.localStorage.removeItem('console:branch_id');
+    });
+}
+
+async function retryProfileLoad(page: import('@playwright/test').Page) {
+    const retry = page.getByTestId('me-retry');
+    if (!(await retry.isVisible().catch(() => false))) {
+        return false;
+    }
+    await clearStoredContext(page);
+    await retry.click();
+    await page.waitForTimeout(500);
+    return true;
+}
+
+async function waitForConsoleReady(page: import('@playwright/test').Page) {
+    const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
+    const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
+    const casesTitle = page.getByTestId('cases-title');
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        await retryProfileLoad(page);
+        if (await casesTitle.isVisible().catch(() => false)) return;
+        if (await selectionGate.isVisible().catch(() => false)) return;
+        if (await contextGate.isVisible().catch(() => false)) return;
+        await page.waitForTimeout(1000);
+    }
+    await expect
+        .poll(
+            async () => {
+                if (await casesTitle.isVisible().catch(() => false)) return true;
+                if (await selectionGate.isVisible().catch(() => false)) return true;
+                if (await contextGate.isVisible().catch(() => false)) return true;
+                return false;
+            },
+            { timeout: 20000 }
+        )
+        .toBe(true);
+}
+
 test.describe('Smoke Test: Login Flow', () => {
     test('should redirect to Keycloak login @smoke', async ({ page }) => {
         await page.goto('/');
@@ -94,19 +137,7 @@ test.describe('Smoke Test: Login Flow', () => {
         await selectCompanyIfNeeded(page);
         await selectClientIfNeeded(page);
         await selectBranchIfNeeded(page);
-        const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
-        const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
-        await expect
-            .poll(
-                async () => {
-                    if (await page.getByTestId('cases-title').isVisible().catch(() => false)) return true;
-                    if (await selectionGate.isVisible().catch(() => false)) return true;
-                    if (await contextGate.isVisible().catch(() => false)) return true;
-                    return false;
-                },
-                { timeout: 20000 }
-            )
-            .toBe(true);
+        await waitForConsoleReady(page);
     });
 
     test('should logout successfully @smoke', async ({ page }) => {
