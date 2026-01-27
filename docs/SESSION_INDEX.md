@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-01-27-provider-gateway-canary-arch | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md | 2026-01-27 |
 | 2026-01-27-console-ux-selection | active | feat/console-ux-selection | /home/zhan/worktrees/console-ux-selection | docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md | 2026-01-27 |
 | 2026-01-27-session-governance | done | feat/session-governance-2026-01-27 | /home/zhan/worktrees/session-governance-2026-01-27 | docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md | 2026-01-27 |
 | 2026-01-27-session-id-guard-a1 | active | feat/2026-01-27-session-id-guard-a1 | /home/zhan/worktrees/2026-01-27-session-id-guard-a1 | docs/TASK_PACKAGES/TP-2026-01-27-session-id-guard-a1.md | 2026-01-27 |
