@@ -16,7 +16,7 @@ class AgentMembership(Base):
     company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"))
     client_id = Column(UUID(as_uuid=True), ForeignKey("clients.id"))
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"))
-    role = Column(Text, nullable=False)  # owner, admin, manager, support
+    role = Column(Text, nullable=False)  # owner, admin, manager, support, platform_admin
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP(timezone=True))
     updated_at = Column(TIMESTAMP(timezone=True))

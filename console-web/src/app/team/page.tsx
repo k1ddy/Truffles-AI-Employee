@@ -52,6 +52,7 @@ const TEAM_TABS: Array<{ id: TeamTab; label: string; hint: string }> = [
 
 function RoleBadge({ role }: { role?: string | null }) {
     const styles: Record<string, string> = {
+        platform_admin: "bg-amber-100 text-amber-800",
         owner: "bg-purple-100 text-purple-800",
         admin: "bg-secondary text-secondary-foreground",
         manager: "bg-green-100 text-green-800",
@@ -150,7 +151,7 @@ function UsersPanel({
                     <div>
                         <h2 className="text-lg font-semibold">Пользователи</h2>
                         <p className="text-sm text-muted-foreground mt-1">
-                            Управление ролями и доступом. Telegram linking доступен только owner/admin.
+                            Управление ролями и доступом. Telegram linking доступен только owner/admin/platform admin.
                         </p>
                     </div>
                     {canManage ? (
@@ -159,7 +160,7 @@ function UsersPanel({
                         </Link>
                     ) : (
                         <span className="text-xs text-muted-foreground">
-                            Только owner/admin может управлять пользователями.
+                            Только owner/admin/platform admin может управлять пользователями.
                         </span>
                     )}
                 </div>
@@ -235,7 +236,7 @@ function UsersPanel({
                                             {identity ? displayHandle : "не подключен"}
                                         </span>
                                     ) : (
-                                        <span className="text-muted-foreground">только owner/admin</span>
+                                        <span className="text-muted-foreground">только owner/admin/platform admin</span>
                                     )}
                                 </div>
                                 {canManage && agent.id && (
@@ -303,6 +304,7 @@ function SpecialistsPanel({
     onSelectBranch: (value: string) => void;
 }) {
     const { handleError } = useErrorHandler();
+    const canWriteTeam = canAccessConsole(role, "team", "write");
 
     const specialistsQuery = useQuery({
         queryKey: ["calendar-specialists", selectedBranchId],
@@ -356,7 +358,7 @@ function SpecialistsPanel({
                     <div className="rounded-2xl border border-border/60 bg-muted/40 p-4">
                         <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Доступ</p>
                         <p className="text-sm text-muted-foreground mt-2">
-                            {role === "manager" ? "Read-only" : "Owner/Admin"}
+                            {canWriteTeam ? "Owner/Admin/Platform" : "Read-only"}
                         </p>
                     </div>
                 </div>

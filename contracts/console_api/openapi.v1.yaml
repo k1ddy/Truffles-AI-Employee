@@ -1359,7 +1359,7 @@ components:
           nullable: true
         role:
           type: string
-          enum: [owner, admin, manager, support]
+          enum: [platform_admin, owner, admin, manager, support]
         client_id:
           type: string
           format: uuid
@@ -1398,7 +1398,7 @@ components:
           nullable: true
         role:
           type: string
-          enum: [owner, admin, manager, support]
+          enum: [platform_admin, owner, admin, manager, support]
         client_id:
           type: string
           format: uuid
@@ -1882,7 +1882,7 @@ components:
           nullable: true
         role:
           type: string
-          enum: [owner, admin, manager, support]
+          enum: [platform_admin, owner, admin, manager, support]
         name:
           type: string
           nullable: true

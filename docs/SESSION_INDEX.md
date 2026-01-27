@@ -14,3 +14,4 @@
 | 2026-01-27-provider-gateway-media-pipeline-arch | done | feat/2026-01-27-provider-gateway-media-pipeline-arch | /home/zhan/worktrees/2026-01-27-provider-gateway-media-pipeline-arch | docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-media-pipeline.md | 2026-01-27 |
 | 2026-01-27-session-end-noop-a1 | done | feat/2026-01-27-session-end-noop-a1 | /home/zhan/worktrees/2026-01-27-session-end-noop-a1 | docs/TASK_PACKAGES/TP-2026-01-27-session-end-noop-a1.md | 2026-01-27 |
 | 2026-01-27-session-resume-protocol-a1 | done | feat/2026-01-27-session-resume-protocol-a1 | /home/zhan/worktrees/2026-01-27-session-resume-protocol-a1 | docs/TASK_PACKAGES/TP-2026-01-27-session-resume-protocol-a1.md | 2026-01-27 |
+| 2026-01-27-platform-admin-a2 | active | feat/2026-01-27-platform-admin-a2 | /home/zhan/worktrees/2026-01-27-platform-admin-a2 | docs/TASK_PACKAGES/TP-2026-01-27-platform-admin-rbac.md | 2026-01-27 |

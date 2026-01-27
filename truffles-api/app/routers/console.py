@@ -644,11 +644,11 @@ def _require_roles(
 def _require_owner_admin(
     context: ConsoleAuthContext,
     *,
-    message: str = "Only owner/admin can manage Telegram connector",
+    message: str = "Only owner/admin/platform admin can manage Telegram connector",
 ) -> None:
     _require_roles(
         context,
-        allowed=("owner", "admin"),
+        allowed=("platform_admin", "owner", "admin"),
         message=message,
     )
 
@@ -656,8 +656,8 @@ def _require_owner_admin(
 def _require_platform_admin(context: ConsoleAuthContext) -> None:
     _require_roles(
         context,
-        allowed=("owner", "admin", "support"),
-        message="Only owner/admin/support can access admin operations",
+        allowed=("platform_admin", "owner", "admin", "support"),
+        message="Only platform admin/owner/admin/support can access admin operations",
     )
 
 
@@ -1000,8 +1000,8 @@ async def link_agent_telegram(
     agent_id: UUID, request: Request, db: Session = Depends(get_db)
 ) -> ConsoleTelegramLinkResponse:
     context = get_console_context(request, db)
-    if context.role not in ("owner", "admin") and context.agent.id != agent_id:
-        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only owner/admin can link other agents")
+    if context.role not in ("platform_admin", "owner", "admin") and context.agent.id != agent_id:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only platform admin/owner/admin can link other agents")
 
     agent = (
         db.query(Agent)
@@ -1194,7 +1194,7 @@ async def list_cases(
 
     # Branch filter (RBAC + Request)
     allowed_branch_ids = {b.id for b in context.branches}
-    is_privileged = context.agent.role in ("owner", "admin")
+    is_privileged = context.agent.role in ("platform_admin", "owner", "admin")
 
     if not is_privileged:
         if not allowed_branch_ids:
@@ -1595,7 +1595,7 @@ async def resolve_case(
             release_idempotency(db, record=idempotency.record)
         raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
 
-    if context.role not in ("owner", "admin"):
+    if context.role not in ("platform_admin", "owner", "admin"):
         if case.assigned_to_name and case.assigned_to_name != context.agent.name:
             if idempotency and idempotency.record:
                 release_idempotency(db, record=idempotency.record)
@@ -1736,7 +1736,7 @@ async def return_case(
             release_idempotency(db, record=idempotency.record)
         raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", "Case already resolved")
 
-    if context.role not in ("owner", "admin"):
+    if context.role not in ("platform_admin", "owner", "admin"):
         if case.assigned_to_name and case.assigned_to_name != context.agent.name:
             if idempotency and idempotency.record:
                 release_idempotency(db, record=idempotency.record)
@@ -2016,10 +2016,10 @@ async def send_manager_message(
         raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found or access denied")
     
     # Only allow if case is active and assigned to this agent, or agent is owner/admin
-    if case.status != "active" and context.role not in ("owner", "admin"):
+    if case.status != "active" and context.role not in ("platform_admin", "owner", "admin"):
         raise ConsoleAPIError(403, "CASE_NOT_ACTIVE", "Case must be active to send messages")
     
-    if context.role not in ("owner", "admin"):
+    if context.role not in ("platform_admin", "owner", "admin"):
         assigned_id = str(case.assigned_to or "").strip()
         if assigned_id:
             if assigned_id != str(context.agent.id):
@@ -3696,6 +3696,8 @@ async def create_agent(
 
     if body.role == "manager" and not body.branch_id:
         raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id required for manager role")
+    if body.role == "platform_admin" and context.role != "platform_admin":
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only platform admin can assign platform_admin role")
 
     branch = None
     if body.branch_id:
