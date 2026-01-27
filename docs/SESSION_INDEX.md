@@ -7,3 +7,4 @@
 | 2026-01-27-session-governance | done | feat/session-governance-2026-01-27 | /home/zhan/worktrees/session-governance-2026-01-27 | docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md | 2026-01-27 |
 | 2026-01-27-session-id-guard-a1 | active | feat/2026-01-27-session-id-guard-a1 | /home/zhan/worktrees/2026-01-27-session-id-guard-a1 | docs/TASK_PACKAGES/TP-2026-01-27-session-id-guard-a1.md | 2026-01-27 |
 | 2026-01-27-session-close-same-commit-a1 | done | feat/2026-01-27-session-close-same-commit-a1 | /home/zhan/worktrees/2026-01-27-session-close-same-commit-a1 | docs/TASK_PACKAGES/TP-2026-01-27-session-close-same-commit-a1.md | 2026-01-27 |
+| 2026-01-27-session-tp-prestart-a1 | done | feat/2026-01-27-session-tp-prestart-a1 | /home/zhan/worktrees/2026-01-27-session-tp-prestart-a1 | docs/TASK_PACKAGES/TP-2026-01-27-session-tp-prestart-a1.md | 2026-01-27 |
