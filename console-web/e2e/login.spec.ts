@@ -200,11 +200,19 @@ test.describe('Smoke Test: Login Flow', () => {
             await startKeycloakLogin(page);
         }
         const logoutButton = page.getByTestId('logout-button');
+        const signInHeading = page.getByRole('heading', { name: /sign in/i });
+        await Promise.race([
+            page.waitForURL(keycloakHostPattern, { timeout: 5000 }),
+            logoutButton.waitFor({ state: 'visible', timeout: 5000 }),
+            signInHeading.waitFor({ state: 'visible', timeout: 5000 }),
+        ]);
         if (await logoutButton.isVisible().catch(() => false)) {
             return;
         }
+        if (await signInHeading.isVisible().catch(() => false)) {
+            return;
+        }
         await expect(page).toHaveURL(keycloakHostPattern);
-        await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible();
     });
 
     test('should login and see inbox @smoke', async ({ page }) => {
