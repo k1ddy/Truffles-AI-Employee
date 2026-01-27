@@ -24,3 +24,4 @@
 | 2026-01-27-provider-gateway-service-arch | done | feat/2026-01-27-provider-gateway-service-arch | /home/zhan/worktrees/2026-01-27-provider-gateway-service-arch | docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md | 2026-01-27 |
 | 2026-01-27-provider-gateway-ghcr-evidence-arch | done | feat/2026-01-27-provider-gateway-ghcr-evidence-arch | /home/zhan/worktrees/worktrees/2026-01-27-provider-gateway-ghcr-evidence-arch | docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md | 2026-01-27 |
 | 2026-01-27-admin-login-verify-a2 | done | feat/2026-01-27-admin-login-verify-a2 | /home/zhan/worktrees/2026-01-27-admin-login-verify-a2 | docs/TASK_PACKAGES/TP-2026-01-27-admin-login-verify.md | 2026-01-27 |
+| 2026-01-27-inbox-service-shadow-arch | active | feat/2026-01-27-inbox-service-shadow-arch | /home/zhan/worktrees/2026-01-27-inbox-service-shadow-arch | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 |

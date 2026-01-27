@@ -44,6 +44,7 @@
 | `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
 | `scripts/restart_knowledge_gateway.sh` | Перезапуск Knowledge Gateway (shadow) | OPS |
 | `scripts/restart_provider_gateway.sh` | Перезапуск Provider Gateway (shadow) | OPS |
+| `scripts/restart_inbox_service.sh` | Перезапуск Inbox Service (shadow) | OPS |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
@@ -53,6 +54,8 @@
 | `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |
 | `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |
 | `truffles-api/app/provider_gateway_app.py` | Отдельный app для Provider Gateway | Backend |
+| `truffles-api/app/inbox_service_app.py` | Отдельный app для Inbox Service | Backend |
+| `truffles-api/app/routers/inbox_service.py` | Router для Inbox Service | Backend |
 | `truffles-api/migrations/015_add_inbox_events.sql` | Migration: inbox_events (durable inbox store) | Backend/OPS |
 | `truffles-api/migrations/016_add_console_confirmations.sql` | Migration: console_confirmations (destructive safeguards) | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |

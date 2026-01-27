@@ -32,6 +32,7 @@ without changing routing or production behavior.
 ## Touch-list
 - `truffles-api/app/inbox_service_app.py`
 - `truffles-api/app/routers/inbox_service.py`
+- `truffles-api/app/routers/__init__.py`
 - `truffles-api/app/services/inbox_event_service.py` (if needed)
 - `truffles-api/tests/test_inbox_service_app.py`
 - `scripts/restart_inbox_service.sh`
