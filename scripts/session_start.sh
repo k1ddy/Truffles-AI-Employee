@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage: scripts/session_start.sh --session-id ID --task-package PATH [--title TITLE]
-                               [--branch NAME] [--worktree PATH] [--base-ref REF]
+                               [--branch NAME] [--worktree PATH] [--base-ref REF] [--force-new]
 
 Creates a new worktree + branch and registers a session log + index entry.
 Defaults:
@@ -13,6 +13,7 @@ Defaults:
   worktree:   <repo-parent>/worktrees/<session-id>
   base-ref:   origin/main
   task-package: <required; must exist>
+  force-new:  allow new session even when open sessions exist
 USAGE
 }
 
@@ -22,6 +23,7 @@ task_package=""
 branch=""
 worktree=""
 base_ref="origin/main"
+force_new="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -31,6 +33,7 @@ while [[ $# -gt 0 ]]; do
     --branch) branch="$2"; shift 2;;
     --worktree) worktree="$2"; shift 2;;
     --base-ref) base_ref="$2"; shift 2;;
+    --force-new) force_new="true"; shift 1;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 1;;
   esac
@@ -77,6 +80,25 @@ fi
 
 index_file_root="$repo_root/docs/SESSION_INDEX.md"
 if [[ -f "$index_file_root" ]]; then
+  open_sessions=$(awk -F'|' '
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    /^\|/ {
+      sid=trim($2); status=trim($3); worktree=trim($5);
+      if (sid=="" || sid=="session_id") next;
+      if (status=="done") next;
+      print sid "|" status "|" worktree;
+    }
+  ' "$index_file_root")
+  if [[ -n "$open_sessions" && "$force_new" != "true" ]]; then
+    echo "ERROR: Open sessions exist. Resume before starting a new session." >&2
+    while IFS='|' read -r sid status wt; do
+      [[ -z "$sid" ]] && continue
+      echo "  - ${sid} (${status}) ${wt}" >&2
+    done <<< "$open_sessions"
+    echo "Resume with: scripts/session_resume.sh (then pick session-id)" >&2
+    echo "Or pass --force-new if you intentionally start a parallel session." >&2
+    exit 1
+  fi
   agent_suffix="${session_id##*-}"
   open_matches=$(awk -F'|' -v agent="$agent_suffix" '
     function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }

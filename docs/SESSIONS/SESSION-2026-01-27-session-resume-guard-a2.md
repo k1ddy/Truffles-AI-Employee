@@ -1,0 +1,21 @@
+# SESSION 2026-01-27-session-resume-guard-a2 — Session 2026-01-27-session-resume-guard-a2
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-session-resume-guard-a2.md
+- branch: feat/2026-01-27-session-resume-guard-a2
+- worktree: /home/zhan/worktrees/2026-01-27-session-resume-guard-a2
+- base_ref: origin/main
+- scope: Strong resume guard for parallel agents after compaction.
+- done:
+  - session_start blocks new sessions when any open sessions exist (unless --force-new).
+  - session_resume lists dirty/clean status for open sessions.
+  - Docs updated with stronger resume protocol.
+  - Updated session index status.
+- next:
+  - None.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-session-resume-guard-a2.md
+  - scripts/session_start.sh
+  - scripts/session_resume.sh
+- last_updated: 2026-01-27
