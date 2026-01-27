@@ -190,6 +190,7 @@
 - Перед commit/push обязателен `scripts/session_check.sh` (хуки блокируют без него).
 - Закрытие: `scripts/session_end.sh --status done` и cleanup worktree/branch.
 - Коммит закрытия: `SESSION_ALLOW_DONE=1 git commit ...` (иначе pre-commit блокирует статус `done`).
+- Статус `done` ставится **в том же коммите**, где внесены рабочие изменения. Отдельный commit/PR только ради закрытия запрещён. Для doc-only — один commit и fast-forward push в `main`.
 - Неправильное закрытие ловит `scripts/session_audit.sh` → статус `needs_fix`.
 - Doc-only fast path: разрешены только `docs/**`, `STATE.md`, `STRUCTURE.md`, `AGENTS.md`; такие изменения пушатся напрямую в `main` (fast-forward) без PR. PR допустим только при `ALLOW_DOC_ONLY_PR=1` (конфликты/исключения).
 

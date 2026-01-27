@@ -35,6 +35,7 @@ SESSION RITUAL (every session)
 Before SSH, verify environment: if `pwd` = `/home/zhan/truffles-main` and public IP matches `TECH.md` — you're already on prod, no SSH. Quick check: `hostname; whoami; pwd; curl -s https://ifconfig.me`.
 1) Read `STATE.md` NOW (1 screen) and pick ONE issue; if NOW/next steps are missing or too long — STOP and ask Brain or Top Architect to update the brief.
 2) Create session log + worktree: `scripts/session_start.sh --session-id YYYY-MM-DD-<slug>-<agent>`, then `scripts/install_hooks.sh`; run `scripts/session_check.sh` before commit/push. Doc-only changes push directly to `main` (fast-forward), no PR.
+   - Статус `done` ставится в финальном коммите работы; отдельный commit/PR ради закрытия запрещён.
 3) Run Question Gate (per `AGENTS.md`): check docs/code/env before asking questions. If debugging message flow, start with `ops/diagnose.py explain` (Fast Debug SOP) before logs/SQL.
 4) Produce a Task Package BEFORE coding. If Task Package is missing/ambiguous: STOP and write the missing pieces.
 5) Implement with one-issue flow: smallest change that satisfies the invariant + DoD.
