@@ -18,4 +18,4 @@
 | 2026-01-27-knowledge-gateway-ghcr-arch | done | feat/2026-01-27-knowledge-gateway-ghcr-arch | /home/zhan/worktrees/2026-01-27-knowledge-gateway-ghcr-arch | docs/TASK_PACKAGES/TP-2026-01-27-knowledge-gateway-service.md | 2026-01-27 |
 | 2026-01-27-session-resume-guard-a2 | done | feat/2026-01-27-session-resume-guard-a2 | /home/zhan/worktrees/2026-01-27-session-resume-guard-a2 | docs/TASK_PACKAGES/TP-2026-01-27-session-resume-guard-a2.md | 2026-01-27 |
 | 2026-01-27-session-agent-lock-a2 | done | feat/2026-01-27-session-agent-lock-a2 | /home/zhan/worktrees/2026-01-27-session-agent-lock-a2 | docs/TASK_PACKAGES/TP-2026-01-27-session-agent-lock-a2.md | 2026-01-27 |
-| 2026-01-27-provider-gateway-service-arch | active | feat/2026-01-27-provider-gateway-service-arch | /home/zhan/worktrees/2026-01-27-provider-gateway-service-arch | docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md | 2026-01-27 |
+| 2026-01-27-provider-gateway-service-arch | done | feat/2026-01-27-provider-gateway-service-arch | /home/zhan/worktrees/2026-01-27-provider-gateway-service-arch | docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md | 2026-01-27 |

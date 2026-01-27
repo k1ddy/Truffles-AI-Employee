@@ -1,6 +1,6 @@
 # SESSION 2026-01-27-provider-gateway-service-arch — Session 2026-01-27-provider-gateway-service-arch
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md
 - branch: feat/2026-01-27-provider-gateway-service-arch
