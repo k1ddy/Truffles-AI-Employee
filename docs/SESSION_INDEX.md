@@ -16,3 +16,4 @@
 | 2026-01-27-session-resume-protocol-a1 | done | feat/2026-01-27-session-resume-protocol-a1 | /home/zhan/worktrees/2026-01-27-session-resume-protocol-a1 | docs/TASK_PACKAGES/TP-2026-01-27-session-resume-protocol-a1.md | 2026-01-27 |
 | 2026-01-27-knowledge-gateway-service-arch | done | feat/2026-01-27-knowledge-gateway-service-arch | /home/zhan/worktrees/2026-01-27-knowledge-gateway-service-arch | docs/TASK_PACKAGES/TP-2026-01-27-knowledge-gateway-service.md | 2026-01-27 |
 | 2026-01-27-knowledge-gateway-ghcr-arch | done | feat/2026-01-27-knowledge-gateway-ghcr-arch | /home/zhan/worktrees/2026-01-27-knowledge-gateway-ghcr-arch | docs/TASK_PACKAGES/TP-2026-01-27-knowledge-gateway-service.md | 2026-01-27 |
+| 2026-01-27-session-resume-guard-a2 | done | feat/2026-01-27-session-resume-guard-a2 | /home/zhan/worktrees/2026-01-27-session-resume-guard-a2 | docs/TASK_PACKAGES/TP-2026-01-27-session-resume-guard-a2.md | 2026-01-27 |
