@@ -1,0 +1,21 @@
+# SESSION 2026-01-27-livecheck-recovery-a1 — Livecheck recovery evidence
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md
+- branch: state/livecheck-recovery-2026-01-27
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: rerun livecheck suites and record CI recovery evidence for snapshot consult cutover.
+- done:
+  - Re-ran ca01-core/ca02-policy/ca03-info livecheck suites with branch instance_id.
+  - Captured trace bundles for CA01/CA02/CA03.
+  - Verified CI rerun green.
+- next:
+  - Commit STATE.md evidence update and push branch.
+- evidence:
+  - /tmp/trace_bundle_ca01_refund_20260127_025128.json
+  - /tmp/trace_bundle_ca02_discount_20260127_025224.json
+  - /tmp/trace_bundle_ca03_address_hours_20260127_025256.json
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21381850315
+- last_updated: 2026-01-27

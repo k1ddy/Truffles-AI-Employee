@@ -740,7 +740,6 @@ def _handle_consult_flow(
         return missing
 
     if message_text and consult_pack_intent_signal:
-        playbook, _pack_error = load_consult_playbook(client_slug)
         if playbook:
             explicit_info_intent = bool(
                 info_class_intents & {"pricing", "duration", "location", "hours"}
