@@ -66,6 +66,13 @@ if [[ -z "$task_package" || ! -f "$repo_root/$task_package" ]]; then
   exit 1
 fi
 
+tp_placeholders=$(grep -nE "<[^>]+>" "$repo_root/$task_package" || true)
+if [[ -n "$tp_placeholders" ]]; then
+  echo "ERROR: Task Package contains placeholders; fill them before commit." >&2
+  echo "$tp_placeholders" >&2
+  exit 1
+fi
+
 index_file="$repo_root/docs/SESSION_INDEX.md"
 if [[ ! -f "$index_file" ]]; then
   echo "ERROR: docs/SESSION_INDEX.md missing." >&2

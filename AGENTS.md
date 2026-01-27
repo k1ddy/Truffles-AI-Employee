@@ -185,6 +185,7 @@
 
 ### 7.1 Session log (обязательно)
 - Каждая сессия фиксируется в `docs/SESSIONS/SESSION-<id>.md` и `docs/SESSION_INDEX.md` **до** начала правок.
+- Task Package готов до старта сессии; без него `scripts/session_start.sh` не запускать.
 - Старт сессии: `scripts/session_start.sh` (создаёт worktree/branch + лог).
 - `session_id` обязателен и должен включать суффикс агента: `YYYY-MM-DD-<slug>-<agent>` (пример: `2026-01-27-contracts-a1`).
 - Перед commit/push обязателен `scripts/session_check.sh` (хуки блокируют без него).
