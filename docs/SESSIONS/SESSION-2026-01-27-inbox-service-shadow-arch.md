@@ -1,6 +1,6 @@
-# SESSION 2026-01-27-inbox-service-shadow-arch — Session 2026-01-27-inbox-service-shadow-arch
+# SESSION 2026-01-27-inbox-service-shadow-arch — Inbox Service Shadow
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md
 - branch: feat/2026-01-27-inbox-service-shadow-arch
@@ -8,11 +8,11 @@
 - base_ref: origin/main
 - scope: Implement Inbox Service shadow app/router, tests, restart script, and record evidence.
 - done:
-  - Added inbox_service app/router + restart script + tests.
-  - Ran pytest for inbox service app.
-  - Started inbox service container and captured health + inbox_event evidence.
+  - Implemented inbox_service app/router + restart script + tests.
+  - Verified inbox ingest writes `inbox_events` and service health.
+  - Merged to main (per user confirmation).
 - next:
-  - Run session_check and prepare PR.
+  - Restart inbox service from GHCR and capture health/inbox evidence.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md
   - /tmp/inbox_service_health_20260127_165233.json
