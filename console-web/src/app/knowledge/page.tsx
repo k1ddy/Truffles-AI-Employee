@@ -366,7 +366,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
 
             {!canEdit && (
                 <div className="rounded-xl border border-border/60 bg-muted/40 p-4 text-sm text-muted-foreground">
-                    Роль {role}: доступ только для просмотра. Публикация и откат доступны owner/admin.
+                    Роль {role}: доступ только для просмотра. Публикация и откат доступны owner/admin/platform admin.
                 </div>
             )}
 

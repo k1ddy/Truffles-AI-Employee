@@ -427,7 +427,7 @@ export default function OpsPage() {
                         {telegramAction === "test" ? "Отправка..." : "Send test"}
                     </button>
                     {!canWriteSettings && (
-                        <span className="text-xs text-muted-foreground">Только owner/admin</span>
+                        <span className="text-xs text-muted-foreground">Только owner/admin/platform admin</span>
                     )}
                 </div>
             </div>
@@ -479,7 +479,7 @@ export default function OpsPage() {
                         </button>
                     )}
                     {!canWriteOps && (
-                        <span className="text-xs text-muted-foreground">Ретрай доступен только owner/admin</span>
+                        <span className="text-xs text-muted-foreground">Ретрай доступен только owner/admin/platform admin</span>
                     )}
                 </div>
                 {outboxLoading ? (

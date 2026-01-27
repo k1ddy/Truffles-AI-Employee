@@ -13,7 +13,7 @@ class Agent(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id = Column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"))
-    role = Column(Text, nullable=False)  # owner, admin, manager, support
+    role = Column(Text, nullable=False)  # owner, admin, manager, support, platform_admin
     name = Column(Text)
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP(timezone=True))
