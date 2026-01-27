@@ -37,6 +37,7 @@ Before SSH, verify environment: if `pwd` = `/home/zhan/truffles-main` and public
 2) Produce a Task Package BEFORE session start. If Task Package is missing/ambiguous: STOP and write the missing pieces.
    - Do NOT run `scripts/session_start.sh` until the Task Package is ready.
 3) Create session log + worktree: `scripts/session_start.sh --session-id YYYY-MM-DD-<slug>-<agent>`, then `scripts/install_hooks.sh`; run `scripts/session_check.sh` before commit/push. Doc-only changes push directly to `main` (fast-forward), no PR.
+   - Doc-only в `main` требует `docs/SESSIONS/*` + `docs/SESSION_INDEX.md` в том же коммите.
    - Статус `done` ставится в финальном коммите работы; отдельный commit/PR ради закрытия запрещён.
 4) Run Question Gate (per `AGENTS.md`): check docs/code/env before asking questions. If debugging message flow, start with `ops/diagnose.py explain` (Fast Debug SOP) before logs/SQL.
 5) Implement with one-issue flow: smallest change that satisfies the invariant + DoD.
