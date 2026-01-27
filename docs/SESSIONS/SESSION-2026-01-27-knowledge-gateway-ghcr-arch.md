@@ -1,0 +1,21 @@
+# SESSION 2026-01-27-knowledge-gateway-ghcr-arch — Session 2026-01-27-knowledge-gateway-ghcr-arch
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-knowledge-gateway-service.md
+- branch: feat/2026-01-27-knowledge-gateway-ghcr-arch
+- worktree: /home/zhan/worktrees/2026-01-27-knowledge-gateway-ghcr-arch
+- base_ref: origin/main
+- scope: knowledge gateway GHCR verification + STATE evidence
+- done:
+  - Session created.
+  - Restarted knowledge gateway with GHCR image and verified /health.
+  - Fetched /knowledge/snapshot for demo_salon and saved evidence in /tmp.
+  - Updated STATE.md with CI + GHCR evidence.
+- next:
+  - Start Provider Gateway service separation Task Package (TP2).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-knowledge-gateway-service.md
+  - /tmp/knowledge_gateway_health_20260127_144245.json
+  - /tmp/knowledge_gateway_snapshot_20260127_144245.json
+- last_updated: 2026-01-27

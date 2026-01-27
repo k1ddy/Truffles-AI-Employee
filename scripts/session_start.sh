@@ -4,7 +4,8 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage: scripts/session_start.sh --session-id ID --task-package PATH [--title TITLE]
-                               [--branch NAME] [--worktree PATH] [--base-ref REF]
+                               [--branch NAME] [--worktree PATH] [--base-ref REF] [--agent SUFFIX]
+                               [--force-new]
 
 Creates a new worktree + branch and registers a session log + index entry.
 Defaults:
@@ -13,6 +14,8 @@ Defaults:
   worktree:   <repo-parent>/worktrees/<session-id>
   base-ref:   origin/main
   task-package: <required; must exist>
+  agent:      required (or via SESSION_AGENT) and must match session-id suffix
+  force-new:  allow new session even when open sessions exist for the same agent
 USAGE
 }
 
@@ -22,6 +25,8 @@ task_package=""
 branch=""
 worktree=""
 base_ref="origin/main"
+force_new="false"
+agent=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -31,6 +36,8 @@ while [[ $# -gt 0 ]]; do
     --branch) branch="$2"; shift 2;;
     --worktree) worktree="$2"; shift 2;;
     --base-ref) base_ref="$2"; shift 2;;
+    --agent) agent="$2"; shift 2;;
+    --force-new) force_new="true"; shift 1;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 1;;
   esac
@@ -57,6 +64,25 @@ if [[ -z "$title" ]]; then
   title="Session ${session_id}"
 fi
 
+if [[ -z "$agent" ]]; then
+  agent="${SESSION_AGENT:-}"
+fi
+
+if [[ -z "$agent" ]]; then
+  echo "ERROR: --agent is required (or set SESSION_AGENT)." >&2
+  exit 1
+fi
+
+if ! [[ "$agent" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+  echo "ERROR: Invalid agent suffix '${agent}'." >&2
+  exit 1
+fi
+
+if [[ "$session_id" != *"-${agent}" ]]; then
+  echo "ERROR: session-id must end with '-${agent}'." >&2
+  exit 1
+fi
+
 if [[ -z "$task_package" ]]; then
   echo "ERROR: --task-package is required and must point to an existing file." >&2
   exit 1
@@ -77,25 +103,23 @@ fi
 
 index_file_root="$repo_root/docs/SESSION_INDEX.md"
 if [[ -f "$index_file_root" ]]; then
-  agent_suffix="${session_id##*-}"
-  open_matches=$(awk -F'|' -v agent="$agent_suffix" '
+  open_matches=$(awk -F'|' -v agent="$agent" '
     function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
     /^\|/ {
       sid=trim($2); status=trim($3); worktree=trim($5);
       if (sid=="" || sid=="session_id") next;
       if (status=="done") next;
-      if (sid ~ "-"agent"$") {
-        print sid "|" status "|" worktree;
-      }
+      if (sid ~ "-"agent"$") { print sid "|" status "|" worktree; }
     }
   ' "$index_file_root")
-  if [[ -n "$open_matches" ]]; then
-    echo "ERROR: Open session exists for agent suffix '-${agent_suffix}'." >&2
+  if [[ -n "$open_matches" && "$force_new" != "true" ]]; then
+    echo "ERROR: Open session exists for agent suffix '-${agent}'." >&2
     while IFS='|' read -r sid status wt; do
       [[ -z "$sid" ]] && continue
       echo "  - ${sid} (${status}) ${wt}" >&2
     done <<< "$open_matches"
-    echo "Resume with: scripts/session_resume.sh --session-id <id>" >&2
+    echo "Resume with: scripts/session_resume.sh --agent ${agent}" >&2
+    echo "Or pass --force-new if you intentionally start a parallel session for ${agent}." >&2
     exit 1
   fi
   if grep -q "^| ${session_id} |" "$index_file_root"; then
