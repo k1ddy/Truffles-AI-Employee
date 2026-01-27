@@ -34,6 +34,10 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const role = meData?.agent?.role ?? "manager";
     const canReadInbox = canAccessConsole(role, "inbox", "read");
     const canWriteInbox = canAccessConsole(role, "inbox", "write");
+    const branches = (meData?.branches ?? []) as { id?: string; name?: string }[];
+    const selectedBranchId = meData?.selected_branch_id ?? "";
+    const isPrivileged = role === "owner" || role === "admin";
+    const showBranchFilter = isPrivileged && branches.length > 1 && !selectedBranchId;
 
     useEffect(() => {
         if (initialCaseId) {
@@ -112,6 +116,8 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                         variant="compact"
                         selectedCaseId={selectedCaseId}
                         onSelectCase={handleSelectCase}
+                        branches={branches}
+                        showBranchFilter={showBranchFilter}
                     />
                 </section>
 
