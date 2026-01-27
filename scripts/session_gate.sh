@@ -88,7 +88,7 @@ if [[ "$doc_only" == "true" ]]; then
   exit 1
 fi
 
-if [[ "$target_branch" == "main" ]]; then
+if [[ "$mode" != "ci" && "$target_branch" == "main" ]]; then
   echo "ERROR: Non-doc changes cannot be pushed directly to main. Use PR." >&2
   exit 1
 fi
