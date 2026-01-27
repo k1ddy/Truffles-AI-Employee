@@ -183,6 +183,15 @@
 - Любые неожиданные файлы/изменения → STOP и вопрос.
 - Cleanup после merge делает Brain или Top Architect (удалить ветку + worktree).
 
+### 7.1 Session log (обязательно)
+- Каждая сессия фиксируется в `docs/SESSIONS/SESSION-<id>.md` и `docs/SESSION_INDEX.md` **до** начала правок.
+- Старт сессии: `scripts/session_start.sh` (создаёт worktree/branch + лог).
+- Перед commit/push обязателен `scripts/session_check.sh` (хуки блокируют без него).
+- Закрытие: `scripts/session_end.sh --status done` и cleanup worktree/branch.
+- Коммит закрытия: `SESSION_ALLOW_DONE=1 git commit ...` (иначе pre-commit блокирует статус `done`).
+- Неправильное закрытие ловит `scripts/session_audit.sh` → статус `needs_fix`.
+- Doc-only fast path: разрешены только `docs/**`, `STATE.md`, `STRUCTURE.md`, `AGENTS.md`; такие изменения пушатся напрямую в `main` (fast-forward) без PR. PR допустим только при `ALLOW_DOC_ONLY_PR=1` (конфликты/исключения).
+
 ---
 
 ## 8) Live-check протокол (WA/Telegram)

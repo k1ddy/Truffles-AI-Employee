@@ -7,6 +7,7 @@
 ## СЕССИОННЫЙ СНИМОК (читать первым)
 
 **NOW (1 экран)**
+- DONE: Session governance (session log + scripts + hooks + doc-only gate) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md`; Evidence: `docs/SESSIONS/SESSION-2026-01-27-session-governance.md`, `docs/SESSION_INDEX.md`, `scripts/session_*.sh`, `.githooks/`, `.github/workflows/session-gate.yml`.
 - DONE: Control Plane канон зафиксирован (`SPECS/CONTROL_PLANE.md`), roadmap приведён к Web‑first; Task Package `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-canon.md`. Evidence: doc updates in repo.
 - DONE: DEC‑014 (Knowledge Studio publish pipeline) и DEC‑015 (capabilities model) зафиксированы в `docs/IMPERIUM_DECISIONS.yaml`. Evidence: doc updates in repo.
 - DONE: Phase 1 Control Plane UI (layout + context + roles) — PR #340 https://github.com/k1ddy/Truffles-AI-Employee/pull/340; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21314913097.
