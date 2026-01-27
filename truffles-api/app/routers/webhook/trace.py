@@ -22,6 +22,7 @@ DECISION_TRACE_CRITICAL_STAGES = {
     "booking_commit",
     "booking_interrupt",
     "consult_flow",
+    "consult_snapshot",
     "consult_return",
     "contract_error",
     "escalation",
