@@ -29,6 +29,7 @@ Target: strict snapshot mode per-tenant, with an explicit fallback mode for roll
 - `truffles-api/app/services/knowledge_snapshot_consumer.py`
 - `truffles-api/app/services/consult_pack_service.py`
 - `truffles-api/app/routers/webhook/response.py`
+- `truffles-api/app/routers/webhook/trace.py`
 - `truffles-api/app/services/knowledge_service.py` (if resolver needs snapshot packs)
 - `truffles-api/tests/test_consult_pack_service.py`
 - `truffles-api/tests/test_message_endpoint.py`
