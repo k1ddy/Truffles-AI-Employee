@@ -150,7 +150,7 @@ class ProviderGatewayAdapter(MessagingPort):
         media_payload: dict[str, Any] = {"media_type": media_type}
         if isinstance(media_meta, dict):
             media_payload.update(media_meta)
-        if "signed_url" not in media_payload and "source_url" not in media_payload:
+        if not media_payload.get("signed_url") and not media_payload.get("source_url"):
             media_payload["signed_url"] = media_url
         if options.caption and "caption" not in media_payload:
             media_payload["caption"] = options.caption

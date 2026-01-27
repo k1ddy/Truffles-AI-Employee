@@ -1,0 +1,21 @@
+# SESSION 2026-01-27-provider-gateway-media-pipeline-arch — Session 2026-01-27-provider-gateway-media-pipeline-arch
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-media-pipeline.md
+- branch: feat/2026-01-27-provider-gateway-media-pipeline-arch
+- worktree: /home/zhan/worktrees/2026-01-27-provider-gateway-media-pipeline-arch
+- base_ref: origin/main
+- scope: provider gateway outbound media pipeline (signed URL + TTL + async outbox) canary on demo_salon
+- done:
+  - Session created.
+  - Enforced signed_url + TTL requirements for provider outbound media payloads.
+  - Updated media_send contract to require signed_url + expires_at.
+  - Added tests covering media TTL enforcement and gateway media payload.
+- next:
+  - Capture live-check or simulated outbox evidence for media send.
+  - Run session_check and prep PR after evidence.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-media-pipeline.md
+  - pytest -q truffles-api/tests/test_provider_gateway_outbound.py
+- last_updated: 2026-01-27

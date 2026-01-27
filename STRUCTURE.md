@@ -116,6 +116,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-26-provider-contracts-v1.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbound-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-outbound-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-media-pipeline.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbox-event.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
