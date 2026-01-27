@@ -77,6 +77,27 @@ fi
 
 index_file_root="$repo_root/docs/SESSION_INDEX.md"
 if [[ -f "$index_file_root" ]]; then
+  agent_suffix="${session_id##*-}"
+  open_matches=$(awk -F'|' -v agent="$agent_suffix" '
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    /^\|/ {
+      sid=trim($2); status=trim($3); worktree=trim($5);
+      if (sid=="" || sid=="session_id") next;
+      if (status=="done") next;
+      if (sid ~ "-"agent"$") {
+        print sid "|" status "|" worktree;
+      }
+    }
+  ' "$index_file_root")
+  if [[ -n "$open_matches" ]]; then
+    echo "ERROR: Open session exists for agent suffix '-${agent_suffix}'." >&2
+    while IFS='|' read -r sid status wt; do
+      [[ -z "$sid" ]] && continue
+      echo "  - ${sid} (${status}) ${wt}" >&2
+    done <<< "$open_matches"
+    echo "Resume with: scripts/session_resume.sh --session-id <id>" >&2
+    exit 1
+  fi
   if grep -q "^| ${session_id} |" "$index_file_root"; then
     echo "ERROR: session-id already exists in SESSION_INDEX: ${session_id}" >&2
     exit 1

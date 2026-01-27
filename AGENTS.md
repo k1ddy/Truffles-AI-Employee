@@ -187,6 +187,7 @@
 - Каждая сессия фиксируется в `docs/SESSIONS/SESSION-<id>.md` и `docs/SESSION_INDEX.md` **до** начала правок.
 - Task Package готов до старта сессии; без него `scripts/session_start.sh` не запускать.
 - Старт сессии: `scripts/session_start.sh --session-id ... --task-package docs/TASK_PACKAGES/TP-....md` (создаёт worktree/branch + лог; Task Package должен существовать).
+- После compaction/амнезии: использовать `scripts/session_resume.sh --agent <suffix>` или `--session-id <id>` и продолжать в указанном worktree (новую сессию не создавать).
 - `session_id` обязателен и должен включать суффикс агента: `YYYY-MM-DD-<slug>-<agent>` (пример: `2026-01-27-contracts-a1`).
 - Перед commit/push обязателен `scripts/session_check.sh` (хуки блокируют без него).
 - Закрытие: `scripts/session_end.sh --status done` и cleanup worktree/branch.

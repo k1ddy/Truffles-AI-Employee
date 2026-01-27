@@ -38,6 +38,7 @@
 | `scripts/session_start.sh` | Создать worktree/branch и session log | Все роли |
 | `scripts/session_check.sh` | Проверка сессии перед commit/push | Все роли |
 | `scripts/session_end.sh` | Закрытие сессии + index обновление | Все роли |
+| `scripts/session_resume.sh` | Возобновить активную сессию после compaction | Все роли |
 | `scripts/session_audit.sh` | Аудит сессий (статусы/сироты) | Brain/Architect |
 | `scripts/session_gate.sh` | Gate для doc-only и session log | Brain/Architect |
 | `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
