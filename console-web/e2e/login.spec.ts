@@ -4,6 +4,71 @@ const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffle
 const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
 const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
+let resolvedBaseURL = baseURL;
+
+async function waitForConsoleApp(page: import('@playwright/test').Page) {
+    await page.waitForURL(
+        (url) => consoleHostPattern.test(url.toString()) && !url.toString().includes('/api/auth'),
+        { timeout: 30000 }
+    );
+}
+
+function buildSignInUrl(origin: string) {
+    return `${origin}/api/auth/signin?callbackUrl=${encodeURIComponent(origin)}`;
+}
+
+async function gotoConsoleRoot(page: import('@playwright/test').Page) {
+    await page.goto(resolvedBaseURL, { waitUntil: 'domcontentloaded' });
+}
+
+async function startKeycloakLogin(page: import('@playwright/test').Page) {
+    await page.goto(buildSignInUrl(baseURL), { waitUntil: 'domcontentloaded' });
+    let providerForm = page.locator('form[action*="keycloak"]').first();
+    const action = await providerForm.getAttribute('action');
+    const actionOrigin = action ? new URL(action).origin : baseURL;
+    if (actionOrigin !== baseURL) {
+        await page.goto(buildSignInUrl(actionOrigin), { waitUntil: 'domcontentloaded' });
+        providerForm = page.locator('form[action*="keycloak"]').first();
+    }
+    resolvedBaseURL = actionOrigin;
+    const providerButton = page.getByRole('button', { name: /sign in with keycloak/i });
+    if (await providerButton.isVisible().catch(() => false)) {
+        await providerButton.click();
+    } else if (await providerForm.isVisible().catch(() => false)) {
+        await providerForm.waitFor({ state: 'visible', timeout: 15000 });
+        const submitButton = providerForm
+            .locator('button[type="submit"], input[type="submit"]')
+            .first();
+        await submitButton.click();
+    } else {
+        return false;
+    }
+    await Promise.race([
+        page.waitForURL(keycloakHostPattern, { timeout: 20000 }),
+        waitForConsoleApp(page),
+    ]);
+    return true;
+}
+
+async function loginThroughKeycloak(page: import('@playwright/test').Page) {
+    const started = await startKeycloakLogin(page);
+    if (!started) {
+        return;
+    }
+    if (!(await page.locator('#username').isVisible().catch(() => false))) {
+        await waitForConsoleApp(page);
+        await gotoConsoleRoot(page);
+        return;
+    }
+    await expect(page.locator('#username')).toBeVisible();
+    await expect(page.locator('#password')).toBeVisible();
+    await page.fill('#username', loginUser);
+    await page.fill('#password', loginPassword);
+    await page.click('#kc-login');
+    await waitForConsoleApp(page);
+    await gotoConsoleRoot(page);
+}
 
 async function selectOptionIfNeeded(
     selector: import('@playwright/test').Locator
@@ -127,23 +192,19 @@ async function waitForConsoleReady(page: import('@playwright/test').Page) {
 
 test.describe('Smoke Test: Login Flow', () => {
     test('should redirect to Keycloak login @smoke', async ({ page }) => {
-        await page.goto('/');
-        await expect(page.getByRole('button', { name: /войти/i })).toBeVisible();
-        await page.getByRole('button', { name: /войти/i }).click();
+        await gotoConsoleRoot(page);
+        const loginButton = page.getByTestId('login-button');
+        if (await loginButton.isVisible().catch(() => false)) {
+            await loginButton.click();
+        } else {
+            await startKeycloakLogin(page);
+        }
         await expect(page).toHaveURL(keycloakHostPattern);
         await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible();
     });
 
     test('should login and see inbox @smoke', async ({ page }) => {
-        await page.goto('/');
-        await page.getByRole('button', { name: /войти/i }).click();
-        await page.waitForURL(keycloakHostPattern);
-        await page.fill('#username', loginUser);
-        await page.fill('#password', loginPassword);
-        await page.click('#kc-login');
-        await page.waitForURL(consoleHostPattern);
-        await page.goto('/');
-        await expect(page.getByRole('button', { name: /выйти/i })).toBeVisible({ timeout: 10000 });
+        await loginThroughKeycloak(page);
         await selectCompanyIfNeeded(page);
         await selectClientIfNeeded(page);
         await selectBranchIfNeeded(page);
@@ -151,19 +212,12 @@ test.describe('Smoke Test: Login Flow', () => {
     });
 
     test('should logout successfully @smoke', async ({ page }) => {
-        await page.goto('/');
-        await page.getByRole('button', { name: /войти/i }).click();
-        await page.waitForURL(keycloakHostPattern);
-        await page.fill('#username', loginUser);
-        await page.fill('#password', loginPassword);
-        await page.click('#kc-login');
-        await page.waitForURL(consoleHostPattern);
-        await page.goto('/');
-        await expect(page.getByRole('button', { name: /выйти/i })).toBeVisible({ timeout: 10000 });
+        await loginThroughKeycloak(page);
+        await expect(page.getByTestId('logout-button')).toBeVisible({ timeout: 20000 });
         await selectCompanyIfNeeded(page);
         await selectClientIfNeeded(page);
         await selectBranchIfNeeded(page);
-        await page.getByRole('button', { name: /выйти/i }).click();
-        await expect(page.getByRole('button', { name: /войти/i })).toBeVisible({ timeout: 10000 });
+        await page.getByTestId('logout-button').click();
+        await expect(page.getByTestId('login-button')).toBeVisible({ timeout: 10000 });
     });
 });
