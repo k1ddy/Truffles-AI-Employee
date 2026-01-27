@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useAuthenticatedApi } from "@/hooks/useAuthenticatedApi";
 import Link from "next/link";
@@ -22,9 +21,9 @@ interface CaseFilters {
 }
 
 interface Branch {
-    id: string;
-    slug: string;
-    name: string;
+    id?: string;
+    slug?: string;
+    name?: string;
 }
 
 interface CasesResponse {
@@ -39,6 +38,8 @@ interface CaseListProps {
     variant?: CaseListVariant;
     selectedCaseId?: string | null;
     onSelectCase?: (caseId: string) => void;
+    branches?: Branch[];
+    showBranchFilter?: boolean;
 }
 
 // Loading skeleton component
@@ -62,6 +63,8 @@ export default function CaseList({
     variant = "table",
     selectedCaseId,
     onSelectCase,
+    branches = [],
+    showBranchFilter = false,
 }: CaseListProps) {
     const { data: session } = useSession();
     const api = useAuthenticatedApi();
@@ -96,18 +99,18 @@ export default function CaseList({
     // Check if we have a valid token
     const hasToken = !!(session as { accessToken?: string } | null)?.accessToken;
 
-    // Fetch branches for filter dropdown
-    const { data: settingsData } = useQuery({
-        queryKey: ["settings"],
-        queryFn: async () => {
-            const response = await api.get("/settings");
-            return response.data;
-        },
-        enabled: hasToken,
-    });
+    const selectableBranches = branches.filter((branch) => !!branch.id);
+    const branchMap = new Map(
+        selectableBranches.map((branch) => [branch.id as string, branch.name ?? branch.id as string])
+    );
+    const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
 
-    const branches: Branch[] = settingsData?.branches ?? [];
-    const branchMap = new Map<string, string>(branches.map((b) => [b.id, b.name]));
+    useEffect(() => {
+        if (!branchFilterEnabled && filters.branchId) {
+            setCursor(undefined);
+            setFilters((prev) => ({ ...prev, branchId: undefined }));
+        }
+    }, [branchFilterEnabled, filters.branchId]);
 
     const { data, isLoading, error, refetch, isFetching } = useQuery({
         queryKey: ["cases", filters, cursor],
@@ -254,7 +257,7 @@ export default function CaseList({
                 </select>
 
                 {/* Branch filter */}
-                {branches.length > 0 && (
+                {branchFilterEnabled && (
                     <select
                         value={filters.branchId || ""}
                         onChange={(e) => { resetPagination(); setFilters({ ...filters, branchId: e.target.value || undefined }); }}
@@ -262,8 +265,10 @@ export default function CaseList({
                         data-testid="cases-filter-branch"
                     >
                         <option value="">Все филиалы</option>
-                        {branches.map((b: Branch) => (
-                            <option key={b.id} value={b.id}>{b.name}</option>
+                        {selectableBranches.map((branch) => (
+                            <option key={branch.id} value={branch.id}>
+                                {branch.name ?? branch.id}
+                            </option>
                         ))}
                     </select>
                 )}
@@ -339,7 +344,7 @@ export default function CaseList({
                 </label>
 
                 {/* Clear filters */}
-                {(filters.status || filters.branchId || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox) && (
+                {(filters.status || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox) && (
                     <button
                         onClick={() => {
                             setSearchValue("");

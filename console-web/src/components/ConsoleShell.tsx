@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Image from "next/image";
 import Link from "next/link";
+import toast from "react-hot-toast";
 
 import LoginButton from "@/components/LoginButton";
 import { authApi, canAccessConsole, type ConsoleAction, type ConsoleRole, type ConsoleSection } from "@/lib/api-client";
@@ -164,7 +165,7 @@ function SelectionGate({
                         disabled={!companyId || isSubmitting}
                         data-testid="company-select-confirm"
                     >
-                        Продолжить
+                        {isSubmitting ? "Загрузка..." : "Продолжить"}
                     </button>
                 </div>
             </div>
@@ -199,7 +200,7 @@ function SelectionGate({
                         disabled={!clientId || isSubmitting}
                         data-testid="client-select-confirm"
                     >
-                        Продолжить
+                        {isSubmitting ? "Загрузка..." : "Продолжить"}
                     </button>
                 </div>
             </div>
@@ -234,7 +235,7 @@ function SelectionGate({
                         disabled={!branchId || isSubmitting}
                         data-testid="branch-select-confirm"
                     >
-                        Продолжить
+                        {isSubmitting ? "Загрузка..." : "Продолжить"}
                     </button>
                 </div>
             </div>
@@ -251,6 +252,7 @@ function ContextBar({
     onSelectCompany,
     onSelectClient,
     onSelectBranch,
+    isBusy,
 }: {
     me: ConsoleMe;
     companyId: string;
@@ -258,6 +260,7 @@ function ContextBar({
     onSelectCompany: (companyId: string) => void;
     onSelectClient: (clientId: string) => void;
     onSelectBranch: (branchId: string | null) => void;
+    isBusy: boolean;
 }) {
     const companies = me.companies ?? [];
     const branches = me.branches ?? [];
@@ -275,6 +278,7 @@ function ContextBar({
                         className="rounded-lg border border-border bg-background px-2 py-1 text-sm"
                         value={companyId}
                         onChange={(event) => onSelectCompany(event.target.value)}
+                        disabled={isBusy}
                         data-testid="context-company-select"
                     >
                         <option value="">Выберите компанию</option>
@@ -297,6 +301,7 @@ function ContextBar({
                         className="rounded-lg border border-border bg-background px-2 py-1 text-sm"
                         value={clientId}
                         onChange={(event) => onSelectClient(event.target.value)}
+                        disabled={isBusy}
                         data-testid="context-client-select"
                     >
                         {clients.map((client) => (
@@ -316,6 +321,7 @@ function ContextBar({
                         className="rounded-lg border border-border bg-background px-2 py-1 text-sm"
                         value={branchId}
                         onChange={(event) => onSelectBranch(event.target.value || null)}
+                        disabled={isBusy}
                         data-testid="context-branch-select"
                     >
                         {allowAllBranches && <option value="">Все филиалы</option>}
@@ -389,6 +395,16 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     );
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [contextNotice, setContextNotice] = useState<string | null>(null);
+    const contextBusy = isSubmitting || isFetching;
+
+    useEffect(() => {
+        if (!contextNotice) {
+            return undefined;
+        }
+        const timeout = window.setTimeout(() => setContextNotice(null), 2500);
+        return () => window.clearTimeout(timeout);
+    }, [contextNotice]);
 
     const companies = data?.companies ?? [];
     const companySelectionRequired = !!data?.company_selection_required;
@@ -411,12 +427,18 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return;
         }
         setIsSubmitting(true);
-        writeLocalStorage(COMPANY_ID_STORAGE_KEY, companyId);
-        writeLocalStorage(CLIENT_ID_STORAGE_KEY, null);
-        writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
-        await refetch();
-        queryClient.invalidateQueries();
-        setIsSubmitting(false);
+        try {
+            writeLocalStorage(COMPANY_ID_STORAGE_KEY, companyId);
+            writeLocalStorage(CLIENT_ID_STORAGE_KEY, null);
+            writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
+            await refetch();
+            queryClient.invalidateQueries();
+            setContextNotice("Контекст обновлён");
+        } catch {
+            toast.error("Не удалось обновить контекст");
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     const handleSelectClient = async (clientId: string) => {
@@ -424,11 +446,17 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return;
         }
         setIsSubmitting(true);
-        writeLocalStorage(CLIENT_ID_STORAGE_KEY, clientId);
-        writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
-        await refetch();
-        queryClient.invalidateQueries();
-        setIsSubmitting(false);
+        try {
+            writeLocalStorage(CLIENT_ID_STORAGE_KEY, clientId);
+            writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
+            await refetch();
+            queryClient.invalidateQueries();
+            setContextNotice("Контекст обновлён");
+        } catch {
+            toast.error("Не удалось обновить контекст");
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     const handleSelectBranch = async (branchId: string) => {
@@ -436,10 +464,16 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return;
         }
         setIsSubmitting(true);
-        writeLocalStorage(BRANCH_ID_STORAGE_KEY, branchId);
-        await refetch();
-        queryClient.invalidateQueries();
-        setIsSubmitting(false);
+        try {
+            writeLocalStorage(BRANCH_ID_STORAGE_KEY, branchId);
+            await refetch();
+            queryClient.invalidateQueries();
+            setContextNotice("Контекст обновлён");
+        } catch {
+            toast.error("Не удалось обновить контекст");
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     const handleContextClientChange = async (clientId: string) => {
@@ -462,10 +496,16 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return;
         }
         setIsSubmitting(true);
-        writeLocalStorage(BRANCH_ID_STORAGE_KEY, branchId);
-        await refetch();
-        queryClient.invalidateQueries();
-        setIsSubmitting(false);
+        try {
+            writeLocalStorage(BRANCH_ID_STORAGE_KEY, branchId);
+            await refetch();
+            queryClient.invalidateQueries();
+            setContextNotice("Контекст обновлён");
+        } catch {
+            toast.error("Не удалось обновить контекст");
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     if (!hasSession && status !== "loading") {
@@ -534,9 +574,18 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                     onSelectCompany={handleContextCompanyChange}
                                     onSelectClient={handleContextClientChange}
                                     onSelectBranch={handleContextBranchChange}
+                                    isBusy={contextBusy}
                                 />
                             )}
                             <div className="flex items-center justify-between gap-4">
+                                {contextBusy && (
+                                    <span className="text-xs text-muted-foreground" data-testid="context-loading">
+                                        Обновление контекста...
+                                    </span>
+                                )}
+                                {!contextBusy && contextNotice && (
+                                    <span className="text-xs text-muted-foreground">{contextNotice}</span>
+                                )}
                                 <LoginButton />
                             </div>
                         </div>

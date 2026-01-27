@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import axios from "axios";
 import toast from "react-hot-toast";
@@ -10,6 +10,9 @@ import { useErrorHandler } from "@/lib/api-hooks";
 import AccessDenied from "@/components/AccessDenied";
 
 type SessionData = ReturnType<typeof useSession>["data"];
+type BranchSummary = { id?: string; name?: string };
+
+const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 
 const KNOWLEDGE_STEPS = [
     { id: "draft", label: "Draft", hint: "редактирование" },
@@ -69,6 +72,7 @@ function extractHistoryItems(value: unknown): KnowledgeHistoryItem[] {
 
 function KnowledgeStudio({ session }: { session: SessionData }) {
     const { handleError } = useErrorHandler();
+    const queryClient = useQueryClient();
     const [stepIndex, setStepIndex] = useState(0);
     const [draftText, setDraftText] = useState("");
     const [ackWarnings, setAckWarnings] = useState(false);
@@ -79,6 +83,8 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const [lastRollbackAt, setLastRollbackAt] = useState<string | null>(null);
     const [showRollbackConfirm, setShowRollbackConfirm] = useState(false);
     const [rollbackReason, setRollbackReason] = useState("");
+    const [branchId, setBranchId] = useState("");
+    const [isSelectingBranch, setIsSelectingBranch] = useState(false);
     const [validation, setValidation] = useState<ValidationState>({
         ran: false,
         errors: [],
@@ -98,6 +104,16 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const role = meData?.agent?.role ?? "manager";
     const canRead = canAccessConsole(role, "knowledge", "read");
     const canEdit = canAccessConsole(role, "knowledge", "write");
+    const branches: BranchSummary[] = (meData?.branches ?? []) as BranchSummary[];
+    const selectedBranchId = meData?.selected_branch_id ?? "";
+    const branchIsValid = selectedBranchId
+        ? branches.some((branch) => branch.id === selectedBranchId)
+        : false;
+    const branchSelectionRequired = branches.length > 1 && !branchIsValid;
+
+    useEffect(() => {
+        setBranchId(selectedBranchId ?? "");
+    }, [selectedBranchId]);
 
     const currentQuery = useQuery({
         queryKey: ["knowledge-current"],
@@ -105,7 +121,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             const response = await knowledgeApi.getCurrent();
             return response.data;
         },
-        enabled: !!session && !apiUnavailable && canRead,
+        enabled: !!session && !!meData && !apiUnavailable && canRead && !branchSelectionRequired,
         retry: false,
     });
 
@@ -115,7 +131,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             const response = await knowledgeApi.history();
             return response.data;
         },
-        enabled: !!session && !apiUnavailable && canRead,
+        enabled: !!session && !!meData && !apiUnavailable && canRead && !branchSelectionRequired,
         retry: false,
     });
 
@@ -257,6 +273,56 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
 
     if (!canRead) {
         return <AccessDenied message="Эта роль не имеет доступа к знаниям." />;
+    }
+
+    if (branchSelectionRequired) {
+        return (
+            <div className="card-surface max-w-xl p-8" data-testid="knowledge-branch-gate">
+                <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Требуется выбор</p>
+                <h2 className="text-2xl font-semibold mt-3 mb-4">Выберите филиал</h2>
+                <p className="text-sm text-muted-foreground mb-6">
+                    Управление знаниями выполняется отдельно для каждого филиала.
+                </p>
+                <select
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    value={branchId}
+                    onChange={(event) => setBranchId(event.target.value)}
+                >
+                    <option value="">Выберите филиал</option>
+                    {branches.map((branch) => (
+                        <option key={branch.id} value={branch.id ?? ""}>
+                            {branch.name ?? branch.id}
+                        </option>
+                    ))}
+                </select>
+                <div className="mt-6 flex justify-end">
+                    <button
+                        className="btn-primary"
+                        onClick={async () => {
+                            if (!branchId) {
+                                toast.error("Выберите филиал");
+                                return;
+                            }
+                            setIsSelectingBranch(true);
+                            try {
+                                if (typeof window !== "undefined") {
+                                    window.localStorage.setItem(BRANCH_ID_STORAGE_KEY, branchId);
+                                }
+                                await queryClient.invalidateQueries({ queryKey: ["console-me"] });
+                                await currentQuery.refetch();
+                                await historyQuery.refetch();
+                                toast.success("Филиал выбран");
+                            } finally {
+                                setIsSelectingBranch(false);
+                            }
+                        }}
+                        disabled={!branchId || isSelectingBranch}
+                    >
+                        {isSelectingBranch ? "Загрузка..." : "Продолжить"}
+                    </button>
+                </div>
+            </div>
+        );
     }
 
     return (
