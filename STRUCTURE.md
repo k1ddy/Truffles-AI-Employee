@@ -53,6 +53,7 @@
 | `docs/REPORTS/2026-01-24-consult-quality.md` | Отчёт: consult quality + chaos‑sim | Brain/Architect |
 | `docs/REPORTS/2026-01-25-control-plane-provisioning.png` | Скрин: Provisioning Wizard (Settings) | Brain/Architect |
 | `docs/REPORTS/2026-01-26-control-plane-inbox.png` | Скрин: Inbox 3‑pane (Phase 5) | Brain/Architect |
+| `docs/REPORTS/2026-01-27-control-plane-review.md` | Отчёт: Control Plane UX/RBAC/safety review | Brain/Architect |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
