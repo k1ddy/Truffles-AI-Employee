@@ -1,0 +1,35 @@
+# SESSION 2026-01-27-session-governance — Session governance bootstrap
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md
+- branch: feat/session-governance-2026-01-27
+- worktree: /home/zhan/worktrees/session-governance-2026-01-27
+- base_ref: origin/main
+- scope: session log + gates + hooks + doc-only fast path rules.
+- done:
+  - Merged PR #404
+  - Session governance ready for merge
+  - Created task package and session log/index.
+  - Added session scripts + hooks + CI gate.
+  - Updated AGENTS/STRUCTURE/SESSION_START_PROMPT for new protocol.
+  - Ran bash -n checks for session scripts.
+  - Updated STATE.md with session governance entry.
+  - Session audit OK.
+- next:
+  - None (ready to close after merge/push).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md
+  - docs/SESSIONS/SESSION_TEMPLATE.md
+  - scripts/session_start.sh
+  - scripts/session_check.sh
+  - scripts/session_end.sh
+  - scripts/session_audit.sh
+  - scripts/session_gate.sh
+  - scripts/install_hooks.sh
+  - .githooks/pre-commit
+  - .githooks/pre-push
+  - .github/workflows/session-gate.yml
+  - bash -n scripts/session_start.sh scripts/session_check.sh scripts/session_end.sh scripts/session_audit.sh scripts/session_gate.sh scripts/install_hooks.sh
+  - scripts/session_audit.sh (Session audit OK)
+- last_updated: 2026-01-27
