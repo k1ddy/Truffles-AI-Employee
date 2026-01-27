@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/session_start.sh --session-id ID [--title TITLE] [--task-package PATH]
+Usage: scripts/session_start.sh --session-id ID --task-package PATH [--title TITLE]
                                [--branch NAME] [--worktree PATH] [--base-ref REF]
 
 Creates a new worktree + branch and registers a session log + index entry.
@@ -12,7 +12,7 @@ Defaults:
   branch:     feat/<session-id>
   worktree:   <repo-parent>/worktrees/<session-id>
   base-ref:   origin/main
-  task-package: docs/TASK_PACKAGES/TP-<session-id>.md
+  task-package: <required; must exist>
 USAGE
 }
 
@@ -52,10 +52,27 @@ fi
 
 branch=${branch:-"feat/${session_id}"}
 worktree=${worktree:-"${repo_parent}/worktrees/${session_id}"}
-task_package=${task_package:-"docs/TASK_PACKAGES/TP-${session_id}.md"}
 
 if [[ -z "$title" ]]; then
   title="Session ${session_id}"
+fi
+
+if [[ -z "$task_package" ]]; then
+  echo "ERROR: --task-package is required and must point to an existing file." >&2
+  exit 1
+fi
+
+if [[ "$task_package" == /* ]]; then
+  if [[ "$task_package" != "$repo_root/"* ]]; then
+    echo "ERROR: task-package must be inside repo root: ${repo_root}" >&2
+    exit 1
+  fi
+  task_package="${task_package#"$repo_root/"}"
+fi
+
+if [[ ! -f "$repo_root/$task_package" ]]; then
+  echo "ERROR: Task Package not found: ${task_package}" >&2
+  exit 1
 fi
 
 index_file_root="$repo_root/docs/SESSION_INDEX.md"
@@ -122,36 +139,6 @@ fi
 
 if ! grep -q "^| ${session_id} |" "$index_file"; then
   echo "| ${session_id} | active | ${branch} | ${worktree} | ${task_package} | $(date +%F) |" >> "$index_file"
-fi
-
-if [[ ! -f "$worktree/$task_package" ]]; then
-  mkdir -p "$(dirname "$worktree/$task_package")"
-  cat <<EOF_TP > "$worktree/$task_package"
-# TP-${session_id} — ${title}
-
-- **Название/цель:** <1-2 sentences>
-- **Canon refs:** <owner docs + STATE.md NOW/GAP>
-- **Invariant:** <what must not get worse>
-- **Scope:** <in scope>
-- **Out of scope:** <out of scope>
-- **Touch-list:**
-  - <files/tables>
-- **Plan:**
-  1) <step>
-- **DoD:**
-  - <acceptance>
-- **Checks:** <commands>
-- **Evidence:** <CI/logs/trace>
-- **Rollback:** <rollback>
-- **No-go:** <forbidden>
-- **Риски/блокеры:** <risks>
-- **Branch/Worktree/Base/Merge/Cleanup:**
-  - Branch: ${branch}
-  - Worktree: ${worktree}
-  - Base: ${base_ref}
-  - Merge: merge --no-ff (no rebase)
-  - Cleanup: delete worktree + branch after merge.
-EOF_TP
 fi
 
 echo "Session created: ${session_file}"

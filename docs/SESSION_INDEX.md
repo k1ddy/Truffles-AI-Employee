@@ -9,3 +9,4 @@
 | 2026-01-27-session-close-same-commit-a1 | done | feat/2026-01-27-session-close-same-commit-a1 | /home/zhan/worktrees/2026-01-27-session-close-same-commit-a1 | docs/TASK_PACKAGES/TP-2026-01-27-session-close-same-commit-a1.md | 2026-01-27 |
 | 2026-01-27-session-tp-prestart-a1 | done | feat/2026-01-27-session-tp-prestart-a1 | /home/zhan/worktrees/2026-01-27-session-tp-prestart-a1 | docs/TASK_PACKAGES/TP-2026-01-27-session-tp-prestart-a1.md | 2026-01-27 |
 | 2026-01-27-doc-only-main-gate-a1 | done | feat/2026-01-27-doc-only-main-gate-a1 | /home/zhan/worktrees/2026-01-27-doc-only-main-gate-a1 | docs/TASK_PACKAGES/TP-2026-01-27-doc-only-main-gate-a1.md | 2026-01-27 |
+| 2026-01-27-session-start-require-tp-a1 | done | feat/2026-01-27-session-start-require-tp-a1 | /home/zhan/worktrees/2026-01-27-session-start-require-tp-a1 | docs/TASK_PACKAGES/TP-2026-01-27-session-start-require-tp-a1.md | 2026-01-27 |
