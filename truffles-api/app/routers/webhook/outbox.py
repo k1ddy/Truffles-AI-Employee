@@ -76,6 +76,10 @@ def _is_send_text_event(payload_json: dict | None) -> bool:
     return _is_outbox_event(payload_json) and payload_json.get("event_type") == "whatsapp.send_text"
 
 
+def _is_send_media_event(payload_json: dict | None) -> bool:
+    return _is_outbox_event(payload_json) and payload_json.get("event_type") == "whatsapp.send_media"
+
+
 def _split_outbox_batches(batch_sorted: list[dict], window_seconds: float) -> list[list[dict]]:
     if not batch_sorted:
         return []
@@ -781,7 +785,7 @@ async def _process_outbox_rows(
         try:
             if _is_outbox_event(payload_json):
                 event_type = payload_json.get("event_type")
-                if event_type != "whatsapp.send_text":
+                if event_type not in {"whatsapp.send_text", "whatsapp.send_media"}:
                     _record_outbox_payload_error(outbox_id=outbox_id_str, reason=f"event:{event_type}")
                     mark_outbox_status(
                         db,
@@ -794,10 +798,9 @@ async def _process_outbox_rows(
                     return
                 payload = payload_json.get("payload") or {}
                 remote_jid = payload.get("remote_jid")
-                text = payload.get("text")
                 instance_id = payload.get("instance_id")
                 idempotency_key = payload.get("idempotency_key") or payload_json.get("idempotency_key")
-                if not remote_jid or not text or not instance_id:
+                if not remote_jid or not instance_id:
                     _record_outbox_payload_error(outbox_id=outbox_id_str, reason="event:missing_fields")
                     mark_outbox_status(
                         db,
@@ -836,8 +839,44 @@ async def _process_outbox_rows(
                         instance_id=instance_id,
                         idempotency_key=idempotency_key,
                     )
-                with start_span("outbox.send", context=span_context) as span:
-                    result = adapter.send_text(remote_jid, text, options)
+
+                if event_type == "whatsapp.send_text":
+                    text = payload.get("text")
+                    if not text:
+                        _record_outbox_payload_error(outbox_id=outbox_id_str, reason="event:missing_text")
+                        mark_outbox_status(
+                            db,
+                            outbox_id=outbox_id,
+                            status="FAILED",
+                            last_error="invalid_payload:missing_text",
+                            next_attempt_at=None,
+                        )
+                        results["failed"] += 1
+                        return
+                    with start_span("outbox.send", context=span_context) as span:
+                        result = adapter.send_text(remote_jid, text, options)
+                else:
+                    media_url = payload.get("media_url") or payload.get("signed_url")
+                    media_type = payload.get("media_type")
+                    caption = payload.get("caption")
+                    media_meta = payload.get("media_meta")
+                    if not media_url or not media_type:
+                        _record_outbox_payload_error(outbox_id=outbox_id_str, reason="event:missing_media")
+                        mark_outbox_status(
+                            db,
+                            outbox_id=outbox_id,
+                            status="FAILED",
+                            last_error="invalid_payload:missing_media",
+                            next_attempt_at=None,
+                        )
+                        results["failed"] += 1
+                        return
+                    if caption:
+                        options.caption = caption
+                    if use_gateway and isinstance(options.extra, dict) and isinstance(media_meta, dict):
+                        options.extra["media_meta"] = media_meta
+                    with start_span("outbox.send", context=span_context) as span:
+                        result = adapter.send_media(remote_jid, media_url, media_type, options)
                 if span is not None:
                     span.set_attribute("send.ok", result.is_ok())
                 if not result.is_ok():

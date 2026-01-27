@@ -13,6 +13,7 @@ outbox worker without changing default behavior.
 
 ## Scope
 - Add provider gateway outbound adapter (HTTP) and payload builder for `provider_outbound.v1`.
+- Support media payloads (`media_send.v1`) with signed URL + TTL (no behavior change when disabled).
 - Add optional status callback endpoint to update outbox status + meta.
 - Add env gates for outbound + status endpoints.
 - Update docs to reflect the new outbound shadow path.
@@ -24,7 +25,6 @@ outbox worker without changing default behavior.
 - Inbox durable storage (`inbox_event`) or DLQ.
 - Knowledge snapshot integration.
 - Production cutover to provider gateway.
-- Media sending via provider gateway (text-only for shadow).
 
 ## Touch-list
 - `truffles-api/app/adapters/provider_gateway.py`
@@ -46,7 +46,7 @@ outbox worker without changing default behavior.
 5) Update docs and register TP.
 
 ## DoD
-- Outbound payload builder produces valid provider_outbound for text messages.
+- Outbound payload builder produces valid provider_outbound for text and media messages.
 - When gateway disabled, outbound behavior remains unchanged.
 - Status callback updates outbox status/meta when outbox_id is provided.
 - Unit tests cover builder + status endpoint.

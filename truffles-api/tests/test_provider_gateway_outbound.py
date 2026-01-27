@@ -47,6 +47,30 @@ def test_build_provider_outbound_payload_ok():
     assert payload["idempotency_key"] == "idem-1"
 
 
+def test_build_provider_outbound_payload_media_ok():
+    payload, error = build_provider_outbound_payload(
+        outbox_id=str(uuid4()),
+        provider="chatflow",
+        channel="whatsapp",
+        tenant_context=_tenant_context(),
+        remote_jid="77770000000@s.whatsapp.net",
+        text=None,
+        media={
+            "media_type": "image",
+            "signed_url": "https://example.com/media.jpg",
+            "caption": "Caption",
+        },
+        idempotency_key="idem-2",
+        callback_url="https://example.com/provider/status",
+        metadata={"event_type": "whatsapp.send_media"},
+    )
+
+    assert error is None
+    assert payload is not None
+    assert payload["content"]["media"]["media_type"] == "image"
+    assert payload["content"]["media"]["signed_url"] == "https://example.com/media.jpg"
+
+
 def test_build_provider_outbound_payload_missing_tenant():
     payload, error = build_provider_outbound_payload(
         outbox_id=str(uuid4()),
@@ -71,6 +95,7 @@ def test_provider_status_disabled_returns_404(client, monkeypatch):
 
 def test_provider_status_calls_update(client, monkeypatch):
     monkeypatch.setenv("PROVIDER_GATEWAY_STATUS_ENABLED", "1")
+    monkeypatch.delenv("PROVIDER_GATEWAY_TOKEN", raising=False)
 
     db = Mock()
 
