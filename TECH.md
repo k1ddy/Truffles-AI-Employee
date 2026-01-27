@@ -111,6 +111,12 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `GET /health` — статус сервиса
 - `POST /knowledge/snapshot` — выдача snapshot (требует `KNOWLEDGE_SNAPSHOT_ENABLED=1`)
 
+### Provider Gateway (shadow, internal)
+- URL: `http://127.0.0.1:8011`
+- `GET /health` — статус сервиса
+- `POST /provider/inbound` — входящие от провайдера (требует `PROVIDER_GATEWAY_INBOUND_ENABLED=1`)
+- `POST /provider/status` — статус доставки (требует `PROVIDER_GATEWAY_STATUS_ENABLED=1`)
+
 **WhatsApp Webhook URL (ChatFlow):**
 `https://api.truffles.kz/webhook/{client_slug}?webhook_secret=<SECRET>`
 
@@ -494,6 +500,12 @@ ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.e
 ```bash
 ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env PULL_IMAGE=1 REQUIRE_GHCR=1 bash /home/zhan/truffles-main/scripts/restart_knowledge_gateway.sh"
 ssh -p 222 zhan@5.188.241.234 "curl -s http://127.0.0.1:8010/health"
+```
+
+### Provider Gateway (shadow)
+```bash
+ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env PULL_IMAGE=1 REQUIRE_GHCR=1 bash /home/zhan/truffles-main/scripts/restart_provider_gateway.sh"
+ssh -p 222 zhan@5.188.241.234 "curl -s http://127.0.0.1:8011/health"
 ```
 
 ### Перезапуск API (без обновления кода)
