@@ -122,11 +122,102 @@ class ProviderGatewayAdapter(MessagingPort):
         )
 
     def send_media(self, to: str, media_url: str, media_type: str, options: MessageOptions) -> Result[MessageSent]:
-        return Err(
-            IntegrationError(
-                code=ErrorCodes.INVALID_PAYLOAD,
-                message="provider_gateway media not supported",
-                service="provider_gateway",
-                context={"media_type": media_type},
+        if not self.base_url:
+            return Err(
+                IntegrationError(
+                    code=ErrorCodes.CONFIG_MISSING,
+                    message="provider_gateway outbound url missing",
+                    service="provider_gateway",
+                )
+            )
+        if not media_url or not media_type:
+            return Err(
+                IntegrationError(
+                    code=ErrorCodes.INVALID_PAYLOAD,
+                    message="provider_gateway media missing",
+                    service="provider_gateway",
+                    context={"media_type": media_type},
+                )
+            )
+
+        outbox_id = options.extra.get("outbox_id")
+        tenant_context = options.extra.get("tenant_context")
+        provider = options.extra.get("provider") or self.provider
+        channel = options.extra.get("channel") or self.channel
+        callback_url = options.extra.get("callback_url") or self.callback_url
+        idempotency_key = options.idempotency_key or ""
+        media_meta = options.extra.get("media_meta") if isinstance(options.extra, dict) else None
+        media_payload: dict[str, Any] = {"media_type": media_type}
+        if isinstance(media_meta, dict):
+            media_payload.update(media_meta)
+        if "signed_url" not in media_payload and "source_url" not in media_payload:
+            media_payload["signed_url"] = media_url
+        if options.caption and "caption" not in media_payload:
+            media_payload["caption"] = options.caption
+
+        payload, error = build_provider_outbound_payload(
+            outbox_id=str(outbox_id) if outbox_id else "",
+            provider=provider,
+            channel=channel,
+            tenant_context=tenant_context,
+            remote_jid=to,
+            text=None,
+            media=media_payload,
+            idempotency_key=idempotency_key,
+            callback_url=callback_url,
+            metadata=options.extra.get("metadata") if isinstance(options.extra, dict) else None,
+        )
+        if error:
+            return Err(
+                IntegrationError(
+                    code=ErrorCodes.INVALID_PAYLOAD,
+                    message=f"provider_gateway outbound invalid: {error}",
+                    service="provider_gateway",
+                )
+            )
+
+        try:
+            response = httpx.post(
+                self.base_url,
+                json=payload,
+                headers=self._build_headers(),
+                timeout=self.timeout_seconds,
+            )
+        except Exception as exc:
+            return Err(
+                IntegrationError(
+                    code=ErrorCodes.CHATFLOW_ERROR,
+                    message=f"provider_gateway outbound failed: {exc}",
+                    service="provider_gateway",
+                )
+            )
+
+        if response.status_code >= 400:
+            return Err(
+                IntegrationError(
+                    code=ErrorCodes.CHATFLOW_ERROR,
+                    message=f"provider_gateway outbound http {response.status_code}",
+                    service="provider_gateway",
+                    context={"status_code": response.status_code},
+                )
+            )
+
+        message_id = None
+        provider_response: dict[str, Any] = {}
+        try:
+            provider_response = response.json()
+            message_id = (
+                provider_response.get("provider_message_id")
+                or provider_response.get("message_id")
+                or provider_response.get("id")
+            )
+        except Exception:
+            provider_response = {}
+
+        return Ok(
+            MessageSent(
+                remote_jid=to,
+                message_id=message_id or options.idempotency_key,
+                provider_response=provider_response,
             )
         )

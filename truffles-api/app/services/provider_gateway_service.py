@@ -10,6 +10,7 @@ from app.schemas.provider_gateway import (
     ProviderInbound,
     ProviderOutbound,
     ProviderOutboundContent,
+    ProviderOutboundMedia,
     ProviderOutboundRecipient,
     ProviderParticipant,
     ProviderStatus,
@@ -99,7 +100,8 @@ def build_provider_outbound_payload(
     channel: str,
     tenant_context: dict[str, Any] | TenantContext | None,
     remote_jid: str,
-    text: str,
+    text: str | None,
+    media: dict[str, Any] | None = None,
     idempotency_key: str,
     callback_url: str | None,
     metadata: dict[str, Any] | None = None,
@@ -108,8 +110,8 @@ def build_provider_outbound_payload(
         return None, "missing_tenant_context"
     if not remote_jid:
         return None, "missing_remote_jid"
-    if not text:
-        return None, "missing_text"
+    if not text and not media:
+        return None, "missing_content"
     if not outbox_id:
         return None, "missing_outbox_id"
     if not idempotency_key:
@@ -121,13 +123,26 @@ def build_provider_outbound_payload(
         except Exception:
             return None, "invalid_tenant_context"
 
+    media_payload = None
+    if media:
+        try:
+            media_payload = ProviderOutboundMedia.model_validate(media)
+        except Exception:
+            return None, "invalid_media"
+    content = ProviderOutboundContent(
+        text=text if text else None,
+        media=media_payload,
+    )
+    if not content.text and not content.media:
+        return None, "missing_content"
+
     outbound = ProviderOutbound(
         outbox_id=outbox_id,
         provider=provider,
         channel=channel,
         tenant_context=tenant_context,
         to=ProviderOutboundRecipient(jid=remote_jid),
-        content=ProviderOutboundContent(text=text),
+        content=content,
         idempotency_key=idempotency_key,
         callback_url=callback_url,
         requested_at=datetime.now(timezone.utc).isoformat(),

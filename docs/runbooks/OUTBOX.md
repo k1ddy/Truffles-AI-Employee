@@ -15,6 +15,8 @@ curl -s http://localhost:8000/admin/health
 Contract guardrails
 - Outbox payload types:
   - `schema_version=outbox.v1` + `event_type=whatsapp.send_text` for send-only delivery.
+  - `schema_version=outbox.v1` + `event_type=whatsapp.send_media` for media delivery
+    (`media_type`, `media_url`/`signed_url`, optional `caption`, `media_meta`).
   - Legacy webhook payloads validated by `app.schemas.outbox_payload.OutboxPayloadContract`.
 - Invalid payload → `decision_trace.stage=outbox_payload_guard`, `decision_meta.action=error`, no outbox enqueue.
 - Timing evidence: `decision_meta.timing.outbox` + `outbox_messages.meta.timing`.
