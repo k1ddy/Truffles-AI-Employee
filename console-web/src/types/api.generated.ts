@@ -767,7 +767,7 @@ export interface components {
         Agent: {
             /** Format: uuid */
             id?: string;
-            name?: string;
+            name?: string | null;
             /** @enum {string} */
             role?: "owner" | "admin" | "manager" | "support";
             /** Format: uuid */
