@@ -10,8 +10,8 @@ from app.schemas.provider_gateway import (
     ProviderInbound,
     ProviderOutbound,
     ProviderOutboundContent,
-    ProviderOutboundRecipient,
     ProviderOutboundMedia,
+    ProviderOutboundRecipient,
     ProviderParticipant,
     ProviderStatus,
 )
