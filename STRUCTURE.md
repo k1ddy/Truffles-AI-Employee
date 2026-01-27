@@ -124,6 +124,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-media-pipeline.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbox-event.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`
