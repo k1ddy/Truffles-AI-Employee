@@ -24,6 +24,7 @@
 - DONE: Console-web deploy for Team route (build fix + prod /team) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-web-deploy-team.md`; evidence below (2026-01-25).
 - DONE: Prod version drift monitor — `.github/workflows/monitor-prod-version.yml` (cron alert if `/admin/version.git_commit` differs from main). Evidence: workflow added in repo.
 - DONE: Console contract unexclude `/knowledge/*` — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`; PR #368 https://github.com/k1ddy/Truffles-AI-Employee/pull/368; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21333020110.
+- PLAN: Console UX selection clarity + knowledge branch gating — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md`.
 - DONE: Phase 5 Inbox UX (3-pane + Explain/Trace + Macros) — PR #372 https://github.com/k1ddy/Truffles-AI-Employee/pull/372; Evidence: prod console-web build SHA `9f40b3303c3abaafdf76abe3b39fce3c93f9323f` + build time `2026-01-25T22:15:53Z` (docker exec) + UI confirmation.
 - DONE: Control Plane docs refresh (tenancy code-backed notes + selection plan + role runbooks) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-docs-selection-runbooks.md`. Evidence: doc updates in repo.
 - PLAN: Phase 4 Control Plane (Team + Calendar UI) — Task Package `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`.
