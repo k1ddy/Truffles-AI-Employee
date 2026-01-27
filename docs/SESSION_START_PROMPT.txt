@@ -33,7 +33,7 @@ PRODUCT CONTRACT (do not debate; enforce)
 
 SESSION RITUAL (every session)
 Before SSH, verify environment: if `pwd` = `/home/zhan/truffles-main` and public IP matches `TECH.md` — you're already on prod, no SSH. Quick check: `hostname; whoami; pwd; curl -s https://ifconfig.me`.
-If context compaction happens: run `scripts/session_resume.sh --agent <suffix>` or `--session-id <id>` and continue in that worktree. Do NOT start a new session.
+If context compaction happens: run `scripts/session_resume.sh` and continue in that worktree. Do NOT start a new session; `session_start` requires `--force-new` when any session is still open.
 1) Read `STATE.md` NOW (1 screen) and pick ONE issue; if NOW/next steps are missing or too long — STOP and ask Brain or Top Architect to update the brief.
 2) Produce a Task Package BEFORE session start. If Task Package is missing/ambiguous: STOP and write the missing pieces.
    - Do NOT run `scripts/session_start.sh` until the Task Package is ready.

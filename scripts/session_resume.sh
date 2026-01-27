@@ -7,7 +7,7 @@ Usage: scripts/session_resume.sh [--agent SUFFIX] [--session-id ID]
 
 Lists open sessions and prints resume instructions.
 Defaults:
-  --agent: current agent suffix inferred from SESSION_AGENT or required.
+  --agent: current agent suffix inferred from SESSION_AGENT (if set).
 USAGE
 }
 
@@ -33,11 +33,6 @@ fi
 
 if [[ -z "$session_id" && -z "$agent" ]]; then
   agent="${SESSION_AGENT:-}"
-fi
-
-if [[ -z "$session_id" && -z "$agent" ]]; then
-  echo "ERROR: Provide --session-id or --agent (or set SESSION_AGENT)." >&2
-  exit 1
 fi
 
 matches=$(awk -F'|' -v agent="$agent" -v sid_filter="$session_id" '
@@ -67,8 +62,17 @@ if [[ "$count" -gt 1 && -z "$session_id" ]]; then
 fi
 
 echo "$matches" | while IFS='|' read -r sid status branch wt tp; do
+  dirty="clean"
+  if [[ -d "$wt/.git" ]]; then
+    if ! git -C "$wt" diff --quiet || ! git -C "$wt" diff --cached --quiet; then
+      dirty="dirty"
+    fi
+    if [[ -n "$(git -C "$wt" status --porcelain -uall 2>/dev/null)" ]]; then
+      dirty="dirty"
+    fi
+  fi
   echo "Session: ${sid} (${status})"
-  echo "Worktree: ${wt}"
+  echo "Worktree: ${wt} (${dirty})"
   echo "Branch: ${branch}"
   echo "Task Package: ${tp}"
   echo "Resume: cd ${wt} && scripts/session_check.sh"
