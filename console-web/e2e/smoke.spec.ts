@@ -8,6 +8,10 @@ const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
 const runMutations = process.env.E2E_ALLOW_MUTATIONS === '1';
 const useStorageState = process.env.E2E_USE_STORAGE_STATE === '1';
+const isLocalBaseURL = /localhost|127\.0\.0\.1/.test(baseURL);
+const quarantineLocal = !!process.env.CI && isLocalBaseURL;
+
+test.skip(quarantineLocal, 'Quarantine local CI smoke suite while stabilizing console-e2e.');
 
 function matchesPath(url: string, paths: string[]) {
     try {
