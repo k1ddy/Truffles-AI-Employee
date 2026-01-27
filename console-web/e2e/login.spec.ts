@@ -204,10 +204,10 @@ test.describe('Smoke Test: Login Flow', () => {
         const logoutButton = page.getByTestId('logout-button');
         const signInHeading = page.getByRole('heading', { name: /sign in/i });
         await Promise.race([
-            page.waitForURL(keycloakHostPattern, { timeout: 5000 }),
-            logoutButton.waitFor({ state: 'visible', timeout: 5000 }),
-            signInHeading.waitFor({ state: 'visible', timeout: 5000 }),
-            loginButton.waitFor({ state: 'hidden', timeout: 5000 }),
+            logoutButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
+            signInHeading.waitFor({ state: 'visible', timeout: 5000 }).catch(() => null),
+            loginButton.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => null),
+            page.waitForURL(keycloakHostPattern, { timeout: 5000 }).catch(() => null),
         ]);
         const hasLogout = await logoutButton.isVisible().catch(() => false);
         const hasSignIn = await signInHeading.isVisible().catch(() => false);

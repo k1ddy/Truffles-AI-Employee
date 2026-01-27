@@ -279,7 +279,7 @@ async function fetchMe(
     companyId?: string | null,
     clientId?: string | null,
 ) {
-    return page.evaluate(async ({ company, client }) => {
+    return page.evaluate(async ({ company, client, timeoutMs }) => {
         const headers: Record<string, string> = {};
         if (company) {
             headers['X-Company-Id'] = company;
@@ -287,12 +287,20 @@ async function fetchMe(
         if (client) {
             headers['X-Client-Id'] = client;
         }
-        const response = await fetch('/api/proxy/me', { headers });
-        if (!response.ok) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch('/api/proxy/me', { headers, signal: controller.signal });
+            if (!response.ok) {
+                return null;
+            }
+            return response.json();
+        } catch {
             return null;
+        } finally {
+            clearTimeout(timer);
         }
-        return response.json();
-    }, { company: companyId ?? null, client: clientId ?? null });
+    }, { company: companyId ?? null, client: clientId ?? null, timeoutMs: 5000 });
 }
 
 async function fetchMeWithRetry(
