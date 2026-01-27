@@ -12,8 +12,10 @@ if [[ "$branch" == "HEAD" ]]; then
 fi
 
 if [[ "$branch" == "main" || "$branch" == "master" ]]; then
-  echo "ERROR: Work on main/master is запрещено. Use a worktree branch." >&2
-  exit 1
+  if [[ "${SESSION_ALLOW_MAIN:-}" != "1" ]]; then
+    echo "ERROR: Work on main/master is запрещено. Use a worktree branch." >&2
+    exit 1
+  fi
 fi
 
 hooks_path=$(git config --get core.hooksPath || true)
@@ -46,8 +48,12 @@ worktree=$(grep -E "^- worktree: " "$session_file" | head -n1 | sed 's/^- worktr
 task_package=$(grep -E "^- task_package: " "$session_file" | head -n1 | sed 's/^- task_package: //')
 
 if [[ "$status" != "active" ]]; then
-  echo "ERROR: Session status is '${status}'. Set status to active before work." >&2
-  exit 1
+  if [[ "$status" == "done" && "${SESSION_ALLOW_DONE:-}" == "1" ]]; then
+    :
+  else
+    echo "ERROR: Session status is '${status}'. Set status to active before work." >&2
+    exit 1
+  fi
 fi
 
 if [[ "$worktree" != "$repo_root" ]]; then

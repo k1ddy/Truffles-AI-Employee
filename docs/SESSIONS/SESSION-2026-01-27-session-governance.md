@@ -1,6 +1,6 @@
 # SESSION 2026-01-27-session-governance — Session governance bootstrap
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md
 - branch: feat/session-governance-2026-01-27
@@ -8,6 +8,7 @@
 - base_ref: origin/main
 - scope: session log + gates + hooks + doc-only fast path rules.
 - done:
+  - Merged PR #404
   - Session governance ready for merge
   - Created task package and session log/index.
   - Added session scripts + hooks + CI gate.
