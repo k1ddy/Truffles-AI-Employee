@@ -189,6 +189,8 @@
 - Старт сессии: `scripts/session_start.sh --session-id ... --task-package docs/TASK_PACKAGES/TP-....md` (создаёт worktree/branch + лог; Task Package должен существовать).
 - После compaction/амнезии: использовать `scripts/session_resume.sh` и продолжать в указанном worktree (новую сессию не создавать). Новый `session_start` разрешён только с `--force-new` и осознанным параллельным процессом.
 - `session_id` обязателен и должен включать суффикс агента: `YYYY-MM-DD-<slug>-<agent>` (пример: `2026-01-27-contracts-a1`).
+- `SESSION_AGENT` обязателен (например: `a1`, `a2`, `a3`). `session_start`/`session_resume`/`session_check` блокируют кросс‑агентные сессии.
+- Для списка всех сессий использовать `scripts/session_resume.sh --all`; по умолчанию резюмируется только свой агент.
 - Перед commit/push обязателен `scripts/session_check.sh` (хуки блокируют без него).
 - Закрытие: `scripts/session_end.sh --status done` и cleanup worktree/branch.
 - Коммит закрытия: `SESSION_ALLOW_DONE=1 git commit ...` (иначе pre-commit блокирует статус `done`).

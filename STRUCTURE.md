@@ -35,10 +35,10 @@
 | `.github/workflows/session-gate.yml` | CI gate: session log + doc-only policy | Brain/Architect |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
-| `scripts/session_start.sh` | Создать worktree/branch и session log | Все роли |
+| `scripts/session_start.sh` | Создать worktree/branch и session log (agent suffix обязателен) | Все роли |
 | `scripts/session_check.sh` | Проверка сессии перед commit/push | Все роли |
 | `scripts/session_end.sh` | Закрытие сессии + index обновление | Все роли |
-| `scripts/session_resume.sh` | Возобновить активную сессию после compaction (показывает dirty/clean) | Все роли |
+| `scripts/session_resume.sh` | Возобновить активную сессию после compaction (по умолчанию SESSION_AGENT) | Все роли |
 | `scripts/session_audit.sh` | Аудит сессий (статусы/сироты) | Brain/Architect |
 | `scripts/session_gate.sh` | Gate для doc-only и session log | Brain/Architect |
 | `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
