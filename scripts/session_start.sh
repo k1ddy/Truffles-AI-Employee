@@ -3,12 +3,12 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/session_start.sh [--session-id ID] [--title TITLE] [--task-package PATH]
+Usage: scripts/session_start.sh --session-id ID [--title TITLE] [--task-package PATH]
                                [--branch NAME] [--worktree PATH] [--base-ref REF]
 
 Creates a new worktree + branch and registers a session log + index entry.
 Defaults:
-  session-id: YYYY-MM-DD-<slug>
+  session-id: YYYY-MM-DD-<slug>-<agent>
   branch:     feat/<session-id>
   worktree:   <repo-parent>/worktrees/<session-id>
   base-ref:   origin/main
@@ -40,11 +40,14 @@ repo_root=$(git rev-parse --show-toplevel)
 repo_parent=$(dirname "$repo_root")
 
 if [[ -z "$session_id" ]]; then
-  slug="session"
-  if [[ -n "$title" ]]; then
-    slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-//; s/-$//')
-  fi
-  session_id="$(date +%F)-${slug}"
+  echo "ERROR: --session-id is required (format: YYYY-MM-DD-<slug>-<agent>)." >&2
+  exit 1
+fi
+
+if ! [[ "$session_id" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9][a-z0-9-]*-[a-z0-9][a-z0-9-]*$ ]]; then
+  echo "ERROR: Invalid session-id '$session_id'." >&2
+  echo "Expected: YYYY-MM-DD-<slug>-<agent> (lowercase, digits, dashes)." >&2
+  exit 1
 fi
 
 branch=${branch:-"feat/${session_id}"}
@@ -55,11 +58,30 @@ if [[ -z "$title" ]]; then
   title="Session ${session_id}"
 fi
 
-if [[ -e "$worktree" ]]; then
-  echo "Worktree already exists: $worktree"
-else
-  git -C "$repo_root" worktree add -b "$branch" "$worktree" "$base_ref"
+index_file_root="$repo_root/docs/SESSION_INDEX.md"
+if [[ -f "$index_file_root" ]]; then
+  if grep -q "^| ${session_id} |" "$index_file_root"; then
+    echo "ERROR: session-id already exists in SESSION_INDEX: ${session_id}" >&2
+    exit 1
+  fi
 fi
+
+if [[ -e "$worktree" ]]; then
+  echo "ERROR: worktree path already exists: $worktree" >&2
+  exit 1
+fi
+
+if git -C "$repo_root" show-ref --verify --quiet "refs/heads/${branch}"; then
+  echo "ERROR: branch already exists: ${branch}" >&2
+  exit 1
+fi
+
+if git -C "$repo_root" show-ref --verify --quiet "refs/remotes/origin/${branch}"; then
+  echo "ERROR: remote branch already exists: origin/${branch}" >&2
+  exit 1
+fi
+
+git -C "$repo_root" worktree add -b "$branch" "$worktree" "$base_ref"
 
 mkdir -p "$worktree/docs/SESSIONS"
 
