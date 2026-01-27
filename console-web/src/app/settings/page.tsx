@@ -859,7 +859,7 @@ function ProvisioningWizard({ session }: { session: SessionData }) {
 
             {!canEdit && (
                 <div className="mt-6 rounded-xl border border-border/60 bg-muted/40 p-4 text-sm text-muted-foreground">
-                    Provisioning доступен только для owner/admin.
+                    Provisioning доступен только для owner/admin/platform admin.
                 </div>
             )}
 
@@ -1848,7 +1848,7 @@ export default function SettingsPage() {
                         📨 Telegram коннектор
                     </h2>
                     <p className="text-sm text-muted-foreground mb-3">
-                        Проверка и тест отправки в Telegram (client scope, owner/admin).
+                        Проверка и тест отправки в Telegram (client scope, owner/admin/platform admin).
                     </p>
                     <div className="flex items-center gap-2">
                         <button
@@ -1882,7 +1882,7 @@ export default function SettingsPage() {
                             {testTarget === "client" ? "Отправка..." : "Send test"}
                         </button>
                         {!canWriteSettings && (
-                            <span className="text-xs text-muted-foreground">Только owner/admin</span>
+                            <span className="text-xs text-muted-foreground">Только owner/admin/platform admin</span>
                         )}
                     </div>
                 </div>

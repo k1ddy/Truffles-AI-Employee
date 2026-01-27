@@ -64,6 +64,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const ROLE_LABELS: Record<ConsoleRole, string> = {
+    platform_admin: "Platform Admin",
     owner: "Owner",
     admin: "Admin",
     manager: "Manager",

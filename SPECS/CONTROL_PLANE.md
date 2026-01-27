@@ -23,7 +23,7 @@
 Роль‑модель строится поверх org‑scope memberships и tenant context (см. `SPECS/MULTI_TENANT.md`).
 
 **Платформа (Truffles):**
-- **Platform Admin** — управление тенантами и модулями, доступ к Ops по всей системе.
+- **Platform Admin** — управление тенантами и модулями, доступ к Ops по всей системе (runtime роль `platform_admin`, cross‑tenant, selection gate обязателен).
 - **Platform Support** — диагностика/помощь, read‑only в provisioning (без create/update).
 
 **Клиент (бизнес):**
@@ -36,27 +36,27 @@
 **Принцип:** UI и навигация режутся по роли, чтобы не было шума.
 
 **Runtime roles (impl):**
-- В коде реально используются: `owner`, `admin`, `manager`, `support`
+- В коде реально используются: `platform_admin`, `owner`, `admin`, `manager`, `support`
   (см. `truffles-api/app/services/console_auth.py`).
-- Platform Admin/Support — концепт уровня доступа; фактически доступ задаётся
-  membership‑scope + роль owner/admin/support.
+- Platform Support — концепт уровня доступа; фактически доступ задаётся
+  membership‑scope + роль support.
 - Specialist/Viewer пока не реализованы в RBAC.
 
 **RBAC matrix (runtime, enforced in API/UI):**
 
 | Раздел | Read | Write |
 |--------|------|-------|
-| Inbox (Cases) | owner/admin/manager/support | owner/admin/manager |
-| Knowledge | owner/admin/manager | owner/admin |
-| Team | owner/admin | owner/admin |
-| Calendar | owner/admin/manager | owner/admin/manager |
-| Settings | owner/admin | owner/admin |
-| Ops | owner/admin/support | owner/admin |
-| Audit | owner/admin/support | — |
-| Provisioning (`/console/v1/admin/*`) | owner/admin/support (read) | owner/admin |
+| Inbox (Cases) | platform_admin/owner/admin/manager/support | platform_admin/owner/admin/manager |
+| Knowledge | platform_admin/owner/admin/manager | platform_admin/owner/admin |
+| Team | platform_admin/owner/admin | platform_admin/owner/admin |
+| Calendar | platform_admin/owner/admin/manager | platform_admin/owner/admin/manager |
+| Settings | platform_admin/owner/admin | platform_admin/owner/admin |
+| Ops | platform_admin/owner/admin/support | platform_admin/owner/admin |
+| Audit | platform_admin/owner/admin/support | — |
+| Provisioning (`/console/v1/admin/*`) | platform_admin/owner/admin/support (read) | platform_admin/owner/admin |
 
 Примечания:
-- Support = read‑only для Ops/Provisioning; write‑операции доступны только owner/admin.
+- Support = read‑only для Ops/Provisioning; write‑операции доступны только platform_admin/owner/admin.
 - Team/Settings скрыты для manager/support; read‑only команда не предоставляется.
 
 ---
