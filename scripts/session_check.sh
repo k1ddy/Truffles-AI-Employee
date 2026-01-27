@@ -5,23 +5,64 @@ hooks_path_expected=".githooks"
 
 repo_root=$(git rev-parse --show-toplevel)
 branch=$(git rev-parse --abbrev-ref HEAD)
+allowed_doc_regex='^(docs/|STATE.md$|STRUCTURE.md$|AGENTS.md$)'
 
 if [[ "$branch" == "HEAD" ]]; then
   echo "ERROR: Detached HEAD; session check requires a named branch." >&2
   exit 1
 fi
 
-if [[ "$branch" == "main" || "$branch" == "master" ]]; then
-  if [[ "${SESSION_ALLOW_MAIN:-}" != "1" ]]; then
-    echo "ERROR: Work on main/master is запрещено. Use a worktree branch." >&2
-    exit 1
-  fi
-fi
-
 hooks_path=$(git config --get core.hooksPath || true)
 if [[ "$hooks_path" != "$hooks_path_expected" && "$hooks_path" != "${repo_root}/${hooks_path_expected}" ]]; then
   echo "ERROR: git hooks not installed. Run: scripts/install_hooks.sh" >&2
   exit 1
+fi
+
+if [[ "$branch" == "main" || "$branch" == "master" ]]; then
+  changed_files=$(git diff --name-only --cached)
+  if [[ -z "$changed_files" ]]; then
+    base_ref=""
+    if git rev-parse --verify --quiet "@{u}" >/dev/null; then
+      base_ref="@{u}"
+    else
+      base_ref="origin/main"
+    fi
+    if git rev-parse --verify --quiet "$base_ref" >/dev/null; then
+      changed_files=$(git diff --name-only "$base_ref"..HEAD || true)
+    fi
+  fi
+
+  if [[ -n "$changed_files" ]]; then
+    doc_only="true"
+    has_session_file="false"
+    has_session_index="false"
+    while read -r file; do
+      [[ -z "$file" ]] && continue
+      if [[ "$file" == docs/SESSIONS/* ]]; then
+        has_session_file="true"
+      fi
+      if [[ "$file" == docs/SESSION_INDEX.md ]]; then
+        has_session_index="true"
+      fi
+      if ! echo "$file" | grep -Eq "$allowed_doc_regex"; then
+        doc_only="false"
+      fi
+    done <<< "$changed_files"
+
+    if [[ "$doc_only" == "true" ]]; then
+      if [[ "$has_session_file" != "true" || "$has_session_index" != "true" ]]; then
+        echo "ERROR: Doc-only on main requires session log + index in the same commit." >&2
+        exit 1
+      fi
+      echo "Session OK: doc-only main"
+      exit 0
+    fi
+  fi
+
+  if [[ "${SESSION_ALLOW_MAIN:-}" != "1" ]]; then
+    echo "ERROR: Work on main/master is запрещено. Use a worktree branch." >&2
+    exit 1
+  fi
 fi
 
 sessions_dir="$repo_root/docs/SESSIONS"

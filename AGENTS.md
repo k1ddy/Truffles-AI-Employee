@@ -194,6 +194,7 @@
 - Статус `done` ставится **в том же коммите**, где внесены рабочие изменения. Отдельный commit/PR только ради закрытия запрещён. Для doc-only — один commit и fast-forward push в `main`.
 - Неправильное закрытие ловит `scripts/session_audit.sh` → статус `needs_fix`.
 - Doc-only fast path: разрешены только `docs/**`, `STATE.md`, `STRUCTURE.md`, `AGENTS.md`; такие изменения пушатся напрямую в `main` (fast-forward) без PR. PR допустим только при `ALLOW_DOC_ONLY_PR=1` (конфликты/исключения).
+- Doc-only в `main` требует `docs/SESSIONS/*` + `docs/SESSION_INDEX.md` в том же коммите (session_check блокирует без них).
 
 ---
 
