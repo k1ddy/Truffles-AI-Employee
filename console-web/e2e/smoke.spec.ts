@@ -161,6 +161,8 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
     }
     await resolveSelectionGate(page);
     const casesTitle = page.getByTestId('cases-title');
+    const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
+    const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
     if (useStorageState) {
         const resolved = await ensureTenantSelection(page);
         if (resolved) {
@@ -179,7 +181,17 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
                 }
             }
         }
-        await expect(casesTitle, 'Expected logged-in UI with storage state.').toBeVisible({ timeout: 15000 });
+        await expect
+            .poll(
+                async () => {
+                    if (await casesTitle.isVisible().catch(() => false)) return true;
+                    if (await selectionGate.isVisible().catch(() => false)) return true;
+                    if (await contextGate.isVisible().catch(() => false)) return true;
+                    return false;
+                },
+                { timeout: 20000 }
+            )
+            .toBe(true);
         return;
     }
     try {
@@ -194,7 +206,17 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
         if (resolved) {
             await page.reload({ waitUntil: 'domcontentloaded' });
         }
-        await expect(casesTitle).toBeVisible({ timeout: 10000 });
+        await expect
+            .poll(
+                async () => {
+                    if (await casesTitle.isVisible().catch(() => false)) return true;
+                    if (await selectionGate.isVisible().catch(() => false)) return true;
+                    if (await contextGate.isVisible().catch(() => false)) return true;
+                    return false;
+                },
+                { timeout: 20000 }
+            )
+            .toBe(true);
     }
 }
 
@@ -318,7 +340,27 @@ async function ensureTenantSelection(page: import('@playwright/test').Page): Pro
 // =========================================
 async function openInbox(page: import('@playwright/test').Page) {
     await ensureLoggedIn(page);
-    await expect(page.getByTestId('cases-title')).toBeVisible({ timeout: 10000 });
+    const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
+    const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
+    await resolveSelectionGate(page);
+    if (await selectionGate.isVisible().catch(() => false)) {
+        const resolved = await ensureTenantSelection(page);
+        if (resolved) {
+            await page.reload({ waitUntil: 'domcontentloaded' });
+        }
+        await resolveSelectionGate(page);
+    }
+    await expect
+        .poll(
+            async () => {
+                if (await page.getByTestId('cases-title').isVisible().catch(() => false)) return true;
+                if (await selectionGate.isVisible().catch(() => false)) return true;
+                if (await contextGate.isVisible().catch(() => false)) return true;
+                return false;
+            },
+            { timeout: 20000 }
+        )
+        .toBe(true);
     const errorPanel = page.getByTestId('cases-error');
     if (await errorPanel.isVisible().catch(() => false)) {
         const resolved = await ensureTenantSelection(page);

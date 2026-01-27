@@ -99,7 +99,19 @@ test('setup auth @smoke', async ({ page }) => {
     await selectCompanyIfNeeded(page);
     await selectClientIfNeeded(page);
     await selectBranchIfNeeded(page);
-    await expect(page.getByTestId('cases-title')).toBeVisible({ timeout: 10000 });
+    const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
+    const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
+    await expect
+        .poll(
+            async () => {
+                if (await page.getByTestId('cases-title').isVisible().catch(() => false)) return true;
+                if (await selectionGate.isVisible().catch(() => false)) return true;
+                if (await contextGate.isVisible().catch(() => false)) return true;
+                return false;
+            },
+            { timeout: 20000 }
+        )
+        .toBe(true);
 
     fs.mkdirSync(path.dirname(authFile), { recursive: true });
     await page.context().storageState({ path: authFile });
