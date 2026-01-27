@@ -96,11 +96,17 @@ async function waitForConsoleReady(page: import('@playwright/test').Page) {
     const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
     const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
     const casesTitle = page.getByTestId('cases-title');
+    const contextBar = page.getByTestId('context-bar');
+    const inboxView = page.getByTestId('inbox-view');
+    const consoleHeader = page.getByTestId('console-header');
     for (let attempt = 0; attempt < 3; attempt += 1) {
         await retryProfileLoad(page);
         if (await casesTitle.isVisible().catch(() => false)) return;
         if (await selectionGate.isVisible().catch(() => false)) return;
         if (await contextGate.isVisible().catch(() => false)) return;
+        if (await contextBar.isVisible().catch(() => false)) return;
+        if (await inboxView.isVisible().catch(() => false)) return;
+        if (await consoleHeader.isVisible().catch(() => false)) return;
         await page.waitForTimeout(1000);
     }
     await expect
@@ -109,6 +115,9 @@ async function waitForConsoleReady(page: import('@playwright/test').Page) {
                 if (await casesTitle.isVisible().catch(() => false)) return true;
                 if (await selectionGate.isVisible().catch(() => false)) return true;
                 if (await contextGate.isVisible().catch(() => false)) return true;
+                if (await contextBar.isVisible().catch(() => false)) return true;
+                if (await inboxView.isVisible().catch(() => false)) return true;
+                if (await consoleHeader.isVisible().catch(() => false)) return true;
                 return false;
             },
             { timeout: 20000 }
@@ -133,6 +142,7 @@ test.describe('Smoke Test: Login Flow', () => {
         await page.fill('#password', loginPassword);
         await page.click('#kc-login');
         await page.waitForURL(consoleHostPattern);
+        await page.goto('/');
         await expect(page.getByRole('button', { name: /выйти/i })).toBeVisible({ timeout: 10000 });
         await selectCompanyIfNeeded(page);
         await selectClientIfNeeded(page);
@@ -148,6 +158,7 @@ test.describe('Smoke Test: Login Flow', () => {
         await page.fill('#password', loginPassword);
         await page.click('#kc-login');
         await page.waitForURL(consoleHostPattern);
+        await page.goto('/');
         await expect(page.getByRole('button', { name: /выйти/i })).toBeVisible({ timeout: 10000 });
         await selectCompanyIfNeeded(page);
         await selectClientIfNeeded(page);

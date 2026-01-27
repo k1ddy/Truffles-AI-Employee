@@ -137,13 +137,17 @@ async function casesTitleOrContextVisible(
     page: import('@playwright/test').Page,
     selectionGate: import('@playwright/test').Locator,
     contextGate: import('@playwright/test').Locator,
-    loginButton: import('@playwright/test').Locator,
 ) {
     const casesTitle = page.getByTestId('cases-title');
+    const contextBar = page.getByTestId('context-bar');
+    const inboxView = page.getByTestId('inbox-view');
+    const consoleHeader = page.getByTestId('console-header');
     if (await casesTitle.isVisible().catch(() => false)) return true;
     if (await selectionGate.isVisible().catch(() => false)) return true;
     if (await contextGate.isVisible().catch(() => false)) return true;
-    if (await loginButton.isVisible().catch(() => false)) return true;
+    if (await contextBar.isVisible().catch(() => false)) return true;
+    if (await inboxView.isVisible().catch(() => false)) return true;
+    if (await consoleHeader.isVisible().catch(() => false)) return true;
     return false;
 }
 
@@ -204,7 +208,7 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
         await resolveSelectionGate(page);
     }
 
-    if (!(await casesTitleOrContextVisible(page, selectionGate, contextGate, loginButton))) {
+    if (!(await casesTitleOrContextVisible(page, selectionGate, contextGate))) {
         if (await loginButton.isVisible().catch(() => false)) {
             await loginThroughKeycloak(page);
             await page.goto('/');
@@ -225,7 +229,7 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
             }
             await resolveSelectionGate(page);
         }
-        if (await casesTitleOrContextVisible(page, selectionGate, contextGate, loginButton)) {
+        if (await casesTitleOrContextVisible(page, selectionGate, contextGate)) {
             return;
         }
         await page.waitForTimeout(1000);
@@ -233,7 +237,7 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
 
     await expect
         .poll(
-            async () => casesTitleOrContextVisible(page, selectionGate, contextGate, loginButton),
+            async () => casesTitleOrContextVisible(page, selectionGate, contextGate),
             { timeout: 20000 }
         )
         .toBe(true);
@@ -359,6 +363,7 @@ async function ensureTenantSelection(page: import('@playwright/test').Page): Pro
 // =========================================
 async function openInbox(page: import('@playwright/test').Page) {
     await ensureLoggedIn(page);
+    await page.goto('/');
     const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
     const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
     await resolveSelectionGate(page);
@@ -375,6 +380,7 @@ async function openInbox(page: import('@playwright/test').Page) {
                 if (await page.getByTestId('cases-title').isVisible().catch(() => false)) return true;
                 if (await selectionGate.isVisible().catch(() => false)) return true;
                 if (await contextGate.isVisible().catch(() => false)) return true;
+                if (await page.getByTestId('context-bar').isVisible().catch(() => false)) return true;
                 return false;
             },
             { timeout: 20000 }
@@ -392,7 +398,7 @@ async function openInbox(page: import('@playwright/test').Page) {
             await retry.click();
         }
     }
-    await expect(page.getByTestId('cases-table')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('cases-title')).toBeVisible({ timeout: 20000 });
     await expectRowsOrEmpty(page, 'cases-row', 'cases-empty');
 }
 

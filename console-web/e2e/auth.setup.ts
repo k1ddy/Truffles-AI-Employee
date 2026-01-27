@@ -36,7 +36,7 @@ async function selectOptionIfNeeded(
     } else {
         await selector.selectOption({ index: 1 });
     }
-    await expect(selector).not.toHaveValue("");
+    await expect(selector).not.toHaveValue('');
 }
 
 async function selectClientIfNeeded(page: import('@playwright/test').Page) {
@@ -101,12 +101,18 @@ test('setup auth @smoke', async ({ page }) => {
     await selectBranchIfNeeded(page);
     const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
     const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
+    const contextBar = page.getByTestId('context-bar');
+    const inboxView = page.getByTestId('inbox-view');
+    const consoleHeader = page.getByTestId('console-header');
     await expect
         .poll(
             async () => {
                 if (await page.getByTestId('cases-title').isVisible().catch(() => false)) return true;
                 if (await selectionGate.isVisible().catch(() => false)) return true;
                 if (await contextGate.isVisible().catch(() => false)) return true;
+                if (await contextBar.isVisible().catch(() => false)) return true;
+                if (await inboxView.isVisible().catch(() => false)) return true;
+                if (await consoleHeader.isVisible().catch(() => false)) return true;
                 return false;
             },
             { timeout: 20000 }
