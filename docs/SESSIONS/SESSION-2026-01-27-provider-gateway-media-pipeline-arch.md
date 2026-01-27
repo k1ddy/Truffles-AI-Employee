@@ -13,6 +13,7 @@
   - Updated media_send contract to require signed_url + expires_at.
   - Added tests covering media TTL enforcement and gateway media payload.
   - Canary media live-check attempt: handover created via `/webhook/demo_salon`, Telegram media webhook queued; outbox media row created but failed due to outbox worker lacking send_media support.
+  - Outbox worker restarted (GHCR main) and canary media send succeeded (outbox status SENT with signed_url + expires_at).
 - next:
   - Redeploy outbox worker with send_media support, rerun media live-check on demo_salon.
   - Update STATE.md with live-check success evidence.
@@ -24,4 +25,5 @@
   - /tmp/telegram_photo_upload.json
   - /tmp/telegram_media_update.json
   - /tmp/telegram_media_webhook_response.json
+  - /tmp/trace_bundle_media_livecheck_20260127.json
 - last_updated: 2026-01-27
