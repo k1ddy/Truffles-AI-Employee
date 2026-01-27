@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -112,7 +113,13 @@ def _fake_intent_decomp():
 
 @pytest.fixture(autouse=True)
 def _disable_debounce_redis():
-    with patch("app.routers.webhook._legacy._get_debounce_redis", return_value=None):
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch("app.routers.webhook._legacy._get_debounce_redis", return_value=None)
+        )
+        stack.enter_context(
+            patch("app.routers.webhook.dedup._get_debounce_redis", return_value=None)
+        )
         yield
 
 

@@ -1,0 +1,23 @@
+# SESSION 2026-01-27-knowledge-snapshot-cutover-arch — Session 2026-01-27-knowledge-snapshot-cutover-arch
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md
+- branch: feat/2026-01-27-knowledge-snapshot-cutover-arch
+- worktree: /home/zhan/worktrees/2026-01-27-knowledge-snapshot-cutover-arch
+- base_ref: origin/main
+- scope: consult snapshot cutover (fallback/strict) on demo_salon canary with tests + live evidence
+- done:
+  - Session created.
+  - Removed legacy playbook override during snapshot cutover.
+  - `pytest -q truffles-api/tests/test_consult_pack_service.py` (pass).
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k consult_snapshot` (hung; interrupted at 132s).
+  - `timeout 60s pytest -q truffles-api/tests/test_message_endpoint.py -k consult_snapshot_cutover_strict_clarifies` (timeout).
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k consult_snapshot` (pass).
+  - Live-check `ops/diagnose.py livecheck-auto --suite ca06-consult --client-slug demo_salon --noise none --remote-jid 77785890765@s.whatsapp.net`.
+  - Trace bundle `/tmp/trace_bundle_consult_snapshot_strict_20260127.json` (consult_snapshot strict, playbook present).
+- next:
+  - Complete live-check + trace-bundle and record evidence in STATE.md.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md
+- last_updated: 2026-01-27
