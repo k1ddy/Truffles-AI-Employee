@@ -1,0 +1,29 @@
+# SESSION 2026-01-27-provider-gateway-media-pipeline-arch — Session 2026-01-27-provider-gateway-media-pipeline-arch
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-media-pipeline.md
+- branch: feat/2026-01-27-provider-gateway-media-pipeline-arch
+- worktree: /home/zhan/worktrees/2026-01-27-provider-gateway-media-pipeline-arch
+- base_ref: origin/main
+- scope: provider gateway outbound media pipeline (signed URL + TTL + async outbox) canary on demo_salon
+- done:
+  - Session created.
+  - Enforced signed_url + TTL requirements for provider outbound media payloads.
+  - Updated media_send contract to require signed_url + expires_at.
+  - Added tests covering media TTL enforcement and gateway media payload.
+  - Canary media live-check attempt: handover created via `/webhook/demo_salon`, Telegram media webhook queued; outbox media row created but failed due to outbox worker lacking send_media support.
+  - Outbox worker restarted (GHCR main) and canary media send succeeded (outbox status SENT with signed_url + expires_at).
+- next:
+  - Redeploy outbox worker with send_media support, rerun media live-check on demo_salon.
+  - Update STATE.md with live-check success evidence.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-media-pipeline.md
+  - pytest -q truffles-api/tests/test_provider_gateway_outbound.py
+  - /tmp/webhook_media_handover.json
+  - /tmp/webhook_media_handover_response.json
+  - /tmp/telegram_photo_upload.json
+  - /tmp/telegram_media_update.json
+  - /tmp/telegram_media_webhook_response.json
+  - /tmp/trace_bundle_media_livecheck_20260127.json
+- last_updated: 2026-01-27

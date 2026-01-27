@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 from uuid import UUID
 
 from app.models import OutboxMessage
@@ -51,6 +52,20 @@ def _parse_received_at(value: str | None) -> int | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return int(parsed.timestamp())
+
+
+def _extract_signed_url_expires_at(signed_url: str) -> str | None:
+    if not signed_url:
+        return None
+    try:
+        parsed = urlparse(signed_url)
+        expires_values = parse_qs(parsed.query or "").get("expires")
+        if not expires_values:
+            return None
+        expires = int(expires_values[0])
+        return datetime.fromtimestamp(expires, tz=timezone.utc).isoformat()
+    except Exception:
+        return None
 
 
 def translate_provider_inbound(payload: ProviderInbound) -> tuple[WebhookRequest | None, str | None]:
@@ -129,6 +144,13 @@ def build_provider_outbound_payload(
             media_payload = ProviderOutboundMedia.model_validate(media)
         except Exception:
             return None, "invalid_media"
+        if not media_payload.signed_url:
+            return None, "missing_media_signed_url"
+        if not media_payload.expires_at:
+            expires_at = _extract_signed_url_expires_at(media_payload.signed_url)
+            if not expires_at:
+                return None, "missing_media_expires_at"
+            media_payload = media_payload.model_copy(update={"expires_at": expires_at})
     content = ProviderOutboundContent(
         text=text if text else None,
         media=media_payload,

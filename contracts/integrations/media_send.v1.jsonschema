@@ -3,7 +3,7 @@
   "$id": "https://truffles.ai/contracts/integrations/media_send.v1.jsonschema",
   "title": "Media Send v1",
   "type": "object",
-  "required": ["media_id", "tenant_context", "media_type"],
+  "required": ["media_id", "tenant_context", "media_type", "signed_url", "expires_at"],
   "properties": {
     "media_id": {
       "type": "string",
@@ -21,11 +21,11 @@
       "format": "uri"
     },
     "signed_url": {
-      "type": ["string", "null"],
+      "type": "string",
       "format": "uri"
     },
     "expires_at": {
-      "type": ["string", "null"],
+      "type": "string",
       "format": "date-time"
     },
     "sha256": {
@@ -53,9 +53,5 @@
       "additionalProperties": true
     }
   },
-  "anyOf": [
-    {"required": ["source_url"]},
-    {"required": ["signed_url"]}
-  ],
   "additionalProperties": false
 }
