@@ -1,0 +1,21 @@
+# SESSION 2026-01-27-session-resume-protocol-a1 — Session 2026-01-27-session-resume-protocol-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-session-resume-protocol-a1.md
+- branch: feat/2026-01-27-session-resume-protocol-a1
+- worktree: /home/zhan/worktrees/2026-01-27-session-resume-protocol-a1
+- base_ref: origin/main
+- scope: Resume protocol + session_start guard for active sessions.
+- done:
+  - Added session_resume script for post-compaction continuation.
+  - session_start blocks new sessions when one is already open for the same agent suffix.
+  - Updated docs/structure with resume protocol.
+  - Updated session index status.
+- next:
+  - None.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-session-resume-protocol-a1.md
+  - scripts/session_resume.sh
+  - scripts/session_start.sh
+- last_updated: 2026-01-27
