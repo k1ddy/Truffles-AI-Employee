@@ -9,9 +9,10 @@ function buildSignInUrl(baseUrl: string, basePath: string) {
 
 async function resolveNextAuthBase(page: import("@playwright/test").Page, fallbackBaseURL: string) {
     const nextAuth = await page
-        .evaluate(() => {
+        .waitForFunction(() => {
             return (window as typeof window & { __NEXTAUTH?: { baseUrl?: string; basePath?: string } }).__NEXTAUTH ?? null;
-        })
+        }, { timeout: 5000 })
+        .then((handle) => handle.jsonValue() as { baseUrl?: string; basePath?: string })
         .catch(() => null);
     const baseUrl = typeof nextAuth?.baseUrl === "string" ? nextAuth.baseUrl : fallbackBaseURL;
     const basePath = typeof nextAuth?.basePath === "string" ? nextAuth.basePath : "/api/auth";
