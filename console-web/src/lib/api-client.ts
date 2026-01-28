@@ -89,6 +89,7 @@ export type ConsoleSection =
     | "settings"
     | "ops"
     | "audit"
+    | "tenants"
     | "provisioning";
 export type ConsoleAction = "read" | "write";
 
@@ -120,6 +121,10 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
     audit: {
         read: ["platform_admin", "owner", "admin", "support"],
         write: [],
+    },
+    tenants: {
+        read: ["platform_admin"],
+        write: ["platform_admin"],
     },
     provisioning: {
         read: ["platform_admin", "owner", "admin", "support"],
