@@ -136,6 +136,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-28-decision-core-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-28-outbox-service-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-28-provider-gateway-integration-tests.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`
