@@ -1,0 +1,21 @@
+# SESSION 2026-01-28-inbox-service-ghcr-evidence-a1 — Inbox Service GHCR evidence
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md
+- branch: docs/2026-01-28-inbox-service-ghcr-evidence-a1
+- worktree: /home/zhan/worktrees/2026-01-28-inbox-service-ghcr-evidence-a1
+- base_ref: origin/main
+- scope: Restart Inbox Service from GHCR and capture health/inbox_event evidence.
+- done:
+  - Restarted truffles-inbox-service from GHCR with INBOX_SERVICE_ENABLED=1.
+  - Captured health response and inbox_event DB row from /inbox/event.
+- next:
+  - None.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md
+  - /tmp/inbox_service_health_20260128_002921.json
+  - /tmp/inbox_service_payload_20260128_003021.json
+  - /tmp/inbox_service_response_20260128_003021.json
+  - /tmp/inbox_event_20260128_003021.txt
+- last_updated: 2026-01-28
