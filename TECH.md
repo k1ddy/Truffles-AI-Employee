@@ -154,6 +154,8 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `PROVIDER_GATEWAY_OUTBOUND_URL` — URL provider gateway outbound endpoint.
 - `PROVIDER_GATEWAY_STATUS_CALLBACK_URL` — callback URL для статусов отправки.
 - `PROVIDER_GATEWAY_TOKEN` — токен для inbound/outbound/status.
+- `INBOX_SERVICE_ENABLED` — включает `POST /inbox/event` (shadow inbox service).
+- `INBOX_SERVICE_TOKEN` — токен для inbox service (header `X-Inbox-Service-Token`).
 - `QDRANT_COLLECTION` — коллекция Qdrant (default: truffles_knowledge; при `TEST_MODE=1` и пустом env → truffles_knowledge_ci).
 - `KNOWLEDGE_SNAPSHOT_ENABLED` — включает `/knowledge/snapshot` (gateway service).
 - `KNOWLEDGE_SNAPSHOT_TOKEN` — токен для gateway snapshot (header `X-Knowledge-Snapshot-Token`).
