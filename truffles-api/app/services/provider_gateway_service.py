@@ -170,7 +170,7 @@ def build_provider_outbound_payload(
         requested_at=datetime.now(timezone.utc).isoformat(),
         metadata=metadata,
     )
-    return outbound.model_dump(exclude_none=True), None
+    return outbound.model_dump(exclude_none=True, mode="json"), None
 
 
 def _merge_dict(base: dict, updates: dict) -> dict:
