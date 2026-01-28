@@ -10,8 +10,9 @@
 - done:
   - Implemented inbox_service app/router + restart script + tests.
   - Verified inbox ingest writes `inbox_events` and service health.
-  - Merged to main (per user confirmation).
+  - PR #423 open; session-gate fix required (session log + index updates).
 - next:
+  - Merge PR #423 after CI green.
   - Restart inbox service from GHCR and capture health/inbox evidence.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md

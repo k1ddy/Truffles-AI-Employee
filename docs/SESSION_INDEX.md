@@ -5,7 +5,7 @@
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
 | 2026-01-27-inbox-service-tp-arch | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 |
-| 2026-01-27-inbox-service-shadow-arch | done | feat/2026-01-27-inbox-service-shadow-arch | /home/zhan/worktrees/2026-01-27-inbox-service-shadow-arch | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 |
+| 2026-01-27-inbox-service-shadow-arch | done | feat/2026-01-27-inbox-service-shadow-arch | /home/zhan/worktrees/2026-01-27-inbox-service-shadow-arch | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 (gate-fix) |
 | 2026-01-27-provider-gateway-canary-arch | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md | 2026-01-27 |
 | 2026-01-27-main-sync-arch | done | docs/main-sync-2026-01-27 | /home/zhan/worktrees/main-sync-2026-01-27 | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 |
 | 2026-01-27-console-ux-selection | active | feat/console-ux-selection | /home/zhan/worktrees/console-ux-selection | docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md | 2026-01-27 |
