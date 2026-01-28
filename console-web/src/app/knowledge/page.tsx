@@ -109,7 +109,8 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const branchIsValid = selectedBranchId
         ? branches.some((branch) => branch.id === selectedBranchId)
         : false;
-    const branchSelectionRequired = branches.length > 1 && !branchIsValid;
+    const branchSelectionRequired = Boolean(meData) && !branchIsValid;
+    const branchOptions = branches.filter((branch) => branch.id);
 
     useEffect(() => {
         setBranchId(selectedBranchId ?? "");
@@ -283,18 +284,24 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                 <p className="text-sm text-muted-foreground mb-6">
                     Управление знаниями выполняется отдельно для каждого филиала.
                 </p>
-                <select
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                    value={branchId}
-                    onChange={(event) => setBranchId(event.target.value)}
-                >
-                    <option value="">Выберите филиал</option>
-                    {branches.map((branch) => (
-                        <option key={branch.id} value={branch.id ?? ""}>
-                            {branch.name ?? branch.id}
-                        </option>
-                    ))}
-                </select>
+                {branchOptions.length > 0 ? (
+                    <select
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                        value={branchId}
+                        onChange={(event) => setBranchId(event.target.value)}
+                    >
+                        <option value="">Выберите филиал</option>
+                        {branchOptions.map((branch) => (
+                            <option key={branch.id} value={branch.id ?? ""}>
+                                {branch.name ?? branch.id}
+                            </option>
+                        ))}
+                    </select>
+                ) : (
+                    <div className="rounded-lg border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
+                        Нет доступных филиалов.
+                    </div>
+                )}
                 <div className="mt-6 flex justify-end">
                     <button
                         className="btn-primary"
@@ -316,7 +323,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 setIsSelectingBranch(false);
                             }
                         }}
-                        disabled={!branchId || isSelectingBranch}
+                        disabled={!branchId || isSelectingBranch || branchOptions.length === 0}
                     >
                         {isSelectingBranch ? "Загрузка..." : "Продолжить"}
                     </button>
