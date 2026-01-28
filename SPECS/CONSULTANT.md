@@ -2,7 +2,7 @@
 
 **Статус:** CANON  
 **Owner:** Top Architect  
-**Обновлено:** 2026-01-22  
+**Обновлено:** 2026-01-28  
 **Scope:** поведение бота (info/consult/booking), LAW/policy/clarify, формат ответа.  
 **Out of scope:** реализация, evidence/CI.  
 **Links:** `SPECS/ARCHITECTURE.md`, `SPECS/ESCALATION.md`, `docs/SESSION_START_PROMPT.txt`, `STATE.md`.
@@ -37,7 +37,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 
 Сводка опирается на правила ниже и не вводит новых норм.
 
-- Цель: довести диалог до следующего шага (FACT/COLLECT/HANDOFF).
+- Цель: довести диалог до следующего шага (FACT/COLLECT/HANDOFF) и вести к записи/продаже.
 - Тон: спокойный, уверенный, заботливый; 2–3 предложения, без воды.
 - Язык: ChatGPT-like естественность, но строго domain-bound.
 - Факты: только из `client_pack`/`consult_playbooks`; нет факта → уточнение/эскалация.
@@ -50,6 +50,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 
 - Формат ответа: короткое подтверждение → факт/ограничение → один следующий шаг.
 - Запреты: длинные списки, лекции, "я ИИ", оправдания, обещания без фактов.
+- Тон по времени суток (утро/день/вечер) и языку клиента (RU/KZ/mixed), без новых фактов; варианты ответов детерминированы (seed от `conversation_id`).
 
 ---
 
@@ -57,8 +58,8 @@ _Любые статусы ниже — DERIVED; единственный ист
 
 - **Decision Graph:** `truffles-api/app/routers/webhook/decision.py` + trace `stage=decision_graph`.
 - **State Machine:** `truffles-api/app/services/state_service.py` + trace `stage=state_transition`.
-- **Fact Resolver (truth‑first):** `truffles-api/app/services/demo_salon_knowledge.py` + trace `stage=truth_gate/service_matcher/multi_truth`.
-- **Policy‑gate:** `demo_salon_knowledge.py` + trace `stage=policy_gate`.
+- **Fact Resolver (truth‑first):** `truffles-api/app/services/demo_salon_knowledge.py` + trace `stage=truth_gate/service_matcher/multi_truth` (текущий адаптер pack‑данных, не demo‑only логика).
+- **Policy‑gate:** `demo_salon_knowledge.py` + trace `stage=policy_gate` (pack‑driven, без demo‑only правил).
 - **Memory/Re‑entry:** `truffles-api/app/routers/webhook/session_memory.py` + `context_manager.py` + trace `stage=session_memory/re_entry`.
 - **Escalation:** `app/services/escalation_service.py` + `telegram_webhook.py` + trace `stage=escalation/pending_sla`.
 
@@ -68,10 +69,10 @@ _Любые статусы ниже — DERIVED; единственный ист
 
 ## Определение
 
-Консультант — это **работник компании** с ChatGPT-like естественностью речи, но строго **domain-bound**. Он работает минимум неделю, знает салон и правила. Не робот.
+Консультант — это **работник компании** с ChatGPT-like естественностью речи, но строго **domain-bound**. Он работает минимум неделю, знает бизнес/салон и правила. Не робот.
 
 **Он:**
-- Знает документы компании
+- Знает документы компании и домен бизнеса, на котором запущен
 - Понимает деятельность и границы
 - Знает кто за что отвечает
 - Учится быстрее человека
@@ -118,6 +119,9 @@ _Любые статусы ниже — DERIVED; единственный ист
 - **3 исхода:** факт‑ответ (info/consult), booking intake, эскалация.
 - **Fact‑answer (info):** только факты из `client_pack`; LLM может **только перефразировать** эти факты.
 - **Consult:** pack‑first (`consult_playbooks`); LLM‑советы только из `allowed_advice`, без фактов о бизнесе.
+- **Goal‑first:** каждая реплика (кроме HANDOFF/pending/manager_active) заканчивается следующим шагом; при явной записи — сразу следующий слот.
+- **Truthfulness:** запрещены выдуманные факты/скидки/условия/медсоветы; нет факта в pack/tools → уточнение или handoff.
+- **ChatGPT‑like память:** не противоречит сказанному ранее; опирается на `current_goal`, `expected_reply_type`, заполненные слоты и `compact_summary`.
 - **Booking intake:** сбор слотов записи (`expected_reply_type`); при перебивке — факт‑ответ и возврат к последнему booking‑вопросу.
 - **Hard‑LAW:** оплата (подтверждение/проверка/возвраты), медицинка, жалобы, переносы → только эскалация, без рекомендаций/офферов.
 - **Policy‑gates:** скидки и способы оплаты разрешены **только** по явным правилам в `client_pack`; иначе эскалация.
@@ -156,6 +160,26 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Если `state ∈ {pending, manager_active}` → отвечаем **только** статусом/подтверждением (pending_status/pending_wait/pending_ack/pending_close).
 - Любые multi‑intent и booking/info/consult игнорируются до выхода из `pending`; цель записи не сбрасываем, а ставим на паузу.
 - Trace/meta: `stage=pending_guard/pending_status/pending_wait`, `action ∈ {pending_status,pending_wait,pending_ack,pending_close}`.
+
+**Quiet‑hours / время суток (P1):**
+- Рабочее время берём из pack/tools; если его нет — предупреждение не показываем.
+- Первое сообщение вне рабочего времени → короткое уведомление, но запись/консультация продолжаются.
+- Повтор уведомления не чаще 1 раза в 10 минут на диалог.
+- Приветствие по времени суток даём один раз за сессию; вечером используем формулировку “Добрый вечер. Я виртуальный помощник...”.
+
+**Память и профиль (P1):**
+- `context_capsule`: `current_goal`, `expected_reply_type`, слоты, `last_question`, safety‑flags, `compact_summary`.
+- При переполнении сбрасываем только свободный текст, capsule сохраняется.
+- Профиль клиента хранит только явно подтверждённые предпочтения (услуга/мастер/время) с TTL и явным “запомнить”.
+
+**Media/ASR порядок (P1):**
+- Фото/аудио/документы принимаем, видео запрещено.
+- Фото без текста → короткое уточнение “Это референс? Что хотите повторить/изменить?” без смены цели.
+- Текст “как на фото/референс” без фото → попросить фото, без эскалации.
+- Фото + текст (или фото после текста) с “референс” → эскалация, медиа + контекст в handoff, с предупреждением о `pending`.
+- Голосовые: одна активная транскрибация на диалог; новые аудио ставятся в очередь по времени.
+- Пока идёт транскрибация, на текст отвечаем сразу; транскрипт учитывается следующим шагом.
+- “Подождите, расшифровываю” — не чаще 1 раза в 10 минут; при долгой обработке просим текстом.
 
 **Consult clarify (pack-first + LLM fallback, safe):**
 - Consult canon: сначала playbook из `client_pack.consult_playbooks`; если playbook/topic не найден — уточнение или эскалация (LLM‑совет только внутри `allowed_advice`).
@@ -207,6 +231,8 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Явные угрозы/насилие/криминал/дискриминация → эскалация.
 - Грубая лексика/флуд без угроз → нейтральная заглушка + возврат к slot-вопросу.
 - Ключ: `remote_jid` (WhatsApp без IP).
+- Signal/Noise: шум не меняет `current_goal`/`expected_reply_type`, ответы на шум не чаще 1 раза в N сообщений (cooldown), остальное — silent‑drop.
+- Медиа/эмодзи/точки без текста не сбрасывают цель; просим уточнить текстом.
 
 **Long-form стабильность (P0)**
 - Цель диалога не теряется 10-15 сообщений: `current_goal` и `expected_reply_type` сохраняются между перебивками.
@@ -215,6 +241,9 @@ _Любые статусы ниже — DERIVED; единственный ист
 - При OOD в booking: мягкий отказ + вернуть к booking-вопросу.
 - При Hard-LAW/Policy-gate: эскалация, booking ставится на паузу до явного запроса записи.
 - После 12+ сообщений или смены цели — обновлять `compact_summary` и опираться на него.
+- Rolling‑summary: LLM видит `compact_summary` + последние 3–5 реплик, полная история не требуется.
+- Session TTL: отдельные TTL для booking и общего диалога; при истечении — re‑entry (“продолжим запись?”).
+- Intent‑queue: вторичные интенты кладём в очередь, но активную цель не сбрасываем до завершения текущей.
 - Carryover по **классу**: если вопрос про адрес/часы/гостей — сохраняем класс info‑bundle, не сбрасываем при перефразе.
 - `info_bundle` — это **класс**, хранится как `info_bundle` (не `info`) в class‑carryover.
 - Follow‑up “по времени/по часам” после адреса/часов → остаётся в `hours`; `duration` и service‑carryover не применяются без явной услуги.
@@ -245,6 +274,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 - **Enforcement‑гейты** (state/policy/LAW) выше смысла и могут перекрывать решение ради безопасности.
 - Semantic resolver (embeddings) подтверждает смысл; ключевые слова/якоря — только fallback.
 - LLM‑контроллер — основной арбитр смысла; словари/якоря не расширяем ради покрытия, только для safety‑gate и минимальных якорей.
+- `demo_salon` — тестовый pack; запрещены demo_salon‑only правила и “подгон под тесты”.
 - LLM **не создаёт факты**. Факты об услугах/ценах/наличии берутся только из tools/packs.
 - LLM может давать **общие рекомендации** (consult) только из `allowed_advice`; факты о бизнесе — только из pack/tools.
 - Response Guard обязателен: ответ = ack + facts + next_step; лишнее → fallback/clarify/handoff.

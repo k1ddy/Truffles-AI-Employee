@@ -9,6 +9,13 @@
 
 ---
 
+## 0a) Quickstart for new agents
+
+1) Read `SPECS/CONSULTANT.md` and `SPECS/ESCALATION.md` before touching code.
+2) Debug message flow with `ops/diagnose.py explain` first, then `trace-bundle`, then logs.
+3) `demo_salon` is a test pack only; never add demo‑only rules or “pass‑tests” hacks.
+4) Prefer semantic resolver/LLM controller; do not expand dictionaries to chase coverage.
+
 ## 0) E2E inbound message flow (code-accurate, with LLM touchpoints)
 
 This is the full WA/ChatFlow inbound path in code order. Every step is traced in `decision_trace` unless a

@@ -1,0 +1,23 @@
+# SESSION 2026-01-28-consultant-canon-alignment-a1 — Consultant canon alignment (ChatGPT-like + media/noise)
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-28-consultant-canon-alignment.md
+- branch: feat/2026-01-28-consultant-canon-alignment-a1
+- worktree: /home/zhan/worktrees/2026-01-28-consultant-canon-alignment-a1
+- base_ref: origin/main
+- scope: Canon updates for consultant/escalation + onboarding guidance for new agents.
+- done:
+  - Updated consultant canon for goal-first, quiet-hours, memory capsule, media/ASR ordering, intent queue, and demo_salon guardrails.
+  - Updated voice spec with time-of-day tone + deterministic variants.
+  - Clarified pack-driven adapters are not demo-only.
+  - Updated escalation canon with pending warning and audio ordering note.
+  - Added new-agent quickstart in Consultant Code Map.
+  - Updated System Reference start map with demo_salon guardrail and diagnose-first note.
+  - Ran session_check.
+- next:
+  - None.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-28-consultant-canon-alignment.md
+  - scripts/session_check.sh (Session OK)
+- last_updated: 2026-01-28
