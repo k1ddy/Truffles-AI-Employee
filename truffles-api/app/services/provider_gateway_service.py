@@ -198,6 +198,13 @@ def update_outbox_status_from_provider(
     if not outbox:
         return False, "outbox_not_found"
 
+    tenant_context = status.tenant_context
+    if tenant_context and tenant_context.client_id and outbox.client_id != tenant_context.client_id:
+        return False, "tenant_mismatch"
+    if outbox.branch_id and tenant_context and tenant_context.branch_id:
+        if outbox.branch_id != tenant_context.branch_id:
+            return False, "tenant_mismatch"
+
     meta = dict(outbox.meta or {})
     status_meta = {
         "provider": status.provider,
