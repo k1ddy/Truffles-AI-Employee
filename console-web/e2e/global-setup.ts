@@ -3,6 +3,57 @@ import { chromium, type FullConfig } from "@playwright/test";
 const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
 const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
 
+function buildSignInUrl(origin: string) {
+    return `${origin}/api/auth/signin?callbackUrl=${encodeURIComponent(origin)}`;
+}
+
+async function waitForConsoleApp(page: import("@playwright/test").Page) {
+    await page.waitForURL(
+        (url) => consoleHostPattern.test(url.toString()) && !url.toString().includes("/api/auth"),
+        { timeout: 30000 }
+    );
+}
+
+async function startKeycloakLogin(page: import("@playwright/test").Page, baseURL: string) {
+    await page.goto(baseURL, { waitUntil: "domcontentloaded" });
+
+    const logoutButton = page.getByTestId("logout-button");
+    if (await logoutButton.isVisible().catch(() => false)) {
+        return "already-logged-in";
+    }
+
+    const loginButton = page.getByTestId("login-button");
+    if (await loginButton.isVisible().catch(() => false)) {
+        await loginButton.click();
+        return "started";
+    }
+
+    const signInUrl = buildSignInUrl(baseURL);
+    const signInResponse = await page.goto(signInUrl, { waitUntil: "domcontentloaded" });
+    const providerForm = page.locator('form[action*="keycloak"]').first();
+    const providerButton = page.getByRole("button", { name: /sign in with keycloak/i });
+
+    if (await providerButton.isVisible().catch(() => false)) {
+        await providerButton.click();
+        return "started";
+    }
+
+    if (await providerForm.isVisible().catch(() => false)) {
+        await providerForm.waitFor({ state: "visible", timeout: 15000 });
+        const submitButton = providerForm
+            .locator('button[type="submit"], input[type="submit"]')
+            .first();
+        await submitButton.click();
+        return "started";
+    }
+
+    if (keycloakHostPattern.test(page.url())) {
+        return "started";
+    }
+
+    throw new Error(`Keycloak sign-in not reachable (status ${signInResponse?.status() ?? "unknown"})`);
+}
+
 export default async function globalSetup(config: FullConfig) {
     if (process.env.E2E_USE_STORAGE_STATE !== "1") {
         return;
@@ -21,18 +72,26 @@ export default async function globalSetup(config: FullConfig) {
     const browser = await chromium.launch();
     const page = await browser.newPage();
 
-    const signInUrl = `${baseURL}/api/auth/signin?callbackUrl=${encodeURIComponent(baseURL)}`;
-    await page.goto(signInUrl, { waitUntil: "domcontentloaded" });
-    const providerForm = page.locator('form[action*="keycloak"]');
-    await providerForm.first().waitFor({ state: "visible", timeout: 15000 });
-    const submitButton = providerForm.first().locator('button[type="submit"], input[type="submit"]').first();
-    await submitButton.click();
-    await page.waitForURL(keycloakHostPattern, { timeout: 20000 });
-    await page.waitForSelector("#username", { timeout: 20000 });
-    await page.fill("#username", username);
-    await page.fill("#password", password);
-    await page.click("#kc-login");
-    await page.waitForURL(consoleHostPattern, { timeout: 30000 });
+    const loginState = await startKeycloakLogin(page, baseURL);
+
+    if (loginState !== "already-logged-in") {
+        if (!keycloakHostPattern.test(page.url())) {
+            await Promise.race([
+                page.waitForURL(keycloakHostPattern, { timeout: 20000 }),
+                waitForConsoleApp(page),
+            ]);
+        }
+
+        if (keycloakHostPattern.test(page.url())) {
+            await page.waitForSelector("#username", { timeout: 20000 });
+            await page.fill("#username", username);
+            await page.fill("#password", password);
+            await page.click("#kc-login");
+        }
+
+        await waitForConsoleApp(page);
+    }
+
     await page.waitForLoadState("domcontentloaded");
     await page.locator('[data-testid="logout-button"]').waitFor({ state: "visible", timeout: 20000 });
 
