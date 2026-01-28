@@ -1,0 +1,23 @@
+# SESSION 2026-01-28-qdrant-branch-backfill-ca13-a1 — Session 2026-01-28-qdrant-branch-backfill-ca13-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-28-qdrant-branch-backfill-ca13.md
+- branch: feat/2026-01-28-qdrant-branch-backfill-ca13-a1
+- worktree: /home/zhan/worktrees/2026-01-28-qdrant-branch-backfill-ca13-a1
+- base_ref: origin/main
+- scope: Qdrant backfill for demo_salon branches + CA-13 trace-bundle evidence (branch isolation).
+- done:
+  - Backfilled Qdrant for demo_salon branch A/B; captured backfill log.
+  - Captured Qdrant metadata evidence for branch_id/knowledge_tag.
+  - Captured CA-13 trace bundles for branch A/B (rag_filter + branch_id in message).
+- next:
+  - Follow up: decision_meta.branch_id is not emitted for rag_search messages (GAP, outside scope).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-28-qdrant-branch-backfill-ca13.md
+  - /tmp/qdrant_backfill_20260128.txt
+  - /tmp/qdrant_demo_salon_branch_a_points_20260128.json
+  - /tmp/qdrant_demo_salon_branch_b_points_20260128.json
+  - /tmp/trace_bundle_ca13_branch_a_20260128.json
+  - /tmp/trace_bundle_ca13_branch_b_20260128.json
+- last_updated: 2026-01-28
