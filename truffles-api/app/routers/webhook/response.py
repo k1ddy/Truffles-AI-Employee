@@ -400,6 +400,14 @@ def _record_rag_meta(
 
     rag_scores = legacy._merge_rag_scores(rag_scores if isinstance(rag_scores, dict) else None)
     if saved_message:
+        branch_id = None
+        knowledge_tag = None
+        if isinstance(timing_context, dict):
+            branch_id = timing_context.get("branch_id")
+            knowledge_tag = timing_context.get("knowledge_tag")
+        decision_meta = {}
+        if isinstance(saved_message.message_metadata, dict):
+            decision_meta = saved_message.message_metadata.get("decision_meta") or {}
         rag_confident, rag_reason = legacy._derive_rag_status(
             rag_scores=rag_scores,
             rag_best_score=(
@@ -409,13 +417,18 @@ def _record_rag_meta(
                 timing_context.get("rag_attempted") if isinstance(timing_context, dict) else False
             ),
         )
+        meta_updates = {
+            "rag_scores": rag_scores,
+            "rag_confident": rag_confident,
+            "rag_reason": rag_reason,
+        }
+        if branch_id and "branch_id" not in decision_meta:
+            meta_updates["branch_id"] = branch_id
+        if knowledge_tag and "knowledge_tag" not in decision_meta:
+            meta_updates["knowledge_tag"] = knowledge_tag
         _update_message_decision_metadata(
             saved_message,
-            {
-                "rag_scores": rag_scores,
-                "rag_confident": rag_confident,
-                "rag_reason": rag_reason,
-            },
+            meta_updates,
         )
 
 

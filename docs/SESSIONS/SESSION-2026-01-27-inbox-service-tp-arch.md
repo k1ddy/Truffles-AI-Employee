@@ -3,7 +3,7 @@
 - status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md
-- branch: main
+- branch: docs/2026-01-27-inbox-service-tp-arch
 - worktree: /home/zhan/truffles-main
 - base_ref: origin/main
 - scope: Add Inbox Service separation Task Package and register it in STRUCTURE/STATE.

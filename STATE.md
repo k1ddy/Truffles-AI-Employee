@@ -48,6 +48,8 @@
 - DONE: Provider Gateway media pipeline (signed URL + TTL enforcement in gateway outbound) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-media-pipeline.md`; evidence: `pytest -q truffles-api/tests/test_provider_gateway_outbound.py` (8 passed).
 - DONE: Provider Gateway mock + contract tests (inbound/outbound/status/media) + JSON-serializable outbound payloads — Task Package `docs/TASK_PACKAGES/TP-2026-01-28-provider-mock-contract-tests.md`; tests `pytest -q truffles-api/tests/test_provider_gateway_inbound.py truffles-api/tests/test_provider_gateway_outbound.py` (19 passed).
 - DONE: Provider Gateway integration tests (cross-tenant mismatch, provider swap, status update) — Task Package `docs/TASK_PACKAGES/TP-2026-01-28-provider-gateway-integration-tests.md`; tests `pytest -q truffles-api/tests/test_provider_gateway_integration.py` (3 passed).
+- DONE: Qdrant branch backfill + CA-13 evidence refresh (demo_salon) — Task Package `docs/TASK_PACKAGES/TP-2026-01-28-qdrant-branch-backfill-ca13.md`; evidence `/tmp/qdrant_backfill_20260128.txt`, `/tmp/qdrant_demo_salon_branch_*_points_20260128.json`, `/tmp/trace_bundle_ca13_branch_*_20260128.json`.
+- DONE: decision_meta branch_id for RAG messages — Task Package `docs/TASK_PACKAGES/TP-2026-01-28-decision-meta-branch-id.md`; tests `pytest -q truffles-api/tests/test_message_endpoint.py -k "rag_rewrite_and_scores_logged or record_rag_meta_sets_branch_id"` (2 passed).
 - DONE: Provider Gateway media send live-check (demo_salon, allowlist) — outbox worker restarted on GHCR main, media outbox row `1ad9754b-048d-465c-b222-6350c1ce1fbf` status SENT with signed_url + expires_at; conversation_id `10049e90-5805-425f-841b-c0c9419c9c30`; inbound msg_id `LC-MEDIA-97ec06b3`; trace bundle `/tmp/trace_bundle_media_livecheck_20260127.json`.
 - DONE: Provider Gateway inbound (shadow endpoint + adapter) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbound-shadow.md`; PR #387 https://github.com/k1ddy/Truffles-AI-Employee/pull/387; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21352725432; live-check `/provider/inbound` (demo_salon, token header) trace bundle `/tmp/trace_bundle_provider_inbound_20260126_122228.json` msg_id `LC-PGW-INBOUND-20260126-122228`, conv_id `a7ec4c6e-d5b4-4c5d-ae8e-909b09ea9aaf`, trace_id `4193e62f668fa1389943a701cbbcc958`, outbox_id `f09510d3-f6db-4092-9acd-0286c6bacbed` status SENT; stored inbound payload `/tmp/pgw_inbound_payload.json` and response `/tmp/pgw_inbound_response.json`.
 - DONE: Provider Gateway outbound + status (shadow) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-outbound-shadow.md`; PR #388 https://github.com/k1ddy/Truffles-AI-Employee/pull/388; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21353906345.
@@ -2845,6 +2847,27 @@ SELECT t FROM traces WHERE t->>'stage'='rag_retrieve';"
 - `SELECT id, branch_id FROM conversations WHERE id IN ('aa49f151-9a61-4d1f-8039-0047184e830c','724ce9d0-bf2f-4a55-8ef5-53abf322992e');`
 - `SELECT metadata->>'messageId', metadata->'decision_meta'->'rag_scores'->'bm25_filter' FROM messages WHERE metadata->>'messageId' IN ('sim-branch-a4-1768878520','sim-branch-b4-1768878534');`
 - `SELECT metadata->>'messageId', metadata->'decision_meta'->>'rag_confident', metadata->'decision_meta'->'rag_scores'->>'bm25_max', metadata->'decision_meta'->'rag_scores'->>'bm25_count' FROM messages WHERE metadata->>'messageId' IN ('sim-branch-a4-1768878520','sim-branch-b4-1768878534');`
+
+### 2026-01-28 — Qdrant branch backfill + CA-13 evidence refresh (demo_salon)
+
+**Qdrant backfill log:**
+- `/tmp/qdrant_backfill_20260128.txt` (branch A re-sync success: 37 chunks + 69 services; branch B ok).
+
+**Qdrant metadata check (scroll):**
+- `/tmp/qdrant_demo_salon_branch_a_points_20260128.json` → metadata.client_slug `demo_salon`, branch_id `b7f75692-951e-421a-aae6-f5db97394799`, knowledge_tag null.
+- `/tmp/qdrant_demo_salon_branch_b_points_20260128.json` → metadata.client_slug `demo_salon`, branch_id `2e9f5a9d-50a2-4b07-8e54-da2cac2ac751`, knowledge_tag `demo_salon_branch_b`.
+
+**CA-13 trace bundles (simulated inbound, TEST_MODE=1):**
+- Branch A: msg_id `sim-branch-a4-1768878520`, conv_id `aa49f151-9a61-4d1f-8039-0047184e830c`, message.branch_id `b7f75692-951e-421a-aae6-f5db97394799`.
+  - decision_meta.rag_scores.bm25_filter.filter_reason = `branch_id`
+  - decision_trace.rag_retrieve.rag_filter.filter_reason = `branch_filter_empty`
+- Branch B: msg_id `sim-branch-b4-1768878534`, conv_id `724ce9d0-bf2f-4a55-8ef5-53abf322992e`, message.branch_id `2e9f5a9d-50a2-4b07-8e54-da2cac2ac751`.
+  - decision_meta.rag_scores.bm25_filter.filter_reason = `knowledge_tag`
+  - decision_trace.rag_retrieve.rag_filter.filter_reason = `branch_filter_empty`
+- Evidence: `/tmp/trace_bundle_ca13_branch_a_20260128.json`, `/tmp/trace_bundle_ca13_branch_b_20260128.json`.
+
+**Note/GAP:**
+- decision_meta.branch_id is not emitted for rag_search messages; evidence uses message.branch_id + rag_filter (follow-up needed if branch_id required in decision_meta).
 
 ### 2026-01-20 — PROBLEM-001 Branch routing stickiness (instanceId vs conversation + outbound)
 
