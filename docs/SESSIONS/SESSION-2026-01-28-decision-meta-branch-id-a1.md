@@ -11,9 +11,11 @@
   - Added branch_id/knowledge_tag emission in rag meta updates.
   - Added unit test for rag meta branch_id and adjusted rag rewrite test mocks.
   - Ran targeted pytest.
+  - Ran full `truffles-api/tests/test_message_endpoint.py` (failed; see failures summary in report).
 - next:
   - None.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-01-28-decision-meta-branch-id.md
   - pytest: `pytest -q truffles-api/tests/test_message_endpoint.py -k "rag_rewrite_and_scores_logged or record_rag_meta_sets_branch_id"`
+  - pytest (failed): `pytest -q truffles-api/tests/test_message_endpoint.py`
 - last_updated: 2026-01-28
