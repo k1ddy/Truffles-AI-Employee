@@ -33,3 +33,4 @@
 | 2026-01-28-decision-core-ghcr-evidence-a1 | done | docs/2026-01-28-decision-core-ghcr-evidence-a1 | /home/zhan/worktrees/2026-01-28-decision-core-ghcr-evidence-a1 | docs/TASK_PACKAGES/TP-2026-01-28-decision-core-shadow.md | 2026-01-28 |
 | 2026-01-28-outbox-service-shadow-a1 | done | feat/2026-01-28-outbox-service-shadow-a1 | /home/zhan/worktrees/2026-01-28-outbox-service-shadow-a1 | docs/TASK_PACKAGES/TP-2026-01-28-outbox-service-shadow.md | 2026-01-28 |
 | 2026-01-28-outbox-service-ghcr-evidence-a1 | done | feat/2026-01-28-outbox-service-ghcr-evidence-a1 | /home/zhan/worktrees/2026-01-28-outbox-service-ghcr-evidence-a1 | docs/TASK_PACKAGES/TP-2026-01-28-outbox-service-shadow.md | 2026-01-28 |
+| 2026-01-28-provider-gateway-integration-tests-a1 | done | feat/2026-01-28-provider-gateway-integration-tests-a1 | /home/zhan/worktrees/2026-01-28-provider-gateway-integration-tests-a1 | docs/TASK_PACKAGES/TP-2026-01-28-provider-gateway-integration-tests.md | 2026-01-28 |
