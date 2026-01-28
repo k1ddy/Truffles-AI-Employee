@@ -19,12 +19,16 @@ async function startKeycloakLogin(page: import("@playwright/test").Page, baseURL
 
     const logoutButton = page.getByTestId("logout-button");
     if (await logoutButton.isVisible().catch(() => false)) {
-        return "already-logged-in";
+        return "logged-in";
     }
 
     const loginButton = page.getByTestId("login-button");
-    if (await loginButton.isVisible().catch(() => false)) {
+    if (await loginButton.waitFor({ state: "visible", timeout: 10000 }).catch(() => false)) {
         await loginButton.click();
+        return "started";
+    }
+
+    if (keycloakHostPattern.test(page.url())) {
         return "started";
     }
 
@@ -44,10 +48,6 @@ async function startKeycloakLogin(page: import("@playwright/test").Page, baseURL
             .locator('button[type="submit"], input[type="submit"]')
             .first();
         await submitButton.click();
-        return "started";
-    }
-
-    if (keycloakHostPattern.test(page.url())) {
         return "started";
     }
 
@@ -73,14 +73,13 @@ export default async function globalSetup(config: FullConfig) {
     const page = await browser.newPage();
 
     const loginState = await startKeycloakLogin(page, baseURL);
+    const logoutButton = page.getByTestId("logout-button");
 
-    if (loginState !== "already-logged-in") {
-        if (!keycloakHostPattern.test(page.url())) {
-            await Promise.race([
-                page.waitForURL(keycloakHostPattern, { timeout: 20000 }),
-                waitForConsoleApp(page),
-            ]);
-        }
+    if (loginState !== "logged-in") {
+        await Promise.race([
+            page.waitForURL(keycloakHostPattern, { timeout: 20000 }),
+            logoutButton.waitFor({ state: "visible", timeout: 20000 }),
+        ]);
 
         if (keycloakHostPattern.test(page.url())) {
             await page.waitForSelector("#username", { timeout: 20000 });
@@ -93,7 +92,7 @@ export default async function globalSetup(config: FullConfig) {
     }
 
     await page.waitForLoadState("domcontentloaded");
-    await page.locator('[data-testid="logout-button"]').waitFor({ state: "visible", timeout: 20000 });
+    await logoutButton.waitFor({ state: "visible", timeout: 20000 });
 
     const envClientId = process.env.E2E_CLIENT_ID;
     const envBranchId = process.env.E2E_BRANCH_ID;
