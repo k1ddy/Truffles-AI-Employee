@@ -3,8 +3,19 @@ import { chromium, type FullConfig } from "@playwright/test";
 const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
 const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
 
-function buildSignInUrl(origin: string) {
-    return `${origin}/api/auth/signin?callbackUrl=${encodeURIComponent(origin)}`;
+function buildSignInUrl(baseUrl: string, basePath: string) {
+    return `${baseUrl}${basePath}/signin?callbackUrl=${encodeURIComponent(baseUrl)}`;
+}
+
+async function resolveNextAuthBase(page: import("@playwright/test").Page, fallbackBaseURL: string) {
+    const nextAuth = await page
+        .evaluate(() => {
+            return (window as typeof window & { __NEXTAUTH?: { baseUrl?: string; basePath?: string } }).__NEXTAUTH ?? null;
+        })
+        .catch(() => null);
+    const baseUrl = typeof nextAuth?.baseUrl === "string" ? nextAuth.baseUrl : fallbackBaseURL;
+    const basePath = typeof nextAuth?.basePath === "string" ? nextAuth.basePath : "/api/auth";
+    return { baseUrl, basePath };
 }
 
 async function waitForConsoleApp(page: import("@playwright/test").Page) {
@@ -32,7 +43,8 @@ async function startKeycloakLogin(page: import("@playwright/test").Page, baseURL
         return "started";
     }
 
-    const signInUrl = buildSignInUrl(baseURL);
+    const { baseUrl: authBaseUrl, basePath: authBasePath } = await resolveNextAuthBase(page, baseURL);
+    const signInUrl = buildSignInUrl(authBaseUrl, authBasePath);
     const signInResponse = await page.goto(signInUrl, { waitUntil: "domcontentloaded" });
     const providerForm = page.locator('form[action*="keycloak"]').first();
     const providerButton = page.getByRole("button", { name: /sign in with keycloak/i });
