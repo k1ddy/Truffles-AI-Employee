@@ -39,3 +39,4 @@
 | 2026-01-28-qdrant-branch-backfill-ca13-a1 | done | feat/2026-01-28-qdrant-branch-backfill-ca13-a1 | /home/zhan/worktrees/2026-01-28-qdrant-branch-backfill-ca13-a1 | docs/TASK_PACKAGES/TP-2026-01-28-qdrant-branch-backfill-ca13.md | 2026-01-28 |
 | 2026-01-28-console-ux-selection-a2 | done | feat/2026-01-28-console-ux-selection-a2 | /home/zhan/worktrees/2026-01-28-console-ux-selection-a2 | docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md | 2026-01-28 |
 | 2026-01-28-decision-meta-branch-id-a1 | done | feat/2026-01-28-decision-meta-branch-id-a1 | /home/zhan/worktrees/2026-01-28-decision-meta-branch-id-a1 | docs/TASK_PACKAGES/TP-2026-01-28-decision-meta-branch-id.md | 2026-01-28 |
+| 2026-01-28-consultant-canon-alignment-a1 | done | feat/2026-01-28-consultant-canon-alignment-a1 | /home/zhan/worktrees/2026-01-28-consultant-canon-alignment-a1 | docs/TASK_PACKAGES/TP-2026-01-28-consultant-canon-alignment.md | 2026-01-28 |
