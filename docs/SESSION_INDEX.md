@@ -37,3 +37,4 @@
 | 2026-01-28-provider-gateway-integration-tests-a1 | done | feat/2026-01-28-provider-gateway-integration-tests-a1 | /home/zhan/worktrees/2026-01-28-provider-gateway-integration-tests-a1 | docs/TASK_PACKAGES/TP-2026-01-28-provider-gateway-integration-tests.md | 2026-01-28 |
 | 2026-01-28-console-web-bringup-a2 | done | feat/2026-01-28-console-web-bringup-a2 | /home/zhan/worktrees/2026-01-28-console-web-bringup-a2 | docs/TASK_PACKAGES/TP-2026-01-28-console-web-bringup.md | 2026-01-28 |
 | 2026-01-28-console-ux-selection-a2 | done | feat/2026-01-28-console-ux-selection-a2 | /home/zhan/worktrees/2026-01-28-console-ux-selection-a2 | docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md | 2026-01-28 |
+| 2026-01-28-trace-explain-v2-a2 | done | feat/2026-01-28-trace-explain-v2-a2 | /home/zhan/worktrees/2026-01-28-trace-explain-v2-a2 | docs/TASK_PACKAGES/TP-2026-01-28-trace-explain-v2.md | 2026-01-28 |
