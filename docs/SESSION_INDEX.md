@@ -34,3 +34,4 @@
 | 2026-01-28-outbox-service-shadow-a1 | done | feat/2026-01-28-outbox-service-shadow-a1 | /home/zhan/worktrees/2026-01-28-outbox-service-shadow-a1 | docs/TASK_PACKAGES/TP-2026-01-28-outbox-service-shadow.md | 2026-01-28 |
 | 2026-01-28-outbox-service-ghcr-evidence-a1 | done | feat/2026-01-28-outbox-service-ghcr-evidence-a1 | /home/zhan/worktrees/2026-01-28-outbox-service-ghcr-evidence-a1 | docs/TASK_PACKAGES/TP-2026-01-28-outbox-service-shadow.md | 2026-01-28 |
 | 2026-01-28-provider-mock-contract-tests-a1 | done | feat/2026-01-28-provider-mock-contract-tests-a1 | /home/zhan/worktrees/2026-01-28-provider-mock-contract-tests-a1 | docs/TASK_PACKAGES/TP-2026-01-28-provider-mock-contract-tests.md | 2026-01-28 |
+| 2026-01-28-case-list-usequery-a2 | done | feat/2026-01-28-case-list-usequery-a2 | /home/zhan/worktrees/2026-01-28-case-list-usequery-a2 | docs/TASK_PACKAGES/TP-2026-01-28-case-list-usequery.md | 2026-01-28 |
