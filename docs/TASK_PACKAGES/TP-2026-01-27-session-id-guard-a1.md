@@ -12,7 +12,7 @@
   - `docs/SESSION_INDEX.md`
   - `docs/SESSIONS/SESSION-2026-01-27-session-id-guard-a1.md`
 - **Plan:**
-  1) Зафиксировать правило `session_id` = `YYYY-MM-DD-<slug>-<agent>` в `AGENTS.md` и старт‑промпте.
+  1) Зафиксировать правило `session_id` = `YYYY-MM-DD-{slug}-{agent}` в `AGENTS.md` и старт‑промпте.
   2) Усилить `scripts/session_start.sh`: требовать session_id, проверять индекс, branch и worktree.
   3) Обновить session log/index и сохранить evidence.
 - **DoD:**
@@ -21,7 +21,7 @@
   - `bash -n scripts/session_start.sh` проходит.
 - **Checks:** `bash -n scripts/session_start.sh`
 - **Evidence:** `git diff --stat`, вывод `bash -n`.
-- **Rollback:** `git revert <commit>` или удаление правок из docs/scripts.
+- **Rollback:** `git revert 0c64eeb4` или удаление правок из docs/scripts.
 - **No-go:** не трогать runtime код, БД, миграции.
 - **Риски/блокеры:** нет.
 - **Branch/Worktree/Base/Merge/Cleanup:**
