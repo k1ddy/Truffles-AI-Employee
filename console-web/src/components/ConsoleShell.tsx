@@ -274,7 +274,7 @@ function ContextBar({
     return (
         <div className="flex flex-wrap items-center gap-6 text-sm" data-testid="context-bar">
             <div className="flex flex-col gap-1 min-w-[140px]">
-                <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Company</span>
+                <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Компания</span>
                 {companies.length > 1 ? (
                     <select
                         className="rounded-lg border border-border bg-background px-2 py-1 text-sm"
@@ -297,7 +297,7 @@ function ContextBar({
                 )}
             </div>
             <div className="flex flex-col gap-1 min-w-[180px]">
-                <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Client</span>
+                <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Клиент</span>
                 {clients.length > 1 ? (
                     <select
                         className="rounded-lg border border-border bg-background px-2 py-1 text-sm"
@@ -317,7 +317,7 @@ function ContextBar({
                 )}
             </div>
             <div className="flex flex-col gap-1 min-w-[180px]">
-                <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Branch</span>
+                <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Филиал</span>
                 {branches.length > 1 ? (
                     <select
                         className="rounded-lg border border-border bg-background px-2 py-1 text-sm"
@@ -435,7 +435,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
             await refetch();
             queryClient.invalidateQueries();
-            setContextNotice("Контекст обновлён");
+            setContextNotice("Контекст применён");
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -453,7 +453,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
             await refetch();
             queryClient.invalidateQueries();
-            setContextNotice("Контекст обновлён");
+            setContextNotice("Контекст применён");
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -470,7 +470,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             writeLocalStorage(BRANCH_ID_STORAGE_KEY, branchId);
             await refetch();
             queryClient.invalidateQueries();
-            setContextNotice("Контекст обновлён");
+            setContextNotice("Контекст применён");
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -502,7 +502,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             writeLocalStorage(BRANCH_ID_STORAGE_KEY, branchId);
             await refetch();
             queryClient.invalidateQueries();
-            setContextNotice("Контекст обновлён");
+            setContextNotice("Контекст применён");
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -581,12 +581,20 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                             )}
                             <div className="flex items-center justify-between gap-4">
                                 {contextBusy && (
-                                    <span className="text-xs text-muted-foreground" data-testid="context-loading">
+                                    <span
+                                        className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground"
+                                        data-testid="context-loading"
+                                    >
                                         Обновление контекста...
                                     </span>
                                 )}
                                 {!contextBusy && contextNotice && (
-                                    <span className="text-xs text-muted-foreground">{contextNotice}</span>
+                                    <span
+                                        className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700"
+                                        data-testid="context-notice"
+                                    >
+                                        {contextNotice}
+                                    </span>
                                 )}
                                 <LoginButton />
                             </div>

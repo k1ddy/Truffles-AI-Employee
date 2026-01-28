@@ -83,6 +83,7 @@ export default function CaseList({
     });
     const [cursor, setCursor] = useState<string | undefined>(undefined);
     const [searchValue, setSearchValue] = useState("");
+    const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const isCompact = variant === "compact";
 
     useEffect(() => {
@@ -105,6 +106,15 @@ export default function CaseList({
         selectableBranches.map((branch) => [branch.id as string, branch.name ?? branch.id as string])
     );
     const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
+    const advancedFiltersActive = Boolean(
+        filters.branchId || filters.dateFrom || filters.dateTo || filters.hasDeliveryError || filters.hasPendingOutbox
+    );
+    const advancedFiltersVisible = showAdvancedFilters || advancedFiltersActive;
+    const advancedToggleLabel = advancedFiltersActive
+        ? "Фильтры активны"
+        : advancedFiltersVisible
+            ? "Скрыть фильтры"
+            : "Расширенные фильтры";
 
     useEffect(() => {
         if (!branchFilterEnabled && filters.branchId) {
@@ -236,132 +246,136 @@ export default function CaseList({
                 }`}
                 data-testid="cases-filters"
             >
-                <input
-                    type="text"
-                    value={searchValue}
-                    onChange={(e) => setSearchValue(e.target.value)}
-                    placeholder="Телефон / имя / ID"
-                    className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 min-w-[220px]"
-                    data-testid="cases-filter-search"
-                />
-                {/* Status filter */}
-                <select
-                    value={filters.status || ""}
-                    onChange={(e) => { resetPagination(); setFilters({ ...filters, status: e.target.value || undefined }); }}
-                    className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    data-testid="cases-filter-status"
-                >
-                    <option value="">Все статусы</option>
-                    <option value="pending">Ожидает</option>
-                    <option value="active">В работе</option>
-                    <option value="resolved">Закрыта</option>
-                </select>
-
-                {/* Branch filter */}
-                {branchFilterEnabled && (
+                <div className="flex w-full flex-wrap items-center gap-3">
+                    <input
+                        type="text"
+                        value={searchValue}
+                        onChange={(e) => setSearchValue(e.target.value)}
+                        placeholder="Телефон / имя / ID"
+                        className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 min-w-[220px]"
+                        data-testid="cases-filter-search"
+                    />
                     <select
-                        value={filters.branchId || ""}
-                        onChange={(e) => { resetPagination(); setFilters({ ...filters, branchId: e.target.value || undefined }); }}
+                        value={filters.status || ""}
+                        onChange={(e) => { resetPagination(); setFilters({ ...filters, status: e.target.value || undefined }); }}
                         className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
-                        data-testid="cases-filter-branch"
+                        data-testid="cases-filter-status"
                     >
-                        <option value="">Все филиалы</option>
-                        {selectableBranches.map((branch) => (
-                            <option key={branch.id} value={branch.id}>
-                                {branch.name ?? branch.id}
-                            </option>
-                        ))}
+                        <option value="">Все статусы</option>
+                        <option value="pending">Ожидает</option>
+                        <option value="active">В работе</option>
+                        <option value="resolved">Закрыта</option>
                     </select>
-                )}
-
-                {/* Sort by */}
-                <select
-                    value={filters.sortBy}
-                    onChange={(e) => setFilters({ ...filters, sortBy: e.target.value as "created_at" | "sla" | "activity" })}
-                    className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    data-testid="cases-filter-sort"
-                >
-                    <option value="activity">Сортировка: Активные</option>
-                    <option value="created_at">Сортировка: Новые</option>
-                    <option value="sla">Сортировка: Срочные</option>
-                </select>
-
-                {/* Date from */}
-                <div className="flex items-center gap-1">
-                    <span className="text-xs text-muted-foreground">С:</span>
-                    <input
-                        type="date"
-                        value={filters.dateFrom || ""}
-                        onChange={(e) => { resetPagination(); setFilters({ ...filters, dateFrom: e.target.value || undefined }); }}
-                        className="px-2 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
-                        data-testid="cases-filter-date-from"
-                    />
-                </div>
-
-                {/* Date to */}
-                <div className="flex items-center gap-1">
-                    <span className="text-xs text-muted-foreground">По:</span>
-                    <input
-                        type="date"
-                        value={filters.dateTo || ""}
-                        onChange={(e) => { resetPagination(); setFilters({ ...filters, dateTo: e.target.value || undefined }); }}
-                        className="px-2 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
-                        data-testid="cases-filter-date-to"
-                    />
-                </div>
-
-                {/* Assigned to me toggle */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={filters.assignedToMe}
-                        onChange={(e) => { resetPagination(); setFilters({ ...filters, assignedToMe: e.target.checked }); }}
-                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                        data-testid="cases-filter-assigned"
-                    />
-                    <span className="text-sm text-foreground/80">Мои заявки</span>
-                </label>
-
-                <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={filters.hasDeliveryError}
-                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasDeliveryError: e.target.checked }); }}
-                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                        data-testid="cases-filter-delivery-error"
-                    />
-                    <span className="text-sm text-foreground/80">Есть ошибки</span>
-                </label>
-
-                <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={filters.hasPendingOutbox}
-                        onChange={(e) => { resetPagination(); setFilters({ ...filters, hasPendingOutbox: e.target.checked }); }}
-                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                        data-testid="cases-filter-pending-outbox"
-                    />
-                    <span className="text-sm text-foreground/80">В очереди</span>
-                </label>
-
-                {/* Clear filters */}
-                {(filters.status || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox) && (
-                    <button
-                        onClick={() => {
-                            setSearchValue("");
-                            resetPagination();
-                            setFilters({
-                                assignedToMe: false,
-                                sortBy: "activity",
-                                hasDeliveryError: false,
-                                hasPendingOutbox: false,
-                            });
-                        }}
-                        className="text-xs text-muted-foreground hover:text-destructive"
-                        data-testid="cases-filter-clear"
+                    <select
+                        value={filters.sortBy}
+                        onChange={(e) => setFilters({ ...filters, sortBy: e.target.value as "created_at" | "sla" | "activity" })}
+                        className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        data-testid="cases-filter-sort"
                     >
-                        Сбросить
+                        <option value="activity">Сортировка: Активные</option>
+                        <option value="created_at">Сортировка: Новые</option>
+                        <option value="sla">Сортировка: Срочные</option>
+                    </select>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={filters.assignedToMe}
+                            onChange={(e) => { resetPagination(); setFilters({ ...filters, assignedToMe: e.target.checked }); }}
+                            className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                            data-testid="cases-filter-assigned"
+                        />
+                        <span className="text-sm text-foreground/80">Мои заявки</span>
+                    </label>
+                    <button
+                        type="button"
+                        onClick={() => setShowAdvancedFilters((prev) => !prev)}
+                        className="text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                        data-testid="cases-filter-advanced-toggle"
+                        disabled={advancedFiltersActive}
+                    >
+                        {advancedToggleLabel}
                     </button>
+                    {(filters.status || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox) && (
+                        <button
+                            onClick={() => {
+                                setSearchValue("");
+                                resetPagination();
+                                setShowAdvancedFilters(false);
+                                setFilters({
+                                    assignedToMe: false,
+                                    sortBy: "activity",
+                                    hasDeliveryError: false,
+                                    hasPendingOutbox: false,
+                                });
+                            }}
+                            className="text-xs text-muted-foreground hover:text-destructive"
+                            data-testid="cases-filter-clear"
+                        >
+                            Сбросить
+                        </button>
+                    )}
+                </div>
+                {advancedFiltersVisible && (
+                    <div
+                        className="flex w-full flex-wrap items-center gap-3 border-t border-border/60 pt-3"
+                        data-testid="cases-filters-advanced"
+                    >
+                        {branchFilterEnabled && (
+                            <select
+                                value={filters.branchId || ""}
+                                onChange={(e) => { resetPagination(); setFilters({ ...filters, branchId: e.target.value || undefined }); }}
+                                className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                data-testid="cases-filter-branch"
+                            >
+                                <option value="">Все филиалы</option>
+                                {selectableBranches.map((branch) => (
+                                    <option key={branch.id} value={branch.id}>
+                                        {branch.name ?? branch.id}
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                        <div className="flex items-center gap-1">
+                            <span className="text-xs text-muted-foreground">С:</span>
+                            <input
+                                type="date"
+                                value={filters.dateFrom || ""}
+                                onChange={(e) => { resetPagination(); setFilters({ ...filters, dateFrom: e.target.value || undefined }); }}
+                                className="px-2 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                data-testid="cases-filter-date-from"
+                            />
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <span className="text-xs text-muted-foreground">По:</span>
+                            <input
+                                type="date"
+                                value={filters.dateTo || ""}
+                                onChange={(e) => { resetPagination(); setFilters({ ...filters, dateTo: e.target.value || undefined }); }}
+                                className="px-2 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                data-testid="cases-filter-date-to"
+                            />
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={filters.hasDeliveryError}
+                                onChange={(e) => { resetPagination(); setFilters({ ...filters, hasDeliveryError: e.target.checked }); }}
+                                className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                data-testid="cases-filter-delivery-error"
+                            />
+                            <span className="text-sm text-foreground/80">Есть ошибки</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={filters.hasPendingOutbox}
+                                onChange={(e) => { resetPagination(); setFilters({ ...filters, hasPendingOutbox: e.target.checked }); }}
+                                className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                data-testid="cases-filter-pending-outbox"
+                            />
+                            <span className="text-sm text-foreground/80">В очереди</span>
+                        </label>
+                    </div>
                 )}
             </div>
 

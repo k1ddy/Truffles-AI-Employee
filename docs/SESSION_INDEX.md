@@ -4,7 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
-| 2026-01-27-inbox-service-tp-arch | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 |
+| 2026-01-27-inbox-service-tp-arch | done | docs/2026-01-27-inbox-service-tp-arch | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 |
 | 2026-01-27-inbox-service-shadow-arch | done | feat/2026-01-27-inbox-service-shadow-arch | /home/zhan/worktrees/2026-01-27-inbox-service-shadow-arch | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 (gate-fix) |
 | 2026-01-27-provider-gateway-canary-arch | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md | 2026-01-27 |
 | 2026-01-27-main-sync-arch | done | docs/main-sync-2026-01-27 | /home/zhan/worktrees/main-sync-2026-01-27 | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 |
@@ -37,3 +37,5 @@
 | 2026-01-28-provider-gateway-integration-tests-a1 | done | feat/2026-01-28-provider-gateway-integration-tests-a1 | /home/zhan/worktrees/2026-01-28-provider-gateway-integration-tests-a1 | docs/TASK_PACKAGES/TP-2026-01-28-provider-gateway-integration-tests.md | 2026-01-28 |
 | 2026-01-28-console-web-bringup-a2 | done | feat/2026-01-28-console-web-bringup-a2 | /home/zhan/worktrees/2026-01-28-console-web-bringup-a2 | docs/TASK_PACKAGES/TP-2026-01-28-console-web-bringup.md | 2026-01-28 |
 | 2026-01-28-qdrant-branch-backfill-ca13-a1 | done | feat/2026-01-28-qdrant-branch-backfill-ca13-a1 | /home/zhan/worktrees/2026-01-28-qdrant-branch-backfill-ca13-a1 | docs/TASK_PACKAGES/TP-2026-01-28-qdrant-branch-backfill-ca13.md | 2026-01-28 |
+| 2026-01-28-console-ux-selection-a2 | done | feat/2026-01-28-console-ux-selection-a2 | /home/zhan/worktrees/2026-01-28-console-ux-selection-a2 | docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md | 2026-01-28 |
+| 2026-01-28-decision-meta-branch-id-a1 | done | feat/2026-01-28-decision-meta-branch-id-a1 | /home/zhan/worktrees/2026-01-28-decision-meta-branch-id-a1 | docs/TASK_PACKAGES/TP-2026-01-28-decision-meta-branch-id.md | 2026-01-28 |
