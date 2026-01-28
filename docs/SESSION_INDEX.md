@@ -29,3 +29,4 @@
 | 2026-01-27-platform-admin-ui-rbac-a2 | done | feat/2026-01-27-platform-admin-ui-rbac-a2 | /home/zhan/worktrees/2026-01-27-platform-admin-ui-rbac-a2 | docs/TASK_PACKAGES/TP-2026-01-27-platform-admin-ui-rbac.md | 2026-01-27 |
 | 2026-01-27-tenants-ui-shell-a2 | done | feat/2026-01-27-tenants-ui-shell-a2 | /home/zhan/worktrees/2026-01-27-tenants-ui-shell-a2 | docs/TASK_PACKAGES/TP-2026-01-27-tenants-ui-shell.md | 2026-01-28 |
 | 2026-01-28-inbox-service-ghcr-evidence-a1 | done | docs/2026-01-28-inbox-service-ghcr-evidence-a1 | /home/zhan/worktrees/2026-01-28-inbox-service-ghcr-evidence-a1 | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-28 |
+| 2026-01-28-decision-core-shadow-a1 | done | feat/2026-01-28-decision-core-shadow-a1 | /home/zhan/worktrees/2026-01-28-decision-core-shadow-a1 | docs/TASK_PACKAGES/TP-2026-01-28-decision-core-shadow.md | 2026-01-28 |

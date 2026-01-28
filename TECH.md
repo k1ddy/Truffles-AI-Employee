@@ -156,6 +156,8 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `PROVIDER_GATEWAY_TOKEN` — токен для inbound/outbound/status.
 - `INBOX_SERVICE_ENABLED` — включает `POST /inbox/event` (shadow inbox service).
 - `INBOX_SERVICE_TOKEN` — токен для inbox service (header `X-Inbox-Service-Token`).
+- `DECISION_CORE_ENABLED` — включает `POST /decision/handle` (shadow decision core).
+- `DECISION_CORE_TOKEN` — токен для decision core (header `X-Decision-Core-Token`).
 - `QDRANT_COLLECTION` — коллекция Qdrant (default: truffles_knowledge; при `TEST_MODE=1` и пустом env → truffles_knowledge_ci).
 - `KNOWLEDGE_SNAPSHOT_ENABLED` — включает `/knowledge/snapshot` (gateway service).
 - `KNOWLEDGE_SNAPSHOT_TOKEN` — токен для gateway snapshot (header `X-Knowledge-Snapshot-Token`).
