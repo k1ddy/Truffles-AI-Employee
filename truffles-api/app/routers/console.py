@@ -53,9 +53,11 @@ from app.schemas.console import (
     ConsoleClient,
     ConsoleClientCreateRequest,
     ConsoleClientCreateResponse,
+    ConsoleClientUpdateRequest,
     ConsoleCompany,
     ConsoleCompanyCreateRequest,
     ConsoleCompanyCreateResponse,
+    ConsoleCompanyUpdateRequest,
     ConsoleConfirmationCreateRequest,
     ConsoleConfirmationResponse,
     ConsoleErrorResponse,
@@ -166,6 +168,7 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
             "id": client.id,
             "slug": client.name,
             "name": client.name,
+            "status": client.status,
             "company_id": client.company_id,
             "company_name": companies_by_id.get(client.company_id).name
             if client.company_id and client.company_id in companies_by_id
@@ -177,6 +180,7 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
         "id": context.client.id,
         "slug": context.client.name,
         "name": context.client.name,
+        "status": context.client.status,
         "company_id": context.client.company_id,
         "company_name": companies_by_id.get(context.client.company_id).name
         if context.client.company_id and context.client.company_id in companies_by_id
@@ -3373,6 +3377,63 @@ async def create_company(
     )
 
 
+@router.patch(
+    "/admin/companies/{company_id}",
+    response_model=ConsoleCompany,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def update_company(
+    company_id: UUID,
+    request: Request,
+    body: ConsoleCompanyUpdateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleCompany:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage provisioning",
+    )
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+
+    updated_fields: list[str] = []
+    fields_set = body.model_fields_set
+
+    if "name" in fields_set:
+        name = _normalize_required_text(body.name, "name")
+        if name != company.name:
+            company.name = name
+        updated_fields.append("name")
+
+    if "billing_info" in fields_set:
+        company.billing_info = body.billing_info or {}
+        updated_fields.append("billing_info")
+
+    if updated_fields:
+        company.updated_at = datetime.now(timezone.utc)
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="company_updated",
+            entity_type="company",
+            entity_id=company.id,
+            payload={"updated_fields": updated_fields},
+            actor_id=context.agent.id,
+            actor_name=context.agent.name,
+        )
+        db.commit()
+
+    return ConsoleCompany(
+        id=company.id,
+        name=company.name,
+        billing_info=company.billing_info,
+    )
+
+
 @router.post(
     "/admin/clients",
     response_model=ConsoleClientCreateResponse,
@@ -3434,9 +3495,99 @@ async def create_client(
             id=client.id,
             slug=client.name,
             name=client.name,
+            status=client.status,
             company_id=client.company_id,
             company_name=company.name if company else None,
         )
+    )
+
+
+@router.patch(
+    "/admin/clients/{client_id}",
+    response_model=ConsoleClient,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def update_client(
+    client_id: UUID,
+    request: Request,
+    body: ConsoleClientUpdateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleClient:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage provisioning",
+    )
+
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+
+    updated_fields: list[str] = []
+    fields_set = body.model_fields_set
+    company = None
+
+    if "slug" in fields_set:
+        slug = _normalize_slug(body.slug, "client_slug")
+        existing = (
+            db.query(Client)
+            .filter(func.lower(Client.name) == slug.lower(), Client.id != client.id)
+            .first()
+        )
+        if existing:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "client_slug already exists")
+        if slug != client.name:
+            client.name = slug
+        updated_fields.append("slug")
+
+    if "status" in fields_set:
+        status_value = _normalize_required_text(body.status, "status")
+        if status_value != client.status:
+            client.status = status_value
+        updated_fields.append("status")
+
+    if "company_id" in fields_set:
+        if body.company_id:
+            company = db.query(Company).filter(Company.id == body.company_id).first()
+            if not company:
+                raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+            next_company_id = company.id
+        else:
+            next_company_id = None
+        if next_company_id != client.company_id:
+            client.company_id = next_company_id
+        updated_fields.append("company_id")
+
+    if updated_fields:
+        client.updated_at = datetime.now(timezone.utc)
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="client_updated",
+            entity_type="client",
+            entity_id=client.id,
+            payload={"updated_fields": updated_fields},
+            client_id=client.id,
+            actor_id=context.agent.id,
+            actor_name=context.agent.name,
+        )
+        db.commit()
+
+    company_name = None
+    if client.company_id:
+        if not company or company.id != client.company_id:
+            company = db.query(Company).filter(Company.id == client.company_id).first()
+        company_name = company.name if company else None
+
+    return ConsoleClient(
+        id=client.id,
+        slug=client.name,
+        name=client.name,
+        status=client.status,
+        company_id=client.company_id,
+        company_name=company_name,
     )
 
 

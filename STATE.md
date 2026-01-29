@@ -23,6 +23,7 @@
 - DONE: admin/admin (role `platform_admin`) видит Inbox без AccessDenied — evidence: `/home/zhan/screenshots/console-admin-deny-2026-01-27T11-29-06-656Z/01-home.png`, `/tmp/admin_admin_me.json`.
 - DONE: Tenants UI shell for platform_admin (nav + `/tenants` page + Provisioning Wizard reuse) — evidence: `console-web/src/components/ConsoleShell.tsx`, `console-web/src/app/tenants/page.tsx`, `npm --prefix console-web run lint` (clean).
 - DONE: Tenants read-only lists (companies/clients/branches + search/context switch) — evidence: `console-web/src/app/tenants/page.tsx`, `npm --prefix console-web run lint` (clean).
+- PLAN: Tenants CRUD (read-write) for platform_admin — Task Package `docs/TASK_PACKAGES/TP-2026-01-28-tenants-crud.md`.
 - DONE: TP‑B Onboarding state machine (server‑side order enforcement + `/onboarding/status` + `/onboarding/advance` + wizard gating) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-onboarding-state-machine.md`; PR #389 https://github.com/k1ddy/Truffles-AI-Employee/pull/389; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21355570600.
 - DONE: TP‑C Destructive safeguards (confirmation flow for destructive console actions) — Task Package `docs/TASK_PACKAGES/TP-2026-01-26-control-plane-destructive-safeguards.md`; PR #394 https://github.com/k1ddy/Truffles-AI-Employee/pull/394; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21358713516.
 - DONE: Control Plane review report (UX/RBAC/safety + test harness) — `docs/REPORTS/2026-01-27-control-plane-review.md`.

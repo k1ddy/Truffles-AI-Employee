@@ -53,6 +53,7 @@ class ConsoleClient(BaseModel):
     id: UUID
     slug: str
     name: Optional[str] = None
+    status: Optional[str] = None
     company_id: Optional[UUID] = None
     company_name: Optional[str] = None
 
@@ -82,6 +83,11 @@ class ConsoleCompanyCreateResponse(BaseModel):
     company: ConsoleCompany
 
 
+class ConsoleCompanyUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    billing_info: Optional[dict] = None
+
+
 class ConsoleClientCreateRequest(BaseModel):
     slug: str
     company_id: Optional[UUID] = None
@@ -90,6 +96,12 @@ class ConsoleClientCreateRequest(BaseModel):
 
 class ConsoleClientCreateResponse(BaseModel):
     client: ConsoleClient
+
+
+class ConsoleClientUpdateRequest(BaseModel):
+    slug: Optional[str] = None
+    company_id: Optional[UUID] = None
+    status: Optional[str] = None
 
 
 class ConsoleBranchCreateRequest(BaseModel):
