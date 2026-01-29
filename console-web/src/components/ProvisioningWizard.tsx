@@ -41,6 +41,27 @@ const MISSING_LABELS: Record<string, string> = {
     specialists: "specialists",
     capabilities: "capabilities",
     branch_active: "Филиал активен",
+    "client_pack.salon.name": "Название салона",
+    "client_pack.salon.city": "Город",
+    "client_pack.salon.address.full": "Адрес",
+    "client_pack.salon.hours.days": "Часы работы: дни",
+    "client_pack.salon.hours.open": "Часы работы: открытие",
+    "client_pack.salon.hours.close": "Часы работы: закрытие",
+    "client_pack.salon.services_summary": "Кратко об услугах",
+    "client_pack.salon.communication.languages": "Языки общения",
+    "client_pack.services_catalog.services": "Каталог услуг",
+    "client_pack.booking.collect_fields": "Booking: обязательные поля",
+    "client_pack.booking.bot_can_confirm": "Booking: подтверждение",
+    "client_pack.price_list": "Прайс-лист",
+    "client_pack.policy.hard_law": "Policy: hard_law",
+    "client_pack.policy.payment_info": "Policy: payment",
+    "client_pack.policy.reschedule": "Policy: reschedule",
+    "client_pack.policy.cancel": "Policy: cancel",
+    "client_pack.policy.medical": "Policy: medical",
+    "client_pack.policy.legal": "Policy: legal",
+    "client_pack.policy.complaint": "Policy: complaint",
+    "client_pack.policy.discounts": "Policy: discounts",
+    "client_pack.policy.guard_topics.refund": "Policy: refund keywords",
 };
 
 type WizardStepId = (typeof WIZARD_STEPS)[number]["id"];
@@ -559,7 +580,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     ]);
 
     const missingRequirements = readinessItems.filter((item) => item.required && !item.ok);
-    const goNoGoReady = missingRequirements.length === 0;
+    const goNoGoMissing = stepStateById.go_no_go?.missing ?? [];
+    const goNoGoReady = missingRequirements.length === 0 && goNoGoMissing.length === 0;
 
     const handleCreateCompany = () => {
         const name = companyName.trim();
