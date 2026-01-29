@@ -251,7 +251,7 @@ LIVECHECK_SUITES = {
             "case_id": "CA06_SHORT_CIRCUIT",
             "expected_consult_playbook_id": "nails_care",
             "expected_consult_decision": "short_circuit",
-            "expected_fact_source_any": ["truth", "service_matcher"],
+            "expected_fact_source_any": ["pack"],
             "expected_llm_used": False,
             "messages": [
                 "уход за ногтями, сколько стоит маникюр?",

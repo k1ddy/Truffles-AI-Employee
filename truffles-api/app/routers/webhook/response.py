@@ -1406,6 +1406,11 @@ def _handle_consult_flow(
                     meta=consult_meta,
                 )
                 consult_signal = True
+    if consult_meta and consult_meta.get("fact_source") is None:
+        if consult_llm_used:
+            consult_meta["fact_source"] = "llm"
+        elif consult_meta.get("consult_source") == "pack" or consult_meta.get("source") == "pack":
+            consult_meta["fact_source"] = "pack"
     if consult_signal:
         context = legacy._get_conversation_context(conversation)
         context_manager = legacy._get_context_manager(context)
