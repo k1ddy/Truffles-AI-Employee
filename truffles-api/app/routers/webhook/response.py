@@ -1332,6 +1332,18 @@ def _handle_consult_flow(
             consult_meta["consult_topic"] = consult_topic
         if consult_question:
             consult_meta["consult_question"] = consult_question
+    short_circuit_intents = (
+        consult_interrupt_intents - {"booking"} if consult_interrupt_intents else set()
+    )
+    if (
+        consult_decision
+        and consult_decision.action == "reply"
+        and consult_pack_used
+        and short_circuit_intents
+    ):
+        consult_short_circuit = True
+        consult_short_circuit_reason = "consult_overrides_info"
+        consult_short_circuit_service = consult_meta.get("service_query")
     if consult_decision and consult_snapshot_meta:
         consult_meta.update(consult_snapshot_meta)
     if service_availability_decision and service_availability_decision.action == "reply":
@@ -1417,9 +1429,12 @@ def _handle_consult_flow(
         if consult_flow_override:
             consult_flow_decision = consult_flow_override
         elif consult_decision:
-            consult_flow_decision = (
-                "consult_escalate" if consult_decision.action == "escalate" else "consult_reply"
-            )
+            if consult_short_circuit:
+                consult_flow_decision = "short_circuit"
+            else:
+                consult_flow_decision = (
+                    "consult_escalate" if consult_decision.action == "escalate" else "consult_reply"
+                )
             if consult_decision.action == "reply" and consult_llm_used:
                 consult_flow_decision = "consult_llm"
         elif legacy._should_escalate_for_clarify(context_manager, "consult"):
@@ -1498,6 +1513,10 @@ def _handle_consult_flow(
                     if isinstance(guard, dict):
                         guard_reason = guard.get("reason")
                 consult_flow_trace["reason"] = guard_reason or "consult_no_service"
+            elif consult_flow_decision == "short_circuit":
+                consult_flow_trace["reason"] = consult_short_circuit_reason or "consult_short_circuit"
+                if consult_short_circuit_service:
+                    consult_flow_trace["service_query"] = consult_short_circuit_service
             elif consult_flow_decision == "consult_llm":
                 consult_flow_trace["reason"] = "consult_llm"
             elif service_availability_used and not consult_candidate:

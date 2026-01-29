@@ -13,6 +13,7 @@
   - Allow branch `Livecheck Only` runs via explicit flag.
   - Updated CA04 live-check not-found service to use foot massage wording (absent in demo pack).
   - Set consult pack replies to stamp `fact_source=pack` and updated CA06 expectation.
+  - Added consult short-circuit trace decision for consult replies that override info intents.
   - Local tests: `PYTHONPATH=. pytest -q tests/test_demo_salon_eval.py -k "truth_first_info_bundle or consult_pack_only_and_short_circuit"`.
 - next:
   - Run Livecheck Only CI with `allow_non_main=true` after deploying branch to the livecheck target.
