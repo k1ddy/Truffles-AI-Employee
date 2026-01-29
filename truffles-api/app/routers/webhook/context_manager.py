@@ -64,6 +64,11 @@ def _set_conversation_context(conversation: Conversation, context: dict) -> None
         conversation.context = context
         return
     existing_context = conversation.context if isinstance(conversation.context, dict) else {}
+    if existing_context:
+        for key in ("simulation", "simulation_mode", "simulation_id", "simulation_llm", "simulation_time"):
+            if key not in context and key in existing_context:
+                context = dict(context)
+                context[key] = existing_context.get(key)
     merged_trace = _merge_decision_trace(
         existing_context.get(DECISION_TRACE_KEY),
         context.get(DECISION_TRACE_KEY),
@@ -85,10 +90,22 @@ def _get_expected_reply_type(context: dict) -> str | None:
     return None
 
 
+def _get_expected_reply_reason(context: dict) -> str | None:
+    if not isinstance(context, dict):
+        return None
+    from . import _legacy as legacy
+
+    value = context.get(legacy.EXPECTED_REPLY_REASON_KEY)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
 def _set_expected_reply_type(context: dict, expected_reply_type: str | None) -> dict:
     from . import _legacy as legacy
 
     context = dict(context)
+    context.pop(legacy.EXPECTED_REPLY_REASON_KEY, None)
     if isinstance(expected_reply_type, str) and expected_reply_type.strip():
         context[legacy.EXPECTED_REPLY_TYPE_KEY] = expected_reply_type.strip()
     else:
@@ -146,6 +163,10 @@ def _set_expected_reply_context(
     now: datetime,
 ) -> dict:
     context = _set_expected_reply_type(context, expected_reply_type)
+    if isinstance(reason, str) and reason.strip():
+        from . import _legacy as legacy
+
+        context[legacy.EXPECTED_REPLY_REASON_KEY] = reason.strip()
     re_entry_cleared = False
     if isinstance(expected_reply_type, str) and expected_reply_type.strip():
         if _is_re_entry_required(context):
@@ -683,17 +704,20 @@ def _resolve_current_goal(
     intent_set: set[str],
     consult_intent: bool,
     expected_reply_type: str | None = None,
+    expected_reply_reason: str | None = None,
 ) -> str | None:
     from . import _legacy as legacy
 
+    if consult_intent:
+        return "consult"
     if expected_reply_type in {
         legacy.EXPECTED_REPLY_SERVICE,
         legacy.EXPECTED_REPLY_TIME,
         legacy.EXPECTED_REPLY_NAME,
     }:
+        if expected_reply_reason and expected_reply_reason != "booking_prompt":
+            return None
         return "booking"
-    if consult_intent:
-        return "consult"
     if "booking" in intent_set:
         return "booking"
     if intent_set & legacy.INFO_INTENTS:
@@ -917,6 +941,52 @@ def _parse_profile_time(value: str | None) -> datetime | None:
     return parsed
 
 
+def _get_asr_inflight(context: dict, *, now: datetime) -> tuple[dict | None, bool]:
+    from . import _legacy as legacy
+
+    payload = context.get(legacy.ASR_INFLIGHT_KEY) if isinstance(context, dict) else None
+    if not isinstance(payload, dict):
+        return None, False
+    expires_at = _parse_profile_time(payload.get("expires_at"))
+    if expires_at and expires_at <= now:
+        return None, True
+    return dict(payload), False
+
+
+def _set_asr_inflight(context: dict, payload: dict | None) -> dict:
+    from . import _legacy as legacy
+
+    context = dict(context)
+    if payload:
+        context[legacy.ASR_INFLIGHT_KEY] = payload
+    else:
+        context.pop(legacy.ASR_INFLIGHT_KEY, None)
+    return context
+
+
+def _get_style_reference_pending(context: dict, *, now: datetime) -> tuple[dict | None, bool]:
+    from . import _legacy as legacy
+
+    payload = context.get(legacy.STYLE_REFERENCE_PENDING_KEY) if isinstance(context, dict) else None
+    if not isinstance(payload, dict):
+        return None, False
+    expires_at = _parse_profile_time(payload.get("expires_at"))
+    if expires_at and expires_at <= now:
+        return None, True
+    return dict(payload), False
+
+
+def _set_style_reference_pending(context: dict, payload: dict | None) -> dict:
+    from . import _legacy as legacy
+
+    context = dict(context)
+    if payload:
+        context[legacy.STYLE_REFERENCE_PENDING_KEY] = payload
+    else:
+        context.pop(legacy.STYLE_REFERENCE_PENDING_KEY, None)
+    return context
+
+
 def _normalize_memory_profile(profile: dict | None, *, now: datetime) -> tuple[dict, bool]:
     from . import _legacy as legacy
 
@@ -1015,10 +1085,12 @@ __all__ = [
     "_build_compact_summary_text",
     "_build_consult_return_prompt",
     "_get_asr_confirmation",
+    "_get_asr_inflight",
     "_get_class_carryover",
     "_get_consult_context",
     "_get_context_manager",
     "_get_conversation_context",
+    "_get_expected_reply_reason",
     "_get_expected_reply_type",
     "_get_handover_confirmation",
     "_get_low_confidence_retry_count",
@@ -1039,6 +1111,7 @@ __all__ = [
     "_reset_low_confidence_retry",
     "_resolve_current_goal",
     "_set_asr_confirmation",
+    "_set_asr_inflight",
     "_set_class_carryover",
     "_set_consult_context",
     "_set_context_manager",
@@ -1050,11 +1123,13 @@ __all__ = [
     "_set_handover_confirmation",
     "_set_low_confidence_retry_count",
     "_set_reengage_confirmation",
+    "_get_style_reference_pending",
     "_get_memory_profile",
     "_set_memory_profile",
     "_get_memory_pending",
     "_set_memory_pending",
     "_normalize_memory_profile",
     "_set_service_carryover",
+    "_set_style_reference_pending",
     "_update_compact_summary",
 ]

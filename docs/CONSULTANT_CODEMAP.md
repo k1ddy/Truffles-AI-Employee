@@ -9,12 +9,17 @@
 
 ---
 
-## 0a) Quickstart for new agents
+## 0) New agent checklist (read-first)
 
-1) Read `SPECS/CONSULTANT.md` and `SPECS/ESCALATION.md` before touching code.
-2) Debug message flow with `ops/diagnose.py explain` first, then `trace-bundle`, then logs.
-3) `demo_salon` is a test pack only; never add demo‑only rules or “pass‑tests” hacks.
-4) Prefer semantic resolver/LLM controller; do not expand dictionaries to chase coverage.
+- Read `AGENTS.md`, `STATE.md`, `STRUCTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/ESCALATION.md`, `SPECS/SYSTEM_REFERENCE.md`.
+- Debug message flow with `ops/diagnose.py explain` first, then `trace-bundle`, then logs.
+- Work only in the assigned worktree/branch; do not switch branches mid-task.
+- `demo_salon` is a canary pack; never add demo‑only rules or “pass‑tests” hacks.
+- Prefer semantic resolver/LLM controller; do not expand dictionaries to chase coverage.
+- Use `ops/diagnose.py` for live‑check evidence; never “massage” DB/trace.
+- Keep process artifacts updated: session log + Task Package; `STATE.md` only by Brain.
+
+---
 
 ## 0) E2E inbound message flow (code-accurate, with LLM touchpoints)
 
@@ -115,6 +120,9 @@ preflight reject happens before a conversation is resolved.
   `truffles-api/app/services/llm/openai_provider.py:74`
 
 ### Live demo trace (demo_salon) — evidence
+
+**Note:** `demo_salon` is a canary pack used for examples/evidence only. If you have another pack,
+use its `client_slug`. Never tailor logic to `demo_salon`.
 
 **How it was run (per Live‑check SOP):**
 ```bash
@@ -233,7 +241,7 @@ truth gate provided a safe response.
 ## 4) Knowledge + truth (facts only from packs/tools)
 
 **Code blocks:**
-- Domain facts + service availability: `truffles-api/app/services/demo_salon_knowledge.py`
+- Domain facts + service availability: `truffles-api/app/services/demo_salon_knowledge.py` (current canary implementation)
 - Truth pack (facts/policy): `truffles-api/app/knowledge/<client_slug>/SALON_TRUTH.yaml`
 - Consult playbooks (care advice): `truffles-api/app/knowledge/<client_slug>/CONSULT_PLAYBOOK.yaml`
 - Knowledge Snapshot Gateway (shadow): `truffles-api/app/routers/knowledge_gateway.py` + `truffles-api/app/services/knowledge_snapshot_service.py`
@@ -244,6 +252,7 @@ truth gate provided a safe response.
 **Behavior impact:**
 - **No hallucinations:** facts only from `client_pack`/`consult_playbooks`.
 - If service is not offered → explicit **"не оказываем"** reply (`service_not_found`).
+- Packs define behavior; do not hardcode logic for `demo_salon`.
 
 ---
 
@@ -351,6 +360,7 @@ truth gate provided a safe response.
 
 **Behavior impact:**
 - Simulates 10–15 turn dialogs with noise and mixed languages, validates behavior by trace/meta (not by text).
+- `demo_salon` eval is a canary; tests assert invariants and must not drive demo‑only logic.
 
 ---
 

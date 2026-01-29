@@ -24,14 +24,24 @@ def _is_pending_ack(text: str) -> bool:
     from . import _legacy as legacy
 
     normalized = _normalize_pending_text(text)
-    return normalized in legacy.PENDING_ACK_PHRASES
+    if normalized in legacy.PENDING_ACK_PHRASES:
+        return True
+    tokens = normalized.split()
+    return any(token in legacy.PENDING_ACK_PHRASES for token in tokens)
 
 
 def _is_pending_close(text: str) -> bool:
     from . import _legacy as legacy
 
     normalized = _normalize_pending_text(text)
-    return normalized in legacy.PENDING_CLOSE_PHRASES
+    if normalized in legacy.PENDING_CLOSE_PHRASES:
+        return True
+    tokens = normalized.split()
+    if any(token in legacy.PENDING_CLOSE_PHRASES for token in tokens):
+        return True
+    return any(
+        " " in phrase and phrase in normalized for phrase in legacy.PENDING_CLOSE_PHRASES
+    )
 
 
 def _get_pending_sla(context: dict) -> dict:
@@ -615,7 +625,10 @@ def _handle_pending_gate(
             bot_response=bot_response,
         )
 
-    if legacy.is_handover_status_question(message_text):
+    pending_intent = getattr(handover, "trigger_value", None)
+    if legacy.is_handover_status_question(message_text) and not (
+        isinstance(pending_intent, str) and pending_intent.strip() == "procedure_combo"
+    ):
         bot_response = legacy.MSG_PENDING_STATUS
         trace_payload = {
             "stage": "pending_status",
@@ -682,12 +695,48 @@ def _handle_pending_gate(
             bot_response=bot_response,
         )
 
-    bot_response = legacy.MSG_PENDING_WAIT
+    normalized_text = legacy._normalize_text(message_text)
+    reschedule_signal = False
+    if normalized_text:
+        for token in (
+            "перенес",
+            "перенос",
+            "перезапис",
+            "перепис",
+            "сдвин",
+            "передвин",
+            "поменя",
+            "изменить запись",
+            "изменить дату",
+            "на другое время",
+            "на другой день",
+        ):
+            if token in normalized_text:
+                reschedule_signal = True
+                break
+
+    if reschedule_signal or (isinstance(pending_intent, str) and pending_intent.strip() == "reschedule"):
+        bot_response = legacy.MSG_PENDING_RESCHEDULE
+    elif isinstance(pending_intent, str) and pending_intent.strip() == "complaint":
+        bot_response = legacy.MSG_PENDING_COMPLAINT
+    elif isinstance(pending_intent, str) and pending_intent.strip() == "procedure_combo":
+        from app.models import Client
+        from app.services.demo_salon_knowledge import format_reply_from_truth
+
+        client = db.query(Client).filter(Client.id == conversation.client_id).first()
+        client_slug = None
+        if client:
+            client_slug = getattr(client, "slug", None) or getattr(client, "name", None)
+        bot_response = format_reply_from_truth("procedure_combo", client_slug=client_slug) or legacy.MSG_PENDING_WAIT
+    else:
+        bot_response = legacy.MSG_PENDING_WAIT
     trace_payload = {
         "stage": "pending_wait",
         "decision": "pending_wait",
         "state": conversation.state,
     }
+    if isinstance(pending_intent, str) and pending_intent.strip():
+        trace_payload["pending_intent"] = pending_intent.strip()
     trace_payload.update(router_pending_meta)
     legacy._record_decision_trace(conversation, trace_payload)
     legacy._record_message_decision_meta(

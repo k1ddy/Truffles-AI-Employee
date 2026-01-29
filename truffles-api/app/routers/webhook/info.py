@@ -111,13 +111,22 @@ def _detect_info_class_intents(
     guest_signal = any(
         token.startswith(prefix) for token in tokens for prefix in guest_prefixes
     )
-    location_signal = parking_signal or guest_signal or any(
+    location_signal = parking_signal or any(
         token in normalized
         for token in ["адрес", "где вы", "где находитесь", "куда ехать", "локац", "как доехать"]
     )
     hours_signal = any(
         token in normalized
-        for token in ["работае", "до скольк", "во скольк", "график", "открыт", "сейчас открыты", "когда откры"]
+        for token in [
+            "работае",
+            "работайт",
+            "до скольк",
+            "во скольк",
+            "график",
+            "открыт",
+            "сейчас открыты",
+            "когда откры",
+        ]
     )
 
     if "location" in anchor_intents and (question_like or short_query or intent_decomp_set):
@@ -153,16 +162,36 @@ def _detect_info_class_intents(
     return intents, meta
 
 
-def _looks_like_info_query(message_text: str | None) -> bool:
+def _looks_like_info_query(message_text: str | None, *, client_slug: str | None = None) -> bool:
     intents, meta = _detect_info_class_intents(message_text, intent_decomp_set=set())
     if intents:
         return True
     info_signals = meta.get("info_signals") if isinstance(meta, dict) else None
     if isinstance(info_signals, dict):
-        return any(
+        if any(
             info_signals.get(signal)
             for signal in ("parking", "guest", "location", "hours")
-        )
+        ):
+            return True
+    if message_text:
+        from .policy import _looks_like_promotions_request
+
+        if _looks_like_promotions_request(message_text, client_slug=client_slug):
+            return True
+        if client_slug:
+            from app.services.demo_salon_knowledge import phrase_match_intent
+
+            if "order_booking" in phrase_match_intent(message_text, client_slug):
+                return True
+        from . import _legacy as legacy
+
+        normalized = legacy.normalize_for_matching(message_text)
+        if normalized and "запис" in normalized:
+            if any(
+                token in normalized
+                for token in ("какие дан", "дан", "что нужно", "нужно для", "какие нужны", "нужн")
+            ):
+                return True
     return False
 
 
@@ -307,6 +336,57 @@ def _extract_truth_gate_info_intents(
 class InfoFlowResult:
     response: WebhookResponse | None
     force_truth_gate: bool
+
+
+def _record_class_router_trace(*, conversation: Any, class_router_result: dict | None) -> None:
+    if not conversation or not isinstance(class_router_result, dict):
+        return
+    from . import _legacy as legacy
+
+    controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
+    controller_used = bool(controller_meta.get("used")) if isinstance(controller_meta, dict) else False
+    controller_attempted = bool(controller_meta.get("attempted")) if isinstance(controller_meta, dict) else False
+    controller_fallback = bool(controller_meta.get("fallback")) if isinstance(controller_meta, dict) else False
+    controller_low_confidence = (
+        bool(controller_meta.get("low_confidence")) if isinstance(controller_meta, dict) else False
+    )
+    controller_used_reason = (
+        controller_meta.get("used_reason") if isinstance(controller_meta, dict) else None
+    )
+    controller_confidence = (
+        controller_meta.get("confidence") if isinstance(controller_meta, dict) else None
+    )
+    controller_error = controller_meta.get("error") if isinstance(controller_meta, dict) else None
+    controller_goal = controller_meta.get("goal") if isinstance(controller_meta, dict) else None
+    trace_payload = {
+        "stage": "class_router",
+        "classes": class_router_result.get("classes"),
+        "intents": class_router_result.get("intents"),
+        "carryover_intents": class_router_result.get("carryover_intents"),
+        "in_signals": class_router_result.get("in_signals"),
+        "out_signals": class_router_result.get("out_signals"),
+        "anchors_in_hits": class_router_result.get("anchors_in_hits"),
+        "anchors_out_hits": class_router_result.get("anchors_out_hits"),
+        "out_of_domain_signal": class_router_result.get("out_of_domain_signal"),
+        "carryover_class": class_router_result.get("carryover_class"),
+        "carryover_info_sections": class_router_result.get("carryover_info_sections"),
+        "router_fallback_reason": class_router_result.get("router_fallback_reason"),
+        "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
+        "router": class_router_result.get("router"),
+        "controller": controller_meta,
+        "controller_used": controller_used,
+        "controller_attempted": controller_attempted,
+        "controller_fallback": controller_fallback,
+        "controller_low_confidence": controller_low_confidence,
+        "controller_used_reason": controller_used_reason,
+        "controller_confidence": controller_confidence,
+        "controller_error": controller_error,
+        "controller_goal": controller_goal,
+    }
+    trace_payload.update(
+        legacy._router_observability_updates_from_class_router(class_router_result)
+    )
+    legacy._record_decision_trace(conversation, trace_payload)
 
 
 def _handle_info_flow(
@@ -458,13 +538,18 @@ def _handle_info_flow(
         domain_meta=None,
         router_state=router_state,
     )
+    info_signals = info_class_meta.get("info_signals") if isinstance(info_class_meta, dict) else None
+    guest_signal = bool(info_signals.get("guest")) if isinstance(info_signals, dict) else False
     info_class = "info_bundle" in (class_router_result.get("classes") or [])
-    guest_policy_class = "guest_policy" in (class_router_result.get("classes") or [])
+    guest_policy_class = "guest_policy" in (class_router_result.get("classes") or []) or guest_signal
     base_info_intents: set[str] = set(class_router_result.get("intents") or [])
     info_class_intents_for_reply: set[str] = set(base_info_intents)
+    carryover_intents: set[str] = set()
     for item in class_router_result.get("carryover_intents") or []:
         if isinstance(item, str) and item.strip():
-            info_class_intents_for_reply.add(item.strip().casefold())
+            value = item.strip().casefold()
+            info_class_intents_for_reply.add(value)
+            carryover_intents.add(value)
     skip_info_class_for_service = False
     if (
         info_class
@@ -510,12 +595,22 @@ def _handle_info_flow(
     alias_service_query = None
     intent_decomp_explicit_query = None
     carryover_has_hours = False
-    if info_class and info_class_intents_for_reply and not skip_info_class_for_service:
+    carryover_has_parking = False
+    if (
+        info_class
+        and info_class_intents_for_reply
+        and not skip_info_class_for_service
+        and not guest_policy_class
+    ):
         carryover_sections = class_router_result.get("carryover_info_sections")
         if isinstance(carryover_sections, list):
             for section in carryover_sections:
                 if isinstance(section, str) and section.strip().casefold() == "hours":
                     carryover_has_hours = True
+                    break
+            for section in carryover_sections:
+                if isinstance(section, str) and section.strip().casefold() == "parking":
+                    carryover_has_parking = True
                     break
         router_state = (
             class_router_result.get("router")
@@ -571,9 +666,13 @@ def _handle_info_flow(
             info_class_intents_for_reply.discard("pricing")
             info_class_intents_for_reply.discard("duration")
         else:
-            if "pricing" not in base_info_intents:
+            if "pricing" not in base_info_intents and not (
+                allow_service_carryover and "pricing" in carryover_intents
+            ):
                 info_class_intents_for_reply.discard("pricing")
-            if "duration" not in base_info_intents:
+            if "duration" not in base_info_intents and not (
+                allow_service_carryover and "duration" in carryover_intents
+            ):
                 info_class_intents_for_reply.discard("duration")
         if guest_policy_lock:
             skip_reason = "guest_policy_lock"
@@ -594,15 +693,27 @@ def _handle_info_flow(
                     "service_query_score": 0.0,
                 }
             )
-        carryover_service_query = None
-    info_signals = info_class_meta.get("info_signals") if isinstance(info_class_meta, dict) else None
+        if not (allow_service_carryover and carryover_intents):
+            carryover_service_query = None
+    normalized_followup = legacy.normalize_for_matching(message_text) if message_text else ""
     force_hours_followup = (
         carryover_has_hours
         and legacy._looks_like_hours_followup(message_text)
         and not explicit_service_signal
     )
+    force_parking_followup = bool(
+        carryover_has_parking and normalized_followup and "мест" in normalized_followup
+    )
+    base_info_override = False
+    if isinstance(info_signals, dict):
+        base_info_override = bool(info_signals.get("parking") or info_signals.get("guest"))
+    if not base_info_override:
+        base_info_override = bool({"location", "hours"} & info_class_intents_for_reply)
+    effective_semantic_lock = info_semantic_lock and not (
+        force_hours_followup or force_parking_followup or base_info_override
+    )
     info_service_query = None
-    if not info_semantic_lock:
+    if not effective_semantic_lock:
         if alias_service_query:
             info_service_query = alias_service_query
         elif router_service_query:
@@ -613,14 +724,14 @@ def _handle_info_flow(
             not force_hours_followup
             and not info_service_query
             and {"pricing", "duration"} & info_class_intents_for_reply
-            and not info_semantic_lock
+            and not effective_semantic_lock
         ):
             info_service_query = legacy._extract_service_hint(message_text, client_slug)
         if (
             not force_hours_followup
             and not info_service_query
             and {"pricing", "duration"} & info_class_intents_for_reply
-            and not info_semantic_lock
+            and not effective_semantic_lock
             and allow_service_carryover
         ):
             if carryover_service_query:
@@ -646,6 +757,8 @@ def _handle_info_flow(
         include_parking = (
             bool(info_signals.get("parking")) if isinstance(info_signals, dict) else False
         )
+        if force_parking_followup:
+            include_parking = True
         include_guest = (
             bool(info_signals.get("guest")) if isinstance(info_signals, dict) else False
         )
@@ -657,6 +770,8 @@ def _handle_info_flow(
             )
         if not include_base_bundle:
             include_base_bundle = bool({"hours", "location"} & info_class_intents_for_reply)
+        if force_parking_followup:
+            include_base_bundle = True
         base_bundle_reply: str | None = None
         base_bundle_meta: dict[str, Any] = {}
         if include_base_bundle:
@@ -720,6 +835,10 @@ def _handle_info_flow(
             )
             bot_response = legacy._combine_sidecar(bot_response, multi_intent_other_followup)
             legacy._reset_low_confidence_retry(conversation)
+            _record_class_router_trace(
+                conversation=conversation,
+                class_router_result=class_router_result,
+            )
             trace_payload = {
                 "stage": "info_class",
                 "decision": "reply",
@@ -822,6 +941,10 @@ def _handle_info_flow(
             )
             bot_response = legacy._combine_sidecar(bot_response, multi_intent_other_followup)
             legacy._reset_low_confidence_retry(conversation)
+            _record_class_router_trace(
+                conversation=conversation,
+                class_router_result=class_router_result,
+            )
             trace_payload = {
                 "stage": "info_class",
                 "decision": "reply",
@@ -1041,6 +1164,29 @@ def _handle_info_flow(
             message_count=message_count,
             reason="service_matcher",
         )
+        decision_meta = (
+            service_decision.meta
+            if isinstance(getattr(service_decision, "meta", None), dict)
+            else {}
+        )
+        info_carryover_intents: list[str] = []
+        if service_decision.intent in legacy.INFO_INTENTS:
+            info_carryover_intents.append(service_decision.intent)
+        if service_decision.intent == "service_clarify":
+            question_type = decision_meta.get("question_type")
+            if question_type == "pricing":
+                info_carryover_intents.append("pricing")
+            elif question_type == "duration":
+                info_carryover_intents.append("duration")
+        if info_carryover_intents or decision_meta.get("info_sections"):
+            legacy._maybe_store_class_carryover(
+                conversation=conversation,
+                class_name="info_bundle",
+                intents=info_carryover_intents,
+                info_meta=decision_meta,
+                message_count=message_count,
+                reason="service_matcher",
+            )
         bot_response, sent = send_and_save(bot_response)
         if not sent:
             result_message = f"{result_message}; response_send=failed"
@@ -1089,6 +1235,40 @@ def _handle_truth_gate_fallback(
     from app.services.demo_salon_knowledge import DemoSalonDecision
 
     from . import _legacy as legacy
+
+    def _build_out_of_domain_class_router_result() -> dict[str, Any]:
+        controller_output = legacy._build_controller_meta_output(error="skipped")
+        controller_output["class"] = "out_of_domain"
+        controller_output["goal"] = "out_of_domain"
+        controller_output["confidence"] = max(legacy.CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
+        controller_output = legacy._ensure_controller_output_meta(
+            controller_output, error="skipped"
+        )
+        router_state = {
+            "used": True,
+            "attempted": False,
+            "fallback": False,
+            "confidence": controller_output["confidence"],
+            "error": "skipped",
+            "fallback_reason": None,
+            "signal_class": legacy._resolve_controller_signal_class(
+                intent_decomp_set=set(intent_decomp_intents),
+                booking_signal=False,
+            ),
+            "signal_match": False,
+            "used_reason": "deterministic",
+            "output": controller_output,
+            "sla": None,
+        }
+        return legacy._resolve_class_router_result(
+            info_intents=set(),
+            info_meta=None,
+            booking_signal=False,
+            class_carryover=None,
+            domain_intent=legacy.DomainIntent.OUT_OF_DOMAIN,
+            domain_meta=None,
+            router_state=router_state,
+        )
 
     policy_t0 = time.monotonic()
     truth_gate = policy_handler.get("truth_gate") if policy_handler else None
@@ -1221,6 +1401,12 @@ def _handle_truth_gate_fallback(
             else:
                 result_message = "Truth gate escalation skipped (already pending)"
 
+        if decision.intent == "off_topic":
+            class_router_result = _build_out_of_domain_class_router_result()
+            _record_class_router_trace(
+                conversation=conversation,
+                class_router_result=class_router_result,
+            )
         trace_payload = {
             "stage": "truth_gate",
             "decision": decision.action,
@@ -1272,6 +1458,12 @@ def _handle_truth_gate_fallback(
             info_carryover_intents.append(decision.intent)
         if decision.intent in {"parking", "guest_policy"}:
             info_carryover_intents.append(decision.intent)
+        if decision.intent == "service_clarify":
+            question_type = decision_meta.get("question_type")
+            if question_type == "pricing":
+                info_carryover_intents.append("pricing")
+            elif question_type == "duration":
+                info_carryover_intents.append("duration")
         if info_carryover_intents or decision_meta.get("info_sections"):
             legacy._maybe_store_class_carryover(
                 conversation=conversation,
