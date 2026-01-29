@@ -351,15 +351,24 @@ Python API:
 | Qdrant | Одна коллекция, разные фильтры |
 | LLM (OpenAI) | Один API key; контекст/инструменты tenant‑scoped |
 
-## Domain Pack / Client Pack (Knowledge)
+## Domain Pack / Company Pack / Client Pack (Knowledge)
 
 - **Domain Pack** — общие категории услуг, RU/KZ синонимы, типовые вопросы, OOD‑якоря. **Без фактов.**
+- **Company Pack** — опциональные общие факты/политики на уровень компании (сеть/бренд), если они одинаковы для всех клиентов/филиалов; без адресов/часов/филиальных условий.
 - **Client Pack** — факты конкретного салона: услуги, цены, адрес, часы, правила, акции и т.д.
 - **Intent/Service cards** — канонические описания интентов/услуг для semantic resolver (embeddings), без фактов клиента.
 - **demo_salon** — dummy Client Pack с вымышленными данными, используется только для демо/тестов.
 
 **Где лежит:** `truffles-api/app/knowledge/<client_slug>/SALON_TRUTH.yaml`  
-**Формат:** `domain_pack` + `client_pack`, при этом старые ключи остаются для обратной совместимости.
+**Формат:** `domain_pack` + `company_pack` (optional) + `client_pack`, при этом старые ключи остаются для обратной совместимости.
+
+**Порядок резолва (effective pack):**
+1) `domain_pack` (global, no facts)  
+2) `company_pack` (optional business defaults)  
+3) `client_pack` (client facts)  
+4) branch overrides (адрес/часы/контакты/политики на уровне филиала, если указаны)
+
+**Правило конфликтов:** последний слой выигрывает; отсутствие поля = отсутствие факта; коллекции с `id` мерджим по `id`.
 
 ---
 
@@ -428,6 +437,11 @@ features:
 ```
 
 **Инвариант:** выбор логики определяется capabilities, а не hardcode.
+
+## 3.2.1 Tool scopes (CRM/Calendar/Calls/Channels)
+
+**Порядок резолва (DEC-017):** domain -> company -> client -> branch.  
+**Правило конфликтов:** более поздний слой переопределяет ранний; явное `false` отключает инструмент даже если выше было `true`; отсутствие поля = наследование.
 
 ## 3.3 Domain Packs (разные ниши)
 

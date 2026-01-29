@@ -13,6 +13,7 @@
 - DONE: Dialog report one-command tool + runbook (timeline + decision_meta/outbox + media/ASR) — evidence: `python3 ops/diagnose.py dialog-report --help`, report `/tmp/dialog-report-2026-01-29-1627-1636.md`.
 - DONE: Control Plane канон зафиксирован (`SPECS/CONTROL_PLANE.md`), roadmap приведён к Web‑first; Task Package `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-canon.md`. Evidence: doc updates in repo.
 - DONE: DEC‑014 (Knowledge Studio publish pipeline) и DEC‑015 (capabilities model) зафиксированы в `docs/IMPERIUM_DECISIONS.yaml`. Evidence: doc updates in repo.
+- DONE: DEC-017 (pack layers + tool-scope resolve order: domain -> company -> client -> branch overrides) + specs sync. Evidence: `docs/IMPERIUM_DECISIONS.yaml`, `SPECS/MULTI_TENANT.md`, `SPECS/ARCHITECTURE.md`.
 - DONE: Phase 1 Control Plane UI (layout + context + roles) — PR #340 https://github.com/k1ddy/Truffles-AI-Employee/pull/340; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21314913097.
 - PLAN: Phase 2 Control Plane (Provisioning + Capabilities) — Task Package `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-phase2.md`.
 - DONE: Phase 2A Capabilities model + admin API — PR #343 https://github.com/k1ddy/Truffles-AI-Employee/pull/343; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21315691684.
