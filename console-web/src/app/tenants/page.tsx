@@ -923,7 +923,8 @@ export default function TenantsPage() {
                                                                         prev
                                                                             ? { ...prev, confirmReason: event.target.value }
                                                                             : prev
-                                                                )
+                                                                    )
+                                                                }
                                                                 disabled={!canWriteTenants || savingBranch}
                                                             />
                                                         </label>
