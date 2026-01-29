@@ -21,6 +21,20 @@ REQUIRED_CLIENT_PACK_FIELDS = [
     "client_pack.price_list",
 ]
 
+REQUIRED_POLICY_FIELDS = [
+    "client_pack.policy.hard_law",
+    "client_pack.policy.payment_info",
+    "client_pack.policy.reschedule",
+    "client_pack.policy.cancel",
+    "client_pack.policy.medical",
+    "client_pack.policy.legal",
+    "client_pack.policy.complaint",
+    "client_pack.policy.discounts",
+    "client_pack.policy.guard_topics.refund",
+]
+
+REQUIRED_PACK_FIELDS = REQUIRED_CLIENT_PACK_FIELDS + REQUIRED_POLICY_FIELDS
+
 _MISSING = object()
 
 
@@ -49,6 +63,21 @@ def _normalize_payload(data: dict) -> dict:
     return {"client_pack": data}
 
 
+def get_missing_required_fields(
+    payload: dict,
+    *,
+    required_fields: list[str] | None = None,
+) -> list[str]:
+    normalized = _normalize_payload(payload)
+    fields = required_fields if required_fields is not None else REQUIRED_PACK_FIELDS
+    missing: list[str] = []
+    for path in fields:
+        value = _get_nested_value(normalized, path)
+        if value is _MISSING or _is_empty_value(value):
+            missing.append(path)
+    return missing
+
+
 def parse_draft_text(draft_text: str) -> tuple[dict | None, list[str]]:
     if not draft_text or not draft_text.strip():
         return None, ["draft_text is required"]
@@ -65,10 +94,9 @@ def validate_payload(payload: dict, *, previous_payload: dict | None = None) -> 
     errors: list[str] = []
     warnings: list[str] = []
 
-    for path in REQUIRED_CLIENT_PACK_FIELDS:
-        value = _get_nested_value(payload, path)
-        if value is _MISSING or _is_empty_value(value):
-            errors.append(f"Missing required field: {path}")
+    missing_fields = get_missing_required_fields(payload)
+    for path in missing_fields:
+        errors.append(f"Missing required field: {path}")
 
     if previous_payload:
         warnings.extend(_diff_warnings(previous_payload, payload))
