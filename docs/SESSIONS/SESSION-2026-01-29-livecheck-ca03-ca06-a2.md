@@ -1,0 +1,27 @@
+# SESSION 2026-01-29-livecheck-ca03-ca06-a2 — Session 2026-01-29-livecheck-ca03-ca06-a2
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-29-livecheck-ca03-ca06.md
+- branch: feat/2026-01-29-livecheck-ca03-ca06-a2
+- worktree: /home/zhan/worktrees/2026-01-29-livecheck-ca03-ca06-a2
+- base_ref: origin/main
+- scope: Fix CA03/CA06 live-check regressions (trace retention + consult short-circuit heuristics) and correct CA04 live-check not-found service.
+- done:
+  - Added `info_class` to decision_trace critical retention.
+  - Relaxed force-consult blockers to allow consult cues with price/duration/hours.
+  - Allow branch `Livecheck Only` runs via explicit flag.
+  - Updated CA04 live-check not-found service to use foot massage wording (absent in demo pack).
+  - Set consult pack replies to stamp `fact_source=pack` and updated CA06 expectation.
+  - Added consult short-circuit trace decision for consult replies that override info intents.
+  - Livecheck Only: run `21476277759` (all pools green), artifacts in `/tmp/livecheck-21476277759-a1`.
+  - Livecheck Only: run `21476995344` (all pools green), artifacts in `/tmp/livecheck-21476995344-a2`.
+  - Local tests: `PYTHONPATH=. pytest -q tests/test_demo_salon_eval.py -k "truth_first_info_bundle or consult_pack_only_and_short_circuit"`.
+- next:
+  - Capture livecheck evidence + update STATE.md if required.
+  - Prepare PR status for Brain merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-29-livecheck-ca03-ca06.md
+  - /tmp/livecheck-21476995344-a2
+  - Local test output: 2 passed, 8 deselected (3.12s).
+- last_updated: 2026-01-29

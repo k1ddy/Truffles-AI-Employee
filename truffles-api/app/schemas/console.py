@@ -73,6 +73,24 @@ class ConsoleBranch(BaseModel):
     onboarding_updated_at: Optional[str] = None
 
 
+class ConsoleCompanyListResponse(BaseModel):
+    items: list[ConsoleCompany]
+    cursor: Optional[str] = None
+    has_more: bool
+
+
+class ConsoleClientListResponse(BaseModel):
+    items: list[ConsoleClient]
+    cursor: Optional[str] = None
+    has_more: bool
+
+
+class ConsoleBranchListResponse(BaseModel):
+    items: list[ConsoleBranch]
+    cursor: Optional[str] = None
+    has_more: bool
+
+
 class ConsoleCompanyCreateRequest(BaseModel):
     name: str
     billing_info: Optional[dict] = None

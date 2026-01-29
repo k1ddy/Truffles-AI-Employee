@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
-import { authApi, canAccessConsole } from "@/lib/api-client";
+import { adminApi, authApi, canAccessConsole } from "@/lib/api-client";
 
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
 const BRANCH_ID_STORAGE_KEY = "console:branch_id";
@@ -20,10 +20,6 @@ function setLocalStorageValue(key: string, value?: string | null) {
         return;
     }
     window.localStorage.setItem(key, value);
-}
-
-function toSearchable(value?: string | null): string {
-    return (value ?? "").toLowerCase();
 }
 
 export default function TenantsPage() {
@@ -45,56 +41,75 @@ export default function TenantsPage() {
     const role = meData?.agent?.role ?? "manager";
     const canReadTenants = canAccessConsole(role, "tenants", "read");
 
-    const companies = useMemo(() => meData?.companies ?? [], [meData?.companies]);
-    const clients = useMemo(() => meData?.clients ?? [], [meData?.clients]);
-    const branches = useMemo(() => meData?.branches ?? [], [meData?.branches]);
-
     const selectedClientId = meData?.client?.id ?? null;
     const selectedCompanyId = meData?.selected_company_id ?? meData?.client?.company_id ?? null;
     const selectedBranchId = meData?.selected_branch_id ?? null;
 
-    const filteredCompanies = useMemo(() => {
-        const query = toSearchable(companyQuery);
-        if (!query) {
-            return companies;
-        }
-        return companies.filter((company) => {
-            return (
-                toSearchable(company.name).includes(query)
-                || toSearchable(company.id).includes(query)
-            );
-        });
-    }, [companies, companyQuery]);
+    const tenantsEnabled = Boolean(session && canReadTenants);
+    const companyQueryValue = companyQuery.trim() || undefined;
+    const clientQueryValue = clientQuery.trim() || undefined;
+    const branchQueryValue = branchQuery.trim() || undefined;
 
-    const filteredClients = useMemo(() => {
-        const query = toSearchable(clientQuery);
-        if (!query) {
-            return clients;
-        }
-        return clients.filter((client) => {
-            return (
-                toSearchable(client.name).includes(query)
-                || toSearchable(client.slug).includes(query)
-                || toSearchable(client.id).includes(query)
-                || toSearchable(client.company_name).includes(query)
-            );
-        });
-    }, [clients, clientQuery]);
+    const companiesQuery = useInfiniteQuery({
+        queryKey: ["tenants-companies", companyQueryValue],
+        queryFn: async ({ pageParam }) => {
+            const cursor = typeof pageParam === "string" ? pageParam : undefined;
+            const response = await adminApi.listCompanies({
+                cursor,
+                limit: 20,
+                q: companyQueryValue,
+            });
+            return response.data;
+        },
+        getNextPageParam: (lastPage) =>
+            lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
+        enabled: tenantsEnabled,
+    });
 
-    const filteredBranches = useMemo(() => {
-        const query = toSearchable(branchQuery);
-        if (!query) {
-            return branches;
-        }
-        return branches.filter((branch) => {
-            return (
-                toSearchable(branch.name).includes(query)
-                || toSearchable(branch.slug).includes(query)
-                || toSearchable(branch.instance_id).includes(query)
-                || toSearchable(branch.phone).includes(query)
-            );
-        });
-    }, [branches, branchQuery]);
+    const clientsQuery = useInfiniteQuery({
+        queryKey: ["tenants-clients", clientQueryValue],
+        queryFn: async ({ pageParam }) => {
+            const cursor = typeof pageParam === "string" ? pageParam : undefined;
+            const response = await adminApi.listClients({
+                cursor,
+                limit: 20,
+                q: clientQueryValue,
+            });
+            return response.data;
+        },
+        getNextPageParam: (lastPage) =>
+            lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
+        enabled: tenantsEnabled,
+    });
+
+    const branchesQuery = useInfiniteQuery({
+        queryKey: ["tenants-branches", branchQueryValue],
+        queryFn: async ({ pageParam }) => {
+            const cursor = typeof pageParam === "string" ? pageParam : undefined;
+            const response = await adminApi.listBranches({
+                cursor,
+                limit: 20,
+                q: branchQueryValue,
+            });
+            return response.data;
+        },
+        getNextPageParam: (lastPage) =>
+            lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
+        enabled: tenantsEnabled,
+    });
+
+    const companies = useMemo(
+        () => companiesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
+        [companiesQuery.data],
+    );
+    const clients = useMemo(
+        () => clientsQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
+        [clientsQuery.data],
+    );
+    const branches = useMemo(
+        () => branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
+        [branchesQuery.data],
+    );
 
     const refreshContext = () => {
         queryClient.invalidateQueries({ queryKey: ["console-me"] });
@@ -155,7 +170,9 @@ export default function TenantsPage() {
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
                             <h2 className="text-lg font-semibold">Компании</h2>
-                            <p className="text-sm text-muted-foreground">{companies.length} всего</p>
+                            <p className="text-sm text-muted-foreground">
+                                {companiesQuery.isLoading ? "—" : `${companies.length} всего`}
+                            </p>
                         </div>
                         <input
                             className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -165,10 +182,14 @@ export default function TenantsPage() {
                         />
                     </div>
                     <div className="space-y-3">
-                        {filteredCompanies.length === 0 ? (
+                        {companiesQuery.isLoading ? (
+                            <div className="text-sm text-muted-foreground">Загрузка компаний...</div>
+                        ) : companiesQuery.isError ? (
+                            <div className="text-sm text-muted-foreground">Не удалось загрузить компании.</div>
+                        ) : companies.length === 0 ? (
                             <div className="text-sm text-muted-foreground">Компании не найдены.</div>
                         ) : (
-                            filteredCompanies.map((company) => (
+                            companies.map((company) => (
                                 <div
                                     key={company.id}
                                     className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3"
@@ -191,13 +212,26 @@ export default function TenantsPage() {
                             ))
                         )}
                     </div>
+                    {companiesQuery.hasNextPage ? (
+                        <div className="flex justify-center pt-3">
+                            <button
+                                className="btn-ghost"
+                                onClick={() => companiesQuery.fetchNextPage()}
+                                disabled={companiesQuery.isFetchingNextPage}
+                            >
+                                {companiesQuery.isFetchingNextPage ? "Загрузка..." : "Показать еще"}
+                            </button>
+                        </div>
+                    ) : null}
                 </section>
 
                 <section className="bg-card border border-border/60 rounded-lg p-5">
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
                             <h2 className="text-lg font-semibold">Клиенты</h2>
-                            <p className="text-sm text-muted-foreground">{clients.length} всего</p>
+                            <p className="text-sm text-muted-foreground">
+                                {clientsQuery.isLoading ? "—" : `${clients.length} всего`}
+                            </p>
                         </div>
                         <input
                             className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -207,10 +241,14 @@ export default function TenantsPage() {
                         />
                     </div>
                     <div className="space-y-3">
-                        {filteredClients.length === 0 ? (
+                        {clientsQuery.isLoading ? (
+                            <div className="text-sm text-muted-foreground">Загрузка клиентов...</div>
+                        ) : clientsQuery.isError ? (
+                            <div className="text-sm text-muted-foreground">Не удалось загрузить клиентов.</div>
+                        ) : clients.length === 0 ? (
                             <div className="text-sm text-muted-foreground">Клиенты не найдены.</div>
                         ) : (
-                            filteredClients.map((client) => (
+                            clients.map((client) => (
                                 <div
                                     key={client.id}
                                     className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3"
@@ -236,13 +274,26 @@ export default function TenantsPage() {
                             ))
                         )}
                     </div>
+                    {clientsQuery.hasNextPage ? (
+                        <div className="flex justify-center pt-3">
+                            <button
+                                className="btn-ghost"
+                                onClick={() => clientsQuery.fetchNextPage()}
+                                disabled={clientsQuery.isFetchingNextPage}
+                            >
+                                {clientsQuery.isFetchingNextPage ? "Загрузка..." : "Показать еще"}
+                            </button>
+                        </div>
+                    ) : null}
                 </section>
 
                 <section className="bg-card border border-border/60 rounded-lg p-5">
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
                             <h2 className="text-lg font-semibold">Филиалы</h2>
-                            <p className="text-sm text-muted-foreground">{branches.length} всего для выбранного клиента</p>
+                            <p className="text-sm text-muted-foreground">
+                                {branchesQuery.isLoading ? "—" : `${branches.length} всего`}
+                            </p>
                         </div>
                         <input
                             className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -252,10 +303,14 @@ export default function TenantsPage() {
                         />
                     </div>
                     <div className="space-y-3">
-                        {filteredBranches.length === 0 ? (
+                        {branchesQuery.isLoading ? (
+                            <div className="text-sm text-muted-foreground">Загрузка филиалов...</div>
+                        ) : branchesQuery.isError ? (
+                            <div className="text-sm text-muted-foreground">Не удалось загрузить филиалы.</div>
+                        ) : branches.length === 0 ? (
                             <div className="text-sm text-muted-foreground">Филиалы не найдены.</div>
                         ) : (
-                            filteredBranches.map((branch) => (
+                            branches.map((branch) => (
                                 <div
                                     key={branch.id}
                                     className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3"
@@ -284,6 +339,17 @@ export default function TenantsPage() {
                             ))
                         )}
                     </div>
+                    {branchesQuery.hasNextPage ? (
+                        <div className="flex justify-center pt-3">
+                            <button
+                                className="btn-ghost"
+                                onClick={() => branchesQuery.fetchNextPage()}
+                                disabled={branchesQuery.isFetchingNextPage}
+                            >
+                                {branchesQuery.isFetchingNextPage ? "Загрузка..." : "Показать еще"}
+                            </button>
+                        </div>
+                    ) : null}
                 </section>
             </div>
 
