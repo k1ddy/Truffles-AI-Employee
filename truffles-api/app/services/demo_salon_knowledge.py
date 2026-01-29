@@ -923,13 +923,29 @@ def _looks_like_hours_question(normalized: str, *, client_slug: str | None = Non
         [
             "график",
             "до скольки",
+            "со скольки",
+            "с какого времени",
+            "с какого часа",
             "открыты",
             "открыто",
             "время работы",
+            "жұмыс уақыты",
+            "жұмыс уакыты",
             "во сколько",
             "открывает",
             "открываете",
             "открываетесь",
+            "когда можно прийти",
+            "когда можно подойти",
+            "когда заканчиваете",
+            "когда заканчивает",
+            "заканчиваете",
+            "заканчивает",
+            "когда закрываетесь",
+            "когда закрывает",
+            "закрываетесь",
+            "нешеге дейін",
+            "қаншаға дейін",
             "в будни",
             "по будням",
             "в выходные",
@@ -2478,6 +2494,7 @@ def get_demo_salon_service_decision(
     )
     has_price_signal = any(_has_price_signal(_normalize_text(segment), segment) for segment in segments)
     has_duration_signal = any(_has_duration_signal(_normalize_text(segment), segment) for segment in segments)
+    price_or_duration_signal = has_price_signal or has_duration_signal
     if has_hours_signal and (has_price_signal or has_duration_signal):
         return None
     consult_intent = False
@@ -2506,7 +2523,17 @@ def get_demo_salon_service_decision(
     service = _match_service(normalized, slug)
     truth = load_yaml_truth(slug)
     if service:
-        reply = _format_service_reply(service, truth, slug)
+        reply = None
+        if consult_intent and not price_or_duration_signal:
+            service_name = service.get("name") if isinstance(service, dict) else None
+            if isinstance(service_name, str) and service_name.strip():
+                reply = _format_service_presence_reply_for_name(service_name, slug)
+            if not reply:
+                description = service.get("description") if isinstance(service, dict) else None
+                if isinstance(description, str) and description.strip():
+                    reply = description.strip()
+        if not reply:
+            reply = _format_service_reply(service, truth, slug)
         if reply:
             meta = _build_fact_meta(
                 meta=service_query_meta,
@@ -2847,7 +2874,10 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="guest_policy")
 
+    hours_like = _looks_like_hours_question(normalized, client_slug=slug)
     question_type = semantic_question_type(message, client_slug=slug)
+    if hours_like and not price_signal and not duration_signal:
+        question_type = None
     question_meta: dict[str, Any] | None = None
     duration_meta: dict[str, Any] | None = None
     if question_type:

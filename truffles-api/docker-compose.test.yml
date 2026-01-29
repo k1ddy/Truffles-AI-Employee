@@ -7,6 +7,7 @@ services:
     env_file: []
     environment:
       - TEST_MODE=1
+      - DEBOUNCE_ENABLED=0
       - OPENAI_API_KEY=
       - KNOWLEDGE_SNAPSHOT_CONSUMER_ENABLED=0
       - KNOWLEDGE_SNAPSHOT_ENABLED=0

@@ -1165,9 +1165,25 @@ def _run_intent_decomposition(
     )
     openai_key = os.environ.get("OPENAI_API_KEY")
     openai_key_missing = not openai_key or openai_key.strip().casefold() in {"none", "null"}
+    short_noisy_followup = False
+    if (
+        openai_key_missing
+        and isinstance(class_carryover, dict)
+        and class_carryover.get("class") == "info_bundle"
+        and class_carryover.get("info_sections")
+        and message_text
+    ):
+        normalized = normalize_for_matching(message_text)
+        tokens = _tokenize_for_matching(normalized)
+        if tokens and len(tokens) <= SESSION_MEMORY_SHORT_TOKENS:
+            has_digits = any(ch.isdigit() for ch in message_text)
+            has_service_hint = bool(
+                get_demo_salon_service_hint(message_text, client_slug=client_slug)
+            )
+            short_noisy_followup = not has_digits and "?" not in message_text and not has_service_hint
     preserve_info_carryover = bool(
         openai_key_missing
-        and (carryover_followup or hours_followup)
+        and (carryover_followup or hours_followup or short_noisy_followup)
         and isinstance(class_carryover, dict)
         and class_carryover.get("class") == "info_bundle"
         and class_carryover.get("info_sections")

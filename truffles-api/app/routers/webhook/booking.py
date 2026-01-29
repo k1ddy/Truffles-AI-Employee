@@ -1288,6 +1288,21 @@ def _handle_booking_interrupt(
             if info_decision and info_decision.action == "escalate":
                 info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}
                 info_meta = dict(info_meta)
+                trace_info_intents = booking_info_intents
+                if not trace_info_intents:
+                    fact_intents = info_meta.get("fact_intents")
+                    if isinstance(fact_intents, list):
+                        trace_info_intents = [
+                            item.strip()
+                            for item in fact_intents
+                            if isinstance(item, str) and item.strip()
+                        ]
+                if (
+                    not trace_info_intents
+                    and info_decision.intent
+                    and isinstance(info_decision.intent, str)
+                ):
+                    trace_info_intents = [info_decision.intent]
                 trace_payload = {
                     "stage": "booking_interrupt",
                     "decision": info_decision.action,
@@ -1295,8 +1310,8 @@ def _handle_booking_interrupt(
                     "state": conversation.state,
                     "booking_interrupt_info": True,
                 }
-                if booking_info_intents:
-                    trace_payload["info_intents"] = booking_info_intents
+                if trace_info_intents:
+                    trace_payload["info_intents"] = list(trace_info_intents)
                 if info_source == "truth_gate":
                     gate_trace = {
                         "stage": "truth_gate",
@@ -1382,6 +1397,21 @@ def _handle_booking_interrupt(
             if info_decision and info_decision.action == "reply":
                 info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}
                 info_meta = dict(info_meta)
+                trace_info_intents = booking_info_intents
+                if not trace_info_intents:
+                    fact_intents = info_meta.get("fact_intents")
+                    if isinstance(fact_intents, list):
+                        trace_info_intents = [
+                            item.strip()
+                            for item in fact_intents
+                            if isinstance(item, str) and item.strip()
+                        ]
+                if (
+                    not trace_info_intents
+                    and info_decision.intent
+                    and isinstance(info_decision.intent, str)
+                ):
+                    trace_info_intents = [info_decision.intent]
                 guard_response = maybe_apply_fact_guard(
                     decision_meta=info_meta,
                     intent=info_decision.intent,
@@ -1578,7 +1608,7 @@ def _handle_booking_interrupt(
                     "stage": "booking_interrupt",
                     "decision": "info_reply",
                     "state": conversation.state,
-                    "info_intents": booking_info_intents,
+                    "info_intents": list(trace_info_intents),
                     "booking_prompt": prompt,
                 }
                 if booking_interrupt_info:

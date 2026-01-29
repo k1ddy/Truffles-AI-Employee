@@ -1048,6 +1048,17 @@ def _handle_consult_flow(
                         client_slug=client_slug,
                         intent_decomp=intent_decomp_payload,
                     )
+            if (
+                consult_intent
+                and short_circuit_service
+                and service_availability_decision is None
+                and service_matcher
+            ):
+                service_availability_decision = service_matcher(
+                    message_text,
+                    client_slug=client_slug,
+                    intent_decomp=intent_decomp_payload,
+                )
             topic_map = {topic.id: topic for topic in playbook.topics}
             topic_candidates = resolve_consult_topic_candidates(
                 message_text,
