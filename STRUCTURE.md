@@ -159,6 +159,8 @@
 - `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-company-selection.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-console-contract-stabilization.md`
+- `docs/TASK_PACKAGES/TP-2026-01-29-livecheck-ca03-ca06.md`
+- `docs/TASK_PACKAGES/TP-2026-01-29-livecheck-ca03-ca06.md`
 
 ---
 

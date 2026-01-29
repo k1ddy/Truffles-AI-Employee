@@ -1268,23 +1268,10 @@ def detect_multi_intent(
         "перенос",
         "отмен",
         "окошк",
-        "цена",
-        "стоим",
-        "сколько",
-        "прайс",
-        "адрес",
-        "где",
-        "наход",
-        "график",
-        "часы",
-        "во сколько",
-        "до сколь",
-        "длител",
-        "минут",
     )
 
     def _should_force_consult_intent(raw_text: str, intents: list[str]) -> bool:
-        if intents and {"booking", "pricing", "duration", "location", "hours"} & set(intents):
+        if intents and {"booking"} & set(intents):
             return False
         normalized = normalize_for_matching(raw_text)
         if not normalized:
