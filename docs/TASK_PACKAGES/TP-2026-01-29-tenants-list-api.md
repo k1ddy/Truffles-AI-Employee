@@ -14,6 +14,7 @@ Scope
 - Update OpenAPI and regenerate TS types.
 - Update Tenants UI to use list API with pagination.
 - Add unit tests for list filtering/validation logic.
+- Temporarily exclude new admin list endpoints from console-contract GET-only smoke until backend deploy.
 
 Out of scope
 - Tenants CRUD write changes beyond existing endpoints.
@@ -39,13 +40,15 @@ Plan
 3) Update OpenAPI and regenerate types.
 4) Wire Tenants UI to list API + pagination.
 5) Add unit test(s).
-6) Run checks.
-7) Capture evidence; update STATE.md.
+6) Exclude new admin list endpoints from console-contract GET-only smoke.
+7) Run checks.
+8) Capture evidence; update STATE.md.
 
 DoD
 - platform_admin can list all companies/clients/branches without context headers.
 - list endpoints support cursor/limit/q and filters.
 - Tenants UI uses list API and paginates.
+- console-contract GET-only smoke excludes new admin list endpoints until backend deploy.
 - Tests and lint pass (or waiver noted in TP if blocked).
 
 Checks

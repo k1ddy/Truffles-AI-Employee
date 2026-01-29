@@ -12,6 +12,7 @@
   - Added list response schemas + list endpoints for companies/clients/branches.
   - Wired Tenants UI to list API with pagination and loading states.
   - Updated OpenAPI and regenerated console-web API types.
+  - Temporarily excluded new admin list endpoints from console-contract GET-only smoke.
   - Checks: pytest and console-web lint.
 - next:
   - Run scripts/session_check.sh, commit, open PR.

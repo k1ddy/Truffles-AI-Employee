@@ -432,6 +432,9 @@ jobs:
             --url https://api.truffles.kz/console/v1 \
             --include-method=GET \
             --exclude-path /ops/outbox \
+            --exclude-path /admin/companies \
+            --exclude-path /admin/clients \
+            --exclude-path /admin/branches \
             --exclude-path /admin/capabilities \
             --exclude-path /onboarding/status \
             --exclude-path /onboarding/advance \
