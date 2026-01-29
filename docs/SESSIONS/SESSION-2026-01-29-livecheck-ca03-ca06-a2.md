@@ -14,10 +14,11 @@
   - Updated CA04 live-check not-found service to use foot massage wording (absent in demo pack).
   - Set consult pack replies to stamp `fact_source=pack` and updated CA06 expectation.
   - Added consult short-circuit trace decision for consult replies that override info intents.
+  - Livecheck Only: run `21476277759` (all pools green), artifacts in `/tmp/livecheck-21476277759-a1`.
   - Local tests: `PYTHONPATH=. pytest -q tests/test_demo_salon_eval.py -k "truth_first_info_bundle or consult_pack_only_and_short_circuit"`.
 - next:
-  - Run Livecheck Only CI with `allow_non_main=true` after deploying branch to the livecheck target.
   - Capture livecheck evidence + update STATE.md if required.
+  - Prepare PR status for Brain merge.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-01-29-livecheck-ca03-ca06.md
   - Local test output: 2 passed, 8 deselected (3.12s).
