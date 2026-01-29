@@ -16,6 +16,7 @@
   - TP-2: policy_pack fail-closed + service tokens/HMAC.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-01-29-mandatory-data-gate.md
+  - CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21480226866
   - pytest -q truffles-api/tests/test_console_onboarding_state.py truffles-api/tests/test_knowledge_validation.py
   - npm --prefix console-web ci
   - npm --prefix console-web run lint
