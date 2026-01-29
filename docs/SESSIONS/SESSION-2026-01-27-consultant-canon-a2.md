@@ -35,6 +35,12 @@
   - `pytest -q truffles-api/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit` → passed.
   - `pytest -q truffles-api/tests/test_webhook_response.py` → 6 passed.
   - `EVAL_TIER=core pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases` → passed.
+  - Updated `E097` eval expectation to require consult CTA.
+  - Container run: `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases -vv` → passed.
+  - Container run: `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 EVAL_TIER=all PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases -vv` → passed.
+  - Container run: `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_message_endpoint.py::test_consult_precedence_over_booking_flow -vv` → passed.
+  - Container run: `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_webhook_response.py -vv` → 6 passed.
+  - Container run: `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests -vv` → 463 passed.
   - Updated canon docs with outcome contract, context capsule, ASR ordering clarifications, and demo‑pack boundary.
   - Updated escalation spec with single‑notice rule and forwarding guarantees in pending.
   - Updated system reference with demo_salon canary note and anti‑dictionary guidance.
@@ -57,5 +63,10 @@
   - `pytest -q truffles-api/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit` (passed).
   - `pytest -q truffles-api/tests/test_webhook_response.py` (6 passed).
   - `EVAL_TIER=core pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases` (passed).
+  - `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases -vv` (passed).
+  - `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 EVAL_TIER=all PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases -vv` (passed).
+  - `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_message_endpoint.py::test_consult_precedence_over_booking_flow -vv` (passed).
+  - `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_webhook_response.py -vv` (6 passed).
+  - `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests -vv` (463 passed).
   - `EVAL_TIER=all pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases` → **FAILED** (`E097`, ожидание CTA/price против consult‑ответа).
 - last_updated: 2026-01-29

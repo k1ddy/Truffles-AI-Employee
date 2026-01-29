@@ -16,6 +16,7 @@
     - `docker compose exec truffles-api env -i PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit` → passed.
     - `docker compose exec truffles-api env -i PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_webhook_response.py` → 6 passed.
     - `docker compose exec truffles-api env -i CI=1 PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests -vv` → 463 passed.
+    - `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 EVAL_TIER=all PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases -vv` → passed.
   - Канон: добавлены пункты про signal/noise, intent_queue, media/ASR ordering, escalation notice (см. SPECS).
 - NEXT:
   - При необходимости: контейнерный прогон перед финальной приёмкой.
@@ -67,12 +68,15 @@
   - Тесты проходят.
 - Checks:
   - `pytest -q truffles-api/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit`
+  - `EVAL_TIER=all pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases`
   - `pytest -q truffles-api/tests/test_message_endpoint.py::test_consult_precedence_over_booking_flow`
   - `pytest -q truffles-api/tests/test_webhook_response.py`
 - Evidence:
   - Вывод pytest + обновлённые спецификации.
   - `pytest -q truffles-api/tests/test_message_endpoint.py::test_consult_precedence_over_booking_flow` (passed).
   - `EVAL_TIER=core pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases` (passed).
+  - `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 EVAL_TIER=all PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases -vv` (passed).
+  - `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml exec -T truffles-api env -i CI=1 PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests -vv` (463 passed).
   - Запись в `STATE.md` с фактами и evidence после проверок.
 - Rollback:
 - `git revert COMMIT_SHA` или откатить изменения в перечисленных файлах.
