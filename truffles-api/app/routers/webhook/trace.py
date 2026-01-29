@@ -27,6 +27,7 @@ DECISION_TRACE_CRITICAL_STAGES = {
     "contract_error",
     "escalation",
     "fast_intent",
+    "info_class",
     "knowledge_safe_mode",
     "multi_truth",
     "out_of_domain",
