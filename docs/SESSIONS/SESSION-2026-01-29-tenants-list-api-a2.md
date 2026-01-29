@@ -1,0 +1,23 @@
+# SESSION 2026-01-29-tenants-list-api-a2 — Session 2026-01-29-tenants-list-api-a2
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-29-tenants-list-api.md
+- branch: feat/2026-01-29-tenants-list-api-a2
+- worktree: /home/zhan/worktrees/2026-01-29-tenants-list-api-a2
+- base_ref: origin/main
+- scope: Tenants list API (companies/clients/branches) + Tenants UI pagination.
+- done:
+  - Session created.
+  - Added list response schemas + list endpoints for companies/clients/branches.
+  - Wired Tenants UI to list API with pagination and loading states.
+  - Updated OpenAPI and regenerated console-web API types.
+  - Checks: pytest and console-web lint.
+- next:
+  - Run scripts/session_check.sh, commit, open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-29-tenants-list-api.md
+  - /tmp/tenants_list_api_pytest_20260129.txt
+  - /tmp/tenants_list_api_lint_20260129.txt
+  - /home/zhan/screenshots/console-tenants-2026-01-29T09-35-40-969Z/01-tenants.png
+- last_updated: 2026-01-29
