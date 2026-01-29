@@ -765,6 +765,7 @@ def _handle_consult_flow(
                 intent_decomp_payload["consult_topic"] = consult_topic
                 if consult_question:
                     intent_decomp_payload["consult_question"] = consult_question
+    consult_intent_signal = bool(consult_intent or consult_context_active)
     booking_goal_locked = bool(
         booking_wants_flow
         or booking_active
@@ -965,7 +966,7 @@ def _handle_consult_flow(
                         "consult_source": "pack",
                         "source": "pack",
                     }
-                    if not booking_goal_locked:
+                    if not booking_goal_locked or consult_intent_signal:
                         context = legacy._get_conversation_context(conversation)
                         context = legacy._set_expected_reply_context(
                             conversation=conversation,
@@ -1042,6 +1043,11 @@ def _handle_consult_flow(
                     normalized_message,
                     message_text,
                 ) or _has_duration_signal(normalized_message, message_text)
+            explicit_info_signal = price_or_duration_signal
+            explicit_info_intent = bool(
+                explicit_info_signal
+                or info_class_intents & {"location", "hours"}
+            )
             service_matcher = None
             handler_override = legacy._get_policy_handler(None, client_slug=client_slug)
             if isinstance(handler_override, dict):
@@ -1132,6 +1138,25 @@ def _handle_consult_flow(
                 consult_pack_topic_id = consult_topic
                 consult_selector = "intent_decomp"
 
+            if explicit_info_intent:
+                consult_short_circuit = True
+                consult_short_circuit_reason = "explicit_info"
+                consult_short_circuit_service = short_circuit_service
+                consult_pack_used = True
+                consult_flow_trace = {
+                    "stage": "consult_flow",
+                    "decision": "short_circuit",
+                    "state": conversation.state,
+                    "reason": consult_short_circuit_reason,
+                    "explicit_info": True,
+                    "service_query": short_circuit_service,
+                }
+                if consult_pack_topic_id:
+                    consult_flow_trace["consult_playbook_id"] = consult_pack_topic_id
+                if consult_question:
+                    consult_flow_trace["consult_question"] = consult_question
+                legacy._record_decision_trace(conversation, consult_flow_trace)
+
             guard_reason = None
             non_consult_intent = (
                 controller_output.intent
@@ -1143,7 +1168,7 @@ def _handle_consult_flow(
                     guard_reason = "risk_high"
                 elif "handoff" in controller_output.actions:
                     guard_reason = "needs_human"
-            if non_consult_intent and not guard_reason:
+            if non_consult_intent and not guard_reason and not consult_intent:
                 consult_intent = False
                 if isinstance(intent_decomp_payload, dict):
                     intent_decomp_payload = dict(intent_decomp_payload)
@@ -1261,7 +1286,7 @@ def _handle_consult_flow(
                         "consult_source": "pack",
                         "source": "pack",
                     }
-                    if not booking_goal_locked:
+                    if not booking_goal_locked or consult_intent_signal:
                         context = legacy._get_conversation_context(conversation)
                         context = legacy._set_expected_reply_context(
                             conversation=conversation,
@@ -1406,6 +1431,9 @@ def _handle_consult_flow(
                     meta=consult_meta,
                 )
                 consult_signal = True
+    if consult_intent_signal and not consult_signal and not consult_short_circuit:
+        consult_signal = True
+
     if consult_signal:
         context = legacy._get_conversation_context(conversation)
         context_manager = legacy._get_context_manager(context)
@@ -1450,7 +1478,7 @@ def _handle_consult_flow(
             consult_meta["consult_questions"] = [legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC]
             consult_meta["clarify_attempt"] = {"intent": "consult", "count": clarify_count}
             consult_meta["clarify_reason"] = "consult"
-            if booking_goal_locked:
+            if booking_goal_locked and not consult_intent_signal:
                 consult_meta["clarify_suppressed"] = True
             else:
                 context = legacy._get_conversation_context(conversation)
@@ -1619,7 +1647,7 @@ def _handle_consult_flow(
         bot_response = consult_decision.response
         bot_response = legacy._combine_sidecar(bot_response, intent_queue_followup)
         booking_followup = None
-        if booking_goal_locked:
+        if booking_goal_locked and consult_flow_decision != "consult_clarify":
             if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
                 booking_followup = legacy.MSG_BOOKING_ASK_SERVICE
             elif expected_reply_type == legacy.EXPECTED_REPLY_TIME:

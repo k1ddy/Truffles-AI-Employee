@@ -141,6 +141,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-28-provider-gateway-integration-tests.md`
 - `docs/TASK_PACKAGES/TP-2026-01-28-qdrant-branch-backfill-ca13.md`
 - `docs/TASK_PACKAGES/TP-2026-01-28-decision-meta-branch-id.md`
+- `docs/TASK_PACKAGES/TP-2026-01-29-ci-ruff-ca06.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`

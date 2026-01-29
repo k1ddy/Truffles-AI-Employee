@@ -1,0 +1,22 @@
+# SESSION 2026-01-29-ci-ruff-ca06-a2 — Session 2026-01-29-ci-ruff-ca06-a2
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-29-ci-ruff-ca06.md
+- branch: feat/2026-01-29-ci-ruff-ca06-a2
+- worktree: /home/zhan/worktrees/2026-01-29-ci-ruff-ca06-a2
+- base_ref: origin/main
+- scope: Fix CA06 consult short_circuit mismatch + keep consult precedence; keep ruff green.
+- done:
+  - Analyzed CI run `21468288249` (ruff I001 + CA06 consult mismatch).
+  - Adjusted consult short_circuit signals and consult clarify precedence.
+  - Checks: `ruff check app tests`; `pytest -q truffles-api/tests/test_message_endpoint.py -k consult -p no:logging`.
+- next:
+  - Push branch and let CI re-run livecheck.
+- evidence:
+  - `gh run view 21468288249 --log-failed`
+  - `/tmp/livecheck-artifacts-pool-c-21468288249/livecheck-ca06-consult.jsonl`
+  - `ruff check app tests` (All checks passed)
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k consult -p no:logging` (8 passed, 103 deselected)
+  - docs/TASK_PACKAGES/TP-2026-01-29-ci-ruff-ca06.md
+- last_updated: 2026-01-29
