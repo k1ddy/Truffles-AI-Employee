@@ -495,6 +495,9 @@ export type KnowledgeRollbackResponse = {
 // Query params
 export type ListCasesParams = operations["listCases"]["parameters"]["query"];
 export type ListAuditParams = operations["listAuditEvents"]["parameters"]["query"];
+export type ListCompaniesParams = operations["listAdminCompanies"]["parameters"]["query"];
+export type ListClientsParams = operations["listAdminClients"]["parameters"]["query"];
+export type ListBranchesParams = operations["listAdminBranches"]["parameters"]["query"];
 
 // ═══════════════════════════════════════════════════════════════════
 // API METHODS (typed)
@@ -574,6 +577,12 @@ function buildClientHeader(clientId?: string): Record<string, string> | undefine
 
 /** Admin provisioning endpoints */
 export const adminApi = {
+    listCompanies: (params?: ListCompaniesParams) =>
+        apiClient.get<components["schemas"]["CompanyListResponse"]>("/admin/companies", { params }),
+    listClients: (params?: ListClientsParams) =>
+        apiClient.get<components["schemas"]["ClientListResponse"]>("/admin/clients", { params }),
+    listBranches: (params?: ListBranchesParams) =>
+        apiClient.get<components["schemas"]["BranchListResponse"]>("/admin/branches", { params }),
     createCompany: (data: components["schemas"]["CompanyCreateRequest"]) =>
         apiClient.post<components["schemas"]["CompanyCreateResponse"]>("/admin/companies", data),
     createClient: (data: components["schemas"]["ClientCreateRequest"]) =>
