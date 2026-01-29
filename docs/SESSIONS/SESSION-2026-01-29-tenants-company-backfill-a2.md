@@ -1,0 +1,24 @@
+# SESSION 2026-01-29-tenants-company-backfill-a2 — Session 2026-01-29-tenants-company-backfill-a2
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-29-tenants-company-backfill.md
+- branch: feat/2026-01-29-tenants-company-backfill-a2
+- worktree: /home/zhan/worktrees/2026-01-29-tenants-company-backfill-a2
+- base_ref: origin/main
+- scope: Backfill company ownership (Truffles Corp) + require company_id for new clients (API/UI).
+- done:
+  - Created company "Truffles Corp" and backfilled demo_salon/truffles/demo_salon_script_test company_id in chatbot DB.
+  - Required company_id for client creation (API schema + validation + UI guard).
+  - Updated Console OpenAPI + regenerated console-web API types.
+  - Added pydantic validation test for client create payload.
+  - Captured Tenants UI showing Truffles Corp + backfilled clients.
+- next:
+  - Run CI after PR.
+  - Update STATE.md with evidence before merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-29-tenants-company-backfill.md
+  - /tmp/tenants_company_backfill_counts_20260129.txt
+  - /tmp/tenants_company_backfill_clients_20260129.txt
+  - /home/zhan/screenshots/console-live-2026-01-29T00-47-26-638Z/01-tenants.png
+- last_updated: 2026-01-29

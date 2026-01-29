@@ -829,7 +829,7 @@ export interface components {
         ClientCreateRequest: {
             slug: string;
             /** Format: uuid */
-            company_id?: string | null;
+            company_id: string;
             status?: string | null;
         };
         ClientCreateResponse: {
