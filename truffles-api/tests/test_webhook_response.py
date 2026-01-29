@@ -1,4 +1,8 @@
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+
 from app.routers import webhook
+from app.routers.webhook.response import _finalize_bot_response
 
 
 def test_maybe_append_booking_cta_adds_prompt_when_needed():
@@ -39,3 +43,63 @@ def test_apply_quiet_hours_notice_skips_when_notice_present():
     )
 
     assert response == "Салон сейчас закрыт. Мы ответим утром."
+
+
+def test_finalize_bot_response_quiet_hours_ttl():
+    conversation = SimpleNamespace(
+        state=webhook.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    now = datetime(2026, 1, 27, 21, 0, tzinfo=timezone.utc)
+    response = _finalize_bot_response(
+        "Ответ",
+        conversation=conversation,
+        quiet_hours_notice="Салон закрыт.",
+        evening_greeting=None,
+        now=now,
+    )
+    assert response.startswith("Салон закрыт.")
+
+    response = _finalize_bot_response(
+        "Ответ",
+        conversation=conversation,
+        quiet_hours_notice="Салон закрыт.",
+        evening_greeting=None,
+        now=now + timedelta(minutes=5),
+    )
+    assert response == "Ответ"
+
+    response = _finalize_bot_response(
+        "Ответ",
+        conversation=conversation,
+        quiet_hours_notice="Салон закрыт.",
+        evening_greeting=None,
+        now=now + timedelta(minutes=11),
+    )
+    assert response.startswith("Салон закрыт.")
+
+
+def test_finalize_bot_response_evening_greeting_once():
+    conversation = SimpleNamespace(
+        state=webhook.ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    now = datetime(2026, 1, 27, 19, 0, tzinfo=timezone.utc)
+    greeting = "Добрый вечер. Это виртуальный ассистент салона."
+    response = _finalize_bot_response(
+        "Ответ",
+        conversation=conversation,
+        quiet_hours_notice=None,
+        evening_greeting=greeting,
+        now=now,
+    )
+    assert response.startswith(greeting)
+
+    response = _finalize_bot_response(
+        "Ответ",
+        conversation=conversation,
+        quiet_hours_notice=None,
+        evening_greeting=greeting,
+        now=now + timedelta(hours=1),
+    )
+    assert response == "Ответ"

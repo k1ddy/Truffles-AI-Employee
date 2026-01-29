@@ -42,10 +42,12 @@
 | `scripts/session_audit.sh` | Аудит сессий (статусы/сироты) | Brain/Architect |
 | `scripts/session_gate.sh` | Gate для doc-only и session log | Brain/Architect |
 | `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
+| `scripts/test_api_container.sh` | Контейнерный pytest (drift‑safe, sanitized env) | Backend/QA |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
+| `truffles-api/docker-compose.test.yml` | Test‑compose overrides (test containers, no prod env) | Backend/QA |
 | `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
 | `truffles-api/app/services/console_confirmations.py` | Confirmation safeguards for destructive Console actions | Backend |
 | `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |

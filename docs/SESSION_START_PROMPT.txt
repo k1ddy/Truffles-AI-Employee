@@ -59,6 +59,7 @@ CONSOLE QUICKSTART (first login)
 TESTING CONTRACT (summary)
 - Source of truth: `SPECS/SYSTEM_REFERENCE.md` (Test design rules + LLM testing policy + CA-Matrix).
 - CI usage + skip rules: `TECH.md` → "CI / GitHub Actions (как запускать, зачем и когда)".
+- Container pytest: use `scripts/test_api_container.sh` (or `truffles-api/docker-compose.test.yml` overrides); do NOT run pytest inside prod `truffles-api` container.
 - New feature requires at least one test (Playwright/Schemathesis/k6/unit) or an explicit waiver in the Task Package.
 - CI livecheck is allowed only with safety gates (TEST_MODE=1 + allowlist); evidence is `livecheck-evidence.md`.
 - Live-check uses JID pool (comma list). One suite -> one JID. Instance->instance simulation is valid only if inbound is recorded in DB with decision_meta/trace; **CA‑13** may use simulated inbound when allowlist is unavailable (mark as `simulated` in `STATE.md`).

@@ -1,0 +1,57 @@
+# SESSION 2026-01-27-consultant-canon-a2 — Session 2026-01-27-consultant-canon-a2
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-consultant-canon-alignment.md
+- branch: feat/2026-01-27-consultant-canon-a2
+- worktree: /home/zhan/worktrees/2026-01-27-consultant-canon-a2
+- base_ref: origin/main
+- scope: canon alignment (consult-first/pack-first), media+ASR ordering, test alignment
+- done:
+  - Session created.
+  - Ran `pytest -q truffles-api/tests/test_message_endpoint.py` (14 failed, list in shell output; needs rerun after edits).
+  - Updated part of `truffles-api/tests/test_message_endpoint.py` (pending retest).
+  - Updated Task Package with NOW/NEXT and canon gaps.
+  - Added canon bullets for signal/noise, intent_queue, media/ASR ordering, escalation notice.
+  - Reran `pytest -q truffles-api/tests/test_message_endpoint.py` → 9 failed (see “next” list).
+  - Scope expanded (approved) to include `http.py`, `chatflow_service.py`, `knowledge_service.py`,
+    `demo_salon_knowledge.py`, `test_knowledge_service.py`, `docs/SESSION_INDEX.md`.
+  - Added autouse fixture to disable quiet-hours/evening greeting notices for deterministic tests.
+  - Updated test expectations for expected_reply_type + info-bundle carryover.
+  - `pytest -q truffles-api/tests/test_message_endpoint.py` → 112 passed.
+  - `pytest -q truffles-api/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit` → passed.
+  - `pytest -q truffles-api/tests/test_webhook_response.py` → 6 passed.
+  - Container run: `docker exec truffles-api pytest -q /app/tests/test_message_endpoint.py` → 37 failed, 73 passed (container code, /app).
+  - Stopped and replaced `truffles-api`, `truffles-outbox`, `truffles-sentinel` with worktree compose build.
+  - Container run (worktree image, service env): `docker compose exec truffles-api pytest -q /app/tests/test_message_endpoint.py` → 7 failed, 105 passed.
+  - Container run (worktree image, env overrides: OPENAI/snapshot disabled): → 2 failed, 110 passed.
+  - Container run (worktree image, sanitized env): `docker compose exec truffles-api env -i PATH=... PYTHONPATH=/app pytest -q /app/tests/test_message_endpoint.py` → 112 passed.
+  - Container run (worktree image, sanitized env): `pytest -q /app/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit` → passed.
+  - Container run (worktree image, sanitized env): `pytest -q /app/tests/test_webhook_response.py` → 6 passed.
+  - Hardened legacy consult selection: consult replies in `demo_salon_knowledge` now require `consult_intent` + `consult_topic` (no trigger fallback).
+  - Updated eval intent stub: consult/duration/promotions detection + consult pack response assertion; disabled consult snapshot in test harness.
+  - Added autouse snapshot-disable fixture in `test_message_endpoint.py`.
+  - `pytest -q truffles-api/tests/test_message_endpoint.py::test_consult_precedence_over_booking_flow` → passed.
+  - `pytest -q truffles-api/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit` → passed.
+  - `pytest -q truffles-api/tests/test_webhook_response.py` → 6 passed.
+  - `EVAL_TIER=core pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases` → passed.
+- next:
+  - Разобрать фейл `EVAL_TIER=all`: кейс `E097` ожидает price+CTA, а canon даёт consult‑ответ; решить (обновить EVAL или поведение).
+  - При необходимости: контейнерный прогон перед финальной приёмкой.
+  - Подготовить запись в `STATE.md` с evidence (Brain/Top Architect).
+- evidence:
+  - `pytest -q truffles-api/tests/test_message_endpoint.py` (112 passed).
+  - `pytest -q truffles-api/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit` (passed).
+  - `pytest -q truffles-api/tests/test_webhook_response.py` (6 passed).
+  - `docker exec truffles-api pytest -q /app/tests/test_message_endpoint.py` (37 failed, 73 passed).
+  - `docker compose exec truffles-api pytest -q /app/tests/test_message_endpoint.py` (7 failed, 105 passed).
+  - `docker compose exec -e OPENAI_API_KEY= -e KNOWLEDGE_SNAPSHOT_CONSUMER_ENABLED=0 ... pytest -q /app/tests/test_message_endpoint.py` (2 failed, 110 passed).
+  - `docker compose exec truffles-api env -i PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_message_endpoint.py` (112 passed).
+  - `docker compose exec truffles-api env -i PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit` (passed).
+  - `docker compose exec truffles-api env -i PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_webhook_response.py` (6 passed).
+  - `pytest -q truffles-api/tests/test_message_endpoint.py::test_consult_precedence_over_booking_flow` (passed).
+  - `pytest -q truffles-api/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit` (passed).
+  - `pytest -q truffles-api/tests/test_webhook_response.py` (6 passed).
+  - `EVAL_TIER=core pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases` (passed).
+  - `EVAL_TIER=all pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases` → **FAILED** (`E097`, ожидание CTA/price против consult‑ответа).
+- last_updated: 2026-01-28

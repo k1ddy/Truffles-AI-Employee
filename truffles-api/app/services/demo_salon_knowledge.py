@@ -363,6 +363,26 @@ def build_quiet_hours_notice(
     )
 
 
+def build_evening_greeting(
+    *,
+    now_utc: datetime | None = None,
+    now_local: datetime | None = None,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
+) -> str | None:
+    truth = load_yaml_truth(client_slug)
+    timezone_name = get_salon_timezone(truth, client_slug=client_slug)
+    if not timezone_name:
+        return None
+    now_local = _resolve_local_now(
+        timezone_name=timezone_name,
+        now_utc=now_utc,
+        now_local=now_local,
+    )
+    if now_local.hour < 18:
+        return None
+    return "Добрый вечер. Это виртуальный ассистент салона."
+
+
 def build_info_combined_reply(
     *,
     include_parking: bool = False,
@@ -558,6 +578,7 @@ _OFFTOPIC_KEYWORDS = [
     "crm",
     "интеграц",
     "мессенджер",
+    "биткоин",
 ]
 
 
@@ -693,10 +714,17 @@ def _token_matches(token: str, message_tokens: list[str]) -> bool:
     for msg in message_tokens:
         if msg == token:
             return True
-        if len(token) >= 3 and msg.startswith(token):
-            return True
-        if len(msg) >= 3 and token.startswith(msg):
-            return True
+        if len(token) >= 4 and len(msg) >= 4:
+            if msg.startswith(token) or token.startswith(msg):
+                return True
+        if len(token) >= 6 and len(msg) >= 6:
+            common = 0
+            for a, b in zip(token, msg):
+                if a != b:
+                    break
+                common += 1
+            if common >= 5:
+                return True
     return False
 
 
@@ -911,7 +939,7 @@ def _looks_like_hours_question(normalized: str, *, client_slug: str | None = Non
         return True
     if _contains_any_words(normalized, ["часы", "часов"]):
         return not _message_has_service_token(normalized, _normalize_client_slug(client_slug))
-    if "работаете" in normalized:
+    if "работаете" in normalized or "работайт" in normalized:
         return True
     if "работает" in normalized and _contains_any(normalized, ["вы", "салон"]):
         if _contains_any(normalized, ["сегодня", "сейчас", "открыт", "будни", "выходн"]):
@@ -922,7 +950,17 @@ def _looks_like_hours_question(normalized: str, *, client_slug: str | None = Non
 def _has_parking_signal(normalized: str) -> bool:
     if not normalized:
         return False
-    return "парков" in normalized
+    if _contains_any(normalized, ["парков", "паркинг", "во дворе", "двор"]):
+        return True
+    if "машинк" in normalized and not _contains_any(
+        normalized, ["парков", "паркинг", "двор", "авто", "остав", "мест", "стоян"]
+    ):
+        return False
+    if _contains_any(normalized, ["авто", "машин", "машины", "машину"]):
+        if _contains_any(normalized, ["мест", "остав", "став", "стоян"]):
+            return True
+        return True
+    return False
 
 
 def _has_guest_waiting_signal(normalized: str) -> bool:
@@ -939,12 +977,17 @@ def _has_guest_waiting_signal(normalized: str) -> bool:
         "пораньше",
         "раньше",
         "подожд",
+        "подруг",
+        "падруг",
         "заранее",
         "сопровожд",
     )
     if any(token.startswith(prefix) for token in tokens for prefix in prefixes):
         return True
-    return _contains_any_words(normalized, ["муж", "супруг", "подруг", "сопровожд"])
+    return _contains_any_words(
+        normalized,
+        ["муж", "супруг", "подруг", "сопровожд", "семья", "семье", "семьи"],
+    )
 
 
 def _has_price_signal(normalized: str, raw_text: str | None = None) -> bool:
@@ -1032,6 +1075,10 @@ def _format_service_reply(service: dict[str, Any], truth: dict, client_slug: str
     price_items = service.get("price_items") if isinstance(service, dict) else None
     reply = _format_service_price_items(price_items or [], client_slug)
     if reply:
+        service_name = service.get("name") if isinstance(service, dict) else None
+        if isinstance(service_name, str) and service_name.strip():
+            if _normalize_text(service_name) not in _normalize_text(reply):
+                reply = f"{service_name}: {reply}"
         return reply
     description = service.get("description") if isinstance(service, dict) else None
     if description:
@@ -1893,14 +1940,24 @@ def _format_promotions(truth: dict, intent: str | None = None) -> str:
     if not isinstance(items, list):
         items = []
 
+    def _stacking_text() -> str:
+        stacking = promotions.get("stacking")
+        stacking_notes = promotions.get("stacking_notes")
+        parts = [
+            str(item).strip().rstrip(".")
+            for item in (stacking, stacking_notes)
+            if isinstance(item, str) and item.strip()
+        ]
+        if not parts:
+            return " Скидки не суммируются."
+        return " " + ". ".join(parts) + "."
+
     if intent == "promotion_first_visit":
         for promo in items:
             if "перв" in str(promo.get("name", "")).casefold():
-                stacking = promotions.get("stacking")
-                stacking_text = f" {stacking}." if stacking else " Скидки не суммируются."
                 return (
                     f"На первое посещение действует скидка {promo.get('discount_percent')}% "
-                    f"на услуги.{stacking_text}"
+                    f"на услуги.{_stacking_text()}"
                 )
     if intent == "promotion_birthday":
         for promo in items:
@@ -1924,9 +1981,7 @@ def _format_promotions(truth: dict, intent: str | None = None) -> str:
         if name and percent:
             parts.append(f"{name}: {percent}%")
     if parts:
-        stacking = promotions.get("stacking")
-        stacking_text = f" {stacking}." if stacking else ""
-        return "Официальные акции: " + "; ".join(parts) + "." + stacking_text
+        return "Официальные акции: " + "; ".join(parts) + "." + _stacking_text()
     return "Скидки действуют только по официальным акциям."
 
 
@@ -1958,23 +2013,18 @@ def build_consult_reply(
     ):
         return None
 
+    if not consult_intent or not consult_topic:
+        return None
+
     playbooks = _load_consult_playbooks(client_slug)
     if not playbooks:
         return None
 
-    playbook = _select_consult_playbook(
-        message,
-        consult_topic if consult_intent else None,
-        playbooks,
-        allow_fallback=consult_intent,
-    )
-    if not playbook and not consult_intent:
-        playbook = _select_consult_playbook(
-            message,
-            None,
-            playbooks,
-            allow_fallback=False,
-        )
+    playbook = None
+    for candidate in playbooks:
+        if _consult_topic_matches(candidate, consult_topic):
+            playbook = candidate
+            break
     if not playbook:
         return None
 
@@ -2127,7 +2177,10 @@ def format_reply_from_truth(
         return reason or "Цена «от» зависит от деталей услуги."
     if intent == "promotions_rules":
         stacking = truth.get("promotions", {}).get("stacking")
-        return stacking or "Скидки не суммируются."
+        stacking_notes = truth.get("promotions", {}).get("stacking_notes")
+        if stacking and stacking_notes:
+            return f"{stacking}. {stacking_notes}"
+        return stacking or stacking_notes or "Скидки не суммируются."
     if intent == "promotions":
         return _format_promotions(truth, slots.get("promotion_intent"))
     if intent == "objection_price":
@@ -2498,9 +2551,26 @@ def get_demo_salon_decision(
     truth = load_yaml_truth(slug)
     phrase_intents = phrase_match_intent(message, slug)
     policy_pack = load_policy_pack(slug)
+    hygiene_keywords = [
+        "стерилиз",
+        "инструмент",
+        "обрабатываете",
+        "дез",
+        "сухожар",
+        "уз-ванн",
+        "уз ванн",
+        "ультразв",
+        "крафт",
+        "пакет",
+        "вскрыва",
+        "инфек",
+    ]
     parking_signal = _has_parking_signal(normalized)
     guest_signal = _has_guest_waiting_signal(normalized)
     location_signal = _contains_any(normalized, ["адрес", "где вы", "где наход"])
+    hygiene_signal = _contains_any(normalized, hygiene_keywords)
+    if not hygiene_signal and "подруг" in normalized and "воспал" in normalized:
+        hygiene_signal = True
     price_signal = _has_price_signal(normalized, message)
     duration_signal = _has_duration_signal(normalized, message)
     price_item = _find_best_price_item(message, slug)
@@ -2516,6 +2586,12 @@ def get_demo_salon_decision(
         policy_pack=policy_pack,
         client_slug=slug,
     )
+
+    if policy_intent == "policy_complaint" and _contains_any(
+        normalized,
+        ["без задерж", "без опозд", "без опоз"],
+    ):
+        policy_intent = None
 
     if policy_intent == "policy_payment":
         return _build_payment_info_decision(policy_pack)
@@ -2537,6 +2613,8 @@ def get_demo_salon_decision(
             ),
             default_collect=["имя", "услуга", "контактный номер"],
         )
+    if policy_intent == "policy_medical" and hygiene_signal:
+        policy_intent = None
     if policy_intent == "policy_medical":
         return _build_policy_decision(
             policy_pack,
@@ -2573,19 +2651,28 @@ def get_demo_salon_decision(
                 collect=["услуга", "время"],
             )
 
+    if "aftercare_gel_lac" in phrase_intents or (
+        "гель лак" in normalized
+        and _contains_any(normalized, ["ухаж", "продл", "держ", "нос", "срок"])
+    ):
+        reply = format_reply_from_truth("aftercare_gel_lac", client_slug=slug, truth=truth)
+        if reply:
+            return _build_truth_decision(response=reply, intent="aftercare_gel_lac")
+
     consult_decision = build_consult_reply(
         message,
         client_slug=slug,
         intent_decomp=intent_decomp,
     )
     if consult_decision:
-        service_decision = get_demo_salon_service_decision(
-            message,
-            client_slug=slug,
-            intent_decomp=intent_decomp,
-        )
-        if service_decision and service_decision.intent == "service_match":
-            return service_decision
+        if price_signal or duration_signal:
+            service_decision = get_demo_salon_service_decision(
+                message,
+                client_slug=slug,
+                intent_decomp=intent_decomp,
+            )
+            if service_decision and service_decision.intent == "service_match":
+                return service_decision
         return consult_decision
 
     if "скидки сумм" in normalized or "скидк" in normalized and "сумм" in normalized:
@@ -2605,16 +2692,7 @@ def get_demo_salon_decision(
             return _build_truth_decision(response=reply, intent="promotions")
 
     if policy_intent == "policy_discount":
-        reply = _format_promotions(truth)
-        policy_meta = _build_policy_meta(
-            "discounts",
-            _get_policy_section(policy_pack, "discounts"),
-        )
-        return _build_truth_decision(
-            response=reply,
-            intent="discount_haggle",
-            meta=policy_meta,
-        )
+        return None
 
     if "почему" in normalized and "от" in normalized and ("цена" in normalized or "стоим" in normalized):
         reply = format_reply_from_truth("why_price_from", client_slug=slug, truth=truth)
@@ -2726,17 +2804,9 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="services_overview")
 
-    if "aftercare_gel_lac" in phrase_intents or (
-        "гель лак" in normalized
-        and _contains_any(normalized, ["ухаж", "продл", "держ", "нос", "срок"])
-    ):
-        reply = format_reply_from_truth("aftercare_gel_lac", client_slug=slug, truth=truth)
-        if reply:
-            return _build_truth_decision(response=reply, intent="aftercare_gel_lac")
-
     if "prep_brows_lashes" in phrase_intents or (
         "подготов" in normalized and _contains_any(normalized, ["бров", "ресниц"])
-    ):
+    ) or _contains_any(normalized, ["линз", "контейнер", "макияж"]):
         reply = format_reply_from_truth("prep_brows_lashes", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="prep_brows_lashes")
@@ -2902,7 +2972,7 @@ def get_demo_salon_decision(
                     price_item=price_item_payload,
                 )
 
-    if _contains_any(normalized, ["стерилиз", "инструмент", "обрабатываете", "дез", "сухожар"]):
+    if hygiene_signal:
         reply = format_reply_from_truth("hygiene", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="hygiene")
@@ -2974,10 +3044,15 @@ def get_demo_salon_decision(
         if not service_query_value:
             reply = format_reply_from_truth("service_clarify", client_slug=slug, truth=truth)
             if reply:
+                meta = (
+                    {**question_meta_for_price, **service_query_meta}
+                    if question_meta_for_price
+                    else service_query_meta
+                )
                 return _build_truth_decision(
                     response=reply,
                     intent="service_clarify",
-                    meta=service_query_meta,
+                    meta=meta,
                 )
         if not price_item and isinstance(service_query_value, str):
             service = _resolve_service_from_query(service_query_value, slug)

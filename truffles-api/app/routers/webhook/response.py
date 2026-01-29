@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any, Callable
 
@@ -198,24 +198,93 @@ def _apply_quiet_hours_notice(text: str, notice: str | None) -> str:
     return f"{notice}\n\n{text}"
 
 
+def _apply_evening_greeting(text: str, greeting: str | None) -> str:
+    if not text or not greeting:
+        return text
+    from . import _legacy as legacy
+
+    normalized_text = legacy._normalize_text(text)
+    normalized_greeting = legacy._normalize_text(greeting)
+    if normalized_greeting and normalized_greeting in normalized_text:
+        return text
+    return f"{greeting}\n\n{text}"
+
+
+def _parse_notice_time(value: str | None) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _should_emit_notice(payload: dict | None, *, now: datetime, ttl: timedelta) -> bool:
+    if not isinstance(payload, dict):
+        return True
+    last_sent_at = _parse_notice_time(payload.get("last_sent_at"))
+    if not last_sent_at:
+        return True
+    return (now - last_sent_at) >= ttl
+
+
 def _finalize_bot_response(
     text: str | None,
     *,
     conversation: Conversation,
     quiet_hours_notice: str | None,
+    evening_greeting: str | None = None,
     allow_quiet_hours: bool = True,
+    now: datetime | None = None,
 ) -> str | None:
     if not text:
         return text
-    if not allow_quiet_hours:
-        return text
-    if not quiet_hours_notice:
-        return text
     from . import _legacy as legacy
 
+    if not allow_quiet_hours:
+        return text
     if conversation.state != legacy.ConversationState.BOT_ACTIVE.value:
         return text
-    return _apply_quiet_hours_notice(text, quiet_hours_notice)
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    from app.routers.webhook.context_manager import _get_conversation_context, _set_conversation_context
+
+    context = _get_conversation_context(conversation)
+    context_changed = False
+
+    if quiet_hours_notice:
+        if _should_emit_notice(
+            context.get(legacy.QUIET_HOURS_NOTICE_KEY),
+            now=now,
+            ttl=timedelta(minutes=legacy.QUIET_HOURS_NOTICE_TTL_MINUTES),
+        ):
+            text = _apply_quiet_hours_notice(text, quiet_hours_notice)
+            context[legacy.QUIET_HOURS_NOTICE_KEY] = {"last_sent_at": now.isoformat()}
+            context_changed = True
+    else:
+        if context.pop(legacy.QUIET_HOURS_NOTICE_KEY, None) is not None:
+            context_changed = True
+
+    if evening_greeting:
+        if _should_emit_notice(
+            context.get(legacy.EVENING_GREETING_KEY),
+            now=now,
+            ttl=timedelta(hours=legacy.EVENING_GREETING_TTL_HOURS),
+        ):
+            text = _apply_evening_greeting(text, evening_greeting)
+            context[legacy.EVENING_GREETING_KEY] = {"last_sent_at": now.isoformat()}
+            context_changed = True
+
+    if context_changed:
+        _set_conversation_context(conversation, context)
+
+    return text
 
 
 def _send_response(
@@ -469,6 +538,61 @@ class ConsultFlowResult:
     intent_decomp_payload: dict[str, Any] | None
 
 
+def _record_class_router_trace_from_result(
+    *,
+    conversation: Conversation,
+    class_router_result: dict | None,
+) -> None:
+    if not isinstance(class_router_result, dict):
+        return
+    from . import _legacy as legacy
+
+    controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
+    controller_used = bool(controller_meta.get("used")) if isinstance(controller_meta, dict) else False
+    controller_attempted = bool(controller_meta.get("attempted")) if isinstance(controller_meta, dict) else False
+    controller_fallback = bool(controller_meta.get("fallback")) if isinstance(controller_meta, dict) else False
+    controller_low_confidence = (
+        bool(controller_meta.get("low_confidence")) if isinstance(controller_meta, dict) else False
+    )
+    controller_used_reason = (
+        controller_meta.get("used_reason") if isinstance(controller_meta, dict) else None
+    )
+    controller_confidence = (
+        controller_meta.get("confidence") if isinstance(controller_meta, dict) else None
+    )
+    controller_error = controller_meta.get("error") if isinstance(controller_meta, dict) else None
+    controller_goal = controller_meta.get("goal") if isinstance(controller_meta, dict) else None
+    trace_payload = {
+        "stage": "class_router",
+        "classes": class_router_result.get("classes"),
+        "intents": class_router_result.get("intents"),
+        "carryover_intents": class_router_result.get("carryover_intents"),
+        "in_signals": class_router_result.get("in_signals"),
+        "out_signals": class_router_result.get("out_signals"),
+        "anchors_in_hits": class_router_result.get("anchors_in_hits"),
+        "anchors_out_hits": class_router_result.get("anchors_out_hits"),
+        "out_of_domain_signal": class_router_result.get("out_of_domain_signal"),
+        "carryover_class": class_router_result.get("carryover_class"),
+        "carryover_info_sections": class_router_result.get("carryover_info_sections"),
+        "router_fallback_reason": class_router_result.get("router_fallback_reason"),
+        "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
+        "router": class_router_result.get("router"),
+        "controller": controller_meta,
+        "controller_used": controller_used,
+        "controller_attempted": controller_attempted,
+        "controller_fallback": controller_fallback,
+        "controller_low_confidence": controller_low_confidence,
+        "controller_used_reason": controller_used_reason,
+        "controller_confidence": controller_confidence,
+        "controller_error": controller_error,
+        "controller_goal": controller_goal,
+    }
+    trace_payload.update(
+        legacy._router_observability_updates_from_class_router(class_router_result)
+    )
+    _record_decision_trace(conversation, trace_payload)
+
+
 def _handle_consult_flow(
     *,
     db: Session,
@@ -503,7 +627,7 @@ def _handle_consult_flow(
     send_and_save: Callable[..., tuple[str, bool]],
     record_escalation_metric: Callable[[str], None],
 ) -> ConsultFlowResult:
-    from app.services.ai_service import generate_consult_advice, generate_consult_controller_output
+    from app.services.ai_service import generate_consult_controller_output
     from app.services.consult_pack_service import (
         build_consult_pack_reply,
         get_consult_topic,
@@ -512,9 +636,7 @@ def _handle_consult_flow(
     )
     from app.services.demo_salon_knowledge import (
         DemoSalonDecision,
-        build_consult_reply,
         get_demo_salon_service_decision,
-        get_demo_salon_service_hint,
     )
     from app.services.knowledge_service import resolve_consult_topic_candidates
     from app.services.knowledge_snapshot_consumer import (
@@ -526,6 +648,40 @@ def _handle_consult_flow(
     )
 
     from . import _legacy as legacy
+
+    def _build_consult_class_router_result() -> dict[str, Any]:
+        controller_output = legacy._build_controller_meta_output(error="skipped")
+        controller_output["class"] = "consult"
+        controller_output["goal"] = "consult"
+        controller_output["confidence"] = max(legacy.CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
+        controller_output = legacy._ensure_controller_output_meta(
+            controller_output, error="skipped"
+        )
+        router_state = {
+            "used": True,
+            "attempted": False,
+            "fallback": False,
+            "confidence": controller_output["confidence"],
+            "error": "skipped",
+            "fallback_reason": None,
+            "signal_class": legacy._resolve_controller_signal_class(
+                intent_decomp_set=intent_decomp_set,
+                booking_signal=booking_signal,
+            ),
+            "signal_match": False,
+            "used_reason": "deterministic",
+            "output": controller_output,
+            "sla": None,
+        }
+        return legacy._resolve_class_router_result(
+            info_intents=info_class_intents,
+            info_meta=None,
+            booking_signal=booking_signal,
+            class_carryover=None,
+            domain_intent=legacy.DomainIntent.UNKNOWN,
+            domain_meta=None,
+            router_state=router_state,
+        )
 
     if not (routing.get("allow_bot_reply") and not bypass_domain_flows and message_text):
         return ConsultFlowResult(
@@ -548,23 +704,137 @@ def _handle_consult_flow(
     service_availability_used = False
     service_availability_decision = None
     consult_context_active = bool(current_goal == "consult")
+    if not consult_context_active and isinstance(consult_context, dict):
+        if consult_context.get("topic") or consult_context.get("question") or consult_context.get("questions"):
+            consult_context_active = True
+    consult_interrupt_intents = (
+        intent_decomp_set & legacy.CONSULT_INTERRUPT_INTENTS if intent_decomp_set else set()
+    )
+    consult_interrupt_text = False
+    if message_text:
+        normalized = legacy.normalize_for_matching(message_text)
+        if normalized:
+            if (
+                ("совмещ" in normalized or "в один день" in normalized)
+                and "чистк" in normalized
+                and "пилинг" in normalized
+            ):
+                consult_interrupt_text = True
+            elif any(
+                token in normalized
+                for token in (
+                    "инструмент",
+                    "стерилиз",
+                    "линз",
+                    "подготов",
+                    "перед процедур",
+                )
+            ):
+                consult_interrupt_text = True
+    consult_interrupt_signal = bool(
+        consult_interrupt_intents or consult_interrupt_text or booking_signal
+    )
+    if consult_context_active and consult_interrupt_signal and not consult_intent:
+        consult_context_active = False
+    elif consult_context_active and not consult_intent:
+        consult_intent = True
+        if isinstance(intent_decomp_payload, dict):
+            intent_decomp_payload = dict(intent_decomp_payload)
+            intent_decomp_payload["consult_intent"] = True
+    if consult_context_active and not consult_topic and isinstance(consult_context, dict):
+        context_topic = consult_context.get("topic")
+        if isinstance(context_topic, str) and context_topic.strip():
+            consult_topic = context_topic.strip()
+            if isinstance(consult_context.get("question"), str) and not consult_question:
+                consult_question = consult_context.get("question").strip() or None
+            if isinstance(intent_decomp_payload, dict):
+                intent_decomp_payload = dict(intent_decomp_payload)
+                intent_decomp_payload["consult_topic"] = consult_topic
+                if consult_question:
+                    intent_decomp_payload["consult_question"] = consult_question
     booking_goal_locked = bool(
         booking_wants_flow
         or booking_active
         or booking_signal
         or current_goal == "booking"
-        or expected_reply_type
-        in {
-            legacy.EXPECTED_REPLY_SERVICE,
-            legacy.EXPECTED_REPLY_TIME,
-            legacy.EXPECTED_REPLY_NAME,
-        }
+        or (
+            expected_reply_type
+            in {
+                legacy.EXPECTED_REPLY_SERVICE,
+                legacy.EXPECTED_REPLY_TIME,
+                legacy.EXPECTED_REPLY_NAME,
+            }
+            and not consult_intent
+        )
     )
     consult_blocked = bool(booking_wants_flow or booking_active or booking_signal)
     if consult_intent or consult_context_active:
         consult_blocked = False
     elif intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}:
         consult_blocked = True
+
+    if message_text and policy_type == "demo_salon" and routing.get("allow_truth_gate_reply"):
+        from app.services.demo_salon_knowledge import _normalize_text
+
+        normalized = _normalize_text(message_text)
+        aftercare_trigger = bool(
+            normalized
+            and "гель лак" in normalized
+            and any(token in normalized for token in ("ухаж", "продл", "держ", "нос", "срок"))
+        )
+        if aftercare_trigger:
+            from app.services.demo_salon_knowledge import get_demo_salon_decision
+
+            truth_decision = get_demo_salon_decision(
+                message_text,
+                client_slug=client_slug,
+                intent_decomp=intent_decomp_payload,
+            )
+            if (
+                truth_decision
+                and truth_decision.action == "reply"
+                and truth_decision.intent == "aftercare_gel_lac"
+            ):
+                bot_response = truth_decision.response
+                legacy._reset_low_confidence_retry(conversation)
+                trace_payload = {
+                    "stage": "truth_gate",
+                    "decision": truth_decision.action,
+                    "intent": truth_decision.intent,
+                    "state": conversation.state,
+                    "booking_wants_flow": booking_wants_flow,
+                    "policy_type": policy_type,
+                    "consult_override": True,
+                }
+                if isinstance(getattr(truth_decision, "meta", None), dict):
+                    trace_payload.update(truth_decision.meta)
+                _record_decision_trace(conversation, trace_payload)
+                _record_message_decision_meta(
+                    saved_message,
+                    action=truth_decision.action,
+                    intent=truth_decision.intent,
+                    source="truth_gate",
+                    fast_intent=False,
+                )
+                if saved_message and isinstance(getattr(truth_decision, "meta", None), dict):
+                    _update_message_decision_metadata(saved_message, truth_decision.meta)
+                bot_response, sent = send_and_save(bot_response)
+                result_message = "Truth gate override reply sent"
+                if not sent:
+                    result_message = f"{result_message}; response_send=failed"
+                db.commit()
+                return ConsultFlowResult(
+                    response=WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    ),
+                    consult_intent=consult_intent,
+                    consult_topic=consult_topic,
+                    consult_question=consult_question,
+                    intent_decomp_payload=intent_decomp_payload,
+                )
 
     consult_flow_override = None
     consult_pack_used = False
@@ -741,22 +1011,31 @@ def _handle_consult_flow(
 
     if message_text and consult_pack_intent_signal:
         if playbook:
-            explicit_info_intent = bool(
-                info_class_intents & {"pricing", "duration", "location", "hours"}
-                or intent_decomp_set & {"pricing", "duration", "location", "hours"}
-            )
             short_circuit_service = (
                 str(intent_decomp_service_query).strip()
                 if isinstance(intent_decomp_service_query, str)
                 else ""
             )
+            price_or_duration_signal = False
+            if message_text:
+                from app.services.demo_salon_knowledge import (
+                    _has_duration_signal,
+                    _has_price_signal,
+                    _normalize_text,
+                )
+
+                normalized_message = _normalize_text(message_text)
+                price_or_duration_signal = _has_price_signal(
+                    normalized_message,
+                    message_text,
+                ) or _has_duration_signal(normalized_message, message_text)
             service_matcher = None
             handler_override = legacy._get_policy_handler(None, client_slug=client_slug)
             if isinstance(handler_override, dict):
                 service_matcher = handler_override.get("service_matcher")
             if service_matcher is None and isinstance(policy_handler, dict):
                 service_matcher = policy_handler.get("service_matcher")
-            if short_circuit_service and service_availability_decision is None:
+            if short_circuit_service and service_availability_decision is None and price_or_duration_signal:
                 if service_matcher:
                     service_availability_decision = service_matcher(
                         message_text,
@@ -828,32 +1107,6 @@ def _handle_consult_flow(
             if not consult_pack_topic_id and consult_topic and consult_topic in topic_map:
                 consult_pack_topic_id = consult_topic
                 consult_selector = "intent_decomp"
-
-            if explicit_info_intent:
-                consult_short_circuit = True
-                consult_short_circuit_reason = "explicit_info"
-                consult_short_circuit_service = short_circuit_service
-                consult_pack_used = True
-                consult_flow_trace = {
-                    "stage": "consult_flow",
-                    "decision": "short_circuit",
-                    "state": conversation.state,
-                    "reason": consult_short_circuit_reason,
-                    "explicit_info": True,
-                    "service_query": short_circuit_service,
-                }
-                if consult_pack_topic_id:
-                    consult_flow_trace["consult_playbook_id"] = consult_pack_topic_id
-                if consult_question:
-                    consult_flow_trace["consult_question"] = consult_question
-                legacy._record_decision_trace(conversation, consult_flow_trace)
-                return ConsultFlowResult(
-                    response=None,
-                    consult_intent=consult_intent,
-                    consult_topic=consult_topic,
-                    consult_question=consult_question,
-                    intent_decomp_payload=intent_decomp_payload,
-                )
 
             guard_reason = None
             non_consult_intent = (
@@ -1044,197 +1297,6 @@ def _handle_consult_flow(
                         if consult_pack_topic_id:
                             consult_topic = consult_pack_topic_id
                         consult_pack_used = True
-    if not consult_pack_used:
-        def _has_service_availability_signal(text: str | None) -> bool:
-            if not text:
-                return False
-            normalized = legacy.normalize_for_matching(text)
-            if not normalized:
-                return False
-            keywords = (
-                "делаете",
-                "есть ли",
-                "оказываете",
-                "предоставляете",
-                "можно сделать",
-                "жасайсыз",
-                "жасайсыздар",
-                "жасай ма",
-                "бар ма",
-                "қызмет көрсет",
-                "көрсетесіз",
-            )
-            return any(keyword in normalized for keyword in keywords)
-        service_hint = None
-        service_hint_reason = None
-        if message_text and (consult_intent or consult_context_active):
-            service_hint = get_demo_salon_service_hint(message_text, client_slug=client_slug)
-            if service_hint:
-                service_hint_reason = "service_hint"
-        service_query_for_consult = intent_decomp_service_query or service_hint
-        allow_service_query = bool(service_query_for_consult and (consult_intent or consult_context_active))
-        consult_candidate = None
-        if message_text:
-            consult_candidate = build_consult_reply(
-                message_text,
-                client_slug=client_slug,
-                intent_decomp=intent_decomp_payload,
-                conversation_id=str(conversation.id),
-                allow_service_query=allow_service_query,
-            )
-            if consult_candidate:
-                consult_blocked = False
-        if consult_candidate and not consult_intent and isinstance(intent_decomp_payload, dict):
-            consult_intent = True
-            intent_decomp_payload = dict(intent_decomp_payload)
-            intent_decomp_payload["consult_intent"] = True
-            candidate_meta = consult_candidate.meta if isinstance(consult_candidate.meta, dict) else {}
-            candidate_topic = candidate_meta.get("consult_topic")
-            candidate_question = candidate_meta.get("consult_question")
-            if candidate_topic and not consult_topic:
-                consult_topic = candidate_topic
-                intent_decomp_payload["consult_topic"] = candidate_topic
-            if candidate_question and not consult_question:
-                consult_question = candidate_question
-                intent_decomp_payload["consult_question"] = candidate_question
-        consult_intent_signal = bool(consult_intent or consult_candidate or consult_context_active)
-        normalized_message = legacy.normalize_for_matching(message_text) if message_text else ""
-        explicit_info_signal = bool(
-            booking_signal
-            or legacy._has_price_signal(normalized_message, message_text)
-            or legacy._has_duration_signal(normalized_message, message_text)
-            or (legacy._looks_like_info_query(message_text) and not consult_intent_signal)
-        )
-        explicit_info_intent = bool(
-            explicit_info_signal
-            or (
-                intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}
-                and not consult_intent_signal
-            )
-            or (info_class_intents & {"location", "hours"} and not consult_intent_signal)
-        )
-        consult_candidate_meta = (
-            consult_candidate.meta if consult_candidate and isinstance(consult_candidate.meta, dict) else None
-        )
-        if consult_intent_signal:
-            if not service_hint and message_text:
-                service_hint = get_demo_salon_service_hint(message_text, client_slug=client_slug)
-                if service_hint:
-                    service_hint_reason = "service_hint"
-            consult_short_circuit_service = intent_decomp_service_query or service_hint
-            if consult_short_circuit_service and not intent_decomp_service_query and service_hint_reason:
-                consult_short_circuit_reason = service_hint_reason
-            color_hair_signal = "цвет" in normalized_message and "волос" in normalized_message
-            consult_playbook_id = None
-            if consult_candidate_meta:
-                consult_playbook_id = consult_candidate_meta.get("consult_playbook_id")
-            consult_service_short_circuit = consult_playbook_id in {
-                "brows_lashes_care",
-                "sensitive_skin",
-                "hair_color_choice",
-            }
-            if consult_short_circuit_service and (
-                explicit_info_intent or color_hair_signal or consult_service_short_circuit
-            ) and not consult_intent_signal:
-                consult_short_circuit = True
-                if not consult_short_circuit_reason:
-                    consult_short_circuit_reason = (
-                        "explicit_info"
-                        if explicit_info_intent
-                        else "service_hint"
-                        if consult_short_circuit_service
-                        else "consult_service"
-                    )
-                consult_flow_trace = {
-                    "stage": "consult_flow",
-                    "decision": "short_circuit",
-                    "state": conversation.state,
-                    "reason": consult_short_circuit_reason,
-                }
-                consult_flow_trace["explicit_info"] = explicit_info_intent
-                if color_hair_signal:
-                    consult_flow_trace["color_hair_signal"] = True
-                consult_flow_trace["service_query"] = consult_short_circuit_service
-                if consult_topic:
-                    consult_flow_trace["consult_topic"] = consult_topic
-                if consult_question:
-                    consult_flow_trace["consult_question"] = consult_question
-                if consult_candidate_meta:
-                    consult_playbook_id = consult_candidate_meta.get("consult_playbook_id")
-                    if consult_playbook_id:
-                        consult_flow_trace["consult_playbook_id"] = consult_playbook_id
-                    consult_variant_id = consult_candidate_meta.get("consult_variant_id")
-                    if consult_variant_id:
-                        consult_flow_trace["consult_variant_id"] = consult_variant_id
-                legacy._record_decision_trace(conversation, consult_flow_trace)
-        if consult_intent_signal and not consult_short_circuit and message_text:
-            service_availability_signal = bool(intent_decomp_service_query) or _has_service_availability_signal(
-                message_text
-            )
-            if service_availability_signal:
-                service_availability_decision = get_demo_salon_service_decision(
-                    message_text,
-                    client_slug=client_slug,
-                    intent_decomp=intent_decomp_payload,
-                )
-        consult_decision = None if consult_short_circuit else consult_candidate
-        if not consult_decision and consult_intent_signal and not consult_short_circuit and message_text:
-            advice_result = generate_consult_advice(
-                db=db,
-                client_id=conversation.client_id,
-                client_slug=client_slug or "demo_salon",
-                conversation_id=conversation.id,
-                message_text=message_text,
-                consult_topic=consult_topic,
-                consult_question=consult_question,
-                client_config=client_config,
-                timing_context=timing_context,
-            )
-            if advice_result.ok and advice_result.value:
-                blocked_topics = legacy._detect_llm_guard_topics(
-                    advice_result.value,
-                    policy_type=policy_type,
-                    policy_pack=policy_pack,
-                )
-                if blocked_topics:
-                    legacy._record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "consult_llm_guard",
-                            "decision": "blocked_topics",
-                            "state": conversation.state,
-                            "blocked_topics": blocked_topics,
-                        },
-                    )
-                    if saved_message:
-                        legacy._update_message_decision_metadata(
-                            saved_message,
-                            {"consult_llm_guard": blocked_topics},
-                        )
-                else:
-                    consult_llm_used = True
-                    consult_meta = {
-                        "consult_intent": True,
-                        "consult_topic": consult_topic,
-                        "consult_question": consult_question or message_text,
-                        "consult_llm_used": True,
-                        "source": "llm",
-                    }
-                    consult_decision = DemoSalonDecision(
-                        action="reply",
-                        response=advice_result.value,
-                        intent="consult_reply",
-                        meta=consult_meta,
-                    )
-                    consult_signal = True
-                    if not consult_intent and isinstance(intent_decomp_payload, dict):
-                        consult_intent = True
-                        intent_decomp_payload = dict(intent_decomp_payload)
-                        intent_decomp_payload["consult_intent"] = True
-                        if consult_topic:
-                            intent_decomp_payload["consult_topic"] = consult_topic
-                        if consult_question:
-                            intent_decomp_payload["consult_question"] = consult_question
     if consult_decision:
         consult_meta = consult_decision.meta if isinstance(consult_decision.meta, dict) else {}
         consult_meta = dict(consult_meta)
@@ -1305,7 +1367,7 @@ def _handle_consult_flow(
                     if value is not None and consult_meta.get(key) is None:
                         consult_meta[key] = value
             if consult_decision and consult_decision.action == "reply":
-                combined_response = legacy._combine_sidecar(consult_decision.response, service_reply)
+                combined_response = legacy._append_followup(consult_decision.response, service_reply)
                 consult_decision = DemoSalonDecision(
                     action="reply",
                     response=combined_response,
@@ -1386,6 +1448,11 @@ def _handle_consult_flow(
             consult_flow_decision = "consult_clarify"
 
     if consult_decision:
+        class_router_result = _build_consult_class_router_result()
+        _record_class_router_trace_from_result(
+            conversation=conversation,
+            class_router_result=class_router_result,
+        )
         if consult_flow_decision:
             consult_flow_trace = {
                 "stage": "consult_flow",
@@ -1546,9 +1613,15 @@ def _handle_consult_flow(
                     booking_state,
                     refusal_flags=refusal_flags,
                 )
-            if booking_followup:
-                consult_meta["booking_followup"] = True
+        if booking_followup:
+            consult_meta["booking_followup"] = True
         bot_response = legacy._append_followup(bot_response, booking_followup)
+        bot_response = _maybe_append_booking_cta(
+            bot_response,
+            conversation_state=conversation.state,
+            allow_booking_flow=routing["allow_booking_flow"],
+            has_followup=bool(booking_followup or intent_queue_followup),
+        )
         legacy._reset_low_confidence_retry(conversation)
         bot_response, sent = send_and_save(bot_response)
         result_message = "Consult reply sent" if sent else "Consult reply send failed"

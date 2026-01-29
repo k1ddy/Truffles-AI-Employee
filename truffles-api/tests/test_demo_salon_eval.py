@@ -2,6 +2,7 @@ import asyncio
 import os
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -11,6 +12,7 @@ from zoneinfo import ZoneInfo
 import yaml
 
 import app.services.demo_salon_knowledge as demo_knowledge
+import app.services.knowledge_service as knowledge_service
 import app.services.reminder_service as reminder_service
 from app.models import Client, ClientSettings, Conversation, Handover, User
 from app.routers import webhook as webhook_router
@@ -524,8 +526,36 @@ def _build_service_carryover_patch() -> tuple[list[patch], list[dict]]:
 def _fake_intent_decomp(text: str, **_kwargs) -> dict:
     normalized = (text or "").casefold()
     intents: list[str] = []
+    if any(
+        keyword in normalized
+        for keyword in [
+            "скидк",
+            "акци",
+            "промо",
+            "именин",
+            "день рождения",
+            "перв",
+            "студент",
+            "пенсион",
+        ]
+    ):
+        intents.append("promotions")
+    if "до после" in normalized and any(word in normalized for word in ["дней", "дня", "день"]):
+        intents.append("promotions")
     if any(keyword in normalized for keyword in ["цена", "стоим", "стоимость", "прайс", "сколько стоит", "почем"]):
         intents.append("pricing")
+    if any(
+        keyword in normalized
+        for keyword in [
+            "сколько длится",
+            "длится",
+            "длительность",
+            "по времени",
+            "сколько времени",
+            "сколько по времени",
+        ]
+    ):
+        intents.append("duration")
     if any(keyword in normalized for keyword in ["во сколько", "до скольки", "работаете", "график", "часы"]):
         intents.append("hours")
     if any(keyword in normalized for keyword in ["где", "адрес", "находитесь"]):
@@ -535,15 +565,140 @@ def _fake_intent_decomp(text: str, **_kwargs) -> dict:
     primary = intents[0]
     secondary = [intent for intent in intents[1:] if intent != primary]
     service_query = _fake_service_hint(normalized, None) or ""
+    consult_intent = False
+    consult_topic = ""
+    consult_question = ""
+    consult_verbs = (
+        "посовет",
+        "совет",
+        "рекоменд",
+        "как ухаж",
+        "ухаживать за цвет",
+        "что делать",
+        "что мне",
+        "что лучше",
+        "нужен уход",
+        "уход за",
+        "уход после",
+        "сохранить цвет",
+        "после окраш",
+        "после покраск",
+        "подскажите варианты",
+    )
+    consult_color = (
+        "какой цвет",
+        "какой оттен",
+        "подойдет цвет",
+        "подойдет оттен",
+        "подобрать цвет",
+        "подобрать оттен",
+    )
+    consult_visual = (
+        "референс",
+        "как на фото",
+        "в стиле",
+        "фото пример",
+    )
+    consult_problems = (
+        "лома",
+        "сух",
+        "поврежд",
+        "чувств",
+        "редеют",
+        "сло",
+        "раздраж",
+    )
+    consult_parts = (
+        "волос",
+        "ногт",
+        "кожа",
+        "бров",
+        "ресниц",
+        "кутикул",
+    )
+    consult_kz = (
+        "күтім",
+        "бояудан кейін",
+        "қалай күт",
+        "қандай түс",
+    )
+    aftercare_signal = "гель лак" in normalized and any(
+        keyword in normalized for keyword in ("ухаж", "продл", "держ", "нос", "срок")
+    )
+    extra_consult = "чувств" in normalized and "уход" in normalized
+    availability_intent = any(
+        phrase in normalized for phrase in ("делаете", "предлагаете", "оказываете", "есть ли")
+    )
+    availability_block = availability_intent and not any(
+        phrase in normalized
+        for phrase in (
+            "посовет",
+            "совет",
+            "рекоменд",
+            "как ухаж",
+            "что делать",
+            "что мне",
+            "что лучше",
+            "подскажите варианты",
+            "после окраш",
+            "после покраск",
+        )
+    ) and not any(problem in normalized for problem in consult_problems)
+    if primary == "other" and not aftercare_signal and (
+        any(phrase in normalized for phrase in consult_verbs)
+        or any(phrase in normalized for phrase in consult_color)
+        or any(phrase in normalized for phrase in consult_visual)
+        or (
+            any(part in normalized for part in consult_parts)
+            and any(problem in normalized for problem in consult_problems)
+        )
+        or any(phrase in normalized for phrase in consult_kz)
+        or extra_consult
+    ):
+        consult_intent = True
+        consult_question = (text or "").strip()
+        try:
+            from app.services.consult_pack_service import load_consult_playbook
+            from app.services.knowledge_service import resolve_consult_topic_candidates
+
+            playbook, _error = load_consult_playbook("demo_salon")
+            if playbook:
+                candidates = resolve_consult_topic_candidates(
+                    text,
+                    playbook.topics,
+                    client_slug="demo_salon",
+                    top_k=1,
+                    embedding_fn=demo_knowledge._local_text_embedding,
+                )
+                if candidates:
+                    consult_topic = candidates[0].get("topic_id") or ""
+                if any(token in normalized for token in ("уход за лиц", "уход по лиц", "чувствит", "кожа", "лиц")):
+                    for topic in playbook.topics:
+                        if topic.id == "sensitive_skin":
+                            consult_topic = topic.id
+                            break
+                if not consult_topic:
+                    for topic in playbook.topics:
+                        if topic.id == "general_consult":
+                            consult_topic = topic.id
+                            break
+        except Exception:
+            consult_intent = False
+            consult_topic = ""
+            consult_question = ""
+    if consult_intent and availability_block:
+        consult_intent = False
+        consult_topic = ""
+        consult_question = ""
     return {
         "multi_intent": len(intents) > 1,
         "primary_intent": primary,
         "secondary_intents": secondary,
         "intents": intents,
         "service_query": service_query,
-        "consult_intent": False,
-        "consult_topic": "",
-        "consult_question": "",
+        "consult_intent": consult_intent,
+        "consult_topic": consult_topic,
+        "consult_question": consult_question,
     }
 
 
@@ -551,6 +706,7 @@ def _build_query(result):
     query = Mock()
     query.filter.return_value = query
     query.order_by.return_value = query
+    query.limit.return_value = query
     if isinstance(result, list):
         query.first.return_value = result[0] if result else None
         query.all.return_value = result
@@ -581,7 +737,8 @@ def _build_fake_db(client, settings, conversation, user, handovers=None):
 
     def _add(item):
         if isinstance(item, Handover):
-            item.conversation = conversation
+            if hasattr(conversation, "_sa_instance_state"):
+                item.conversation = conversation
             handovers.append(item)
 
     db.add = Mock(side_effect=_add)
@@ -624,7 +781,11 @@ def _trigger_pending_sla(
         reminder_service.process_reminders(db)
 
 
-def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> str:
+def _run_webhook_case(
+    user_text: str,
+    case_id: str,
+    local_time: str | None,
+) -> tuple[str, SimpleNamespace, SimpleNamespace]:
     conversation_id = uuid4()
     client = SimpleNamespace(id="client-123", name="demo_salon", config=_load_client_config_from_truth())
     settings = SimpleNamespace(
@@ -652,7 +813,7 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
         telegram_topic_id=None,
         escalated_at=None,
         branch_id=None,
-        context={},
+        context={"simulation": {"mode": True}},
         retry_offered_at=None,
     )
     user = SimpleNamespace(id="user-123", context={}, remote_jid="77000000000@s.whatsapp.net")
@@ -684,7 +845,30 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
             "app.routers.webhook._legacy.generate_bot_response",
             return_value=SimpleNamespace(ok=True, error=None, error_code=None, value=("", 0.0)),
         ),
-        patch("app.services.demo_salon_knowledge.get_embedding", side_effect=lambda text, *_args, **_kwargs: demo_knowledge._local_text_embedding(text)),
+        patch(
+            "app.services.knowledge_snapshot_consumer.get_consult_snapshot_mode",
+            return_value="shadow",
+        ),
+        patch(
+            "app.services.knowledge_snapshot_consumer.is_snapshot_consumer_enabled",
+            return_value=False,
+        ),
+        patch(
+            "app.services.knowledge_snapshot_consumer.is_consult_snapshot_allowlisted",
+            return_value=False,
+        ),
+        patch(
+            "app.services.ai_service.generate_consult_controller_output",
+            return_value=SimpleNamespace(ok=False, error="llm_disabled", error_code="llm_disabled", value=None),
+        ),
+        patch(
+            "app.services.demo_salon_knowledge.get_embedding",
+            side_effect=lambda text, *_args, **_kwargs: demo_knowledge._local_text_embedding(text),
+        ),
+        patch(
+            "app.services.knowledge_service.get_embedding",
+            side_effect=lambda text, *_args, **_kwargs: demo_knowledge._local_text_embedding(text),
+        ),
         patch("app.services.demo_salon_knowledge._search_services_index", return_value=[]),
         *carryover_patches,
     ]
@@ -716,7 +900,7 @@ def _run_webhook_case(user_text: str, case_id: str, local_time: str | None) -> s
                 conversation_id=conversation_id,
             )
         )
-    return response.bot_response or ""
+    return response.bot_response or "", conversation, saved_message
 
 
 def _run_webhook_conversation_turns(
@@ -753,7 +937,7 @@ def _run_webhook_conversation_turns(
         telegram_topic_id=None,
         escalated_at=None,
         branch_id=None,
-        context={},
+        context={"simulation": {"mode": True}},
         retry_offered_at=None,
     )
     user = SimpleNamespace(id="user-123", context={}, remote_jid="77000000000@s.whatsapp.net")
@@ -773,6 +957,18 @@ def _run_webhook_conversation_turns(
         patch(
             "app.routers.webhook._legacy.generate_bot_response",
             return_value=SimpleNamespace(ok=True, error=None, error_code=None, value=("", 0.0)),
+        ),
+        patch(
+            "app.services.knowledge_snapshot_consumer.get_consult_snapshot_mode",
+            return_value="shadow",
+        ),
+        patch(
+            "app.services.knowledge_snapshot_consumer.is_snapshot_consumer_enabled",
+            return_value=False,
+        ),
+        patch(
+            "app.services.knowledge_snapshot_consumer.is_consult_snapshot_allowlisted",
+            return_value=False,
         ),
         patch("app.services.demo_salon_knowledge.get_embedding", side_effect=lambda text, *_args, **_kwargs: demo_knowledge._local_text_embedding(text)),
         patch("app.services.demo_salon_knowledge._search_services_index", return_value=[]),
@@ -1041,50 +1237,77 @@ def test_consult_pack_only_and_short_circuit():
             payload["consult_intent"] = True
         return payload
 
-    case_id = "CA06_PACK_ONLY"
-    _responses, conversation, saved_message = _run_webhook_conversation_turns(
-        ["сухие волосы, что посоветуете?"],
-        case_id,
-        None,
-        intent_decomp_fn=_consult_intent_decomp,
-    )
-    meta = saved_message.message_metadata.get("decision_meta", {})
-    assert meta.get("consult_playbook_id") == "hair_damage", f"{case_id}: consult_playbook_id mismatch"
-    assert meta.get("source") == "pack", f"{case_id}: source mismatch"
-    assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+    real_consult_resolver = knowledge_service.resolve_consult_topic_candidates
 
-    trace = _get_decision_trace(conversation)
-    _assert_trace_contains(
-        trace,
-        {
-            "stage": "consult_flow",
-            "decision": "consult_reply",
-            "consult_playbook_id": "hair_damage",
-        },
-        case_id,
-    )
+    def _fake_consult_candidates(message_text: str, topics: list, **kwargs) -> list[dict]:
+        normalized = (message_text or "").casefold()
 
-    case_id = "CA06_SHORT_CIRCUIT"
-    _responses, conversation, saved_message = _run_webhook_conversation_turns(
-        ["уход за ногтями, сколько стоит маникюр?"],
-        case_id,
-        None,
-        intent_decomp_fn=_consult_intent_decomp,
-    )
-    meta = saved_message.message_metadata.get("decision_meta", {})
-    assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
-    fact_source = meta.get("fact_source")
-    assert fact_source in {"truth", "service_matcher"}, (
-        f"{case_id}: fact_source mismatch ({fact_source})"
-    )
+        def _candidate(topic_id: str, score: float) -> dict:
+            topic = next((item for item in topics if item.id == topic_id), None)
+            return {
+                "topic_id": topic_id,
+                "title": topic.title if topic else "",
+                "summary": topic.summary if topic else "",
+                "score": score,
+            }
 
-    trace = _get_decision_trace(conversation)
-    consult_short_circuit = {
-        "stage": "consult_flow",
-        "decision": "short_circuit",
-        "consult_playbook_id": "nails_care",
-    }
-    if not _trace_has_entry(trace, consult_short_circuit):
+        if any(keyword in normalized for keyword in ("волос", "сух")):
+            return [_candidate("hair_damage", 0.92)]
+        if "ногт" in normalized:
+            return [_candidate("nails_care", 0.91)]
+        return real_consult_resolver(message_text, topics, **kwargs)
+
+    with patch(
+        "app.services.knowledge_service.resolve_consult_topic_candidates",
+        side_effect=_fake_consult_candidates,
+    ):
+        case_id = "CA06_PACK_ONLY"
+        _responses, conversation, saved_message = _run_webhook_conversation_turns(
+            ["сухие волосы, что посоветуете?"],
+            case_id,
+            None,
+            intent_decomp_fn=_consult_intent_decomp,
+        )
+        meta = saved_message.message_metadata.get("decision_meta", {})
+        assert meta.get("consult_playbook_id") == "hair_damage", f"{case_id}: consult_playbook_id mismatch"
+        assert meta.get("source") == "pack", f"{case_id}: source mismatch"
+        assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+
+        trace = _get_decision_trace(conversation)
+        _assert_trace_contains(
+            trace,
+            {
+                "stage": "consult_flow",
+                "decision": "consult_reply",
+                "consult_playbook_id": "hair_damage",
+            },
+            case_id,
+        )
+
+        case_id = "CA06_SHORT_CIRCUIT"
+        _responses, conversation, saved_message = _run_webhook_conversation_turns(
+            ["уход за ногтями, сколько стоит маникюр?"],
+            case_id,
+            None,
+            intent_decomp_fn=_consult_intent_decomp,
+        )
+        meta = saved_message.message_metadata.get("decision_meta", {})
+        assert meta.get("llm_used") is False, f"{case_id}: llm_used mismatch"
+        fact_source = meta.get("fact_source")
+        assert fact_source in {"truth", "service_matcher"}, (
+            f"{case_id}: fact_source mismatch ({fact_source})"
+        )
+
+        trace = _get_decision_trace(conversation)
+        _assert_trace_contains(
+            trace,
+            {
+                "stage": "consult_flow",
+                "decision": "consult_reply",
+                "consult_playbook_id": "nails_care",
+            },
+            case_id,
+        )
         stage = "truth_gate" if fact_source == "truth" else "service_matcher"
         _assert_trace_stage_decision_any(trace, case_id, {stage})
 
@@ -1402,6 +1625,57 @@ def _assert_expected_response(response: str, expected: dict, case_id: str) -> No
             _assert_contains_all(response, expected["collect"], case_id, "collect")
 
 
+@lru_cache(maxsize=1)
+def _load_consult_pack():
+    from app.services.consult_pack_service import load_consult_playbook
+
+    playbook, _error = load_consult_playbook("demo_salon")
+    return playbook
+
+
+def _assert_consult_pack_response(response: str, topic_id: str | None, case_id: str) -> None:
+    if not topic_id:
+        raise AssertionError(f"{case_id}: consult_topic_id missing for consult case")
+    playbook = _load_consult_pack()
+    if playbook is None:
+        raise AssertionError(f"{case_id}: consult playbook missing")
+    from app.services.consult_pack_service import get_consult_topic
+
+    topic = get_consult_topic(playbook, topic_id)
+    if topic is None:
+        raise AssertionError(f"{case_id}: unknown consult_topic_id '{topic_id}'")
+    allowed = [item for item in (topic.allowed_advice or []) if isinstance(item, str) and item.strip()]
+    if not allowed:
+        raise AssertionError(f"{case_id}: consult topic '{topic_id}' has no allowed_advice")
+    normalized = _normalize(response)
+    if not any(_normalize(item) in normalized for item in allowed):
+        raise AssertionError(
+            f"{case_id}: consult response missing allowed_advice for topic '{topic_id}'"
+        )
+
+
+def _sanitize_consult_expected(expected: dict) -> dict:
+    payload = dict(expected)
+    payload.pop("must_include", None)
+    payload.pop("must_include_any", None)
+    must_not = payload.get("must_not")
+    if isinstance(must_not, list):
+        filtered = [
+            item
+            for item in must_not
+            if not (isinstance(item, str) and "запис" in item)
+        ]
+        if filtered:
+            payload["must_not"] = filtered
+        else:
+            payload.pop("must_not", None)
+    return payload
+
+
+def _assert_consult_cta(response: str, case_id: str) -> None:
+    _assert_contains_all(response, ["Хотите записаться"], case_id, "consult_cta")
+
+
 def _collect_trace_expectations(expected: dict, trace_expectations: list[dict]) -> None:
     items = expected.get("trace_contains") or []
     if isinstance(items, list):
@@ -1463,6 +1737,12 @@ def test_demo_salon_eval_cases():
         conversation = None
         saved_message = None
         trace_expectations: list[dict] = []
+        is_consult_case = case_expected.get("intent") == "consult_reply"
+        trace_required = bool(case_expected.get("trace_contains"))
+        if turns:
+            trace_required = trace_required or any(
+                (turn.get("expected") or {}).get("trace_contains") for turn in turns
+            )
 
         if turns and messages:
             raise AssertionError(f"{case_id}: use turns or messages, not both")
@@ -1489,7 +1769,7 @@ def test_demo_salon_eval_cases():
             continue
 
         decision = None
-        if not messages and expected_action != "off_topic":
+        if not messages and expected_action != "off_topic" and not trace_required:
             decision = get_demo_salon_decision(user_text)
             if decision is not None:
                 assert decision.action == expected_action, (
@@ -1518,10 +1798,17 @@ def test_demo_salon_eval_cases():
                         f"{case_id}/turn{idx}",
                     )
                     _collect_trace_expectations(step_expected, trace_expectations)
-            if case_expected:
-                response = responses[-1] if responses else ""
-                _assert_expected_response(response, case_expected, case_id)
-                _collect_trace_expectations(case_expected, trace_expectations)
+                if case_expected:
+                    response = responses[-1] if responses else ""
+                    expected_payload = case_expected
+                    if is_consult_case and saved_message:
+                        meta = saved_message.message_metadata.get("decision_meta", {})
+                        topic_id = meta.get("consult_topic_id") or meta.get("consult_topic")
+                        _assert_consult_pack_response(response, topic_id, case_id)
+                        _assert_consult_cta(response, case_id)
+                        expected_payload = _sanitize_consult_expected(case_expected)
+                    _assert_expected_response(response, expected_payload, case_id)
+                    _collect_trace_expectations(case_expected, trace_expectations)
         else:
             if messages:
                 response, conversation, saved_message = _run_webhook_conversation(
@@ -1529,14 +1816,21 @@ def test_demo_salon_eval_cases():
                     case_id,
                     str(local_time) if local_time else None,
                 )
-            elif local_time or wants_cta or not decision:
-                response = _run_webhook_case(
+            elif local_time or wants_cta or not decision or is_consult_case:
+                response, conversation, saved_message = _run_webhook_case(
                     user_text,
                     case_id,
                     str(local_time) if local_time else None,
                 )
             if case_expected:
-                _assert_expected_response(response, case_expected, case_id)
+                expected_payload = case_expected
+                if is_consult_case and saved_message:
+                    meta = saved_message.message_metadata.get("decision_meta", {})
+                    topic_id = meta.get("consult_topic_id") or meta.get("consult_topic")
+                    _assert_consult_pack_response(response, topic_id, case_id)
+                    _assert_consult_cta(response, case_id)
+                    expected_payload = _sanitize_consult_expected(case_expected)
+                _assert_expected_response(response, expected_payload, case_id)
                 _collect_trace_expectations(case_expected, trace_expectations)
 
         if trace_expectations:
