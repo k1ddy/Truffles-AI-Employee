@@ -2,7 +2,7 @@
 
 **Статус:** CANON  
 **Owner:** Top Architect  
-**Обновлено:** 2026-01-15  
+**Обновлено:** 2026-01-28  
 **Scope:** техсправка и операционные детали; поведение бота см. `SPECS/ARCHITECTURE.md` и `SPECS/CONSULTANT.md`.  
 **Out of scope:** продуктовые обещания, SLA продаж.  
 **Links:** `SPECS/ARCHITECTURE.md`, `SPECS/INFRASTRUCTURE.md`, `TECH.md`, `STATE.md`.
@@ -18,6 +18,7 @@
 3) Для CA‑аудита открой `STRATEGY/TECH_ROADMAP.md` (CA‑plan) и раздел 4.3 (Live‑check SOP).
 4) Отдели аудит от фикса: аудит = evidence, фикс = отдельный Task Package с CA‑ID.
 5) Если `STATE.md` NOW не помещается в 1 экран или нет следующих шагов — STOP и запросить Brain или Top Architect обновление брифа.
+6) Demo‑packs (например, `demo_salon`) — только тест/демо; запрещено вводить demo‑only правила или “подгон” под тесты.
 
 **Правила evidence:**
 - Единственный источник фактов — `STATE.md` (PASS/FAIL с conv_id/trace/SQL/CI).
@@ -25,6 +26,7 @@
 - Если live‑check невозможен → статус **BLOCKED**, без подмены. **Исключение CA‑13:** допускается simulated inbound (`/webhook` или instance→instance) при наличии inbound row в БД + `decision_meta/trace`; в `STATE.md` пометка `simulated`.
 
 **Карта инструментов (что запускать):**
+- Для дебага message‑flow начинаем с `ops/diagnose.py explain`, затем trace‑bundle, затем логи.
 - `ops/diagnose.py livecheck` — реальный inbound через ChatFlow, маркеры для SQL evidence.
 - `ops/diagnose.py` — health/metrics/outbox snapshot.
 - `ops/diagnose.py send-text` — одноразовая отправка через ChatFlow send‑text.

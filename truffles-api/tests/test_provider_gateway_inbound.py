@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator, FormatChecker, RefResolver
 
 from app.database import get_db
 from app.main import app
@@ -17,6 +20,37 @@ from app.services.provider_gateway_service import translate_provider_inbound
 @pytest.fixture
 def client():
     return TestClient(app)
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _load_schema(relative_path: str) -> Draft202012Validator:
+    schema_path = _repo_root() / relative_path
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    store = _schema_store(schema)
+    resolver = RefResolver(base_uri=schema_path.resolve().as_uri(), referrer=schema, store=store)
+    return Draft202012Validator(schema, resolver=resolver, format_checker=FormatChecker())
+
+
+def _validate_schema(relative_path: str, payload: dict) -> None:
+    _load_schema(relative_path).validate(payload)
+
+
+def _schema_store(schema: dict) -> dict[str, dict]:
+    store: dict[str, dict] = {}
+    schema_id = schema.get("$id")
+    if isinstance(schema_id, str):
+        store[schema_id] = schema
+
+    tenant_path = _repo_root() / "contracts/tenancy/tenant_context.v1.jsonschema"
+    tenant_schema = json.loads(tenant_path.read_text(encoding="utf-8"))
+    tenant_id = tenant_schema.get("$id")
+    if isinstance(tenant_id, str):
+        store[tenant_id] = tenant_schema
+    store[tenant_path.resolve().as_uri()] = tenant_schema
+    return store
 
 
 def _build_payload(overrides: dict | None = None) -> dict:
@@ -102,3 +136,8 @@ def test_translate_provider_inbound_requires_client_slug():
     request, error = translate_provider_inbound(inbound)
     assert request is None
     assert error == "client_slug_required"
+
+
+def test_provider_inbound_contract_valid():
+    payload = _build_payload()
+    _validate_schema("contracts/integrations/provider_inbound.v1.jsonschema", payload)

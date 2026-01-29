@@ -42,39 +42,39 @@ class ConsoleAuthContext:
 
 
 _jwks_client: Optional[PyJWKClient] = None
-_role_priority = {"owner": 0, "admin": 1, "manager": 2, "support": 3}
+_role_priority = {"platform_admin": -1, "owner": 0, "admin": 1, "manager": 2, "support": 3}
 _console_rbac_matrix: dict[str, dict[str, tuple[str, ...]]] = {
     "inbox": {
-        "read": ("owner", "admin", "manager", "support"),
-        "write": ("owner", "admin", "manager"),
+        "read": ("platform_admin", "owner", "admin", "manager", "support"),
+        "write": ("platform_admin", "owner", "admin", "manager"),
     },
     "knowledge": {
-        "read": ("owner", "admin", "manager"),
-        "write": ("owner", "admin"),
+        "read": ("platform_admin", "owner", "admin", "manager"),
+        "write": ("platform_admin", "owner", "admin"),
     },
     "team": {
-        "read": ("owner", "admin"),
-        "write": ("owner", "admin"),
+        "read": ("platform_admin", "owner", "admin"),
+        "write": ("platform_admin", "owner", "admin"),
     },
     "calendar": {
-        "read": ("owner", "admin", "manager"),
-        "write": ("owner", "admin", "manager"),
+        "read": ("platform_admin", "owner", "admin", "manager"),
+        "write": ("platform_admin", "owner", "admin", "manager"),
     },
     "settings": {
-        "read": ("owner", "admin"),
-        "write": ("owner", "admin"),
+        "read": ("platform_admin", "owner", "admin"),
+        "write": ("platform_admin", "owner", "admin"),
     },
     "ops": {
-        "read": ("owner", "admin", "support"),
-        "write": ("owner", "admin"),
+        "read": ("platform_admin", "owner", "admin", "support"),
+        "write": ("platform_admin", "owner", "admin"),
     },
     "audit": {
-        "read": ("owner", "admin", "support"),
+        "read": ("platform_admin", "owner", "admin", "support"),
         "write": (),
     },
     "provisioning": {
-        "read": ("owner", "admin", "support"),
-        "write": ("owner", "admin"),
+        "read": ("platform_admin", "owner", "admin", "support"),
+        "write": ("platform_admin", "owner", "admin"),
     },
 }
 
@@ -377,6 +377,23 @@ def _build_access_map(
     return access_map
 
 
+def _build_platform_admin_access_map(
+    clients: list[Client],
+    agents: list[Agent],
+) -> dict[UUID, _AccessEntry]:
+    access_map: dict[UUID, _AccessEntry] = {}
+    agent_ids = {agent.id for agent in agents}
+    for client in clients:
+        scopes = {"company"} if client.company_id else {"client"}
+        access_map[client.id] = _AccessEntry(
+            roles={"platform_admin"},
+            scopes=scopes,
+            branch_ids=set(),
+            agent_ids=set(agent_ids),
+        )
+    return access_map
+
+
 def get_console_context(request: Request, db: Session, *, require_selection: bool = True) -> ConsoleAuthContext:
     token = _get_bearer_token(request)
     payload = _decode_token(token)
@@ -411,54 +428,66 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
             .all()
         )
 
-    memberships_by_agent: dict[UUID, list[AgentMembership]] = defaultdict(list)
-    for membership in memberships:
-        memberships_by_agent[membership.agent_id].append(membership)
-
-    legacy_agents = [agent for agent in agents if not memberships_by_agent.get(agent.id)]
-
-    membership_branch_ids = {m.branch_id for m in memberships if m.scope == "branch" and m.branch_id}
-    membership_client_ids = {m.client_id for m in memberships if m.scope == "client" and m.client_id}
-    membership_company_ids = {m.company_id for m in memberships if m.scope == "company" and m.company_id}
-
-    legacy_branch_ids = {agent.branch_id for agent in legacy_agents if agent.branch_id}
-    legacy_client_ids = {agent.client_id for agent in legacy_agents if agent.client_id}
-
-    branch_ids = membership_branch_ids | legacy_branch_ids
-    branches_by_id: dict[UUID, Branch] = {}
-    if branch_ids:
-        branches = db.query(Branch).filter(Branch.id.in_(branch_ids)).all()
-        branches_by_id = {branch.id: branch for branch in branches}
-
-    branch_client_ids = {branch.client_id for branch in branches_by_id.values()}
-
-    company_clients = []
-    if membership_company_ids:
-        company_clients = db.query(Client).filter(Client.company_id.in_(membership_company_ids)).all()
-
-    clients_by_company: dict[UUID, list[Client]] = defaultdict(list)
-    for client in company_clients:
-        if client.company_id:
-            clients_by_company[client.company_id].append(client)
-
-    client_ids = set(membership_client_ids) | legacy_client_ids | branch_client_ids | {client.id for client in company_clients}
+    platform_admin_agents = [agent for agent in agents if agent.role == "platform_admin"]
     clients_by_id: dict[UUID, Client] = {}
-    if client_ids:
-        clients = db.query(Client).filter(Client.id.in_(client_ids)).all()
+    access_map: dict[UUID, _AccessEntry] = {}
+    accessible_clients: list[Client] = []
+
+    if platform_admin_agents:
+        clients = db.query(Client).order_by(Client.name.asc()).all()
         clients_by_id = {client.id: client for client in clients}
+        access_map = _build_platform_admin_access_map(clients, platform_admin_agents)
+        accessible_clients = clients
+    else:
+        memberships_by_agent: dict[UUID, list[AgentMembership]] = defaultdict(list)
+        for membership in memberships:
+            memberships_by_agent[membership.agent_id].append(membership)
 
-    access_map = _build_access_map(
-        memberships=memberships,
-        legacy_agents=legacy_agents,
-        branches_by_id=branches_by_id,
-        clients_by_company=clients_by_company,
-        clients_by_id=clients_by_id,
-    )
+        legacy_agents = [agent for agent in agents if not memberships_by_agent.get(agent.id)]
 
-    accessible_clients = sorted(
-        [clients_by_id[client_id] for client_id in access_map.keys() if client_id in clients_by_id],
-        key=lambda client: client.name,
-    )
+        membership_branch_ids = {m.branch_id for m in memberships if m.scope == "branch" and m.branch_id}
+        membership_client_ids = {m.client_id for m in memberships if m.scope == "client" and m.client_id}
+        membership_company_ids = {m.company_id for m in memberships if m.scope == "company" and m.company_id}
+
+        legacy_branch_ids = {agent.branch_id for agent in legacy_agents if agent.branch_id}
+        legacy_client_ids = {agent.client_id for agent in legacy_agents if agent.client_id}
+
+        branch_ids = membership_branch_ids | legacy_branch_ids
+        branches_by_id: dict[UUID, Branch] = {}
+        if branch_ids:
+            branches = db.query(Branch).filter(Branch.id.in_(branch_ids)).all()
+            branches_by_id = {branch.id: branch for branch in branches}
+
+        branch_client_ids = {branch.client_id for branch in branches_by_id.values()}
+
+        company_clients = []
+        if membership_company_ids:
+            company_clients = db.query(Client).filter(Client.company_id.in_(membership_company_ids)).all()
+
+        clients_by_company: dict[UUID, list[Client]] = defaultdict(list)
+        for client in company_clients:
+            if client.company_id:
+                clients_by_company[client.company_id].append(client)
+
+        client_ids = set(membership_client_ids) | legacy_client_ids | branch_client_ids | {
+            client.id for client in company_clients
+        }
+        if client_ids:
+            clients = db.query(Client).filter(Client.id.in_(client_ids)).all()
+            clients_by_id = {client.id: client for client in clients}
+
+        access_map = _build_access_map(
+            memberships=memberships,
+            legacy_agents=legacy_agents,
+            branches_by_id=branches_by_id,
+            clients_by_company=clients_by_company,
+            clients_by_id=clients_by_id,
+        )
+
+        accessible_clients = sorted(
+            [clients_by_id[client_id] for client_id in access_map.keys() if client_id in clients_by_id],
+            key=lambda client: client.name,
+        )
     if not accessible_clients:
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Client not found for agent")
 

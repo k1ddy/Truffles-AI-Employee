@@ -1,0 +1,25 @@
+# SESSION 2026-01-27-provider-gateway-canary-arch — Provider Gateway Canary Evidence
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md
+- branch: main
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: Record provider gateway canary inbound/status/inbox evidence and update STATE.
+- done:
+  - Restarted provider gateway container with inbound/status/inbox enabled (outbound off).
+  - Ran canary inbound and status callback; verified inbox_event + outbox meta.
+  - Updated STATE with evidence.
+- next:
+  - Start Inbox Service separation Task Package.
+- evidence:
+  - /tmp/provider_gateway_health_canary_20260127_113011.json
+  - /tmp/pgw_inbound_payload_canary_20260127-113011.json
+  - /tmp/pgw_inbound_response_canary_20260127-113011.json
+  - /tmp/pgw_inbox_event_canary_20260127-113011.txt
+  - /tmp/pgw_outbox_row_canary_20260127-113011.txt
+  - /tmp/pgw_status_payload_canary_20260127-113011.json
+  - /tmp/pgw_status_response_canary_20260127-113011.json
+  - /tmp/pgw_outbox_status_canary_20260127-113011.txt
+- last_updated: 2026-01-27

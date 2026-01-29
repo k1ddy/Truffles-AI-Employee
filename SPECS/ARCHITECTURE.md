@@ -115,6 +115,16 @@ ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/health"
 
 ## 5. Архитектура — потоки данных
 
+### Knowledge Gateway (shadow service)
+- Отдельный FastAPI app: `app.knowledge_gateway_app:app`.
+- Эндпойнты: `POST /knowledge/snapshot`, `GET /health` (gate: `KNOWLEDGE_SNAPSHOT_ENABLED` + optional token).
+- Контейнер internal-only; core остается на прямом доступе к БД (shadow, без переключения трафика).
+
+### Provider Gateway (shadow service)
+- Отдельный FastAPI app: `app.provider_gateway_app:app`.
+- Эндпойнты: `POST /provider/inbound`, `POST /provider/status`, `GET /health` (gated by env flags).
+- Контейнер internal-only; core остается на текущем ingress (shadow, без переключения трафика).
+
 ### WhatsApp → Бот (ACK‑first + outbox)
 ```
 WhatsApp клиент

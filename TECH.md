@@ -32,7 +32,9 @@ hostname; whoami; pwd; curl -s https://ifconfig.me
 |-----|-------|------------|
 | truffles-api | truffles-api_truffles-api | Python API (FastAPI) |
 | truffles-outbox | truffles-api_truffles-api | Outbox worker (ACK-first delivery) |
+| truffles-outbox-service | truffles-api_truffles-api | Outbox service (shadow) |
 | truffles-sentinel | truffles-api_truffles-api | Sentinel worker (health/self-heal) |
+| truffles-knowledge-gateway | truffles-api_truffles-api | Knowledge snapshot gateway (shadow) |
 | truffles_postgres_1 | postgres:15-alpine | PostgreSQL |
 | truffles_redis_1 | redis:7-alpine | Redis |
 | truffles_qdrant_1 | qdrant/qdrant:latest | Vector DB |
@@ -105,6 +107,22 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `POST /admin/media/cleanup` — TTL‑очистка `/home/zhan/truffles-media` (admin token)
 - `POST /reminders/process` — обработка напоминаний
 
+### Knowledge Gateway (shadow, internal)
+- URL: `http://127.0.0.1:8010`
+- `GET /health` — статус сервиса
+- `POST /knowledge/snapshot` — выдача snapshot (требует `KNOWLEDGE_SNAPSHOT_ENABLED=1`)
+
+### Outbox Service (shadow, internal)
+- URL: `http://127.0.0.1:8014`
+- `GET /health` — статус сервиса
+- `POST /outbox/process` — обработка outbox (требует `OUTBOX_SERVICE_ENABLED=1`)
+
+### Provider Gateway (shadow, internal)
+- URL: `http://127.0.0.1:8011`
+- `GET /health` — статус сервиса
+- `POST /provider/inbound` — входящие от провайдера (требует `PROVIDER_GATEWAY_INBOUND_ENABLED=1`)
+- `POST /provider/status` — статус доставки (требует `PROVIDER_GATEWAY_STATUS_ENABLED=1`)
+
 **WhatsApp Webhook URL (ChatFlow):**
 `https://api.truffles.kz/webhook/{client_slug}?webhook_secret=<SECRET>`
 
@@ -122,6 +140,8 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `OUTBOX_MAX_ATTEMPTS` — максимум попыток outbox перед статусом FAILED (default: 5).
 - `OUTBOX_RETRY_BACKOFF_SECONDS` — базовый backoff (сек) для повторов outbox (default: 2).
 - `OUTBOX_STALE_PROCESSING_SECONDS` — через сколько секунд PROCESSING считается зависшим и переходит обратно в очередь (default: 120).
+- `OUTBOX_SERVICE_ENABLED` — включает `POST /outbox/process` (shadow сервис).
+- `OUTBOX_SERVICE_TOKEN` — токен для outbox service (header `X-Outbox-Service-Token`).
 - `WEBHOOK_PIPELINE_BUDGET_MS` — бюджет (мс) для /webhook пайплайна (LLM/RAG gating) (default: 7000).
 - `CONSOLE_IDEMPOTENCY_TTL_SECONDS` — TTL незавершённых console idempotency ключей (default: 600).
 - `ALERTS_ADMIN_TOKEN` — токен для admin/outbox эндпойнтов.
@@ -142,7 +162,16 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `PROVIDER_GATEWAY_OUTBOUND_URL` — URL provider gateway outbound endpoint.
 - `PROVIDER_GATEWAY_STATUS_CALLBACK_URL` — callback URL для статусов отправки.
 - `PROVIDER_GATEWAY_TOKEN` — токен для inbound/outbound/status.
+- `INBOX_SERVICE_ENABLED` — включает `POST /inbox/event` (shadow inbox service).
+- `INBOX_SERVICE_TOKEN` — токен для inbox service (header `X-Inbox-Service-Token`).
+- `DECISION_CORE_ENABLED` — включает `POST /decision/handle` (shadow decision core).
+- `DECISION_CORE_TOKEN` — токен для decision core (header `X-Decision-Core-Token`).
 - `QDRANT_COLLECTION` — коллекция Qdrant (default: truffles_knowledge; при `TEST_MODE=1` и пустом env → truffles_knowledge_ci).
+- `KNOWLEDGE_SNAPSHOT_ENABLED` — включает `/knowledge/snapshot` (gateway service).
+- `KNOWLEDGE_SNAPSHOT_TOKEN` — токен для gateway snapshot (header `X-Knowledge-Snapshot-Token`).
+- `KNOWLEDGE_SNAPSHOT_TTL_SECONDS` — TTL snapshot (сек).
+- `KNOWLEDGE_SNAPSHOT_HMAC_KEY` — HMAC‑секрет подписи snapshot.
+- `KNOWLEDGE_SNAPSHOT_KEY_ID` — key id для подписи snapshot (optional).
 - `KNOWLEDGE_SNAPSHOT_CONSUMER_ENABLED` — включает shadow-consumer для consult snapshot (default: false).
 - `KNOWLEDGE_SNAPSHOT_CONSULT_MODE` — режим consult snapshot: `shadow|fallback|strict` (default: shadow).
 - `KNOWLEDGE_SNAPSHOT_CONSULT_ALLOWLIST` — список `client_slug` для canary/cutover (через запятую).
@@ -477,6 +506,18 @@ ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:mai
 После деплоя обязательно перезапустить воркеры на том же образе, чтобы не было дрейфа:
 ```bash
 ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env bash /home/zhan/truffles-main/scripts/restart_workers.sh"
+```
+
+### Knowledge Gateway (shadow)
+```bash
+ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env PULL_IMAGE=1 REQUIRE_GHCR=1 bash /home/zhan/truffles-main/scripts/restart_knowledge_gateway.sh"
+ssh -p 222 zhan@5.188.241.234 "curl -s http://127.0.0.1:8010/health"
+```
+
+### Provider Gateway (shadow)
+```bash
+ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env PULL_IMAGE=1 REQUIRE_GHCR=1 bash /home/zhan/truffles-main/scripts/restart_provider_gateway.sh"
+ssh -p 222 zhan@5.188.241.234 "curl -s http://127.0.0.1:8011/health"
 ```
 
 ### Перезапуск API (без обновления кода)

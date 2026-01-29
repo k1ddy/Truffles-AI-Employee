@@ -84,7 +84,7 @@ class ConsoleCompanyCreateResponse(BaseModel):
 
 class ConsoleClientCreateRequest(BaseModel):
     slug: str
-    company_id: Optional[UUID] = None
+    company_id: UUID
     status: Optional[str] = "active"
 
 
@@ -178,7 +178,7 @@ class ConsoleConfirmationResponse(BaseModel):
 class ConsoleAgentCreateRequest(BaseModel):
     client_id: UUID
     branch_id: Optional[UUID] = None
-    role: Literal["owner", "admin", "manager", "support"]
+    role: Literal["owner", "admin", "manager", "support", "platform_admin"]
     name: Optional[str] = None
     is_active: Optional[bool] = True
     oidc_subject: Optional[str] = None

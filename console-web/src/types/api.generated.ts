@@ -769,7 +769,7 @@ export interface components {
             id?: string;
             name?: string | null;
             /** @enum {string} */
-            role?: "owner" | "admin" | "manager" | "support";
+            role?: "platform_admin" | "owner" | "admin" | "manager" | "support";
             /** Format: uuid */
             client_id?: string;
             /**
@@ -792,7 +792,7 @@ export interface components {
             id?: string;
             name?: string | null;
             /** @enum {string} */
-            role?: "owner" | "admin" | "manager" | "support";
+            role?: "platform_admin" | "owner" | "admin" | "manager" | "support";
             /** Format: uuid */
             client_id?: string;
             /** Format: uuid */
@@ -829,7 +829,7 @@ export interface components {
         ClientCreateRequest: {
             slug: string;
             /** Format: uuid */
-            company_id?: string | null;
+            company_id: string;
             status?: string | null;
         };
         ClientCreateResponse: {
@@ -1019,7 +1019,7 @@ export interface components {
             /** Format: uuid */
             branch_id?: string | null;
             /** @enum {string} */
-            role: "owner" | "admin" | "manager" | "support";
+            role: "platform_admin" | "owner" | "admin" | "manager" | "support";
             name?: string | null;
             is_active?: boolean | null;
             oidc_subject?: string | null;

@@ -96,7 +96,7 @@ export default function CaseView({ caseId }: CaseViewProps) {
                     canWrite={canWriteInbox}
                 />
             </div>
-            <CaseDetailsPanel caseDetail={caseDetail} />
+            <CaseDetailsPanel caseDetail={caseDetail} messages={messages} />
         </div>
     );
 }

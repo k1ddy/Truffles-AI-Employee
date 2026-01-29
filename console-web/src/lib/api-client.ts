@@ -80,7 +80,7 @@ export const ErrorCodes = {
 
 export type ErrorCode = keyof typeof ErrorCodes;
 
-export type ConsoleRole = "owner" | "admin" | "manager" | "support";
+export type ConsoleRole = "platform_admin" | "owner" | "admin" | "manager" | "support";
 export type ConsoleSection =
     | "inbox"
     | "knowledge"
@@ -89,41 +89,46 @@ export type ConsoleSection =
     | "settings"
     | "ops"
     | "audit"
+    | "tenants"
     | "provisioning";
 export type ConsoleAction = "read" | "write";
 
 export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRole[]>> = {
     inbox: {
-        read: ["owner", "admin", "manager", "support"],
-        write: ["owner", "admin", "manager"],
+        read: ["platform_admin", "owner", "admin", "manager", "support"],
+        write: ["platform_admin", "owner", "admin", "manager"],
     },
     knowledge: {
-        read: ["owner", "admin", "manager"],
-        write: ["owner", "admin"],
+        read: ["platform_admin", "owner", "admin", "manager"],
+        write: ["platform_admin", "owner", "admin"],
     },
     team: {
-        read: ["owner", "admin"],
-        write: ["owner", "admin"],
+        read: ["platform_admin", "owner", "admin"],
+        write: ["platform_admin", "owner", "admin"],
     },
     calendar: {
-        read: ["owner", "admin", "manager"],
-        write: ["owner", "admin", "manager"],
+        read: ["platform_admin", "owner", "admin", "manager"],
+        write: ["platform_admin", "owner", "admin", "manager"],
     },
     settings: {
-        read: ["owner", "admin"],
-        write: ["owner", "admin"],
+        read: ["platform_admin", "owner", "admin"],
+        write: ["platform_admin", "owner", "admin"],
     },
     ops: {
-        read: ["owner", "admin", "support"],
-        write: ["owner", "admin"],
+        read: ["platform_admin", "owner", "admin", "support"],
+        write: ["platform_admin", "owner", "admin"],
     },
     audit: {
-        read: ["owner", "admin", "support"],
+        read: ["platform_admin", "owner", "admin", "support"],
         write: [],
     },
+    tenants: {
+        read: ["platform_admin"],
+        write: ["platform_admin"],
+    },
     provisioning: {
-        read: ["owner", "admin", "support"],
-        write: ["owner", "admin"],
+        read: ["platform_admin", "owner", "admin", "support"],
+        write: ["platform_admin", "owner", "admin"],
     },
 };
 

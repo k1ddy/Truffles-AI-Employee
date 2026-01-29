@@ -35,14 +35,19 @@
 | `.github/workflows/session-gate.yml` | CI gate: session log + doc-only policy | Brain/Architect |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
-| `scripts/session_start.sh` | Создать worktree/branch и session log | Все роли |
+| `scripts/session_start.sh` | Создать worktree/branch и session log (agent suffix обязателен) | Все роли |
 | `scripts/session_check.sh` | Проверка сессии перед commit/push | Все роли |
 | `scripts/session_end.sh` | Закрытие сессии + index обновление | Все роли |
-| `scripts/session_resume.sh` | Возобновить активную сессию после compaction | Все роли |
+| `scripts/session_resume.sh` | Возобновить активную сессию после compaction (по умолчанию SESSION_AGENT) | Все роли |
 | `scripts/session_audit.sh` | Аудит сессий (статусы/сироты) | Brain/Architect |
 | `scripts/session_gate.sh` | Gate для doc-only и session log | Brain/Architect |
 | `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
 | `scripts/test_api_container.sh` | Контейнерный pytest (drift‑safe, sanitized env) | Backend/QA |
+| `scripts/restart_knowledge_gateway.sh` | Перезапуск Knowledge Gateway (shadow) | OPS |
+| `scripts/restart_provider_gateway.sh` | Перезапуск Provider Gateway (shadow) | OPS |
+| `scripts/restart_inbox_service.sh` | Перезапуск Inbox Service (shadow) | OPS |
+| `scripts/restart_decision_core.sh` | Перезапуск Decision Core (shadow) | OPS |
+| `scripts/restart_outbox_service.sh` | Перезапуск Outbox Service (shadow) | OPS |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
@@ -51,6 +56,14 @@
 | `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
 | `truffles-api/app/services/console_confirmations.py` | Confirmation safeguards for destructive Console actions | Backend |
 | `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |
+| `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |
+| `truffles-api/app/provider_gateway_app.py` | Отдельный app для Provider Gateway | Backend |
+| `truffles-api/app/inbox_service_app.py` | Отдельный app для Inbox Service | Backend |
+| `truffles-api/app/decision_core_app.py` | Отдельный app для Decision Core | Backend |
+| `truffles-api/app/outbox_service_app.py` | Отдельный app для Outbox Service | Backend |
+| `truffles-api/app/routers/inbox_service.py` | Router для Inbox Service | Backend |
+| `truffles-api/app/routers/decision_core.py` | Router для Decision Core | Backend |
+| `truffles-api/app/routers/outbox_service.py` | Router для Outbox Service | Backend |
 | `truffles-api/migrations/015_add_inbox_events.sql` | Migration: inbox_events (durable inbox store) | Backend/OPS |
 | `truffles-api/migrations/016_add_console_confirmations.sql` | Migration: console_confirmations (destructive safeguards) | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
@@ -121,9 +134,17 @@
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-outbound-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-media-pipeline.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-inbox-event.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-28-decision-core-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-28-outbox-service-shadow.md`
+- `docs/TASK_PACKAGES/TP-2026-01-28-provider-gateway-integration-tests.md`
+- `docs/TASK_PACKAGES/TP-2026-01-28-qdrant-branch-backfill-ca13.md`
+- `docs/TASK_PACKAGES/TP-2026-01-28-decision-meta-branch-id.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`
+- `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-gateway-service.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-control-plane-docs-selection-runbooks.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`

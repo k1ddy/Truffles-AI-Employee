@@ -12,8 +12,10 @@
 ## 0) New agent checklist (read-first)
 
 - Read `AGENTS.md`, `STATE.md`, `STRUCTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/ESCALATION.md`, `SPECS/SYSTEM_REFERENCE.md`.
+- Debug message flow with `ops/diagnose.py explain` first, then `trace-bundle`, then logs.
 - Work only in the assigned worktree/branch; do not switch branches mid-task.
-- Do **not** special‑case `demo_salon`; it is a canary pack. Logic must remain pack‑agnostic.
+- `demo_salon` is a canary pack; never add demo‑only rules or “pass‑tests” hacks.
+- Prefer semantic resolver/LLM controller; do not expand dictionaries to chase coverage.
 - Use `ops/diagnose.py` for live‑check evidence; never “massage” DB/trace.
 - Keep process artifacts updated: session log + Task Package; `STATE.md` only by Brain.
 

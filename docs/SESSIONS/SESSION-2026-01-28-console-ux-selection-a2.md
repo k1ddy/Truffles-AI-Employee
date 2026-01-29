@@ -1,0 +1,22 @@
+# SESSION 2026-01-28-console-ux-selection-a2 — Console UX selection + noise cleanup
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md
+- branch: feat/2026-01-28-console-ux-selection-a2
+- worktree: /home/zhan/worktrees/2026-01-28-console-ux-selection-a2
+- base_ref: origin/main
+- scope: Console UX selection clarity (context feedback, Knowledge branch gate, Cases filters cleanup).
+- done:
+  - Session created.
+  - Updated Task Package for branch/worktree and plan.
+  - CaseList: added advanced filters section and reduced default filter noise.
+  - Knowledge: branch gate now triggers on missing selection and handles empty branches.
+  - Console header: clearer context feedback and RU labels for context bar.
+  - `npm --prefix console-web run lint` (after install) — OK.
+- next:
+  - Capture UI evidence (screens) if needed.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md
+  - `npm --prefix console-web run lint`
+- last_updated: 2026-01-28

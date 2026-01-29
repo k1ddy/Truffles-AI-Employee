@@ -1,6 +1,6 @@
 # SESSION 2026-01-27-console-ux-selection — Console UX selection + E2E recovery
 
-- status: active
+- status: done
 - owner: Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md
 - branch: feat/console-ux-selection
@@ -10,9 +10,10 @@
 - done:
   - Added profile retry handling + selection fallback in Playwright login/smoke tests.
   - Verified console-web lint passes.
+  - PR #401 merged (UX selection + knowledge branch gating).
 - next:
-  - Wait for CI on PR #401 and merge if green.
-  - Continue UX polish after merge (Inbox/Knowledge follow-ups).
+  - None.
 - evidence:
   - `npm --prefix console-web run lint`
-- last_updated: 2026-01-27
+  - PR #401 https://github.com/k1ddy/Truffles-AI-Employee/pull/401 (merge commit 22e55e3d59272fbf3ec727b02acf2c296b1a57fb)
+- last_updated: 2026-01-28

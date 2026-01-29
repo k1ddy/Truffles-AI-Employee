@@ -1,0 +1,31 @@
+# SESSION 2026-01-27-platform-admin-a2 — Session 2026-01-27-platform-admin-a2
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-platform-admin-rbac.md
+- branch: feat/2026-01-27-platform-admin-a2
+- worktree: /home/zhan/worktrees/2026-01-27-platform-admin-a2
+- base_ref: origin/main
+- scope: Add runtime platform_admin role + RBAC enforcement (API/UI/contract).
+- done:
+  - Session created.
+  - Task Package copied into worktree.
+  - Added platform_admin runtime role + RBAC enforcement (API/UI/contract).
+  - Added platform_admin access-map helper + tests.
+  - Updated Console UI labels/gating for platform_admin.
+  - Ran pytest for console auth/RBAC tests.
+  - Installed console-web deps + ran lint (clean).
+  - Regenerated API types from OpenAPI.
+  - Promoted agent_id `aaaaaaaa-0000-0000-0000-000000000001` to platform_admin (agents + agent_memberships).
+  - Verified `/console/v1/me` role=platform_admin.
+  - Captured live console screenshots for platform_admin.
+- next:
+  - Run CI and update STATE.md with CI evidence (move to DONE).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-platform-admin-rbac.md
+  - pytest: `pytest -q truffles-api/tests/test_console_auth_access.py truffles-api/tests/test_console_rbac.py` (40 passed)
+  - lint: `npm --prefix console-web run lint` (clean)
+  - types: `npm --prefix console-web run generate:api`
+  - /me proof: `/tmp/console_me_platform_admin_20260127.json`
+  - screenshots: `/home/zhan/screenshots/console-live-2026-01-27T09-36-00-261Z`
+- last_updated: 2026-01-27

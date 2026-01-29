@@ -1,0 +1,23 @@
+# SESSION 2026-01-27-inbox-service-shadow-arch — Inbox Service Shadow
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md
+- branch: feat/2026-01-27-inbox-service-shadow-arch
+- worktree: /home/zhan/worktrees/2026-01-27-inbox-service-shadow-arch
+- base_ref: origin/main
+- scope: Implement Inbox Service shadow app/router, tests, restart script, and record evidence.
+- done:
+  - Implemented inbox_service app/router + restart script + tests.
+  - Verified inbox ingest writes `inbox_events` and service health.
+  - PR #423 open; session-gate fix required (session log + index updates).
+- next:
+  - Merge PR #423 after CI green.
+  - Restart inbox service from GHCR and capture health/inbox evidence.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md
+  - /tmp/inbox_service_health_20260127_165233.json
+  - /tmp/inbox_service_payload_20260127-115244.json
+  - /tmp/inbox_service_response_20260127-115244.json
+  - /tmp/inbox_event_canary_20260127-115244.txt
+- last_updated: 2026-01-27

@@ -16,6 +16,7 @@ from app.database import get_db
 from app.main import app
 from app.models import Branch, Client, ClientSettings, Conversation, User
 from app.routers import webhook as webhook_router
+from app.routers.webhook import response as webhook_response
 from app.routers.webhook.session_memory import _is_session_reset_only_message
 from app.schemas.consult import ConsultControllerOutput
 from app.schemas.message import MessageRequest, MessageResponse
@@ -2810,10 +2811,28 @@ def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
     client_query.filter.return_value.first.return_value = client
     settings_query = Mock()
     settings_query.filter.return_value.first.return_value = settings
+    branch_phone_query = Mock()
+    branch_phone_query.filter.return_value.all.return_value = []
     conversation_query = Mock()
     conversation_query.filter.return_value.first.return_value = conversation
     user_query = Mock()
     user_query.filter.return_value.first.return_value = user
+
+    def _query_side_effect(model, *args, **kwargs):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Conversation:
+            return conversation_query
+        if model is User:
+            return user_query
+        if getattr(model, "class_", None) is Branch and getattr(model, "key", None) == "phone":
+            return branch_phone_query
+        fallback = Mock()
+        fallback.filter.return_value.first.return_value = None
+        fallback.filter.return_value.all.return_value = []
+        return fallback
 
     db = Mock()
     db.query.side_effect = _build_query_side_effect(
@@ -2912,10 +2931,28 @@ def test_rag_rewrite_and_scores_logged():
     client_query.filter.return_value.first.return_value = client
     settings_query = Mock()
     settings_query.filter.return_value.first.return_value = settings
+    branch_phone_query = Mock()
+    branch_phone_query.filter.return_value.all.return_value = []
     conversation_query = Mock()
     conversation_query.filter.return_value.first.return_value = conversation
     user_query = Mock()
     user_query.filter.return_value.first.return_value = user
+
+    def _query_side_effect(model, *args, **kwargs):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Conversation:
+            return conversation_query
+        if model is User:
+            return user_query
+        if getattr(model, "class_", None) is Branch and getattr(model, "key", None) == "phone":
+            return branch_phone_query
+        fallback = Mock()
+        fallback.filter.return_value.first.return_value = None
+        fallback.filter.return_value.all.return_value = []
+        return fallback
 
     db = Mock()
     db.query.side_effect = _build_query_side_effect(
@@ -2971,7 +3008,11 @@ def test_rag_rewrite_and_scores_logged():
         "app.services.ai_service.rewrite_query_for_retrieval",
         return_value={"rewrite_used": True, "rewrite_text": "адрес салона", "reason": "rewritten"},
     ), patch(
-        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+        "app.routers.webhook.http._lookup_sender_branch",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match",
+        return_value=None,
     ), patch(
         "app.routers.webhook._legacy.generate_bot_response",
         side_effect=fake_generate_bot_response,
@@ -3008,6 +3049,30 @@ def test_rag_rewrite_and_scores_logged():
     trace = conversation.context.get("decision_trace", [])
     assert any(entry.get("stage") == "rewrite" for entry in trace if isinstance(entry, dict))
     assert any(entry.get("stage") == "rag_retrieve" for entry in trace if isinstance(entry, dict))
+
+
+def test_record_rag_meta_sets_branch_id():
+    conversation = SimpleNamespace(context={})
+    saved_message = SimpleNamespace(message_metadata={})
+    branch_id = "b7f75692-951e-421a-aae6-f5db97394799"
+    timing_context = {
+        "rag_scores": {"vector_max": 0.6, "bm25_max": 1.2, "hybrid_max": 0.8},
+        "rag_best_score": 0.6,
+        "rag_attempted": True,
+        "branch_id": branch_id,
+    }
+
+    with patch("app.routers.webhook.response._record_llm_budget_trace"), patch(
+        "app.routers.webhook.response._record_llm_degradation"
+    ), patch("app.routers.webhook.response._record_decision_trace"):
+        webhook_response._record_rag_meta(
+            conversation=conversation,
+            saved_message=saved_message,
+            timing_context=timing_context,
+        )
+
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("branch_id") == branch_id
 
 
 def test_semantic_service_matcher_allows_short_query_without_keywords():

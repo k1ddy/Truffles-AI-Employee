@@ -124,6 +124,15 @@ session_id=$(basename "$session_file")
 session_id=${session_id#SESSION-}
 session_id=${session_id%.md}
 
+agent="${SESSION_AGENT:-}"
+if [[ -n "$agent" ]]; then
+  if [[ "$session_id" != *"-${agent}" ]]; then
+    echo "ERROR: SESSION_AGENT='${agent}' does not match session id '${session_id}'." >&2
+    echo "Resume the correct worktree or unset SESSION_AGENT for legacy sessions." >&2
+    exit 1
+  fi
+fi
+
 if ! grep -q "^| ${session_id} |" "$index_file"; then
   echo "ERROR: Session ID missing in SESSION_INDEX: ${session_id}" >&2
   exit 1

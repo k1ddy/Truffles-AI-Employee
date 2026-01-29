@@ -5,6 +5,7 @@ import pytest
 
 from app.services.console_auth import (
     _build_access_map,
+    _build_platform_admin_access_map,
     _resolve_branch_selection,
     _resolve_client_selection,
     _resolve_company_selection,
@@ -99,8 +100,30 @@ def test_build_access_map_legacy_agent_fallback():
 
 
 def test_resolve_role_priority():
-    role = _resolve_role({"manager", "owner", "support"})
-    assert role == "owner"
+    role = _resolve_role({"manager", "owner", "support", "platform_admin"})
+    assert role == "platform_admin"
+
+
+def test_build_platform_admin_access_map_scopes():
+    agent_id = uuid4()
+    company_id = uuid4()
+    client_a = SimpleNamespace(id=uuid4(), name="Client A", company_id=company_id)
+    client_b = SimpleNamespace(id=uuid4(), name="Client B", company_id=None)
+    agent = SimpleNamespace(id=agent_id, role="platform_admin")
+
+    access_map = _build_platform_admin_access_map([client_a, client_b], [agent])
+
+    entry_a = access_map[client_a.id]
+    assert entry_a.roles == {"platform_admin"}
+    assert entry_a.scopes == {"company"}
+    assert entry_a.branch_ids == set()
+    assert entry_a.agent_ids == {agent_id}
+
+    entry_b = access_map[client_b.id]
+    assert entry_b.roles == {"platform_admin"}
+    assert entry_b.scopes == {"client"}
+    assert entry_b.branch_ids == set()
+    assert entry_b.agent_ids == {agent_id}
 
 
 def test_resolve_client_selection_requires_client_when_multiple():

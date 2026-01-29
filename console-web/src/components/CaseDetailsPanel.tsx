@@ -1,11 +1,28 @@
 import type { ReactNode } from "react";
-import type { Case, DecisionTraceEntry } from "@/types";
+import type { Case, DecisionTraceEntry, Message } from "@/types";
 
 function formatTimestamp(value?: string | null) {
     if (!value) {
         return "—";
     }
     return new Date(value).toLocaleString("ru-RU");
+}
+
+function getRoleLabel(role: string) {
+    if (role === "user") {
+        return "Клиент";
+    }
+    if (role === "manager") {
+        return "Менеджер";
+    }
+    return "Бот";
+}
+
+function truncateText(value: string, max = 140) {
+    if (value.length <= max) {
+        return value;
+    }
+    return `${value.slice(0, max)}…`;
 }
 
 function getPrimaryContact(caseDetail: Case) {
@@ -23,14 +40,103 @@ function extractExplainEntry(trace: DecisionTraceEntry[] | undefined) {
     return [...trace].reverse().find((entry) => entry.decision || entry.meta) ?? null;
 }
 
-function normalizeMeta(meta: Record<string, unknown> | undefined) {
-    if (!meta) {
-        return [] as Array<[string, string]>;
+type DecisionMeta = Record<string, unknown>;
+
+const META_LABELS: Record<string, string> = {
+    action: "Действие",
+    intent: "Интент",
+    source: "Источник",
+    policy_gate: "Policy",
+    fact_source: "Источник фактов",
+    info_sections: "Секции",
+    service_query: "Запрос услуги",
+    price_item: "Прайс",
+    duration_item: "Длительность",
+    consult_playbook_id: "Playbook",
+    consult_selector: "Selector",
+    rag_reason: "RAG",
+    trace_id: "Trace ID",
+    llm_used: "LLM",
+    llm_degradation_reason: "LLM fallback",
+};
+
+const SUMMARY_GROUPS = [
+    {
+        title: "Что произошло",
+        keys: ["action", "intent"],
+    },
+    {
+        title: "Почему",
+        keys: ["source", "policy_gate", "rag_reason"],
+    },
+    {
+        title: "Что использовано",
+        keys: [
+            "info_sections",
+            "service_query",
+            "price_item",
+            "duration_item",
+            "consult_playbook_id",
+            "consult_selector",
+            "fact_source",
+        ],
+    },
+    {
+        title: "Тех. метки",
+        keys: ["trace_id", "llm_used", "llm_degradation_reason"],
+    },
+];
+
+const MESSAGE_META_KEYS = ["action", "intent", "source", "policy_gate", "fact_source"];
+
+function extractDecisionMeta(metadata: Message["metadata"]): DecisionMeta | null {
+    if (!metadata || typeof metadata !== "object") {
+        return null;
     }
-    return Object.entries(meta)
-        .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
-        .slice(0, 6)
-        .map(([key, value]) => [key, String(value)]);
+    const raw = (metadata as Record<string, unknown>).decision_meta;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        return null;
+    }
+    return raw as DecisionMeta;
+}
+
+function formatMetaValue(value: unknown) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    if (["string", "number", "boolean"].includes(typeof value)) {
+        return String(value);
+    }
+    if (Array.isArray(value)) {
+        const flat = value
+            .filter((item) => ["string", "number", "boolean"].includes(typeof item))
+            .map((item) => String(item));
+        if (flat.length === 0) {
+            return null;
+        }
+        const visible = flat.slice(0, 4);
+        const suffix = flat.length > 4 ? ` +${flat.length - 4}` : "";
+        return `${visible.join(", ")}${suffix}`;
+    }
+    return null;
+}
+
+function buildMetaItems(meta: DecisionMeta | null, keys: string[]) {
+    if (!meta) {
+        return [];
+    }
+    return keys.flatMap((key) => {
+        const value = formatMetaValue(meta[key]);
+        if (!value) {
+            return [];
+        }
+        return [
+            {
+                label: META_LABELS[key] ?? key,
+                value,
+            },
+        ];
+    });
 }
 
 function DetailCard({
@@ -59,15 +165,36 @@ function DetailCard({
     );
 }
 
-export default function CaseDetailsPanel({ caseDetail }: { caseDetail: Case }) {
+export default function CaseDetailsPanel({
+    caseDetail,
+    messages = [],
+}: {
+    caseDetail: Case;
+    messages?: Message[];
+}) {
     const contact = getPrimaryContact(caseDetail);
     const contextText = caseDetail.context_summary || caseDetail.user_message || "Контекст недоступен";
     const explainEntry = extractExplainEntry(caseDetail.decision_trace);
-    const explainMeta = normalizeMeta((explainEntry?.meta ?? undefined) as Record<string, unknown> | undefined);
     const trace = caseDetail.decision_trace ?? [];
     const keyStages = trace
         .filter((entry) => ["policy_gate", "state_transition", "escalation", "booking"].includes(entry.stage))
         .slice(-5);
+    const messageDiagnostics = messages.flatMap((message) => {
+        const meta = extractDecisionMeta(message.metadata);
+        if (!meta) {
+            return [];
+        }
+        return [{ message, meta }];
+    });
+    const latestDecision = messageDiagnostics[0];
+    const summaryGroups = latestDecision
+        ? SUMMARY_GROUPS.map((group) => ({
+            title: group.title,
+            items: buildMetaItems(latestDecision.meta, group.keys),
+        })).filter((group) => group.items.length > 0)
+        : [];
+    const hasTrace = trace.length > 0;
+    const hasMessageDiagnostics = messageDiagnostics.length > 0;
 
     return (
         <div className="flex flex-col gap-4" data-testid="case-details">
@@ -135,7 +262,40 @@ export default function CaseDetailsPanel({ caseDetail }: { caseDetail: Case }) {
             </DetailCard>
 
             <DetailCard title="Explain" defaultOpen={false}>
-                {explainEntry ? (
+                {latestDecision ? (
+                    <div className="space-y-4 text-xs">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <span className="bg-muted px-2 py-1 rounded">Последнее решение</span>
+                            <span className="text-muted-foreground">{formatTimestamp(latestDecision.message.created_at)}</span>
+                        </div>
+                        <div className="rounded border border-border/60 bg-background px-3 py-2">
+                            <p className="text-[11px] text-muted-foreground mb-1">
+                                {getRoleLabel(latestDecision.message.role)} • {latestDecision.message.role}
+                            </p>
+                            <p className="text-sm font-medium">
+                                {truncateText(latestDecision.message.content)}
+                            </p>
+                        </div>
+                        {summaryGroups.length > 0 ? (
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                {summaryGroups.map((group) => (
+                                    <div key={group.title} className="space-y-2">
+                                        <p className="text-[11px] uppercase text-muted-foreground">{group.title}</p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {group.items.map((item) => (
+                                                <span key={`${group.title}-${item.label}`} className="bg-muted px-2 py-1 rounded">
+                                                    {item.label}: {item.value}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="text-xs text-muted-foreground">decision_meta есть, но без ключевых полей.</p>
+                        )}
+                    </div>
+                ) : explainEntry ? (
                     <div className="space-y-2 text-xs">
                         <div className="flex flex-wrap gap-2">
                             <span className="bg-muted px-2 py-1 rounded">{explainEntry.stage}</span>
@@ -143,15 +303,9 @@ export default function CaseDetailsPanel({ caseDetail }: { caseDetail: Case }) {
                                 <span className="bg-muted px-2 py-1 rounded">{explainEntry.decision}</span>
                             )}
                         </div>
-                        {explainMeta.length > 0 && (
-                            <div className="flex flex-wrap gap-2">
-                                {explainMeta.map(([key, value]) => (
-                                    <span key={key} className="bg-muted px-2 py-1 rounded">
-                                        {key}: {value}
-                                    </span>
-                                ))}
-                            </div>
-                        )}
+                        <p className="text-xs text-muted-foreground">
+                            decision_meta не записан для сообщений, показаны последние trace‑стадии.
+                        </p>
                     </div>
                 ) : (
                     <p className="text-xs text-muted-foreground">Объяснение недоступно.</p>
@@ -159,9 +313,9 @@ export default function CaseDetailsPanel({ caseDetail }: { caseDetail: Case }) {
             </DetailCard>
 
             <DetailCard title="Trace" defaultOpen={false}>
-                {trace.length > 0 ? (
+                {hasTrace || hasMessageDiagnostics ? (
                     <div className="space-y-3">
-                        {keyStages.length > 0 && (
+                        {hasTrace && keyStages.length > 0 && (
                             <div className="flex flex-wrap gap-2 text-xs">
                                 {keyStages.map((entry, idx) => {
                                     const stageClass = entry.stage === "policy_gate"
@@ -179,19 +333,63 @@ export default function CaseDetailsPanel({ caseDetail }: { caseDetail: Case }) {
                                 })}
                             </div>
                         )}
-                        <div className="max-h-48 overflow-y-auto space-y-1 text-xs">
-                            {trace.map((entry, idx) => (
-                                <div
-                                    key={`${entry.stage}-${idx}`}
-                                    className="bg-background p-2 rounded border border-border/60 flex items-start gap-2"
-                                >
-                                    <span className="font-mono text-muted-foreground w-6">{idx + 1}.</span>
-                                    <span className="font-medium text-foreground">{entry.stage}</span>
-                                    {entry.decision && (
-                                        <span className="text-muted-foreground">: {entry.decision}</span>
-                                    )}
+                        {hasMessageDiagnostics && (
+                            <div className="space-y-2">
+                                <p className="text-xs text-muted-foreground">По сообщениям</p>
+                                <div className="max-h-64 overflow-y-auto space-y-2 text-xs">
+                                    {messageDiagnostics.map(({ message, meta }) => (
+                                        <div
+                                            key={message.id}
+                                            className="bg-background p-3 rounded border border-border/60 space-y-2"
+                                        >
+                                            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                                                <span>{getRoleLabel(message.role)} • {message.role}</span>
+                                                <span>{formatTimestamp(message.created_at)}</span>
+                                            </div>
+                                            <p className="text-xs text-foreground/90">
+                                                {truncateText(message.content, 160)}
+                                            </p>
+                                            <div className="flex flex-wrap gap-2">
+                                                {buildMetaItems(meta, MESSAGE_META_KEYS).map((item) => (
+                                                    <span key={`${message.id}-${item.label}`} className="bg-muted px-2 py-1 rounded">
+                                                        {item.label}: {item.value}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
-                            ))}
+                            </div>
+                        )}
+                        <div className="space-y-2">
+                            <p className="text-xs text-muted-foreground">Стадии пайплайна</p>
+                            {hasTrace ? (
+                                <div className="max-h-48 overflow-y-auto space-y-1 text-xs">
+                                    {trace.map((entry, idx) => (
+                                        <div
+                                            key={`${entry.stage}-${idx}`}
+                                            className="bg-background p-2 rounded border border-border/60"
+                                        >
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-mono text-muted-foreground w-6">{idx + 1}.</span>
+                                                    <span className="font-medium text-foreground">{entry.stage}</span>
+                                                    {entry.decision && (
+                                                        <span className="text-muted-foreground">: {entry.decision}</span>
+                                                    )}
+                                                </div>
+                                                {entry.recorded_at && (
+                                                    <span className="text-[11px] text-muted-foreground">
+                                                        {formatTimestamp(entry.recorded_at)}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-xs text-muted-foreground">Trace ещё не записан.</p>
+                            )}
                         </div>
                     </div>
                 ) : (

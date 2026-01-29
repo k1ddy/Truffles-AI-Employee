@@ -36,7 +36,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const canWriteInbox = canAccessConsole(role, "inbox", "write");
     const branches = (meData?.branches ?? []) as { id?: string; name?: string }[];
     const selectedBranchId = meData?.selected_branch_id ?? "";
-    const isPrivileged = role === "owner" || role === "admin";
+    const isPrivileged = role === "owner" || role === "admin" || role === "platform_admin";
     const showBranchFilter = isPrivileged && branches.length > 1 && !selectedBranchId;
 
     useEffect(() => {
@@ -152,7 +152,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                     {selectedCaseId && caseLoading && renderLoadingPane()}
                     {selectedCaseId && caseError && renderErrorPane()}
                     {selectedCaseId && !caseLoading && !caseError && caseDetail && (
-                        <CaseDetailsPanel caseDetail={caseDetail} />
+                        <CaseDetailsPanel caseDetail={caseDetail} messages={messages} />
                     )}
                     {selectedCaseId && !caseLoading && !caseError && !caseDetail && (
                         <div className="card-surface p-6 text-center text-muted-foreground">
