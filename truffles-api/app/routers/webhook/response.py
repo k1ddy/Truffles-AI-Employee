@@ -561,6 +561,7 @@ def _handle_consult_flow(
     service_availability_used = False
     service_availability_decision = None
     consult_context_active = bool(current_goal == "consult")
+    consult_intent_signal = bool(consult_intent or consult_context_active)
     booking_goal_locked = bool(
         booking_wants_flow
         or booking_active
@@ -695,7 +696,7 @@ def _handle_consult_flow(
                         "consult_source": "pack",
                         "source": "pack",
                     }
-                    if not booking_goal_locked:
+                    if not booking_goal_locked or consult_intent_signal:
                         context = legacy._get_conversation_context(conversation)
                         context = legacy._set_expected_reply_context(
                             conversation=conversation,
@@ -754,9 +755,14 @@ def _handle_consult_flow(
 
     if message_text and consult_pack_intent_signal:
         if playbook:
+            normalized_message = legacy.normalize_for_matching(message_text) if message_text else ""
+            explicit_info_signal = bool(
+                legacy._has_price_signal(normalized_message, message_text)
+                or legacy._has_duration_signal(normalized_message, message_text)
+            )
             explicit_info_intent = bool(
-                info_class_intents & {"pricing", "duration", "location", "hours"}
-                or intent_decomp_set & {"pricing", "duration", "location", "hours"}
+                explicit_info_signal
+                or info_class_intents & {"location", "hours"}
             )
             short_circuit_service = (
                 str(intent_decomp_service_query).strip()
@@ -879,7 +885,7 @@ def _handle_consult_flow(
                     guard_reason = "risk_high"
                 elif "handoff" in controller_output.actions:
                     guard_reason = "needs_human"
-            if non_consult_intent and not guard_reason:
+            if non_consult_intent and not guard_reason and not consult_intent:
                 consult_intent = False
                 if isinstance(intent_decomp_payload, dict):
                     intent_decomp_payload = dict(intent_decomp_payload)
@@ -997,7 +1003,7 @@ def _handle_consult_flow(
                         "consult_source": "pack",
                         "source": "pack",
                     }
-                    if not booking_goal_locked:
+                    if not booking_goal_locked or consult_intent_signal:
                         context = legacy._get_conversation_context(conversation)
                         context = legacy._set_expected_reply_context(
                             conversation=conversation,
@@ -1333,6 +1339,9 @@ def _handle_consult_flow(
                     meta=consult_meta,
                 )
                 consult_signal = True
+    if consult_intent_signal and not consult_signal and not consult_short_circuit:
+        consult_signal = True
+
     if consult_signal:
         context = legacy._get_conversation_context(conversation)
         context_manager = legacy._get_context_manager(context)
@@ -1377,7 +1386,7 @@ def _handle_consult_flow(
             consult_meta["consult_questions"] = [legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC]
             consult_meta["clarify_attempt"] = {"intent": "consult", "count": clarify_count}
             consult_meta["clarify_reason"] = "consult"
-            if booking_goal_locked:
+            if booking_goal_locked and not consult_intent_signal:
                 consult_meta["clarify_suppressed"] = True
             else:
                 context = legacy._get_conversation_context(conversation)
@@ -1541,7 +1550,7 @@ def _handle_consult_flow(
         bot_response = consult_decision.response
         bot_response = legacy._combine_sidecar(bot_response, intent_queue_followup)
         booking_followup = None
-        if booking_goal_locked:
+        if booking_goal_locked and consult_flow_decision != "consult_clarify":
             if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
                 booking_followup = legacy.MSG_BOOKING_ASK_SERVICE
             elif expected_reply_type == legacy.EXPECTED_REPLY_TIME:
