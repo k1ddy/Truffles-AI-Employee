@@ -30,6 +30,22 @@ def _base_payload() -> dict:
                 {"category": "Hair", "items": [{"name": "Haircut", "price": 1000}]},
                 {"category": "Nails", "items": [{"name": "Manicure", "price": 2000}]},
             ],
+            "policy": {
+                "hard_law": {"intents": ["payment"]},
+                "payment_info": {"intent": "payment", "keywords": ["pay"]},
+                "reschedule": {"intent": "reschedule", "keywords": ["reschedule"]},
+                "cancel": {"intent": "cancel_request", "keywords": ["cancel"]},
+                "medical": {"intent": "medical", "keywords": ["medical"]},
+                "legal": {"intent": "legal", "keywords": ["legal"]},
+                "complaint": {
+                    "intent": "complaint",
+                    "keywords": ["complaint"],
+                    "explicit_keywords": ["complaint"],
+                    "consult_override_keywords": ["fear"],
+                },
+                "discounts": {"intent": "discounts", "keywords": ["discount"]},
+                "guard_topics": {"refund": ["refund"]},
+            },
         }
     }
 

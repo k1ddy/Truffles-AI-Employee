@@ -24,6 +24,7 @@ def _make_inputs(*, capabilities: CapabilitiesPayload, has_capabilities: bool = 
         has_telegram_chat=overrides.get("has_telegram_chat", False),
         has_knowledge_tag=overrides.get("has_knowledge_tag", False),
         has_published_knowledge=overrides.get("has_published_knowledge", False),
+        missing_pack_fields=overrides.get("missing_pack_fields", []),
         has_working_hours=overrides.get("has_working_hours", False),
         has_booking_settings=overrides.get("has_booking_settings", False),
         has_specialists=overrides.get("has_specialists", False),
@@ -64,6 +65,20 @@ def test_go_no_go_requires_capabilities():
 
     missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
     assert "capabilities" in missing
+
+
+def test_go_no_go_includes_missing_pack_fields():
+    capabilities = CapabilitiesPayload.model_validate({"features": {"knowledge_upload": True}})
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_capabilities=True,
+        has_knowledge_tag=True,
+        has_published_knowledge=True,
+        missing_pack_fields=["client_pack.salon.address.full"],
+    )
+
+    missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    assert "client_pack.salon.address.full" in missing
 
 
 def test_ensure_onboarding_step_requires_previous(monkeypatch):

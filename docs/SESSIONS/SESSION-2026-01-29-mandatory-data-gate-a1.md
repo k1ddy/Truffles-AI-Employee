@@ -1,0 +1,23 @@
+# SESSION 2026-01-29-mandatory-data-gate-a1 — Session 2026-01-29-mandatory-data-gate-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-29-mandatory-data-gate.md
+- branch: feat/2026-01-29-mandatory-data-gate-a1
+- worktree: /home/zhan/worktrees/2026-01-29-mandatory-data-gate-a1
+- base_ref: origin/main
+- scope: Extend Go/No-Go with pack-required fields + policy validation + Console missing labels.
+- done:
+  - Added required policy fields and shared missing-field helper in knowledge validation.
+  - Linked Go/No-Go to published pack missing fields (knowledge + go/no-go steps).
+  - Updated Console labels and Go/No-Go readiness to reflect server missing list.
+  - Updated tests for onboarding and knowledge validation.
+- next:
+  - TP-2: policy_pack fail-closed + service tokens/HMAC.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-29-mandatory-data-gate.md
+  - pytest -q truffles-api/tests/test_console_onboarding_state.py truffles-api/tests/test_knowledge_validation.py
+  - npm --prefix console-web ci
+  - npm --prefix console-web run lint
+  - npm --prefix console-web audit (3 vulnerabilities: next high, lodash moderate, pm2 low)
+- last_updated: 2026-01-29
