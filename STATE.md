@@ -10,6 +10,7 @@
 - DONE: console-web bringup (Traefik → console.truffles.kz) — evidence: `docker ps` shows `truffles-console-web` Up; `curl https://console.truffles.kz` → 200; `curl https://console.truffles.kz/api/auth/signin` → 200.
 - DONE: Console CaseList `useQuery` import fix — lint `npm --prefix console-web run lint`.
 - DONE: Session governance (session log + scripts + hooks + doc-only gate) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md`; Evidence: `docs/SESSIONS/SESSION-2026-01-27-session-governance.md`, `docs/SESSION_INDEX.md`, `scripts/session_*.sh`, `.githooks/`, `.github/workflows/session-gate.yml`.
+- DONE: Dialog report one-command tool + runbook (timeline + decision_meta/outbox + media/ASR) — evidence: `python3 ops/diagnose.py dialog-report --help`, report `/tmp/dialog-report-2026-01-29-1627-1636.md`.
 - DONE: Control Plane канон зафиксирован (`SPECS/CONTROL_PLANE.md`), roadmap приведён к Web‑first; Task Package `docs/TASK_PACKAGES/TP-2026-01-24-control-plane-canon.md`. Evidence: doc updates in repo.
 - DONE: DEC‑014 (Knowledge Studio publish pipeline) и DEC‑015 (capabilities model) зафиксированы в `docs/IMPERIUM_DECISIONS.yaml`. Evidence: doc updates in repo.
 - DONE: Phase 1 Control Plane UI (layout + context + roles) — PR #340 https://github.com/k1ddy/Truffles-AI-Employee/pull/340; CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21314913097.

@@ -2491,6 +2491,33 @@ def _parse_trace_bundle_args(argv):
         args.client_slug = os.environ.get("TRUFFLES_CLIENT_SLUG", "demo_salon")
     return args
 
+def _parse_dialog_report_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py dialog-report",
+        description="Generate a dialog report (timeline + decisions + outbox + media/ASR).",
+    )
+    parser.add_argument("--date", default=None, help="Date for the local time window (YYYY-MM-DD).")
+    parser.add_argument(
+        "--start",
+        required=True,
+        help="Start time (HH:MM[:SS] or YYYY-MM-DD HH:MM[:SS]).",
+    )
+    parser.add_argument(
+        "--end",
+        required=True,
+        help="End time (HH:MM[:SS] or YYYY-MM-DD HH:MM[:SS]).",
+    )
+    parser.add_argument("--tz", default="Asia/Almaty", help="Timezone for the time window.")
+    parser.add_argument("--sender", default=None, help="Sender phone (used to derive remote_jid).")
+    parser.add_argument("--remote-jid", default=None, help="Sender remote_jid (overrides --sender).")
+    parser.add_argument("--receiver-phone", default=None, help="Receiver phone (branch).")
+    parser.add_argument("--conversation-id", default=None)
+    parser.add_argument("--client-slug", default=None)
+    parser.add_argument("--branch-id", default=None)
+    parser.add_argument("--output", default=None, help="Output markdown path (use '-' for stdout).")
+    parser.add_argument("--max-conversations", type=int, default=3)
+    return parser.parse_args(argv)
+
 def _pick_fuzz_cases(cases, count, rng):
     if count <= 0:
         return []
@@ -2569,6 +2596,42 @@ def _normalize_phone_digits(value):
     if not value:
         return ""
     return re.sub(r"\D", "", str(value))
+
+def _normalize_remote_jid(value):
+    if not value:
+        return None
+    text = str(value).strip()
+    if "@" in text:
+        return text
+    digits = _normalize_phone_digits(text)
+    if not digits:
+        return None
+    return f"{digits}@s.whatsapp.net"
+
+def _sanitize_timezone(value):
+    if not value:
+        return "Asia/Almaty"
+    text = str(value).strip()
+    if not re.fullmatch(r"[A-Za-z0-9_+/\-]+", text):
+        raise SystemExit("dialog-report: invalid timezone")
+    return text
+
+def _normalize_datetime_input(value, date_hint):
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    text = text.replace("T", " ")
+    if re.search(r"\d{4}-\d{2}-\d{2}", text):
+        base = text
+    else:
+        if not date_hint:
+            raise SystemExit("dialog-report: --date required when time has no date")
+        base = f"{date_hint} {text}"
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", base):
+        base = f"{base}:00"
+    return base
 
 def _resolve_webhook_secret(client_slug, explicit):
     if explicit:
@@ -3046,6 +3109,87 @@ def _fetch_message_bundle_rows(db_user, where_clause, limit):
         except Exception:
             continue
     return rows, None
+
+def _parse_json_lines(rows_raw):
+    if not rows_raw:
+        return []
+    rows = []
+    for line in rows_raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            continue
+    return rows
+
+def _fetch_dialog_conversation_ids(db_user, branch_id, remote_jid, tz_name, start_ts, end_ts):
+    safe_branch = _escape_sql_literal(branch_id)
+    safe_jid = _escape_sql_literal(remote_jid)
+    safe_tz = _escape_sql_literal(tz_name)
+    safe_start = _escape_sql_literal(start_ts)
+    safe_end = _escape_sql_literal(end_ts)
+    query = (
+        "SELECT DISTINCT m.conversation_id "
+        "FROM messages m "
+        "JOIN conversations c ON c.id = m.conversation_id "
+        "JOIN users u ON u.id = c.user_id "
+        "WHERE m.role = 'user' "
+        f"AND c.branch_id = '{safe_branch}' "
+        f"AND u.remote_jid = '{safe_jid}' "
+        f"AND (m.created_at AT TIME ZONE '{safe_tz}') BETWEEN '{safe_start}' AND '{safe_end}' "
+        "ORDER BY m.conversation_id;"
+    )
+    rows_raw, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    if not rows_raw:
+        return [], None
+    return [line.strip() for line in rows_raw.splitlines() if line.strip()], None
+
+def _fetch_dialog_rows(db_user, conversation_id, tz_name, start_ts, end_ts):
+    safe_conv = _escape_sql_literal(conversation_id)
+    safe_tz = _escape_sql_literal(tz_name)
+    safe_start = _escape_sql_literal(start_ts)
+    safe_end = _escape_sql_literal(end_ts)
+    query = (
+        "SELECT json_build_object("
+        "'created_at', m.created_at, "
+        f"'ts_local', (m.created_at AT TIME ZONE '{safe_tz}'), "
+        "'role', m.role, "
+        "'content', m.content, "
+        "'message_id', m.metadata->>'messageId', "
+        "'message_uuid', m.id, "
+        "'conversation_id', c.id, "
+        "'client_id', m.client_id, "
+        "'remote_jid', u.remote_jid, "
+        "'instance_id', m.metadata->>'instanceId', "
+        "'media_type', m.metadata->'media'->>'media_type', "
+        "'media_storage_path', m.metadata->'media'->>'storage_path', "
+        "'media_url', m.metadata->'media'->>'url', "
+        "'media_transcript', m.metadata->'media'->>'transcript', "
+        "'asr_used', m.metadata->'asr'->>'asr_used', "
+        "'asr_provider', m.metadata->'asr'->>'asr_provider', "
+        "'decision_meta', m.metadata->'decision_meta', "
+        "'outbox_id', o.id, "
+        "'outbox_status', o.status, "
+        f"'outbox_updated_at', (o.updated_at AT TIME ZONE '{safe_tz}'), "
+        "'outbox_error', o.last_error"
+        ") "
+        "FROM messages m "
+        "JOIN conversations c ON c.id = m.conversation_id "
+        "JOIN users u ON u.id = c.user_id "
+        "LEFT JOIN outbox_messages o "
+        "ON o.client_id = m.client_id AND o.inbound_message_id = m.metadata->>'messageId' "
+        f"WHERE m.conversation_id = '{safe_conv}' "
+        f"AND (m.created_at AT TIME ZONE '{safe_tz}') BETWEEN '{safe_start}' AND '{safe_end}' "
+        "ORDER BY m.created_at ASC;"
+    )
+    rows_raw, error = _run_psql_query(db_user, query)
+    if error:
+        return None, error
+    return _parse_json_lines(rows_raw), None
 
 def _fetch_latest_outbox_for_conversation(db_user, conversation_id):
     safe_id = _escape_sql_literal(conversation_id)
@@ -5083,6 +5227,164 @@ def _run_trace_bundle(args):
     with open(args.output, "w", encoding="utf-8") as handle:
         handle.write(output + "\n")
     print(json.dumps({"output": args.output, "count": len(bundles)}, ensure_ascii=False))
+
+def _run_dialog_report(args):
+    db_user = _resolve_db_user_simple()
+    tz_name = _sanitize_timezone(args.tz)
+    start_ts = _normalize_datetime_input(args.start, args.date)
+    end_ts = _normalize_datetime_input(args.end, args.date)
+    if not start_ts or not end_ts:
+        raise SystemExit("dialog-report: --start and --end are required")
+
+    receiver_phone = args.receiver_phone
+    client_slug = args.client_slug
+    branch_id = args.branch_id
+    instance_id = None
+    remote_jid = args.remote_jid or _normalize_remote_jid(args.sender)
+
+    if args.conversation_id:
+        conv_ids = [args.conversation_id]
+    else:
+        if receiver_phone:
+            resolved_branch, error = _fetch_client_by_branch_phone(db_user, receiver_phone)
+            if error:
+                raise SystemExit(f"dialog-report: receiver phone lookup failed ({error})")
+            if not resolved_branch:
+                raise SystemExit("dialog-report: receiver phone not found; provide --branch-id")
+            client_slug = client_slug or resolved_branch.get("client_slug")
+            branch_id = branch_id or resolved_branch.get("branch_id")
+            instance_id = resolved_branch.get("instance_id")
+        if not branch_id:
+            raise SystemExit("dialog-report: provide --receiver-phone or --branch-id")
+        if not remote_jid:
+            raise SystemExit("dialog-report: provide --sender or --remote-jid")
+        conv_ids, error = _fetch_dialog_conversation_ids(
+            db_user, branch_id, remote_jid, tz_name, start_ts, end_ts
+        )
+        if error:
+            raise SystemExit(f"dialog-report: db error ({error})")
+        if not conv_ids:
+            print("dialog-report: no conversations found for the window.")
+            return
+        max_convs = max(1, int(args.max_conversations))
+        conv_ids = conv_ids[:max_convs]
+
+    def _clean_text(value):
+        if value is None:
+            return ""
+        return re.sub(r"\s+", " ", str(value)).strip()
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    lines = [
+        "# Dialog Report",
+        "",
+        f"- generated_at: {generated_at}",
+        f"- timezone: {tz_name}",
+        f"- window: {start_ts} — {end_ts}",
+        f"- sender: {args.sender or ''}",
+        f"- receiver: {receiver_phone or ''}",
+        f"- remote_jid: {remote_jid or ''}",
+        f"- client_slug: {client_slug or ''}",
+        f"- branch_id: {branch_id or ''}",
+        f"- instance_id: {instance_id or ''}",
+        f"- conversation_ids: {', '.join(conv_ids)}",
+        "",
+        "Notes:",
+        "- Audio transcripts are shown only if ASR succeeded and saved.",
+        "- Media files live under /home/zhan/truffles-media and may be cleaned by TTL.",
+        "",
+    ]
+
+    for conv_id in conv_ids:
+        rows, error = _fetch_dialog_rows(db_user, conv_id, tz_name, start_ts, end_ts)
+        if error:
+            raise SystemExit(f"dialog-report: db error ({error})")
+        lines.append(f"## Conversation {conv_id}")
+        lines.append("")
+        if not rows:
+            lines.append("_No messages in the requested window._")
+            lines.append("")
+            continue
+
+        lines.append("### Timeline")
+        for row in rows:
+            ts = row.get("ts_local") or row.get("created_at") or ""
+            role = row.get("role") or ""
+            message_id = row.get("message_id") or row.get("message_uuid") or ""
+            content = _clean_text(row.get("content"))
+            media_bits = []
+            media_type = row.get("media_type")
+            if media_type:
+                media_bits.append(f"media={media_type}")
+            if row.get("asr_used"):
+                media_bits.append(f"asr_used={row.get('asr_used')}")
+            if row.get("asr_provider"):
+                media_bits.append(f"asr_provider={row.get('asr_provider')}")
+            if row.get("media_storage_path"):
+                media_bits.append(f"storage={row.get('media_storage_path')}")
+            transcript = _clean_text(row.get("media_transcript"))
+            if transcript and transcript != content:
+                media_bits.append(f"transcript={transcript}")
+            suffix = f" [{'; '.join(media_bits)}]" if media_bits else ""
+            lines.append(f"- {ts} {role} ({message_id}): {content}{suffix}")
+        lines.append("")
+
+        lines.append("### Decisions (user messages)")
+        for row in rows:
+            if row.get("role") != "user":
+                continue
+            ts = row.get("ts_local") or row.get("created_at") or ""
+            message_id = row.get("message_id") or row.get("message_uuid") or ""
+            content = _clean_text(row.get("content"))
+            decision_meta = row.get("decision_meta")
+            if not isinstance(decision_meta, dict):
+                decision_meta = {}
+            summary = {
+                "action": decision_meta.get("action"),
+                "intent": decision_meta.get("intent"),
+                "source": decision_meta.get("source"),
+                "fact_source": decision_meta.get("fact_source"),
+                "info_sections": decision_meta.get("info_sections"),
+                "fact_intents": decision_meta.get("fact_intents"),
+                "service_query": decision_meta.get("service_query"),
+                "service_query_source": decision_meta.get("service_query_source"),
+                "service_query_score": decision_meta.get("service_query_score"),
+                "rag_reason": decision_meta.get("rag_reason"),
+                "llm_used": decision_meta.get("llm_used"),
+                "trace_id": decision_meta.get("trace_id"),
+            }
+            outbox_summary = None
+            if row.get("outbox_id") or row.get("outbox_status"):
+                outbox_summary = {
+                    "outbox_id": row.get("outbox_id"),
+                    "status": row.get("outbox_status"),
+                    "updated_at": row.get("outbox_updated_at"),
+                    "error": row.get("outbox_error"),
+                }
+            lines.append(f"Message {message_id} ({ts}): {content}")
+            lines.append(f"Decision summary: {json.dumps(summary, ensure_ascii=False)}")
+            if outbox_summary:
+                lines.append(f"Outbox: {json.dumps(outbox_summary, ensure_ascii=False)}")
+            lines.append("Decision meta (raw):")
+            lines.append("```json")
+            lines.append(json.dumps(decision_meta, ensure_ascii=False, indent=2))
+            lines.append("```")
+            lines.append("")
+
+    output_path = args.output
+    if not output_path:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        output_path = f"/tmp/dialog-report-{stamp}.md"
+    report = "\n".join(lines).rstrip() + "\n"
+    if output_path == "-":
+        print(report)
+        return
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as handle:
+        handle.write(report)
+    print(json.dumps({"output": output_path, "conversations": len(conv_ids)}, ensure_ascii=False))
 
 
 def _resolve_booking_commit_steps(case):
@@ -7953,6 +8255,9 @@ if len(sys.argv) > 1 and sys.argv[1] == "explain":
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "trace-bundle":
     _run_trace_bundle(_parse_trace_bundle_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "dialog-report":
+    _run_dialog_report(_parse_dialog_report_args(sys.argv[2:]))
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "emit-evidence":
     _run_emit_evidence(_parse_emit_evidence_args(sys.argv[2:]))

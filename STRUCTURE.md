@@ -50,6 +50,7 @@
 | `scripts/restart_outbox_service.sh` | Перезапуск Outbox Service (shadow) | OPS |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
+| `ops/diagnose.py` | Диагностика диалогов/trace/outbox + `dialog-report` (one-command) | QA/OPS/Brain |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
 | `truffles-api/docker-compose.test.yml` | Test‑compose overrides (test containers, no prod env) | Backend/QA |
@@ -74,6 +75,7 @@
 | `console-web/public/brand/` | Бренд‑ассеты консоли (логотипы) | Frontend |
 | `docs/CONSOLE_GUIDE.md` | Guide по Console (API, тесты, дебаг) | Frontend/Backend |
 | `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
+| `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
 | `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |
 | `docs/REPORTS/` | Отчёты по прогонам/изменениям | Brain/Architect |
@@ -142,6 +144,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-28-qdrant-branch-backfill-ca13.md`
 - `docs/TASK_PACKAGES/TP-2026-01-28-decision-meta-branch-id.md`
 - `docs/TASK_PACKAGES/TP-2026-01-29-ci-ruff-ca06.md`
+- `docs/TASK_PACKAGES/TP-2026-01-29-dialog-report-tool.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`
@@ -234,6 +237,7 @@
 - `docs/SESSION_START_PROMPT.txt` — протокол старта.
 - `docs/IMPERIUM_DECISIONS.yaml`, `docs/IMPERIUM_GAPS.yaml` — решения и GAP.
 - `docs/runbooks/*` — операционные runbooks (outbox/sentinel/incidents).
+- `docs/runbooks/DIALOG_REPORT.md` — dialog-report (таймлайн + решения + outbox + media/ASR).
 - `docs/runbooks/TRACE_BUNDLE.md` — bundle диагностика (trace/meta/outbox latency).
 - `truffles-api/app/knowledge/<client_slug>/*` — runtime pack (truth/policy/eval).
 - `knowledge/<client_slug>/*` — канон RAG‑контента клиента.
