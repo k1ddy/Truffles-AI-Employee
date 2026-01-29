@@ -1303,7 +1303,7 @@ def test_consult_pack_only_and_short_circuit():
             trace,
             {
                 "stage": "consult_flow",
-                "decision": "consult_reply",
+                "decision": "short_circuit",
                 "consult_playbook_id": "nails_care",
             },
             case_id,
