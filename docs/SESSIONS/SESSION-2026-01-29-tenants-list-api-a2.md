@@ -1,6 +1,6 @@
 # SESSION 2026-01-29-tenants-list-api-a2 — Session 2026-01-29-tenants-list-api-a2
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-29-tenants-list-api.md
 - branch: feat/2026-01-29-tenants-list-api-a2
@@ -15,7 +15,8 @@
   - Temporarily excluded new admin list endpoints from console-contract GET-only smoke.
   - Checks: pytest and console-web lint.
 - next:
-  - Run scripts/session_check.sh, commit, open PR.
+  - Merge PR #441.
+  - Cleanup worktree after merge.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-01-29-tenants-list-api.md
   - /tmp/tenants_list_api_pytest_20260129.txt
