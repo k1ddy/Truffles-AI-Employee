@@ -11,6 +11,7 @@
 ## Scope
 - Уточнить эвристику force-consult для запросов с consult-cue + price/duration/hours.
 - Добавить `info_class` в критический retention decision_trace.
+- Разрешить запуск `Livecheck Only` на ветках через явный флаг (без снятия гейта для main).
 - Обновить session/docs для новой сессии.
 
 ## Out of scope
@@ -21,6 +22,7 @@
 ## Touch-list
 - `truffles-api/app/services/ai_service.py`
 - `truffles-api/app/routers/webhook/trace.py`
+- `.github/workflows/livecheck-only.yml`
 - `docs/TASK_PACKAGES/TP-2026-01-29-livecheck-ca03-ca06.md`
 - `docs/SESSIONS/SESSION-2026-01-29-livecheck-ca03-ca06-a2.md`
 - `docs/SESSION_INDEX.md`
@@ -29,8 +31,9 @@
 1) Зафиксировать текущие симптомы CA03/CA06 (лог live-check, trace retention).
 2) Исправить retention: добавить `info_class` в `DECISION_TRACE_CRITICAL_STAGES`.
 3) Исправить consult heuristics: разрешить consult_intent при consult-cue + price/duration/hours (без booking).
-4) Прогнать локальные тесты для CA03/CA06.
-5) Открыть PR и запустить CI `Livecheck Only`.
+4) Добавить флаг `allow_non_main` для `Livecheck Only`.
+5) Прогнать локальные тесты для CA03/CA06.
+6) Открыть PR и запустить CI `Livecheck Only` с `allow_non_main=true`.
 
 ## DoD
 - CA03: decision_trace содержит `info_class` и `truth_gate` на live-check.
@@ -39,8 +42,8 @@
 - Livecheck Only зелёный и приложен evidence.
 
 ## Checks
-- `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "address_hours or consult_pack_only_and_short_circuit"`
-- CI: `Livecheck Only` (workflow_dispatch) на PR.
+- `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "truth_first_info_bundle or consult_pack_only_and_short_circuit"`
+- CI: `Livecheck Only` (workflow_dispatch) на PR с `allow_non_main=true`.
 
 ## Evidence
 - Локальные тесты (stdout).
