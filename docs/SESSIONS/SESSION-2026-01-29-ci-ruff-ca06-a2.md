@@ -6,17 +6,21 @@
 - branch: feat/2026-01-29-ci-ruff-ca06-a2
 - worktree: /home/zhan/worktrees/2026-01-29-ci-ruff-ca06-a2
 - base_ref: origin/main
-- scope: Fix CA06 consult short_circuit mismatch + keep consult precedence; keep ruff green.
+- scope: Fix CA04 livecheck service_not_found mismatch + CA06 consult short_circuit trace decision.
 - done:
   - Analyzed CI run `21468288249` (ruff I001 + CA06 consult mismatch).
   - Adjusted consult short_circuit signals and consult clarify precedence.
   - Checks: `ruff check app tests`; `pytest -q truffles-api/tests/test_message_endpoint.py -k consult -p no:logging`.
+  - Updated CA04 livecheck case to use service-not-found phrase aligned with demo_salon pack.
+  - Preserved consult short_circuit trace as final consult_flow decision for CA06.
+  - Checks: `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "service_matcher_core or consult_pack_only_and_short_circuit"`.
 - next:
-  - Push branch and let CI re-run livecheck.
+  - Commit + push branch, open PR, run CI, then livecheck-only on main after merge.
 - evidence:
   - `gh run view 21468288249 --log-failed`
   - `/tmp/livecheck-artifacts-pool-c-21468288249/livecheck-ca06-consult.jsonl`
   - `ruff check app tests` (All checks passed)
   - `pytest -q truffles-api/tests/test_message_endpoint.py -k consult -p no:logging` (8 passed, 103 deselected)
+  - `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "service_matcher_core or consult_pack_only_and_short_circuit"` (2 passed, 8 deselected)
   - docs/TASK_PACKAGES/TP-2026-01-29-ci-ruff-ca06.md
 - last_updated: 2026-01-29
