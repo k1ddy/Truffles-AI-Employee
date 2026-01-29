@@ -3396,12 +3396,10 @@ async def create_client(
     if existing:
         raise ConsoleAPIError(400, "INVALID_PARAM", "client_slug already exists")
 
-    company_id = None
-    if body.company_id:
-        company = db.query(Company).filter(Company.id == body.company_id).first()
-        if not company:
-            raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
-        company_id = company.id
+    company = db.query(Company).filter(Company.id == body.company_id).first()
+    if not company:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+    company_id = company.id
 
     status_value = (body.status or "active").strip()
     now = datetime.now(timezone.utc)
@@ -3435,7 +3433,7 @@ async def create_client(
             slug=client.name,
             name=client.name,
             company_id=client.company_id,
-            company_name=company.name if company else None,
+            company_name=company.name,
         )
     )
 

@@ -584,9 +584,13 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.error("Укажите slug клиента");
             return;
         }
+        if (!companyId.trim()) {
+            toast.error("Укажите company_id компании");
+            return;
+        }
         createClientMutation.mutate({
             slug,
-            company_id: companyId || undefined,
+            company_id: companyId.trim(),
         });
     };
 
@@ -867,7 +871,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                         placeholder="demo_salon"
                         disabled={!canEdit}
                     />
-                    <label className="mt-3 block text-xs text-muted-foreground">Company ID (optional)</label>
+                    <label className="mt-3 block text-xs text-muted-foreground">Company ID</label>
                     <input
                         className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                         value={companyId}
@@ -879,7 +883,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                         type="button"
                         className="btn-primary mt-4"
                         onClick={handleCreateClient}
-                        disabled={!canEdit || createClientMutation.isPending}
+                        disabled={!canEdit || createClientMutation.isPending || !companyId.trim()}
                     >
                         {createClientMutation.isPending ? "Создание..." : "Создать клиента"}
                     </button>

@@ -84,7 +84,7 @@ class ConsoleCompanyCreateResponse(BaseModel):
 
 class ConsoleClientCreateRequest(BaseModel):
     slug: str
-    company_id: Optional[UUID] = None
+    company_id: UUID
     status: Optional[str] = "active"
 
 
