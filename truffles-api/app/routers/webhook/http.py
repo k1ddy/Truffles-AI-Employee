@@ -39,7 +39,7 @@ def _lookup_sender_branch(db: Session, remote_jid: str | None) -> Branch | None:
     digits = _normalize_phone_digits(remote_jid)
     if not digits:
         return None
-    return (
+    branch = (
         db.query(Branch)
         .filter(
             Branch.is_active.is_(True),
@@ -48,6 +48,9 @@ def _lookup_sender_branch(db: Session, remote_jid: str | None) -> Branch | None:
         )
         .first()
     )
+    if not branch or not getattr(branch, "phone", None):
+        return None
+    return branch
 
 
 def _run_preflight(
@@ -166,7 +169,15 @@ def _run_preflight(
             .filter(Branch.client_id == client.id, Branch.phone.isnot(None))
             .all()
         )
-        for (phone,) in branch_phones:
+        if not isinstance(branch_phones, list):
+            branch_phones = []
+        for row in branch_phones:
+            if isinstance(row, (list, tuple)):
+                phone = row[0] if row else None
+            else:
+                phone = getattr(row, "phone", None)
+            if not phone:
+                continue
             if remote_digits == _normalize_phone(phone):
                 trace_conversation = resolve_trace_conversation(
                     trace_client=client,

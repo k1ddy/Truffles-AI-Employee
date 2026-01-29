@@ -31,18 +31,45 @@ OUTBOUND_ALLOWLIST_JIDS = {
 }
 
 
+def _get_test_mode() -> bool:
+    raw = os.environ.get("TEST_MODE")
+    if raw is None:
+        return TEST_MODE
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _get_outbound_allowlist() -> set[str]:
+    raw = os.environ.get("OUTBOUND_ALLOWLIST_JIDS")
+    if raw is None:
+        return OUTBOUND_ALLOWLIST_JIDS
+    return {jid.strip() for jid in raw.split(",") if jid.strip()}
+
+
+def _get_chatflow_token() -> str | None:
+    return os.environ.get("CHATFLOW_TOKEN") or CHATFLOW_TOKEN
+
+
+def _get_chatflow_api_url() -> str:
+    return os.environ.get("CHATFLOW_API_URL") or CHATFLOW_API_URL
+
+
+def _get_chatflow_media_base_url() -> str:
+    return os.environ.get("CHATFLOW_MEDIA_BASE_URL") or CHATFLOW_MEDIA_BASE_URL
+
+
 def _should_skip_outbound(remote_jid: str, *, action: str) -> bool:
-    if not TEST_MODE:
+    if not _get_test_mode():
         return False
     jid = (remote_jid or "").strip()
-    if jid and jid in OUTBOUND_ALLOWLIST_JIDS:
+    allowlist = _get_outbound_allowlist()
+    if jid and jid in allowlist:
         return False
-    allowlist = ",".join(sorted(OUTBOUND_ALLOWLIST_JIDS)) or "<empty>"
+    allowlist_value = ",".join(sorted(allowlist)) or "<empty>"
     logger.warning(
         "Outbound guard: TEST_MODE enabled, SKIP %s to jid=%s (allowlist=%s)",
         action,
         jid or "<missing>",
-        allowlist,
+        allowlist_value,
     )
     return True
 
@@ -100,7 +127,8 @@ def send_whatsapp_message(
     if _should_skip_outbound(remote_jid, action="message"):
         return True
 
-    if not CHATFLOW_TOKEN:
+    token = _get_chatflow_token()
+    if not token:
         logger.error("ChatFlow token is missing (CHATFLOW_TOKEN env var not set)")
         alert_critical("WhatsApp send failed", {"jid": remote_jid, "error": "missing_chatflow_token"})
         return False
@@ -112,7 +140,7 @@ def send_whatsapp_message(
     try:
         logger.debug(f"Sending to ChatFlow: jid={remote_jid}, instance_id={instance_id[:20]}...")
         params = {
-            "token": CHATFLOW_TOKEN,
+            "token": token,
             "instance_id": instance_id,
             "jid": remote_jid,
             "msg": message,
@@ -120,7 +148,7 @@ def send_whatsapp_message(
         if idempotency_key:
             params["msg_id"] = idempotency_key
         with httpx.Client(timeout=30.0) as client:
-            response = client.get(CHATFLOW_API_URL, params=params)
+            response = client.get(_get_chatflow_api_url(), params=params)
             logger.info(
                 f"ChatFlow response: status={response.status_code}, jid={remote_jid}, body={response.text[:200]}"
             )
@@ -181,7 +209,8 @@ def send_whatsapp_media(
     if _should_skip_outbound(remote_jid, action="media"):
         return True
 
-    if not CHATFLOW_TOKEN:
+    token = _get_chatflow_token()
+    if not token:
         logger.error("ChatFlow token is missing (CHATFLOW_TOKEN env var not set)")
         alert_critical("WhatsApp media send failed", {"jid": remote_jid, "error": "missing_chatflow_token"})
         return False
@@ -214,9 +243,9 @@ def send_whatsapp_media(
         logger.warning(f"send_whatsapp_media: unsupported media_type={media_type}")
         return False
 
-    url = f"{CHATFLOW_MEDIA_BASE_URL.rstrip('/')}/{endpoint}"
+    url = f"{_get_chatflow_media_base_url().rstrip('/')}/{endpoint}"
     params = {
-        "token": CHATFLOW_TOKEN,
+        "token": token,
         "instance_id": instance_id,
         "jid": remote_jid,
         url_param: media_url,
@@ -297,7 +326,8 @@ def send_message_safe(
     if _should_skip_outbound(remote_jid, action="message"):
         return Ok(MessageSent(remote_jid=remote_jid, instance_id=instance_id))
 
-    if not CHATFLOW_TOKEN:
+    token = _get_chatflow_token()
+    if not token:
         logger.error("ChatFlow token is missing (CHATFLOW_TOKEN env var not set)")
         alert_critical("WhatsApp send failed", {"jid": remote_jid, "error": "missing_chatflow_token"})
         return Err(ConfigError(
@@ -317,7 +347,7 @@ def send_message_safe(
     try:
         logger.debug(f"Sending to ChatFlow: jid={remote_jid}, instance_id={instance_id[:20]}...")
         params = {
-            "token": CHATFLOW_TOKEN,
+            "token": token,
             "instance_id": instance_id,
             "jid": remote_jid,
             "msg": message,
@@ -326,7 +356,7 @@ def send_message_safe(
             params["msg_id"] = idempotency_key
             
         with httpx.Client(timeout=30.0) as client:
-            response = client.get(CHATFLOW_API_URL, params=params)
+            response = client.get(_get_chatflow_api_url(), params=params)
             logger.info(
                 f"ChatFlow response: status={response.status_code}, jid={remote_jid}, body={response.text[:200]}"
             )

@@ -1,0 +1,23 @@
+# SESSION 2026-01-28-trace-explain-v2-a2 — Trace/Explain v2
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-28-trace-explain-v2.md
+- branch: feat/2026-01-28-trace-explain-v2-a2
+- worktree: /home/zhan/worktrees/2026-01-28-trace-explain-v2-a2
+- base_ref: origin/main
+- scope: Trace/Explain v2 UI (summary + timeline) in case details.
+- done:
+  - Session created.
+  - Explain/Trace v2 UI: summary + message diagnostics + pipeline timeline in `CaseDetailsPanel`.
+  - Inbox/Case view now pass messages into details panel for per-message diagnostics.
+  - Installed `console-web` deps; lint passes.
+  - Attempted Playwright smoke on prod; Chromium launch failed (sandbox host `Operation not permitted`).
+  - Playwright smoke rerun with sandbox override env: 14 passed.
+- next:
+  - Manual smoke by owner after deploy: Inbox → case → details (Explain/Trace sections).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-28-trace-explain-v2.md
+  - `npm --prefix console-web run lint` (clean).
+  - `PLAYWRIGHT_BASE_URL=https://console.truffles.kz PLAYWRIGHT_WEB_SERVER=0 PW_CHROMIUM_DISABLE_SANDBOX=1 PLAYWRIGHT_CHROMIUM_DISABLE_SANDBOX=1 PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL=0 npm --prefix console-web run test:e2e:smoke -- --workers=1` (14 passed).
+- last_updated: 2026-01-28

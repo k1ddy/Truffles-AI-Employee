@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import toast from "react-hot-toast";
 import type { components } from "@/types/api.generated";
@@ -23,10 +23,6 @@ function setLocalStorageValue(key: string, value?: string | null) {
         return;
     }
     window.localStorage.setItem(key, value);
-}
-
-function toSearchable(value?: string | null): string {
-    return (value ?? "").toLowerCase();
 }
 
 type CompanyEditorState = {
@@ -119,59 +115,84 @@ export default function TenantsPage() {
     const canReadTenants = canAccessConsole(role, "tenants", "read");
     const canWriteTenants = canAccessConsole(role, "tenants", "write");
 
-    const companies = useMemo(() => meData?.companies ?? [], [meData?.companies]);
-    const clients = useMemo(() => meData?.clients ?? [], [meData?.clients]);
-    const branches = useMemo(() => meData?.branches ?? [], [meData?.branches]);
-
     const selectedClientId = meData?.client?.id ?? null;
     const selectedCompanyId = meData?.selected_company_id ?? meData?.client?.company_id ?? null;
     const selectedBranchId = meData?.selected_branch_id ?? null;
 
-    const filteredCompanies = useMemo(() => {
-        const query = toSearchable(companyQuery);
-        if (!query) {
-            return companies;
-        }
-        return companies.filter((company) => {
-            return (
-                toSearchable(company.name).includes(query)
-                || toSearchable(company.id).includes(query)
-            );
-        });
-    }, [companies, companyQuery]);
+    const tenantsEnabled = Boolean(session && canReadTenants);
+    const companyQueryValue = companyQuery.trim() || undefined;
+    const clientQueryValue = clientQuery.trim() || undefined;
+    const branchQueryValue = branchQuery.trim() || undefined;
 
-    const filteredClients = useMemo(() => {
-        const query = toSearchable(clientQuery);
-        if (!query) {
-            return clients;
-        }
-        return clients.filter((client) => {
-            return (
-                toSearchable(client.name).includes(query)
-                || toSearchable(client.slug).includes(query)
-                || toSearchable(client.id).includes(query)
-                || toSearchable(client.company_name).includes(query)
-            );
-        });
-    }, [clients, clientQuery]);
+    const companiesQuery = useInfiniteQuery({
+        queryKey: ["tenants-companies", companyQueryValue],
+        queryFn: async ({ pageParam }) => {
+            const cursor = typeof pageParam === "string" ? pageParam : undefined;
+            const response = await adminApi.listCompanies({
+                cursor,
+                limit: 20,
+                q: companyQueryValue,
+            });
+            return response.data;
+        },
+        getNextPageParam: (lastPage) =>
+            lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
+        enabled: tenantsEnabled,
+    });
 
-    const filteredBranches = useMemo(() => {
-        const query = toSearchable(branchQuery);
-        if (!query) {
-            return branches;
-        }
-        return branches.filter((branch) => {
-            return (
-                toSearchable(branch.name).includes(query)
-                || toSearchable(branch.slug).includes(query)
-                || toSearchable(branch.instance_id).includes(query)
-                || toSearchable(branch.phone).includes(query)
-            );
-        });
-    }, [branches, branchQuery]);
+    const clientsQuery = useInfiniteQuery({
+        queryKey: ["tenants-clients", clientQueryValue],
+        queryFn: async ({ pageParam }) => {
+            const cursor = typeof pageParam === "string" ? pageParam : undefined;
+            const response = await adminApi.listClients({
+                cursor,
+                limit: 20,
+                q: clientQueryValue,
+            });
+            return response.data;
+        },
+        getNextPageParam: (lastPage) =>
+            lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
+        enabled: tenantsEnabled,
+    });
+
+    const branchesQuery = useInfiniteQuery({
+        queryKey: ["tenants-branches", branchQueryValue],
+        queryFn: async ({ pageParam }) => {
+            const cursor = typeof pageParam === "string" ? pageParam : undefined;
+            const response = await adminApi.listBranches({
+                cursor,
+                limit: 20,
+                q: branchQueryValue,
+            });
+            return response.data;
+        },
+        getNextPageParam: (lastPage) =>
+            lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
+        enabled: tenantsEnabled,
+    });
+
+    const companies = useMemo(
+        () => companiesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
+        [companiesQuery.data],
+    );
+    const clients = useMemo(
+        () => clientsQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
+        [clientsQuery.data],
+    );
+    const branches = useMemo(
+        () => branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
+        [branchesQuery.data],
+    );
 
     const refreshContext = () => {
         queryClient.invalidateQueries({ queryKey: ["console-me"] });
+    };
+
+    const refreshTenants = () => {
+        queryClient.invalidateQueries({ queryKey: ["tenants-companies"] });
+        queryClient.invalidateQueries({ queryKey: ["tenants-clients"] });
+        queryClient.invalidateQueries({ queryKey: ["tenants-branches"] });
     };
 
     const setCompanyContext = (companyId?: string | null) => {
@@ -193,7 +214,7 @@ export default function TenantsPage() {
         refreshContext();
     };
 
-    const startCompanyEdit = (company: (typeof companies)[number]) => {
+    const startCompanyEdit = (company: components["schemas"]["Company"]) => {
         setClientEditor(null);
         setBranchEditor(null);
         const billingInfo = stringifyOptionalJson(company.billing_info);
@@ -206,7 +227,7 @@ export default function TenantsPage() {
         });
     };
 
-    const startClientEdit = (client: (typeof clients)[number]) => {
+    const startClientEdit = (client: components["schemas"]["Client"]) => {
         setCompanyEditor(null);
         setBranchEditor(null);
         setClientEditor({
@@ -219,7 +240,7 @@ export default function TenantsPage() {
         });
     };
 
-    const startBranchEdit = (branch: (typeof branches)[number]) => {
+    const startBranchEdit = (branch: components["schemas"]["Branch"]) => {
         setCompanyEditor(null);
         setClientEditor(null);
         setBranchEditor({
@@ -276,6 +297,7 @@ export default function TenantsPage() {
             await adminApi.patchCompany(companyEditor.id, payload);
             toast.success("Компания обновлена");
             setCompanyEditor(null);
+            refreshTenants();
             refreshContext();
         } catch (error) {
             handleError(error);
@@ -314,6 +336,7 @@ export default function TenantsPage() {
             await adminApi.patchClient(clientEditor.id, payload);
             toast.success("Клиент обновлён");
             setClientEditor(null);
+            refreshTenants();
             refreshContext();
         } catch (error) {
             handleError(error);
@@ -395,6 +418,7 @@ export default function TenantsPage() {
             await adminApi.patchBranch(branchEditor.id, payload);
             toast.success("Филиал обновлён");
             setBranchEditor(null);
+            refreshTenants();
             refreshContext();
         } catch (error) {
             handleError(error);
@@ -439,7 +463,9 @@ export default function TenantsPage() {
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
                             <h2 className="text-lg font-semibold">Компании</h2>
-                            <p className="text-sm text-muted-foreground">{companies.length} всего</p>
+                            <p className="text-sm text-muted-foreground">
+                                {companiesQuery.isLoading ? "—" : `${companies.length} всего`}
+                            </p>
                         </div>
                         <input
                             className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -449,10 +475,14 @@ export default function TenantsPage() {
                         />
                     </div>
                     <div className="space-y-3">
-                        {filteredCompanies.length === 0 ? (
+                        {companiesQuery.isLoading ? (
+                            <div className="text-sm text-muted-foreground">Загрузка компаний...</div>
+                        ) : companiesQuery.isError ? (
+                            <div className="text-sm text-muted-foreground">Не удалось загрузить компании.</div>
+                        ) : companies.length === 0 ? (
                             <div className="text-sm text-muted-foreground">Компании не найдены.</div>
                         ) : (
-                            filteredCompanies.map((company) => {
+                            companies.map((company) => {
                                 const isEditing = companyEditor?.id === company.id;
                                 return (
                                     <div
@@ -494,7 +524,8 @@ export default function TenantsPage() {
                                                                     prev
                                                                         ? { ...prev, name: event.target.value }
                                                                         : prev
-                                                                )}
+                                                                )
+                                                            }
                                                             disabled={!canWriteTenants || savingCompany}
                                                         />
                                                     </label>
@@ -509,7 +540,8 @@ export default function TenantsPage() {
                                                                     prev
                                                                         ? { ...prev, billingInfo: event.target.value }
                                                                         : prev
-                                                                )}
+                                                                )
+                                                            }
                                                             disabled={!canWriteTenants || savingCompany}
                                                         />
                                                     </label>
@@ -537,13 +569,26 @@ export default function TenantsPage() {
                             })
                         )}
                     </div>
+                    {companiesQuery.hasNextPage ? (
+                        <div className="flex justify-center pt-3">
+                            <button
+                                className="btn-ghost"
+                                onClick={() => companiesQuery.fetchNextPage()}
+                                disabled={companiesQuery.isFetchingNextPage}
+                            >
+                                {companiesQuery.isFetchingNextPage ? "Загрузка..." : "Показать еще"}
+                            </button>
+                        </div>
+                    ) : null}
                 </section>
 
                 <section className="bg-card border border-border/60 rounded-lg p-5">
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
                             <h2 className="text-lg font-semibold">Клиенты</h2>
-                            <p className="text-sm text-muted-foreground">{clients.length} всего</p>
+                            <p className="text-sm text-muted-foreground">
+                                {clientsQuery.isLoading ? "—" : `${clients.length} всего`}
+                            </p>
                         </div>
                         <input
                             className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -553,10 +598,14 @@ export default function TenantsPage() {
                         />
                     </div>
                     <div className="space-y-3">
-                        {filteredClients.length === 0 ? (
+                        {clientsQuery.isLoading ? (
+                            <div className="text-sm text-muted-foreground">Загрузка клиентов...</div>
+                        ) : clientsQuery.isError ? (
+                            <div className="text-sm text-muted-foreground">Не удалось загрузить клиентов.</div>
+                        ) : clients.length === 0 ? (
                             <div className="text-sm text-muted-foreground">Клиенты не найдены.</div>
                         ) : (
-                            filteredClients.map((client) => {
+                            clients.map((client) => {
                                 const isEditing = clientEditor?.id === client.id;
                                 return (
                                     <div
@@ -604,7 +653,8 @@ export default function TenantsPage() {
                                                                     prev
                                                                         ? { ...prev, slug: event.target.value }
                                                                         : prev
-                                                                )}
+                                                                )
+                                                            }
                                                             disabled={!canWriteTenants || savingClient}
                                                         />
                                                     </label>
@@ -618,7 +668,8 @@ export default function TenantsPage() {
                                                                     prev
                                                                         ? { ...prev, companyId: event.target.value }
                                                                         : prev
-                                                                )}
+                                                                )
+                                                            }
                                                             disabled={!canWriteTenants || savingClient}
                                                         />
                                                     </label>
@@ -632,7 +683,8 @@ export default function TenantsPage() {
                                                                     prev
                                                                         ? { ...prev, status: event.target.value }
                                                                         : prev
-                                                                )}
+                                                                )
+                                                            }
                                                             disabled={!canWriteTenants || savingClient}
                                                         />
                                                     </label>
@@ -660,13 +712,26 @@ export default function TenantsPage() {
                             })
                         )}
                     </div>
+                    {clientsQuery.hasNextPage ? (
+                        <div className="flex justify-center pt-3">
+                            <button
+                                className="btn-ghost"
+                                onClick={() => clientsQuery.fetchNextPage()}
+                                disabled={clientsQuery.isFetchingNextPage}
+                            >
+                                {clientsQuery.isFetchingNextPage ? "Загрузка..." : "Показать еще"}
+                            </button>
+                        </div>
+                    ) : null}
                 </section>
 
                 <section className="bg-card border border-border/60 rounded-lg p-5">
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
                             <h2 className="text-lg font-semibold">Филиалы</h2>
-                            <p className="text-sm text-muted-foreground">{branches.length} всего для выбранного клиента</p>
+                            <p className="text-sm text-muted-foreground">
+                                {branchesQuery.isLoading ? "—" : `${branches.length} всего`}
+                            </p>
                         </div>
                         <input
                             className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -676,12 +741,16 @@ export default function TenantsPage() {
                         />
                     </div>
                     <div className="space-y-3">
-                        {filteredBranches.length === 0 ? (
+                        {branchesQuery.isLoading ? (
+                            <div className="text-sm text-muted-foreground">Загрузка филиалов...</div>
+                        ) : branchesQuery.isError ? (
+                            <div className="text-sm text-muted-foreground">Не удалось загрузить филиалы.</div>
+                        ) : branches.length === 0 ? (
                             <div className="text-sm text-muted-foreground">Филиалы не найдены.</div>
                         ) : (
-                            filteredBranches.map((branch) => {
+                            branches.map((branch) => {
                                 const isEditing = branchEditor?.id === branch.id;
-                                const confirmationNeeded = branchEditor
+                                const confirmationNeeded = isEditing && branchEditor
                                     ? requiresBranchConfirmation(branchEditor)
                                     : false;
                                 return (
@@ -731,7 +800,8 @@ export default function TenantsPage() {
                                                                         prev
                                                                             ? { ...prev, name: event.target.value }
                                                                             : prev
-                                                                    )}
+                                                                    )
+                                                                }
                                                                 disabled={!canWriteTenants || savingBranch}
                                                             />
                                                         </label>
@@ -745,7 +815,8 @@ export default function TenantsPage() {
                                                                         prev
                                                                             ? { ...prev, slug: event.target.value }
                                                                             : prev
-                                                                    )}
+                                                                    )
+                                                                }
                                                                 disabled={!canWriteTenants || savingBranch}
                                                             />
                                                         </label>
@@ -759,7 +830,8 @@ export default function TenantsPage() {
                                                                         prev
                                                                             ? { ...prev, timezone: event.target.value }
                                                                             : prev
-                                                                    )}
+                                                                    )
+                                                                }
                                                                 disabled={!canWriteTenants || savingBranch}
                                                             />
                                                         </label>
@@ -773,7 +845,8 @@ export default function TenantsPage() {
                                                                         prev
                                                                             ? { ...prev, phone: event.target.value }
                                                                             : prev
-                                                                    )}
+                                                                    )
+                                                                }
                                                                 disabled={!canWriteTenants || savingBranch}
                                                             />
                                                         </label>
@@ -787,7 +860,8 @@ export default function TenantsPage() {
                                                                         prev
                                                                             ? { ...prev, instanceId: event.target.value }
                                                                             : prev
-                                                                    )}
+                                                                    )
+                                                                }
                                                                 disabled={!canWriteTenants || savingBranch}
                                                             />
                                                         </label>
@@ -801,7 +875,8 @@ export default function TenantsPage() {
                                                                         prev
                                                                             ? { ...prev, telegramChatId: event.target.value }
                                                                             : prev
-                                                                    )}
+                                                                    )
+                                                                }
                                                                 disabled={!canWriteTenants || savingBranch}
                                                             />
                                                         </label>
@@ -815,7 +890,8 @@ export default function TenantsPage() {
                                                                         prev
                                                                             ? { ...prev, knowledgeTag: event.target.value }
                                                                             : prev
-                                                                    )}
+                                                                    )
+                                                                }
                                                                 disabled={!canWriteTenants || savingBranch}
                                                             />
                                                         </label>
@@ -830,7 +906,8 @@ export default function TenantsPage() {
                                                                     prev
                                                                         ? { ...prev, isActive: event.target.checked }
                                                                         : prev
-                                                                )}
+                                                                )
+                                                            }
                                                             disabled={!canWriteTenants || savingBranch}
                                                         />
                                                         Активен
@@ -846,7 +923,7 @@ export default function TenantsPage() {
                                                                         prev
                                                                             ? { ...prev, confirmReason: event.target.value }
                                                                             : prev
-                                                                    )}
+                                                                )
                                                                 disabled={!canWriteTenants || savingBranch}
                                                             />
                                                         </label>
@@ -875,6 +952,17 @@ export default function TenantsPage() {
                             })
                         )}
                     </div>
+                    {branchesQuery.hasNextPage ? (
+                        <div className="flex justify-center pt-3">
+                            <button
+                                className="btn-ghost"
+                                onClick={() => branchesQuery.fetchNextPage()}
+                                disabled={branchesQuery.isFetchingNextPage}
+                            >
+                                {branchesQuery.isFetchingNextPage ? "Загрузка..." : "Показать еще"}
+                            </button>
+                        </div>
+                    ) : null}
                 </section>
             </div>
 

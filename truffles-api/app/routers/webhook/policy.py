@@ -232,6 +232,8 @@ def _detect_policy_section(
     if not normalized or not sections:
         return None
     for section_key in sections:
+        if section_key == "medical" and "подруг" in normalized and "у меня" not in normalized:
+            continue
         section = _get_policy_section(policy_pack, section_key)
         if _matches_policy_section(normalized, section):
             return section_key, section
@@ -249,6 +251,8 @@ def _detect_hard_law_match(
     policy_pack: dict | None,
     intent_hints: list[str] | None = None,
 ) -> tuple[str, dict | None] | None:
+    from . import _legacy as legacy
+
     hard_law_sections = _resolve_hard_law_sections(policy_pack)
     match = _detect_policy_section(
         message_text,
@@ -256,6 +260,21 @@ def _detect_hard_law_match(
         sections=hard_law_sections,
     )
     if match:
+        section_key, section = match
+        if section_key == "complaint":
+            normalized = legacy._normalize_text(message_text)
+            if normalized and legacy._contains_any(
+                normalized,
+                ["без задерж", "без опозд", "без опоз"],
+            ):
+                return None
+        if section_key == "medical":
+            normalized = legacy._normalize_text(message_text)
+            consult_override = _policy_str_list(
+                section.get("consult_override_keywords") if isinstance(section, dict) else None
+            )
+            if normalized and consult_override and legacy._contains_any(normalized, consult_override):
+                return None
         return match
     if not intent_hints:
         return None
@@ -463,6 +482,12 @@ def _format_discounts_policy_reply(
     discounts = _load_discount_policy_payload(policy_pack=policy_pack, policy_type=policy_type)
     if not discounts:
         return None
+    stacking_parts = [
+        str(value).strip().rstrip(".")
+        for value in (discounts.get("stacking"), discounts.get("stacking_notes"))
+        if isinstance(value, str) and value.strip()
+    ]
+    stacking_text = f" {'. '.join(stacking_parts)}." if stacking_parts else ""
     items = discounts.get("items")
     if not isinstance(items, list):
         items = []
@@ -475,10 +500,6 @@ def _format_discounts_policy_reply(
         if name and percent:
             parts.append(f"{name}: {percent}%")
     if parts:
-        stacking = discounts.get("stacking") or discounts.get("stacking_notes")
-        stacking_text = ""
-        if isinstance(stacking, str) and stacking.strip():
-            stacking_text = f" {stacking}."
         return "Официальные акции: " + "; ".join(parts) + "." + stacking_text
     rules = discounts.get("rules")
     if isinstance(rules, list) and rules:
@@ -488,9 +509,8 @@ def _format_discounts_policy_reply(
     fallback_text = discounts.get("value_text") or discounts.get("text") or discounts.get("notes")
     if isinstance(fallback_text, str) and fallback_text.strip():
         return fallback_text.strip()
-    stacking = discounts.get("stacking") or discounts.get("stacking_notes")
-    if isinstance(stacking, str) and stacking.strip():
-        return stacking.strip()
+    if stacking_parts:
+        return ". ".join(stacking_parts) + "."
     return None
 
 
@@ -716,7 +736,16 @@ def _handle_hard_law_gate(
     hard_law_match = _detect_hard_law_match(message_text, policy_pack=policy_pack)
     if not hard_law_match:
         return None
+    from . import _legacy as legacy
+
     section_key, section = hard_law_match
+    if section_key == "medical":
+        normalized = legacy._normalize_text(message_text)
+        consult_override = _policy_str_list(
+            section.get("consult_override_keywords") if isinstance(section, dict) else None
+        )
+        if normalized and consult_override and legacy._contains_any(normalized, consult_override):
+            return None
     risk_level = _resolve_policy_risk_level(section) or "high"
     intent = _resolve_policy_intent(section_key, section)
     response = section.get("response") if isinstance(section, dict) else None

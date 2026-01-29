@@ -42,6 +42,7 @@ from app.schemas.console import (
     ConsoleBranch,
     ConsoleBranchCreateRequest,
     ConsoleBranchCreateResponse,
+    ConsoleBranchListResponse,
     ConsoleBranchUpdateRequest,
     ConsoleCapabilitiesPatchRequest,
     ConsoleCapabilitiesRecord,
@@ -53,10 +54,12 @@ from app.schemas.console import (
     ConsoleClient,
     ConsoleClientCreateRequest,
     ConsoleClientCreateResponse,
+    ConsoleClientListResponse,
     ConsoleClientUpdateRequest,
     ConsoleCompany,
     ConsoleCompanyCreateRequest,
     ConsoleCompanyCreateResponse,
+    ConsoleCompanyListResponse,
     ConsoleCompanyUpdateRequest,
     ConsoleConfirmationCreateRequest,
     ConsoleConfirmationResponse,
@@ -821,6 +824,11 @@ def _require_ops_access(context: ConsoleAuthContext, *, action: str = "read") ->
         action,
         message=message,
     )
+
+
+def _require_platform_admin(context: ConsoleAuthContext) -> None:
+    if context.role != "platform_admin":
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Platform admin access required")
 
 
 def _normalize_outbox_status(status: Optional[str]) -> str:
@@ -3328,6 +3336,193 @@ async def rollback_knowledge(
     )
 
 
+@router.get(
+    "/admin/companies",
+    response_model=ConsoleCompanyListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_companies(
+    request: Request,
+    cursor: Optional[str] = None,
+    limit: int = 50,
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleCompanyListResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_platform_admin(context)
+    _reject_unknown_query_params(request, {"cursor", "limit", "q"})
+    _validate_limit(limit)
+
+    query = db.query(Company)
+    query_value = _normalize_search_query("q", q) if q else None
+    if query_value:
+        query_value_lower = query_value.lower()
+        uuid_value = _looks_like_uuid(query_value)
+        if uuid_value:
+            query = query.filter(Company.id == uuid_value)
+        else:
+            query = query.filter(func.lower(Company.name).like(f"%{query_value_lower}%"))
+
+    cursor_date = _parse_cursor_param(cursor)
+    if cursor_date is not None:
+        query = query.filter(Company.created_at < cursor_date)
+
+    items = (
+        query.order_by(Company.created_at.desc(), Company.id.desc())
+        .limit(limit + 1)
+        .all()
+    )
+    has_more = len(items) > limit
+    if has_more:
+        items = items[:limit]
+    next_cursor = items[-1].created_at.isoformat() if has_more and items[-1].created_at else None
+
+    return ConsoleCompanyListResponse(
+        items=[
+            ConsoleCompany(
+                id=company.id,
+                name=company.name,
+                billing_info=company.billing_info,
+            )
+            for company in items
+        ],
+        cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
+@router.get(
+    "/admin/clients",
+    response_model=ConsoleClientListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_clients(
+    request: Request,
+    cursor: Optional[str] = None,
+    limit: int = 50,
+    q: Optional[str] = None,
+    company_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleClientListResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_platform_admin(context)
+    _reject_unknown_query_params(request, {"cursor", "limit", "q", "company_id"})
+    _validate_limit(limit)
+
+    company_uuid = _parse_uuid_param("company_id", company_id)
+    query = db.query(Client)
+    if company_uuid:
+        query = query.filter(Client.company_id == company_uuid)
+
+    query_value = _normalize_search_query("q", q) if q else None
+    if query_value:
+        query_value_lower = query_value.lower()
+        uuid_value = _looks_like_uuid(query_value)
+        filters = []
+        if uuid_value:
+            filters.append(Client.id == uuid_value)
+        filters.append(func.lower(Client.name).like(f"%{query_value_lower}%"))
+        query = query.filter(or_(*filters))
+
+    cursor_date = _parse_cursor_param(cursor)
+    if cursor_date is not None:
+        query = query.filter(Client.created_at < cursor_date)
+
+    items = (
+        query.order_by(Client.created_at.desc(), Client.id.desc())
+        .limit(limit + 1)
+        .all()
+    )
+    has_more = len(items) > limit
+    if has_more:
+        items = items[:limit]
+    next_cursor = items[-1].created_at.isoformat() if has_more and items[-1].created_at else None
+
+    company_ids = {client.company_id for client in items if client.company_id}
+    companies_by_id: dict[UUID, Company] = {}
+    if company_ids:
+        companies = db.query(Company).filter(Company.id.in_(company_ids)).all()
+        companies_by_id = {company.id: company for company in companies}
+
+    return ConsoleClientListResponse(
+        items=[
+            ConsoleClient(
+                id=client.id,
+                slug=client.name,
+                name=client.name,
+                company_id=client.company_id,
+                company_name=companies_by_id.get(client.company_id).name
+                if client.company_id and client.company_id in companies_by_id
+                else None,
+            )
+            for client in items
+        ],
+        cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
+@router.get(
+    "/admin/branches",
+    response_model=ConsoleBranchListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_branches(
+    request: Request,
+    cursor: Optional[str] = None,
+    limit: int = 50,
+    q: Optional[str] = None,
+    client_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleBranchListResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_platform_admin(context)
+    _reject_unknown_query_params(request, {"cursor", "limit", "q", "client_id"})
+    _validate_limit(limit)
+
+    client_uuid = _parse_uuid_param("client_id", client_id)
+    query = db.query(Branch)
+    if client_uuid:
+        query = query.filter(Branch.client_id == client_uuid)
+
+    query_value = _normalize_search_query("q", q) if q else None
+    if query_value:
+        query_value_lower = query_value.lower()
+        uuid_value = _looks_like_uuid(query_value)
+        filters = []
+        if uuid_value:
+            filters.append(Branch.id == uuid_value)
+        filters.extend(
+            [
+                func.lower(Branch.name).like(f"%{query_value_lower}%"),
+                func.lower(Branch.slug).like(f"%{query_value_lower}%"),
+                func.lower(Branch.instance_id).like(f"%{query_value_lower}%"),
+                func.lower(Branch.phone).like(f"%{query_value_lower}%"),
+            ]
+        )
+        query = query.filter(or_(*filters))
+
+    cursor_date = _parse_cursor_param(cursor)
+    if cursor_date is not None:
+        query = query.filter(Branch.created_at < cursor_date)
+
+    items = (
+        query.order_by(Branch.created_at.desc(), Branch.id.desc())
+        .limit(limit + 1)
+        .all()
+    )
+    has_more = len(items) > limit
+    if has_more:
+        items = items[:limit]
+    next_cursor = items[-1].created_at.isoformat() if has_more and items[-1].created_at else None
+
+    return ConsoleBranchListResponse(
+        items=[_serialize_branch(branch) for branch in items],
+        cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
 @router.post(
     "/admin/companies",
     response_model=ConsoleCompanyCreateResponse,
@@ -3457,12 +3652,10 @@ async def create_client(
     if existing:
         raise ConsoleAPIError(400, "INVALID_PARAM", "client_slug already exists")
 
-    company_id = None
-    if body.company_id:
-        company = db.query(Company).filter(Company.id == body.company_id).first()
-        if not company:
-            raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
-        company_id = company.id
+    company = db.query(Company).filter(Company.id == body.company_id).first()
+    if not company:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+    company_id = company.id
 
     status_value = (body.status or "active").strip()
     now = datetime.now(timezone.utc)
@@ -3497,7 +3690,7 @@ async def create_client(
             name=client.name,
             status=client.status,
             company_id=client.company_id,
-            company_name=company.name if company else None,
+            company_name=company.name,
         )
     )
 

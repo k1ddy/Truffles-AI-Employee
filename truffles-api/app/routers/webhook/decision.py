@@ -99,16 +99,19 @@ from app.routers.webhook.context_manager import (
     _build_compact_summary_text,
     _build_consult_return_prompt,
     _get_asr_confirmation,
+    _get_asr_inflight,
     _get_class_carryover,
     _get_consult_context,
     _get_context_manager,
     _get_conversation_context,
+    _get_expected_reply_reason,
     _get_expected_reply_type,
     _get_low_confidence_retry_count,
     _get_memory_pending,
     _get_memory_profile,
     _get_reengage_confirmation,
     _get_service_carryover,
+    _get_style_reference_pending,
     _increment_context_message_count,
     _is_asr_confirmation_active,
     _is_re_entry_required,
@@ -122,6 +125,7 @@ from app.routers.webhook.context_manager import (
     _reset_low_confidence_retry,
     _resolve_current_goal,
     _set_asr_confirmation,
+    _set_asr_inflight,
     _set_class_carryover,
     _set_consult_context,
     _set_context_manager,
@@ -135,6 +139,7 @@ from app.routers.webhook.context_manager import (
     _set_re_entry_required,
     _set_reengage_confirmation,
     _set_service_carryover,
+    _set_style_reference_pending,
     _update_compact_summary,
 )
 from app.routers.webhook.dedup import (
@@ -297,7 +302,7 @@ from app.services.demo_salon_knowledge import (
     _has_duration_signal,
     _has_price_signal,
     _match_service,
-    build_consult_reply,
+    build_evening_greeting,
     build_quiet_hours_notice,
     compose_multi_truth_reply,
     format_reply_from_truth,
@@ -508,6 +513,7 @@ def _apply_expected_reply_contract(
     from . import _legacy as legacy
 
     expected_reply_type = legacy._get_expected_reply_type(context)
+    expected_reply_reason = legacy._get_expected_reply_reason(context)
     intent_queue = legacy._get_intent_queue(context)
     session_memory = legacy._get_session_memory(context)
     re_entry_required = legacy._is_re_entry_required(context)
@@ -531,7 +537,7 @@ def _apply_expected_reply_contract(
                 legacy.EXPECTED_REPLY_NAME,
             }
             and legacy._is_short_reply(message_text)
-            and not legacy._looks_like_info_query(message_text)
+            and not legacy._looks_like_info_query(message_text, client_slug=client_slug)
             and not legacy._looks_like_policy_topic(
                 message_text,
                 policy_type=policy_type,
@@ -572,10 +578,16 @@ def _apply_expected_reply_contract(
         if message_text:
             normalized_message = legacy._normalize_service_text(message_text)
             expected_reply_blocked_by_info = (
-                legacy._looks_like_info_query(message_text)
+                legacy._looks_like_info_query(message_text, client_slug=client_slug)
                 or legacy._has_price_signal(normalized_message, message_text)
                 or legacy._has_duration_signal(normalized_message, message_text)
             )
+            if (
+                expected_reply_blocked_by_info
+                and expected_reply_type == legacy.EXPECTED_REPLY_TIME
+                and legacy._extract_datetime(message_text)
+            ):
+                expected_reply_blocked_by_info = False
         expected_reply_text = expected_reply_text or ""
         answer_result = None
         answer_confidence = 0.0
@@ -832,28 +844,29 @@ def _apply_expected_reply_contract(
                 context = legacy._set_booking_context(context, booking_state)
                 legacy._set_conversation_context(conversation, context)
         if expected_reply_shortcircuit:
-            context_manager = legacy._get_context_manager(context)
-            if context_manager.get("current_goal") != "booking":
-                context_manager["current_goal"] = "booking"
-                context = legacy._set_context_manager(context, context_manager)
-                legacy._set_conversation_context(conversation, context)
-                legacy._record_context_manager_decision(
-                    conversation,
-                    saved_message,
-                    decision="current_goal",
-                    updates={"current_goal": "booking"},
-                )
-                context, memory = legacy._update_session_memory_goal(
-                    context, active_goal="booking", now=now
-                )
-                legacy._set_conversation_context(conversation, context)
-                legacy._record_session_memory_update(
-                    conversation,
-                    saved_message,
-                    memory=memory,
-                    reason="active_goal",
-                )
-            current_goal = "booking"
+            if not expected_reply_reason or expected_reply_reason == "booking_prompt":
+                context_manager = legacy._get_context_manager(context)
+                if context_manager.get("current_goal") != "booking":
+                    context_manager["current_goal"] = "booking"
+                    context = legacy._set_context_manager(context, context_manager)
+                    legacy._set_conversation_context(conversation, context)
+                    legacy._record_context_manager_decision(
+                        conversation,
+                        saved_message,
+                        decision="current_goal",
+                        updates={"current_goal": "booking"},
+                    )
+                    context, memory = legacy._update_session_memory_goal(
+                        context, active_goal="booking", now=now
+                    )
+                    legacy._set_conversation_context(conversation, context)
+                    legacy._record_session_memory_update(
+                        conversation,
+                        saved_message,
+                        memory=memory,
+                        reason="active_goal",
+                    )
+                current_goal = "booking"
         trace_payload = {
             "stage": "question_contract",
             "decision": "matched" if matched else "missed",
@@ -914,6 +927,7 @@ def _run_intent_decomposition(
     saved_message: Message | None,
     message_text: str | None,
     expected_reply_type: str | None,
+    expected_reply_reason: str | None,
     intent_queue: list[str] | None,
     class_carryover: dict | None,
     routing: dict[str, bool],
@@ -1084,12 +1098,15 @@ def _run_intent_decomposition(
                         "multi_intent": intent_decomp_multi,
                     }
         else:
+            pending_intent_queue = []
+            pending_expected_reply_type = None
             intent_queue_event = {
-                "decision": "no_match",
+                "decision": "drop",
                 "expected_reply_type": expected_reply_type,
                 "intent_queue": intent_queue,
                 "intents": intent_decomp_intents,
                 "expected_reply_matched": False,
+                "expected_reply_next": None,
             }
 
     intent_decomp_set = (
@@ -1112,10 +1129,24 @@ def _run_intent_decomposition(
                 info_signals = {}
             info_signals["guest"] = True
             info_class_meta["info_signals"] = info_signals
+    if (
+        not info_class_intents
+        and expected_reply_shortcircuit
+        and current_goal != "booking"
+        and isinstance(class_carryover, dict)
+    ):
+        carryover_intents = class_carryover.get("intents")
+        if isinstance(carryover_intents, list):
+            for intent_name in carryover_intents:
+                if isinstance(intent_name, str) and intent_name.strip():
+                    info_class_intents.add(intent_name.strip().casefold())
     info_signals = (
         info_class_meta.get("info_signals")
         if isinstance(info_class_meta, dict)
         else None
+    )
+    guest_policy_signal = bool(
+        isinstance(info_signals, dict) and info_signals.get("guest")
     )
     basic_info_message = bool(
         {"location", "hours"} & info_class_intents
@@ -1125,18 +1156,52 @@ def _run_intent_decomposition(
         )
     )
     carryover_followup = legacy._looks_like_carryover_followup(message_text)
-    allow_service_carryover = bool(carryover_followup and not basic_info_message)
+    hours_followup = legacy._looks_like_hours_followup(message_text)
+    expected_reply_followup = bool(
+        expected_reply_shortcircuit and current_goal != "booking"
+    )
+    allow_service_carryover = bool(
+        (carryover_followup or expected_reply_followup) and not basic_info_message
+    )
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    openai_key_missing = not openai_key or openai_key.strip().casefold() in {"none", "null"}
+    short_noisy_followup = False
+    if (
+        openai_key_missing
+        and isinstance(class_carryover, dict)
+        and class_carryover.get("class") == "info_bundle"
+        and class_carryover.get("info_sections")
+        and message_text
+    ):
+        normalized = normalize_for_matching(message_text)
+        tokens = _tokenize_for_matching(normalized)
+        if tokens and len(tokens) <= SESSION_MEMORY_SHORT_TOKENS:
+            has_digits = any(ch.isdigit() for ch in message_text)
+            has_service_hint = bool(
+                get_demo_salon_service_hint(message_text, client_slug=client_slug)
+            )
+            short_noisy_followup = not has_digits and "?" not in message_text and not has_service_hint
     preserve_info_carryover = bool(
-        not os.environ.get("OPENAI_API_KEY")
+        openai_key_missing
+        and (carryover_followup or hours_followup or short_noisy_followup)
         and isinstance(class_carryover, dict)
         and class_carryover.get("class") == "info_bundle"
         and class_carryover.get("info_sections")
     )
     if not allow_service_carryover:
+        force_keep_info_carryover = bool(
+            isinstance(class_carryover, dict)
+            and class_carryover.get("class") == "info_bundle"
+            and hours_followup
+        )
         existing_service_carryover = legacy._get_service_carryover(
             context_manager, message_count=message_count
         )
-        if (basic_info_message or class_carryover or existing_service_carryover) and not preserve_info_carryover:
+        if (
+            (basic_info_message or class_carryover or existing_service_carryover)
+            and not preserve_info_carryover
+            and not force_keep_info_carryover
+        ):
             carryover_reason = "basic_info_lock" if basic_info_message else "no_followup"
             if saved_message:
                 legacy._update_message_decision_metadata(
@@ -1154,7 +1219,7 @@ def _run_intent_decomposition(
                     "reason": carryover_reason,
                 },
             )
-        if not preserve_info_carryover:
+        if not preserve_info_carryover and not force_keep_info_carryover:
             class_carryover = None
     consult_interrupt_intents = (
         intent_decomp_set & legacy.CONSULT_INTERRUPT_INTENTS if intent_decomp_used else set()
@@ -1175,6 +1240,7 @@ def _run_intent_decomposition(
             intent_decomp_set,
             consult_intent,
             expected_reply_type,
+            expected_reply_reason,
         )
         if not expected_reply_shortcircuit and not (
             current_goal == "consult" and consult_return_pending
@@ -1272,8 +1338,9 @@ def _run_intent_decomposition(
     intent_decomp_has_booking = "booking" in intent_decomp_set
     intent_decomp_info = intent_decomp_set & legacy.BOOKING_INFO_QUESTION_TYPES
     if expected_reply_shortcircuit:
-        booking_signal = True
-        booking_block_meta = None
+        if not expected_reply_reason or expected_reply_reason == "booking_prompt":
+            booking_signal = True
+            booking_block_meta = None
     elif intent_decomp_has_booking:
         booking_signal = True
         if booking_block_meta and booking_block_meta.get("booking_blocked_reason") == "info_question":
@@ -1305,6 +1372,9 @@ def _run_intent_decomposition(
         if not bypass_domain_flows
         else False
     )
+    if guest_policy_signal and not booking_active:
+        booking_signal = False
+        booking_wants_flow = False
     if booking_block_meta:
         legacy._record_decision_trace(
             conversation,
@@ -2021,13 +2091,20 @@ LOW_CONFIDENCE_MAX_RETRIES = 2
 HANDOVER_CONFIRM_WINDOW_MINUTES = 15
 REENGAGE_CONFIRM_WINDOW_MINUTES = 15
 ASR_CONFIRM_WINDOW_MINUTES = 10
+ASR_INFLIGHT_TTL_SECONDS = 90
 SERVICE_HINT_WINDOW_MINUTES = 120
 ASR_LOW_CONFIDENCE_MIN_CHARS = 6
 ASR_LOW_CONFIDENCE_MIN_WORDS = 3
 ASR_LOW_CONFIDENCE_MIN_DURATION_SECONDS = 6.0
 ASR_LOW_CONFIDENCE_NON_LETTER_RATIO = 0.4
 MULTI_INTENT_MIN_CHARS = 350
-MSG_ESCALATED = "Передал менеджеру. Могу чем-то помочь пока ждёте?"
+STYLE_REFERENCE_PENDING_TTL_MINUTES = 10
+QUIET_HOURS_NOTICE_TTL_MINUTES = 10
+EVENING_GREETING_TTL_HOURS = 12
+MSG_ESCALATED = (
+    "Передал менеджеру. Пока заявка активна, я не отвечаю — сообщения уходят администратору. "
+    "Если есть детали (услуга/время/имя), напишите — я передам."
+)
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."
 MSG_MUTED_LONG = "Понял! Если ответа от менеджеров долго нет — лучше звоните напрямую: +7 775 984 19 26"
 MSG_LOW_CONFIDENCE = "Хороший вопрос! Уточню у коллег и вернусь с ответом."
@@ -2051,10 +2128,26 @@ MSG_PENDING_LOW_CONFIDENCE = (
     "Я уже передал менеджеру — он скоро подключится. "
     "Пока ждём, уточните: услуги/цены или запись/адрес."
 )
-MSG_PENDING_ESCALATION = "Я уже передал менеджеру — он скоро подключится."
-MSG_PENDING_STATUS = "Да, я передал. Сейчас менеджер ещё не взял заявку. Как только возьмёт — ответит здесь. Пока ждём, могу помочь: уточните, что нужно?"
-MSG_PENDING_WAIT = "Администратор подключится."
-MSG_PENDING_SLA_PING = "Напоминаю: менеджер ещё не подключился. Я на связи — напишите, что нужно уточнить."
+MSG_PENDING_ESCALATION = (
+    "Я уже передал менеджеру. Пока заявка активна, я не отвечаю — сообщения уходят администратору."
+)
+MSG_PENDING_STATUS = (
+    "Да, передал. Сейчас менеджер ещё не взял заявку. "
+    "Пока он не подключился, я не отвечаю — сообщения уходят администратору."
+)
+MSG_PENDING_RESCHEDULE = (
+    "Перенос записи подтверждает администратор. Передам ваш запрос. "
+    "Пока заявка активна, я не отвечаю."
+)
+MSG_PENDING_COMPLAINT = (
+    "Жаль, что так вышло. Передам администратору, разберутся. "
+    "Пока заявка активна, я не отвечаю."
+)
+MSG_PENDING_WAIT = "Менеджер подключится. Пока заявка активна, я не отвечаю."
+MSG_PENDING_SLA_PING = (
+    "Напоминаю: менеджер ещё не подключился. "
+    "Если всё актуально — напишите детали, я передам администратору."
+)
 MSG_PENDING_AUTO_CLOSE = "Закрываю ожидание. Если всё ещё актуально — напишите, я помогу."
 MSG_PENDING_ACK = "Хорошо. Напишите, что именно нужно: цена/запись/адрес/мастер."
 MSG_AI_ERROR = "Извините, произошла ошибка. Попробуйте позже."
@@ -2063,17 +2156,21 @@ MSG_MEDIA_UNSUPPORTED = (
 )
 MSG_MEDIA_TOO_LARGE = "Файл слишком большой. Пришлите, пожалуйста, фото/аудио поменьше или опишите текстом."
 MSG_MEDIA_RATE_LIMIT = "Слишком много файлов за короткое время. Давайте продолжим позже или опишите текстом."
-MSG_MEDIA_RECEIVED = "Файл получил. Напишите, пожалуйста, что именно нужно: цена/запись/адрес/мастер/жалоба."
+MSG_MEDIA_RECEIVED = (
+    "Файл получил. Напишите, пожалуйста, что именно нужно: цена/запись/адрес/мастер/жалоба. "
+    "Если это референс, напишите: «как на фото»."
+)
 MSG_MEDIA_DOC_RECEIVED = "Документ получил. Напишите, пожалуйста, что именно нужно."
 MSG_MEDIA_TRANSCRIPT_FAILED = "Не смог разобрать аудио. Напишите, пожалуйста, текстом."
 MSG_ASR_CONFIRM = "Я услышал: «{text}». Правильно? (да/нет)"
 MSG_ASR_CONFIRM_DECLINED = "Пожалуйста, напишите текстом или перешлите аудио."
+MSG_ASR_INFLIGHT_WAIT = "Расшифровываю предыдущее аудио. Можно написать текстом, чтобы быстрее."
 MSG_MEDIA_PENDING_NEED_TEXT = (
-    "Я уже передал менеджеру. Чтобы ускорить, напишите, что именно нужно: цена/запись/адрес/мастер/жалоба."
+    "Я уже передал менеджеру. Чтобы ускорить, напишите детали: цена/запись/адрес/мастер/жалоба — я передам."
 )
 MSG_MEDIA_STYLE_REFERENCE = (
     "Спасибо за фото/референс. Передал администратору для подтверждения возможности и деталей. "
-    "Чтобы ускорить, напишите услугу, дату/время и имя."
+    "Пока заявка активна, я не отвечаю. Чтобы ускорить, напишите услугу, дату/время и имя."
 )
 MSG_STYLE_REFERENCE_NEED_MEDIA = (
     "Можем ориентироваться на фото/референс. Пришлите фото и кратко опишите запрос — "
@@ -2119,6 +2216,7 @@ PENDING_CLOSE_PHRASES = {
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
 MSG_BOOKING_ASK_NAME = "Как вас зовут?"
+MSG_BOOKING_ASK_ALL = "Чтобы записать, пожалуйста, напишите: услуга, точная дата, точное время, имя, контактный номер."
 MSG_BOOKING_SLOT_LOCK_STUB = "Я помогаю только по вопросам салона и записи."
 MSG_BOOKING_CANCELLED = "Хорошо, если передумаете — пишите."
 MSG_BOOKING_REENGAGE = "Хотите продолжить запись? Если да — напишите услугу."
@@ -2129,10 +2227,15 @@ SERVICE_HINT_AT_KEY = "last_service_hint_at"
 RE_ENTRY_REQUIRED_KEY = "re_entry_required"
 REENGAGE_CONFIRM_KEY = "reengage_confirmation"
 ASR_CONFIRM_KEY = "asr_confirm_pending"
+ASR_INFLIGHT_KEY = "asr_inflight"
+STYLE_REFERENCE_PENDING_KEY = "style_reference_pending"
+QUIET_HOURS_NOTICE_KEY = "quiet_hours_notice"
+EVENING_GREETING_KEY = "evening_greeting"
 DECISION_TRACE_KEY = "decision_trace"
 CONTEXT_MANAGER_KEY = "context_manager"
 INTENT_QUEUE_KEY = "intent_queue"
 EXPECTED_REPLY_TYPE_KEY = "expected_reply_type"
+EXPECTED_REPLY_REASON_KEY = "expected_reply_reason"
 
 EXPECTED_REPLY_SERVICE = "service_choice"
 EXPECTED_REPLY_TIME = "time"
@@ -2531,7 +2634,7 @@ def _extract_datetime(
 
 
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration"}
-INFO_INTENTS = {"pricing", "hours", "duration", "location"}
+INFO_INTENTS = {"pricing", "hours", "duration", "location", "promotions"}
 CONSULT_INTERRUPT_INTENTS = {"booking", "pricing", "duration", "location", "hours"}
 INFO_INTENT_PRIORITY_SERVICE = ("pricing", "duration", "location", "hours")
 INFO_INTENT_PRIORITY_GENERIC = ("location", "hours", "pricing", "duration")
@@ -2605,6 +2708,12 @@ def _evaluate_booking_signal(
     )
     booking_signal = has_service and has_datetime
     if booking_signal and message_text:
+        normalized = normalize_for_matching(message_text)
+        if normalized and _contains_any(normalized, ["совмещ", "в один день"]) and _contains_any(
+            normalized,
+            ["чистк", "пилинг"],
+        ):
+            return False, {"booking_blocked_reason": "procedure_combo"}
         segments = [segment.strip() for segment in re.split(r"[?!\.,;]+", message_text) if segment.strip()]
         if not segments:
             segments = [message_text.strip()]
@@ -2745,6 +2854,8 @@ def _looks_like_carryover_followup(message_text: str | None) -> bool:
     ]
     if _contains_any(normalized, followup_phrases):
         return True
+    if tokens[0].startswith("скольк") and "мест" in normalized:
+        return True
     if len(tokens) <= SESSION_MEMORY_SHORT_TOKENS:
         pricing_groups = INFO_ANCHOR_GROUPS.get("pricing", [])
         if pricing_groups and _count_anchor_hits(tokens, pricing_groups) > 0:
@@ -2870,7 +2981,7 @@ def _build_class_controller_result(
         info_signals = info_meta.get("info_signals")
         if isinstance(info_signals, dict) and info_signals.get("guest"):
             in_signals.append("info_guest")
-            classes.append("guest_policy")
+            classes.append("info_bundle")
     if booking_signal:
         in_signals.append("booking_signal")
         classes.append("booking")
@@ -2899,6 +3010,8 @@ def _build_class_controller_result(
         out_signals.append("domain_out")
 
     out_of_domain_signal = bool(out_signals and not in_signals)
+    if out_of_domain_signal:
+        classes.append("out_of_domain")
     classes = list(dict.fromkeys(classes))
     in_signals = list(dict.fromkeys(in_signals))
     out_signals = list(dict.fromkeys(out_signals))
@@ -2936,6 +3049,7 @@ def _resolve_class_router_result(
         domain_intent=domain_intent,
         domain_meta=domain_meta,
     )
+    out_of_domain_signal = bool(result.get("out_of_domain_signal"))
 
     controller_output = router_state.get("output") if isinstance(router_state, dict) else None
     controller_used = router_state.get("used") if isinstance(router_state, dict) else False
@@ -2999,6 +3113,36 @@ def _resolve_class_router_result(
         normalized_fallback = _normalize_controller_fallback_reason(error=controller_fallback)
         if normalized_fallback:
             controller_fallback_reason = controller_fallback_reason or normalized_fallback
+
+    if (
+        not controller_used
+        and not controller_attempted
+        and controller_error_normalized in {"skipped", "no_api_key"}
+    ):
+        fallback_goal = None
+        fallback_class = None
+        if out_of_domain_signal or "out_of_domain" in result.get("classes", []):
+            fallback_goal = "out_of_domain"
+            fallback_class = "out_of_domain"
+        elif "booking" in result.get("classes", []):
+            fallback_goal = "booking"
+            fallback_class = "booking"
+        elif "consult" in result.get("classes", []):
+            fallback_goal = "consult"
+            fallback_class = "consult"
+        elif "info_bundle" in result.get("classes", []) or "guest_policy" in result.get("classes", []):
+            fallback_goal = "info"
+            fallback_class = "info_bundle"
+        if fallback_goal:
+            controller_used = True
+            controller_used_reason = "deterministic"
+            controller_goal = fallback_goal
+            controller_class = fallback_class
+            if not isinstance(controller_output, dict):
+                controller_output = {}
+            controller_output = {**controller_output, "class": controller_class, "goal": controller_goal}
+            controller_fallback_reason = None
+            controller_fallback_flag = False
 
     result["controller"] = {
         "used": bool(controller_used),
@@ -3976,53 +4120,82 @@ async def _handle_webhook_payload(
             },
         )
 
+    now = datetime.now(timezone.utc)
+    sim_now = get_simulation_time(conversation) if conversation else None
+    if sim_now:
+        now = sim_now
+
     transcript = None
     asr_meta = None
+    asr_inflight_blocked = False
+    asr_inflight_set = False
     if media_info and media_policy and _is_placeholder_text(message_text):
         stored_path = None
         if saved_message and isinstance(saved_message.message_metadata, dict):
             stored_path = (saved_message.message_metadata.get("media") or {}).get("storage_path")
-        transcript, transcript_status, asr_meta = await _maybe_transcribe_voice(
-            media=media_info,
-            policy=media_policy,
-            media_decision=media_decision,
-            storage_path=stored_path,
-            saved_message=saved_message,
-        )
-        if saved_message and asr_meta:
-            _update_message_asr_metadata(saved_message, asr_meta)
-        if transcript:
-            message_text = transcript
-            if saved_message:
-                saved_message.content = transcript
-                _, _, model, language, _, _, _, _ = _get_transcription_settings()
-                transcript_model = model
-                if asr_meta and asr_meta.get("asr_model"):
-                    transcript_model = asr_meta.get("asr_model")
-                updates = {
-                    "transcript": transcript,
-                    "transcript_model": transcript_model,
-                    "transcript_provider": asr_meta.get("asr_provider") if asr_meta else None,
-                    "transcribed_at": datetime.now(timezone.utc).isoformat(),
-                }
-                if language:
-                    updates["transcript_language"] = language
-                _update_message_media_metadata(saved_message, updates)
-        elif transcript_status not in {"disabled", "not_voice", "not_allowed", "too_large", "missing_audio"}:
-            logger.warning(
-                "Voice transcription skipped",
-                extra={"context": {"status": transcript_status, "conversation_id": str(conversation.id)}},
+        if _is_voice_note(media_info) and conversation.state == ConversationState.BOT_ACTIVE.value:
+            context = _get_conversation_context(conversation)
+            asr_inflight, inflight_expired = _get_asr_inflight(context, now=now)
+            if inflight_expired:
+                context = _set_asr_inflight(context, None)
+            if asr_inflight:
+                asr_inflight_blocked = True
+            else:
+                context = _set_asr_inflight(
+                    context,
+                    {
+                        "started_at": now.isoformat(),
+                        "expires_at": (now + timedelta(seconds=ASR_INFLIGHT_TTL_SECONDS)).isoformat(),
+                    },
+                )
+                asr_inflight_set = True
+            if inflight_expired or asr_inflight_set or asr_inflight_blocked:
+                _set_conversation_context(conversation, context)
+            if asr_inflight_blocked and saved_message:
+                _update_message_decision_metadata(saved_message, {"asr_inflight": True})
+
+        if not asr_inflight_blocked:
+            transcript, transcript_status, asr_meta = await _maybe_transcribe_voice(
+                media=media_info,
+                policy=media_policy,
+                media_decision=media_decision,
+                storage_path=stored_path,
+                saved_message=saved_message,
             )
+            if saved_message and asr_meta:
+                _update_message_asr_metadata(saved_message, asr_meta)
+            if transcript:
+                message_text = transcript
+                if saved_message:
+                    saved_message.content = transcript
+                    _, _, model, language, _, _, _, _ = _get_transcription_settings()
+                    transcript_model = model
+                    if asr_meta and asr_meta.get("asr_model"):
+                        transcript_model = asr_meta.get("asr_model")
+                    updates = {
+                        "transcript": transcript,
+                        "transcript_model": transcript_model,
+                        "transcript_provider": asr_meta.get("asr_provider") if asr_meta else None,
+                        "transcribed_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    if language:
+                        updates["transcript_language"] = language
+                    _update_message_media_metadata(saved_message, updates)
+            elif transcript_status not in {"disabled", "not_voice", "not_allowed", "too_large", "missing_audio"}:
+                logger.warning(
+                    "Voice transcription skipped",
+                    extra={"context": {"status": transcript_status, "conversation_id": str(conversation.id)}},
+                )
+        if asr_inflight_set:
+            context = _get_conversation_context(conversation)
+            context = _set_asr_inflight(context, None)
+            _set_conversation_context(conversation, context)
 
     asr_low_confidence = False
     if transcript and media_info and _is_voice_note(media_info):
         asr_low_confidence = _is_asr_low_confidence(transcript, media_info.duration_seconds)
 
     # 4. Update last_message_at (keep previous for session timeout check)
-    now = datetime.now(timezone.utc)
-    sim_now = get_simulation_time(conversation) if conversation else None
-    if sim_now:
-        now = sim_now
     from . import _legacy as legacy
 
     policy_type = _get_policy_type(client, client_slug=payload.client_slug)
@@ -4032,8 +4205,13 @@ async def _handle_webhook_payload(
     policy_handler = legacy._get_policy_handler(client, client_slug=payload.client_slug)
     hard_law_sections = set(_resolve_hard_law_sections(policy_pack))
     quiet_hours_notice: str | None = None
+    evening_greeting: str | None = None
     if conversation.state == ConversationState.BOT_ACTIVE.value:
         quiet_hours_notice = build_quiet_hours_notice(
+            now_utc=now,
+            client_slug=payload.client_slug,
+        )
+        evening_greeting = build_evening_greeting(
             now_utc=now,
             client_slug=payload.client_slug,
         )
@@ -4042,6 +4220,8 @@ async def _handle_webhook_payload(
         _finalize_bot_response_helper,
         conversation=conversation,
         quiet_hours_notice=quiet_hours_notice,
+        evening_greeting=evening_greeting,
+        now=now,
     )
 
     def _extract_fact_payload(decision_meta: dict[str, Any]) -> dict[str, Any] | None:
@@ -4514,6 +4694,31 @@ async def _handle_webhook_payload(
         return safe_mode_response
     previous_last_message_at = conversation.last_message_at
     conversation.last_message_at = now
+    if asr_inflight_blocked:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "asr_inflight",
+                "decision": "wait",
+                "state": conversation.state,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="asr_inflight",
+            intent="asr_inflight",
+            source="asr_inflight",
+            fast_intent=False,
+        )
+        bot_response, sent = _send_and_save(MSG_ASR_INFLIGHT_WAIT)
+        result_message = "ASR inflight wait sent" if sent else "ASR inflight wait failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
     context = _get_conversation_context(conversation)
     context_manager = _get_context_manager(context)
     session_memory = _get_session_memory(context)
@@ -4690,6 +4895,7 @@ async def _handle_webhook_payload(
     consult_return_reason = None
     consult_return_pending = False
     class_carryover = _get_class_carryover(context_manager, message_count=message_count)
+    expected_reply_reason = _get_expected_reply_reason(context)
 
     expected_reply_state = _apply_expected_reply_contract(
         conversation=conversation,
@@ -5086,6 +5292,19 @@ async def _handle_webhook_payload(
             message_text,
             has_media=media_info.media_type == "photo",
         )
+        style_reference_pending = None
+        if conversation.state == ConversationState.BOT_ACTIVE.value and media_info.media_type == "photo":
+            context = _get_conversation_context(conversation)
+            style_reference_pending, style_pending_expired = _get_style_reference_pending(
+                context,
+                now=now,
+            )
+            if style_pending_expired:
+                context = _set_style_reference_pending(context, None)
+                _set_conversation_context(conversation, context)
+                style_reference_pending = None
+            if style_reference_pending and style_reference_pending.get("reason") == "text_only":
+                style_request = True
 
         if conversation.state == ConversationState.BOT_ACTIVE.value:
             if media_text_placeholder and _is_voice_note(media_info) and asr_failed:
@@ -5144,6 +5363,10 @@ async def _handle_webhook_payload(
                             conversation_id=conversation.id,
                             bot_response=bot_response,
                         )
+                if style_reference_pending:
+                    context = _get_conversation_context(conversation)
+                    context = _set_style_reference_pending(context, None)
+                    _set_conversation_context(conversation, context)
             elif style_request:
                 media_response = MSG_STYLE_REFERENCE_NEED_MEDIA
             elif media_text_placeholder:
@@ -5151,6 +5374,35 @@ async def _handle_webhook_payload(
                     media_response = MSG_MEDIA_DOC_RECEIVED
                 else:
                     media_response = MSG_MEDIA_RECEIVED
+                if media_info.media_type == "photo" and not style_request:
+                    pending_payload = {
+                        "reason": "photo_only",
+                        "created_at": now.isoformat(),
+                        "expires_at": (now + timedelta(minutes=STYLE_REFERENCE_PENDING_TTL_MINUTES)).isoformat(),
+                        "media": {
+                            "media_type": media_info.media_type,
+                            "raw_type": media_info.raw_type,
+                            "mime": media_info.mime,
+                            "size_bytes": media_info.size_bytes,
+                            "duration_seconds": media_info.duration_seconds,
+                            "url": media_info.url,
+                            "file_name": media_info.file_name,
+                            "caption": media_info.caption,
+                            "ptt": media_info.is_ptt,
+                        },
+                        "storage_path": storage_path,
+                    }
+                    context = _get_conversation_context(conversation)
+                    context = _set_style_reference_pending(context, pending_payload)
+                    _set_conversation_context(conversation, context)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "style_reference",
+                            "decision": "photo_pending",
+                            "state": conversation.state,
+                        },
+                    )
 
         elif conversation.state == ConversationState.PENDING.value:
             if media_text_placeholder and _is_voice_note(media_info) and asr_failed:
@@ -5311,6 +5563,7 @@ async def _handle_webhook_payload(
         saved_message=saved_message,
         message_text=message_text,
         expected_reply_type=expected_reply_type,
+        expected_reply_reason=expected_reply_reason,
         intent_queue=intent_queue,
         class_carryover=class_carryover,
         routing=routing,
@@ -5478,6 +5731,13 @@ async def _handle_webhook_payload(
         and not expected_reply_blocked_by_info
         and message_text
         and (early_out_of_domain or is_frustration_message(message_text))
+        and not consult_intent
+        and not booking_signal
+        and not booking_wants_flow
+        and not (
+            isinstance(booking_block_meta, dict)
+            and booking_block_meta.get("booking_blocked_reason") == "procedure_combo"
+        )
     )
     if expected_reply_off_topic:
         bot_response = MSG_EXPECTED_SERVICE_OFF_TOPIC
@@ -5535,6 +5795,13 @@ async def _handle_webhook_payload(
         and not expected_reply_blocked_by_info
         and message_text
         and not in_domain_signal
+        and not consult_intent
+        and not booking_signal
+        and not booking_wants_flow
+        and not (
+            isinstance(booking_block_meta, dict)
+            and booking_block_meta.get("booking_blocked_reason") == "procedure_combo"
+        )
     )
     if expected_reply_invalid_choice:
         semantic_match = semantic_service_match(message_text, payload.client_slug)
@@ -5774,7 +6041,10 @@ async def _handle_webhook_payload(
 
         bot_response = decision.response or MSG_ESCALATED
         followup_intents: list[str] = []
-        if booking_signal or "booking" in intent_decomp_set:
+        booking_followup = bool(booking_signal or "booking" in intent_decomp_set)
+        if not booking_followup and message_text and _is_booking_request(message_text):
+            booking_followup = True
+        if booking_followup:
             followup_intents.append("booking")
         for intent_name in ("location", "hours"):
             if intent_name in info_class_intents and intent_name not in followup_intents:
@@ -6570,6 +6840,109 @@ async def _handle_webhook_payload(
             bot_response=bot_response,
         )
 
+    if (
+        expected_reply_shortcircuit
+        and routing.get("allow_bot_reply")
+        and not bypass_domain_flows
+        and current_goal != "booking"
+    ):
+        carryover_intents = []
+        if isinstance(class_carryover, dict):
+            carryover_intents = class_carryover.get("intents") or []
+        carryover_intents = [
+            intent.strip().casefold()
+            for intent in carryover_intents
+            if isinstance(intent, str) and intent.strip()
+        ]
+        followup_intent = None
+        if "pricing" in carryover_intents:
+            followup_intent = "pricing"
+        elif "duration" in carryover_intents:
+            followup_intent = "duration"
+        if followup_intent:
+            service_carryover = _get_service_carryover(
+                context_manager, message_count=message_count
+            )
+            service_query = None
+            if isinstance(service_carryover, dict):
+                service_query = service_carryover.get("service_query")
+            if not isinstance(service_query, str) or not service_query.strip():
+                service_context = _get_conversation_context(conversation)
+                service_query = _get_recent_service_hint(service_context, now)
+            if (
+                (not isinstance(service_query, str) or not service_query.strip())
+                and saved_message
+                and isinstance(saved_message.message_metadata, dict)
+            ):
+                decision_meta = saved_message.message_metadata.get("decision_meta")
+                if isinstance(decision_meta, dict):
+                    candidate = decision_meta.get("expected_reply_value")
+                    if isinstance(candidate, str) and candidate.strip():
+                        service_query = candidate.strip()
+            reply, reply_meta = _build_info_intent_reply(
+                followup_intent,
+                service_query=service_query if isinstance(service_query, str) else None,
+                client_slug=payload.client_slug,
+                message_text=message_text,
+                include_info_bundle=False,
+            )
+            if reply:
+                guard_response = _maybe_apply_fact_guard(
+                    decision_meta=reply_meta if isinstance(reply_meta, dict) else None,
+                    intent=followup_intent,
+                    source="expected_reply_followup",
+                    allow_handover=routing.get("allow_handover_create", False),
+                )
+                if guard_response:
+                    db.commit()
+                    return guard_response
+                bot_response = reply
+                composer_meta = None
+                bot_response, composer_meta = _compose_fact_response(
+                    bot_response,
+                    client_slug=payload.client_slug,
+                    conversation_id=str(conversation.id),
+                    response_tag="expected_reply_followup",
+                    conversation_state=conversation.state,
+                    allow_booking_flow=routing["allow_booking_flow"],
+                    has_followup=bool(multi_intent_other_followup),
+                )
+                _reset_low_confidence_retry(conversation)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "info_class",
+                        "decision": "reply",
+                        "intent": followup_intent,
+                        "state": conversation.state,
+                        "source": "expected_reply_followup",
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="reply",
+                    intent=followup_intent,
+                    source="expected_reply_followup",
+                    fast_intent=False,
+                )
+                if saved_message and isinstance(reply_meta, dict):
+                    _update_message_decision_metadata(saved_message, reply_meta)
+                if saved_message and composer_meta:
+                    _update_message_decision_metadata(saved_message, composer_meta)
+                bot_response, sent = _send_and_save(bot_response)
+                result_message = (
+                    "Expected reply followup sent"
+                    if sent
+                    else "Expected reply followup failed"
+                )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+
     info_flow_result = _handle_info_flow(
         db=db,
         conversation=conversation,
@@ -6731,7 +7104,21 @@ async def _handle_webhook_payload(
     is_pending_status_question = (
         conversation.state == ConversationState.PENDING.value and is_handover_status_question(message_text)
     )
+    context = _get_conversation_context(conversation)
+    style_reference_pending, style_pending_expired = _get_style_reference_pending(context, now=now)
+    if style_pending_expired:
+        context = _set_style_reference_pending(context, None)
+        _set_conversation_context(conversation, context)
+        style_reference_pending = None
     style_reference = not has_media and _is_style_reference_request(message_text, has_media=False)
+    if (
+        not has_media
+        and style_reference_pending
+        and style_reference_pending.get("media")
+        and message_text
+        and not is_acknowledgement_message(message_text)
+    ):
+        style_reference = True
     decision = _resolve_action(
         routing=routing,
         state=conversation.state,
@@ -6830,6 +7217,140 @@ async def _handle_webhook_payload(
         )
 
     if decision.action == "style_reference":
+        context = _get_conversation_context(conversation)
+        style_reference_pending, style_pending_expired = _get_style_reference_pending(context, now=now)
+        if style_pending_expired:
+            context = _set_style_reference_pending(context, None)
+            _set_conversation_context(conversation, context)
+            style_reference_pending = None
+        pending_media = (
+            style_reference_pending.get("media")
+            if isinstance(style_reference_pending, dict)
+            else None
+        )
+        pending_storage_path = (
+            style_reference_pending.get("storage_path")
+            if isinstance(style_reference_pending, dict)
+            else None
+        )
+        if isinstance(pending_media, dict):
+            media_escalated = False
+            handover_text = message_text.strip() if message_text else "Клиент уточнил референс."
+            _, reused, telegram_sent = _reuse_active_handover(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message=handover_text,
+                source="style_reference_pending",
+                intent="style_reference",
+            )
+            if reused:
+                media_escalated = True
+            else:
+                _record_escalation_metric("media")
+                result = escalate_to_pending(
+                    db=db,
+                    conversation=conversation,
+                    user_message=handover_text,
+                    trigger_type="media",
+                    trigger_value="style_reference",
+                )
+                if result.ok:
+                    handover = result.value
+                    telegram_sent = send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=handover_text,
+                    )
+                    media_escalated = True
+                else:
+                    bot_response = MSG_AI_ERROR
+                    bot_response, sent = _send_and_save(bot_response)
+                    result_message = (
+                        "Style reference escalation failed"
+                        if sent
+                        else "Style reference escalation response failed"
+                    )
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
+
+            media_policy_local = media_policy or _get_media_policy(client)
+            if (
+                media_escalated
+                and conversation.telegram_topic_id
+                and media_policy_local
+                and media_policy_local.get("forward_to_telegram")
+            ):
+                bot_token, chat_id = get_telegram_credentials(db, client.id)
+                if bot_token and chat_id:
+                    telegram = TelegramService(bot_token)
+                    pending_media_info = MediaInfo(
+                        raw_type=pending_media.get("raw_type") or "image",
+                        media_type=pending_media.get("media_type") or "photo",
+                        mime=pending_media.get("mime"),
+                        size_bytes=pending_media.get("size_bytes"),
+                        duration_seconds=pending_media.get("duration_seconds"),
+                        url=pending_media.get("url"),
+                        file_name=pending_media.get("file_name"),
+                        caption=pending_media.get("caption"),
+                        base64_data=None,
+                        is_ptt=bool(pending_media.get("ptt")),
+                    )
+                    caption = _build_media_caption(message_text, pending_media_info)
+                    _send_telegram_media(
+                        telegram=telegram,
+                        chat_id=chat_id,
+                        topic_id=conversation.telegram_topic_id,
+                        media=pending_media_info,
+                        caption=caption,
+                        stored_path=pending_storage_path,
+                    )
+
+            context = _set_style_reference_pending(context, None)
+            _set_conversation_context(conversation, context)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "style_reference",
+                    "decision": "escalate_with_media",
+                    "state": conversation.state,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="style_reference",
+                intent=intent.value,
+                source="style_reference",
+                fast_intent=False,
+            )
+            bot_response, sent = _send_and_save(MSG_MEDIA_STYLE_REFERENCE)
+            result_message = (
+                "Style reference pending media escalated"
+                if sent
+                else "Style reference pending media response failed"
+            )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        pending_payload = {
+            "reason": "text_only",
+            "requested_at": now.isoformat(),
+            "expires_at": (now + timedelta(minutes=STYLE_REFERENCE_PENDING_TTL_MINUTES)).isoformat(),
+        }
+        context = _set_style_reference_pending(context, pending_payload)
+        _set_conversation_context(conversation, context)
         bot_response = MSG_STYLE_REFERENCE_NEED_MEDIA
         _record_decision_trace(
             conversation,
@@ -6837,6 +7358,7 @@ async def _handle_webhook_payload(
                 "stage": "style_reference",
                 "decision": "need_media",
                 "state": conversation.state,
+                "pending": "text_only",
             },
         )
         _record_message_decision_meta(
@@ -6850,7 +7372,10 @@ async def _handle_webhook_payload(
         result_message = "Style reference prompt sent" if sent else "Style reference prompt failed"
         db.commit()
         return WebhookResponse(
-            success=True, message=result_message, conversation_id=conversation.id, bot_response=bot_response
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
         )
 
     if decision.action == "out_of_domain":

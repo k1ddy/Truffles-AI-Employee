@@ -132,6 +132,19 @@ def _build_slot_candidates(
         seen.add(cleaned)
         candidates.append(SlotCandidate(cleaned, flags))
 
+    allow_layout_swap = expected_reply_type in {
+        legacy.EXPECTED_REPLY_SERVICE,
+        legacy.EXPECTED_REPLY_TIME,
+    }
+    if allow_layout_swap and _looks_like_layout_swap(raw):
+        swapped = _swap_keyboard_layout(raw)
+        swapped_normalized = legacy._normalize_text(swapped)
+        if swapped_normalized and swapped_normalized != raw:
+            _push(swapped_normalized, ("layout_swap", "normalized"))
+        swapped_collapsed = _collapse_repeats(swapped_normalized)
+        if swapped_collapsed and swapped_collapsed != swapped_normalized:
+            _push(swapped_collapsed, ("layout_swap", "normalized", "repeat_collapse"))
+
     _push(raw, ())
 
     normalized = legacy._normalize_text(raw)
@@ -140,19 +153,6 @@ def _build_slot_candidates(
     collapsed = _collapse_repeats(normalized)
     if collapsed and collapsed != normalized:
         _push(collapsed, ("normalized", "repeat_collapse"))
-
-    allow_layout_swap = expected_reply_type in {
-        legacy.EXPECTED_REPLY_SERVICE,
-        legacy.EXPECTED_REPLY_TIME,
-    }
-    if allow_layout_swap and _looks_like_layout_swap(raw):
-        swapped = _swap_keyboard_layout(raw)
-        swapped_normalized = legacy._normalize_text(swapped)
-        if swapped_normalized and swapped_normalized != normalized:
-            _push(swapped_normalized, ("layout_swap", "normalized"))
-        swapped_collapsed = _collapse_repeats(swapped_normalized)
-        if swapped_collapsed and swapped_collapsed != swapped_normalized:
-            _push(swapped_collapsed, ("layout_swap", "normalized", "repeat_collapse"))
 
     return candidates
 
@@ -400,9 +400,15 @@ def _resolve_datetime_offline(
         if relative_base.tzinfo is None:
             relative_base = relative_base.replace(tzinfo=timezone.utc)
         settings["RELATIVE_BASE"] = relative_base
-    parsed = dateparser.parse(message_text, languages=["ru"], settings=settings)
+    try:
+        parsed = dateparser.parse(message_text, languages=["ru"], settings=settings)
+    except Exception:
+        parsed = None
     if not parsed and normalized != message_text:
-        parsed = dateparser.parse(normalized, languages=["ru"], settings=settings)
+        try:
+            parsed = dateparser.parse(normalized, languages=["ru"], settings=settings)
+        except Exception:
+            parsed = None
     if not parsed:
         if matches:
             value = message_text.strip() if any(char.isdigit() for char in message_text) else normalized
@@ -445,6 +451,12 @@ def _validate_service_slot(
     extracted = legacy._extract_service_hint(message_text, client_slug)
     if extracted:
         return extracted
+    if client_slug:
+        from app.services.demo_salon_knowledge import get_demo_salon_service_hint
+
+        fallback = get_demo_salon_service_hint(message_text, client_slug=client_slug)
+        if fallback:
+            return fallback
     return None
 
 
@@ -476,14 +488,14 @@ def _validate_name_slot(
         return None
     from . import _legacy as legacy
 
-    if legacy._extract_service_hint(message_text, client_slug) or legacy._extract_datetime(message_text):
-        return None
     name_match = legacy.NAME_PATTERN.search(message_text)
     if name_match:
         candidate = name_match.group(1)
     elif not allow_freeform:
         return None
     else:
+        if legacy._extract_service_hint(message_text, client_slug) or legacy._extract_datetime(message_text):
+            return None
         candidate = message_text
     cleaned = _clean_name_candidate(candidate)
     if not cleaned:
@@ -608,9 +620,13 @@ def _is_booking_related_message(
 
 
 def _select_last_non_booking_message(messages: list[str], *, client_slug: str | None) -> str | None:
+    from . import _legacy as legacy
+
     for message in reversed(messages or []):
         if not message:
             continue
+        if legacy._looks_like_info_query(message, client_slug=client_slug):
+            return message
         if _is_booking_related_message(message, client_slug, allow_name=False, allow_service=False):
             continue
         return message
@@ -720,6 +736,35 @@ def _next_booking_prompt(booking: dict, *, refusal_flags: dict | None = None) ->
         return booking, legacy.MSG_BOOKING_ASK_NAME
     booking["last_question"] = None
     return booking, None
+
+
+def _should_collect_booking_details(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    from . import _legacy as legacy
+
+    normalized = legacy.normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    if "без запис" in normalized or "сроч" in normalized:
+        return True
+    if "через" in normalized and ("час" in normalized or "мин" in normalized):
+        return True
+    return False
+
+
+def _apply_collect_all_prompt(
+    booking_state: dict,
+    prompt: str | None,
+    message_text: str | None,
+) -> tuple[dict, str | None]:
+    if not prompt or not _should_collect_booking_details(message_text):
+        return booking_state, prompt
+    from . import _legacy as legacy
+
+    booking_state = dict(booking_state)
+    booking_state["last_question"] = None
+    return booking_state, legacy.MSG_BOOKING_ASK_ALL
 
 
 def _is_booking_time_service_decision(decision: DemoSalonDecision | None) -> bool:
@@ -943,6 +988,102 @@ class BookingFlowResult:
     booking_logged: bool
 
 
+def _build_booking_class_router_result(
+    *,
+    intent_decomp_set: set[str] | None,
+    booking_signal: bool,
+) -> dict[str, Any]:
+    from . import _legacy as legacy
+
+    controller_output = legacy._build_controller_meta_output(error="skipped")
+    controller_output["class"] = "booking"
+    controller_output["goal"] = "booking"
+    controller_output["confidence"] = max(legacy.CONTROLLER_CONFIDENCE_THRESHOLD, 0.5)
+    controller_output = legacy._ensure_controller_output_meta(
+        controller_output, error="skipped"
+    )
+    router_state = {
+        "used": True,
+        "attempted": False,
+        "fallback": False,
+        "confidence": controller_output["confidence"],
+        "error": "skipped",
+        "fallback_reason": None,
+        "signal_class": legacy._resolve_controller_signal_class(
+            intent_decomp_set=intent_decomp_set or set(),
+            booking_signal=booking_signal,
+        ),
+        "signal_match": False,
+        "used_reason": "deterministic",
+        "output": controller_output,
+        "sla": None,
+    }
+    return legacy._resolve_class_router_result(
+        info_intents=set(),
+        info_meta=None,
+        booking_signal=booking_signal,
+        class_carryover=None,
+        domain_intent=legacy.DomainIntent.UNKNOWN,
+        domain_meta=None,
+        router_state=router_state,
+    )
+
+
+def _record_booking_class_router_trace(
+    *,
+    conversation: Conversation,
+    class_router_result: dict | None,
+) -> None:
+    if not isinstance(class_router_result, dict):
+        return
+    from . import _legacy as legacy
+
+    controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
+    controller_used = bool(controller_meta.get("used")) if isinstance(controller_meta, dict) else False
+    controller_attempted = bool(controller_meta.get("attempted")) if isinstance(controller_meta, dict) else False
+    controller_fallback = bool(controller_meta.get("fallback")) if isinstance(controller_meta, dict) else False
+    controller_low_confidence = (
+        bool(controller_meta.get("low_confidence")) if isinstance(controller_meta, dict) else False
+    )
+    controller_used_reason = (
+        controller_meta.get("used_reason") if isinstance(controller_meta, dict) else None
+    )
+    controller_confidence = (
+        controller_meta.get("confidence") if isinstance(controller_meta, dict) else None
+    )
+    controller_error = controller_meta.get("error") if isinstance(controller_meta, dict) else None
+    controller_goal = controller_meta.get("goal") if isinstance(controller_meta, dict) else None
+    trace_payload = {
+        "stage": "class_router",
+        "classes": class_router_result.get("classes"),
+        "intents": class_router_result.get("intents"),
+        "carryover_intents": class_router_result.get("carryover_intents"),
+        "in_signals": class_router_result.get("in_signals"),
+        "out_signals": class_router_result.get("out_signals"),
+        "anchors_in_hits": class_router_result.get("anchors_in_hits"),
+        "anchors_out_hits": class_router_result.get("anchors_out_hits"),
+        "out_of_domain_signal": class_router_result.get("out_of_domain_signal"),
+        "carryover_class": class_router_result.get("carryover_class"),
+        "carryover_info_sections": class_router_result.get("carryover_info_sections"),
+        "router_fallback_reason": class_router_result.get("router_fallback_reason"),
+        "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
+        "router": class_router_result.get("router"),
+        "controller": controller_meta,
+        "controller_used": controller_used,
+        "controller_attempted": controller_attempted,
+        "controller_fallback": controller_fallback,
+        "controller_low_confidence": controller_low_confidence,
+        "controller_used_reason": controller_used_reason,
+        "controller_confidence": controller_confidence,
+        "controller_error": controller_error,
+        "controller_goal": controller_goal,
+    }
+    trace_payload.update(
+        legacy._router_observability_updates_from_class_router(class_router_result)
+    )
+    legacy._record_decision_trace(conversation, trace_payload)
+
+
 def _handle_booking_interrupt(
     *,
     db: Session,
@@ -1020,6 +1161,26 @@ def _handle_booking_interrupt(
             and info_class_intents
         ):
             booking_info_intents = sorted(info_class_intents)
+        if not booking_info_intents and message_text:
+            policy_pack = (
+                policy_handler.get("policy_pack") if isinstance(policy_handler, dict) else None
+            )
+            from app.routers.webhook.policy import _looks_like_promotions_request
+
+            if _looks_like_promotions_request(
+                message_text,
+                policy_pack=policy_pack,
+                client_slug=client_slug,
+            ):
+                booking_info_intents = ["promotions"]
+        guest_policy_hit = bool(
+            booking_interrupt_text
+            and legacy._matches_guest_policy_lexicon(
+                booking_interrupt_text, client_slug=client_slug
+            )
+        )
+        if guest_policy_hit and "guest_policy" not in booking_info_intents:
+            booking_info_intents = [*booking_info_intents, "guest_policy"]
         allow_booking_interrupt_info = bool(
             booking_info_intents
             or booking_time_service_candidate
@@ -1028,6 +1189,22 @@ def _handle_booking_interrupt(
         if allow_booking_interrupt_info and policy_handler and routing.get("allow_truth_gate_reply"):
             info_decision = None
             info_source = None
+            if guest_policy_hit:
+                from app.services.demo_salon_knowledge import build_info_combined_reply
+
+                guest_reply, guest_meta = build_info_combined_reply(
+                    include_parking=False,
+                    include_guest=True,
+                    client_slug=client_slug,
+                )
+                if guest_reply:
+                    info_decision = DemoSalonDecision(
+                        action="reply",
+                        response=guest_reply,
+                        intent="guest_policy",
+                        meta=guest_meta if isinstance(guest_meta, dict) else None,
+                    )
+                    info_source = "guest_policy"
             if booking_info_intents:
                 if "hours" in booking_info_intents and {"pricing", "duration"} & set(booking_info_intents):
                     multi_result = compose_multi_truth_reply(
@@ -1108,9 +1285,133 @@ def _handle_booking_interrupt(
                             info_decision = candidate
                             info_source = "truth_gate"
 
+            if info_decision and info_decision.action == "escalate":
+                info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}
+                info_meta = dict(info_meta)
+                trace_info_intents = booking_info_intents
+                if not trace_info_intents:
+                    fact_intents = info_meta.get("fact_intents")
+                    if isinstance(fact_intents, list):
+                        trace_info_intents = [
+                            item.strip()
+                            for item in fact_intents
+                            if isinstance(item, str) and item.strip()
+                        ]
+                if (
+                    not trace_info_intents
+                    and info_decision.intent
+                    and isinstance(info_decision.intent, str)
+                ):
+                    trace_info_intents = [info_decision.intent]
+                trace_payload = {
+                    "stage": "booking_interrupt",
+                    "decision": info_decision.action,
+                    "intent": info_decision.intent,
+                    "state": conversation.state,
+                    "booking_interrupt_info": True,
+                }
+                if trace_info_intents:
+                    trace_payload["info_intents"] = list(trace_info_intents)
+                if info_source == "truth_gate":
+                    gate_trace = {
+                        "stage": "truth_gate",
+                        "decision": info_decision.action,
+                        "intent": info_decision.intent,
+                        "state": conversation.state,
+                        "booking_wants_flow": booking_wants_flow,
+                        "policy_type": policy_type,
+                    }
+                    gate_trace.update(info_meta)
+                    legacy._record_decision_trace(conversation, gate_trace)
+                trace_payload.update(info_meta)
+                legacy._record_decision_trace(conversation, trace_payload)
+                legacy._record_message_decision_meta(
+                    saved_message,
+                    action=info_decision.action,
+                    intent=info_decision.intent,
+                    source=info_source or "booking_interrupt",
+                    fast_intent=False,
+                )
+                if saved_message:
+                    legacy._update_message_decision_metadata(
+                        saved_message,
+                        {
+                            **info_meta,
+                            "booking_info_interrupt": True,
+                            "booking_info_intents": booking_info_intents,
+                            "booking_interrupt_info": True,
+                        },
+                    )
+                bot_response = info_decision.response or legacy.MSG_ESCALATED
+                legacy._reset_low_confidence_retry(conversation)
+
+                result_message = "Booking interrupt escalation"
+                _, reused, telegram_sent = legacy._reuse_active_handover(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message=message_text,
+                    source=info_source or "booking_interrupt",
+                    intent=info_decision.intent,
+                )
+                if reused:
+                    result_message = f"Booking interrupt reuse, telegram={'sent' if telegram_sent else 'failed'}"
+                elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and routing.get(
+                    "allow_handover_create", False
+                ):
+                    result = legacy.escalate_to_pending(
+                        db=db,
+                        conversation=conversation,
+                        user_message=message_text,
+                        trigger_type="intent",
+                        trigger_value=info_decision.intent or "booking_interrupt",
+                    )
+                    if result.ok:
+                        handover = result.value
+                        telegram_sent = legacy.send_telegram_notification(
+                            db=db,
+                            handover=handover,
+                            conversation=conversation,
+                            user=user,
+                            message=message_text,
+                        )
+                        result_message = (
+                            f"Booking interrupt escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                        )
+                    else:
+                        result_message = f"Booking interrupt escalation failed: {result.error}"
+                else:
+                    result_message = "Booking interrupt escalation skipped (already pending)"
+
+                bot_response, sent = send_and_save(bot_response)
+                if not sent:
+                    result_message = f"{result_message}; response_send=failed"
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+
             if info_decision and info_decision.action == "reply":
                 info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}
                 info_meta = dict(info_meta)
+                trace_info_intents = booking_info_intents
+                if not trace_info_intents:
+                    fact_intents = info_meta.get("fact_intents")
+                    if isinstance(fact_intents, list):
+                        trace_info_intents = [
+                            item.strip()
+                            for item in fact_intents
+                            if isinstance(item, str) and item.strip()
+                        ]
+                if (
+                    not trace_info_intents
+                    and info_decision.intent
+                    and isinstance(info_decision.intent, str)
+                ):
+                    trace_info_intents = [info_decision.intent]
                 guard_response = maybe_apply_fact_guard(
                     decision_meta=info_meta,
                     intent=info_decision.intent,
@@ -1160,6 +1461,11 @@ def _handle_booking_interrupt(
                 refusal_flags = context_manager.get("refusal_flags")
                 booking_state, prompt = legacy._next_booking_prompt(
                     booking_state, refusal_flags=refusal_flags
+                )
+                booking_state, prompt = _apply_collect_all_prompt(
+                    booking_state,
+                    prompt,
+                    message_text,
                 )
                 context = legacy._set_booking_context(context, booking_state)
                 legacy._set_conversation_context(conversation, context)
@@ -1290,11 +1596,19 @@ def _handle_booking_interrupt(
                             reason="booking_prompt",
                         )
 
+                class_router_result = _build_booking_class_router_result(
+                    intent_decomp_set=intent_decomp_set,
+                    booking_signal=booking_wants_flow,
+                )
+                _record_booking_class_router_trace(
+                    conversation=conversation,
+                    class_router_result=class_router_result,
+                )
                 trace_payload = {
                     "stage": "booking_interrupt",
                     "decision": "info_reply",
                     "state": conversation.state,
-                    "info_intents": booking_info_intents,
+                    "info_intents": list(trace_info_intents),
                     "booking_prompt": prompt,
                 }
                 if booking_interrupt_info:
@@ -1448,6 +1762,98 @@ def _handle_booking_flow(
                 booking_context = legacy._set_service_hint(booking_context, price_item, now)
                 legacy._set_conversation_context(conversation, booking_context)
 
+    if (
+        message_text
+        and policy_handler
+        and routing.get("allow_truth_gate_reply")
+        and (booking_wants_flow or booking_active or booking_signal)
+    ):
+        truth_gate = policy_handler.get("truth_gate") if isinstance(policy_handler, dict) else None
+        if truth_gate:
+            decision = truth_gate(message_text, client_slug=client_slug)
+            if (
+                decision
+                and decision.action == "escalate"
+                and decision.intent == "same_day_booking"
+            ):
+                bot_response = decision.response or legacy.MSG_ESCALATED
+                legacy._reset_low_confidence_retry(conversation)
+                record_escalation_metric("intent")
+
+                result_message = "Booking same-day escalation"
+                _, reused, telegram_sent = legacy._reuse_active_handover(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message=message_text,
+                    source="booking",
+                    intent=decision.intent,
+                )
+                if reused:
+                    result_message = f"Booking same-day reuse, telegram={'sent' if telegram_sent else 'failed'}"
+                elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and routing.get(
+                    "allow_handover_create", False
+                ):
+                    result = legacy.escalate_to_pending(
+                        db=db,
+                        conversation=conversation,
+                        user_message=message_text,
+                        trigger_type="intent",
+                        trigger_value=decision.intent or "same_day_booking",
+                    )
+                    if result.ok:
+                        handover = result.value
+                        telegram_sent = legacy.send_telegram_notification(
+                            db=db,
+                            handover=handover,
+                            conversation=conversation,
+                            user=user,
+                            message=message_text,
+                        )
+                        result_message = (
+                            f"Booking same-day escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                        )
+                    else:
+                        result_message = f"Booking same-day escalation failed: {result.error}"
+                else:
+                    result_message = "Booking same-day escalation skipped (already pending)"
+
+                trace_payload = {
+                    "stage": "truth_gate",
+                    "decision": decision.action,
+                    "intent": decision.intent,
+                    "state": conversation.state,
+                    "booking_wants_flow": booking_wants_flow,
+                    "policy_type": policy_pack.get("policy_type") if isinstance(policy_pack, dict) else None,
+                }
+                if isinstance(getattr(decision, "meta", None), dict):
+                    trace_payload.update(decision.meta)
+                legacy._record_decision_trace(conversation, trace_payload)
+                legacy._record_message_decision_meta(
+                    saved_message,
+                    action=decision.action,
+                    intent=decision.intent,
+                    source="truth_gate",
+                    fast_intent=False,
+                )
+                if saved_message and isinstance(getattr(decision, "meta", None), dict):
+                    legacy._update_message_decision_metadata(saved_message, decision.meta)
+
+                bot_response, sent = send_and_save(bot_response)
+                if not sent:
+                    result_message = f"{result_message}; response_send=failed"
+                db.commit()
+                return BookingFlowResult(
+                    response=WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    ),
+                    booking_t0=None,
+                    booking_logged=True,
+                )
+
     booking_t0 = None
     booking_logged = False
     if routing.get("allow_booking_flow") and not bypass_domain_flows:
@@ -1537,6 +1943,11 @@ def _handle_booking_flow(
                     refusal_flags = context_manager.get("refusal_flags")
                     booking_state, prompt = legacy._next_booking_prompt(
                         booking_state, refusal_flags=refusal_flags
+                    )
+                    booking_state, prompt = _apply_collect_all_prompt(
+                        booking_state,
+                        prompt,
+                        message_text,
                     )
                     if prompt:
                         booking_expected = legacy._expected_reply_for_booking_question(
@@ -1764,6 +2175,11 @@ def _handle_booking_flow(
                             )
             refusal_flags = context_manager.get("refusal_flags")
             booking_state, prompt = legacy._next_booking_prompt(booking_state, refusal_flags=refusal_flags)
+            booking_state, prompt = _apply_collect_all_prompt(
+                booking_state,
+                prompt,
+                message_text,
+            )
             slot_lock_reprompt = bool(slot_lock_active and not booking_related and not booking_signal)
             if slot_lock_reprompt and prompt:
                 if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:

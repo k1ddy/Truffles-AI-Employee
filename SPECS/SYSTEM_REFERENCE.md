@@ -34,6 +34,7 @@
 - `ops/chatflow_send.py` — минимальный sender‑скрипт (без diagnose).
 - `ops/diagnose.py explain` — быстрый разбор конкретного сообщения (decision_meta/trace + outbox).
 - `ops/diagnose.py trace-bundle` — полный пакет (decision_meta/trace + timing + outbox rows + latency).
+- `ops/diagnose.py dialog-report` — one‑command отчёт по диалогу (таймлайн + решения + outbox + media/ASR).
 - `ops/diagnose.py deploy-verify` — проверка версии деплоя (`/admin/version`) и совпадения commit.
 - `ops/sync_client.py` — validate/sync client packs (truth → Qdrant).
 - `/home/zhan/restart_api.sh` — restart API контейнера.
@@ -65,6 +66,33 @@ python3 ops/diagnose.py explain --client-slug demo_salon --text "LC-MARKER" --tr
 - Нет inbound → проблема между ChatFlow и API.  
 - Есть inbound, нет outbox → gate/мьют/эскалация.  
 - Outbox SENT, но ответа нет → проблема провайдера (ChatFlow/WA).
+
+## 0.3 Dialog Report (one-command анализ диалогов)
+
+**Цель:** за один запрос получить таймлайн, решения (decision_meta/trace), outbox и медиа/ASR.  
+Инструмент: `ops/diagnose.py dialog-report` (read-only, без изменений БД).  
+Runbook: `docs/runbooks/DIALOG_REPORT.md`.
+
+**Пример:**
+```bash
+python3 ops/diagnose.py dialog-report \
+  --date 2026-01-29 \
+  --start 16:27 \
+  --end 16:36 \
+  --tz Asia/Almaty \
+  --sender "+7 778 589 0765" \
+  --receiver-phone "+7 778 165 87 99"
+```
+
+**Что выдаёт:**
+- Таймлайн диалога (user/assistant) с message_id и медиа/ASR.
+- decision_meta summary + raw JSON.
+- outbox status/ошибки на каждый inbound.
+- Ссылки на storage_path медиа (если файл ещё не удалён TTL).
+
+**Подсказки ввода:**
+- Если `receiver-phone` не найден — попробуйте digits-only или `--branch-id`.
+- Для конкретного диалога используйте `--conversation-id`.
 
 **Где фиксировать изменения:**
 - Статус/evidence → `STATE.md` (Brain или Top Architect; для core/поведенческих изменений — до merge в рамках PR, плюс финальная запись в конце сессии).
@@ -487,6 +515,9 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
   либо указан label `run-long`.
 - **L3** — только на `main` или вручную через `workflow_dispatch` (`run_livecheck=true`).
 - **L4** — nightly (планируется; не блокирует релиз).
+
+**Примечание:** `demo_salon` — канареечный pack. L2 проверяет **инварианты**, а не “прохождение demo_salon”.
+Нельзя вносить изменения, которые работают только для demo‑packs; логика обязана быть pack‑agnostic.
 
 **Release gate:** L0 + L1 обязательны; L2 обязателен, если затронуты файлы из L2; L3 выполняется по DoD/CA‑audit.
 **Livecheck‑harness:** любые изменения в `.github/workflows/ci.yml` или `ops/diagnose.py` требуют L3 (livecheck)
@@ -1011,7 +1042,7 @@ chatflow_service → WhatsApp
 8) **Основные gate-ы (порядок в коде)**  
    - expected reply → branch selection → shield → session timeout  
    - forward pending to Telegram → manager_active → reengage/mute  
-   - ASR confirmation → pending gate → media gate → debounce  
+   - ASR confirmation → ASR inflight guard → pending gate → media gate → debounce  
    - handover confirmation → booking signal → hard_law gate  
    - intent decomposition → opt_out mute → policy escalation  
    - fast_intent/smalltalk → class router → domain flows (consult/info/booking)  
@@ -1055,9 +1086,19 @@ chatflow_service → WhatsApp
 | 18 | **LLM primary + fallback** (`response._handle_llm_primary`) | LLM path enabled | ai_response/clarify/escalate | `stage=llm_guard`, `stage=ai_response`, `stage=llm_degradation` |
 
 **Consult topic resolver**
-- `truffles-api/app/services/knowledge_service.py` uses embeddings for topic candidates; if embeddings fail, it falls back to lexical token matching (same `consult_topic_resolver` trace stage).
+- `truffles-api/app/services/knowledge_service.py` uses embeddings for topic candidates; if embeddings fail, it returns no candidates and consult flow clarifies/escalates (same `consult_topic_resolver` trace stage).
+
+**Media/ASR ordering**
+- `style_reference_pending` (context) links text↔photo order; TTL clears stale references.
+- `asr_inflight` guard prevents concurrent voice transcriptions; subsequent audio gets “wait/please text”.
+
+**Quiet-hours + evening greeting**
+- `_finalize_bot_response` applies quiet‑hours notice with TTL and вечернее приветствие (state=bot_active only); timestamps stored in `conversation.context`.
 
 ### Determinism Inventory (лексиконы + правила)
+**Принцип:** лексиконы — fallback; основной разбор смысла через semantic resolver и LLM‑router (см. `STRATEGY/REQUIREMENTS.md`).
+**Правило:** не расширять словари ради прохождения eval; сначала правим packs/контракты, затем корректируем тесты.
+`demo_salon` — канареечный pack, логика должна быть pack‑agnostic.
 **Rules‑as‑data (packs):**
 - `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`  
   Policy keywords (payment/reschedule/cancel/medical/legal/complaint/discount), explicit/override keywords.
@@ -1359,6 +1400,13 @@ metadata = {
 cd truffles-api
 pytest tests/ -v
 ```
+
+**Контейнерные тесты (anti-drift):**
+- Не запускайте pytest внутри прод‑контейнера `truffles-api` с прод‑`.env` — это даёт ложные результаты.
+- Используйте тестовые контейнеры с чистым окружением:
+  - `scripts/test_api_container.sh` (предпочтительно).
+  - или `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml ...`
+- `ops/diagnose.py` — только live‑check/trace, не замена pytest.
 
 ---
 

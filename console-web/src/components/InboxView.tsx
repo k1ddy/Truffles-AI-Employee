@@ -152,7 +152,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                     {selectedCaseId && caseLoading && renderLoadingPane()}
                     {selectedCaseId && caseError && renderErrorPane()}
                     {selectedCaseId && !caseLoading && !caseError && caseDetail && (
-                        <CaseDetailsPanel caseDetail={caseDetail} />
+                        <CaseDetailsPanel caseDetail={caseDetail} messages={messages} />
                     )}
                     {selectedCaseId && !caseLoading && !caseError && !caseDetail && (
                         <div className="card-surface p-6 text-center text-muted-foreground">
