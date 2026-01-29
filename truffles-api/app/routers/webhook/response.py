@@ -1156,13 +1156,6 @@ def _handle_consult_flow(
                 if consult_question:
                     consult_flow_trace["consult_question"] = consult_question
                 legacy._record_decision_trace(conversation, consult_flow_trace)
-                return ConsultFlowResult(
-                    response=None,
-                    consult_intent=consult_intent,
-                    consult_topic=consult_topic,
-                    consult_question=consult_question,
-                    intent_decomp_payload=intent_decomp_payload,
-                )
 
             guard_reason = None
             non_consult_intent = (
