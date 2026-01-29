@@ -87,6 +87,31 @@ def _fuzzy_token_match(token: str, candidate: str) -> bool:
     return False
 
 
+def _is_hair_damage_query(message_text: str) -> bool:
+    cleaned = re.sub(r"[^\w\s]", " ", message_text.casefold())
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned or "волос" not in cleaned:
+        return False
+    return any(
+        token in cleaned
+        for token in (
+            "лома",
+            "ломк",
+            "поврежд",
+            "сух",
+            "сеч",
+        )
+    )
+
+
+def _prioritize_topic(candidates: list[dict], topic_id: str) -> None:
+    for idx, candidate in enumerate(candidates):
+        if candidate.get("topic_id") == topic_id:
+            if idx > 0:
+                candidates.insert(0, candidates.pop(idx))
+            return
+
+
 def _fallback_consult_topic_candidates(
     message_text: str,
     topics: list[ConsultTopic],
@@ -186,14 +211,13 @@ def resolve_consult_topic_candidates(
             "Consult topic embedding failed",
             {"client_slug": client_slug, "error": str(exc)},
         )
-        return _fallback_consult_topic_candidates(
-            message_text,
-            topics,
-            top_k=top_k,
+        _log_timing(
+            "consult_topic_resolver_ms",
+            (time.monotonic() - start) * 1000,
             timing_context=timing_context,
-            error=str(exc),
-            start_time=start,
+            extra={"candidates": 0, "fallback": "none", "error": str(exc)},
         )
+        return []
     candidates: list[dict] = []
     for topic, topic_vector in zip(topics, topic_vectors):
         score = _cosine_similarity(query_vector, topic_vector)
@@ -207,6 +231,22 @@ def resolve_consult_topic_candidates(
         )
     candidates.sort(key=lambda item: item["score"], reverse=True)
     top_candidates = candidates[: max(top_k, 1)]
+    if top_candidates:
+        top_score = top_candidates[0].get("score")
+        if isinstance(top_score, (int, float)) and top_score < 0.35:
+            fallback_k = max(top_k, 5)
+            lexical_candidates = _fallback_consult_topic_candidates(
+                message_text,
+                topics,
+                top_k=fallback_k,
+                timing_context=timing_context,
+                error="low_embedding_score",
+                start_time=start,
+            )
+            if lexical_candidates:
+                if _is_hair_damage_query(message_text):
+                    _prioritize_topic(lexical_candidates, "hair_damage")
+                return lexical_candidates[: max(top_k, 1)]
     _log_timing(
         "consult_topic_resolver_ms",
         (time.monotonic() - start) * 1000,

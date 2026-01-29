@@ -1,0 +1,32 @@
+version: "3.8"
+
+services:
+  truffles-api:
+    container_name: truffles-api-test
+    ports: []
+    env_file: []
+    environment:
+      - TEST_MODE=1
+      - DEBOUNCE_ENABLED=0
+      - OPENAI_API_KEY=
+      - KNOWLEDGE_SNAPSHOT_CONSUMER_ENABLED=0
+      - KNOWLEDGE_SNAPSHOT_ENABLED=0
+      - KNOWLEDGE_SNAPSHOT_CONSULT_ALLOWLIST=
+      - KNOWLEDGE_SNAPSHOT_CONSULT_MODE=shadow
+    labels: []
+
+  truffles-outbox:
+    container_name: truffles-outbox-test
+    env_file: []
+    environment:
+      - TEST_MODE=1
+      - OUTBOX_WORKER_ENABLED=1
+    labels: []
+
+  truffles-sentinel:
+    container_name: truffles-sentinel-test
+    env_file: []
+    environment:
+      - TEST_MODE=1
+      - SENTINEL_ENABLED=1
+    labels: []

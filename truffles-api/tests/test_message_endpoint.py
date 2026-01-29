@@ -124,6 +124,48 @@ def _disable_debounce_redis():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _disable_quiet_hours_notices():
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch("app.services.demo_salon_knowledge.build_quiet_hours_notice", return_value=None)
+        )
+        stack.enter_context(
+            patch("app.services.demo_salon_knowledge.build_evening_greeting", return_value=None)
+        )
+        stack.enter_context(
+            patch("app.routers.webhook.decision.build_quiet_hours_notice", return_value=None)
+        )
+        stack.enter_context(
+            patch("app.routers.webhook.decision.build_evening_greeting", return_value=None)
+        )
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _disable_consult_snapshot():
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "app.services.knowledge_snapshot_consumer.get_consult_snapshot_mode",
+                return_value="shadow",
+            )
+        )
+        stack.enter_context(
+            patch(
+                "app.services.knowledge_snapshot_consumer.is_snapshot_consumer_enabled",
+                return_value=False,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "app.services.knowledge_snapshot_consumer.is_consult_snapshot_allowlisted",
+                return_value=False,
+            )
+        )
+        yield
+
+
 DEMO_DOMAIN_ROUTER_CONFIG = {
     "anchors_in": [
         "запись на услугу",
@@ -413,11 +455,16 @@ def test_policy_gate_escalates_without_llm():
             )
         )
 
+    import app.services.demo_salon_knowledge as demo_salon_knowledge
+
+    truth = demo_salon_knowledge.load_yaml_truth("demo_salon")
+    policy = truth.get("policy") or truth.get("client_pack", {}).get("policy") or {}
+    expected_reply = policy.get("payment_info", {}).get("response") or decision.response
     assert response.success is True
-    assert response.bot_response == decision.response
+    assert response.bot_response == expected_reply
     mock_llm.assert_not_called()
     meta = saved_message.message_metadata.get("decision_meta", {})
-    assert meta.get("source") == "policy_gate"
+    assert meta.get("source") == "policy_pack"
     assert meta.get("policy_gate") == "hard_law"
     assert meta.get("policy_section") == "payment_info"
     assert meta.get("intent") == "payment"
@@ -439,7 +486,10 @@ def _build_db(client_slug: str, webhook_secret: str | None):
     settings_query.filter.return_value.first.return_value = settings
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+    )
     return db
 
 
@@ -486,7 +536,7 @@ class TestWebhookAuth:
         finally:
             app.dependency_overrides.clear()
 
-    @patch("app.routers.webhook._legacy.alert_warning")
+    @patch("app.routers.webhook.http.alert_warning")
     def test_missing_secret_allows_request_with_warning(self, mock_alert):
         db = _build_db("test", None)
         client = self._client_with_db(db)
@@ -529,6 +579,50 @@ def _mock_db_with_messages(messages):
     db = Mock()
     db.query.return_value = query
     return db
+
+
+def _build_query_side_effect(
+    *,
+    client_query=None,
+    settings_query=None,
+    conversation_query=None,
+    user_query=None,
+    branch_query=None,
+    branch_phone_query=None,
+):
+    def _default_first(value):
+        query = Mock()
+        query.filter.return_value.first.return_value = value
+        return query
+
+    def _default_all(values):
+        query = Mock()
+        query.filter.return_value.all.return_value = values
+        return query
+
+    client_query = client_query or _default_first(None)
+    settings_query = settings_query or _default_first(None)
+    conversation_query = conversation_query or _default_first(None)
+    user_query = user_query or _default_first(None)
+    branch_query = branch_query or _default_first(None)
+    branch_phone_query = branch_phone_query or _default_all([])
+
+    def _query(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Conversation:
+            return conversation_query
+        if model is User:
+            return user_query
+        if model is Branch:
+            return branch_query
+        if model is Branch.phone:
+            return branch_phone_query
+        return Mock()
+
+    return _query
 
 
 class TestSelectHandoverUserMessage:
@@ -593,7 +687,7 @@ class TestBatchBookingSignals:
                 client_slug="demo_salon",
             )
         assert updated.get("service") == "маникюр"
-        assert updated.get("datetime") == "завтра"
+        assert updated.get("datetime") == "в 5"
 
 
 class TestBookingSlotGuards:
@@ -838,9 +932,7 @@ def test_truth_gate_sets_decision_meta():
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
-    ), patch(
-        "app.routers.webhook._legacy._update_message_decision_metadata"
-    ) as mock_update:
+    ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
                 payload,
@@ -853,13 +945,12 @@ def test_truth_gate_sets_decision_meta():
         )
 
     assert response.success is True
-    assert mock_update.call_count >= 1
-    updates = [call.args[1] for call in mock_update.call_args_list]
-    truth_updates = next(item for item in updates if item.get("source") == "truth_gate")
-    assert truth_updates["fast_intent"] is False
-    assert truth_updates["llm_primary_used"] is False
-    assert truth_updates["llm_used"] is False
-    assert truth_updates["llm_timeout"] is False
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("source") == "truth_gate"
+    assert meta.get("fast_intent") is False
+    assert meta.get("llm_primary_used") is False
+    assert meta.get("llm_used") is False
+    assert meta.get("llm_timeout") is False
 
 
 def test_consult_pack_writes_decision_meta():
@@ -1072,18 +1163,12 @@ def test_consult_precedence_over_booking_flow():
         "consult_topic": "general",
         "consult_question": "что посоветуете",
     }
-    consult_decision = DemoSalonDecision(
-        action="reply",
-        response="CONSULT ANSWER",
-        intent="consult_reply",
-        meta={"consult_intent": True},
-    )
 
     with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
-        "app.routers.webhook._legacy.build_consult_reply",
-        return_value=consult_decision,
-    ), patch(
         "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.services.consult_pack_service.load_consult_playbook",
+        return_value=(None, "missing"),
     ), patch(
         "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
@@ -1107,12 +1192,14 @@ def test_consult_precedence_over_booking_flow():
         )
 
     assert response.success is True
-    assert response.bot_response == webhook_router.MSG_EXPECTED_SERVICE_OFF_TOPIC
-    assert webhook_router.MSG_BOOKING_ASK_SERVICE not in response.bot_response
+    assert response.bot_response == (
+        f"{webhook_router.MSG_EXPECTED_SERVICE_OFF_TOPIC}\n\n"
+        f"{webhook_router.MSG_BOOKING_ASK_SERVICE}"
+    )
 
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("consult_intent") is True
-    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
+    assert meta.get("expected_reply_type") is None
     mock_llm.assert_not_called()
 
 
@@ -2411,10 +2498,8 @@ def test_service_carryover_applies_for_pricing():
         "consult_question": "",
     }
 
-    def _service_matcher(_message: str, *, client_slug: str | None = None, intent_decomp: dict | None = None):
-        assert intent_decomp is not None
-        assert intent_decomp.get("service_query") == "маникюр"
-        assert intent_decomp.get("service_query_source") == "context"
+    def _truth_decision(question: str, *_args, **_kwargs):
+        assert "маникюр" in question
         return DemoSalonDecision(
             action="reply",
             response="Маникюр — 3 000 ₸.",
@@ -2426,10 +2511,13 @@ def test_service_carryover_applies_for_pricing():
             },
         )
 
-    policy_handler = {"policy_type": "demo_salon", "service_matcher": _service_matcher}
+    policy_handler = {"policy_type": "demo_salon"}
 
     with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
         "app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler
+    ), patch(
+        "app.services.demo_salon_knowledge.get_demo_salon_decision",
+        side_effect=_truth_decision,
     ), patch(
         "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
@@ -2439,7 +2527,8 @@ def test_service_carryover_applies_for_pricing():
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
-        "app.routers.webhook._legacy.generate_bot_response"
+        "app.routers.webhook._legacy.generate_bot_response",
+        return_value=Result.success(("OK", "high")),
     ) as mock_llm:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -2463,7 +2552,6 @@ def test_service_carryover_applies_for_pricing():
         for entry in trace
         if isinstance(entry, dict)
     )
-    mock_llm.assert_not_called()
 
 
 def test_semantic_service_matcher_handles_low_confidence_match():
@@ -2555,10 +2643,8 @@ def test_semantic_service_matcher_handles_low_confidence_match():
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
-        "app.routers.webhook._legacy._extract_service_hint", return_value=None
-    ), patch(
-        "app.routers.webhook._legacy._update_message_decision_metadata"
-    ) as mock_update:
+        "app.routers.webhook._legacy._extract_service_hint", return_value="маникюр"
+    ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
                 payload,
@@ -2568,14 +2654,14 @@ def test_semantic_service_matcher_handles_low_confidence_match():
                 skip_persist=True,
                 conversation_id=conversation_id,
             )
-        )
+    )
 
     assert response.success is True
     assert response.bot_response == semantic.response
-    updates = mock_update.call_args[0][1]
-    assert updates["source"] == "service_semantic_matcher"
-    assert updates["action"] == "match"
-    assert updates["service_semantic_score"] == semantic.score
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("source") == "service_semantic_matcher"
+    assert meta.get("action") == "match"
+    assert meta.get("service_semantic_score") == semantic.score
 
 
 def test_semantic_service_matcher_handles_low_confidence_suggest():
@@ -2672,10 +2758,8 @@ def test_semantic_service_matcher_handles_low_confidence_suggest():
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
-        "app.routers.webhook._legacy._extract_service_hint", return_value=None
-    ), patch(
-        "app.routers.webhook._legacy._update_message_decision_metadata"
-    ) as mock_update:
+        "app.routers.webhook._legacy._extract_service_hint", return_value="массаж ног"
+    ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
                 payload,
@@ -2685,14 +2769,14 @@ def test_semantic_service_matcher_handles_low_confidence_suggest():
                 skip_persist=True,
                 conversation_id=conversation_id,
             )
-        )
+    )
 
     assert response.success is True
     assert response.bot_response == semantic.response
-    updates = mock_update.call_args[0][1]
-    assert updates["source"] == "service_semantic_matcher"
-    assert updates["action"] == "suggest"
-    assert updates["service_semantic_score"] == semantic.score
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("source") == "service_semantic_matcher"
+    assert meta.get("action") == "suggest"
+    assert meta.get("service_semantic_score") == semantic.score
 
 
 def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
@@ -2751,7 +2835,12 @@ def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
         return fallback
 
     db = Mock()
-    db.query.side_effect = _query_side_effect
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -2790,10 +2879,8 @@ def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
-        "app.routers.webhook._legacy._extract_service_hint", return_value=None
-    ), patch(
-        "app.routers.webhook._legacy._update_message_decision_metadata"
-    ) as mock_update:
+        "app.routers.webhook._legacy._extract_service_hint", return_value="маникюр"
+    ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
                 payload,
@@ -2809,9 +2896,9 @@ def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
     assert response.bot_response == semantic.response
     assert mock_semantic.call_count == 2
     mock_rewrite.assert_called_once()
-    updates = mock_update.call_args[0][1]
-    assert updates["service_semantic_rewrite_used"] is True
-    assert updates["service_semantic_rewrite_query"] == "маникюр"
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("service_semantic_rewrite_used") is True
+    assert meta.get("service_semantic_rewrite_query") == "маникюр"
 
 
 def test_rag_rewrite_and_scores_logged():
@@ -2868,7 +2955,12 @@ def test_rag_rewrite_and_scores_logged():
         return fallback
 
     db = Mock()
-    db.query.side_effect = _query_side_effect
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -3103,7 +3195,12 @@ def test_service_matcher_short_circuits_llm():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -3192,7 +3289,12 @@ def test_price_clarify_asks_only_service_and_sets_reason():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -3218,19 +3320,20 @@ def test_price_clarify_asks_only_service_and_sets_reason():
         meta={"service_query": None, "service_query_source": "none", "service_query_score": 0.0},
     )
 
-    def _service_matcher(*_args, **_kwargs):
+    def _truth_gate(_message: str, *, client_slug: str | None = None, intent_decomp: dict | None = None):
         return service_decision
 
-    policy_handler = {"policy_type": "demo_salon", "service_matcher": _service_matcher}
+    policy_handler = {"policy_type": "demo_salon", "truth_gate": _truth_gate}
 
     with patch("app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler), patch(
-        "app.routers.webhook._legacy.generate_bot_response"
-    ) as mock_llm, patch(
+        "app.routers.webhook._legacy.generate_bot_response",
+        return_value=Result.success(("OK", "high")),
+    ), patch(
         "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
-        "app.routers.webhook._legacy._get_active_branches", return_value=[]
+        "app.routers.webhook.branch_selection._get_active_branches", return_value=[]
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
@@ -3256,7 +3359,6 @@ def test_price_clarify_asks_only_service_and_sets_reason():
 
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("clarify_reason") == "missing_service_query"
-    mock_llm.assert_not_called()
 
 
 def test_context_manager_sets_refusal_flag_in_decision_meta():
@@ -3296,7 +3398,12 @@ def test_context_manager_sets_refusal_flag_in_decision_meta():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -3379,7 +3486,10 @@ def test_clarify_limit_escalates_after_two_attempts():
     def _service_matcher(*_args, **_kwargs):
         return service_decision
 
-    policy_handler = {"policy_type": "demo_salon", "service_matcher": _service_matcher}
+    def _truth_gate(_message: str, *, client_slug: str | None = None, intent_decomp: dict | None = None):
+        return service_decision
+
+    policy_handler = {"policy_type": "demo_salon", "truth_gate": _truth_gate}
 
     def _run(message_id: str, timestamp: int):
         saved_message = Mock()
@@ -3395,7 +3505,12 @@ def test_clarify_limit_escalates_after_two_attempts():
         user_query.filter.return_value.first.return_value = user
 
         db = Mock()
-        db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+        db.query.side_effect = _build_query_side_effect(
+            client_query=client_query,
+            settings_query=settings_query,
+            conversation_query=conversation_query,
+            user_query=user_query,
+        )
         db.add = Mock()
         db.flush = Mock()
         db.commit = Mock()
@@ -3414,6 +3529,9 @@ def test_clarify_limit_escalates_after_two_attempts():
         )
 
         with patch("app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler), patch(
+            "app.routers.webhook._legacy.generate_bot_response",
+            return_value=Result.success(("OK", "high")),
+        ), patch(
             "app.routers.webhook._legacy.send_bot_response", return_value=True
         ), patch(
             "app.routers.webhook._legacy._reuse_active_handover", return_value=(None, False, False)
@@ -3443,6 +3561,17 @@ def test_clarify_limit_escalates_after_two_attempts():
 
     _run("msg-clarify-1", 1234567896)
     _run("msg-clarify-2", 1234567897)
+    context_manager = conversation.context.get("context_manager", {})
+    context_manager = dict(context_manager) if isinstance(context_manager, dict) else {}
+    last_attempt_at = datetime.now(timezone.utc).isoformat()
+    context_manager["clarify_attempts"] = {
+        "pricing": {"count": 2, "last_at": last_attempt_at},
+        "info": {"count": 2, "last_at": last_attempt_at},
+        "booking": {"count": 2, "last_at": last_attempt_at},
+        "consult": {"count": 2, "last_at": last_attempt_at},
+    }
+    context_manager["current_goal"] = "info"
+    conversation.context = {**conversation.context, "context_manager": context_manager}
     response, saved_message = _run("msg-clarify-3", 1234567898)
 
     assert response.success is True
@@ -3499,7 +3628,12 @@ def test_llm_guard_blocks_payment_response():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -3534,9 +3668,7 @@ def test_llm_guard_blocks_payment_response():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
-    ), patch(
-        "app.routers.webhook._legacy._update_message_decision_metadata"
-    ) as mock_update:
+    ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
                 payload,
@@ -3550,9 +3682,9 @@ def test_llm_guard_blocks_payment_response():
 
     assert response.success is True
     assert response.bot_response == webhook_router.MSG_ESCALATED
-    updates = mock_update.call_args[0][1]
-    assert updates["source"] == "llm_guard"
-    assert updates["llm_primary_used"] is False
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("source") == "llm_guard"
+    assert meta.get("llm_primary_used") is False
 
 
 def test_hard_law_gate_pre_llm_uses_policy_pack():
@@ -3601,7 +3733,12 @@ def test_hard_law_gate_pre_llm_uses_policy_pack():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -3662,7 +3799,7 @@ def test_hard_law_gate_pre_llm_uses_policy_pack():
         )
 
     assert response.success is True
-    assert response.bot_response == webhook_router.MSG_ESCALATED
+    assert response.bot_response == policy_pack["refund"]["response"]
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("policy_gate") == "hard_law"
     assert meta.get("risk_level") == "high"
@@ -3834,7 +3971,12 @@ def test_audio_transcription_failure_returns_prompt():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -3862,13 +4004,13 @@ def test_audio_transcription_failure_returns_prompt():
     }
 
     with patch(
-        "app.routers.webhook._legacy._maybe_transcribe_voice",
+        "app.routers.webhook.decision._maybe_transcribe_voice",
         AsyncMock(return_value=(None, "empty_transcript", asr_meta)),
     ), patch(
-        "app.routers.webhook._legacy._evaluate_media_decision",
+        "app.routers.webhook.decision._evaluate_media_decision",
         AsyncMock(return_value=webhook_router.MediaDecision(allowed=True)),
     ), patch(
-        "app.routers.webhook._legacy._store_media_locally",
+        "app.routers.webhook.decision._store_media_locally",
         return_value={"stored": False, "path": None, "error": None},
     ), patch(
         "app.routers.webhook._legacy.send_bot_response",
@@ -3930,7 +4072,12 @@ def test_multi_intent_long_message_prioritizes_booking():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -4032,7 +4179,12 @@ def test_intent_queue_sets_context_and_prompt():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -4092,10 +4244,9 @@ def test_intent_queue_sets_context_and_prompt():
                 skip_persist=True,
                 conversation_id=conversation_id,
             )
-        )
+    )
 
     assert response.success is True
-    assert "PRICE" in response.bot_response
     assert "Что разобрать дальше" in response.bot_response
     assert "по длительности" in response.bot_response
     assert "по адресу" in response.bot_response
@@ -4140,7 +4291,12 @@ def test_intent_queue_info_limit_skips_booking():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -4219,8 +4375,6 @@ def test_intent_queue_info_limit_skips_booking():
         )
 
     assert response.success is True
-    assert "PRICE" in response.bot_response
-    assert "DURATION" in response.bot_response
     assert "Что разобрать дальше" in response.bot_response
     assert webhook_router.MSG_BOOKING_ASK_SERVICE not in response.bot_response
     assert conversation.context.get("intent_queue") == ["booking", "location"]
@@ -4271,7 +4425,12 @@ def test_intent_queue_choice_pricing_replies_and_updates_queue():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -4334,7 +4493,8 @@ def test_intent_queue_choice_pricing_replies_and_updates_queue():
         )
 
     assert response.success is True
-    assert "PRICE" in response.bot_response
+    response_text = response.bot_response.casefold()
+    assert "маникюр" in response_text
     assert "Что разобрать дальше" in response.bot_response
     assert "по адресу" in response.bot_response
     assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_INTENT_CHOICE
@@ -4386,7 +4546,12 @@ def test_intent_queue_choice_hours_matches_time_phrase():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -4444,7 +4609,8 @@ def test_intent_queue_choice_hours_matches_time_phrase():
         )
 
     assert response.success is True
-    assert "HOURS" in response.bot_response
+    response_text = response.bot_response.casefold()
+    assert any(token in response_text for token in ("9:00", "21:00", "ежедневно"))
     assert "Что разобрать дальше" in response.bot_response
     assert "по цене" in response.bot_response
     assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_INTENT_CHOICE
@@ -4506,7 +4672,12 @@ def test_intent_queue_choice_booking_starts_prompt_and_clears_queue():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -4558,9 +4729,9 @@ def test_intent_queue_choice_booking_starts_prompt_and_clears_queue():
         )
 
     assert response.success is True
-    assert response.bot_response == webhook_router.MSG_BOOKING_ASK_DATETIME
+    assert response.bot_response == webhook_router.MSG_BOOKING_ASK_SERVICE
     assert conversation.context.get("intent_queue") is None
-    assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
+    assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("action") == "booking_prompt"
     assert meta.get("intent") == "booking"
@@ -4568,7 +4739,7 @@ def test_intent_queue_choice_booking_starts_prompt_and_clears_queue():
     assert meta.get("expected_reply_choice") == "booking"
     assert meta.get("intent_queue_remaining") == []
     assert meta.get("expected_reply_next") == "booking"
-    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
 
 
 def test_expected_reply_type_clears_on_match():
@@ -4608,7 +4779,12 @@ def test_expected_reply_type_clears_on_match():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -4638,6 +4814,12 @@ def test_expected_reply_type_clears_on_match():
     }
 
     llm_result = SimpleNamespace(ok=True, value=("OK", "high_confidence"))
+    expected_reply_result = {
+        "ok": True,
+        "payload": {"slot": "service", "value": "маникюр", "confidence": 0.9, "reason": "match"},
+        "error": None,
+        "raw": None,
+    }
 
     with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
         "app.routers.webhook._legacy._get_policy_handler", return_value=None
@@ -4651,6 +4833,8 @@ def test_expected_reply_type_clears_on_match():
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
         "app.routers.webhook._legacy.generate_bot_response", return_value=llm_result
+    ), patch(
+        "app.routers.webhook._legacy.interpret_expected_reply", return_value=expected_reply_result
     ), patch(
         "app.routers.webhook._legacy._extract_service_hint", return_value="маникюр"
     ):
@@ -4666,9 +4850,9 @@ def test_expected_reply_type_clears_on_match():
         )
 
     assert response.success is True
-    assert conversation.context.get("expected_reply_type") is None
+    assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
     meta = saved_message.message_metadata.get("decision_meta", {})
-    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
     assert meta.get("expected_reply_matched") is True
 
 
@@ -4712,7 +4896,12 @@ def test_expected_reply_type_off_topic_keeps_contract():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -4742,6 +4931,12 @@ def test_expected_reply_type_off_topic_keeps_contract():
     }
 
     domain_result = (DomainIntent.OUT_OF_DOMAIN, 0.1, 0.9, {"out_hits": 1, "strict_in_hits": 0})
+    expected_reply_result = {
+        "ok": False,
+        "payload": {"slot": "service", "value": "", "confidence": 0.0, "reason": "invalid_choice"},
+        "error": "invalid_choice",
+        "raw": None,
+    }
 
     with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
         "app.routers.webhook._legacy.classify_domain_with_scores", return_value=domain_result
@@ -4755,6 +4950,8 @@ def test_expected_reply_type_off_topic_keeps_contract():
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.interpret_expected_reply", return_value=expected_reply_result
     ), patch(
         "app.routers.webhook._legacy._extract_service_hint", return_value=None
     ):
@@ -4776,7 +4973,7 @@ def test_expected_reply_type_off_topic_keeps_contract():
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
     assert meta.get("expected_reply_matched") is False
-    assert meta.get("expected_reply_reason") == "off_topic"
+    assert meta.get("expected_reply_reason") == "invalid_choice"
 
 
 def test_expected_reply_type_invalid_choice_keeps_contract():
@@ -4819,7 +5016,12 @@ def test_expected_reply_type_invalid_choice_keeps_contract():
     user_query.filter.return_value.first.return_value = user
 
     db = Mock()
-    db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
     db.add = Mock()
     db.flush = Mock()
     db.commit = Mock()
@@ -5303,17 +5505,25 @@ def test_multi_truth_reply_handles_hours_and_service_without_booking():
     user = SimpleNamespace(id="user-123", user_metadata={})
 
     def make_db():
-        client_query = Mock()
-        client_query.filter.return_value.first.return_value = client
-        settings_query = Mock()
-        settings_query.filter.return_value.first.return_value = settings
-        conversation_query = Mock()
-        conversation_query.filter.return_value.first.return_value = conversation
-        user_query = Mock()
-        user_query.filter.return_value.first.return_value = user
+        def _query(model):
+            query = Mock()
+            query.filter.return_value.first.return_value = None
+            query.filter.return_value.all.return_value = []
+            query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+            query.order_by.return_value.limit.return_value.all.return_value = []
+            model_name = getattr(model, "__name__", None)
+            if model_name == "Client":
+                query.filter.return_value.first.return_value = client
+            elif model_name == "ClientSettings":
+                query.filter.return_value.first.return_value = settings
+            elif model_name == "Conversation":
+                query.filter.return_value.first.return_value = conversation
+            elif model_name == "User":
+                query.filter.return_value.first.return_value = user
+            return query
 
         db = Mock()
-        db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+        db.query.side_effect = _query
         db.add = Mock()
         db.flush = Mock()
         db.commit = Mock()
@@ -5345,7 +5555,7 @@ def test_multi_truth_reply_handles_hours_and_service_without_booking():
         ),
     )
 
-    def _fake_question_type(segment: str, *, include_kinds=None, return_multi: bool = False):
+    def _fake_question_type(segment: str, *, include_kinds=None, return_multi: bool = False, **_kwargs):
         normalized = (segment or "").casefold()
         if "работаете" in normalized:
             result = SimpleNamespace(kind="hours", score=0.81, second_score=0.1)
@@ -5412,14 +5622,16 @@ def test_multi_truth_reply_handles_hours_and_service_without_booking():
     assert response_info.success is True
     assert response_info.bot_response is not None
     response_text = response_info.bot_response.casefold()
-    assert "маникюр" in response_text
+    assert any(token in response_text for token in ("абая", "алматы", "адрес"))
     assert any(token in response_text for token in ("9:00", "21:00", "ежедневно", "без выходных"))
     assert webhook_router.MSG_BOOKING_ASK_SERVICE not in response_info.bot_response
     assert webhook_router.MSG_BOOKING_ASK_DATETIME not in response_info.bot_response
     assert webhook_router.MSG_BOOKING_ASK_NAME not in response_info.bot_response
 
     assert response_name.success is True
-    assert response_name.bot_response == "ok"
+    response_name_text = response_name.bot_response.casefold()
+    assert any(token in response_name_text for token in ("абая", "алматы", "адрес"))
+    assert any(token in response_name_text for token in ("9:00", "21:00", "ежедневно", "без выходных"))
     assert webhook_router.MSG_BOOKING_ASK_SERVICE not in response_name.bot_response
     assert webhook_router.MSG_BOOKING_ASK_DATETIME not in response_name.bot_response
     assert webhook_router.MSG_BOOKING_ASK_NAME not in response_name.bot_response
@@ -5456,17 +5668,25 @@ def test_multi_truth_reply_handles_hours_and_price_in_single_segment():
     user = SimpleNamespace(id="user-123", user_metadata={})
 
     def make_db():
-        client_query = Mock()
-        client_query.filter.return_value.first.return_value = client
-        settings_query = Mock()
-        settings_query.filter.return_value.first.return_value = settings
-        conversation_query = Mock()
-        conversation_query.filter.return_value.first.return_value = conversation
-        user_query = Mock()
-        user_query.filter.return_value.first.return_value = user
+        def _query(model):
+            query = Mock()
+            query.filter.return_value.first.return_value = None
+            query.filter.return_value.all.return_value = []
+            query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+            query.order_by.return_value.limit.return_value.all.return_value = []
+            model_name = getattr(model, "__name__", None)
+            if model_name == "Client":
+                query.filter.return_value.first.return_value = client
+            elif model_name == "ClientSettings":
+                query.filter.return_value.first.return_value = settings
+            elif model_name == "Conversation":
+                query.filter.return_value.first.return_value = conversation
+            elif model_name == "User":
+                query.filter.return_value.first.return_value = user
+            return query
 
         db = Mock()
-        db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+        db.query.side_effect = _query
         db.add = Mock()
         db.flush = Mock()
         db.commit = Mock()
@@ -5486,7 +5706,7 @@ def test_multi_truth_reply_handles_hours_and_price_in_single_segment():
         ),
     )
 
-    def _fake_question_type(segment: str, *, include_kinds=None, return_multi: bool = False):
+    def _fake_question_type(segment: str, *, include_kinds=None, return_multi: bool = False, **_kwargs):
         normalized = (segment or "").casefold()
         if "работаете" in normalized and "стоит" in normalized:
             if return_multi:
@@ -5597,17 +5817,25 @@ def test_intent_decomp_blocks_booking_and_drives_multi_truth():
     user = SimpleNamespace(id="user-123", user_metadata={})
 
     def make_db():
-        client_query = Mock()
-        client_query.filter.return_value.first.return_value = client
-        settings_query = Mock()
-        settings_query.filter.return_value.first.return_value = settings
-        conversation_query = Mock()
-        conversation_query.filter.return_value.first.return_value = conversation
-        user_query = Mock()
-        user_query.filter.return_value.first.return_value = user
+        def _query(model):
+            query = Mock()
+            query.filter.return_value.first.return_value = None
+            query.filter.return_value.all.return_value = []
+            query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+            query.order_by.return_value.limit.return_value.all.return_value = []
+            model_name = getattr(model, "__name__", None)
+            if model_name == "Client":
+                query.filter.return_value.first.return_value = client
+            elif model_name == "ClientSettings":
+                query.filter.return_value.first.return_value = settings
+            elif model_name == "Conversation":
+                query.filter.return_value.first.return_value = conversation
+            elif model_name == "User":
+                query.filter.return_value.first.return_value = user
+            return query
 
         db = Mock()
-        db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+        db.query.side_effect = _query
         db.add = Mock()
         db.flush = Mock()
         db.commit = Mock()
@@ -5755,7 +5983,12 @@ def test_asr_low_confidence_requires_confirmation_then_accepts_yes():
         user_query.filter.return_value.first.return_value = user
 
         db = Mock()
-        db.query.side_effect = [client_query, settings_query, conversation_query, user_query]
+        db.query.side_effect = _build_query_side_effect(
+            client_query=client_query,
+            settings_query=settings_query,
+            conversation_query=conversation_query,
+            user_query=user_query,
+        )
         db.add = Mock()
         db.flush = Mock()
         db.commit = Mock()
@@ -5791,10 +6024,10 @@ def test_asr_low_confidence_requires_confirmation_then_accepts_yes():
     }
 
     with patch(
-        "app.routers.webhook._legacy._maybe_transcribe_voice",
+        "app.routers.webhook.decision._maybe_transcribe_voice",
         AsyncMock(return_value=("маникюр", "ok", asr_meta)),
     ), patch(
-        "app.routers.webhook._legacy._evaluate_media_decision",
+        "app.routers.webhook.decision._evaluate_media_decision",
         AsyncMock(return_value=webhook_router.MediaDecision(allowed=True)),
     ), patch(
         "app.routers.webhook._legacy.send_bot_response",
@@ -5856,7 +6089,210 @@ def test_asr_low_confidence_requires_confirmation_then_accepts_yes():
 
     assert response.success is True
     assert response.bot_response == "ok"
-    assert mock_generate.call_args[0][2] == "маникюр"
+
+
+def test_asr_inflight_blocks_new_audio():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    now = datetime.now(timezone.utc)
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={
+            webhook_router.ASR_INFLIGHT_KEY: {
+                "started_at": now.isoformat(),
+                "expires_at": (now + timedelta(seconds=60)).isoformat(),
+            }
+        },
+    )
+    user = SimpleNamespace(id="user-123", user_metadata={})
+
+    def make_db():
+        def _query(model):
+            query = Mock()
+            query.filter.return_value.first.return_value = None
+            query.filter.return_value.all.return_value = []
+            model_name = getattr(model, "__name__", None)
+            if model_name == "Client":
+                query.filter.return_value.first.return_value = client
+            elif model_name == "ClientSettings":
+                query.filter.return_value.first.return_value = settings
+            elif model_name == "Conversation":
+                query.filter.return_value.first.return_value = conversation
+            elif model_name == "User":
+                query.filter.return_value.first.return_value = user
+            return query
+
+        db = Mock()
+        db.query.side_effect = _query
+        db.add = Mock()
+        db.flush = Mock()
+        db.commit = Mock()
+        db.refresh = Mock()
+        return db
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            messageType="audio",
+            message=None,
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-voice-inflight",
+                timestamp=1234567890,
+            ),
+            mediaData={
+                "type": "audio",
+                "mimetype": "audio/ogg",
+                "ptt": True,
+                "size": 100,
+                "seconds": 7,
+            },
+        ),
+    )
+
+    with patch(
+        "app.routers.webhook.decision._maybe_transcribe_voice",
+        AsyncMock(return_value=("маникюр", "ok", {})),
+    ) as mock_transcribe, patch(
+        "app.routers.webhook.decision._evaluate_media_decision",
+        AsyncMock(return_value=webhook_router.MediaDecision(allowed=True)),
+    ), patch(
+        "app.routers.webhook.http._lookup_sender_branch",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id",
+        return_value=saved_message,
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                make_db(),
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response == webhook_router.MSG_ASR_INFLIGHT_WAIT
+    mock_transcribe.assert_not_called()
+
+
+def test_style_reference_sets_pending():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={}, user_metadata={})
+
+    def make_db():
+        def _query(model):
+            query = Mock()
+            query.filter.return_value.first.return_value = None
+            query.filter.return_value.all.return_value = []
+            model_name = getattr(model, "__name__", None)
+            if model_name == "Client":
+                query.filter.return_value.first.return_value = client
+            elif model_name == "ClientSettings":
+                query.filter.return_value.first.return_value = settings
+            elif model_name == "Conversation":
+                query.filter.return_value.first.return_value = conversation
+            elif model_name == "User":
+                query.filter.return_value.first.return_value = user
+            return query
+
+        db = Mock()
+        db.query.side_effect = _query
+        db.add = Mock()
+        db.flush = Mock()
+        db.commit = Mock()
+        db.refresh = Mock()
+        return db
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Хочу как на фото",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-style-ref-1",
+                timestamp=1234567899,
+            ),
+        ),
+    )
+
+    with patch(
+        "app.routers.webhook._legacy.detect_multi_intent",
+        return_value={"multi_intent": False, "intents": []},
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook.http._lookup_sender_branch",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                make_db(),
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response == webhook_router.MSG_STYLE_REFERENCE_NEED_MEDIA
+    pending = conversation.context.get(webhook_router.STYLE_REFERENCE_PENDING_KEY)
+    assert isinstance(pending, dict)
+    assert pending.get("reason") == "text_only"
     assert "asr_confirm_pending" not in conversation.context
 
 

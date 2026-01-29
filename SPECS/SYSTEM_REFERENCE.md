@@ -488,6 +488,9 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 - **L3** — только на `main` или вручную через `workflow_dispatch` (`run_livecheck=true`).
 - **L4** — nightly (планируется; не блокирует релиз).
 
+**Примечание:** `demo_salon` — канареечный pack. L2 проверяет **инварианты**, а не “прохождение demo_salon”.
+Нельзя вносить изменения, которые работают только для demo‑packs; логика обязана быть pack‑agnostic.
+
 **Release gate:** L0 + L1 обязательны; L2 обязателен, если затронуты файлы из L2; L3 выполняется по DoD/CA‑audit.
 **Livecheck‑harness:** любые изменения в `.github/workflows/ci.yml` или `ops/diagnose.py` требуют L3 (livecheck)
 или явного waiver в Task Package с причиной.
@@ -1011,7 +1014,7 @@ chatflow_service → WhatsApp
 8) **Основные gate-ы (порядок в коде)**  
    - expected reply → branch selection → shield → session timeout  
    - forward pending to Telegram → manager_active → reengage/mute  
-   - ASR confirmation → pending gate → media gate → debounce  
+   - ASR confirmation → ASR inflight guard → pending gate → media gate → debounce  
    - handover confirmation → booking signal → hard_law gate  
    - intent decomposition → opt_out mute → policy escalation  
    - fast_intent/smalltalk → class router → domain flows (consult/info/booking)  
@@ -1055,9 +1058,19 @@ chatflow_service → WhatsApp
 | 18 | **LLM primary + fallback** (`response._handle_llm_primary`) | LLM path enabled | ai_response/clarify/escalate | `stage=llm_guard`, `stage=ai_response`, `stage=llm_degradation` |
 
 **Consult topic resolver**
-- `truffles-api/app/services/knowledge_service.py` uses embeddings for topic candidates; if embeddings fail, it falls back to lexical token matching (same `consult_topic_resolver` trace stage).
+- `truffles-api/app/services/knowledge_service.py` uses embeddings for topic candidates; if embeddings fail, it returns no candidates and consult flow clarifies/escalates (same `consult_topic_resolver` trace stage).
+
+**Media/ASR ordering**
+- `style_reference_pending` (context) links text↔photo order; TTL clears stale references.
+- `asr_inflight` guard prevents concurrent voice transcriptions; subsequent audio gets “wait/please text”.
+
+**Quiet-hours + evening greeting**
+- `_finalize_bot_response` applies quiet‑hours notice with TTL and вечернее приветствие (state=bot_active only); timestamps stored in `conversation.context`.
 
 ### Determinism Inventory (лексиконы + правила)
+**Принцип:** лексиконы — fallback; основной разбор смысла через semantic resolver и LLM‑router (см. `STRATEGY/REQUIREMENTS.md`).
+**Правило:** не расширять словари ради прохождения eval; сначала правим packs/контракты, затем корректируем тесты.
+`demo_salon` — канареечный pack, логика должна быть pack‑agnostic.
 **Rules‑as‑data (packs):**
 - `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`  
   Policy keywords (payment/reschedule/cancel/medical/legal/complaint/discount), explicit/override keywords.
@@ -1359,6 +1372,13 @@ metadata = {
 cd truffles-api
 pytest tests/ -v
 ```
+
+**Контейнерные тесты (anti-drift):**
+- Не запускайте pytest внутри прод‑контейнера `truffles-api` с прод‑`.env` — это даёт ложные результаты.
+- Используйте тестовые контейнеры с чистым окружением:
+  - `scripts/test_api_container.sh` (предпочтительно).
+  - или `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml ...`
+- `ops/diagnose.py` — только live‑check/trace, не замена pytest.
 
 ---
 

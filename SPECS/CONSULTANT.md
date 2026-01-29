@@ -2,7 +2,7 @@
 
 **Статус:** CANON  
 **Owner:** Top Architect  
-**Обновлено:** 2026-01-28  
+**Обновлено:** 2026-01-29  
 **Scope:** поведение бота (info/consult/booking), LAW/policy/clarify, формат ответа.  
 **Out of scope:** реализация, evidence/CI.  
 **Links:** `SPECS/ARCHITECTURE.md`, `SPECS/ESCALATION.md`, `docs/SESSION_START_PROMPT.txt`, `STATE.md`.
@@ -38,11 +38,13 @@ _Любые статусы ниже — DERIVED; единственный ист
 Сводка опирается на правила ниже и не вводит новых норм.
 
 - Цель: довести диалог до следующего шага (FACT/COLLECT/HANDOFF) и вести к записи/продаже.
+- Контекст: держит линию разговора (current_goal/expected_reply_type), не противоречит; при перегрузе опирается на compact_summary.
 - Тон: спокойный, уверенный, заботливый; 2–3 предложения, без воды.
 - Язык: ChatGPT-like естественность, но строго domain-bound.
-- Факты: только из `client_pack`/`consult_playbooks`; нет факта → уточнение/эскалация.
+- Факты: только из `client_pack`/`consult_playbooks`; нет факта → уточнение/эскалация; скидки/акции не выдумывает.
 - Запись: если начали сбор слотов — возвращаемся к нему после перебивок.
 - Прозрачность: при handoff сообщаем статус и что будет дальше (без обещаний по времени).
+- Время: если вне рабочих часов — короткое уведомление не чаще 1 раза в 10 минут; вечером — одно приветствие.
 - Память: используем только подтверждённые слоты; при перегрузе — `compact_summary`.
 - Формулировки: не "я ИИ", а "виртуальный помощник" (см. Правило 10).
 
@@ -62,6 +64,9 @@ _Любые статусы ниже — DERIVED; единственный ист
 - **Policy‑gate:** `demo_salon_knowledge.py` + trace `stage=policy_gate` (pack‑driven, без demo‑only правил).
 - **Memory/Re‑entry:** `truffles-api/app/routers/webhook/session_memory.py` + `context_manager.py` + trace `stage=session_memory/re_entry`.
 - **Escalation:** `app/services/escalation_service.py` + `telegram_webhook.py` + trace `stage=escalation/pending_sla`.
+
+_Примечание:_ текущая реализация fact resolver опирается на `demo_salon_knowledge.py` как канареечный pack,
+но поведение должно оставаться pack‑agnostic (никаких demo‑only исключений).
 
 ---
 
@@ -85,6 +90,10 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Ассистент вне домена (погода, новости, бытовые советы)
 - Медицинский/юридический консультант
 
+**Граница домена:**
+- Доменные факты и правила берутся только из `client_pack`/`consult_playbooks`/`policy`.
+- Канон одинаков для любой ниши; `demo_salon` — лишь канареечный pack и не может быть “особым случаем”.
+
 ---
 
 # ЧАСТЬ 2: ПРАВИЛА ПОВЕДЕНИЯ
@@ -93,6 +102,11 @@ _Любые статусы ниже — DERIVED; единственный ист
 
 Если в одном сообщении несколько сигналов/интентов, действует самый сильный по приоритету.
 Это правило сильнее любых локальных эвристик.
+
+**Контракт исхода (P0):**
+- Каждое входящее сообщение должно завершиться одним исходом: **FACT**, **COLLECT**, **HANDOFF**.
+- Если безопасный FACT/COLLECT невозможен (нет фактов/правил/уверенности) → только HANDOFF.
+- Запрещён ответ “в никуда” без явного исхода.
 
 **Приоритеты (сильнее → слабее):**
 1. **Hard‑LAW** (оплата: подтверждение/проверка/возвраты, медицинка, жалобы, переносы) → только эскалация, без советов/оферов/компенсаций.
@@ -159,49 +173,49 @@ _Любые статусы ниже — DERIVED; единственный ист
 **Pending guard (P0):**
 - Если `state ∈ {pending, manager_active}` → отвечаем **только** статусом/подтверждением (pending_status/pending_wait/pending_ack/pending_close).
 - Любые multi‑intent и booking/info/consult игнорируются до выхода из `pending`; цель записи не сбрасываем, а ставим на паузу.
+- При первой эскалации обязателен notice: “передал менеджеру, пока заявка активна бот не отвечает; сообщения передаются”.
 - Trace/meta: `stage=pending_guard/pending_status/pending_wait`, `action ∈ {pending_status,pending_wait,pending_ack,pending_close}`.
 
-**Quiet‑hours / время суток (P1):**
-- Рабочее время берём из pack/tools; если его нет — предупреждение не показываем.
-- Первое сообщение вне рабочего времени → короткое уведомление, но запись/консультация продолжаются.
-- Повтор уведомления не чаще 1 раза в 10 минут на диалог.
-- Приветствие по времени суток даём один раз за сессию; вечером используем формулировку “Добрый вечер. Я виртуальный помощник...”.
-
-**Память и профиль (P1):**
-- `context_capsule`: `current_goal`, `expected_reply_type`, слоты, `last_question`, safety‑flags, `compact_summary`.
-- При переполнении сбрасываем только свободный текст, capsule сохраняется.
-- Профиль клиента хранит только явно подтверждённые предпочтения (услуга/мастер/время) с TTL и явным “запомнить”.
-
-**Media/ASR порядок (P1):**
-- Фото/аудио/документы принимаем, видео запрещено.
-- Фото без текста → короткое уточнение “Это референс? Что хотите повторить/изменить?” без смены цели.
-- Текст “как на фото/референс” без фото → попросить фото, без эскалации.
-- Фото + текст (или фото после текста) с “референс” → эскалация, медиа + контекст в handoff, с предупреждением о `pending`.
-- Голосовые: одна активная транскрибация на диалог; новые аудио ставятся в очередь по времени.
-- Пока идёт транскрибация, на текст отвечаем сразу; транскрипт учитывается следующим шагом.
-- “Подождите, расшифровываю” — не чаще 1 раза в 10 минут; при долгой обработке просим текстом.
-
-**Consult clarify (pack-first + LLM fallback, safe):**
-- Consult canon: сначала playbook из `client_pack.consult_playbooks`; если playbook/topic не найден — уточнение или эскалация (LLM‑совет только внутри `allowed_advice`).
-- LLM‑совет **не имеет права** заявлять факты о наличии/ценах/условиях бизнеса. Только общие рекомендации, разрешенные playbook.
+**Consult clarify (pack-first, без LLM-советов):**
+- Consult canon: сначала playbook из `client_pack.consult_playbooks`; если playbook/topic не найден — уточнение или эскалация.
+- LLM используется только для выбора темы (controller) и **не** генерирует советы/факты.
+- LLM не имеет права заявлять факты о наличии/ценах/условиях бизнеса; любые факты — только из pack/tools.
 - Если запрос требует недостающих фактов (service/policy/price/duration) и факты не доступны в pack/tools → уточнение или handoff, без предположений.
-- Если explicit info/booking и факт подтвержден pack/tools → short‑circuit в info/booking (без лишнего consult).
+- Если explicit info/booking и нет consult‑интента → short‑circuit в info/booking (без лишнего consult).
 - `clarify_limit=2` максимум; после лимита без topic/facts → эскалация с reason `consult_no_topic`.
 - Hard‑LAW/Policy/opt‑out/human выше consult: если сработало — consult‑playbook/LLM не применяется.
 - Если есть consult‑интент вместе с pricing/info → consult‑ответ идёт первым, факты добавляются только при наличии в pack/tools.
 - Вариант ответа playbook выбирается детерминированно (hash от `conversation_id + playbook_id`) — без дрейфа.
 - Trace/meta: `stage=consult_flow` (`decision=consult_clarify|consult_escalate|short_circuit|consult_pack`), `clarify_attempt`,
-  `consult_topic_id`, `consult_playbook_id`, `consult_variant_id`, `consult_source=pack|llm`, `consult_risk_class`, `consult_confidence`.
+  `consult_topic_id`, `consult_playbook_id`, `consult_variant_id`, `consult_source=pack`, `consult_risk_class`, `consult_confidence`.
 
 **Consult schema (domain-agnostic, no dictionaries):**
 - Pack schema: `contracts/consult/consult_playbook.v1.jsonschema` (topics, allowed_advice, required_questions, risk_tags).
 - LLM output contract: `contracts/consult/consult_controller_output.v1.jsonschema` (intent, topic_id, confidence, risk_class, actions, slots).
-- Topic resolution: semantic retrieval over pack topics → Top‑K candidates → LLM selects `topic_id`; no phrase dictionaries.
+- Topic resolution: semantic retrieval over pack topics → Top‑K candidates → LLM selects `topic_id`; no phrase dictionaries/lexical fallback.
 - Deterministic commit: low confidence / missing facts / risk high → clarify or handoff; never answer outside `allowed_advice`.
 
 **CTA после инфо‑ответа (standalone, вне booking):**
 - После ответа на цены/длительность/часы/адрес — добавить мягкий CTA: “Хотите записаться?”.
 - Исключения: LAW/opt‑out/OOD, `pending/manager_active`, и когда booking‑prompt уже добавлен (booking‑interrupt).
+
+**CTA после consult‑ответа (standalone, вне booking):**
+- После ответа из consult‑playbook — добавить мягкий CTA: “Хотите записаться?”.
+- Исключения: LAW/opt‑out/OOD, `pending/manager_active`, booking‑prompt или intent‑queue followup уже добавлены.
+
+**Time‑awareness (P0):**
+- Рабочее время берём из pack/tools; если его нет — уведомление не показываем.
+- Если клиент написал вне рабочих часов — короткое уведомление о режиме работы не чаще 1 раза в 10 минут; консультация/запись всё равно продолжаются.
+- В вечернее время одно приветствие за сессию: “Добрый вечер. Это виртуальный ассистент салона…”.
+
+**Media + ASR ordering (P0):**
+- Фото без текста → короткое уточнение “Это референс? Что хотите повторить/изменить?”; цель не сбрасываем.
+- Style reference: текст без фото → `style_reference_pending` (TTL), просим фото; фото позже → эскалация даже без подписи.
+- Фото раньше текста → сохраняем ссылку/путь (TTL) и используем при явном стиле/референсе в следующем сообщении.
+- Любая эскалация (включая media‑style) предупреждает: пока заявка активна, бот не отвечает.
+- Audio: только один ASR inflight; новый voice → “расшифровываю, можно текстом”; транскрипты обрабатываются по очереди.
+- Если приходит текст во время ASR — отвечаем на текст сразу; транскрипт учитывается в следующем шаге.
+- Низкая уверенность ASR → просим повторить текстом; цель диалога не меняется.
 
 **Lifecycle/Closure (PLAN):**
 - Resolved = факт закрыт (вопрос снят) / lead собран (slot-intake завершён) / handoff подтверждён.
@@ -233,6 +247,29 @@ _Любые статусы ниже — DERIVED; единственный ист
 - Ключ: `remote_jid` (WhatsApp без IP).
 - Signal/Noise: шум не меняет `current_goal`/`expected_reply_type`, ответы на шум не чаще 1 раза в N сообщений (cooldown), остальное — silent‑drop.
 - Медиа/эмодзи/точки без текста не сбрасывают цель; просим уточнить текстом.
+
+**Signal/Noise handling (P0, PLAN)**
+- Signal/Noise классификация (правила + лёгкая модель); шум **не** меняет `expected_reply_type/current_goal`.
+- Если активна запись и пришёл шум → короткая нейтральная реплика + повтор последнего slot-вопроса; без эскалации.
+- Cooldown: отвечать на шум не чаще 1 раза на N сообщений; остальные — silent-drop.
+- Goal‑lock: активный booking/consult не сбрасывается шумом; `current_goal` фиксируется до явной смены.
+- Trace/meta: `noise_count`, `noise_cooldown_drop`, `signal_detected`.
+
+**Context capsule & memory overflow (P0, PLAN)**
+- Храним только структурные поля: `current_goal`, `expected_reply_type`, `slots`, `last_question`, `safety_flags`,
+  `preferences` (только подтверждённые), `intent_queue`, `style_reference_pending`, `asr_inflight`,
+  `quiet_hours_timestamps`, `compact_summary`.
+- Rolling summary: каждые K сообщений обновляем `compact_summary`; LLM видит summary + последние N реплик.
+- Overflow: при превышении лимита контекста сбрасываем “сырой” текст, сохраняем capsule + summary.
+- Trace retention: P0‑стадии сохраняются всегда; остальное допускает сэмплинг/агрегацию.
+- Session TTL: отдельные TTL для booking и общего диалога; после истечения — re‑entry и подтверждение слотов.
+- Профиль клиента хранит только явно подтверждённые предпочтения (услуга/мастер/время) с TTL и явным “запомнить”.
+
+**Intent queue (P1, PLAN)**
+- При multi‑intent: ответить на текущую цель и положить остальные интенты в `intent_queue`.
+- Очередь не сбрасывает активную запись и не меняет `current_goal` без явного выбора пользователя.
+- При наличии очереди: `expected_reply_type=intent_choice`, короткий follow‑up “что разобрать дальше”.
+- Trace/meta: `intent_queue`, `intent_queue_reason`, `expected_reply_type=intent_choice`.
 
 **Long-form стабильность (P0)**
 - Цель диалога не теряется 10-15 сообщений: `current_goal` и `expected_reply_type` сохраняются между перебивками.
@@ -611,9 +648,13 @@ def send_bot_response(db, client_id, remote_jid, text):
     }
 ```
 
-**Inbound media policy (PLAN):**
-- Фото/референс: не обещать результат; 1–2 уточнения → чаще handoff.
-- Голос: транскрибировать; если транскрипция недоступна — попросить текст.
+**Inbound media policy (P0, PLAN):**
+- Фото без текста → короткое уточнение (“это референс? что нужно?”); цель диалога не сбрасываем.
+- Текст “как на фото/референс” без фото → просим фото, без эскалации.
+- Фото + текст (или фото после уточнения) → `style_reference` → handoff + pending‑notice; медиа форвардится менеджеру.
+- Аудио: одна активная транскрипция на диалог; новые аудио при inflight → “расшифровываю” (cooldown) + silent‑drop.
+- ASR низкая уверенность → подтверждение; ASR fail → попросить текст.
+- Текст во время ASR: отвечаем на текст сразу, транскрипт учитываем на следующем шаге (без смены goal).
 
 ---
 

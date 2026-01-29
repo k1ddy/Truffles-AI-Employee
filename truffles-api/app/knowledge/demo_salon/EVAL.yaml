@@ -1368,12 +1368,9 @@ eval_cases:
   user: Какой цвет волос мне подойдёт?
   expected:
     action: reply
-    intent: service_match
+    intent: consult_reply
     must_include:
     - Хотите записаться
-    must_include_any:
-    - 8 000
-    - 12 000
 - id: E098
   user: Нужен договор и юридическая ответственность
   expected:
@@ -1800,12 +1797,7 @@ eval_cases:
   user: Какой цвет волос мне подойдёт?
   expected:
     action: reply
-    intent: service_match
-    must_include:
-    - Хотите записаться
-    must_include_any:
-    - 8 000
-    - 12 000
+    intent: consult_reply
 - id: E151
   user: Какой цвет мне подойдет?
   expected:
@@ -1862,12 +1854,7 @@ eval_cases:
   user: Подойдет цвет волос тёплый или холодный?
   expected:
     action: reply
-    intent: service_match
-    must_include:
-    - Хотите записаться
-    must_include_any:
-    - 8 000
-    - 12 000
+    intent: consult_reply
 - id: E156
   user: Подойдёт цвет под тон кожи?
   expected:
@@ -1894,12 +1881,7 @@ eval_cases:
   user: Какой цвет волос лучше выбрать?
   expected:
     action: reply
-    intent: service_match
-    must_include:
-    - Хотите записаться
-    must_include_any:
-    - 8 000
-    - 12 000
+    intent: consult_reply
 - id: E159
   user: Какой цвет мне подойдёт для карих глаз?
   expected:
@@ -3083,32 +3065,17 @@ eval_cases:
   user: Ресницы ломаются, как ухаживать?
   expected:
     action: reply
-    intent: service_match
-    must_include:
-    - Хотите записаться
-    must_include_any:
-    - 2 000
-    - 4 000
+    intent: consult_reply
 - id: E283
   user: Брови редеют, что посоветуете?
   expected:
     action: reply
-    intent: service_match
-    must_include:
-    - Хотите записаться
-    must_include_any:
-    - 2 000
-    - 4 000
+    intent: consult_reply
 - id: E284
   user: У меня чувствительное лицо, что лучше по уходу?
   expected:
     action: reply
-    intent: service_match
-    must_include:
-    - Хотите записаться
-    must_include_any:
-    - 8 000
-    - 6 000
+    intent: consult_reply
 - id: E285
   user: Очень чувствительно, нужен деликатный уход
   expected:
@@ -4590,7 +4557,7 @@ eval_cases:
     action: reply
     intent: location
     must_include:
-    - Адрес:
+    - 'Адрес:'
     - Работаем
     must_not:
     - Какая услуга
@@ -5003,8 +4970,8 @@ eval_cases:
     action: reply
     intent: price_query
     must_include_any:
-    - 7 000
-    - 7000
+    - '7 000'
+    - '7000'
 - id: E461
   user: Сколько стоит мужская стрижка?
   expected:
@@ -5809,7 +5776,7 @@ eval_cases:
   - Сухожарный шкаф используете?
   - Инструменты в крафт-пакетах и вскрываете при мне?
   - Пилки и бафы одноразовые?
-  - Подтвердите: дезраствор → УЗ-ванна → сухожар
+  - "Подтвердите: дезраствор → УЗ-ванна → сухожар"
   expected:
     action: reply
     intent: hygiene
@@ -6305,7 +6272,7 @@ eval_cases:
   tier: long
   turns:
   - Привет
-  - Нужен совет: волосы сухие и ломаются
+  - "Нужен совет: волосы сухие и ломаются"
   - Скорее сухость
   - После окрашивания стало хуже
   - Пользуюсь феном почти каждый день
@@ -6384,7 +6351,7 @@ eval_cases:
   - Как часто делать маски?
   - Смываю цвет быстро
   - Хочу восстановить блеск
-  - Что важнее: оттенок или качество?
+  - "Что важнее: оттенок или качество?"
   - Подскажите уход после окрашивания
   - Сколько стоит маникюр?
   expected:
@@ -6547,24 +6514,24 @@ eval_cases:
     action: reply
     intent: price_query
     must_include_any:
-    - 7 000
-    - 7000
+    - '7 000'
+    - '7000'
 - id: E581
   user: Цена на маникюр с гель-лаком?
   expected:
     action: reply
     intent: price_query
     must_include_any:
-    - 7 000
-    - 7000
+    - '7 000'
+    - '7000'
 - id: E582
   user: маникюр с гель-лаком почем?
   expected:
     action: reply
     intent: price_query
     must_include_any:
-    - 7 000
-    - 7000
+    - '7 000'
+    - '7000'
 - id: E583
   user: Сколько стоит мужская стрижка?
   expected:

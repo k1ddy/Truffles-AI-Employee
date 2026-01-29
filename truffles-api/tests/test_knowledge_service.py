@@ -95,7 +95,7 @@ class TestSearchKnowledge:
         mock_response.text = "Qdrant error"
         mock_client.post.return_value = mock_response
 
-        result = search_knowledge("test query", "test-client")
+        result = search_knowledge("test query", "test-client", branch_id="branch-123")
 
         assert result == []
         mock_alert.assert_called_once()
@@ -123,7 +123,7 @@ class TestSearchKnowledge:
         }
         mock_client.post.return_value = mock_response
 
-        result = search_knowledge("test query", "test-client")
+        result = search_knowledge("test query", "test-client", branch_id="branch-123")
 
         assert len(result) == 1
         assert result[0]["score"] == 0.85
