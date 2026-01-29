@@ -9,6 +9,16 @@
 
 ---
 
+## 0) New agent checklist (read-first)
+
+- Read `AGENTS.md`, `STATE.md`, `STRUCTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/ESCALATION.md`, `SPECS/SYSTEM_REFERENCE.md`.
+- Work only in the assigned worktree/branch; do not switch branches mid-task.
+- Do **not** special‑case `demo_salon`; it is a canary pack. Logic must remain pack‑agnostic.
+- Use `ops/diagnose.py` for live‑check evidence; never “massage” DB/trace.
+- Keep process artifacts updated: session log + Task Package; `STATE.md` only by Brain.
+
+---
+
 ## 0) E2E inbound message flow (code-accurate, with LLM touchpoints)
 
 This is the full WA/ChatFlow inbound path in code order. Every step is traced in `decision_trace` unless a
@@ -108,6 +118,9 @@ preflight reject happens before a conversation is resolved.
   `truffles-api/app/services/llm/openai_provider.py:74`
 
 ### Live demo trace (demo_salon) — evidence
+
+**Note:** `demo_salon` is a canary pack used for examples/evidence only. If you have another pack,
+use its `client_slug`. Never tailor logic to `demo_salon`.
 
 **How it was run (per Live‑check SOP):**
 ```bash
@@ -226,7 +239,7 @@ truth gate provided a safe response.
 ## 4) Knowledge + truth (facts only from packs/tools)
 
 **Code blocks:**
-- Domain facts + service availability: `truffles-api/app/services/demo_salon_knowledge.py`
+- Domain facts + service availability: `truffles-api/app/services/demo_salon_knowledge.py` (current canary implementation)
 - Truth pack (facts/policy): `truffles-api/app/knowledge/<client_slug>/SALON_TRUTH.yaml`
 - Consult playbooks (care advice): `truffles-api/app/knowledge/<client_slug>/CONSULT_PLAYBOOK.yaml`
 - Knowledge Snapshot Gateway (shadow): `truffles-api/app/routers/knowledge_gateway.py` + `truffles-api/app/services/knowledge_snapshot_service.py`
@@ -237,6 +250,7 @@ truth gate provided a safe response.
 **Behavior impact:**
 - **No hallucinations:** facts only from `client_pack`/`consult_playbooks`.
 - If service is not offered → explicit **"не оказываем"** reply (`service_not_found`).
+- Packs define behavior; do not hardcode logic for `demo_salon`.
 
 ---
 
@@ -344,6 +358,7 @@ truth gate provided a safe response.
 
 **Behavior impact:**
 - Simulates 10–15 turn dialogs with noise and mixed languages, validates behavior by trace/meta (not by text).
+- `demo_salon` eval is a canary; tests assert invariants and must not drive demo‑only logic.
 
 ---
 

@@ -158,6 +158,8 @@ _Статус реализации и evidence — в `STATE.md`._
 - Любые booking/info/consult/multi‑intent **не** должны запускать решения; в `pending` только pending‑ответы.
 - Первое сообщение об эскалации **обязательно** предупреждает: пока заявка активна, бот не отвечает (сообщения уходят менеджеру).
 - Notice применяется для любых причин эскалации (LAW/policy/media/style_reference).
+- Notice отправляется **один раз** на `handover_id`; повторные inbound получают только pending‑статусы.
+- Все входящие сообщения после эскалации форвардятся менеджеру, независимо от формата (текст/медиа).
 - После `pending_ack` — восстановление контекста + **re‑entry** (старые слоты требуют подтверждения)
 
 **Реализация:** `truffles-api/app/services/state_service.py` (`escalate_to_pending`) + `truffles-api/app/services/escalation_service.py` (`send_telegram_notification`)

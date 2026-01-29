@@ -486,6 +486,9 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 - **L3** — только на `main` или вручную через `workflow_dispatch` (`run_livecheck=true`).
 - **L4** — nightly (планируется; не блокирует релиз).
 
+**Примечание:** `demo_salon` — канареечный pack. L2 проверяет **инварианты**, а не “прохождение demo_salon”.
+Нельзя вносить изменения, которые работают только для demo‑packs; логика обязана быть pack‑agnostic.
+
 **Release gate:** L0 + L1 обязательны; L2 обязателен, если затронуты файлы из L2; L3 выполняется по DoD/CA‑audit.
 **Livecheck‑harness:** любые изменения в `.github/workflows/ci.yml` или `ops/diagnose.py` требуют L3 (livecheck)
 или явного waiver в Task Package с причиной.
@@ -1064,6 +1067,8 @@ chatflow_service → WhatsApp
 
 ### Determinism Inventory (лексиконы + правила)
 **Принцип:** лексиконы — fallback; основной разбор смысла через semantic resolver и LLM‑router (см. `STRATEGY/REQUIREMENTS.md`).
+**Правило:** не расширять словари ради прохождения eval; сначала правим packs/контракты, затем корректируем тесты.
+`demo_salon` — канареечный pack, логика должна быть pack‑agnostic.
 **Rules‑as‑data (packs):**
 - `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`  
   Policy keywords (payment/reschedule/cancel/medical/legal/complaint/discount), explicit/override keywords.

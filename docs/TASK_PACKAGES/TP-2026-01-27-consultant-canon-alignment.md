@@ -15,6 +15,7 @@
     - `docker compose exec truffles-api env -i PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_message_endpoint.py` → 112 passed.
     - `docker compose exec truffles-api env -i PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit` → passed.
     - `docker compose exec truffles-api env -i PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests/test_webhook_response.py` → 6 passed.
+    - `docker compose exec truffles-api env -i CI=1 PATH=/usr/local/bin:/usr/bin:/bin PYTHONPATH=/app pytest -q /app/tests -vv` → 463 passed.
   - Канон: добавлены пункты про signal/noise, intent_queue, media/ASR ordering, escalation notice (см. SPECS).
 - NEXT:
   - При необходимости: контейнерный прогон перед финальной приёмкой.
@@ -25,6 +26,7 @@
   - Pending/manager_active — бот молчит (кроме статусов).
 - Scope:
   - Канон: consult‑first, pack‑first, no‑dictionaries, quiet‑hours TTL, вечернее приветствие, media/ASR ordering.
+  - Документация: onboarding‑инструкции для новых агентов в `docs/CONSULTANT_CODEMAP.md`.
   - Код: consult flow (order, fallback), media style reference pending, ASR inflight, escalation notice.
   - Код (поддержка канона/устойчивости): preflight branch phone guard, ChatFlow outbound env overrides,
     consult topic resolver fallback=none (без словарей), вечернее приветствие builder.
@@ -35,6 +37,7 @@
   - `SPECS/CONSULTANT.md`
   - `SPECS/ESCALATION.md`
   - `SPECS/SYSTEM_REFERENCE.md`
+  - `docs/CONSULTANT_CODEMAP.md`
   - `docs/SESSION_INDEX.md`
   - `truffles-api/app/routers/webhook/response.py`
   - `truffles-api/app/routers/webhook/decision.py`
@@ -52,13 +55,15 @@
   1) Обновить канон в `SPECS/*` (consult-first/pack-first, media/ASR ordering, quiet-hours TTL, escalation notice).
   2) Обновить consult‑flow (убрать explicit‑info short‑circuit при consult_intent, запретить legacy/LLM fallback, порядок ответов).
   3) Добавить media/ASR guardrails (style_reference_pending TTL, ASR inflight notice, escalation warning).
-  4) Обновить/добавить тесты под новые правила.
-  5) Локальные проверки.
+  4) Обновить onboarding‑инструкции для новых агентов в `docs/CONSULTANT_CODEMAP.md`.
+  5) Обновить/добавить тесты под новые правила.
+  6) Локальные проверки.
 - DoD:
   - Канон обновлён и синхронизирован со спецификациями.
   - Consult‑ответ всегда первым при consult‑интенте; факты добавляются только при наличии в pack/tools.
   - Нет LLM‑советов/legacy‑словари для consult.
   - Фото/аудио обрабатываются с учётом очереди/TTL и эскалационных предупреждений.
+  - `docs/CONSULTANT_CODEMAP.md` содержит чек‑лист для новых агентов и ссылки на канон.
   - Тесты проходят.
 - Checks:
   - `pytest -q truffles-api/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit`

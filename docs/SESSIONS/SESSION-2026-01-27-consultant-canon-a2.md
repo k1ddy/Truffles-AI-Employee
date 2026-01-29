@@ -35,6 +35,10 @@
   - `pytest -q truffles-api/tests/test_demo_salon_eval.py::test_consult_pack_only_and_short_circuit` → passed.
   - `pytest -q truffles-api/tests/test_webhook_response.py` → 6 passed.
   - `EVAL_TIER=core pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases` → passed.
+  - Updated canon docs with outcome contract, context capsule, ASR ordering clarifications, and demo‑pack boundary.
+  - Updated escalation spec with single‑notice rule and forwarding guarantees in pending.
+  - Updated system reference with demo_salon canary note and anti‑dictionary guidance.
+  - Added onboarding checklist + demo_salon disclaimer to `docs/CONSULTANT_CODEMAP.md`.
 - next:
   - Разобрать фейл `EVAL_TIER=all`: кейс `E097` ожидает price+CTA, а canon даёт consult‑ответ; решить (обновить EVAL или поведение).
   - При необходимости: контейнерный прогон перед финальной приёмкой.
@@ -54,4 +58,4 @@
   - `pytest -q truffles-api/tests/test_webhook_response.py` (6 passed).
   - `EVAL_TIER=core pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases` (passed).
   - `EVAL_TIER=all pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases` → **FAILED** (`E097`, ожидание CTA/price против consult‑ответа).
-- last_updated: 2026-01-28
+- last_updated: 2026-01-29
