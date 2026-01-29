@@ -148,8 +148,8 @@ LIVECHECK_SUITES = {
             "expected_intent": "service_not_found",
             "expected_fact_intents": ["service_not_found"],
             "messages": [
-                "делаете массаж?",
-                "делаете стрижку?",
+                "делаете массаж ног?",
+                "массаж ног делаете?",
             ],
         },
     ],
