@@ -34,6 +34,7 @@
 - `ops/chatflow_send.py` — минимальный sender‑скрипт (без diagnose).
 - `ops/diagnose.py explain` — быстрый разбор конкретного сообщения (decision_meta/trace + outbox).
 - `ops/diagnose.py trace-bundle` — полный пакет (decision_meta/trace + timing + outbox rows + latency).
+- `ops/diagnose.py dialog-report` — one‑command отчёт по диалогу (таймлайн + решения + outbox + media/ASR).
 - `ops/diagnose.py deploy-verify` — проверка версии деплоя (`/admin/version`) и совпадения commit.
 - `ops/sync_client.py` — validate/sync client packs (truth → Qdrant).
 - `/home/zhan/restart_api.sh` — restart API контейнера.
@@ -65,6 +66,33 @@ python3 ops/diagnose.py explain --client-slug demo_salon --text "LC-MARKER" --tr
 - Нет inbound → проблема между ChatFlow и API.  
 - Есть inbound, нет outbox → gate/мьют/эскалация.  
 - Outbox SENT, но ответа нет → проблема провайдера (ChatFlow/WA).
+
+## 0.3 Dialog Report (one-command анализ диалогов)
+
+**Цель:** за один запрос получить таймлайн, решения (decision_meta/trace), outbox и медиа/ASR.  
+Инструмент: `ops/diagnose.py dialog-report` (read-only, без изменений БД).  
+Runbook: `docs/runbooks/DIALOG_REPORT.md`.
+
+**Пример:**
+```bash
+python3 ops/diagnose.py dialog-report \
+  --date 2026-01-29 \
+  --start 16:27 \
+  --end 16:36 \
+  --tz Asia/Almaty \
+  --sender "+7 778 589 0765" \
+  --receiver-phone "+7 778 165 87 99"
+```
+
+**Что выдаёт:**
+- Таймлайн диалога (user/assistant) с message_id и медиа/ASR.
+- decision_meta summary + raw JSON.
+- outbox status/ошибки на каждый inbound.
+- Ссылки на storage_path медиа (если файл ещё не удалён TTL).
+
+**Подсказки ввода:**
+- Если `receiver-phone` не найден — попробуйте digits-only или `--branch-id`.
+- Для конкретного диалога используйте `--conversation-id`.
 
 **Где фиксировать изменения:**
 - Статус/evidence → `STATE.md` (Brain или Top Architect; для core/поведенческих изменений — до merge в рамках PR, плюс финальная запись в конце сессии).
