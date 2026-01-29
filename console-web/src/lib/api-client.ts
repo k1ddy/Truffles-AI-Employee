@@ -585,8 +585,12 @@ export const adminApi = {
         apiClient.get<components["schemas"]["BranchListResponse"]>("/admin/branches", { params }),
     createCompany: (data: components["schemas"]["CompanyCreateRequest"]) =>
         apiClient.post<components["schemas"]["CompanyCreateResponse"]>("/admin/companies", data),
+    patchCompany: (companyId: string, data: components["schemas"]["CompanyUpdateRequest"]) =>
+        apiClient.patch<components["schemas"]["Company"]>(`/admin/companies/${companyId}`, data),
     createClient: (data: components["schemas"]["ClientCreateRequest"]) =>
         apiClient.post<components["schemas"]["ClientCreateResponse"]>("/admin/clients", data),
+    patchClient: (clientId: string, data: components["schemas"]["ClientUpdateRequest"]) =>
+        apiClient.patch<components["schemas"]["Client"]>(`/admin/clients/${clientId}`, data),
     createBranch: (data: components["schemas"]["BranchCreateRequest"]) =>
         apiClient.post<components["schemas"]["BranchCreateResponse"]>("/admin/branches", data),
     patchBranch: (branchId: string, data: components["schemas"]["BranchUpdateRequest"]) =>

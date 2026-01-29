@@ -959,6 +959,42 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /admin/companies/{company_id}:
+    patch:
+      operationId: updateAdminCompany
+      tags: [admin]
+      summary: Update company
+      parameters:
+        - name: company_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyUpdateRequest"
+      responses:
+        "200":
+          description: Company updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /admin/clients:
     get:
       operationId: listAdminClients
@@ -1018,6 +1054,42 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/OnboardingStepRequired"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/clients/{client_id}:
+    patch:
+      operationId: updateAdminClient
+      tags: [admin]
+      summary: Update client
+      parameters:
+        - name: client_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientUpdateRequest"
+      responses:
+        "200":
+          description: Client updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "422":
           $ref: "#/components/responses/ValidationError"
 
@@ -1531,6 +1603,15 @@ components:
         company:
           $ref: "#/components/schemas/Company"
 
+    CompanyUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        billing_info:
+          type: object
+          additionalProperties: true
+          nullable: true
     CompanyListResponse:
       type: object
       required: [items, has_more]
@@ -1555,6 +1636,9 @@ components:
           type: string
         name:
           type: string
+        status:
+          type: string
+          nullable: true
         company_id:
           type: string
           format: uuid
@@ -1582,6 +1666,18 @@ components:
         client:
           $ref: "#/components/schemas/Client"
 
+    ClientUpdateRequest:
+      type: object
+      properties:
+        slug:
+          type: string
+        company_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          nullable: true
     ClientListResponse:
       type: object
       required: [items, has_more]

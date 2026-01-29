@@ -1,0 +1,29 @@
+# SESSION 2026-01-28-tenants-crud-a2 — Session 2026-01-28-tenants-crud-a2
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-28-tenants-crud.md
+- branch: feat/2026-01-28-tenants-crud-a2
+- worktree: /home/zhan/worktrees/2026-01-28-tenants-crud-a2
+- base_ref: origin/main
+- scope: Tenants CRUD (backend PATCH endpoints + console-web edit UI + OpenAPI/types + tests).
+- done:
+  - Session created.
+  - Added Tenants CRUD GAP to `STATE.md`.
+  - Added PATCH `/admin/companies/{company_id}` and `/admin/clients/{client_id}` (API + schemas + OpenAPI).
+  - Updated Tenants UI with edit flows for companies/clients/branches and confirmation handling.
+  - Generated API types via `npx openapi-typescript`.
+  - Added tests in `truffles-api/tests/test_console_admin_provisioning.py` (pytest pass).
+  - Installed console-web deps and ran lint (clean).
+  - `scripts/session_check.sh` passed.
+  - Captured Tenants UI screenshot using admin/admin.
+- next:
+  - Prepare PR + CI; update `STATE.md` with evidence before merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-28-tenants-crud.md
+  - pytest: `pytest -q truffles-api/tests/test_console_admin_provisioning.py`
+  - typegen: `npx openapi-typescript contracts/console_api/openapi.v1.yaml -o console-web/src/types/api.generated.ts`
+  - lint: `npm --prefix console-web run lint`
+  - session_check: `scripts/session_check.sh`
+  - screenshot: `/home/zhan/screenshots/console-live-2026-01-28T23-19-07-537Z/01-tenants.png`
+- last_updated: 2026-01-28
