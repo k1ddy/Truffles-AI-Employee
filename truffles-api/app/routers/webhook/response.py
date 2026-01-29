@@ -1434,7 +1434,7 @@ def _handle_consult_flow(
     if consult_intent_signal and not consult_signal and not consult_short_circuit:
         consult_signal = True
 
-    if consult_signal:
+    if consult_signal and not consult_short_circuit:
         context = legacy._get_conversation_context(conversation)
         context_manager = legacy._get_context_manager(context)
         if consult_flow_override:
