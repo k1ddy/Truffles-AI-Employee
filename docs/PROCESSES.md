@@ -274,6 +274,7 @@ POST /console/v1/cases/{case_id}/return
 - Services + pricing
 - Policies (refund/reschedule/medical/payment)
 - Master full names (schedule slots later via CRM/calendar integration)
+  - Enforced via knowledge pack validation + Go/No-Go gate (required fields).
 
 **Process**
 1. Provision tenant + branch records.

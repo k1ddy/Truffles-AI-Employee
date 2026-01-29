@@ -10,12 +10,13 @@ from sqlalchemy.orm import Session
 from app.models.agent import Agent
 from app.models.branch import Branch
 from app.models.client_capability import ClientCapability
-from app.models.knowledge_version import KnowledgeVersion
 from app.models.specialist import Specialist
 from app.schemas.capabilities import CapabilitiesPayload
 from app.services.audit_service import record_audit_event
 from app.services.capabilities_service import merge_capabilities
 from app.services.console_errors import ConsoleAPIError
+from app.services.knowledge_registry_service import get_current_published
+from app.services.knowledge_validation import get_missing_required_fields
 
 
 class OnboardingStep(str, Enum):
@@ -57,6 +58,7 @@ class OnboardingInputs:
     has_telegram_chat: bool
     has_knowledge_tag: bool
     has_published_knowledge: bool
+    missing_pack_fields: list[str]
     has_working_hours: bool
     has_booking_settings: bool
     has_specialists: bool
@@ -152,15 +154,11 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
         is not None
     )
 
-    has_published_knowledge = (
-        db.query(KnowledgeVersion)
-        .filter(
-            KnowledgeVersion.branch_id == branch.id,
-            KnowledgeVersion.status == "published",
-        )
-        .first()
-        is not None
-    )
+    published_version = get_current_published(db, branch_id=branch.id)
+    has_published_knowledge = published_version is not None
+    missing_pack_fields: list[str] = []
+    if published_version and isinstance(published_version.payload_json, dict):
+        missing_pack_fields = get_missing_required_fields(published_version.payload_json)
 
     has_specialists = (
         db.query(Specialist)
@@ -182,6 +180,7 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
         has_telegram_chat=bool(branch.telegram_chat_id),
         has_knowledge_tag=bool(branch.knowledge_tag),
         has_published_knowledge=has_published_knowledge,
+        missing_pack_fields=missing_pack_fields,
         has_working_hours=_has_non_empty_dict(branch.working_hours),
         has_booking_settings=_has_non_empty_dict(branch.booking_settings),
         has_specialists=has_specialists,
@@ -227,6 +226,8 @@ def missing_prerequisites(step: OnboardingStep, inputs: OnboardingInputs) -> lis
             missing.append("knowledge_tag")
         if not inputs.has_published_knowledge:
             missing.append("knowledge_published")
+        if inputs.has_published_knowledge and inputs.missing_pack_fields:
+            missing.extend(inputs.missing_pack_fields)
         return missing
 
     if step == OnboardingStep.BOOKING:
@@ -256,6 +257,8 @@ def missing_prerequisites(step: OnboardingStep, inputs: OnboardingInputs) -> lis
                 missing.append("knowledge_tag")
             if not inputs.has_published_knowledge:
                 missing.append("knowledge_published")
+            if inputs.has_published_knowledge and inputs.missing_pack_fields:
+                missing.extend(inputs.missing_pack_fields)
 
         if inputs.capabilities.features.booking_mode is not None:
             if not inputs.has_working_hours:
