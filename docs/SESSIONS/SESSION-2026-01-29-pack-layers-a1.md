@@ -1,0 +1,23 @@
+# SESSION 2026-01-29-pack-layers-a1 — Pack layers DEC
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-29-pack-layers-dec.md
+- branch: feat/2026-01-29-pack-layers-a1
+- worktree: /home/zhan/worktrees/2026-01-29-pack-layers-a1
+- base_ref: origin/main
+- scope: Doc-only DEC for pack/tool-scope layer resolution + spec alignment (no runtime changes).
+- done:
+  - session_check passed
+  - Added DEC-017 for pack + tool-scope layer order (domain -> company -> client -> branch).
+  - Updated pack layer docs in SPECS/MULTI_TENANT.md and SPECS/ARCHITECTURE.md (tool-scope included).
+  - Recorded evidence in STATE.md.
+- next:
+  - (none)
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-29-pack-layers-dec.md
+  - docs/IMPERIUM_DECISIONS.yaml
+  - SPECS/MULTI_TENANT.md
+  - SPECS/ARCHITECTURE.md
+  - STATE.md
+- last_updated: 2026-01-29

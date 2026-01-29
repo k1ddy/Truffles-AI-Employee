@@ -342,6 +342,8 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - `fact.booking_prompt` → next_slot + prompt_text (expected_reply_type).
 - `fact.handoff` → escalation_text (pending/manager_active status).
 
+**Tool scope gating:** tools are enabled by effective tool-scope (CRM/Calendar/Calls/Channels) resolved per DEC-017; disabled scopes must not invoke tools and must fall back to pack-only flows.
+
 **Tool output contract (minimum):**
 ```json
 {
@@ -455,13 +457,14 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 ### Pack Compiler и онбординг (offline‑pipeline)
 - Источники: CRM/Calendar/Excel/Sheets/сайт → единый формат.
 - Нормализация: услуги/категории/правила → client_pack факты.
+- Слои: `domain_pack` (global, no facts) → `company_pack` (optional) → `client_pack` → branch overrides.
 - Taxonomy → Alias Expansion: ServiceSample расширяет алиасы **только** для услуг клиента (распознавание ≠ правда).
 - Branch overrides: адрес/часы/канал/политики на уровне филиала.
 - Валидация: обязательные поля (адрес/часы/услуги/правила); если нет — GAP‑лист.
-- Версионирование: `client_pack.version`, `domain_pack.version`, `compiled_at`, `hash`.
-- Output: compiled client_pack → Qdrant sync + Base‑80 EVAL генерация.
+- Версионирование: `client_pack.version`, `company_pack.version` (if present), `domain_pack.version`, `compiled_at`, `hash`.
+- Output: compiled effective pack → Qdrant sync + Base‑80 EVAL генерация.
 
-**Runtime использует только compiled client_pack**; domain taxonomy не даёт право на ответ, если факта нет.
+**Runtime использует только compiled effective pack**; domain taxonomy не даёт право на ответ, если факта нет.
 
 ### Context carryover (класс‑уровень)
 - После info‑bundle хранить класс и ключевые факты в контексте, чтобы перестановка вопросов не сбрасывала ветку.

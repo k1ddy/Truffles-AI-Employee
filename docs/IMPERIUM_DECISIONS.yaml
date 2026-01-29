@@ -72,3 +72,7 @@ decisions:
     area: "provider_gateway_architecture"
     choice: "GATEWAY_SNAPSHOT"
     statement: "Provider Gateway + Channel Adapters become the only ingress/egress to external channels; Inbox/Outbox are durable, idempotent, and retryable with DLQ; Knowledge Gateway serves signed per-tenant snapshots (pack-only) so core never reads raw KB; all decisions require tenant_context and are provider-agnostic."
+  - id: "DEC-017"
+    area: "pack_layers"
+    choice: "DOMAIN_COMPANY_CLIENT_BRANCH"
+    statement: "Effective pack resolves in order domain_pack (global) -> company_pack (optional business scope) -> client_pack -> branch overrides; later layers override earlier; tool-scope (CRM/Calendar/Calls/Channels) resolves by the same order; runtime uses the compiled effective pack only."
