@@ -1,0 +1,22 @@
+# SESSION 2026-01-30-inbox-ux-implementation-a1 — Session 2026-01-30-inbox-ux-implementation-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-implementation.md
+- branch: feat/2026-01-30-inbox-ux-implementation-a1
+- worktree: /home/zhan/worktrees/2026-01-30-inbox-ux-implementation-a1
+- base_ref: origin/main
+- scope: Inbox UX implementation (queue + chat + details + diagnostics gating)
+- done:
+  - Inbox UI updated to match standard (queue simplification, quick replies near composer, context strip, details tabs).
+  - Diagnostics gated by role in details.
+  - Case deep-link view aligned with Inbox UX.
+  - Canon + report registered in docs.
+  - Lint executed (clean).
+- next:
+  - None.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-implementation.md
+  - docs/REPORTS/2026-01-30-inbox-ux-standard.md
+  - /tmp/console_web_lint_20260130.txt
+- last_updated: 2026-01-30

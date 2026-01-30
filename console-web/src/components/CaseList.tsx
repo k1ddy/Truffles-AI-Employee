@@ -85,6 +85,11 @@ export default function CaseList({
     const [searchValue, setSearchValue] = useState("");
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const isCompact = variant === "compact";
+    const sortOptions: { id: CaseFilters["sortBy"]; label: string }[] = [
+        { id: "activity", label: "Активные" },
+        { id: "created_at", label: "Новые" },
+        { id: "sla", label: "Срочные" },
+    ];
 
     useEffect(() => {
         const handle = setTimeout(() => {
@@ -115,6 +120,14 @@ export default function CaseList({
         : advancedFiltersVisible
             ? "Скрыть фильтры"
             : "Расширенные фильтры";
+
+    const pillClass = (active: boolean) => (
+        `rounded-full border px-3 py-1 text-xs font-semibold transition ${
+            active
+                ? "bg-primary text-primary-foreground border-primary"
+                : "border-border/60 text-muted-foreground hover:text-foreground"
+        }`
+    );
 
     useEffect(() => {
         if (!branchFilterEnabled && filters.branchId) {
@@ -226,23 +239,21 @@ export default function CaseList({
     }
 
     return (
-        <div className="w-full">
-            {/* Header with filters */}
-            <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+        <div className={isCompact ? "flex flex-col h-full" : "w-full"}>
+            <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
                 <h2 className="text-xl font-semibold" data-testid="cases-title">Заявки</h2>
                 <button
                     onClick={() => { resetPagination(); refetch(); }}
-                    className="text-sm text-primary hover:text-primary/80"
+                    className="text-xs text-muted-foreground hover:text-foreground"
                     data-testid="cases-refresh"
                 >
                     Обновить
                 </button>
             </div>
 
-            {/* Filter row */}
             <div
-                className={`flex flex-wrap items-center gap-3 mb-4 p-3 bg-muted rounded-lg border border-border/60 ${
-                    isCompact ? "flex-col items-start" : ""
+                className={`flex flex-col gap-3 border border-border/60 rounded-lg p-3 ${
+                    isCompact ? "sticky top-0 z-10 bg-card/95 backdrop-blur" : "bg-muted"
                 }`}
                 data-testid="cases-filters"
             >
@@ -252,13 +263,13 @@ export default function CaseList({
                         value={searchValue}
                         onChange={(e) => setSearchValue(e.target.value)}
                         placeholder="Телефон / имя / ID"
-                        className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 min-w-[220px]"
+                        className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 min-w-[180px]"
                         data-testid="cases-filter-search"
                     />
                     <select
                         value={filters.status || ""}
                         onChange={(e) => { resetPagination(); setFilters({ ...filters, status: e.target.value || undefined }); }}
-                        className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        className="px-3 py-2 border border-border/60 rounded-lg text-xs bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
                         data-testid="cases-filter-status"
                     >
                         <option value="">Все статусы</option>
@@ -266,26 +277,32 @@ export default function CaseList({
                         <option value="active">В работе</option>
                         <option value="resolved">Закрыта</option>
                     </select>
-                    <select
-                        value={filters.sortBy}
-                        onChange={(e) => setFilters({ ...filters, sortBy: e.target.value as "created_at" | "sla" | "activity" })}
-                        className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
-                        data-testid="cases-filter-sort"
+                    <div className="flex flex-wrap items-center gap-2" data-testid="cases-filter-sort">
+                        {sortOptions.map((option) => (
+                            <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => {
+                                    resetPagination();
+                                    setFilters({ ...filters, sortBy: option.id });
+                                }}
+                                className={pillClass(filters.sortBy === option.id)}
+                            >
+                                {option.label}
+                            </button>
+                        ))}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            resetPagination();
+                            setFilters({ ...filters, assignedToMe: !filters.assignedToMe });
+                        }}
+                        className={pillClass(filters.assignedToMe)}
+                        data-testid="cases-filter-assigned"
                     >
-                        <option value="activity">Сортировка: Активные</option>
-                        <option value="created_at">Сортировка: Новые</option>
-                        <option value="sla">Сортировка: Срочные</option>
-                    </select>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={filters.assignedToMe}
-                            onChange={(e) => { resetPagination(); setFilters({ ...filters, assignedToMe: e.target.checked }); }}
-                            className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
-                            data-testid="cases-filter-assigned"
-                        />
-                        <span className="text-sm text-foreground/80">Мои заявки</span>
-                    </label>
+                        Мои
+                    </button>
                     <button
                         type="button"
                         onClick={() => setShowAdvancedFilters((prev) => !prev)}
@@ -324,7 +341,7 @@ export default function CaseList({
                             <select
                                 value={filters.branchId || ""}
                                 onChange={(e) => { resetPagination(); setFilters({ ...filters, branchId: e.target.value || undefined }); }}
-                                className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                className="px-3 py-2 border border-border/60 rounded-lg text-xs bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
                                 data-testid="cases-filter-branch"
                             >
                                 <option value="">Все филиалы</option>
@@ -341,7 +358,7 @@ export default function CaseList({
                                 type="date"
                                 value={filters.dateFrom || ""}
                                 onChange={(e) => { resetPagination(); setFilters({ ...filters, dateFrom: e.target.value || undefined }); }}
-                                className="px-2 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                className="px-2 py-2 border border-border/60 rounded-lg text-xs bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
                                 data-testid="cases-filter-date-from"
                             />
                         </div>
@@ -351,7 +368,7 @@ export default function CaseList({
                                 type="date"
                                 value={filters.dateTo || ""}
                                 onChange={(e) => { resetPagination(); setFilters({ ...filters, dateTo: e.target.value || undefined }); }}
-                                className="px-2 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                className="px-2 py-2 border border-border/60 rounded-lg text-xs bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
                                 data-testid="cases-filter-date-to"
                             />
                         </div>
@@ -377,16 +394,14 @@ export default function CaseList({
                         </label>
                     </div>
                 )}
-            </div>
-
-            {/* Results count */}
-            <div className="text-sm text-muted-foreground mb-2" data-testid="cases-count">
-                {sortedCases.length} {sortedCases.length === 1 ? "заявка" : sortedCases.length < 5 ? "заявки" : "заявок"}
-                {data?.has_more && " (есть ещё)"}
+                <div className="text-xs text-muted-foreground" data-testid="cases-count">
+                    {sortedCases.length} {sortedCases.length === 1 ? "заявка" : sortedCases.length < 5 ? "заявки" : "заявок"}
+                    {data?.has_more && " (есть ещё)"}
+                </div>
             </div>
 
             {isCompact ? (
-                <div className="flex flex-col gap-2" data-testid="cases-table">
+                <div className="flex-1 overflow-y-auto pr-1 mt-3 flex flex-col gap-2" data-testid="cases-table">
                     {sortedCases.map((c) => {
                         const sla = getSlaIndicator(c.created_at);
                         const branchName = branchMap.get(c.branch_id || "") || "-";

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import CaseConversation from "./CaseConversation";
 import CaseDetailsPanel from "./CaseDetailsPanel";
 import { useCaseData } from "@/hooks/useCaseData";
@@ -7,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import AccessDenied from "@/components/AccessDenied";
 import { authApi, canAccessConsole } from "@/lib/api-client";
+import { InboxMacroChips } from "@/components/InboxMacros";
 
 interface CaseViewProps {
     caseId: string;
@@ -29,6 +31,7 @@ function CaseViewSkeleton() {
 
 export default function CaseView({ caseId }: CaseViewProps) {
     const { data: session } = useSession();
+    const [draft, setDraft] = useState("");
     const {
         caseDetail,
         caseLoading,
@@ -50,6 +53,7 @@ export default function CaseView({ caseId }: CaseViewProps) {
     const role = meData?.agent?.role ?? "manager";
     const canReadInbox = canAccessConsole(role, "inbox", "read");
     const canWriteInbox = canAccessConsole(role, "inbox", "write");
+    const canViewDiagnostics = role === "support" || role === "platform_admin" || role === "owner" || role === "admin";
 
     if (!canReadInbox) {
         return <AccessDenied message="Эта роль не имеет доступа к заявкам." />;
@@ -84,6 +88,10 @@ export default function CaseView({ caseId }: CaseViewProps) {
 
     const canReply = caseDetail.status === "active" && canWriteInbox;
 
+    const handleMacroSelect = (text: string) => {
+        setDraft((prev) => (prev.trim() ? `${prev}\n${text}` : text));
+    };
+
     return (
         <div className="grid grid-cols-3 gap-6" data-testid="case-view">
             <div className="col-span-2">
@@ -94,9 +102,21 @@ export default function CaseView({ caseId }: CaseViewProps) {
                     messagesLoading={messagesLoading}
                     canSend={canReply}
                     canWrite={canWriteInbox}
+                    draft={draft}
+                    onDraftChange={setDraft}
+                    composerBefore={
+                        <InboxMacroChips
+                            onSelect={handleMacroSelect}
+                            disabled={!canReply}
+                        />
+                    }
                 />
             </div>
-            <CaseDetailsPanel caseDetail={caseDetail} messages={messages} />
+            <CaseDetailsPanel
+                caseDetail={caseDetail}
+                messages={messages}
+                canViewDiagnostics={canViewDiagnostics}
+            />
         </div>
     );
 }

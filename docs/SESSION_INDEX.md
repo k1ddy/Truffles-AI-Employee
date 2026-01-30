@@ -51,3 +51,4 @@
 | 2026-01-29-mandatory-data-gate-a1 | done | feat/2026-01-29-mandatory-data-gate-a1 | /home/zhan/worktrees/2026-01-29-mandatory-data-gate-a1 | docs/TASK_PACKAGES/TP-2026-01-29-mandatory-data-gate.md | 2026-01-29 |
 | 2026-01-29-p0-behavior-fixes-a1 | active | p0/behavior-fixes-2026-01-29-a1 | /home/zhan/worktrees/2026-01-29-p0-behavior-a1 | docs/TASK_PACKAGES/TP-2026-01-29-p0-behavior-fixes.md | 2026-01-30 |
 | 2026-01-30-console-ui-unblock-a1 | done | feat/2026-01-30-console-ui-unblock-a1 | /home/zhan/worktrees/2026-01-30-console-ui-unblock-a1 | docs/TASK_PACKAGES/TP-2026-01-30-console-ui-unblock.md | 2026-01-30 |
+| 2026-01-30-inbox-ux-implementation-a1 | done | feat/2026-01-30-inbox-ux-implementation-a1 | /home/zhan/worktrees/2026-01-30-inbox-ux-implementation-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-implementation.md | 2026-01-30 |

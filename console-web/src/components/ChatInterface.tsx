@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { Message } from "@/types";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
@@ -14,6 +14,7 @@ interface ChatInterfaceProps {
     canSend?: boolean; // Allow sending messages (case must be active)
     draft?: string;
     onDraftChange?: (value: string) => void;
+    composerBefore?: ReactNode;
 }
 
 async function sendMessage(conversationId: string, content: string) {
@@ -31,6 +32,7 @@ export default function ChatInterface({
     canSend = true,
     draft,
     onDraftChange,
+    composerBefore,
 }: ChatInterfaceProps) {
     const isControlled = typeof onDraftChange === "function";
     const [internalDraft, setInternalDraft] = useState("");
@@ -126,7 +128,7 @@ export default function ChatInterface({
 
     if (isLoading) {
         return (
-            <div className="flex flex-col gap-4 p-4 bg-muted rounded-lg h-[500px] overflow-y-auto">
+            <div className="flex flex-col gap-4 p-4 bg-muted rounded-lg min-h-[520px] overflow-y-auto">
                 <div className="animate-pulse space-y-4">
                     <div className="h-16 bg-muted/70 rounded-lg w-3/4"></div>
                     <div className="h-16 bg-muted/70 rounded-lg w-2/3 self-end ml-auto"></div>
@@ -137,7 +139,7 @@ export default function ChatInterface({
     }
 
     return (
-        <div className="flex flex-col h-[500px] bg-muted rounded-lg border border-border/60">
+        <div className="flex flex-col h-full min-h-[520px] bg-muted rounded-lg border border-border/60">
             {/* Messages area */}
             <div
                 ref={scrollContainerRef}
@@ -182,6 +184,11 @@ export default function ChatInterface({
             {/* Input area */}
             {canSend && (
                 <form onSubmit={handleSubmit} className="border-t border-border/60 p-3 bg-card rounded-b-lg">
+                    {composerBefore && (
+                        <div className="mb-3">
+                            {composerBefore}
+                        </div>
+                    )}
                     <div className="flex gap-2">
                         <textarea
                             value={inputValue}
