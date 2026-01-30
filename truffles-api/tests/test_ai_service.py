@@ -7,7 +7,9 @@ from app.services.ai_service import (
     GREETING_RESPONSE,
     KNOWLEDGE_CONFIDENCE_THRESHOLD,
     LOW_SIGNAL_RESPONSE,
+    MULTI_INTENT_TIMEOUT_SECONDS,
     _sanitize_query_for_rag,
+    detect_multi_intent,
     generate_ai_response,
     get_conversation_history,
     get_system_prompt,
@@ -303,3 +305,23 @@ class TestAckAndLowSignal:
         assert result.ok is True
         assert result.value[1] == "medium"
         assert result.value[0] == LOW_SIGNAL_RESPONSE
+
+
+class TestDetectMultiIntentBudgetReserve:
+    def test_reserves_budget_for_controller(self):
+        timing_context = {}
+        required_ms = MULTI_INTENT_TIMEOUT_SECONDS * 1000
+
+        with patch("app.services.ai_service.OPENAI_API_KEY", "test"), patch(
+            "app.services.ai_service._remaining_pipeline_budget_ms", return_value=required_ms + 200
+        ), patch("app.services.ai_service.get_llm_provider") as mock_llm:
+            result = detect_multi_intent(
+                "сколько стоит маникюр",
+                client_slug="demo_salon",
+                timing_context=timing_context,
+                reserve_ms=500,
+            )
+
+        assert result is not None
+        assert timing_context.get("llm_degradation_reason") == "controller_reserved"
+        mock_llm.assert_not_called()

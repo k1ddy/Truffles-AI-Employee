@@ -18,6 +18,7 @@ from app.models import Branch, Client, ClientSettings, Conversation, User
 from app.routers import webhook as webhook_router
 from app.routers.webhook import response as webhook_response
 from app.routers.webhook.session_memory import _is_session_reset_only_message
+from app.contracts.decision import DecisionSignals
 from app.schemas.consult import ConsultControllerOutput
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookResponse
@@ -951,6 +952,138 @@ def test_truth_gate_sets_decision_meta():
     assert meta.get("llm_primary_used") is False
     assert meta.get("llm_used") is False
     assert meta.get("llm_timeout") is False
+
+
+def test_truth_gate_appends_booking_cta_for_info_reply():
+    saved_message = SimpleNamespace(message_metadata={})
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    decision = DemoSalonDecision(action="reply", response="Работаем с 9:00 до 21:00.", intent="hours")
+
+    def _truth_gate(_message: str, *, client_slug: str | None = None, intent_decomp: dict | None = None):
+        return decision
+
+    response = webhook_router._handle_truth_gate_fallback(
+        db=Mock(),
+        conversation=conversation,
+        user=user,
+        message_text="Когда вы работаете?",
+        saved_message=saved_message,
+        client_slug="demo_salon",
+        routing={"allow_booking_flow": True, "allow_handover_create": False},
+        booking_wants_flow=False,
+        policy_handler={"policy_type": "demo_salon", "truth_gate": _truth_gate},
+        policy_type="demo_salon",
+        current_goal=None,
+        intent_decomp_used=False,
+        intent_decomp_intents=[],
+        intent_decomp_payload=None,
+        llm_primary_reason="low_confidence",
+        message_count=1,
+        now=datetime.now(timezone.utc),
+        consult_return_pending=False,
+        consult_return_prompt=None,
+        consult_context=None,
+        consult_return_reason=None,
+        maybe_apply_fact_guard=lambda **_kwargs: None,
+        send_and_save=lambda text: (text, True),
+        log_timing=lambda *args, **_kwargs: None,
+        record_escalation_metric=lambda *_args, **_kwargs: None,
+    )
+
+    assert response is not None
+    assert decision.response in (response.bot_response or "")
+    assert (response.bot_response or "").endswith(webhook_router.MSG_BOOKING_CTA)
+
+
+def test_strict_ood_sets_out_of_domain_without_in_signals():
+    conversation = SimpleNamespace(
+        id="conv-ood-1",
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    signals = DecisionSignals(
+        intent=Intent.OTHER,
+        is_greeting=False,
+        is_thanks=False,
+        is_ack=False,
+        is_low_signal=False,
+        is_status_question=False,
+    )
+
+    with patch(
+        "app.routers.webhook.decision._detect_intent_signals", return_value=signals
+    ), patch(
+        "app.routers.webhook._legacy.classify_domain_with_scores",
+        return_value=(DomainIntent.UNKNOWN, 0.0, 0.0, {}),
+    ):
+        result = webhook_router._run_class_router_stage(
+            conversation=conversation,
+            saved_message=None,
+            message_text="какая погода?",
+            client_slug="demo_salon",
+            client_config={},
+            remote_jid=None,
+            timing_context={},
+            info_class_intents=set(),
+            info_class_meta={},
+            booking_signal=False,
+            class_carryover=None,
+            router_state=None,
+            intent_decomp_payload=None,
+            expected_reply_shortcircuit=False,
+            log_timing=lambda *args, **_kwargs: None,
+        )
+
+    assert result.out_of_domain_signal is True
+    assert "out_of_domain" in (result.class_router_result.get("classes") or [])
+
+
+def test_strict_ood_skips_out_of_domain_with_in_signals():
+    conversation = SimpleNamespace(
+        id="conv-ood-2",
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    signals = DecisionSignals(
+        intent=Intent.OTHER,
+        is_greeting=False,
+        is_thanks=False,
+        is_ack=False,
+        is_low_signal=False,
+        is_status_question=False,
+    )
+
+    with patch(
+        "app.routers.webhook.decision._detect_intent_signals", return_value=signals
+    ), patch(
+        "app.routers.webhook._legacy.classify_domain_with_scores",
+        return_value=(DomainIntent.UNKNOWN, 0.0, 0.0, {}),
+    ):
+        result = webhook_router._run_class_router_stage(
+            conversation=conversation,
+            saved_message=None,
+            message_text="когда работаете?",
+            client_slug="demo_salon",
+            client_config={},
+            remote_jid=None,
+            timing_context={},
+            info_class_intents={"hours"},
+            info_class_meta={},
+            booking_signal=False,
+            class_carryover=None,
+            router_state=None,
+            intent_decomp_payload=None,
+            expected_reply_shortcircuit=False,
+            log_timing=lambda *args, **_kwargs: None,
+        )
+
+    assert result.out_of_domain_signal is False
 
 
 def test_consult_pack_writes_decision_meta():
@@ -2899,6 +3032,71 @@ def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("service_semantic_rewrite_used") is True
     assert meta.get("service_semantic_rewrite_query") == "маникюр"
+
+
+def test_semantic_service_matcher_returns_not_found_on_empty_rag():
+    saved_message = SimpleNamespace(message_metadata={})
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+    timing_context = {
+        "rag_attempted": True,
+        "rag_scores": {"vector_count": 0, "bm25_count": 0},
+        "llm_used": False,
+        "llm_timeout": False,
+        "llm_cache_hit": False,
+    }
+    llm_primary_result = SimpleNamespace(ok=True, value=(None, "low_confidence"))
+    intent_decomp_payload = {
+        "intents": ["other"],
+        "service_query": "стрижка",
+        "service_query_source": "intent_decomp",
+    }
+
+    with patch(
+        "app.routers.webhook._legacy.semantic_service_match", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.rewrite_for_service_match", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy._extract_service_hint", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy._record_knowledge_backlog"
+    ):
+        outcome = webhook_response._handle_ai_response_action(
+            db=Mock(),
+            conversation=conversation,
+            user=user,
+            message_text="делаете стрижку?",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            client_id="client-123",
+            client_config={},
+            routing={"allow_handover_create": False},
+            intent=Intent.QUESTION,
+            llm_primary_result=llm_primary_result,
+            append_user_message=False,
+            timing_context=timing_context,
+            intent_decomp_payload=intent_decomp_payload,
+            class_router_result={"in_signals": [], "anchors_in_hits": 0},
+            expected_reply_shortcircuit=False,
+            out_of_domain_signal=False,
+            booking_signal=False,
+            info_class_intents=set(),
+            current_goal=None,
+            now=datetime.now(timezone.utc),
+            send_and_save=lambda text: (text, True),
+            send_response=lambda text: True,
+            finalize_response=lambda **_kwargs: None,
+        )
+
+    assert outcome.bot_response is not None
+    assert "В списке услуг нет такой позиции" in outcome.bot_response
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("intent") == "service_not_found"
+    assert meta.get("source") == "service_semantic_matcher"
 
 
 def test_rag_rewrite_and_scores_logged():

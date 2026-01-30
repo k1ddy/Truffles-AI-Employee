@@ -1221,6 +1221,7 @@ def detect_multi_intent(
     text: str,
     client_slug: str | None = None,
     timing_context: dict | None = None,
+    reserve_ms: float = 0.0,
 ) -> dict | None:
     def _clean_service_query(value: str | None) -> str:
         if not isinstance(value, str):
@@ -1366,6 +1367,23 @@ def detect_multi_intent(
     if not OPENAI_API_KEY:
         logger.warning("Multi-intent detection skipped: OPENAI_API_KEY missing")
         return _fallback_payload()
+    reserve_ms_value = 0.0
+    if isinstance(reserve_ms, (int, float)):
+        reserve_ms_value = max(float(reserve_ms), 0.0)
+    if reserve_ms_value:
+        remaining_ms = _remaining_pipeline_budget_ms(timing_context)
+        if remaining_ms is not None:
+            required_ms = max(float(MULTI_INTENT_TIMEOUT_SECONDS) * 1000, 0.0)
+            if remaining_ms < required_ms + reserve_ms_value:
+                _record_pipeline_budget_skip(
+                    timing_context=timing_context,
+                    stage="multi_intent_llm",
+                    required_ms=required_ms + reserve_ms_value,
+                    remaining_ms=remaining_ms,
+                )
+                if isinstance(timing_context, dict) and not timing_context.get("llm_degradation_reason"):
+                    timing_context["llm_degradation_reason"] = "controller_reserved"
+                return _fallback_payload()
     if not _should_attempt_llm(
         timing_context,
         timeout_seconds=MULTI_INTENT_TIMEOUT_SECONDS,

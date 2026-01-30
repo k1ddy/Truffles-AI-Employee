@@ -8,6 +8,7 @@
 
 **NOW (1 экран)**
 - DONE: console-web bringup (Traefik → console.truffles.kz) — evidence: `docker ps` shows `truffles-console-web` Up; `curl https://console.truffles.kz` → 200; `curl https://console.truffles.kz/api/auth/signin` → 200.
+- DONE: TP-2026-01-29 P0 consult behavior fixes (controller budget reserve, strict OOD, service_not_offered on empty RAG, pending payment notice, CTA after info) — evidence: `pytest -q truffles-api/tests/test_ai_service.py -k "reserves_budget_for_controller"`, `pytest -q truffles-api/tests/test_message_endpoint.py -k "truth_gate_appends_booking_cta_for_info_reply or strict_ood or semantic_service_matcher_returns_not_found_on_empty_rag"`, `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "CA07_OOD or CA04_SERVICE_NOT_FOUND or payment"`.
 - DONE: Console CaseList `useQuery` import fix — lint `npm --prefix console-web run lint`.
 - DONE: Session governance (session log + scripts + hooks + doc-only gate) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md`; Evidence: `docs/SESSIONS/SESSION-2026-01-27-session-governance.md`, `docs/SESSION_INDEX.md`, `scripts/session_*.sh`, `.githooks/`, `.github/workflows/session-gate.yml`.
 - DONE: Dialog report one-command tool + runbook (timeline + decision_meta/outbox + media/ASR) — evidence: `python3 ops/diagnose.py dialog-report --help`, report `/tmp/dialog-report-2026-01-29-1627-1636.md`.
