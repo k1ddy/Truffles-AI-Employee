@@ -448,17 +448,17 @@ export default function CaseList({
                                     </span>
                                     {needsReply && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-yellow-100 text-yellow-800">
-                                            NEW
+                                            Нужно ответить
                                         </span>
                                     )}
                                     {isLive && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-green-100 text-green-800">
-                                            LIVE
+                                            На связи
                                         </span>
                                     )}
                                     {hasIssue && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-red-100 text-red-800">
-                                            ⚠️
+                                            Ошибка
                                         </span>
                                     )}
                                 </div>
@@ -539,17 +539,17 @@ export default function CaseList({
                                                 <span className="truncate max-w-[180px]">{c.last_message_preview || c.user_message || "-"}</span>
                                                 {needsReply && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-100 text-yellow-800">
-                                                        NEW
+                                                        Нужно ответить
                                                     </span>
                                                 )}
                                                 {isLive && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-800">
-                                                        LIVE
+                                                        На связи
                                                     </span>
                                                 )}
                                                 {hasIssue && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-800">
-                                                        ⚠️
+                                                        Ошибка
                                                     </span>
                                                 )}
                                             </div>

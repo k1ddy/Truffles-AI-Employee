@@ -28,6 +28,9 @@ from app.models import (
     OutboxMessage,
     User,
 )
+from app.models import (
+    ConsoleMacro as ConsoleMacroModel,
+)
 from app.schemas.capabilities import CAPABILITIES_SCHEMA_VERSION, CapabilitiesPayload
 from app.schemas.console import (
     ConsoleAgent,
@@ -74,6 +77,10 @@ from app.schemas.console import (
     ConsoleKnowledgeRollbackResponse,
     ConsoleKnowledgeValidateRequest,
     ConsoleKnowledgeValidateResponse,
+    ConsoleMacroCreateRequest,
+    ConsoleMacroCreateResponse,
+    ConsoleMacroListResponse,
+    ConsoleMacroUpdateRequest,
     ConsoleManagerMessageRequest,
     ConsoleManagerMessageResponse,
     ConsoleMeResponse,
@@ -99,6 +106,9 @@ from app.schemas.console import (
     ConsoleTelegramTrail,
     ConsoleTelegramVerifyRequest,
     ConsoleTelegramVerifyResponse,
+)
+from app.schemas.console import (
+    ConsoleMacro as ConsoleMacroSchema,
 )
 from app.schemas.outbox_payload import validate_outbox_payload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
@@ -352,6 +362,18 @@ def _serialize_branch(branch: Branch) -> ConsoleBranch:
         onboarding_updated_at=branch.onboarding_updated_at.isoformat()
         if branch.onboarding_updated_at
         else None,
+    )
+
+
+def _serialize_macro(macro: ConsoleMacroModel) -> ConsoleMacroSchema:
+    return ConsoleMacroSchema(
+        id=macro.id,
+        scope=macro.scope,
+        label=macro.label,
+        body=macro.body,
+        is_active=macro.is_active,
+        created_at=macro.created_at.isoformat() if macro.created_at else None,
+        updated_at=macro.updated_at.isoformat() if macro.updated_at else None,
     )
 
 
@@ -1889,6 +1911,128 @@ async def get_case_messages(
         cursor=next_cursor,
         has_more=has_more
     )
+
+
+@router.get(
+    "/inbox/macros",
+    response_model=ConsoleMacroListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_inbox_macros(
+    request: Request,
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+) -> ConsoleMacroListResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "read")
+    _reject_unknown_query_params(request, {"include_inactive"})
+
+    branch = _resolve_branch_from_context(context)
+    query = (
+        db.query(ConsoleMacroModel)
+        .filter(
+            ConsoleMacroModel.client_id == context.client.id,
+            ConsoleMacroModel.branch_id == branch.id,
+        )
+        .filter(
+            or_(
+                ConsoleMacroModel.agent_id.is_(None),
+                ConsoleMacroModel.agent_id == context.agent.id,
+            )
+        )
+    )
+    if not include_inactive:
+        query = query.filter(ConsoleMacroModel.is_active.is_(True))
+
+    macros = query.order_by(ConsoleMacroModel.created_at.asc()).all()
+    return ConsoleMacroListResponse(items=[_serialize_macro(macro) for macro in macros])
+
+
+@router.post(
+    "/inbox/macros",
+    response_model=ConsoleMacroCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def create_inbox_macro(
+    request: Request,
+    body: ConsoleMacroCreateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMacroCreateResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+
+    scope = _normalize_required_text(body.scope, "scope")
+    if scope not in ("personal", "team"):
+        raise ConsoleAPIError(400, "INVALID_PARAM", "scope must be personal or team")
+
+    branch = _resolve_branch_from_context(context)
+    now = datetime.now(timezone.utc)
+    macro = ConsoleMacroModel(
+        id=uuid4(),
+        client_id=context.client.id,
+        branch_id=branch.id,
+        agent_id=context.agent.id if scope == "personal" else None,
+        scope=scope,
+        label=_normalize_required_text(body.label, "label"),
+        body=_normalize_required_text(body.body, "body"),
+        is_active=body.is_active if body.is_active is not None else True,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(macro)
+    db.commit()
+
+    return ConsoleMacroCreateResponse(macro=_serialize_macro(macro))
+
+
+@router.patch(
+    "/inbox/macros/{macro_id}",
+    response_model=ConsoleMacroSchema,
+    responses={
+        401: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+    },
+)
+async def update_inbox_macro(
+    macro_id: UUID,
+    request: Request,
+    body: ConsoleMacroUpdateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMacroSchema:
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+
+    branch = _resolve_branch_from_context(context)
+    macro = (
+        db.query(ConsoleMacroModel)
+        .filter(
+            ConsoleMacroModel.id == macro_id,
+            ConsoleMacroModel.client_id == context.client.id,
+            ConsoleMacroModel.branch_id == branch.id,
+        )
+        .first()
+    )
+    if not macro:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Macro not found")
+
+    is_privileged = context.role in ("platform_admin", "owner", "admin")
+    if macro.agent_id and macro.agent_id != context.agent.id and not is_privileged:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Cannot edit another agent's macro")
+
+    fields_set = body.model_fields_set
+    if "label" in fields_set:
+        macro.label = _normalize_required_text(body.label, "label")
+    if "body" in fields_set:
+        macro.body = _normalize_required_text(body.body, "body")
+    if "is_active" in fields_set:
+        macro.is_active = bool(body.is_active)
+
+    if fields_set:
+        macro.updated_at = datetime.now(timezone.utc)
+        db.commit()
+
+    return _serialize_macro(macro)
 
 
 @router.get(

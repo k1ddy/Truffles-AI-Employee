@@ -92,6 +92,37 @@ class ConsoleBranchListResponse(BaseModel):
     has_more: bool
 
 
+class ConsoleMacro(BaseModel):
+    id: UUID
+    scope: Literal["personal", "team"]
+    label: str
+    body: str
+    is_active: bool
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleMacroListResponse(BaseModel):
+    items: list[ConsoleMacro]
+
+
+class ConsoleMacroCreateRequest(BaseModel):
+    scope: Literal["personal", "team"]
+    label: str
+    body: str
+    is_active: Optional[bool] = True
+
+
+class ConsoleMacroCreateResponse(BaseModel):
+    macro: ConsoleMacro
+
+
+class ConsoleMacroUpdateRequest(BaseModel):
+    label: Optional[str] = None
+    body: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
 class ConsoleCompanyCreateRequest(BaseModel):
     name: str
     billing_info: Optional[dict] = None
