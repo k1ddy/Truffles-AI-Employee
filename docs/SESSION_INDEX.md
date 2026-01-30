@@ -53,3 +53,6 @@
 | 2026-01-30-console-ui-unblock-a1 | done | feat/2026-01-30-console-ui-unblock-a1 | /home/zhan/worktrees/2026-01-30-console-ui-unblock-a1 | docs/TASK_PACKAGES/TP-2026-01-30-console-ui-unblock.md | 2026-01-30 |
 | 2026-01-30-inbox-ux-implementation-a1 | done | feat/2026-01-30-inbox-ux-implementation-a1 | /home/zhan/worktrees/2026-01-30-inbox-ux-implementation-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-implementation.md | 2026-01-30 |
 | 2026-01-30-chaos-oracle-a1 | active | feat/2026-01-30-chaos-oracle-a1 | /home/zhan/worktrees/2026-01-30-chaos-oracle-a1 | docs/TASK_PACKAGES/TP-2026-01-30-chaos-oracle.md | 2026-01-30 |
+| 2026-01-30-inbox-ux-v2-macros-a1 | done | feat/2026-01-30-inbox-ux-v2-macros-a1 | /home/zhan/worktrees/2026-01-30-inbox-ux-v2-macros-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v2-macros.md | 2026-01-30 |
+| 2026-01-30-console-build-info-wiring-a1 | done | feat/2026-01-30-console-build-info-wiring-a1 | /home/zhan/worktrees/2026-01-30-console-build-info-wiring-a1 | docs/TASK_PACKAGES/TP-2026-01-30-console-build-info-wiring.md | 2026-01-30 |
+| 2026-01-30-inbox-ux-v3-a1 | done | feat/2026-01-30-inbox-ux-v3-a1 | /home/zhan/worktrees/2026-01-30-inbox-ux-v3-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v3.md | 2026-01-30 |

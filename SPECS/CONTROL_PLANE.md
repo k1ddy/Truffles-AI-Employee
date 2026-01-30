@@ -190,20 +190,21 @@ Pack‑файл — **генерируемый артефакт** при publish
 **Цель:** быстрый разбор заявок без шума. Приоритет: **Action → Chat → Context → Diagnostics**.
 
 ### 9.1 Layout (responsive)
-- **Desktop:** 3‑pane — Queue (list) / Chat / Details.
-- **Tablet:** 2‑pane — Queue / Chat + Details drawer или tabs.
-- **Mobile:** single column с tabs (Очередь / Чат / Контекст / Диагностика).
+- **Desktop:** 2‑pane по умолчанию — Queue (list) + Chat; **Details** справа по toggle, чат остаётся основным.
+- **Tablet:** 2‑pane — Queue / Chat + Details drawer.
+- **Mobile:** single column; **Details** раскрываются из чата по кнопке.
 
 ### 9.2 Queue (list)
-- **Минимум сигналов:** имя/телефон, превью, последняя активность, SLA, теги NEW/LIVE/⚠️.
+- **Минимум сигналов:** имя/телефон, превью, последняя активность, SLA, теги “Нужно ответить / На связи / Ошибка”.
 - **Дефолт сортировка:** activity; быстрые переключатели “Мои” и “Срочные”.
 - **Фильтры:** поиск + статус + assigned; **advanced** скрыт по умолчанию.
 - **Branch filter** только при `branch = All` (если глобальный контекст уже выбран — не дублировать).
 
 ### 9.3 Chat + actions
 - **Action bar:** “Взять”, “Закрыть”, “Передать/Эскалировать” (role‑based).
-- **Quick replies:** рядом с композером (chips + раскрываемый список).
-- **Контекст‑strip:** короткая сводка/интент + время последнего inbound над чатом.
+- **Quick replies:** рядом с композером (chips + раскрываемый список), макросы из БД (персональные/командные).
+- **Управление макросами:** настройка из Inbox (RBAC), хранение per‑client/branch/agent.
+- **Контекст‑strip:** короткая “Суть запроса” + время последнего inbound над чатом.
 
 ### 9.4 Details (Context + Case + Consultant)
 - **Default tabs:** Контекст / Заявка / Консультант.

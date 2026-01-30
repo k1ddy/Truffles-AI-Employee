@@ -20,6 +20,8 @@ interface CaseConversationProps {
     onDraftChange?: (value: string) => void;
     onResolved?: () => void;
     composerBefore?: ReactNode;
+    detailsOpen?: boolean;
+    onToggleDetails?: () => void;
 }
 
 async function takeCase(caseId: string): Promise<void> {
@@ -55,6 +57,8 @@ export default function CaseConversation({
     onDraftChange,
     onResolved,
     composerBefore,
+    detailsOpen = false,
+    onToggleDetails,
 }: CaseConversationProps) {
     const router = useRouter();
     const queryClient = useQueryClient();
@@ -100,24 +104,32 @@ export default function CaseConversation({
     const isActive = caseDetail.status === "active";
     const isPending = caseDetail.status === "pending";
     const contextText = caseDetail.context_summary || caseDetail.user_message || "Сводка недоступна";
+    const contextTitle = caseDetail.context_summary ? "Суть запроса" : "Последнее сообщение";
     const lastInbound = caseDetail.last_inbound_at
         ? new Date(caseDetail.last_inbound_at).toLocaleString("ru-RU")
         : "—";
+    const assignedLabel = caseDetail.assigned_to_name ?? "Не назначен";
+    const showDetailsToggle = typeof onToggleDetails === "function";
 
     return (
         <div className="flex flex-col gap-5 h-full" data-testid="case-conversation">
             <div className="flex flex-col gap-4 border-b border-border/60 pb-4">
-                <div className="flex items-start justify-between gap-4">
-                    <div>
-                        <div className="flex items-center gap-3 mb-2">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
                             <h1 className="text-2xl font-bold" data-testid="case-title">
                                 Заявка {caseDetail.id.slice(0, 8)}
                             </h1>
                             <SlaBadge status={caseDetail.sla_status} />
+                            {caseDetail.needs_reply && (
+                                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-yellow-100 text-yellow-800">
+                                    Нужно ответить
+                                </span>
+                            )}
                         </div>
-                        <div className="flex flex-wrap gap-2 text-sm">
+                        <div className="flex flex-wrap gap-2 text-xs">
                             <span
-                                className={`px-2 py-1 rounded font-medium ${caseDetail.status === "resolved"
+                                className={`px-2 py-0.5 rounded font-semibold ${caseDetail.status === "resolved"
                                     ? "bg-muted text-muted-foreground"
                                     : isActive
                                         ? "bg-green-100 text-green-800"
@@ -128,50 +140,65 @@ export default function CaseConversation({
                             >
                                 {getStatusLabel(caseDetail.status)}
                             </span>
-                            {caseDetail.assigned_to_name && (
-                                <span className="px-2 py-1 rounded bg-secondary text-secondary-foreground">
-                                    👤 {caseDetail.assigned_to_name}
-                                </span>
-                            )}
-                            <span className="bg-muted px-2 py-1 rounded">{caseDetail.channel}</span>
-                            <span className="bg-muted px-2 py-1 rounded">{caseDetail.trigger_type}</span>
+                            <span
+                                className={`px-2 py-0.5 rounded font-semibold ${
+                                    caseDetail.assigned_to_name ? "bg-secondary text-secondary-foreground" : "bg-muted text-muted-foreground"
+                                }`}
+                            >
+                                👤 {assignedLabel}
+                            </span>
                         </div>
                     </div>
 
-                    <div className="flex gap-2">
-                        {canWrite ? (
-                            <>
-                                {isPending && (
-                                    <button
-                                        onClick={() => takeMutation.mutate()}
-                                        disabled={takeMutation.isPending}
-                                        className="bg-primary text-primary-foreground px-4 py-2 rounded hover:bg-primary/90 disabled:opacity-50"
-                                    >
-                                        {takeMutation.isPending ? "Берём..." : "Взять заявку"}
-                                    </button>
-                                )}
-                                {isActive && (
-                                    <button
-                                        onClick={() => resolveMutation.mutate()}
-                                        disabled={resolveMutation.isPending}
-                                        className="bg-foreground text-background px-4 py-2 rounded hover:bg-foreground/90 disabled:opacity-50"
-                                    >
-                                        {resolveMutation.isPending ? "Закрываем..." : "Закрыть заявку"}
-                                    </button>
-                                )}
-                            </>
-                        ) : (
-                            <span className="text-xs text-muted-foreground self-center">
-                                Только просмотр
-                            </span>
+                    <div className="flex flex-col items-end gap-2">
+                        {showDetailsToggle && (
+                            <button
+                                type="button"
+                                onClick={onToggleDetails}
+                                className={`text-xs font-semibold transition ${
+                                    detailsOpen ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                                }`}
+                                aria-pressed={detailsOpen}
+                                data-testid="case-details-toggle"
+                            >
+                                {detailsOpen ? "Скрыть детали" : "Детали"}
+                            </button>
                         )}
+                        <div className="flex gap-2">
+                            {canWrite ? (
+                                <>
+                                    {isPending && (
+                                        <button
+                                            onClick={() => takeMutation.mutate()}
+                                            disabled={takeMutation.isPending}
+                                            className="bg-primary text-primary-foreground px-4 py-2 rounded hover:bg-primary/90 disabled:opacity-50"
+                                        >
+                                            {takeMutation.isPending ? "Берём..." : "Взять заявку"}
+                                        </button>
+                                    )}
+                                    {isActive && (
+                                        <button
+                                            onClick={() => resolveMutation.mutate()}
+                                            disabled={resolveMutation.isPending}
+                                            className="bg-foreground text-background px-4 py-2 rounded hover:bg-foreground/90 disabled:opacity-50"
+                                        >
+                                            {resolveMutation.isPending ? "Закрываем..." : "Закрыть заявку"}
+                                        </button>
+                                    )}
+                                </>
+                            ) : (
+                                <span className="text-xs text-muted-foreground self-center">
+                                    Только просмотр
+                                </span>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
 
             <div className="rounded-lg border border-border/60 bg-card p-3 text-sm">
-                <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
-                    <span>Контекст</span>
+                <div className="flex flex-wrap items-center justify-between text-xs text-muted-foreground mb-1">
+                    <span>{contextTitle}</span>
                     <span>Последнее входящее: {lastInbound}</span>
                 </div>
                 <p className="text-sm text-foreground">{contextText}</p>

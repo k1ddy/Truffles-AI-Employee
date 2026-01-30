@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Case, DecisionTraceEntry, Message } from "@/types";
-import { getSlaLabel, getStatusLabel } from "@/utils/labels";
+import { getChannelLabel, getSlaLabel, getStatusLabel, getTriggerLabel } from "@/utils/labels";
 
 function formatTimestamp(value?: string | null) {
     if (!value) {
@@ -47,31 +47,31 @@ const META_LABELS: Record<string, string> = {
     action: "Действие",
     intent: "Интент",
     source: "Источник",
-    policy_gate: "Policy",
+    policy_gate: "Policy-проверка",
     fact_source: "Источник фактов",
-    info_sections: "Секции",
+    info_sections: "Секции базы знаний",
     service_query: "Запрос услуги",
-    price_item: "Прайс",
+    price_item: "Прайс-позиция",
     duration_item: "Длительность",
-    consult_playbook_id: "Playbook",
-    consult_selector: "Selector",
-    rag_reason: "RAG",
+    consult_playbook_id: "Сценарий",
+    consult_selector: "Селектор",
+    rag_reason: "Причина RAG",
     trace_id: "Trace ID",
     llm_used: "LLM",
-    llm_degradation_reason: "LLM fallback",
+    llm_degradation_reason: "Причина fallback",
 };
 
 const SUMMARY_GROUPS = [
     {
-        title: "Что произошло",
+        title: "Что решили",
         keys: ["action", "intent"],
     },
     {
-        title: "Почему",
+        title: "Почему так",
         keys: ["source", "policy_gate", "rag_reason"],
     },
     {
-        title: "Что использовано",
+        title: "Какие данные",
         keys: [
             "info_sections",
             "service_query",
@@ -169,7 +169,10 @@ export default function CaseDetailsPanel({
     canViewDiagnostics?: boolean;
 }) {
     const contact = getPrimaryContact(caseDetail);
-    const contextText = caseDetail.context_summary || caseDetail.user_message || "Контекст недоступен";
+    const summaryText = caseDetail.context_summary || null;
+    const userMessage = caseDetail.user_message || null;
+    const contextText = summaryText || userMessage || "Контекст недоступен";
+    const contextTitle = summaryText ? "Суть запроса" : "Последнее сообщение клиента";
     const explainEntry = extractExplainEntry(caseDetail.decision_trace);
     const trace = caseDetail.decision_trace ?? [];
     const keyStages = trace
@@ -235,18 +238,18 @@ export default function CaseDetailsPanel({
                             </p>
                         )}
                     </SectionCard>
-                    <SectionCard title="Сводка">
+                    <SectionCard title={contextTitle}>
                         <p className="bg-muted p-2 rounded border border-border/60 text-xs">
                             {contextText}
                         </p>
                     </SectionCard>
-                    <div className="flex flex-wrap gap-2 text-xs">
-                        <span className="bg-muted px-2 py-1 rounded">
-                            Триггер: {caseDetail.trigger_type}
-                            {caseDetail.trigger_value ? ` • ${caseDetail.trigger_value}` : ""}
-                        </span>
-                        <span className="bg-muted px-2 py-1 rounded">Канал: {caseDetail.channel}</span>
-                    </div>
+                    {summaryText && userMessage && summaryText.trim() !== userMessage.trim() && (
+                        <SectionCard title="Исходное сообщение">
+                            <p className="bg-muted p-2 rounded border border-border/60 text-xs">
+                                {userMessage}
+                            </p>
+                        </SectionCard>
+                    )}
                 </div>
             )}
 
@@ -262,6 +265,21 @@ export default function CaseDetailsPanel({
                             <span>{caseDetail.sla_status ? getSlaLabel(caseDetail.sla_status) : "—"}</span>
                         </div>
                     </SectionCard>
+                    <SectionCard title="Источник обращения">
+                        <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">Канал:</span>
+                            <span>{getChannelLabel(caseDetail.channel)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs mt-2">
+                            <span className="text-muted-foreground">Повод:</span>
+                            <span>{getTriggerLabel(caseDetail.trigger_type)}</span>
+                        </div>
+                        {caseDetail.trigger_value && (
+                            <div className="mt-2 text-xs text-muted-foreground">
+                                Детали: {caseDetail.trigger_value}
+                            </div>
+                        )}
+                    </SectionCard>
                     <SectionCard title="Активность">
                         <div className="space-y-2 text-xs">
                             <div className="flex items-center justify-between">
@@ -274,22 +292,22 @@ export default function CaseDetailsPanel({
                             </div>
                             <div className="flex items-center justify-between">
                                 <span className="text-muted-foreground">Канал активности:</span>
-                                <span>{caseDetail.last_activity_channel || "—"}</span>
+                                <span>{getChannelLabel(caseDetail.last_activity_channel)}</span>
                             </div>
                             <div className="flex flex-wrap gap-2">
                                 {caseDetail.needs_reply && (
                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-100 text-yellow-800">
-                                        NEW
+                                        Нужно ответить
                                     </span>
                                 )}
                                 {caseDetail.has_pending_outbox && (
                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-800">
-                                        QUEUED
+                                        В очереди
                                     </span>
                                 )}
                                 {caseDetail.has_delivery_error && (
                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-800">
-                                        FAILED
+                                        Ошибка доставки
                                     </span>
                                 )}
                             </div>
@@ -300,24 +318,18 @@ export default function CaseDetailsPanel({
 
             {activeTab === "consultant" && (
                 <div className="space-y-3">
-                    <SectionCard title="Назначение">
+                    <SectionCard title="Ответственный">
                         <div className="flex items-center justify-between text-xs">
                             <span className="text-muted-foreground">Менеджер:</span>
                             <span>{caseDetail.assigned_to_name ?? "Не назначен"}</span>
                         </div>
                         <div className="flex items-center justify-between text-xs mt-2">
-                            <span className="text-muted-foreground">Статус заявки:</span>
+                            <span className="text-muted-foreground">Статус работы:</span>
                             <span>{getStatusLabel(caseDetail.status)}</span>
                         </div>
-                    </SectionCard>
-                    <SectionCard title="Канал">
-                        <div className="flex items-center justify-between text-xs">
-                            <span className="text-muted-foreground">Канал:</span>
-                            <span>{caseDetail.channel}</span>
-                        </div>
                         <div className="flex items-center justify-between text-xs mt-2">
-                            <span className="text-muted-foreground">Триггер:</span>
-                            <span>{caseDetail.trigger_type}</span>
+                            <span className="text-muted-foreground">Последний ответ:</span>
+                            <span>{formatTimestamp(caseDetail.last_outbound_at)}</span>
                         </div>
                     </SectionCard>
                 </div>
@@ -325,7 +337,7 @@ export default function CaseDetailsPanel({
 
             {activeTab === "diagnostics" && (
                 <div className="space-y-3">
-                    <SectionCard title="Explain">
+                    <SectionCard title="Пояснение">
                         {latestDecision ? (
                             <div className="space-y-4 text-xs">
                                 <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -356,7 +368,7 @@ export default function CaseDetailsPanel({
                                         ))}
                                     </div>
                                 ) : (
-                                    <p className="text-xs text-muted-foreground">decision_meta есть, но без ключевых полей.</p>
+                                    <p className="text-xs text-muted-foreground">decision_meta есть, но ключевые поля пустые.</p>
                                 )}
                             </div>
                         ) : explainEntry ? (
@@ -376,7 +388,7 @@ export default function CaseDetailsPanel({
                         )}
                     </SectionCard>
 
-                    <SectionCard title="Trace">
+                    <SectionCard title="Трассировка">
                         {hasTrace || hasMessageDiagnostics ? (
                             <div className="space-y-3">
                                 {hasTrace && keyStages.length > 0 && (
@@ -452,16 +464,16 @@ export default function CaseDetailsPanel({
                                             ))}
                                         </div>
                                     ) : (
-                                        <p className="text-xs text-muted-foreground">Trace ещё не записан.</p>
+                                        <p className="text-xs text-muted-foreground">Трассировка ещё не записана.</p>
                                     )}
                                 </div>
                             </div>
                         ) : (
-                            <p className="text-xs text-muted-foreground">Trace ещё не записан.</p>
+                            <p className="text-xs text-muted-foreground">Трассировка ещё не записана.</p>
                         )}
                     </SectionCard>
 
-                    <SectionCard title="Telegram">
+                    <SectionCard title="Telegram-доставка">
                         {caseDetail.telegram_trail ? (
                             <div className="space-y-2 text-xs">
                                 <div className="flex items-center gap-2">
@@ -481,7 +493,7 @@ export default function CaseDetailsPanel({
                                 </div>
                                 {caseDetail.telegram_trail.message_id && (
                                     <div className="flex items-center gap-2">
-                                        <span className="text-muted-foreground">Message ID:</span>
+                                        <span className="text-muted-foreground">ID сообщения:</span>
                                         <span className="font-mono bg-muted px-1.5 py-0.5 rounded">
                                             {caseDetail.telegram_trail.message_id}
                                         </span>
@@ -489,7 +501,7 @@ export default function CaseDetailsPanel({
                                 )}
                                 {caseDetail.telegram_trail.topic_id && (
                                     <div className="flex items-center gap-2">
-                                        <span className="text-muted-foreground">Topic ID:</span>
+                                        <span className="text-muted-foreground">ID темы:</span>
                                         <span className="font-mono bg-muted px-1.5 py-0.5 rounded">
                                             {caseDetail.telegram_trail.topic_id}
                                         </span>
@@ -525,7 +537,7 @@ export default function CaseDetailsPanel({
                                 )}
                             </div>
                         ) : (
-                            <p className="text-xs text-muted-foreground">Telegram‑trail недоступен.</p>
+                            <p className="text-xs text-muted-foreground">История Telegram недоступна.</p>
                         )}
                     </SectionCard>
                 </div>

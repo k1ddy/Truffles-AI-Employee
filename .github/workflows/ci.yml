@@ -436,6 +436,7 @@ jobs:
             --exclude-path /admin/clients \
             --exclude-path /admin/branches \
             --exclude-path /admin/capabilities \
+            --exclude-path /inbox/macros \
             --exclude-path /onboarding/status \
             --exclude-path /onboarding/advance \
             --checks all \

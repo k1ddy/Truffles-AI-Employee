@@ -253,6 +253,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inbox/macros": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** List inbox macros */
+        get: operations["listInboxMacros"];
+        put?: never;
+        /** Create inbox macro */
+        post: operations["createInboxMacro"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/macros/{macro_id}": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path: {
+                macro_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update inbox macro */
+        patch: operations["updateInboxMacro"];
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -1069,6 +1116,38 @@ export interface components {
         CaseActionSync: {
             telegram?: components["schemas"]["SyncStatus"];
             client_notify?: components["schemas"]["SyncStatus"];
+        };
+        InboxMacro: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            scope: "personal" | "team";
+            label: string;
+            body: string;
+            is_active: boolean;
+            /** Format: date-time */
+            created_at?: string | null;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        InboxMacroListResponse: {
+            items?: components["schemas"]["InboxMacro"][];
+        };
+        InboxMacroCreateRequest: {
+            /** @enum {string} */
+            scope: "personal" | "team";
+            label: string;
+            body: string;
+            /** @default true */
+            is_active: boolean;
+        };
+        InboxMacroCreateResponse: {
+            macro?: components["schemas"]["InboxMacro"];
+        };
+        InboxMacroUpdateRequest: {
+            label?: string;
+            body?: string;
+            is_active?: boolean;
         };
         SyncStatus: {
             /** @enum {string} */
@@ -2041,6 +2120,103 @@ export interface operations {
             };
             403: components["responses"]["NotAssigned"];
             409: components["responses"]["IdempotencyConflict"];
+        };
+    };
+    listInboxMacros: {
+        parameters: {
+            query?: {
+                include_inactive?: boolean;
+            };
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Macro list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxMacroListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createInboxMacro: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboxMacroCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Macro created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxMacroCreateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateInboxMacro: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path: {
+                macro_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboxMacroUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Macro updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxMacro"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getHealth: {

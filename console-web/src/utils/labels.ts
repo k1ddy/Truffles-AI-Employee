@@ -36,6 +36,39 @@ export function getSystemStatusLabel(status: string): string {
     return labels[status] || status;
 }
 
+export function getChannelLabel(channel?: string | null): string {
+    if (!channel) {
+        return "—";
+    }
+    const normalized = channel.toLowerCase();
+    const labels: Record<string, string> = {
+        whatsapp: "WhatsApp",
+        telegram: "Telegram",
+        instagram: "Instagram",
+        web: "Web",
+        sms: "SMS",
+        email: "Email",
+    };
+    return labels[normalized] ?? channel;
+}
+
+export function getTriggerLabel(trigger?: string | null): string {
+    if (!trigger) {
+        return "—";
+    }
+    const normalized = trigger.toLowerCase();
+    const labels: Record<string, string> = {
+        inbound_message: "Входящее сообщение",
+        message: "Входящее сообщение",
+        handover: "Передача менеджеру",
+        escalation: "Эскалация",
+        policy_gate: "Policy-гейт",
+        reminder: "Напоминание",
+        manual: "Ручной запуск",
+    };
+    return labels[normalized] ?? trigger;
+}
+
 // SLA indicator with color styling based on elapsed time
 export interface SlaIndicator {
     label: string;

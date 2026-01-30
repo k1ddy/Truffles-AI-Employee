@@ -1,0 +1,23 @@
+# SESSION 2026-01-30-inbox-ux-v2-macros-a1 — Session 2026-01-30-inbox-ux-v2-macros-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v2-macros.md
+- branch: feat/2026-01-30-inbox-ux-v2-macros-a1
+- worktree: /home/zhan/worktrees/2026-01-30-inbox-ux-v2-macros-a1
+- base_ref: origin/main
+- scope: Inbox UX v2 + DB macros (chat-first, детали по toggle, RU копия)
+- done:
+  - Backend: console_macros (migration/model/API) + tests.
+  - OpenAPI + generated console-web types updated.
+  - UI: chat-first layout, details toggle, RU labels, macros management.
+  - Checks: pytest + lint; screenshots captured.
+- next:
+  - Подготовить PR/merge после ревью Brain.
+- evidence:
+  - /tmp/pytest_inbox_macros.txt
+  - /tmp/npm_lint_console_web.txt
+  - /tmp/inbox_ux_v2.png
+  - /tmp/inbox_ux_v2_details.png
+  - docs/REPORTS/2026-01-30-inbox-ux-v2.md
+- last_updated: 2026-01-30
