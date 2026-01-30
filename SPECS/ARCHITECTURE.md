@@ -429,7 +429,13 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Включается **только** если ожидается ответ на вопрос (`expected_reply_type` активен).
 - Делает **семантический** разбор ответа (slot/value/confidence), а не классификацию запроса.
 - Низкая уверенность/ошибка → fallback на детерминированный парсер + короткий уточняющий вопрос.
+- Если `expected_reply_match=false` → интерпретатор не применяется: слот не заполняем, идём в root‑gates, затем при активной записи возвращаем booking‑prompt.
 - Не может менять класс ответа и не влияет на Hard‑LAW/policy‑gates.
+
+### Signal Snapshot (routing signals)
+- Единая точка фиксации сигналов: domain_router anchors (client_config), pack lexicons (policy/guest/service), semantic match (RAG/Qdrant), consult topic resolver.
+- Сигналы пишутся в `decision_meta` с источником/score/threshold; используются для OOD/booking/intent gate.
+- LLM‑router остаётся primary по смыслу; детерминированные сигналы — safety/fallback, а не “истина”.
 
 ### Consult clarify (pack-only, no LLM advice)
 - Consult canon: info-first only from pack playbooks; no LLM advice/facts. If explicit info/booking request (pricing/duration/location/hours/booking) and service recognized → short-circuit to normal info/booking; advice-style consult stays in consult even if service recognized. If playbook missing and no service → max 2 clarifications (`clarify_limit=2`), then escalate `consult_no_service`.
@@ -496,6 +502,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - gap > 24h между сообщениями → полный reset памяти.
 - явный текст пользователя “новый запрос” → reset.
 - pending/manager_active → сохранить `pending_resume` (snapshot контекста) и восстановить на `pending_ack`.
+- Reset‑фразы в `pending` трактуются как `pending_ack`/`pending_close`; прямого bypass pending‑guard нет.
 
 ### Pending Resume (context snapshot)
 - При уходе в `pending` сохраняем snapshot (`expected_reply_type`, `intent_queue`, `booking`, `session_memory`).

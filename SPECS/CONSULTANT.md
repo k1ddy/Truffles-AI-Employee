@@ -144,9 +144,10 @@ _Примечание:_ текущая реализация fact resolver опи
 - Если есть frustration/human_request или явный opt-out → без уточнений, сразу handoff/мьют по правилам выше.
 
 **Multi-intent contract (P0):**
-- `primary_goal` определяется по приоритету: активный booking (`expected_reply_type`) → consult → info → smalltalk/OOD.
+- `primary_goal` определяется по приоритету: активный booking (`expected_reply_type` + `expected_reply_match=true` или явный booking‑signal) → consult → info → smalltalk/OOD.
 - `goal_stack` хранит до 3 целей (текущая + отложенные); перебивка **не** сбрасывает активную цель.
 - Допускается составной ответ: (1) consult/info на перебивку (2) в том же сообщении вернуть booking‑prompt, если запись активна.
+- Если `expected_reply_type` активен, но `expected_reply_match=false` → считаем реплику новой: идём в root‑gates (policy/OOD/info/consult), слот **не** заполняем, затем при активной записи возвращаем booking‑prompt.
 - Если есть consult‑интент и нет Hard‑LAW → консультативный ответ обязателен, даже при наличии цен/расписания.
 - Если в сообщении есть запрос на отсутствующую услугу → явный “не оказываем” по этой услуге; остальные интенты отвечаем только если безопасны и in‑domain.
 - В `pending/manager_active` multi‑intent не обрабатываем (см. Pending guard).
@@ -154,7 +155,8 @@ _Примечание:_ текущая реализация fact resolver опи
 **Booking interrupt (expected_reply_type активен):**
 - Если идёт сбор слота записи и приходит in‑domain вопрос/consult (цены/длительность/адрес/часы/уход) → ответить по фактам/consult **и в том же сообщении** вернуть booking‑prompt (продолжить запись).
 - Decision trace/meta: `stage=booking_interrupt`, `booking_info_interrupt=true`, `booking_info_intents` сохраняются.
-- Если сообщение не относится к записи и нет booking-сигнала → не сбрасываем booking; отвечаем нейтрально и повторяем slot-вопрос.
+- Если `expected_reply_match=false` и есть in‑domain сигнал → ответ по факту/consult и вернуть slot‑вопрос; слот не заполняем.
+- Если сообщение не относится к записи и нет booking-сигнала → не сбрасываем booking; отвечаем нейтрально и повторяем slot‑вопрос.
 
 **Booking signal (P0):**
 - Сигнал записи считается активным, если есть `current_goal=booking` или `expected_reply_type`, либо LLM-Intent/slots показывают запись (service/master/time/name) с достаточной уверенностью.
@@ -174,6 +176,7 @@ _Примечание:_ текущая реализация fact resolver опи
 - Если `state ∈ {pending, manager_active}` → отвечаем **только** статусом/подтверждением (pending_status/pending_wait/pending_ack/pending_close).
 - Любые multi‑intent и booking/info/consult игнорируются до выхода из `pending`; цель записи не сбрасываем, а ставим на паузу.
 - При первой эскалации обязателен notice: “передал менеджеру, пока заявка активна бот не отвечает; сообщения передаются”.
+- Reset‑фразы (“начнём сначала/заново”) в `pending` трактуются как `pending_ack` или `pending_close` по детерминированным правилам; обхода pending‑guard нет.
 - Trace/meta: `stage=pending_guard/pending_status/pending_wait`, `action ∈ {pending_status,pending_wait,pending_ack,pending_close}`.
 
 **Consult clarify (pack-first, без LLM-советов):**
@@ -189,10 +192,10 @@ _Примечание:_ текущая реализация fact resolver опи
 - Trace/meta: `stage=consult_flow` (`decision=consult_clarify|consult_escalate|short_circuit|consult_pack`), `clarify_attempt`,
   `consult_topic_id`, `consult_playbook_id`, `consult_variant_id`, `consult_source=pack`, `consult_risk_class`, `consult_confidence`.
 
-**Consult schema (domain-agnostic, no dictionaries):**
+**Consult schema (domain-agnostic, controlled fallback):**
 - Pack schema: `contracts/consult/consult_playbook.v1.jsonschema` (topics, allowed_advice, required_questions, risk_tags).
 - LLM output contract: `contracts/consult/consult_controller_output.v1.jsonschema` (intent, topic_id, confidence, risk_class, actions, slots).
-- Topic resolution: semantic retrieval over pack topics → Top‑K candidates → LLM selects `topic_id`; no phrase dictionaries/lexical fallback.
+- Topic resolution: semantic retrieval over pack topics → Top‑K candidates → LLM selects `topic_id`; при сбое embeddings допускается детерминированный lexical fallback по pack‑терминам с фиксацией `resolver_fallback_reason`.
 - Deterministic commit: low confidence / missing facts / risk high → clarify or handoff; never answer outside `allowed_advice`.
 
 **CTA после инфо‑ответа (standalone, вне booking):**
@@ -250,6 +253,7 @@ _Примечание:_ текущая реализация fact resolver опи
 
 **Signal/Noise handling (P0, PLAN)**
 - Signal/Noise классификация (правила + лёгкая модель); шум **не** меняет `expected_reply_type/current_goal`.
+- `expected_reply_match=false` не считается шумом: слот не заполняем, выполняем root‑gates, затем возвращаем booking‑prompt при активной записи.
 - Если активна запись и пришёл шум → короткая нейтральная реплика + повтор последнего slot-вопроса; без эскалации.
 - Cooldown: отвечать на шум не чаще 1 раза на N сообщений; остальные — silent-drop.
 - Goal‑lock: активный booking/consult не сбрасывается шумом; `current_goal` фиксируется до явной смены.
