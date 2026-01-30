@@ -65,7 +65,7 @@ Evidence
 - Обновить STATE.md с ссылками на evidence.
 
 Rollback
-- git revert MERGE_COMMIT_SHA
+- git revert <commit>
 
 No-go
 - Любые изменения decision/core или смягчение selection‑gate.
