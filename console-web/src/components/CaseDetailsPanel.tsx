@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Case, DecisionTraceEntry, Message } from "@/types";
-import { getSlaLabel, getStatusLabel } from "@/utils/labels";
+import { getChannelLabel, getSlaLabel, getStatusLabel, getTriggerLabel } from "@/utils/labels";
 
 function formatTimestamp(value?: string | null) {
     if (!value) {
@@ -172,6 +172,7 @@ export default function CaseDetailsPanel({
     const summaryText = caseDetail.context_summary || null;
     const userMessage = caseDetail.user_message || null;
     const contextText = summaryText || userMessage || "Контекст недоступен";
+    const contextTitle = summaryText ? "Суть запроса" : "Последнее сообщение клиента";
     const explainEntry = extractExplainEntry(caseDetail.decision_trace);
     const trace = caseDetail.decision_trace ?? [];
     const keyStages = trace
@@ -237,25 +238,18 @@ export default function CaseDetailsPanel({
                             </p>
                         )}
                     </SectionCard>
-                    <SectionCard title="Суть запроса">
+                    <SectionCard title={contextTitle}>
                         <p className="bg-muted p-2 rounded border border-border/60 text-xs">
                             {contextText}
                         </p>
                     </SectionCard>
                     {summaryText && userMessage && summaryText.trim() !== userMessage.trim() && (
-                        <SectionCard title="Последнее сообщение">
+                        <SectionCard title="Исходное сообщение">
                             <p className="bg-muted p-2 rounded border border-border/60 text-xs">
                                 {userMessage}
                             </p>
                         </SectionCard>
                     )}
-                    <div className="flex flex-wrap gap-2 text-xs">
-                        <span className="bg-muted px-2 py-1 rounded">
-                            Триггер: {caseDetail.trigger_type}
-                            {caseDetail.trigger_value ? ` • ${caseDetail.trigger_value}` : ""}
-                        </span>
-                        <span className="bg-muted px-2 py-1 rounded">Канал: {caseDetail.channel}</span>
-                    </div>
                 </div>
             )}
 
@@ -271,6 +265,21 @@ export default function CaseDetailsPanel({
                             <span>{caseDetail.sla_status ? getSlaLabel(caseDetail.sla_status) : "—"}</span>
                         </div>
                     </SectionCard>
+                    <SectionCard title="Источник обращения">
+                        <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">Канал:</span>
+                            <span>{getChannelLabel(caseDetail.channel)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs mt-2">
+                            <span className="text-muted-foreground">Повод:</span>
+                            <span>{getTriggerLabel(caseDetail.trigger_type)}</span>
+                        </div>
+                        {caseDetail.trigger_value && (
+                            <div className="mt-2 text-xs text-muted-foreground">
+                                Детали: {caseDetail.trigger_value}
+                            </div>
+                        )}
+                    </SectionCard>
                     <SectionCard title="Активность">
                         <div className="space-y-2 text-xs">
                             <div className="flex items-center justify-between">
@@ -283,7 +292,7 @@ export default function CaseDetailsPanel({
                             </div>
                             <div className="flex items-center justify-between">
                                 <span className="text-muted-foreground">Канал активности:</span>
-                                <span>{caseDetail.last_activity_channel || "—"}</span>
+                                <span>{getChannelLabel(caseDetail.last_activity_channel)}</span>
                             </div>
                             <div className="flex flex-wrap gap-2">
                                 {caseDetail.needs_reply && (
@@ -315,18 +324,12 @@ export default function CaseDetailsPanel({
                             <span>{caseDetail.assigned_to_name ?? "Не назначен"}</span>
                         </div>
                         <div className="flex items-center justify-between text-xs mt-2">
-                            <span className="text-muted-foreground">Статус:</span>
+                            <span className="text-muted-foreground">Статус работы:</span>
                             <span>{getStatusLabel(caseDetail.status)}</span>
                         </div>
-                    </SectionCard>
-                    <SectionCard title="Источник обращения">
-                        <div className="flex items-center justify-between text-xs">
-                            <span className="text-muted-foreground">Канал:</span>
-                            <span>{caseDetail.channel}</span>
-                        </div>
                         <div className="flex items-center justify-between text-xs mt-2">
-                            <span className="text-muted-foreground">Триггер:</span>
-                            <span>{caseDetail.trigger_type}</span>
+                            <span className="text-muted-foreground">Последний ответ:</span>
+                            <span>{formatTimestamp(caseDetail.last_outbound_at)}</span>
                         </div>
                     </SectionCard>
                 </div>
