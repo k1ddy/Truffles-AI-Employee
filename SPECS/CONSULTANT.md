@@ -64,6 +64,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 - **Policy‑gate:** `demo_salon_knowledge.py` + trace `stage=policy_gate` (pack‑driven, без demo‑only правил).
 - **Memory/Re‑entry:** `truffles-api/app/routers/webhook/session_memory.py` + `context_manager.py` + trace `stage=session_memory/re_entry`.
 - **Escalation:** `app/services/escalation_service.py` + `telegram_webhook.py` + trace `stage=escalation/pending_sla`.
+- **Unified Reasoning Core (DEC-018):** Signal Snapshot Layer + pack‑index + LLM pack‑ref‑only (см. `SPECS/ARCHITECTURE.md`).
 
 _Примечание:_ текущая реализация fact resolver опирается на `demo_salon_knowledge.py` как канареечный pack,
 но поведение должно оставаться pack‑agnostic (никаких demo‑only исключений).
@@ -195,7 +196,7 @@ _Примечание:_ текущая реализация fact resolver опи
 **Consult schema (domain-agnostic, controlled fallback):**
 - Pack schema: `contracts/consult/consult_playbook.v1.jsonschema` (topics, allowed_advice, required_questions, risk_tags).
 - LLM output contract: `contracts/consult/consult_controller_output.v1.jsonschema` (intent, topic_id, confidence, risk_class, actions, slots).
-- Topic resolution: semantic retrieval over pack topics → Top‑K candidates → LLM selects `topic_id`; при сбое embeddings допускается детерминированный lexical fallback по pack‑терминам с фиксацией `resolver_fallback_reason`.
+- Topic resolution: semantic retrieval over pack topics → Top‑K candidates → LLM selects `topic_id`; при сбое embeddings допускается детерминированный fallback **только по pack‑index терминам** с фиксацией `resolver_fallback_reason` (без кодовых словарей).
 - Deterministic commit: low confidence / missing facts / risk high → clarify or handoff; never answer outside `allowed_advice`.
 
 **CTA после инфо‑ответа (standalone, вне booking):**
@@ -313,8 +314,9 @@ _Примечание:_ текущая реализация fact resolver опи
 - **LLM‑контроллер** отдаёт intent/slots (structured JSON), но commit — детерминированный (validators + semantic resolver).
 - Slot-extract работает через LLM (естественные формулировки: “после обеда”, “в пятницу утром”); при низкой уверенности → `booking_confirm`.
 - **Enforcement‑гейты** (state/policy/LAW) выше смысла и могут перекрывать решение ради безопасности.
-- Semantic resolver (embeddings) подтверждает смысл; ключевые слова/якоря — только fallback.
-- LLM‑контроллер — основной арбитр смысла; словари/якоря не расширяем ради покрытия, только для safety‑gate и минимальных якорей.
+- **Signal Snapshot Layer:** единая точка сигналов (pack‑index + semantic/RAG + LLM pack‑ref). Источники/версии пишем в decision_meta.
+- Semantic resolver (embeddings) подтверждает смысл; ключевые слова/якоря — только fallback из pack‑index (без кодовых словарей).
+- LLM‑контроллер — основной арбитр смысла и возвращает **только** pack‑ID/intent/slots; business‑лексиконы запрещены в коде.
 - `demo_salon` — тестовый pack; запрещены demo_salon‑only правила и “подгон под тесты”.
 - LLM **не создаёт факты**. Факты об услугах/ценах/наличии берутся только из tools/packs.
 - LLM может давать **общие рекомендации** (consult) только из `allowed_advice`; факты о бизнесе — только из pack/tools.
