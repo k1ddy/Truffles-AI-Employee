@@ -185,17 +185,39 @@ Pack‑файл — **генерируемый артефакт** при publish
 
 ---
 
-## 9) Inbox UX (без шума, с прогрессивным раскрытием)
+## 9) Inbox UX standard (операторский режим)
 
-**3‑pane:** sidebar / list / details.
+**Цель:** быстрый разбор заявок без шума. Приоритет: **Action → Chat → Context → Diagnostics**.
 
-**List:** имя/телефон, превью, последняя активность, филиал, NEW/LIVE/⚠️.
+### 9.1 Layout (responsive)
+- **Desktop:** 3‑pane — Queue (list) / Chat / Details.
+- **Tablet:** 2‑pane — Queue / Chat + Details drawer или tabs.
+- **Mobile:** single column с tabs (Очередь / Чат / Контекст / Диагностика).
 
-**Details (cards):**
-- по умолчанию: timeline + quick actions + health
-- раскрываемые: Context, Explain, Trace, Telegram trail
+### 9.2 Queue (list)
+- **Минимум сигналов:** имя/телефон, превью, последняя активность, SLA, теги NEW/LIVE/⚠️.
+- **Дефолт сортировка:** activity; быстрые переключатели “Мои” и “Срочные”.
+- **Фильтры:** поиск + статус + assigned; **advanced** скрыт по умолчанию.
+- **Branch filter** только при `branch = All` (если глобальный контекст уже выбран — не дублировать).
 
-**Quick Replies:** системные и клиентские макросы, клики вставки.
+### 9.3 Chat + actions
+- **Action bar:** “Взять”, “Закрыть”, “Передать/Эскалировать” (role‑based).
+- **Quick replies:** рядом с композером (chips + раскрываемый список).
+- **Контекст‑strip:** короткая сводка/интент + время последнего inbound над чатом.
+
+### 9.4 Details (Context + Case + Consultant)
+- **Default tabs:** Контекст / Заявка / Консультант.
+- **Контекст:** контакт клиента, краткая сводка, причина обращения.
+- **Заявка:** статус, SLA, канал, последнее inbound/outbound, флаги доставки.
+- **Консультант:** assigned manager (имя/роль), статус работы, first_response/resolve (если доступно).
+
+### 9.5 Diagnostics (gated)
+- **Отдельный таб:** Explain + Trace + Telegram trail.
+- **По умолчанию скрыт** для операторов; доступен support/admin.
+
+### 9.6 Cross‑tab clarity
+- Inbox = обработка заявок и ответы. Нет редактирования Knowledge/Team/Settings.
+- UI‑тексты операторов — RU; тех. термины только в Diagnostics.
 
 ---
 

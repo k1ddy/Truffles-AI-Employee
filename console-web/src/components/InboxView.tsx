@@ -7,7 +7,7 @@ import { useSession } from "next-auth/react";
 import CaseList from "@/components/CaseList";
 import CaseConversation from "@/components/CaseConversation";
 import CaseDetailsPanel from "@/components/CaseDetailsPanel";
-import InboxMacros from "@/components/InboxMacros";
+import { InboxMacroChips } from "@/components/InboxMacros";
 import AccessDenied from "@/components/AccessDenied";
 import { useCaseData } from "@/hooks/useCaseData";
 import { authApi, canAccessConsole } from "@/lib/api-client";
@@ -21,6 +21,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const { data: session } = useSession();
     const [selectedCaseId, setSelectedCaseId] = useState(initialCaseId ?? "");
     const [draft, setDraft] = useState("");
+    const [detailsOpen, setDetailsOpen] = useState(false);
 
     const { data: meData } = useQuery({
         queryKey: ["console-me"],
@@ -47,6 +48,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
 
     useEffect(() => {
         setDraft("");
+        setDetailsOpen(false);
     }, [selectedCaseId]);
 
     const {
@@ -59,6 +61,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     } = useCaseData(selectedCaseId);
 
     const canSend = Boolean(caseDetail && caseDetail.status === "active" && canWriteInbox);
+    const canViewDiagnostics = role === "support" || role === "platform_admin" || role === "owner" || role === "admin";
 
     const handleSelectCase = (caseId: string) => {
         setSelectedCaseId(caseId);
@@ -95,23 +98,30 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
         </div>
     );
 
+    const composerBefore = (
+        <InboxMacroChips
+            onSelect={handleMacroSelect}
+            disabled={!selectedCaseId || !canSend}
+        />
+    );
+
     if (!canReadInbox) {
         return (
-            <AccessDenied message="Эта роль не имеет доступа к Inbox." />
+            <AccessDenied message="Эта роль не имеет доступа к заявкам." />
         );
     }
 
     return (
         <div className="space-y-6" data-testid="inbox-view">
             <div>
-                <h1 className="text-2xl font-semibold">Inbox</h1>
+                <h1 className="text-2xl font-semibold">Заявки</h1>
                 <p className="text-sm text-muted-foreground">
-                    Рабочий экран менеджера: список → диалог → детали.
+                    Очередь → диалог → детали. Диагностика скрыта по умолчанию.
                 </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_minmax(0,1fr)_320px]">
-                <section className="card-surface p-4 flex flex-col min-h-[620px]" data-testid="inbox-list">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)_320px]">
+                <section className="card-surface flex flex-col min-h-[620px] p-4 xl:overflow-hidden xl:h-[calc(100vh-240px)]" data-testid="inbox-list">
                     <CaseList
                         variant="compact"
                         selectedCaseId={selectedCaseId}
@@ -121,12 +131,31 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                     />
                 </section>
 
-                <section className="flex flex-col gap-4 min-h-[620px]" data-testid="inbox-conversation">
+                <section className="flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)]" data-testid="inbox-conversation">
                     {!selectedCaseId && renderEmptyPane("Выберите заявку", "Кликните по карточке слева, чтобы открыть диалог.")}
                     {selectedCaseId && caseLoading && renderLoadingPane()}
                     {selectedCaseId && caseError && renderErrorPane()}
                     {selectedCaseId && !caseLoading && !caseError && caseDetail && (
-                        <div className="card-surface p-5 flex flex-col">
+                        <div className="card-surface p-5 flex flex-col gap-4 h-full">
+                            <div className="flex items-center justify-between xl:hidden">
+                                <p className="text-sm font-semibold">Детали заявки</p>
+                                <button
+                                    type="button"
+                                    onClick={() => setDetailsOpen((prev) => !prev)}
+                                    className="text-xs text-muted-foreground hover:text-foreground"
+                                >
+                                    {detailsOpen ? "Скрыть" : "Показать"}
+                                </button>
+                            </div>
+                            {detailsOpen && (
+                                <div className="xl:hidden">
+                                    <CaseDetailsPanel
+                                        caseDetail={caseDetail}
+                                        messages={messages}
+                                        canViewDiagnostics={canViewDiagnostics}
+                                    />
+                                </div>
+                            )}
                             <CaseConversation
                                 caseDetail={caseDetail}
                                 caseId={selectedCaseId}
@@ -136,6 +165,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                 canWrite={canWriteInbox}
                                 draft={draft}
                                 onDraftChange={setDraft}
+                                composerBefore={composerBefore}
                             />
                         </div>
                     )}
@@ -144,15 +174,18 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                             Заявка не найдена
                         </div>
                     )}
-                    <InboxMacros onSelect={handleMacroSelect} disabled={!selectedCaseId || !canSend} />
                 </section>
 
-                <section className="flex flex-col gap-4 min-h-[620px]" data-testid="inbox-details">
+                <section className="hidden xl:flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)] xl:overflow-y-auto" data-testid="inbox-details">
                     {!selectedCaseId && renderEmptyPane("Детали", "Выберите заявку, чтобы увидеть контекст и trace.")}
                     {selectedCaseId && caseLoading && renderLoadingPane()}
                     {selectedCaseId && caseError && renderErrorPane()}
                     {selectedCaseId && !caseLoading && !caseError && caseDetail && (
-                        <CaseDetailsPanel caseDetail={caseDetail} messages={messages} />
+                        <CaseDetailsPanel
+                            caseDetail={caseDetail}
+                            messages={messages}
+                            canViewDiagnostics={canViewDiagnostics}
+                        />
                     )}
                     {selectedCaseId && !caseLoading && !caseError && !caseDetail && (
                         <div className="card-surface p-6 text-center text-muted-foreground">

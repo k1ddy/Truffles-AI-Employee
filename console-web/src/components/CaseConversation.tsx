@@ -1,5 +1,6 @@
 "use client";
 
+import { type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
@@ -18,6 +19,7 @@ interface CaseConversationProps {
     draft?: string;
     onDraftChange?: (value: string) => void;
     onResolved?: () => void;
+    composerBefore?: ReactNode;
 }
 
 async function takeCase(caseId: string): Promise<void> {
@@ -52,6 +54,7 @@ export default function CaseConversation({
     draft,
     onDraftChange,
     onResolved,
+    composerBefore,
 }: CaseConversationProps) {
     const router = useRouter();
     const queryClient = useQueryClient();
@@ -96,6 +99,10 @@ export default function CaseConversation({
 
     const isActive = caseDetail.status === "active";
     const isPending = caseDetail.status === "pending";
+    const contextText = caseDetail.context_summary || caseDetail.user_message || "Сводка недоступна";
+    const lastInbound = caseDetail.last_inbound_at
+        ? new Date(caseDetail.last_inbound_at).toLocaleString("ru-RU")
+        : "—";
 
     return (
         <div className="flex flex-col gap-5 h-full" data-testid="case-conversation">
@@ -155,11 +162,19 @@ export default function CaseConversation({
                             </>
                         ) : (
                             <span className="text-xs text-muted-foreground self-center">
-                                Read-only доступ
+                                Только просмотр
                             </span>
                         )}
                     </div>
                 </div>
+            </div>
+
+            <div className="rounded-lg border border-border/60 bg-card p-3 text-sm">
+                <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                    <span>Контекст</span>
+                    <span>Последнее входящее: {lastInbound}</span>
+                </div>
+                <p className="text-sm text-foreground">{contextText}</p>
             </div>
 
             <div className="flex-1 min-h-[480px]">
@@ -171,6 +186,7 @@ export default function CaseConversation({
                     canSend={canSend}
                     draft={draft}
                     onDraftChange={onDraftChange}
+                    composerBefore={composerBefore}
                 />
             </div>
         </div>
