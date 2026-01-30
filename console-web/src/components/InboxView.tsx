@@ -156,28 +156,32 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
 
                 <section className="flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)]" data-testid="inbox-conversation">
                     {!selectedCaseId && renderEmptyPane("Выберите заявку", "Кликните по карточке слева, чтобы открыть диалог.")}
-                    {selectedCaseId && caseLoading && renderLoadingPane()}
-                    {selectedCaseId && caseError && renderErrorPane()}
-                    {selectedCaseId && !caseLoading && !caseError && caseDetail && (
-                        <div className="card-surface p-5 flex flex-col gap-4 h-full">
-                            <CaseConversation
-                                caseDetail={caseDetail}
-                                caseId={selectedCaseId}
-                                messages={messages}
-                                messagesLoading={messagesLoading}
-                                canSend={canSend}
-                                canWrite={canWriteInbox}
-                                draft={draft}
-                                onDraftChange={setDraft}
-                                composerBefore={composerBefore}
-                                detailsOpen={detailsOpen}
-                                onToggleDetails={handleToggleDetails}
-                            />
-                        </div>
-                    )}
-                    {selectedCaseId && !caseLoading && !caseError && !caseDetail && (
-                        <div className="card-surface p-6 text-center text-muted-foreground">
-                            Заявка не найдена
+                    {selectedCaseId && (
+                        <div className="flex flex-col gap-4 h-full" data-testid="case-view">
+                            {caseLoading && renderLoadingPane()}
+                            {caseError && renderErrorPane()}
+                            {!caseLoading && !caseError && caseDetail && (
+                                <div className="card-surface p-5 flex flex-col gap-4 h-full">
+                                    <CaseConversation
+                                        caseDetail={caseDetail}
+                                        caseId={selectedCaseId}
+                                        messages={messages}
+                                        messagesLoading={messagesLoading}
+                                        canSend={canSend}
+                                        canWrite={canWriteInbox}
+                                        draft={draft}
+                                        onDraftChange={setDraft}
+                                        composerBefore={composerBefore}
+                                        detailsOpen={detailsOpen}
+                                        onToggleDetails={handleToggleDetails}
+                                    />
+                                </div>
+                            )}
+                            {!caseLoading && !caseError && !caseDetail && (
+                                <div className="card-surface p-6 text-center text-muted-foreground">
+                                    Заявка не найдена
+                                </div>
+                            )}
                         </div>
                     )}
                 </section>
@@ -185,30 +189,34 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                 {showDetailsColumn && (
                     <section className="hidden xl:flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)] xl:overflow-y-auto" data-testid="inbox-details">
                         {!selectedCaseId && renderEmptyPane("Детали", "Выберите заявку, чтобы увидеть контекст и trace.")}
-                        {selectedCaseId && caseLoading && renderLoadingPane()}
-                        {selectedCaseId && caseError && renderErrorPane()}
-                        {selectedCaseId && !caseLoading && !caseError && caseDetail && (
-                            <>
-                                <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-card px-4 py-3">
-                                    <p className="text-sm font-semibold">Детали заявки</p>
-                                    <button
-                                        type="button"
-                                        onClick={() => setDetailsOpen(false)}
-                                        className="text-xs font-semibold text-muted-foreground hover:text-foreground"
-                                    >
-                                        Скрыть детали
-                                    </button>
-                                </div>
-                                <CaseDetailsPanel
-                                    caseDetail={caseDetail}
-                                    messages={messages}
-                                    canViewDiagnostics={canViewDiagnostics}
-                                />
-                            </>
-                        )}
-                        {selectedCaseId && !caseLoading && !caseError && !caseDetail && (
-                            <div className="card-surface p-6 text-center text-muted-foreground">
-                                Детали недоступны
+                        {selectedCaseId && (
+                            <div className="flex flex-col gap-4" data-testid="case-details">
+                                {caseLoading && renderLoadingPane()}
+                                {caseError && renderErrorPane()}
+                                {!caseLoading && !caseError && caseDetail && (
+                                    <>
+                                        <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-card px-4 py-3">
+                                            <p className="text-sm font-semibold">Детали заявки</p>
+                                            <button
+                                                type="button"
+                                                onClick={() => setDetailsOpen(false)}
+                                                className="text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                            >
+                                                Скрыть детали
+                                            </button>
+                                        </div>
+                                        <CaseDetailsPanel
+                                            caseDetail={caseDetail}
+                                            messages={messages}
+                                            canViewDiagnostics={canViewDiagnostics}
+                                        />
+                                    </>
+                                )}
+                                {!caseLoading && !caseError && !caseDetail && (
+                                    <div className="card-surface p-6 text-center text-muted-foreground">
+                                        Детали недоступны
+                                    </div>
+                                )}
                             </div>
                         )}
                     </section>

@@ -10,6 +10,7 @@
 - done:
   - Session created.
   - Updated Inbox details visibility to default open on case selection.
+  - Added stable case-view wrapper for selected case to keep e2e-live locator visible.
 - next:
   - Run lint (blocked locally: next not installed) and rely on CI.
   - Push changes and verify console-e2e-live green.
