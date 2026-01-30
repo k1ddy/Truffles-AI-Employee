@@ -22,6 +22,7 @@ interface CaseConversationProps {
     composerBefore?: ReactNode;
     detailsOpen?: boolean;
     onToggleDetails?: () => void;
+    chatFrame?: "card" | "plain";
 }
 
 async function takeCase(caseId: string): Promise<void> {
@@ -59,6 +60,7 @@ export default function CaseConversation({
     composerBefore,
     detailsOpen = false,
     onToggleDetails,
+    chatFrame = "card",
 }: CaseConversationProps) {
     const router = useRouter();
     const queryClient = useQueryClient();
@@ -213,6 +215,7 @@ export default function CaseConversation({
                     draft={draft}
                     onDraftChange={onDraftChange}
                     composerBefore={composerBefore}
+                    frame={chatFrame}
                 />
             </div>
         </div>
