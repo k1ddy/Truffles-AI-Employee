@@ -120,13 +120,13 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
             <div>
                 <h1 className="text-2xl font-semibold">Заявки</h1>
                 <p className="text-sm text-muted-foreground">
-                    Работайте слева направо: очередь, чат, детали. Диагностика скрыта по умолчанию.
+                    Очередь слева, чат по центру, детали справа. Ответы и быстрые действия рядом с вводом.
                 </p>
             </div>
 
             <div
                 className={`grid grid-cols-1 gap-6 ${
-                    detailsOpen ? "xl:grid-cols-[320px_minmax(0,1fr)_320px]" : "xl:grid-cols-[320px_minmax(0,1fr)]"
+                    detailsOpen ? "xl:grid-cols-[280px_minmax(0,1fr)_320px]" : "xl:grid-cols-[280px_minmax(0,1fr)]"
                 }`}
             >
                 <section className="card-surface flex flex-col min-h-[620px] p-4 xl:overflow-hidden xl:h-[calc(100vh-240px)]" data-testid="inbox-list">

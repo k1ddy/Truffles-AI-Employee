@@ -380,6 +380,8 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const pathname = usePathname();
     const hasSession = status === "authenticated";
     const queryClient = useQueryClient();
+    const isInboxPage = pathname === "/" || pathname.startsWith("/cases");
+    const contentWidthClass = isInboxPage ? "max-w-[1440px]" : "max-w-6xl";
 
     const { data, isLoading, isFetching, error, refetch } = useQuery({
         queryKey: ["console-me"],
@@ -621,7 +623,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                     </header>
 
                     <main className="flex-1 px-6 py-8">
-                        <div className="mx-auto w-full max-w-6xl">
+                        <div className={`mx-auto w-full ${contentWidthClass}`}>
                             {status === "loading" && (
                                 <div className="card-surface p-8">
                                     <p className="text-sm text-muted-foreground">Загрузка профиля...</p>

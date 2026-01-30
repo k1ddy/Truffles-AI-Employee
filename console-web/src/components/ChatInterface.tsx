@@ -139,7 +139,7 @@ export default function ChatInterface({
     }
 
     return (
-        <div className="flex flex-col h-full min-h-[520px] bg-muted rounded-lg border border-border/60">
+        <div className="flex flex-col h-full min-h-[480px] bg-muted rounded-lg border border-border/60">
             {/* Messages area */}
             <div
                 ref={scrollContainerRef}
@@ -155,7 +155,7 @@ export default function ChatInterface({
                         return (
                             <div
                                 key={msg.id}
-                                className={`flex flex-col max-w-[88%] ${msg.role === "user" ? "self-start" : "self-end items-end"} ${isOptimistic ? "opacity-70" : ""}`}
+                                className={`flex flex-col max-w-[92%] ${msg.role === "user" ? "self-start" : "self-end items-end"} ${isOptimistic ? "opacity-70" : ""}`}
                             >
                                 <div className="text-xs text-muted-foreground mb-1">
                                     {msg.role === "user" ? "Клиент" :
@@ -185,7 +185,7 @@ export default function ChatInterface({
             {canSend && (
                 <form onSubmit={handleSubmit} className="border-t border-border/60 p-3 bg-card rounded-b-lg">
                     {composerBefore && (
-                        <div className="mb-3">
+                        <div className="mb-2">
                             {composerBefore}
                         </div>
                     )}
