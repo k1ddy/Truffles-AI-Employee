@@ -140,11 +140,18 @@ outbox worker (тик 2s) или POST /admin/outbox/process (cron)
 _handle_webhook_payload(skip_persist=True)
     ↓
 behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → policy‑gates (скидки/оплата info)
-→ answer‑interpreter (expected_reply_type) → LLM‑first понимание (intent/slots JSON) + semantic resolver → early OOD (только при out‑signals без in‑signals)
+→ answer‑interpreter (expected_reply_type) → **Signal Snapshot Layer** (LLM pack‑ref‑only intent/slots + compiled pack‑index + semantic/RAG signals; fallback recorded)
+→ early OOD (только при out‑signals без in‑signals)
 → tools/packs fact‑resolver (info/consult/booking/service) → fast intent (smalltalk) → LLM‑формулировка поверх фактов → Response Guard → truth gate fallback → low‑confidence handling
     ↓
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
 ```
+
+#### Unified Reasoning Core (DEC-018)
+- **Signal Snapshot Layer:** единая точка сигналов (pack‑index, domain anchors, semantic/RAG, LLM‑router). Никаких бизнес‑лексиконов в коде.
+- **LLM contract:** LLM возвращает только pack‑ID/intent/slots + confidence (pack‑ref‑only); факты только из packs/tools.
+- **Pack‑index:** строится на publish (domain/company/client/branch), версионируется и пишется в decision_meta (pack_id/version/hash).
+- **Routing:** gates принимают решения только по snapshot; low‑confidence → deterministic fallback с фиксацией `fallback_reason`.
 
 #### Outbox payload contract + action gate
 - **Контракт payload:** валидируем перед enqueue (см. `contracts/events/outbox.webhook_payload.v1.jsonschema` и `truffles-api/app/schemas/outbox_payload.py`).  

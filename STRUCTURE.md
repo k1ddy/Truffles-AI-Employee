@@ -160,6 +160,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-30-inbox-queue-adaptive-ci-fix.md`
 - `docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle-deploy.md`
 - `docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle.md`
+- `docs/TASK_PACKAGES/TP-2026-01-30-unified-reasoning-core-dec.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`
