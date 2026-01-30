@@ -157,6 +157,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v2-macros.md`
 - `docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v3.md`
 - `docs/TASK_PACKAGES/TP-2026-01-30-inbox-queue-adaptive.md`
+- `docs/TASK_PACKAGES/TP-2026-01-30-inbox-queue-adaptive-ci-fix.md`
 - `docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle-deploy.md`
 - `docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`

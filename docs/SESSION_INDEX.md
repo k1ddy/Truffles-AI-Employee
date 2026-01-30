@@ -62,3 +62,4 @@
 | 2026-01-30-console-sidebar-toggle-deploy-a1 | done | feat/2026-01-30-console-sidebar-toggle-deploy-a1 | /home/zhan/worktrees/2026-01-30-console-sidebar-toggle-deploy-a1 | docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle-deploy.md | 2026-01-30 |
 | 2026-01-30-state-update-a1 | done | feat/2026-01-30-state-update-a1 | /home/zhan/worktrees/2026-01-30-state-update-a1 | docs/TASK_PACKAGES/TP-2026-01-30-state-update-a1.md | 2026-01-30 |
 | 2026-01-30-inbox-queue-adaptive-a1 | done | feat/2026-01-30-inbox-queue-adaptive-a1 | /home/zhan/worktrees/2026-01-30-inbox-queue-adaptive-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-queue-adaptive.md | 2026-01-30 |
+| 2026-01-30-inbox-queue-adaptive-ci-fix-a1 | done | feat/2026-01-30-inbox-queue-adaptive-ci-fix-a1 | /home/zhan/worktrees/2026-01-30-inbox-queue-adaptive-ci-fix-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-queue-adaptive-ci-fix.md | 2026-01-30 |
