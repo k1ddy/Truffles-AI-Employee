@@ -47,6 +47,13 @@ function buildFormState(macro?: InboxMacro | null): MacroFormState {
     };
 }
 
+type ApiErrorPayload = { error?: { code?: string } };
+
+function getErrorCode(error: unknown): string | null {
+    const errorWithResponse = error as { response?: { data?: ApiErrorPayload } };
+    return errorWithResponse?.response?.data?.error?.code ?? null;
+}
+
 function InboxMacros({
     onSelect,
     disabled,
@@ -102,6 +109,15 @@ function InboxMacros({
     const activeMacros = macros.filter((macro) => macro.is_active);
     const sortedActiveMacros = useMemo(() => sortMacros(activeMacros), [activeMacros]);
     const primaryMacros = sortedActiveMacros.slice(0, 6);
+    const macrosErrorCode = getErrorCode(macrosQuery.error);
+    const selectionMessages: Record<string, string> = {
+        COMPANY_SELECTION_REQUIRED: "Выберите компанию вверху, чтобы загрузить быстрые ответы.",
+        CLIENT_SELECTION_REQUIRED: "Выберите клиента вверху, чтобы загрузить быстрые ответы.",
+        BRANCH_SELECTION_REQUIRED: "Выберите филиал вверху, чтобы загрузить быстрые ответы.",
+        BRANCH_ACCESS_DENIED: "Нет доступа к филиалу. Обновите контекст вверху.",
+        TENANT_MISMATCH: "Контекст не совпадает с доступом. Обновите выбор.",
+    };
+    const selectionMessage = macrosErrorCode ? selectionMessages[macrosErrorCode] : null;
     const normalizedSearch = searchValue.trim().toLowerCase();
     const filteredMacros = useMemo(() => {
         if (!normalizedSearch) {
@@ -202,14 +218,14 @@ function InboxMacros({
                 </div>
             ) : macrosQuery.isError ? (
                 <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground flex items-center justify-between gap-3">
-                    <span>Не удалось загрузить быстрые ответы.</span>
+                    <span>{selectionMessage ?? "Не удалось загрузить быстрые ответы."}</span>
                     <button
                         type="button"
                         onClick={() => macrosQuery.refetch()}
                         className="text-xs font-semibold text-primary hover:text-primary/80 disabled:opacity-60"
                         disabled={macrosQuery.isFetching}
                     >
-                        Повторить
+                        {selectionMessage ? "Обновить" : "Повторить"}
                     </button>
                 </div>
             ) : primaryMacros.length === 0 ? (

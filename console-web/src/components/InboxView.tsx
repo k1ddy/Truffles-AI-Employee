@@ -69,11 +69,11 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const hasSelection = Boolean(selectedCaseId);
     const gridClass = showDetailsColumn
         ? hasSelection
-            ? "xl:grid-cols-[240px_minmax(0,1fr)_320px]"
-            : "xl:grid-cols-[300px_minmax(0,1fr)_320px]"
+            ? "xl:grid-cols-[220px_minmax(0,1fr)_320px]"
+            : "xl:grid-cols-[280px_minmax(0,1fr)_320px]"
         : hasSelection
-            ? "xl:grid-cols-[240px_minmax(0,1fr)]"
-            : "xl:grid-cols-[300px_minmax(0,1fr)]";
+            ? "xl:grid-cols-[220px_minmax(0,1fr)]"
+            : "xl:grid-cols-[280px_minmax(0,1fr)]";
 
     const handleSelectCase = (caseId: string) => {
         setSelectedCaseId(caseId);
@@ -161,7 +161,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                             {caseLoading && renderLoadingPane()}
                             {caseError && renderErrorPane()}
                             {!caseLoading && !caseError && caseDetail && (
-                                <div className="card-surface p-5 flex flex-col gap-4 h-full">
+                                <div className="card-surface flex flex-col h-full overflow-hidden">
                                     <CaseConversation
                                         caseDetail={caseDetail}
                                         caseId={selectedCaseId}
@@ -175,6 +175,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                         detailsOpen={detailsOpen}
                                         onToggleDetails={handleToggleDetails}
                                         chatFrame="plain"
+                                        layout="inbox"
                                     />
                                 </div>
                             )}
@@ -196,12 +197,12 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                 {caseError && renderErrorPane()}
                                 {!caseLoading && !caseError && caseDetail && (
                                     <>
-                                        <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-card px-4 py-3">
+                                        <div className="sticky top-0 z-10 flex items-center justify-between rounded-2xl border border-border/60 bg-background/90 px-4 py-3 backdrop-blur">
                                             <p className="text-sm font-semibold">Детали заявки</p>
                                             <button
                                                 type="button"
                                                 onClick={() => setDetailsOpen(false)}
-                                                className="text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
                                             >
                                                 Скрыть детали
                                             </button>
@@ -237,7 +238,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                             <button
                                 type="button"
                                 onClick={() => setDetailsOpen(false)}
-                                className="text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
                             >
                                 Скрыть детали
                             </button>

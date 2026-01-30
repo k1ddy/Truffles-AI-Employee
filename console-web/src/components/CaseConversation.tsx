@@ -23,6 +23,7 @@ interface CaseConversationProps {
     detailsOpen?: boolean;
     onToggleDetails?: () => void;
     chatFrame?: "card" | "plain";
+    layout?: "default" | "inbox";
 }
 
 async function takeCase(caseId: string): Promise<void> {
@@ -61,6 +62,7 @@ export default function CaseConversation({
     detailsOpen = false,
     onToggleDetails,
     chatFrame = "card",
+    layout = "default",
 }: CaseConversationProps) {
     const router = useRouter();
     const queryClient = useQueryClient();
@@ -113,10 +115,17 @@ export default function CaseConversation({
     const assignedLabel = caseDetail.assigned_to_name ?? "Не назначен";
     const showDetailsToggle = typeof onToggleDetails === "function";
     const detailsLabel = detailsOpen ? "Скрыть детали" : "Детали";
+    const isInboxLayout = layout === "inbox";
+    const headerClass = `flex flex-col gap-4 border-b border-border/60 pb-4 ${
+        isInboxLayout ? "px-5 pt-5" : ""
+    }`;
+    const contextClass = `rounded-lg border border-border/60 bg-card p-3 text-sm ${
+        isInboxLayout ? "mx-5" : ""
+    }`;
 
     return (
-        <div className="flex flex-col gap-5 h-full" data-testid="case-conversation">
-            <div className="flex flex-col gap-4 border-b border-border/60 pb-4">
+        <div className={`flex flex-col h-full ${isInboxLayout ? "gap-4" : "gap-5"}`} data-testid="case-conversation">
+            <div className={headerClass}>
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
@@ -158,8 +167,11 @@ export default function CaseConversation({
                             <button
                                 type="button"
                                 onClick={onToggleDetails}
-                                className="rounded-full border border-border/60 px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted"
+                                className={`inline-flex items-center gap-2 rounded-full border border-border/60 px-3 py-2 text-xs font-semibold transition ${
+                                    detailsOpen ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
+                                }`}
                                 aria-pressed={detailsOpen}
+                                aria-label={detailsLabel}
                                 data-testid="case-details-toggle"
                             >
                                 {detailsLabel}
@@ -197,7 +209,7 @@ export default function CaseConversation({
                 </div>
             </div>
 
-            <div className="rounded-lg border border-border/60 bg-card p-3 text-sm">
+            <div className={contextClass}>
                 <div className="flex flex-wrap items-center justify-between text-xs text-muted-foreground mb-1">
                     <span>{contextTitle}</span>
                     <span>Последнее входящее: {lastInbound}</span>
