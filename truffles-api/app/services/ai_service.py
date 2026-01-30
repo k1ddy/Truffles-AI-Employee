@@ -53,6 +53,16 @@ GREETING_FILLER_TOKENS = {
     "plz",
     "please",
 }
+LOW_SIGNAL_FILLER_TOKENS = {
+    "плз",
+    "пжл",
+    "плиз",
+    "пж",
+    "pls",
+    "plz",
+    "спс",
+    "срочно",
+}
 
 THANKS_PHRASES = {
     "спасибо",
@@ -975,6 +985,7 @@ def normalize_for_matching(text: str) -> str:
         return ""
 
     normalized = text.strip().casefold()
+    normalized = re.sub(r"\[lc:[^\]]+\]", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     # Make matching robust: "ок?" -> "ок", "салам!" -> "салам"
     normalized = re.sub(r"^[^\w]+|[^\w]+$", "", normalized)
@@ -1751,6 +1762,12 @@ def is_low_signal_message(text: str) -> bool:
         return True
     if is_greeting_message(text) or is_thanks_message(text):
         return False
+    tokens = normalized.split()
+    if tokens:
+        tokens = [token for token in tokens if token not in LOW_SIGNAL_FILLER_TOKENS]
+        if not tokens:
+            return True
+        normalized = " ".join(tokens)
     return len(normalized) <= 2
 
 

@@ -448,7 +448,7 @@ def _resolve_action(
         return DecisionOutcome("pending_status")
     if routing["allow_bot_reply"] and signals.is_status_question:
         return DecisionOutcome("bot_status")
-    if routing["allow_bot_reply"] and out_of_domain_signal and not rag_confident:
+    if routing["allow_bot_reply"] and (out_of_domain_signal or signals.is_low_signal) and not rag_confident:
         return DecisionOutcome("out_of_domain")
     if routing["allow_bot_reply"] and style_reference:
         return DecisionOutcome("style_reference")
@@ -6871,6 +6871,39 @@ async def _handle_webhook_payload(
         )
 
     if (
+        routing["allow_bot_reply"]
+        and message_text
+        and is_low_signal_message(message_text)
+        and not expected_reply_shortcircuit
+    ):
+        bot_response = OUT_OF_DOMAIN_RESPONSE
+        _reset_low_confidence_retry(conversation)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "out_of_domain",
+                "decision": "router_low_confidence",
+                "state": conversation.state,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="out_of_domain",
+            intent="out_of_domain",
+            source="router_low_confidence",
+            fast_intent=False,
+        )
+        bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
+        result_message = "Low-signal OOD reply sent" if sent else "Low-signal OOD reply failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    if (
         expected_reply_shortcircuit
         and routing.get("allow_bot_reply")
         and not bypass_domain_flows
@@ -7098,6 +7131,16 @@ async def _handle_webhook_payload(
     if span is not None:
         span.set_attribute("router.intent", getattr(intent_routing.intent, "value", None))
     signals = intent_routing.signals
+    low_signal = signals.is_low_signal or (message_text and is_low_signal_message(message_text))
+    if low_signal != signals.is_low_signal:
+        signals = DecisionSignals(
+            intent=signals.intent,
+            is_greeting=signals.is_greeting,
+            is_thanks=signals.is_thanks,
+            is_ack=signals.is_ack,
+            is_low_signal=bool(low_signal),
+            is_status_question=signals.is_status_question,
+        )
     intent = intent_routing.intent
     domain_intent = intent_routing.domain_intent
     domain_meta = intent_routing.domain_meta

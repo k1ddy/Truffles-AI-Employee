@@ -1978,6 +1978,41 @@ def _handle_ai_response_action(
     llm_primary_reason = None
     bot_response = None
     result_message = None
+    if message_text and legacy.is_low_signal_message(message_text) and not expected_reply_shortcircuit:
+        bot_response = legacy.OUT_OF_DOMAIN_RESPONSE
+        legacy._reset_low_confidence_retry(conversation)
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "out_of_domain",
+                "decision": "router_low_confidence",
+                "state": conversation.state,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="out_of_domain",
+            intent="out_of_domain",
+            source="router_low_confidence",
+            fast_intent=False,
+        )
+        bot_response, sent = send_and_save(bot_response, allow_quiet_hours=False)
+        result_message = (
+            "Low-signal OOD reply sent" if sent else "Low-signal OOD reply send failed"
+        )
+        db.commit()
+        return AiResponseOutcome(
+            response=WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            ),
+            bot_response=bot_response,
+            result_message=result_message,
+            llm_primary_failed=llm_primary_failed,
+            llm_primary_reason=llm_primary_reason,
+        )
     gen_result = llm_primary_result
     if gen_result is None:
         _ensure_rag_rewrite(
