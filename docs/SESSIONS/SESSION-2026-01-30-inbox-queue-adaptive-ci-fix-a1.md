@@ -9,8 +9,9 @@
 - scope: Fix Inbox case details default visibility to unblock console-e2e-live on PR #459.
 - done:
   - Session created.
-  - Updated Inbox details visibility to default open on case selection.
-  - Added stable case-view wrapper for selected case to keep e2e-live locator visible.
+  - Kept details closed by default and preserved the toggle behavior.
+  - Added stable case-view wrapper for selected case to keep e2e selectors visible.
+  - Updated e2e smoke expectation to assert the conversation view.
 - next:
   - Run lint (blocked locally: next not installed) and rely on CI.
   - Push changes and verify console-e2e-live green.

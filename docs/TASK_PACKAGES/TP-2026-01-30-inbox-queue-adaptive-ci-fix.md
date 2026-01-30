@@ -14,13 +14,14 @@ Invariant
 - No regressions in Inbox layout/actions outside the targeted fix.
 
 Scope
-- Adjust details panel visibility logic in Inbox view to default open on case selection (desktop).
-- Keep details toggle behavior intact.
+- Keep details toggle behavior intact (details closed by default).
+- Ensure case view selectors are stable via the conversation panel.
+- Align live e2e smoke expectation with the chat-first case view (conversation visible).
 
 Out of scope
 - Backend/API/DB changes.
 - Data seed changes.
-- Playwright test changes to bypass the failure.
+- Test-only bypass that hides a real regression.
 
 Touch-list
 - console-web/src/components/InboxView.tsx
@@ -33,9 +34,10 @@ Touch-list
 
 Plan
 1) Start session on top of origin/feat/2026-01-30-inbox-queue-adaptive-a1.
-2) Make details panel default visible after selecting a case (desktop), preserve toggle.
-3) Run lint and capture evidence.
-4) Push fix and verify CI green for console-e2e-live.
+2) Ensure case view selector is visible after selecting a case (chat-first layout).
+3) Update smoke test expectation to match the conversation view.
+4) Run lint and capture evidence.
+5) Push fix and verify CI green for console-e2e-live.
 
 DoD
 - console-e2e-live passes on PR #459.

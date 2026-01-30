@@ -21,7 +21,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const { data: session } = useSession();
     const [selectedCaseId, setSelectedCaseId] = useState(initialCaseId ?? "");
     const [draft, setDraft] = useState("");
-    const [detailsOpen, setDetailsOpen] = useState(Boolean(initialCaseId));
+    const [detailsOpen, setDetailsOpen] = useState(false);
 
     const { data: meData } = useQuery({
         queryKey: ["console-me"],
@@ -48,7 +48,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
 
     useEffect(() => {
         setDraft("");
-        setDetailsOpen(Boolean(selectedCaseId));
+        setDetailsOpen(false);
     }, [selectedCaseId]);
 
     const {
