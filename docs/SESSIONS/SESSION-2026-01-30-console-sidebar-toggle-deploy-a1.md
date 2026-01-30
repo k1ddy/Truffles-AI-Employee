@@ -1,0 +1,24 @@
+# SESSION 2026-01-30-console-sidebar-toggle-deploy-a1 — Session 2026-01-30-console-sidebar-toggle-deploy-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle-deploy.md
+- branch: feat/2026-01-30-console-sidebar-toggle-deploy-a1
+- worktree: /home/zhan/worktrees/2026-01-30-console-sidebar-toggle-deploy-a1
+- base_ref: origin/main
+- scope: Merge PR #458, run lint, deploy console-web, capture evidence.
+- done:
+  - PR #458 merged (sidebar toggle + details overlay).
+  - console-web deps installed and lint passed.
+  - console-web rebuilt/restarted with new build info.
+  - STATE updated with deploy evidence.
+- next:
+  - Optional: capture UI screenshots after user verification.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle-deploy.md
+  - /tmp/console_web_lint_sidebar_toggle_deploy_20260130.txt
+  - /tmp/console_web_restart_sidebar_toggle_20260130.txt
+  - /tmp/console_web_ps_sidebar_toggle_20260130.txt
+  - /tmp/console_web_buildinfo_commit_20260130.txt
+  - STATE.md
+- last_updated: 2026-01-30

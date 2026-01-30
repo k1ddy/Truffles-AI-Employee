@@ -59,3 +59,4 @@
 | 2026-01-30-console-sidebar-toggle-a1 | done | feat/2026-01-30-console-sidebar-toggle-a1 | /home/zhan/worktrees/2026-01-30-console-sidebar-toggle-a1 | docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle.md | 2026-01-30 |
 | 2026-01-30-canon-contradictions-a1 | done | feat/2026-01-30-canon-contradictions-a1 | /home/zhan/worktrees/2026-01-30-canon-contradictions-a1 | docs/TASK_PACKAGES/TP-2026-01-30-canon-contradictions.md | 2026-01-30 |
 | 2026-01-30-agents-sync-a1 | done | feat/2026-01-30-agents-sync-a1 | /home/zhan/worktrees/2026-01-30-agents-sync-a1 | docs/TASK_PACKAGES/TP-2026-01-30-agents-sync.md | 2026-01-30 |
+| 2026-01-30-console-sidebar-toggle-deploy-a1 | done | feat/2026-01-30-console-sidebar-toggle-deploy-a1 | /home/zhan/worktrees/2026-01-30-console-sidebar-toggle-deploy-a1 | docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle-deploy.md | 2026-01-30 |
