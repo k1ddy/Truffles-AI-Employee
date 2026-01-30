@@ -7412,11 +7412,12 @@ async def _handle_webhook_payload(
         bot_response = OUT_OF_DOMAIN_RESPONSE
         _reset_low_confidence_retry(conversation)
         ood_source = "router_low_confidence" if signals.is_low_signal else "domain_router"
+        ood_decision = "router_low_confidence" if signals.is_low_signal else "fallback"
         _record_decision_trace(
             conversation,
             {
                 "stage": "out_of_domain",
-                "decision": "fallback",
+                "decision": ood_decision,
                 "state": conversation.state,
                 "rag_confident": rag_confident,
             },
