@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSession } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,6 +14,7 @@ import { authApi, canAccessConsole, type ConsoleAction, type ConsoleRole, type C
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
 const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 const COMPANY_ID_STORAGE_KEY = "console:company_id";
+const NAV_COLLAPSED_STORAGE_KEY = "console:nav_collapsed";
 
 type ClientSummary = {
     id?: string;
@@ -70,6 +71,76 @@ const ROLE_LABELS: Record<ConsoleRole, string> = {
     admin: "Admin",
     manager: "Manager",
     support: "Support",
+};
+
+function NavIcon({ children, className }: { children: ReactNode; className?: string }) {
+    return (
+        <svg
+            className={className ?? "h-5 w-5"}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+        >
+            {children}
+        </svg>
+    );
+}
+
+const NAV_ICONS: Partial<Record<ConsoleSection, ReactNode>> = {
+    tenants: (
+        <NavIcon>
+            <path d="M4 20h16" />
+            <rect x="6" y="6" width="12" height="14" rx="2" />
+            <path d="M9 10h2M13 10h2M9 14h2M13 14h2" />
+        </NavIcon>
+    ),
+    inbox: (
+        <NavIcon>
+            <path d="M4 4h16v10H4z" />
+            <path d="M4 14h4l2 3h4l2-3h4" />
+        </NavIcon>
+    ),
+    calendar: (
+        <NavIcon>
+            <rect x="4" y="5" width="16" height="15" rx="2" />
+            <path d="M8 3v4M16 3v4M4 9h16" />
+        </NavIcon>
+    ),
+    knowledge: (
+        <NavIcon>
+            <rect x="4" y="4" width="16" height="16" rx="2" />
+            <path d="M8 8h8M8 12h8M8 16h5" />
+        </NavIcon>
+    ),
+    team: (
+        <NavIcon>
+            <path d="M4 19c0-3 3-5 6-5s6 2 6 5" />
+            <circle cx="10" cy="9" r="3" />
+            <path d="M16 19c0-2 2-4 4-4" />
+            <circle cx="18" cy="10" r="2" />
+        </NavIcon>
+    ),
+    ops: (
+        <NavIcon>
+            <path d="M3 12h4l2-4 4 8 2-4h6" />
+        </NavIcon>
+    ),
+    audit: (
+        <NavIcon>
+            <path d="M4 6h1M4 12h1M4 18h1" />
+            <path d="M8 6h12M8 12h12M8 18h12" />
+        </NavIcon>
+    ),
+    settings: (
+        <NavIcon>
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 3v2M12 19v2M4.5 4.5l1.4 1.4M18.1 18.1l1.4 1.4M3 12h2M19 12h2M4.5 19.5l1.4-1.4M18.1 5.9l1.4-1.4" />
+        </NavIcon>
+    ),
 };
 
 function readLocalStorage(key: string): string | null {
@@ -401,6 +472,9 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [contextNotice, setContextNotice] = useState<string | null>(null);
     const contextBusy = isSubmitting || isFetching;
+    const [navCollapsed, setNavCollapsed] = useState(
+        () => readLocalStorage(NAV_COLLAPSED_STORAGE_KEY) === "1"
+    );
 
     useEffect(() => {
         if (!contextNotice) {
@@ -409,6 +483,10 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         const timeout = window.setTimeout(() => setContextNotice(null), 2500);
         return () => window.clearTimeout(timeout);
     }, [contextNotice]);
+
+    useEffect(() => {
+        writeLocalStorage(NAV_COLLAPSED_STORAGE_KEY, navCollapsed ? "1" : null);
+    }, [navCollapsed]);
 
     const companies = data?.companies ?? [];
     const companySelectionRequired = !!data?.company_selection_required;
@@ -519,20 +597,52 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     return (
         <div className="min-h-screen bg-background">
             <div className="flex min-h-screen">
-                <aside className="hidden w-64 flex-col border-r border-border/60 bg-card/40 px-4 py-6 md:flex">
-                    <div className="flex items-center gap-3 px-2">
-                        <Image
-                            src="/brand/truffles-logo.png"
-                            alt="Truffles"
-                            width={120}
-                            height={32}
-                            className="h-6 w-auto"
-                        />
+                <aside
+                    className={`hidden ${navCollapsed ? "w-16" : "w-56"} flex-col border-r border-border/60 bg-card/40 px-3 py-6 transition-[width] duration-200 md:flex`}
+                >
+                    <div
+                        className={`flex px-2 ${
+                            navCollapsed ? "flex-col items-center gap-3" : "items-center justify-between"
+                        }`}
+                    >
+                        {navCollapsed ? (
+                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
+                                T
+                            </div>
+                        ) : (
+                            <Image
+                                src="/brand/truffles-logo.png"
+                                alt="Truffles"
+                                width={120}
+                                height={32}
+                                className="h-6 w-auto"
+                            />
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => setNavCollapsed((prev) => !prev)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/60 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                            aria-label={navCollapsed ? "Развернуть меню" : "Свернуть меню"}
+                            title={navCollapsed ? "Развернуть меню" : "Свернуть меню"}
+                            data-testid="nav-toggle"
+                        >
+                            {navCollapsed ? (
+                                <NavIcon className="h-4 w-4">
+                                    <path d="M10 6l6 6-6 6" />
+                                </NavIcon>
+                            ) : (
+                                <NavIcon className="h-4 w-4">
+                                    <path d="M14 6l-6 6 6 6" />
+                                </NavIcon>
+                            )}
+                        </button>
                     </div>
-                    <div className="mt-6 px-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">
-                        {ROLE_LABELS[role]}
-                    </div>
-                    <nav className="mt-6 flex flex-col gap-2 text-sm font-medium">
+                    {!navCollapsed && (
+                        <div className="mt-6 px-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">
+                            {ROLE_LABELS[role]}
+                        </div>
+                    )}
+                    <nav className={`mt-6 flex flex-col gap-2 text-sm font-medium ${navCollapsed ? "items-center" : ""}`}>
                         {navItems.map((item) => {
                             const isActive = item.href === "/"
                                 ? pathname === "/"
@@ -541,12 +651,25 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                 <Link
                                     key={item.href}
                                     href={item.href}
-                                    className={`rounded-lg px-3 py-2 transition ${
-                                        isActive ? "bg-primary text-primary-foreground" : "hover:bg-muted"
-                                    }`}
+                                    className={`flex items-center rounded-lg transition ${
+                                        navCollapsed ? "justify-center px-2 py-2" : "gap-3 px-3 py-2"
+                                    } ${isActive ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"}`}
                                     data-testid={item.testId}
+                                    title={navCollapsed ? item.label : undefined}
+                                    aria-current={isActive ? "page" : undefined}
                                 >
-                                    {item.label}
+                                    <span
+                                        className={`flex h-5 w-5 items-center justify-center ${
+                                            isActive ? "text-primary-foreground" : "text-muted-foreground"
+                                        }`}
+                                    >
+                                        {NAV_ICONS[item.section] ?? (
+                                            <NavIcon>
+                                                <circle cx="12" cy="12" r="4" />
+                                            </NavIcon>
+                                        )}
+                                    </span>
+                                    {navCollapsed ? <span className="sr-only">{item.label}</span> : item.label}
                                 </Link>
                             );
                         })}
