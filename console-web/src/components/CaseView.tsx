@@ -21,9 +21,9 @@ function CaseViewSkeleton() {
                 <div className="h-8 bg-muted/70 rounded w-48"></div>
                 <div className="h-10 bg-muted/70 rounded w-24"></div>
             </div>
-            <div className="grid grid-cols-3 gap-6">
-                <div className="col-span-2 h-96 bg-muted/70 rounded"></div>
-                <div className="col-span-1 h-48 bg-muted/70 rounded"></div>
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="h-96 bg-muted/70 rounded"></div>
+                <div className="h-48 bg-muted/70 rounded hidden xl:block"></div>
             </div>
         </div>
     );
@@ -32,6 +32,7 @@ function CaseViewSkeleton() {
 export default function CaseView({ caseId }: CaseViewProps) {
     const { data: session } = useSession();
     const [draft, setDraft] = useState("");
+    const [detailsOpen, setDetailsOpen] = useState(false);
     const {
         caseDetail,
         caseLoading,
@@ -87,14 +88,29 @@ export default function CaseView({ caseId }: CaseViewProps) {
     }
 
     const canReply = caseDetail.status === "active" && canWriteInbox;
+    const macroBranchId = caseDetail.branch_id ?? "";
 
     const handleMacroSelect = (text: string) => {
         setDraft((prev) => (prev.trim() ? `${prev}\n${text}` : text));
     };
 
     return (
-        <div className="grid grid-cols-3 gap-6" data-testid="case-view">
-            <div className="col-span-2">
+        <div
+            className={`grid grid-cols-1 gap-6 ${
+                detailsOpen ? "xl:grid-cols-[minmax(0,1fr)_320px]" : "xl:grid-cols-[minmax(0,1fr)]"
+            }`}
+            data-testid="case-view"
+        >
+            <div className="flex flex-col gap-4">
+                {detailsOpen && (
+                    <div className="xl:hidden">
+                        <CaseDetailsPanel
+                            caseDetail={caseDetail}
+                            messages={messages}
+                            canViewDiagnostics={canViewDiagnostics}
+                        />
+                    </div>
+                )}
                 <CaseConversation
                     caseDetail={caseDetail}
                     caseId={caseId}
@@ -108,15 +124,23 @@ export default function CaseView({ caseId }: CaseViewProps) {
                         <InboxMacroChips
                             onSelect={handleMacroSelect}
                             disabled={!canReply}
+                            canManage={canWriteInbox}
+                            branchId={macroBranchId}
                         />
                     }
+                    detailsOpen={detailsOpen}
+                    onToggleDetails={() => setDetailsOpen((prev) => !prev)}
                 />
             </div>
-            <CaseDetailsPanel
-                caseDetail={caseDetail}
-                messages={messages}
-                canViewDiagnostics={canViewDiagnostics}
-            />
+            {detailsOpen && (
+                <div className="hidden xl:block">
+                    <CaseDetailsPanel
+                        caseDetail={caseDetail}
+                        messages={messages}
+                        canViewDiagnostics={canViewDiagnostics}
+                    />
+                </div>
+            )}
         </div>
     );
 }

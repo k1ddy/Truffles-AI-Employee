@@ -139,7 +139,7 @@ export default function ChatInterface({
     }
 
     return (
-        <div className="flex flex-col h-full min-h-[520px] bg-muted rounded-lg border border-border/60">
+        <div className="flex flex-col h-full min-h-[480px] bg-muted rounded-lg border border-border/60">
             {/* Messages area */}
             <div
                 ref={scrollContainerRef}
@@ -155,7 +155,7 @@ export default function ChatInterface({
                         return (
                             <div
                                 key={msg.id}
-                                className={`flex flex-col max-w-[80%] ${msg.role === "user" ? "self-start" : "self-end items-end"} ${isOptimistic ? "opacity-70" : ""}`}
+                                className={`flex flex-col max-w-[92%] ${msg.role === "user" ? "self-start" : "self-end items-end"} ${isOptimistic ? "opacity-70" : ""}`}
                             >
                                 <div className="text-xs text-muted-foreground mb-1">
                                     {msg.role === "user" ? "Клиент" :
@@ -185,7 +185,7 @@ export default function ChatInterface({
             {canSend && (
                 <form onSubmit={handleSubmit} className="border-t border-border/60 p-3 bg-card rounded-b-lg">
                     {composerBefore && (
-                        <div className="mb-3">
+                        <div className="mb-2">
                             {composerBefore}
                         </div>
                     )}
@@ -194,7 +194,7 @@ export default function ChatInterface({
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            placeholder="Введите сообщение... (Enter для отправки)"
+                            placeholder="Введите сообщение. Enter — отправить, Shift+Enter — новая строка."
                             rows={2}
                             disabled={sendMutation.isPending}
                             className="flex-1 px-3 py-2 border border-border/60 rounded-lg text-sm resize-none bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:bg-muted"
@@ -221,7 +221,7 @@ export default function ChatInterface({
 
             {!canSend && (
                 <div className="border-t border-border/60 p-3 bg-muted rounded-b-lg text-center text-sm text-muted-foreground">
-                    Возьмите заявку чтобы отправлять сообщения
+                    Возьмите заявку, чтобы отвечать клиенту
                 </div>
             )}
         </div>

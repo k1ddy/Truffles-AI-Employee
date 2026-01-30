@@ -390,6 +390,96 @@ paths:
           $ref: "#/components/responses/IdempotencyConflict"
 
   # ──────────────────────────────────────────────────────────────────
+  # INBOX MACROS
+  # ──────────────────────────────────────────────────────────────────
+  /inbox/macros:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: listInboxMacros
+      tags: [inbox]
+      summary: List inbox macros
+      parameters:
+        - name: include_inactive
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Macro list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxMacroListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createInboxMacro
+      tags: [inbox]
+      summary: Create inbox macro
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InboxMacroCreateRequest"
+      responses:
+        "200":
+          description: Macro created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxMacroCreateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /inbox/macros/{macro_id}:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+      - name: macro_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: updateInboxMacro
+      tags: [inbox]
+      summary: Update inbox macro
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InboxMacroUpdateRequest"
+      responses:
+        "200":
+          description: Macro updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxMacro"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ──────────────────────────────────────────────────────────────────
   # OPS / HEALTH
   # ──────────────────────────────────────────────────────────────────
   /health:
@@ -2075,6 +2165,70 @@ components:
         client_notify:
           $ref: "#/components/schemas/SyncStatus"
           nullable: true
+
+    InboxMacro:
+      type: object
+      required: [id, scope, label, body, is_active]
+      properties:
+        id:
+          type: string
+          format: uuid
+        scope:
+          type: string
+          enum: [personal, team]
+        label:
+          type: string
+        body:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    InboxMacroListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/InboxMacro"
+
+    InboxMacroCreateRequest:
+      type: object
+      required: [scope, label, body]
+      properties:
+        scope:
+          type: string
+          enum: [personal, team]
+        label:
+          type: string
+        body:
+          type: string
+        is_active:
+          type: boolean
+          default: true
+
+    InboxMacroCreateResponse:
+      type: object
+      properties:
+        macro:
+          $ref: "#/components/schemas/InboxMacro"
+
+    InboxMacroUpdateRequest:
+      type: object
+      properties:
+        label:
+          type: string
+        body:
+          type: string
+        is_active:
+          type: boolean
 
     SyncStatus:
       type: object

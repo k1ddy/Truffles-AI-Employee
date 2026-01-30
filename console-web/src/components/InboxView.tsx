@@ -62,6 +62,8 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
 
     const canSend = Boolean(caseDetail && caseDetail.status === "active" && canWriteInbox);
     const canViewDiagnostics = role === "support" || role === "platform_admin" || role === "owner" || role === "admin";
+    const macroBranchId = caseDetail?.branch_id ?? selectedBranchId;
+    const canManageMacros = canWriteInbox;
 
     const handleSelectCase = (caseId: string) => {
         setSelectedCaseId(caseId);
@@ -102,6 +104,8 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
         <InboxMacroChips
             onSelect={handleMacroSelect}
             disabled={!selectedCaseId || !canSend}
+            canManage={canManageMacros}
+            branchId={macroBranchId}
         />
     );
 
@@ -116,11 +120,15 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
             <div>
                 <h1 className="text-2xl font-semibold">Заявки</h1>
                 <p className="text-sm text-muted-foreground">
-                    Очередь → диалог → детали. Диагностика скрыта по умолчанию.
+                    Очередь слева, чат по центру, детали справа. Ответы и быстрые действия рядом с вводом.
                 </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)_320px]">
+            <div
+                className={`grid grid-cols-1 gap-6 ${
+                    detailsOpen ? "xl:grid-cols-[280px_minmax(0,1fr)_320px]" : "xl:grid-cols-[280px_minmax(0,1fr)]"
+                }`}
+            >
                 <section className="card-surface flex flex-col min-h-[620px] p-4 xl:overflow-hidden xl:h-[calc(100vh-240px)]" data-testid="inbox-list">
                     <CaseList
                         variant="compact"
@@ -137,16 +145,6 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                     {selectedCaseId && caseError && renderErrorPane()}
                     {selectedCaseId && !caseLoading && !caseError && caseDetail && (
                         <div className="card-surface p-5 flex flex-col gap-4 h-full">
-                            <div className="flex items-center justify-between xl:hidden">
-                                <p className="text-sm font-semibold">Детали заявки</p>
-                                <button
-                                    type="button"
-                                    onClick={() => setDetailsOpen((prev) => !prev)}
-                                    className="text-xs text-muted-foreground hover:text-foreground"
-                                >
-                                    {detailsOpen ? "Скрыть" : "Показать"}
-                                </button>
-                            </div>
                             {detailsOpen && (
                                 <div className="xl:hidden">
                                     <CaseDetailsPanel
@@ -166,6 +164,8 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                 draft={draft}
                                 onDraftChange={setDraft}
                                 composerBefore={composerBefore}
+                                detailsOpen={detailsOpen}
+                                onToggleDetails={() => setDetailsOpen((prev) => !prev)}
                             />
                         </div>
                     )}
@@ -176,23 +176,25 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                     )}
                 </section>
 
-                <section className="hidden xl:flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)] xl:overflow-y-auto" data-testid="inbox-details">
-                    {!selectedCaseId && renderEmptyPane("Детали", "Выберите заявку, чтобы увидеть контекст и trace.")}
-                    {selectedCaseId && caseLoading && renderLoadingPane()}
-                    {selectedCaseId && caseError && renderErrorPane()}
-                    {selectedCaseId && !caseLoading && !caseError && caseDetail && (
-                        <CaseDetailsPanel
-                            caseDetail={caseDetail}
-                            messages={messages}
-                            canViewDiagnostics={canViewDiagnostics}
-                        />
-                    )}
-                    {selectedCaseId && !caseLoading && !caseError && !caseDetail && (
-                        <div className="card-surface p-6 text-center text-muted-foreground">
-                            Детали недоступны
-                        </div>
-                    )}
-                </section>
+                {detailsOpen && (
+                    <section className="hidden xl:flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)] xl:overflow-y-auto" data-testid="inbox-details">
+                        {!selectedCaseId && renderEmptyPane("Детали", "Выберите заявку, чтобы увидеть контекст и trace.")}
+                        {selectedCaseId && caseLoading && renderLoadingPane()}
+                        {selectedCaseId && caseError && renderErrorPane()}
+                        {selectedCaseId && !caseLoading && !caseError && caseDetail && (
+                            <CaseDetailsPanel
+                                caseDetail={caseDetail}
+                                messages={messages}
+                                canViewDiagnostics={canViewDiagnostics}
+                            />
+                        )}
+                        {selectedCaseId && !caseLoading && !caseError && !caseDetail && (
+                            <div className="card-surface p-6 text-center text-muted-foreground">
+                                Детали недоступны
+                            </div>
+                        )}
+                    </section>
+                )}
             </div>
         </div>
     );
