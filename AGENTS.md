@@ -6,6 +6,15 @@
 
 ---
 
+## 0) Workspace anchor (обязательно)
+
+- Канонический репозиторий: `/home/zhan/truffles-main`
+- Все канонические документы (`AGENTS.md`, `STATE.md`, `STRUCTURE.md`, `TECH.md`) — **внутри repo**.
+- Старт сессии: `cd /home/zhan/truffles-main` → `docs/SESSION_START_PROMPT.txt` → `scripts/session_start.sh`.
+- Если есть конфликт между этим файлом и repo‑доками, следуй repo‑докам.
+
+---
+
 ## 0) Truffles в одной формуле
 
 **Truffles = Deterministic Core (факты/правила/решения) + LLM (смысл/язык) + Escalation (человек) + Data in KZ**.
