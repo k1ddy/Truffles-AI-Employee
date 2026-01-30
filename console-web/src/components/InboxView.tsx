@@ -185,30 +185,34 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                 {showDetailsColumn && (
                     <section className="hidden xl:flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)] xl:overflow-y-auto" data-testid="inbox-details">
                         {!selectedCaseId && renderEmptyPane("Детали", "Выберите заявку, чтобы увидеть контекст и trace.")}
-                        {selectedCaseId && caseLoading && renderLoadingPane()}
-                        {selectedCaseId && caseError && renderErrorPane()}
-                        {selectedCaseId && !caseLoading && !caseError && caseDetail && (
-                            <>
-                                <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-card px-4 py-3">
-                                    <p className="text-sm font-semibold">Детали заявки</p>
-                                    <button
-                                        type="button"
-                                        onClick={() => setDetailsOpen(false)}
-                                        className="text-xs font-semibold text-muted-foreground hover:text-foreground"
-                                    >
-                                        Скрыть детали
-                                    </button>
-                                </div>
-                                <CaseDetailsPanel
-                                    caseDetail={caseDetail}
-                                    messages={messages}
-                                    canViewDiagnostics={canViewDiagnostics}
-                                />
-                            </>
-                        )}
-                        {selectedCaseId && !caseLoading && !caseError && !caseDetail && (
-                            <div className="card-surface p-6 text-center text-muted-foreground">
-                                Детали недоступны
+                        {selectedCaseId && (
+                            <div className="flex flex-col gap-4" data-testid="case-details">
+                                {caseLoading && renderLoadingPane()}
+                                {caseError && renderErrorPane()}
+                                {!caseLoading && !caseError && caseDetail && (
+                                    <>
+                                        <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-card px-4 py-3">
+                                            <p className="text-sm font-semibold">Детали заявки</p>
+                                            <button
+                                                type="button"
+                                                onClick={() => setDetailsOpen(false)}
+                                                className="text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                            >
+                                                Скрыть детали
+                                            </button>
+                                        </div>
+                                        <CaseDetailsPanel
+                                            caseDetail={caseDetail}
+                                            messages={messages}
+                                            canViewDiagnostics={canViewDiagnostics}
+                                        />
+                                    </>
+                                )}
+                                {!caseLoading && !caseError && !caseDetail && (
+                                    <div className="card-surface p-6 text-center text-muted-foreground">
+                                        Детали недоступны
+                                    </div>
+                                )}
                             </div>
                         )}
                     </section>
