@@ -66,6 +66,14 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const canManageMacros = canWriteInbox;
     const canToggleDetails = Boolean(selectedCaseId && caseDetail && !caseLoading && !caseError);
     const showDetailsColumn = detailsOpen && !!selectedCaseId;
+    const hasSelection = Boolean(selectedCaseId);
+    const gridClass = showDetailsColumn
+        ? hasSelection
+            ? "xl:grid-cols-[240px_minmax(0,1fr)_320px]"
+            : "xl:grid-cols-[300px_minmax(0,1fr)_320px]"
+        : hasSelection
+            ? "xl:grid-cols-[240px_minmax(0,1fr)]"
+            : "xl:grid-cols-[300px_minmax(0,1fr)]";
 
     const handleSelectCase = (caseId: string) => {
         setSelectedCaseId(caseId);
@@ -134,9 +142,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
             </div>
 
             <div
-                className={`grid grid-cols-1 gap-6 ${
-                    showDetailsColumn ? "xl:grid-cols-[280px_minmax(0,1fr)_320px]" : "xl:grid-cols-[280px_minmax(0,1fr)]"
-                }`}
+                className={`grid grid-cols-1 gap-6 ${gridClass}`}
             >
                 <section className="card-surface flex flex-col min-h-[620px] p-4 xl:overflow-hidden xl:h-[calc(100vh-240px)]" data-testid="inbox-list">
                     <CaseList
