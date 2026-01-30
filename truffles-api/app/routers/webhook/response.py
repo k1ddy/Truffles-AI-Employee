@@ -694,6 +694,7 @@ def _handle_consult_flow(
             domain_intent=legacy.DomainIntent.UNKNOWN,
             domain_meta=None,
             router_state=router_state,
+            explicit_service_signal=False,
         )
 
     if not (routing.get("allow_bot_reply") and not bypass_domain_flows and message_text):

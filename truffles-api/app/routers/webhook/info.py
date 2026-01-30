@@ -529,6 +529,11 @@ def _handle_info_flow(
                     force_truth_gate=force_truth_gate,
                 )
 
+    explicit_service_signal = legacy._has_explicit_service_signal(
+        message_text,
+        client_slug=client_slug,
+        intent_decomp_payload=intent_decomp_payload,
+    )
     class_router_result = legacy._resolve_class_router_result(
         info_intents=info_class_intents,
         info_meta=info_class_meta,
@@ -537,6 +542,7 @@ def _handle_info_flow(
         domain_intent=legacy.DomainIntent.UNKNOWN,
         domain_meta=None,
         router_state=router_state,
+        explicit_service_signal=explicit_service_signal,
     )
     info_signals = info_class_meta.get("info_signals") if isinstance(info_class_meta, dict) else None
     guest_signal = bool(info_signals.get("guest")) if isinstance(info_signals, dict) else False
@@ -1268,6 +1274,7 @@ def _handle_truth_gate_fallback(
             domain_intent=legacy.DomainIntent.OUT_OF_DOMAIN,
             domain_meta=None,
             router_state=router_state,
+            explicit_service_signal=False,
         )
 
     policy_t0 = time.monotonic()
