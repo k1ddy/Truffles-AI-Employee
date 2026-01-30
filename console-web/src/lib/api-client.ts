@@ -445,6 +445,11 @@ export type CaseListResponse = components["schemas"]["CaseListResponse"];
 export type CaseActionResponse = components["schemas"]["CaseActionResponse"];
 export type Message = components["schemas"]["Message"];
 export type MessageListResponse = components["schemas"]["MessageListResponse"];
+export type InboxMacro = components["schemas"]["InboxMacro"];
+export type InboxMacroListResponse = components["schemas"]["InboxMacroListResponse"];
+export type InboxMacroCreateRequest = components["schemas"]["InboxMacroCreateRequest"];
+export type InboxMacroCreateResponse = components["schemas"]["InboxMacroCreateResponse"];
+export type InboxMacroUpdateRequest = components["schemas"]["InboxMacroUpdateRequest"];
 export type Client = components["schemas"]["Client"];
 export type MeResponse = components["schemas"]["MeResponse"];
 export type Agent = components["schemas"]["Agent"];
@@ -494,6 +499,7 @@ export type KnowledgeRollbackResponse = {
 
 // Query params
 export type ListCasesParams = operations["listCases"]["parameters"]["query"];
+export type ListInboxMacrosParams = operations["listInboxMacros"]["parameters"]["query"];
 export type ListAuditParams = operations["listAuditEvents"]["parameters"]["query"];
 export type ListCompaniesParams = operations["listAdminCompanies"]["parameters"]["query"];
 export type ListClientsParams = operations["listAdminClients"]["parameters"]["query"];
@@ -527,6 +533,23 @@ export const casesApi = {
 
     getMessages: (caseId: string, params?: { cursor?: string; limit?: number }) =>
         apiClient.get<MessageListResponse>(`/cases/${caseId}/messages`, { params }),
+};
+
+/** Inbox macros endpoints */
+export const inboxApi = {
+    listMacros: (params?: ListInboxMacrosParams, branchId?: string | null) =>
+        apiClient.get<InboxMacroListResponse>("/inbox/macros", {
+            params,
+            headers: branchId ? { "X-Branch-Id": branchId } : undefined,
+        }),
+    createMacro: (data: InboxMacroCreateRequest, branchId?: string | null) =>
+        apiClient.post<InboxMacroCreateResponse>("/inbox/macros", data, {
+            headers: branchId ? { "X-Branch-Id": branchId } : undefined,
+        }),
+    updateMacro: (macroId: string, data: InboxMacroUpdateRequest, branchId?: string | null) =>
+        apiClient.patch<InboxMacro>(`/inbox/macros/${macroId}`, data, {
+            headers: branchId ? { "X-Branch-Id": branchId } : undefined,
+        }),
 };
 
 /** Message endpoints */

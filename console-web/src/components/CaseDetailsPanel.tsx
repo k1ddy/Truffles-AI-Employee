@@ -47,31 +47,31 @@ const META_LABELS: Record<string, string> = {
     action: "Действие",
     intent: "Интент",
     source: "Источник",
-    policy_gate: "Policy",
+    policy_gate: "Policy-проверка",
     fact_source: "Источник фактов",
-    info_sections: "Секции",
+    info_sections: "Секции базы знаний",
     service_query: "Запрос услуги",
-    price_item: "Прайс",
+    price_item: "Прайс-позиция",
     duration_item: "Длительность",
-    consult_playbook_id: "Playbook",
-    consult_selector: "Selector",
-    rag_reason: "RAG",
+    consult_playbook_id: "Сценарий",
+    consult_selector: "Селектор",
+    rag_reason: "Причина RAG",
     trace_id: "Trace ID",
     llm_used: "LLM",
-    llm_degradation_reason: "LLM fallback",
+    llm_degradation_reason: "Причина fallback",
 };
 
 const SUMMARY_GROUPS = [
     {
-        title: "Что произошло",
+        title: "Что решили",
         keys: ["action", "intent"],
     },
     {
-        title: "Почему",
+        title: "Почему так",
         keys: ["source", "policy_gate", "rag_reason"],
     },
     {
-        title: "Что использовано",
+        title: "Какие данные",
         keys: [
             "info_sections",
             "service_query",
@@ -169,7 +169,9 @@ export default function CaseDetailsPanel({
     canViewDiagnostics?: boolean;
 }) {
     const contact = getPrimaryContact(caseDetail);
-    const contextText = caseDetail.context_summary || caseDetail.user_message || "Контекст недоступен";
+    const summaryText = caseDetail.context_summary || null;
+    const userMessage = caseDetail.user_message || null;
+    const contextText = summaryText || userMessage || "Контекст недоступен";
     const explainEntry = extractExplainEntry(caseDetail.decision_trace);
     const trace = caseDetail.decision_trace ?? [];
     const keyStages = trace
@@ -235,11 +237,18 @@ export default function CaseDetailsPanel({
                             </p>
                         )}
                     </SectionCard>
-                    <SectionCard title="Сводка">
+                    <SectionCard title="Суть запроса">
                         <p className="bg-muted p-2 rounded border border-border/60 text-xs">
                             {contextText}
                         </p>
                     </SectionCard>
+                    {summaryText && userMessage && summaryText.trim() !== userMessage.trim() && (
+                        <SectionCard title="Последнее сообщение">
+                            <p className="bg-muted p-2 rounded border border-border/60 text-xs">
+                                {userMessage}
+                            </p>
+                        </SectionCard>
+                    )}
                     <div className="flex flex-wrap gap-2 text-xs">
                         <span className="bg-muted px-2 py-1 rounded">
                             Триггер: {caseDetail.trigger_type}
@@ -279,17 +288,17 @@ export default function CaseDetailsPanel({
                             <div className="flex flex-wrap gap-2">
                                 {caseDetail.needs_reply && (
                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-100 text-yellow-800">
-                                        NEW
+                                        Нужно ответить
                                     </span>
                                 )}
                                 {caseDetail.has_pending_outbox && (
                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-800">
-                                        QUEUED
+                                        В очереди
                                     </span>
                                 )}
                                 {caseDetail.has_delivery_error && (
                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-800">
-                                        FAILED
+                                        Ошибка доставки
                                     </span>
                                 )}
                             </div>
@@ -300,17 +309,17 @@ export default function CaseDetailsPanel({
 
             {activeTab === "consultant" && (
                 <div className="space-y-3">
-                    <SectionCard title="Назначение">
+                    <SectionCard title="Ответственный">
                         <div className="flex items-center justify-between text-xs">
                             <span className="text-muted-foreground">Менеджер:</span>
                             <span>{caseDetail.assigned_to_name ?? "Не назначен"}</span>
                         </div>
                         <div className="flex items-center justify-between text-xs mt-2">
-                            <span className="text-muted-foreground">Статус заявки:</span>
+                            <span className="text-muted-foreground">Статус:</span>
                             <span>{getStatusLabel(caseDetail.status)}</span>
                         </div>
                     </SectionCard>
-                    <SectionCard title="Канал">
+                    <SectionCard title="Источник обращения">
                         <div className="flex items-center justify-between text-xs">
                             <span className="text-muted-foreground">Канал:</span>
                             <span>{caseDetail.channel}</span>
@@ -325,7 +334,7 @@ export default function CaseDetailsPanel({
 
             {activeTab === "diagnostics" && (
                 <div className="space-y-3">
-                    <SectionCard title="Explain">
+                    <SectionCard title="Пояснение">
                         {latestDecision ? (
                             <div className="space-y-4 text-xs">
                                 <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -356,7 +365,7 @@ export default function CaseDetailsPanel({
                                         ))}
                                     </div>
                                 ) : (
-                                    <p className="text-xs text-muted-foreground">decision_meta есть, но без ключевых полей.</p>
+                                    <p className="text-xs text-muted-foreground">decision_meta есть, но ключевые поля пустые.</p>
                                 )}
                             </div>
                         ) : explainEntry ? (
@@ -376,7 +385,7 @@ export default function CaseDetailsPanel({
                         )}
                     </SectionCard>
 
-                    <SectionCard title="Trace">
+                    <SectionCard title="Трассировка">
                         {hasTrace || hasMessageDiagnostics ? (
                             <div className="space-y-3">
                                 {hasTrace && keyStages.length > 0 && (
@@ -452,16 +461,16 @@ export default function CaseDetailsPanel({
                                             ))}
                                         </div>
                                     ) : (
-                                        <p className="text-xs text-muted-foreground">Trace ещё не записан.</p>
+                                        <p className="text-xs text-muted-foreground">Трассировка ещё не записана.</p>
                                     )}
                                 </div>
                             </div>
                         ) : (
-                            <p className="text-xs text-muted-foreground">Trace ещё не записан.</p>
+                            <p className="text-xs text-muted-foreground">Трассировка ещё не записана.</p>
                         )}
                     </SectionCard>
 
-                    <SectionCard title="Telegram">
+                    <SectionCard title="Telegram-доставка">
                         {caseDetail.telegram_trail ? (
                             <div className="space-y-2 text-xs">
                                 <div className="flex items-center gap-2">
@@ -481,7 +490,7 @@ export default function CaseDetailsPanel({
                                 </div>
                                 {caseDetail.telegram_trail.message_id && (
                                     <div className="flex items-center gap-2">
-                                        <span className="text-muted-foreground">Message ID:</span>
+                                        <span className="text-muted-foreground">ID сообщения:</span>
                                         <span className="font-mono bg-muted px-1.5 py-0.5 rounded">
                                             {caseDetail.telegram_trail.message_id}
                                         </span>
@@ -489,7 +498,7 @@ export default function CaseDetailsPanel({
                                 )}
                                 {caseDetail.telegram_trail.topic_id && (
                                     <div className="flex items-center gap-2">
-                                        <span className="text-muted-foreground">Topic ID:</span>
+                                        <span className="text-muted-foreground">ID темы:</span>
                                         <span className="font-mono bg-muted px-1.5 py-0.5 rounded">
                                             {caseDetail.telegram_trail.topic_id}
                                         </span>
@@ -525,7 +534,7 @@ export default function CaseDetailsPanel({
                                 )}
                             </div>
                         ) : (
-                            <p className="text-xs text-muted-foreground">Telegram‑trail недоступен.</p>
+                            <p className="text-xs text-muted-foreground">История Telegram недоступна.</p>
                         )}
                     </SectionCard>
                 </div>

@@ -1,150 +1,328 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import toast from "react-hot-toast";
+import { inboxApi } from "@/lib/api-client";
+import type { components } from "@/types/api.generated";
 
-const MACROS = [
-    {
-        id: "system-greeting",
-        group: "Системные",
-        label: "Приветствие",
-        body: "Здравствуйте! Я менеджер Truffles. Чем можем помочь?",
-    },
-    {
-        id: "system-clarify",
-        group: "Системные",
-        label: "Уточнить",
-        body: "Подскажите, пожалуйста, удобное время и услугу, чтобы я всё проверил.",
-    },
-    {
-        id: "system-escalate",
-        group: "Системные",
-        label: "Эскалация",
-        body: "Передаю вопрос владельцу. Вернусь с ответом в ближайшее время.",
-    },
-    {
-        id: "client-pricing",
-        group: "Клиентские",
-        label: "Цена",
-        body: "Стоимость зависит от выбранной услуги. Напишите, что именно вас интересует.",
-    },
-    {
-        id: "client-booking",
-        group: "Клиентские",
-        label: "Запись",
-        body: "Могу записать вас на удобное время. Напишите предпочтительную дату и время.",
-    },
-] as const;
+const DEFAULT_SCOPE: components["schemas"]["InboxMacro"]["scope"] = "personal";
 
-type Macro = (typeof MACROS)[number];
-
-function getMacroGroups(macros: readonly Macro[]) {
-    const groups = Array.from(new Set(macros.map((macro) => macro.group)));
-    return groups.map((group) => ({
-        group,
-        items: macros.filter((macro) => macro.group === group),
-    }));
-}
+type InboxMacro = components["schemas"]["InboxMacro"];
 
 type InboxMacrosProps = {
     onSelect: (text: string) => void;
     disabled?: boolean;
+    canManage?: boolean;
+    branchId?: string | null;
 };
 
-export function InboxMacroChips({ onSelect, disabled }: InboxMacrosProps) {
-    const [expanded, setExpanded] = useState(false);
-    const primaryMacros = MACROS.slice(0, 4);
-    const groups = useMemo(() => getMacroGroups(MACROS), []);
+type MacroFormState = {
+    scope: InboxMacro["scope"];
+    label: string;
+    body: string;
+};
+
+function getScopeLabel(scope: InboxMacro["scope"]) {
+    return scope === "personal" ? "Личные" : "Командные";
+}
+
+function getMacroTimestamp(macro: InboxMacro) {
+    const value = macro.updated_at || macro.created_at;
+    return value ? new Date(value).getTime() : 0;
+}
+
+function sortMacros(macros: InboxMacro[]) {
+    return [...macros].sort((a, b) => getMacroTimestamp(b) - getMacroTimestamp(a));
+}
+
+function buildFormState(macro?: InboxMacro | null): MacroFormState {
+    if (!macro) {
+        return { scope: DEFAULT_SCOPE, label: "", body: "" };
+    }
+    return {
+        scope: macro.scope,
+        label: macro.label ?? "",
+        body: macro.body ?? "",
+    };
+}
+
+function InboxMacros({
+    onSelect,
+    disabled,
+    canManage = false,
+    branchId,
+}: InboxMacrosProps) {
+    const queryClient = useQueryClient();
+    const [panelOpen, setPanelOpen] = useState(false);
+    const [editing, setEditing] = useState<InboxMacro | null>(null);
+    const [form, setForm] = useState<MacroFormState>(() => buildFormState());
+
+    const macrosQuery = useQuery({
+        queryKey: ["inbox-macros", branchId],
+        queryFn: async () => {
+            const response = await inboxApi.listMacros({ include_inactive: canManage }, branchId);
+            return response.data;
+        },
+        enabled: Boolean(branchId),
+    });
+
+    const createMutation = useMutation({
+        mutationFn: (payload: components["schemas"]["InboxMacroCreateRequest"]) =>
+            inboxApi.createMacro(payload, branchId),
+        onSuccess: () => {
+            toast.success("Макрос сохранён");
+            queryClient.invalidateQueries({ queryKey: ["inbox-macros", branchId] });
+        },
+        onError: () => {
+            toast.error("Не удалось сохранить макрос");
+        },
+    });
+
+    const updateMutation = useMutation({
+        mutationFn: ({
+            macroId,
+            payload,
+        }: {
+            macroId: string;
+            payload: components["schemas"]["InboxMacroUpdateRequest"];
+        }) => inboxApi.updateMacro(macroId, payload, branchId),
+        onSuccess: () => {
+            toast.success("Макрос обновлён");
+            queryClient.invalidateQueries({ queryKey: ["inbox-macros", branchId] });
+        },
+        onError: () => {
+            toast.error("Не удалось обновить макрос");
+        },
+    });
+
+    const macros = macrosQuery.data?.items ?? [];
+    const activeMacros = macros.filter((macro) => macro.is_active);
+    const sortedMacros = useMemo(() => sortMacros(activeMacros), [activeMacros]);
+    const primaryMacros = sortedMacros.slice(0, 4);
+    const personalMacros = macros.filter((macro) => macro.scope === "personal");
+    const teamMacros = macros.filter((macro) => macro.scope === "team");
+
+    const canEdit = canManage && !disabled;
+    const isSaving = createMutation.isPending || updateMutation.isPending;
+
+    const resetForm = () => {
+        setEditing(null);
+        setForm(buildFormState());
+    };
+
+    const handleEdit = (macro: InboxMacro) => {
+        setEditing(macro);
+        setForm(buildFormState(macro));
+        setPanelOpen(true);
+    };
+
+    const handleSubmit = async (event: React.FormEvent) => {
+        event.preventDefault();
+        const label = form.label.trim();
+        const body = form.body.trim();
+        if (!label || !body) {
+            toast.error("Заполните заголовок и текст");
+            return;
+        }
+        if (editing) {
+            await updateMutation.mutateAsync({
+                macroId: editing.id,
+                payload: { label, body },
+            });
+        } else {
+            await createMutation.mutateAsync({
+                scope: form.scope,
+                label,
+                body,
+                is_active: true,
+            });
+        }
+        resetForm();
+    };
+
+    const handleToggleActive = async (macro: InboxMacro) => {
+        await updateMutation.mutateAsync({
+            macroId: macro.id,
+            payload: { is_active: !macro.is_active },
+        });
+    };
+
+    if (!branchId) {
+        return (
+            <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground">
+                Выберите филиал, чтобы загрузить быстрые ответы.
+            </div>
+        );
+    }
 
     return (
-        <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-                {primaryMacros.map((macro) => (
+        <div className="space-y-3" data-testid="inbox-macros">
+            <div className="flex items-center justify-between gap-3">
+                <div className="text-xs text-muted-foreground">Быстрые ответы</div>
+                {canManage && (
                     <button
-                        key={macro.id}
                         type="button"
-                        onClick={() => onSelect(macro.body)}
-                        disabled={disabled}
-                        className="rounded-full border border-border/60 bg-card px-3 py-1 text-xs font-semibold transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={() => setPanelOpen((prev) => !prev)}
+                        className="text-xs font-semibold text-primary hover:text-primary/80"
                     >
-                        {macro.label}
+                        {panelOpen ? "Скрыть" : "Настроить"}
                     </button>
-                ))}
-                <button
-                    type="button"
-                    onClick={() => setExpanded((prev) => !prev)}
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                    disabled={disabled}
-                >
-                    {expanded ? "Скрыть макросы" : "Все макросы"}
-                </button>
+                )}
             </div>
-            {expanded && (
-                <div className="rounded-lg border border-border/60 bg-card p-3">
-                    <div className="space-y-4">
-                        {groups.map((group) => (
-                            <div key={group.group} className="space-y-2">
+
+            {macrosQuery.isLoading ? (
+                <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground">
+                    Загружаем макросы...
+                </div>
+            ) : macrosQuery.isError ? (
+                <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground">
+                    Не удалось загрузить быстрые ответы.
+                </div>
+            ) : primaryMacros.length === 0 ? (
+                <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground">
+                    Нет быстрых ответов. Добавьте свои.
+                </div>
+            ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                    {primaryMacros.map((macro) => (
+                        <button
+                            key={macro.id}
+                            type="button"
+                            onClick={() => onSelect(macro.body)}
+                            disabled={disabled}
+                            className="rounded-full border border-border/60 bg-card px-3 py-1 text-xs font-semibold transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {macro.label}
+                        </button>
+                    ))}
+                </div>
+            )}
+
+            {panelOpen && (
+                <div className="rounded-lg border border-border/60 bg-card p-3 space-y-4">
+                    <div className="space-y-3">
+                        {[{ title: "Личные", items: personalMacros }, { title: "Командные", items: teamMacros }].map((section) => (
+                            <div key={section.title} className="space-y-2">
                                 <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                                    {group.group}
+                                    {section.title}
                                 </p>
-                                <div className="grid gap-2">
-                                    {group.items.map((macro) => (
-                                        <button
-                                            key={macro.id}
-                                            type="button"
-                                            onClick={() => onSelect(macro.body)}
-                                            disabled={disabled}
-                                            className="rounded-xl border border-border/60 bg-background px-3 py-2 text-left text-xs font-medium transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                            <div className="text-sm font-semibold">{macro.label}</div>
-                                            <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                                                {macro.body}
+                                {section.items.length === 0 ? (
+                                    <p className="text-xs text-muted-foreground">Пока нет макросов.</p>
+                                ) : (
+                                    <div className="grid gap-2">
+                                        {section.items.map((macro) => (
+                                            <div
+                                                key={macro.id}
+                                                className={`rounded-xl border border-border/60 bg-background px-3 py-2 text-xs ${
+                                                    macro.is_active ? "" : "opacity-70"
+                                                }`}
+                                            >
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div>
+                                                        <div className="text-sm font-semibold">{macro.label}</div>
+                                                        <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                                            {macro.body}
+                                                        </div>
+                                                    </div>
+                                                    <span className="text-[10px] text-muted-foreground">
+                                                        {getScopeLabel(macro.scope)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex flex-wrap gap-2 mt-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleEdit(macro)}
+                                                        className="text-xs text-primary hover:text-primary/80"
+                                                        disabled={!canEdit}
+                                                    >
+                                                        Изменить
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleToggleActive(macro)}
+                                                        className="text-xs text-muted-foreground hover:text-foreground"
+                                                        disabled={!canEdit}
+                                                    >
+                                                        {macro.is_active ? "Отключить" : "Включить"}
+                                                    </button>
+                                                </div>
                                             </div>
-                                        </button>
-                                    ))}
-                                </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         ))}
                     </div>
+
+                    <form onSubmit={handleSubmit} className="rounded-lg border border-border/60 bg-background p-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                            <p className="text-xs font-semibold text-foreground">
+                                {editing ? "Редактировать макрос" : "Новый макрос"}
+                            </p>
+                            {editing && (
+                                <button
+                                    type="button"
+                                    onClick={resetForm}
+                                    className="text-xs text-muted-foreground hover:text-foreground"
+                                >
+                                    Отмена
+                                </button>
+                            )}
+                        </div>
+                        {!editing && (
+                            <div className="flex items-center gap-4 text-xs">
+                                {["personal", "team"].map((value) => (
+                                    <label key={value} className="flex items-center gap-2">
+                                        <input
+                                            type="radio"
+                                            name="macro-scope"
+                                            value={value}
+                                            checked={form.scope === value}
+                                            onChange={() => setForm((prev) => ({
+                                                ...prev,
+                                                scope: value as InboxMacro["scope"],
+                                            }))}
+                                        />
+                                        {value === "personal" ? "Личный" : "Командный"}
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+                        <div className="space-y-2">
+                            <input
+                                type="text"
+                                value={form.label}
+                                onChange={(event) => setForm((prev) => ({ ...prev, label: event.target.value }))}
+                                placeholder="Заголовок"
+                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-xs"
+                                disabled={isSaving}
+                            />
+                            <textarea
+                                value={form.body}
+                                onChange={(event) => setForm((prev) => ({ ...prev, body: event.target.value }))}
+                                placeholder="Текст быстрого ответа"
+                                rows={3}
+                                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-xs resize-none"
+                                disabled={isSaving}
+                            />
+                        </div>
+                        <button
+                            type="submit"
+                            className="w-full rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+                            disabled={!canEdit || isSaving}
+                        >
+                            {editing ? "Сохранить" : "Добавить"}
+                        </button>
+                    </form>
                 </div>
             )}
         </div>
     );
 }
 
-export default function InboxMacros({ onSelect, disabled }: InboxMacrosProps) {
-    const groups = useMemo(() => getMacroGroups(MACROS), []);
-
-    return (
-        <div className="card-surface p-4" data-testid="inbox-macros">
-            <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold">Quick Replies</h3>
-                <span className="text-xs text-muted-foreground">макросы</span>
-            </div>
-            <div className="space-y-4">
-                {groups.map((group) => (
-                    <div key={group.group} className="space-y-2">
-                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                            {group.group}
-                        </p>
-                        <div className="grid gap-2">
-                            {group.items.map((macro) => (
-                                <button
-                                    key={macro.id}
-                                    type="button"
-                                    onClick={() => onSelect(macro.body)}
-                                    disabled={disabled}
-                                    className="rounded-xl border border-border/60 bg-card px-3 py-2 text-left text-xs font-medium transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    <div className="text-sm font-semibold">{macro.label}</div>
-                                    <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                                        {macro.body}
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
+export function InboxMacroChips(props: InboxMacrosProps) {
+    return <InboxMacros {...props} />;
 }
+
+export default InboxMacros;
