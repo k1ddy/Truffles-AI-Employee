@@ -40,6 +40,7 @@ eval_cases:
     must_include_any:
     - от 25 000
     - цена от 25 000
+    - уточните цену у администратора
 - id: E003a
   user: Скок стоит маник?
   expected:
@@ -441,7 +442,7 @@ eval_cases:
     - передам администратору
     - уточню
     collect:
-    - услуга
+    - услуг
     - время
 - id: E018
   user: Хочу записаться на завтра после 18:00
@@ -451,8 +452,8 @@ eval_cases:
     must_do:
     - ask_fields_missing
     collect:
-    - услуга
-    - точная дата
+    - услуг
+    - дат
     - точное время
     - имя
     - контактный номер
@@ -475,7 +476,7 @@ eval_cases:
     intent: cancel_request
     collect:
     - имя
-    - услуга
+    - услуг
     - контактный номер
     must_tell_user_any:
     - администратор подтвердит
@@ -2070,7 +2071,7 @@ eval_cases:
     intent: cancel_request
     collect:
     - имя
-    - услуга
+    - услуг
     - контактный номер
     must_not:
     - Kaspi
@@ -3460,7 +3461,7 @@ eval_cases:
     intent: cancel_request
     collect:
     - имя
-    - услуга
+    - услуг
     - контактный номер
     must_tell_user_any:
     - администратор подтвердит
@@ -3472,7 +3473,7 @@ eval_cases:
     intent: cancel_request
     collect:
     - имя
-    - услуга
+    - услуг
     - контактный номер
     must_tell_user_any:
     - администратор подтвердит
@@ -8072,8 +8073,8 @@ eval_cases:
     must_do:
     - ask_fields_missing
     collect:
-    - услуга
-    - точная дата
+    - услуг
+    - дат
     - точное время
     - имя
     - контактный номер
@@ -8401,7 +8402,7 @@ eval_cases:
     intent: cancel_request
     collect:
     - имя
-    - услуга
+    - услуг
     - контактный номер
 - id: SCN3-10
   tier: chaos
@@ -8604,7 +8605,7 @@ eval_cases:
     intent: cancel_request
     collect:
     - имя
-    - услуга
+    - услуг
     - контактный номер
 - id: SCN5-10
   tier: chaos

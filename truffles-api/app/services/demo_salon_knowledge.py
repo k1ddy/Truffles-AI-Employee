@@ -3002,15 +3002,6 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="service_clarify")
 
-    if guest_signal and not price_signal:
-        reply, meta = build_info_combined_reply(
-            include_parking=parking_signal,
-            include_guest=True,
-            client_slug=slug,
-        )
-        if reply:
-            return _build_truth_decision(response=reply, intent="guest_policy", meta=meta)
-
     if _contains_any(
         normalized,
         [
@@ -3027,6 +3018,15 @@ def get_demo_salon_decision(
         reply = format_reply_from_truth("guest_animals", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="guest_policy")
+
+    if guest_signal and not price_signal:
+        reply, meta = build_info_combined_reply(
+            include_parking=parking_signal,
+            include_guest=True,
+            client_slug=slug,
+        )
+        if reply:
+            return _build_truth_decision(response=reply, intent="guest_policy", meta=meta)
 
     hours_like = _looks_like_hours_question(normalized, client_slug=slug)
     question_type = semantic_question_type(message, client_slug=slug)
@@ -3207,7 +3207,7 @@ def get_demo_salon_decision(
             return _build_truth_decision(response=reply, intent="booking_intake")
 
     if price_item and price_signal:
-        reply = _format_price_reply(price_item)
+        reply = _format_price_reply(price_item_payload or price_item)
         if reply:
             meta = _build_fact_meta(
                 fact_source="price_list",

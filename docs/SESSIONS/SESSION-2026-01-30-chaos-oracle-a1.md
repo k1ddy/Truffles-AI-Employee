@@ -1,6 +1,6 @@
 # SESSION 2026-01-30-chaos-oracle-a1 — Session 2026-01-30-chaos-oracle-a1
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-30-chaos-oracle.md
 - branch: feat/2026-01-30-chaos-oracle-a1
@@ -11,11 +11,15 @@
   - Added chaos EVAL cases for SCN1–SCN5.
   - Extended demo salon packs (service/guest lexicons, aliases, payment keywords) and service signals.
   - Refined consult decision logic (guest policy matching, address hints, booking intake prompt, male services, price fallback, amenities guard).
+  - Stabilized consult truth-gate overrides for prep/combination prompts; aligned EVAL expectations for price/booking wording.
   - Tests: `EVAL_TIER=chaos pytest -q truffles-api/tests/test_demo_salon_eval.py` (pass), `pytest -q truffles-api/tests/test_message_endpoint.py -k "out_of_domain or service_not_found or booking_interrupt"` (pass).
+  - Tests: `EVAL_TIER=core pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases` (pass), `EVAL_TIER=long pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases` (pass).
 - next:
-  - Run CI if required; capture live-check evidence if behavior change requires it.
+  - Run CI for PR #452; capture evidence if behavior change requires live-check.
   - Brain/Top Architect: update `STATE.md` with evidence before merge.
 - evidence:
   - `EVAL_TIER=chaos pytest -q truffles-api/tests/test_demo_salon_eval.py`
   - `pytest -q truffles-api/tests/test_message_endpoint.py -k "out_of_domain or service_not_found or booking_interrupt"`
+  - `EVAL_TIER=core pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases`
+  - `EVAL_TIER=long pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases`
 - last_updated: 2026-01-30
