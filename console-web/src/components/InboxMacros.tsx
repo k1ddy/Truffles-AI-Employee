@@ -103,7 +103,7 @@ function InboxMacros({
     const personalMacros = macros.filter((macro) => macro.scope === "personal");
     const teamMacros = macros.filter((macro) => macro.scope === "team");
 
-    const canEdit = canManage && !disabled;
+    const canEdit = canManage;
     const isSaving = createMutation.isPending || updateMutation.isPending;
 
     const resetForm = () => {
