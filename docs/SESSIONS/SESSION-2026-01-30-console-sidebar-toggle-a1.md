@@ -1,0 +1,24 @@
+# SESSION 2026-01-30-console-sidebar-toggle-a1 — Session 2026-01-30-console-sidebar-toggle-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle.md
+- branch: feat/2026-01-30-console-sidebar-toggle-a1
+- worktree: /home/zhan/worktrees/2026-01-30-console-sidebar-toggle-a1
+- base_ref: origin/main
+- scope: Console sidebar collapse + Inbox details overlay for chat usability.
+- done:
+  - Slimmed sidebar and added icon-only collapse toggle.
+  - Reworked Inbox details: overlay on small screens + clear hide button on desktop.
+  - Updated Task Package, STRUCTURE, and STATE.
+- next:
+  - Run `npm --prefix console-web run lint` once dependencies are installed.
+  - Capture UI screenshots after deploy.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle.md
+  - /tmp/console_web_lint_sidebar_20260130.txt (next missing)
+  - console-web/src/components/ConsoleShell.tsx
+  - console-web/src/components/InboxView.tsx
+  - console-web/src/components/CaseConversation.tsx
+  - STATE.md
+- last_updated: 2026-01-30

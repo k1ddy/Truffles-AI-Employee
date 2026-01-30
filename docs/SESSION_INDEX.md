@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-01-30-console-web-deploy-inbox-ux-v3-a1 | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-30-console-web-deploy-inbox-ux-v3.md | 2026-01-30 |
 | 2026-01-27-inbox-service-tp-arch | done | docs/2026-01-27-inbox-service-tp-arch | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 |
 | 2026-01-27-inbox-service-shadow-arch | done | feat/2026-01-27-inbox-service-shadow-arch | /home/zhan/worktrees/2026-01-27-inbox-service-shadow-arch | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 (gate-fix) |
 | 2026-01-27-provider-gateway-canary-arch | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-27-provider-gateway-service.md | 2026-01-27 |
@@ -56,3 +57,8 @@
 | 2026-01-30-inbox-ux-v2-macros-a1 | done | feat/2026-01-30-inbox-ux-v2-macros-a1 | /home/zhan/worktrees/2026-01-30-inbox-ux-v2-macros-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v2-macros.md | 2026-01-30 |
 | 2026-01-30-console-build-info-wiring-a1 | done | feat/2026-01-30-console-build-info-wiring-a1 | /home/zhan/worktrees/2026-01-30-console-build-info-wiring-a1 | docs/TASK_PACKAGES/TP-2026-01-30-console-build-info-wiring.md | 2026-01-30 |
 | 2026-01-30-inbox-ux-v3-a1 | done | feat/2026-01-30-inbox-ux-v3-a1 | /home/zhan/worktrees/2026-01-30-inbox-ux-v3-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v3.md | 2026-01-30 |
+| 2026-01-30-console-sidebar-toggle-a1 | done | feat/2026-01-30-console-sidebar-toggle-a1 | /home/zhan/worktrees/2026-01-30-console-sidebar-toggle-a1 | docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle.md | 2026-01-30 |
+| 2026-01-30-canon-contradictions-a1 | done | feat/2026-01-30-canon-contradictions-a1 | /home/zhan/worktrees/2026-01-30-canon-contradictions-a1 | docs/TASK_PACKAGES/TP-2026-01-30-canon-contradictions.md | 2026-01-30 |
+| 2026-01-30-agents-sync-a1 | done | feat/2026-01-30-agents-sync-a1 | /home/zhan/worktrees/2026-01-30-agents-sync-a1 | docs/TASK_PACKAGES/TP-2026-01-30-agents-sync.md | 2026-01-30 |
+| 2026-01-30-console-sidebar-toggle-deploy-a1 | done | feat/2026-01-30-console-sidebar-toggle-deploy-a1 | /home/zhan/worktrees/2026-01-30-console-sidebar-toggle-deploy-a1 | docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle-deploy.md | 2026-01-30 |
+| 2026-01-30-state-update-a1 | done | feat/2026-01-30-state-update-a1 | /home/zhan/worktrees/2026-01-30-state-update-a1 | docs/TASK_PACKAGES/TP-2026-01-30-state-update-a1.md | 2026-01-30 |

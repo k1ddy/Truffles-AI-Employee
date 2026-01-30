@@ -1066,7 +1066,7 @@ chatflow_service → WhatsApp
 ### Gate Ledger (условие → эффект → trace/meta)
 | Order | Gate / function (file) | Condition (summary) | Effect / next step | Trace / meta |
 | --- | --- | --- | --- | --- |
-| 1 | **Question contract / expected reply** (`decision._apply_expected_reply_contract`) | expected_reply_type present | Match/short‑circuit or continue | `stage=question_contract`, `expected_reply_*` in meta |
+| 1 | **Question contract / expected reply** (`decision._apply_expected_reply_contract`) | expected_reply_type present | Match → short‑circuit; mismatch → continue root‑gates без заполнения слота | `stage=question_contract`, `expected_reply_*` in meta |
 | 2 | **Branch selection** (`branch_selection._handle_branch_selection_gate`) | branch_mode ask_user/hybrid, >1 branch | Prompt/select branch and return | `stage=branch_selection`, decision=prompt/selected |
 | 3 | **Shield** (`shield._handle_shield_gate`) | spam/too_long or toxic/nonsense | Drop or escalate; early return | `stage=shield`, decision=drop/escalate |
 | 4 | **Session timeout reset** (`dedup._apply_session_timeout_reset`) | last_message_at > SESSION_TIMEOUT_HOURS | Reset mute/context | (no stage; log only) |
@@ -1086,7 +1086,12 @@ chatflow_service → WhatsApp
 | 18 | **LLM primary + fallback** (`response._handle_llm_primary`) | LLM path enabled | ai_response/clarify/escalate | `stage=llm_guard`, `stage=ai_response`, `stage=llm_degradation` |
 
 **Consult topic resolver**
-- `truffles-api/app/services/knowledge_service.py` uses embeddings for topic candidates; if embeddings fail, it returns no candidates and consult flow clarifies/escalates (same `consult_topic_resolver` trace stage).
+- `truffles-api/app/services/knowledge_service.py` uses embeddings for topic candidates; if embeddings fail or return empty, допускается детерминированный lexical fallback по pack‑терминам с фиксацией причины fallback в trace/meta.
+
+**Signal snapshot (routing signals)**
+- Сводим сигналы от domain_router anchors (client_config), pack‑lexicons (policy/guest/service), semantic match (RAG/Qdrant), consult resolver.
+- Пишем в `decision_meta` источники/score/threshold, чтобы объяснять OOD/booking/intent решения.
+- Канон: anchors в `client_config` синхронизируются из pack при publish; дрейф считается дефектом.
 
 **Media/ASR ordering**
 - `style_reference_pending` (context) links text↔photo order; TTL clears stale references.
