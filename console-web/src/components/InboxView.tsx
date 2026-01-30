@@ -166,6 +166,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                 composerBefore={composerBefore}
                                 detailsOpen={detailsOpen}
                                 onToggleDetails={handleToggleDetails}
+                                chatFrame="plain"
                             />
                         </div>
                     )}
