@@ -132,8 +132,8 @@ export default function ChatInterface({
     if (isLoading) {
         return (
             <div
-                className={`flex flex-col gap-4 p-4 bg-muted min-h-[520px] overflow-y-auto ${
-                    isPlain ? "" : "rounded-lg border border-border/60"
+                className={`flex flex-col gap-4 p-4 min-h-[520px] overflow-y-auto ${
+                    isPlain ? "" : "bg-muted/60 rounded-xl"
                 }`}
             >
                 <div className="animate-pulse space-y-4">
@@ -147,8 +147,8 @@ export default function ChatInterface({
 
     return (
         <div
-            className={`flex flex-col h-full min-h-[480px] bg-muted ${
-                isPlain ? "" : "rounded-lg border border-border/60"
+            className={`flex flex-col h-full min-h-[480px] ${
+                isPlain ? "" : "bg-muted/60 rounded-xl overflow-hidden"
             }`}
         >
             {/* Messages area */}
@@ -194,12 +194,7 @@ export default function ChatInterface({
 
             {/* Input area */}
             {canSend && (
-                <form
-                    onSubmit={handleSubmit}
-                    className={`border-t border-border/60 p-3 bg-card ${
-                        isPlain ? "" : "rounded-b-lg"
-                    }`}
-                >
+                <form onSubmit={handleSubmit} className="border-t border-border/60 p-3 bg-card">
                     {composerBefore && (
                         <div className="mb-2">
                             {composerBefore}
@@ -236,7 +231,7 @@ export default function ChatInterface({
             )}
 
             {!canSend && (
-                <div className="border-t border-border/60 p-3 bg-muted rounded-b-lg text-center text-sm text-muted-foreground">
+                <div className="border-t border-border/60 p-3 bg-muted text-center text-sm text-muted-foreground">
                     Возьмите заявку, чтобы отвечать клиенту
                 </div>
             )}

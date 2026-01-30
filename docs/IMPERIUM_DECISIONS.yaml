@@ -76,3 +76,7 @@ decisions:
     area: "pack_layers"
     choice: "DOMAIN_COMPANY_CLIENT_BRANCH"
     statement: "Effective pack resolves in order domain_pack (global) -> company_pack (optional business scope) -> client_pack -> branch overrides; later layers override earlier; tool-scope (CRM/Calendar/Calls/Channels) resolves by the same order; runtime uses the compiled effective pack only."
+  - id: "DEC-018"
+    area: "unified_reasoning_core"
+    choice: "SIGNAL_SNAPSHOT_PACK_INDEX"
+    statement: "Unified Reasoning Core: a single signal snapshot feeds deterministic gates/actions; signals come from compiled pack-index (anchors/lexicons/cards), semantic/RAG, and LLM pack-ref-only outputs. LLM never creates facts; it returns pack IDs + intent/slots with confidence. Business lexicons are forbidden in code (only system language packs allowed). decision_meta records signal sources + pack versions; stage order snapshot enforced."
