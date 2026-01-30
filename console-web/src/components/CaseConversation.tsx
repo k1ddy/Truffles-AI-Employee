@@ -108,22 +108,28 @@ export default function CaseConversation({
     const lastInbound = caseDetail.last_inbound_at
         ? new Date(caseDetail.last_inbound_at).toLocaleString("ru-RU")
         : "—";
+    const assignedLabel = caseDetail.assigned_to_name ?? "Не назначен";
     const showDetailsToggle = typeof onToggleDetails === "function";
 
     return (
         <div className="flex flex-col gap-5 h-full" data-testid="case-conversation">
             <div className="flex flex-col gap-4 border-b border-border/60 pb-4">
-                <div className="flex items-start justify-between gap-4">
-                    <div>
-                        <div className="flex items-center gap-3 mb-2">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
                             <h1 className="text-2xl font-bold" data-testid="case-title">
                                 Заявка {caseDetail.id.slice(0, 8)}
                             </h1>
                             <SlaBadge status={caseDetail.sla_status} />
+                            {caseDetail.needs_reply && (
+                                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-yellow-100 text-yellow-800">
+                                    Нужно ответить
+                                </span>
+                            )}
                         </div>
-                        <div className="flex flex-wrap gap-2 text-sm">
+                        <div className="flex flex-wrap gap-2 text-xs">
                             <span
-                                className={`px-2 py-1 rounded font-medium ${caseDetail.status === "resolved"
+                                className={`px-2 py-0.5 rounded font-semibold ${caseDetail.status === "resolved"
                                     ? "bg-muted text-muted-foreground"
                                     : isActive
                                         ? "bg-green-100 text-green-800"
@@ -134,13 +140,13 @@ export default function CaseConversation({
                             >
                                 {getStatusLabel(caseDetail.status)}
                             </span>
-                            {caseDetail.assigned_to_name && (
-                                <span className="px-2 py-1 rounded bg-secondary text-secondary-foreground">
-                                    👤 {caseDetail.assigned_to_name}
-                                </span>
-                            )}
-                            <span className="bg-muted px-2 py-1 rounded">Канал: {caseDetail.channel}</span>
-                            <span className="bg-muted px-2 py-1 rounded">Триггер: {caseDetail.trigger_type}</span>
+                            <span
+                                className={`px-2 py-0.5 rounded font-semibold ${
+                                    caseDetail.assigned_to_name ? "bg-secondary text-secondary-foreground" : "bg-muted text-muted-foreground"
+                                }`}
+                            >
+                                👤 {assignedLabel}
+                            </span>
                         </div>
                     </div>
 
@@ -191,7 +197,7 @@ export default function CaseConversation({
             </div>
 
             <div className="rounded-lg border border-border/60 bg-card p-3 text-sm">
-                <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                <div className="flex flex-wrap items-center justify-between text-xs text-muted-foreground mb-1">
                     <span>{contextTitle}</span>
                     <span>Последнее входящее: {lastInbound}</span>
                 </div>

@@ -102,3 +102,11 @@
 - Быстрые ответы доступны без скролла, рядом с полем ввода.
 - Диагностика не мешает обработке (скрыта, явный вход).
 - Ясно, где “работать с заявкой”, и где “настраивать систему”.
+
+---
+
+## 7) V3 applied changes (2026-01-30)
+
+- Chat‑first layout widened (Inbox uses wider max‑width, narrower side columns).
+- Quick replies now live next to composer with chips + full list + search + manage tabs.
+- Details tabs clarified with RU labels; channel/trigger mapped to human‑friendly labels.

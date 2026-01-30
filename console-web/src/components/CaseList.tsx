@@ -85,6 +85,7 @@ export default function CaseList({
     const [searchValue, setSearchValue] = useState("");
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const isCompact = variant === "compact";
+    const headingLabel = isCompact ? "Очередь" : "Заявки";
     const sortOptions: { id: CaseFilters["sortBy"]; label: string }[] = [
         { id: "activity", label: "Активные" },
         { id: "created_at", label: "Новые" },
@@ -214,7 +215,7 @@ export default function CaseList({
     if (isLoading && !cursor) {
         return (
             <div className="w-full">
-                <h2 className="text-xl font-semibold mb-4" data-testid="cases-title">Заявки</h2>
+                <h2 className="text-xl font-semibold mb-4" data-testid="cases-title">{headingLabel}</h2>
                 <TableSkeleton />
             </div>
         );
@@ -223,7 +224,7 @@ export default function CaseList({
     if (error) {
         return (
             <div className="w-full">
-                <h2 className="text-xl font-semibold mb-4" data-testid="cases-title">Заявки</h2>
+                <h2 className="text-xl font-semibold mb-4" data-testid="cases-title">{headingLabel}</h2>
                 <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center" data-testid="cases-error">
                     <p className="text-destructive mb-4">Не удалось загрузить заявки</p>
                     <button
@@ -241,7 +242,7 @@ export default function CaseList({
     return (
         <div className={isCompact ? "flex flex-col h-full" : "w-full"}>
             <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
-                <h2 className="text-xl font-semibold" data-testid="cases-title">Заявки</h2>
+                <h2 className="text-xl font-semibold" data-testid="cases-title">{headingLabel}</h2>
                 <button
                     onClick={() => { resetPagination(); refetch(); }}
                     className="text-xs text-muted-foreground hover:text-foreground"
