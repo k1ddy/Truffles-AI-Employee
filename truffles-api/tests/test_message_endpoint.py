@@ -1134,6 +1134,91 @@ def test_strict_ood_skips_out_of_domain_with_service_request_signal():
     assert "explicit_service" in (result.class_router_result.get("in_signals") or [])
 
 
+def test_signal_snapshot_written_on_class_router():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+    conversation = SimpleNamespace(
+        id="conv-snapshot-1",
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    signals = DecisionSignals(
+        intent=Intent.QUESTION,
+        is_greeting=False,
+        is_thanks=False,
+        is_ack=False,
+        is_low_signal=False,
+        is_status_question=False,
+    )
+    domain_meta = {
+        "in_threshold": 0.6,
+        "out_threshold": 0.6,
+        "margin": 0.1,
+        "in_hits": 2,
+        "out_hits": 0,
+        "strict_in_hits": 1,
+        "anchors_in": 12,
+        "anchors_out": 6,
+        "strict_in_anchors": 4,
+    }
+    class_router_result = {
+        "out_of_domain_signal": False,
+        "in_signals": ["explicit_service"],
+        "out_signals": [],
+        "classes": ["info_bundle"],
+        "intents": ["location"],
+        "carryover_intents": [],
+        "carryover_class": None,
+        "carryover_info_sections": None,
+        "router_fallback_reason": None,
+        "controller_fallback_reason": None,
+        "router": {"eligible": True},
+        "controller": {
+            "used": True,
+            "attempted": True,
+            "fallback": False,
+            "low_confidence": False,
+            "confidence": 0.82,
+            "goal": "info",
+        },
+    }
+
+    with patch(
+        "app.routers.webhook.decision._detect_intent_signals", return_value=signals
+    ), patch(
+        "app.routers.webhook._legacy.classify_domain_with_scores",
+        return_value=(DomainIntent.IN_DOMAIN, 0.77, 0.12, domain_meta),
+    ), patch(
+        "app.routers.webhook._legacy._resolve_class_router_result",
+        return_value=class_router_result,
+    ), patch(
+        "app.routers.webhook.decision._has_explicit_service_signal", return_value=True
+    ):
+        webhook_router._run_class_router_stage(
+            conversation=conversation,
+            saved_message=saved_message,
+            message_text="Где вы находитесь?",
+            client_slug="demo_salon",
+            client_config={},
+            remote_jid=None,
+            timing_context={},
+            info_class_intents=set(),
+            info_class_meta={},
+            booking_signal=False,
+            class_carryover=None,
+            router_state=None,
+            intent_decomp_payload=None,
+            expected_reply_shortcircuit=False,
+            log_timing=lambda *args, **_kwargs: None,
+        )
+
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    snapshot = meta.get("signal_snapshot", {})
+    assert snapshot.get("domain_router", {}).get("intent") == "in_domain"
+    assert snapshot.get("class_router", {}).get("out_of_domain_signal") is False
+    assert snapshot.get("intent_signals", {}).get("intent") == "question"
+
+
 def test_consult_pack_writes_decision_meta():
     saved_message = Mock()
     saved_message.message_metadata = {}
@@ -1271,6 +1356,32 @@ def test_consult_pack_writes_decision_meta():
         if isinstance(entry, dict)
     )
     mock_llm.assert_not_called()
+
+
+def test_signal_snapshot_records_rag_meta():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+    conversation = SimpleNamespace(id="conv-rag-1", context={})
+    timing_context = {
+        "rag_scores": {"vector_count": 1, "bm25_count": 0, "vector_score": 0.42},
+        "rag_attempted": True,
+        "rag_best_score": 0.42,
+        "branch_id": "branch-1",
+        "knowledge_tag": "tag-1",
+    }
+
+    webhook_response._record_rag_meta(
+        conversation=conversation,
+        saved_message=saved_message,
+        timing_context=timing_context,
+    )
+
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    snapshot = meta.get("signal_snapshot", {})
+    rag_snapshot = snapshot.get("rag", {})
+    assert rag_snapshot.get("scores", {}).get("vector_count") == 1
+    assert rag_snapshot.get("attempted") is True
+    assert snapshot.get("knowledge", {}).get("knowledge_tag") == "tag-1"
 
 
 def test_consult_precedence_over_booking_flow():

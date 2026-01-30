@@ -17,6 +17,7 @@ from app.routers.webhook.trace import (
     _record_decision_trace,
     _record_message_decision_meta,
     _update_message_decision_metadata,
+    _update_message_signal_snapshot,
 )
 from app.schemas.webhook import WebhookResponse
 
@@ -403,6 +404,35 @@ def _record_llm_degradation(
     timing_context["llm_degradation_reason"] = None
 
 
+def _record_llm_signal_snapshot(
+    *,
+    saved_message: Message | None,
+    timing_context: dict | None,
+    primary_used: bool,
+    primary_confidence: str | None,
+    primary_reason: str | None,
+    blocked_topics: list[str] | None = None,
+) -> None:
+    if not saved_message:
+        return
+    llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+    llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+    llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+    llm_snapshot: dict[str, Any] = {
+        "used": llm_used,
+        "timeout": llm_timeout,
+        "cache_hit": llm_cache_hit,
+        "primary_used": primary_used,
+    }
+    if primary_confidence is not None:
+        llm_snapshot["primary_confidence"] = primary_confidence
+    if primary_reason:
+        llm_snapshot["primary_reason"] = primary_reason
+    if blocked_topics:
+        llm_snapshot["blocked_topics"] = blocked_topics
+    _update_message_signal_snapshot(saved_message, {"llm": llm_snapshot})
+
+
 def _ensure_rag_rewrite(
     *,
     conversation: Conversation,
@@ -499,6 +529,25 @@ def _record_rag_meta(
             saved_message,
             meta_updates,
         )
+        rag_snapshot: dict[str, Any] = {
+            "scores": rag_scores,
+            "confident": rag_confident,
+            "reason": rag_reason,
+            "attempted": bool(
+                timing_context.get("rag_attempted") if isinstance(timing_context, dict) else False
+            ),
+        }
+        best_score = timing_context.get("rag_best_score") if isinstance(timing_context, dict) else None
+        if isinstance(best_score, (int, float)):
+            rag_snapshot["best_score"] = best_score
+        _update_message_signal_snapshot(saved_message, {"rag": rag_snapshot})
+        knowledge_snapshot: dict[str, Any] = {}
+        if branch_id:
+            knowledge_snapshot["branch_id"] = branch_id
+        if knowledge_tag:
+            knowledge_snapshot["knowledge_tag"] = knowledge_tag
+        if knowledge_snapshot:
+            _update_message_signal_snapshot(saved_message, {"knowledge": knowledge_snapshot})
 
 
 def _maybe_apply_consult_return(
@@ -994,6 +1043,11 @@ def _handle_consult_flow(
             meta["consult_snapshot_playbook_error"] = result.playbook_error
         return meta
 
+    def _record_consult_snapshot_signal(meta: dict[str, Any] | None) -> None:
+        if not saved_message or not isinstance(meta, dict):
+            return
+        _update_message_signal_snapshot(saved_message, {"consult_snapshot": meta})
+
     playbook = None
     _pack_error = None
 
@@ -1024,6 +1078,7 @@ def _handle_consult_flow(
                 mode=consult_snapshot_mode,
                 source=consult_snapshot_source,
             )
+            _record_consult_snapshot_signal(consult_snapshot_meta)
             legacy._record_decision_trace(
                 conversation,
                 _build_consult_snapshot_trace(
@@ -1092,6 +1147,7 @@ def _handle_consult_flow(
                 mode="shadow",
                 source="shadow",
             )
+            _record_consult_snapshot_signal(consult_snapshot_meta)
             legacy._record_decision_trace(
                 conversation,
                 _build_consult_snapshot_trace(
@@ -1875,6 +1931,13 @@ def _handle_llm_primary(
     if not llm_primary_result.ok:
         llm_primary_failed = True
         llm_primary_reason = "ai_error"
+        _record_llm_signal_snapshot(
+            saved_message=saved_message,
+            timing_context=timing_context,
+            primary_used=False,
+            primary_confidence=None,
+            primary_reason=llm_primary_reason,
+        )
         return LlmPrimaryOutcome(
             response=None,
             llm_primary_result=llm_primary_result,
@@ -1886,6 +1949,13 @@ def _handle_llm_primary(
     if confidence == "bot_inactive":
         llm_primary_failed = True
         llm_primary_reason = "bot_inactive"
+        _record_llm_signal_snapshot(
+            saved_message=saved_message,
+            timing_context=timing_context,
+            primary_used=False,
+            primary_confidence=confidence,
+            primary_reason=llm_primary_reason,
+        )
         return LlmPrimaryOutcome(
             response=None,
             llm_primary_result=llm_primary_result,
@@ -1965,6 +2035,14 @@ def _handle_llm_primary(
                         "llm_cache_hit": llm_cache_hit,
                     },
                 )
+                _record_llm_signal_snapshot(
+                    saved_message=saved_message,
+                    timing_context=timing_context,
+                    primary_used=False,
+                    primary_confidence=confidence,
+                    primary_reason="llm_guard",
+                    blocked_topics=blocked_topics,
+                )
             bot_response, sent = send_and_save(bot_response, allow_quiet_hours=False)
             if not sent:
                 result_message = f"{result_message}; response_send=failed"
@@ -2014,6 +2092,13 @@ def _handle_llm_primary(
                     "llm_cache_hit": llm_cache_hit,
                 },
             )
+            _record_llm_signal_snapshot(
+                saved_message=saved_message,
+                timing_context=timing_context,
+                primary_used=True,
+                primary_confidence=confidence,
+                primary_reason=None,
+            )
         db.commit()
         return LlmPrimaryOutcome(
             response=WebhookResponse(
@@ -2029,6 +2114,13 @@ def _handle_llm_primary(
 
     llm_primary_failed = True
     llm_primary_reason = "low_confidence" if confidence == "low_confidence" else "no_response"
+    _record_llm_signal_snapshot(
+        saved_message=saved_message,
+        timing_context=timing_context,
+        primary_used=False,
+        primary_confidence=confidence,
+        primary_reason=llm_primary_reason,
+    )
     return LlmPrimaryOutcome(
         response=None,
         llm_primary_result=llm_primary_result,
@@ -2448,6 +2540,19 @@ def _handle_ai_response_action(
                             "llm_used": llm_used,
                             "llm_timeout": llm_timeout,
                             "llm_cache_hit": llm_cache_hit,
+                        },
+                    )
+                    _update_message_signal_snapshot(
+                        saved_message,
+                        {
+                            "semantic_service": {
+                                "attempted": True,
+                                "action": semantic_result.action,
+                                "score": semantic_result.score,
+                                "rewrite_used": rewrite_used,
+                                "rewrite_query": rewrite_query,
+                                "canonical_name": semantic_result.canonical_name,
+                            }
                         },
                     )
                 bot_response, sent = send_and_save(bot_response)
