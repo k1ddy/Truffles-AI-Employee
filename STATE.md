@@ -12,6 +12,7 @@
 - DONE: Console CaseList `useQuery` import fix — lint `npm --prefix console-web run lint`.
 - DONE: Inbox UX implementation (queue simplification + context strip + quick replies near composer + diagnostics gated) — evidence: `/tmp/console_web_lint_20260130.txt`, `console-web/src/components/*`.
 - DONE: Inbox UX v2 (chat-first layout + RU copy + macros in DB + details toggle) — evidence: `/tmp/pytest_inbox_macros.txt`, `/tmp/npm_lint_console_web.txt`, `/tmp/inbox_ux_v2.png`, `/tmp/inbox_ux_v2_details.png`, `docs/REPORTS/2026-01-30-inbox-ux-v2.md`.
+- DONE: Console build info wiring (restart script + build args) — evidence: `/tmp/console_web_build_info_20260130.txt`, `/tmp/console_web_build_info_bundle_20260130.txt`, `scripts/restart_console_web.sh`, `TECH.md`.
 - DONE: Inbox UX v3 (wider chat, quick replies panel + search, RU labels for case/consultant, clearer context strip) — evidence: `/tmp/console_web_lint_inbox_ux_v3_20260130.txt`, `console-web/src/components/*`, `console-web/src/utils/labels.ts`.
 - DONE: Session governance (session log + scripts + hooks + doc-only gate) — Task Package `docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md`; Evidence: `docs/SESSIONS/SESSION-2026-01-27-session-governance.md`, `docs/SESSION_INDEX.md`, `scripts/session_*.sh`, `.githooks/`, `.github/workflows/session-gate.yml`.
 - DONE: Dialog report one-command tool + runbook (timeline + decision_meta/outbox + media/ASR) — evidence: `python3 ops/diagnose.py dialog-report --help`, report `/tmp/dialog-report-2026-01-29-1627-1636.md`.
