@@ -85,6 +85,7 @@ export default function CaseList({
     const [searchValue, setSearchValue] = useState("");
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const isCompact = variant === "compact";
+    const filtersCompact = isCompact && !!selectedCaseId;
     const headingLabel = isCompact ? "Очередь" : "Заявки";
     const sortOptions: { id: CaseFilters["sortBy"]; label: string }[] = [
         { id: "activity", label: "Активные" },
@@ -121,6 +122,16 @@ export default function CaseList({
         : advancedFiltersVisible
             ? "Скрыть фильтры"
             : "Расширенные фильтры";
+    const headingClass = isCompact ? "text-lg" : "text-xl";
+    const filterContainerClass = `flex flex-col border border-border/60 rounded-lg ${
+        filtersCompact ? "gap-2 p-2" : "gap-3 p-3"
+    } ${isCompact ? "sticky top-0 z-10 bg-card/95 backdrop-blur" : "bg-muted"}`;
+    const searchInputClass = `px-3 border border-border/60 rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 min-w-[160px] ${
+        filtersCompact ? "py-1.5 text-xs" : "py-2 text-sm"
+    }`;
+    const selectClass = `px-3 border border-border/60 rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 ${
+        filtersCompact ? "py-1.5 text-xs" : "py-2 text-xs"
+    }`;
 
     const pillClass = (active: boolean) => (
         `rounded-full border px-3 py-1 text-xs font-semibold transition ${
@@ -242,7 +253,7 @@ export default function CaseList({
     return (
         <div className={isCompact ? "flex flex-col h-full" : "w-full"}>
             <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
-                <h2 className="text-xl font-semibold" data-testid="cases-title">{headingLabel}</h2>
+                <h2 className={`${headingClass} font-semibold`} data-testid="cases-title">{headingLabel}</h2>
                 <button
                     onClick={() => { resetPagination(); refetch(); }}
                     className="text-xs text-muted-foreground hover:text-foreground"
@@ -253,24 +264,22 @@ export default function CaseList({
             </div>
 
             <div
-                className={`flex flex-col gap-3 border border-border/60 rounded-lg p-3 ${
-                    isCompact ? "sticky top-0 z-10 bg-card/95 backdrop-blur" : "bg-muted"
-                }`}
+                className={filterContainerClass}
                 data-testid="cases-filters"
             >
-                <div className="flex w-full flex-wrap items-center gap-3">
+                <div className="flex w-full items-center gap-2 overflow-x-auto pb-1">
                     <input
                         type="text"
                         value={searchValue}
                         onChange={(e) => setSearchValue(e.target.value)}
                         placeholder="Телефон / имя / ID"
-                        className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 min-w-[180px]"
+                        className={searchInputClass}
                         data-testid="cases-filter-search"
                     />
                     <select
                         value={filters.status || ""}
                         onChange={(e) => { resetPagination(); setFilters({ ...filters, status: e.target.value || undefined }); }}
-                        className="px-3 py-2 border border-border/60 rounded-lg text-xs bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        className={selectClass}
                         data-testid="cases-filter-status"
                     >
                         <option value="">Все статусы</option>
@@ -278,7 +287,7 @@ export default function CaseList({
                         <option value="active">В работе</option>
                         <option value="resolved">Закрыта</option>
                     </select>
-                    <div className="flex flex-wrap items-center gap-2" data-testid="cases-filter-sort">
+                    <div className="flex items-center gap-2" data-testid="cases-filter-sort">
                         {sortOptions.map((option) => (
                             <button
                                 key={option.id}
@@ -307,7 +316,7 @@ export default function CaseList({
                     <button
                         type="button"
                         onClick={() => setShowAdvancedFilters((prev) => !prev)}
-                        className="text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                        className="text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap"
                         data-testid="cases-filter-advanced-toggle"
                         disabled={advancedFiltersActive}
                     >
@@ -326,7 +335,7 @@ export default function CaseList({
                                     hasPendingOutbox: false,
                                 });
                             }}
-                            className="text-xs text-muted-foreground hover:text-destructive"
+                            className="text-xs text-muted-foreground hover:text-destructive whitespace-nowrap"
                             data-testid="cases-filter-clear"
                         >
                             Сбросить
@@ -335,14 +344,14 @@ export default function CaseList({
                 </div>
                 {advancedFiltersVisible && (
                     <div
-                        className="flex w-full flex-wrap items-center gap-3 border-t border-border/60 pt-3"
+                        className="flex w-full flex-wrap items-center gap-3 border-t border-border/60 pt-2"
                         data-testid="cases-filters-advanced"
                     >
                         {branchFilterEnabled && (
                             <select
                                 value={filters.branchId || ""}
                                 onChange={(e) => { resetPagination(); setFilters({ ...filters, branchId: e.target.value || undefined }); }}
-                                className="px-3 py-2 border border-border/60 rounded-lg text-xs bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                className={selectClass}
                                 data-testid="cases-filter-branch"
                             >
                                 <option value="">Все филиалы</option>
