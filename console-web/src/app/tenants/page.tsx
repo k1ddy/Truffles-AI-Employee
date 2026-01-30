@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { InfiniteData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import toast from "react-hot-toast";
 import type { components } from "@/types/api.generated";
@@ -123,8 +123,13 @@ export default function TenantsPage() {
     const companyQueryValue = companyQuery.trim() || undefined;
     const clientQueryValue = clientQuery.trim() || undefined;
     const branchQueryValue = branchQuery.trim() || undefined;
-
-    const companiesQuery = useInfiniteQuery({
+    const companiesQuery = useInfiniteQuery<
+        components["schemas"]["CompanyListResponse"],
+        Error,
+        InfiniteData<components["schemas"]["CompanyListResponse"], string | undefined>,
+        ["tenants-companies", string | undefined],
+        string | undefined
+    >({
         queryKey: ["tenants-companies", companyQueryValue],
         queryFn: async ({ pageParam }) => {
             const cursor = typeof pageParam === "string" ? pageParam : undefined;
@@ -135,12 +140,19 @@ export default function TenantsPage() {
             });
             return response.data;
         },
+        initialPageParam: undefined,
         getNextPageParam: (lastPage) =>
             lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
         enabled: tenantsEnabled,
     });
 
-    const clientsQuery = useInfiniteQuery({
+    const clientsQuery = useInfiniteQuery<
+        components["schemas"]["ClientListResponse"],
+        Error,
+        InfiniteData<components["schemas"]["ClientListResponse"], string | undefined>,
+        ["tenants-clients", string | undefined],
+        string | undefined
+    >({
         queryKey: ["tenants-clients", clientQueryValue],
         queryFn: async ({ pageParam }) => {
             const cursor = typeof pageParam === "string" ? pageParam : undefined;
@@ -151,12 +163,19 @@ export default function TenantsPage() {
             });
             return response.data;
         },
+        initialPageParam: undefined,
         getNextPageParam: (lastPage) =>
             lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
         enabled: tenantsEnabled,
     });
 
-    const branchesQuery = useInfiniteQuery({
+    const branchesQuery = useInfiniteQuery<
+        components["schemas"]["BranchListResponse"],
+        Error,
+        InfiniteData<components["schemas"]["BranchListResponse"], string | undefined>,
+        ["tenants-branches", string | undefined],
+        string | undefined
+    >({
         queryKey: ["tenants-branches", branchQueryValue],
         queryFn: async ({ pageParam }) => {
             const cursor = typeof pageParam === "string" ? pageParam : undefined;
@@ -167,6 +186,7 @@ export default function TenantsPage() {
             });
             return response.data;
         },
+        initialPageParam: undefined,
         getNextPageParam: (lastPage) =>
             lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
         enabled: tenantsEnabled,
@@ -215,6 +235,10 @@ export default function TenantsPage() {
     };
 
     const startCompanyEdit = (company: components["schemas"]["Company"]) => {
+        if (!company.id) {
+            toast.error("Не удалось открыть компанию без ID");
+            return;
+        }
         setClientEditor(null);
         setBranchEditor(null);
         const billingInfo = stringifyOptionalJson(company.billing_info);
@@ -228,6 +252,10 @@ export default function TenantsPage() {
     };
 
     const startClientEdit = (client: components["schemas"]["Client"]) => {
+        if (!client.id) {
+            toast.error("Не удалось открыть клиента без ID");
+            return;
+        }
         setCompanyEditor(null);
         setBranchEditor(null);
         setClientEditor({
@@ -241,6 +269,10 @@ export default function TenantsPage() {
     };
 
     const startBranchEdit = (branch: components["schemas"]["Branch"]) => {
+        if (!branch.id) {
+            toast.error("Не удалось открыть филиал без ID");
+            return;
+        }
         setCompanyEditor(null);
         setClientEditor(null);
         setBranchEditor({
@@ -365,7 +397,7 @@ export default function TenantsPage() {
             toast.error("instance_id обязателен для активного филиала");
             return;
         }
-        const payload: components["schemas"]["BranchUpdateRequest"] = {};
+        const payload: components["schemas"]["BranchUpdateRequest"] & { confirmation_id?: string } = {};
         if (name !== branchEditor.original.name) {
             payload.name = name;
         }

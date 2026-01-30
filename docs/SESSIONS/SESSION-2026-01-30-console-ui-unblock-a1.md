@@ -1,0 +1,22 @@
+# SESSION 2026-01-30-console-ui-unblock-a1 — Session 2026-01-30-console-ui-unblock-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-30-console-ui-unblock.md
+- branch: feat/2026-01-30-console-ui-unblock-a1
+- worktree: /home/zhan/worktrees/2026-01-30-console-ui-unblock-a1
+- base_ref: origin/main
+- scope: Console UI CSS overlay (noise layer) causing click-blocking.
+- done:
+  - Moved noise texture from fixed overlay to body background.
+  - Fixed console-web build type errors in Tenants page (infinite query typing, missing IDs, confirmation_id payload type).
+  - Deployed console-web via docker compose build/recreate.
+  - Playwright login smoke against prod console URL (post-deploy).
+  - User confirmed Chrome selection gate is clickable (admin/admin).
+- next:
+  - None.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-30-console-ui-unblock.md
+  - Playwright: `PLAYWRIGHT_BASE_URL=https://console.truffles.kz PLAYWRIGHT_WEB_SERVER=0 E2E_USERNAME=admin E2E_PASSWORD=admin npx playwright test login.spec.ts --project=chromium-login --reporter=line` (3 passed)
+  - Deploy: `docker compose -f truffles-api/docker-compose.yml up -d --build console-web`
+- last_updated: 2026-01-30

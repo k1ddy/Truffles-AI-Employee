@@ -49,3 +49,4 @@
 | 2026-01-29-dialog-report-a1 | done | feat/2026-01-29-dialog-report-a1 | /home/zhan/worktrees/2026-01-29-dialog-report-a1 | docs/TASK_PACKAGES/TP-2026-01-29-dialog-report-tool.md | 2026-01-29 |
 | 2026-01-29-pack-layers-a1 | done | feat/2026-01-29-pack-layers-a1 | /home/zhan/worktrees/2026-01-29-pack-layers-a1 | docs/TASK_PACKAGES/TP-2026-01-29-pack-layers-dec.md | 2026-01-29 |
 | 2026-01-29-mandatory-data-gate-a1 | done | feat/2026-01-29-mandatory-data-gate-a1 | /home/zhan/worktrees/2026-01-29-mandatory-data-gate-a1 | docs/TASK_PACKAGES/TP-2026-01-29-mandatory-data-gate.md | 2026-01-29 |
+| 2026-01-30-console-ui-unblock-a1 | done | feat/2026-01-30-console-ui-unblock-a1 | /home/zhan/worktrees/2026-01-30-console-ui-unblock-a1 | docs/TASK_PACKAGES/TP-2026-01-30-console-ui-unblock.md | 2026-01-30 |
