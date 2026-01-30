@@ -145,6 +145,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-28-decision-meta-branch-id.md`
 - `docs/TASK_PACKAGES/TP-2026-01-29-ci-ruff-ca06.md`
 - `docs/TASK_PACKAGES/TP-2026-01-29-dialog-report-tool.md`
+- `docs/TASK_PACKAGES/TP-2026-01-29-p0-behavior-fixes.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`

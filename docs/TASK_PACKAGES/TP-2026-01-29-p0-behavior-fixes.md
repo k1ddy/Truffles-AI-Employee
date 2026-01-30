@@ -1,0 +1,64 @@
+- Название/цель: P0 behavior fixes to align replies with canon scenarios (controller budget priority, strict OOD, service_not_offered on low score, pending payment notice, CTA after info) + tests/evidence.
+- Canon refs: `STATE.md` (PLAN TP-2026-01-24-consult-quality-core-v1; OPEN chaos-sim OOD residuals), `SPECS/CONSULTANT.md`, `SPECS/ESCALATION.md`, `SPECS/ARCHITECTURE.md`, `SPECS/SYSTEM_REFERENCE.md`, `STRATEGY/REQUIREMENTS.md`; CA IDs: CA-04 (service matcher), CA-07 (OOD), CA-01/02 (payment policy).
+- Invariant:
+  - Hard-LAW/policy/pending remain pre-LLM and fail-closed.
+  - decision_meta/decision_trace recorded on every user message and early return.
+  - No orchestration added to entrypoints or `_legacy.py`; stage order snapshot preserved (hash updated only if order changes).
+- Scope:
+  - Controller-LLM budget priority (reserve budget; ensure controller attempted when budget allows).
+  - Strict OOD gate when no in-domain signals; avoid info_bundle fallback on intent=other.
+  - service_not_offered when semantic match is low and RAG empty (use pack not_found_reply).
+  - Payment escalation response includes pending notice per `SPECS/ESCALATION.md`.
+  - CTA appended after standalone info responses (prices/duration/hours/address) unless excluded by canon.
+- Out of scope:
+  - Auto-enrichment pipeline, pack layering, tool registry.
+  - Price/service catalog changes (except payment response template if needed).
+  - Calendar/CRM changes.
+- Touch-list:
+  - `truffles-api/app/routers/webhook/decision.py`
+  - `truffles-api/app/routers/webhook/response.py`
+  - `truffles-api/app/routers/webhook/info.py`
+  - `truffles-api/app/services/intent_service.py`
+  - `truffles-api/app/services/ai_service.py`
+  - `truffles-api/app/services/demo_salon_knowledge.py`
+  - `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`
+  - `truffles-api/app/knowledge/demo_salon/EVAL.yaml`
+  - `truffles-api/tests/test_demo_salon_eval.py`
+  - `truffles-api/tests/test_message_endpoint.py`
+- Plan:
+  1) Create session/worktree after this Task Package is recorded.
+  2) Implement controller budget priority (reserve budget; skip heavier stages if needed; ensure controller attempt when budget allows).
+  3) Tighten OOD gate to return out_of_domain when no in-domain signals (avoid info_bundle fallback).
+  4) Enforce service_not_offered when semantic match is low and RAG empty (use pack not_found_reply).
+  5) Update payment escalation response to include pending notice; verify CTA after info responses.
+  6) Add/update EVAL + tests; run targeted pytest; capture evidence.
+- DoD:
+  - controller_llm attempted when budget allows; no deadline_exceeded for controller in normal budget.
+  - OOD queries without in-domain signals return out_of_domain, not info_bundle.
+  - service_not_offered returned on low semantic confidence with empty RAG; decision_meta shows service_not_found.
+  - Payment escalation response includes pending notice; action remains escalate.
+  - CTA appended after standalone info responses unless booking/pending/LAW.
+  - Tests pass and evidence recorded in `STATE.md` (Brain/Top Architect) before merge.
+- Checks:
+  - `pytest -q truffles-api/tests/test_ai_service.py -k "reserves_budget_for_controller"`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "truth_gate_appends_booking_cta_for_info_reply or strict_ood or semantic_service_matcher_returns_not_found_on_empty_rag"`
+  - `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "CA07_OOD or CA04_SERVICE_NOT_FOUND or payment"`
+- Evidence:
+  - Pytest outputs from checks above.
+  - If live-check is possible, capture decision_meta/trace; update `STATE.md` with evidence before merge.
+- Rollback:
+  - `git revert HEAD`.
+- No-go:
+  - No DB edits for evidence.
+  - No new orchestration in `_legacy.py` or entrypoints.
+  - No pack changes beyond payment response template.
+  - No stage order change without snapshot hash update.
+- Риски/блокеры:
+  - Семантический сервис-матчинг зависит от Qdrant; оффлайн окружение может давать ложные fail.
+  - OOD residuals требуют in-domain сигналов в тестах, иначе ложные OOD.
+- Branch/worktree:
+  - Branch: `p0/behavior-fixes-2026-01-29-a1`
+  - Worktree: `/home/zhan/worktrees/2026-01-29-p0-behavior-a1`
+  - Base ref: `origin/main`
+  - Merge policy: PR + CI (merge-only)
+  - Cleanup: Brain after merge

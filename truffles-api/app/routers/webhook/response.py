@@ -2042,6 +2042,7 @@ def _handle_ai_response_action(
         )
         semantic_result = None
         rewrite_query = None
+        semantic_attempted = False
         info_intent_hint = False
         if isinstance(intent_decomp_payload, dict):
             raw_intents = intent_decomp_payload.get("intents")
@@ -2177,13 +2178,15 @@ def _handle_ai_response_action(
                     llm_primary_failed=llm_primary_failed,
                     llm_primary_reason=llm_primary_reason,
                 )
+            explicit_service_hint = None
+            intent_decomp_explicit_query = None
+            controller_service_query = None
+            raw_source = None
             if not out_of_domain_signal:
-                explicit_service_hint = None
                 if message_text and client_slug:
                     explicit_service_hint = legacy._extract_service_hint(
                         message_text, client_slug
                     )
-                intent_decomp_explicit_query = None
                 if isinstance(intent_decomp_payload, dict):
                     raw_source = intent_decomp_payload.get("service_query_source")
                     raw_query = intent_decomp_payload.get("service_query")
@@ -2267,6 +2270,7 @@ def _handle_ai_response_action(
                         llm_primary_failed=llm_primary_failed,
                         llm_primary_reason=llm_primary_reason,
                     )
+                semantic_attempted = True
                 semantic_result = legacy.semantic_service_match(message_text, client_slug)
                 if not semantic_result:
                     rewrite_query = legacy.rewrite_for_service_match(
@@ -2337,6 +2341,91 @@ def _handle_ai_response_action(
                     llm_primary_failed=llm_primary_failed,
                     llm_primary_reason=llm_primary_reason,
                 )
+            explicit_service_query = None
+            service_query_source = None
+            if explicit_service_hint:
+                explicit_service_query = explicit_service_hint
+                service_query_source = "semantic_match"
+            elif intent_decomp_explicit_query:
+                explicit_service_query = intent_decomp_explicit_query
+                if isinstance(raw_source, str) and raw_source.strip():
+                    service_query_source = raw_source.strip()
+                else:
+                    service_query_source = "intent_decomp"
+            elif controller_service_query:
+                explicit_service_query = controller_service_query
+                service_query_source = "controller"
+            rag_scores = timing_context.get("rag_scores") if isinstance(timing_context, dict) else None
+            rag_attempted = bool(
+                timing_context.get("rag_attempted") if isinstance(timing_context, dict) else False
+            )
+            vector_count = int(rag_scores.get("vector_count") or 0) if isinstance(rag_scores, dict) else 0
+            bm25_count = int(rag_scores.get("bm25_count") or 0) if isinstance(rag_scores, dict) else 0
+            rag_empty = bool(rag_attempted and vector_count <= 0 and bm25_count <= 0)
+            if semantic_attempted and explicit_service_query and rag_empty:
+                from app.services.demo_salon_knowledge import (
+                    _format_service_not_found_reply,
+                    load_yaml_truth,
+                )
+
+                reply = _format_service_not_found_reply(load_yaml_truth(client_slug))
+                if reply:
+                    bot_response = reply
+                    legacy._reset_low_confidence_retry(conversation)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "service_semantic_matcher",
+                            "decision": "service_not_found",
+                            "state": conversation.state,
+                            "rewrite_used": bool(rewrite_query),
+                            "rewrite_query": rewrite_query,
+                            "service_query": explicit_service_query,
+                            "service_query_source": service_query_source,
+                        },
+                    )
+                    if saved_message:
+                        llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+                        llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+                        llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+                        _update_message_decision_metadata(
+                            saved_message,
+                            {
+                                "action": "reply",
+                                "intent": "service_not_found",
+                                "source": "service_semantic_matcher",
+                                "fact_source": "service_semantic_matcher",
+                                "fact_intents": ["service_not_found"],
+                                "service_query": explicit_service_query,
+                                "service_query_source": service_query_source,
+                                "service_semantic_rewrite_used": bool(rewrite_query),
+                                "service_semantic_rewrite_query": rewrite_query,
+                                "fast_intent": False,
+                                "llm_primary_used": False,
+                                "llm_used": llm_used,
+                                "llm_timeout": llm_timeout,
+                                "llm_cache_hit": llm_cache_hit,
+                            },
+                        )
+                    bot_response, sent = send_and_save(bot_response)
+                    result_message = (
+                        "Service semantic not found reply sent"
+                        if sent
+                        else "Service semantic not found send failed"
+                    )
+                    db.commit()
+                    return AiResponseOutcome(
+                        response=WebhookResponse(
+                            success=True,
+                            message=result_message,
+                            conversation_id=conversation.id,
+                            bot_response=bot_response,
+                        ),
+                        bot_response=bot_response,
+                        result_message=result_message,
+                        llm_primary_failed=llm_primary_failed,
+                        llm_primary_reason=llm_primary_reason,
+                    )
             if conversation.state == legacy.ConversationState.PENDING.value:
                 bot_response = legacy.MSG_PENDING_LOW_CONFIDENCE
                 _record_decision_trace(

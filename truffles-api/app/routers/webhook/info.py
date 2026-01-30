@@ -1354,6 +1354,21 @@ def _handle_truth_gate_fallback(
                 db.commit()
                 return guard_response
         bot_response = decision.response
+        if decision.action == "reply":
+            cta_intents = set(legacy.INFO_INTENTS) | set(legacy.BOOKING_CTA_SERVICE_INTENTS) | {
+                "location_directions",
+                "location_signage",
+                "parking",
+                "guest_policy",
+                "services_overview",
+            }
+            if decision.intent in cta_intents:
+                bot_response = legacy._maybe_append_booking_cta(
+                    bot_response,
+                    conversation_state=conversation.state,
+                    allow_booking_flow=routing["allow_booking_flow"],
+                    has_followup=bool(consult_return_pending),
+                )
         if consult_return_pending:
             bot_response = legacy._apply_consult_return(
                 conversation=conversation,

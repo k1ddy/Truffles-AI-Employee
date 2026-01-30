@@ -320,6 +320,7 @@ from app.services.demo_salon_knowledge import (
 )
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
+    CONTROLLER_TIMEOUT_SECONDS,
     DomainIntent,
     Intent,
     classify_domain_with_scores,
@@ -968,11 +969,22 @@ def _run_intent_decomposition(
     consult_return_reason = None
     consult_return_prompt = None
 
+    controller_reserve_ms = 0.0
+    if (
+        routing["allow_bot_reply"]
+        and not bypass_domain_flows
+        and message_text
+        and not expected_reply_shortcircuit
+        and os.environ.get("OPENAI_API_KEY")
+    ):
+        controller_reserve_ms = max(float(CONTROLLER_TIMEOUT_SECONDS) * 1000, 0.0)
+
     if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
         intent_decomp_payload = legacy.detect_multi_intent(
             message_text,
             client_slug=client_slug,
             timing_context=timing_context,
+            reserve_ms=controller_reserve_ms,
         )
         if isinstance(intent_decomp_payload, dict):
             intent_decomp_used = True
@@ -1680,6 +1692,24 @@ def _run_class_router_stage(
         router_state=router_state,
     )
     out_of_domain_signal = class_router_result["out_of_domain_signal"]
+    in_signals = class_router_result.get("in_signals") or []
+    if (
+        conversation.state == legacy.ConversationState.BOT_ACTIVE.value
+        and intent == Intent.OTHER
+        and not expected_reply_shortcircuit
+        and not in_signals
+        and not out_of_domain_signal
+    ):
+        out_of_domain_signal = True
+        out_signals = list(class_router_result.get("out_signals") or [])
+        if "intent_other" not in out_signals:
+            out_signals.append("intent_other")
+        class_router_result["out_signals"] = out_signals
+        classes = list(class_router_result.get("classes") or [])
+        if "out_of_domain" not in classes:
+            classes.append("out_of_domain")
+        class_router_result["classes"] = classes
+        class_router_result["out_of_domain_signal"] = True
     log_timing(
         "intent_ms",
         (time.monotonic() - intent_t0) * 1000,
@@ -7382,11 +7412,12 @@ async def _handle_webhook_payload(
         bot_response = OUT_OF_DOMAIN_RESPONSE
         _reset_low_confidence_retry(conversation)
         ood_source = "router_low_confidence" if signals.is_low_signal else "domain_router"
+        ood_decision = "router_low_confidence" if signals.is_low_signal else "fallback"
         _record_decision_trace(
             conversation,
             {
                 "stage": "out_of_domain",
-                "decision": "fallback",
+                "decision": ood_decision,
                 "state": conversation.state,
                 "rag_confident": rag_confident,
             },
