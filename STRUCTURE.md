@@ -151,6 +151,9 @@
 - `docs/TASK_PACKAGES/TP-2026-01-29-ci-ruff-ca06.md`
 - `docs/TASK_PACKAGES/TP-2026-01-29-dialog-report-tool.md`
 - `docs/TASK_PACKAGES/TP-2026-01-29-p0-behavior-fixes.md`
+- `docs/TASK_PACKAGES/TP-2026-01-30-chaos-oracle.md`
+- `docs/TASK_PACKAGES/TP-2026-01-30-console-build-info-wiring.md`
+- `docs/TASK_PACKAGES/TP-2026-01-30-console-web-deploy-inbox-ux-v3.md`
 - `docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v2-macros.md`
 - `docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v3.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
@@ -161,7 +164,6 @@
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-build-info.md`
-- `docs/TASK_PACKAGES/TP-2026-01-30-console-build-info-wiring.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-implementation.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-chaos-live-e2e.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-sim-time-override.md`
