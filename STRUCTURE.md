@@ -48,6 +48,7 @@
 | `scripts/restart_inbox_service.sh` | Перезапуск Inbox Service (shadow) | OPS |
 | `scripts/restart_decision_core.sh` | Перезапуск Decision Core (shadow) | OPS |
 | `scripts/restart_outbox_service.sh` | Перезапуск Outbox Service (shadow) | OPS |
+| `scripts/restart_console_web.sh` | Пересборка + перезапуск Console Web (build info) | OPS/Frontend |
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `ops/diagnose.py` | Диагностика диалогов/trace/outbox + `dialog-report` (one-command) | QA/OPS/Brain |
@@ -159,6 +160,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-25-control-plane-phase4-ui.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-contract-knowledge-unexclude.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-console-build-info.md`
+- `docs/TASK_PACKAGES/TP-2026-01-30-console-build-info-wiring.md`
 - `docs/TASK_PACKAGES/TP-2026-01-26-consult-agnostic-implementation.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-chaos-live-e2e.md`
 - `docs/TASK_PACKAGES/TP-2026-01-25-sim-time-override.md`
