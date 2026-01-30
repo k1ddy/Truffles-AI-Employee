@@ -201,8 +201,16 @@ function InboxMacros({
                     Загружаем макросы...
                 </div>
             ) : macrosQuery.isError ? (
-                <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground">
-                    Не удалось загрузить быстрые ответы.
+                <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground flex items-center justify-between gap-3">
+                    <span>Не удалось загрузить быстрые ответы.</span>
+                    <button
+                        type="button"
+                        onClick={() => macrosQuery.refetch()}
+                        className="text-xs font-semibold text-primary hover:text-primary/80 disabled:opacity-60"
+                        disabled={macrosQuery.isFetching}
+                    >
+                        Повторить
+                    </button>
                 </div>
             ) : primaryMacros.length === 0 ? (
                 <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground flex items-center justify-between gap-3">

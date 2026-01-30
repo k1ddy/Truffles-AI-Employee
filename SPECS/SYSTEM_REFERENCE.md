@@ -1086,12 +1086,13 @@ chatflow_service → WhatsApp
 | 18 | **LLM primary + fallback** (`response._handle_llm_primary`) | LLM path enabled | ai_response/clarify/escalate | `stage=llm_guard`, `stage=ai_response`, `stage=llm_degradation` |
 
 **Consult topic resolver**
-- `truffles-api/app/services/knowledge_service.py` uses embeddings for topic candidates; if embeddings fail or return empty, допускается детерминированный lexical fallback по pack‑терминам с фиксацией причины fallback в trace/meta.
+- `truffles-api/app/services/knowledge_service.py` uses embeddings for topic candidates; if embeddings fail or return empty, допускается детерминированный fallback **только по pack‑index терминам** с фиксацией причины fallback в trace/meta.
 
-**Signal snapshot (routing signals)**
-- Сводим сигналы от domain_router anchors (client_config), pack‑lexicons (policy/guest/service), semantic match (RAG/Qdrant), consult resolver.
-- Пишем в `decision_meta` источники/score/threshold, чтобы объяснять OOD/booking/intent решения.
+**Signal snapshot (routing signals, DEC-018)**
+- Сводим сигналы от **compiled pack‑index** (anchors/lexicons/cards), domain_router anchors (сгенерированы из pack‑index), semantic match (RAG/Qdrant), consult resolver, LLM pack‑ref.
+- Пишем в `decision_meta` источники/score/threshold **и pack version/hash**, чтобы объяснять OOD/booking/intent решения.
 - Канон: anchors в `client_config` синхронизируются из pack при publish; дрейф считается дефектом.
+- LLM‑выход обязан быть pack‑ref‑only; при несоответствии → deterministic fallback + `llm_pack_ref_error` в meta.
 
 **Media/ASR ordering**
 - `style_reference_pending` (context) links text↔photo order; TTL clears stale references.
@@ -1102,6 +1103,7 @@ chatflow_service → WhatsApp
 
 ### Determinism Inventory (лексиконы + правила)
 **Принцип:** лексиконы — fallback; основной разбор смысла через semantic resolver и LLM‑router (см. `STRATEGY/REQUIREMENTS.md`).
+**Правило:** бизнес‑лексиконы запрещены в коде; все доменные списки живут в packs/pack‑index. Кодовые списки допустимы только для safety/system‑gates.
 **Правило:** не расширять словари ради прохождения eval; сначала правим packs/контракты, затем корректируем тесты.
 `demo_salon` — канареечный pack, логика должна быть pack‑agnostic.
 **Rules‑as‑data (packs):**
@@ -1111,6 +1113,7 @@ chatflow_service → WhatsApp
   Phrase intents + offtopic examples (используется в `phrase_match_intent`).
 
 **Code lexicons / regex (детерминированные списки):**
+_Legacy note:_ список ниже — технический долг; новые бизнес‑лексиконы в код добавлять нельзя, миграция в packs обязательна.
 - `truffles-api/app/routers/webhook/decision.py`  
   `SHIELD_TOXIC_PATTERNS`, `SHIELD_MEANINGFUL_PATTERN`, `HYGIENE_KEYWORDS`,  
   `BOOKING_REQUEST_KEYWORDS`, `SERVICE_KEYWORDS`, `DATE_KEYWORDS`,  
