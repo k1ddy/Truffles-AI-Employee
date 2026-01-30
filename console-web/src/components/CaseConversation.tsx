@@ -110,6 +110,7 @@ export default function CaseConversation({
         : "—";
     const assignedLabel = caseDetail.assigned_to_name ?? "Не назначен";
     const showDetailsToggle = typeof onToggleDetails === "function";
+    const detailsLabel = detailsOpen ? "Скрыть детали" : "Детали";
 
     return (
         <div className="flex flex-col gap-5 h-full" data-testid="case-conversation">
@@ -155,13 +156,11 @@ export default function CaseConversation({
                             <button
                                 type="button"
                                 onClick={onToggleDetails}
-                                className={`text-xs font-semibold transition ${
-                                    detailsOpen ? "text-foreground" : "text-muted-foreground hover:text-foreground"
-                                }`}
+                                className="rounded-full border border-border/60 px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted"
                                 aria-pressed={detailsOpen}
                                 data-testid="case-details-toggle"
                             >
-                                {detailsOpen ? "Скрыть детали" : "Детали"}
+                                {detailsLabel}
                             </button>
                         )}
                         <div className="flex gap-2">
