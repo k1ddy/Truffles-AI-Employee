@@ -22,12 +22,14 @@ from app.models import (
     ClientSettings,
     Company,
     Conversation,
-    ConsoleMacro as ConsoleMacroModel,
     Handover,
     KnowledgeVersion,
     Message,
     OutboxMessage,
     User,
+)
+from app.models import (
+    ConsoleMacro as ConsoleMacroModel,
 )
 from app.schemas.capabilities import CAPABILITIES_SCHEMA_VERSION, CapabilitiesPayload
 from app.schemas.console import (
@@ -75,7 +77,6 @@ from app.schemas.console import (
     ConsoleKnowledgeRollbackResponse,
     ConsoleKnowledgeValidateRequest,
     ConsoleKnowledgeValidateResponse,
-    ConsoleMacro as ConsoleMacroSchema,
     ConsoleMacroCreateRequest,
     ConsoleMacroCreateResponse,
     ConsoleMacroListResponse,
@@ -105,6 +106,9 @@ from app.schemas.console import (
     ConsoleTelegramTrail,
     ConsoleTelegramVerifyRequest,
     ConsoleTelegramVerifyResponse,
+)
+from app.schemas.console import (
+    ConsoleMacro as ConsoleMacroSchema,
 )
 from app.schemas.outbox_payload import validate_outbox_payload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
