@@ -649,6 +649,7 @@ def _handle_consult_flow(
     )
     from app.services.demo_salon_knowledge import (
         DemoSalonDecision,
+        get_demo_salon_decision,
         get_demo_salon_service_decision,
     )
     from app.services.knowledge_service import resolve_consult_topic_candidates
@@ -694,6 +695,7 @@ def _handle_consult_flow(
             domain_intent=legacy.DomainIntent.UNKNOWN,
             domain_meta=None,
             router_state=router_state,
+            explicit_service_signal=False,
         )
 
     if not (routing.get("allow_bot_reply") and not bypass_domain_flows and message_text):
@@ -791,12 +793,23 @@ def _handle_consult_flow(
         from app.services.demo_salon_knowledge import _normalize_text
 
         normalized = _normalize_text(message_text)
+        prep_trigger = bool(
+            normalized
+            and any(token in normalized for token in ("подготов", "линз", "контейнер", "макияж"))
+            and any(token in normalized for token in ("бров", "ресниц", "лами"))
+        )
+        combo_trigger = bool(
+            normalized
+            and ("совмещ" in normalized or "в один день" in normalized)
+            and "чистк" in normalized
+            and "пилинг" in normalized
+        )
         aftercare_trigger = bool(
             normalized
             and "гель лак" in normalized
             and any(token in normalized for token in ("ухаж", "продл", "держ", "нос", "срок"))
         )
-        if aftercare_trigger:
+        if aftercare_trigger or prep_trigger or combo_trigger:
             from app.services.demo_salon_knowledge import get_demo_salon_decision
 
             truth_decision = get_demo_salon_decision(
@@ -807,7 +820,7 @@ def _handle_consult_flow(
             if (
                 truth_decision
                 and truth_decision.action == "reply"
-                and truth_decision.intent == "aftercare_gel_lac"
+                and truth_decision.intent in {"aftercare_gel_lac", "prep_brows_lashes"}
             ):
                 bot_response = truth_decision.response
                 legacy._reset_low_confidence_retry(conversation)
@@ -834,6 +847,86 @@ def _handle_consult_flow(
                     _update_message_decision_metadata(saved_message, truth_decision.meta)
                 bot_response, sent = send_and_save(bot_response)
                 result_message = "Truth gate override reply sent"
+                if not sent:
+                    result_message = f"{result_message}; response_send=failed"
+                db.commit()
+                return ConsultFlowResult(
+                    response=WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    ),
+                    consult_intent=consult_intent,
+                    consult_topic=consult_topic,
+                    consult_question=consult_question,
+                    intent_decomp_payload=intent_decomp_payload,
+                )
+            if (
+                truth_decision
+                and truth_decision.action == "escalate"
+                and truth_decision.intent == "procedure_combo"
+            ):
+                bot_response = truth_decision.response
+                legacy._reset_low_confidence_retry(conversation)
+                result_message = "Truth gate escalation reply sent"
+                _, reused, telegram_sent = legacy._reuse_active_handover(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message=message_text,
+                    source="truth_gate",
+                    intent=truth_decision.intent,
+                )
+                if reused:
+                    result_message = f"Truth gate reuse, telegram={'sent' if telegram_sent else 'failed'}"
+                elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value:
+                    record_escalation_metric("intent")
+                    result = legacy.escalate_to_pending(
+                        db=db,
+                        conversation=conversation,
+                        user_message=message_text,
+                        trigger_type="intent",
+                        trigger_value=truth_decision.intent or "policy",
+                    )
+                    if result.ok:
+                        handover = result.value
+                        telegram_sent = legacy.send_telegram_notification(
+                            db=db,
+                            handover=handover,
+                            conversation=conversation,
+                            user=user,
+                            message=message_text,
+                        )
+                        result_message = (
+                            f"Truth gate escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                        )
+                    else:
+                        result_message = f"Truth gate escalation failed: {result.error}"
+                else:
+                    result_message = "Truth gate escalation skipped (already pending)"
+                trace_payload = {
+                    "stage": "truth_gate",
+                    "decision": truth_decision.action,
+                    "intent": truth_decision.intent,
+                    "state": conversation.state,
+                    "booking_wants_flow": booking_wants_flow,
+                    "policy_type": policy_type,
+                    "consult_override": True,
+                }
+                if isinstance(getattr(truth_decision, "meta", None), dict):
+                    trace_payload.update(truth_decision.meta)
+                _record_decision_trace(conversation, trace_payload)
+                _record_message_decision_meta(
+                    saved_message,
+                    action=truth_decision.action,
+                    intent=truth_decision.intent,
+                    source="truth_gate",
+                    fast_intent=False,
+                )
+                if saved_message and isinstance(getattr(truth_decision, "meta", None), dict):
+                    _update_message_decision_metadata(saved_message, truth_decision.meta)
+                bot_response, sent = send_and_save(bot_response)
                 if not sent:
                     result_message = f"{result_message}; response_send=failed"
                 db.commit()

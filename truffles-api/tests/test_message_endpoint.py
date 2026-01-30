@@ -1086,6 +1086,54 @@ def test_strict_ood_skips_out_of_domain_with_in_signals():
     assert result.out_of_domain_signal is False
 
 
+def test_strict_ood_skips_out_of_domain_with_service_request_signal():
+    conversation = SimpleNamespace(
+        id="conv-ood-3",
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    signals = DecisionSignals(
+        intent=Intent.OTHER,
+        is_greeting=False,
+        is_thanks=False,
+        is_ack=False,
+        is_low_signal=False,
+        is_status_question=False,
+    )
+
+    with patch(
+        "app.routers.webhook.decision._detect_intent_signals", return_value=signals
+    ), patch(
+        "app.routers.webhook._legacy.classify_domain_with_scores",
+        return_value=(
+            DomainIntent.OUT_OF_DOMAIN,
+            0.0,
+            0.9,
+            {"out_hits": 1, "strict_in_hits": 0},
+        ),
+    ):
+        result = webhook_router._run_class_router_stage(
+            conversation=conversation,
+            saved_message=None,
+            message_text="Вырыть бассейн в холле",
+            client_slug="demo_salon",
+            client_config={},
+            remote_jid=None,
+            timing_context={},
+            info_class_intents=set(),
+            info_class_meta={},
+            booking_signal=False,
+            class_carryover=None,
+            router_state=None,
+            intent_decomp_payload=None,
+            expected_reply_shortcircuit=False,
+            log_timing=lambda *args, **_kwargs: None,
+        )
+
+    assert result.out_of_domain_signal is False
+    assert "explicit_service" in (result.class_router_result.get("in_signals") or [])
+
+
 def test_consult_pack_writes_decision_meta():
     saved_message = Mock()
     saved_message.message_metadata = {}
