@@ -2363,8 +2363,10 @@ def _handle_ai_response_action(
             bm25_count = int(rag_scores.get("bm25_count") or 0) if isinstance(rag_scores, dict) else 0
             rag_empty = bool(rag_attempted and vector_count <= 0 and bm25_count <= 0)
             if semantic_attempted and explicit_service_query and rag_empty:
-                from app.services.demo_salon_knowledge import _format_service_not_found_reply
-                from app.services.demo_salon_knowledge import load_yaml_truth
+                from app.services.demo_salon_knowledge import (
+                    _format_service_not_found_reply,
+                    load_yaml_truth,
+                )
 
                 reply = _format_service_not_found_reply(load_yaml_truth(client_slug))
                 if reply:

@@ -12,13 +12,13 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from app.contracts.decision import DecisionSignals
 from app.database import get_db
 from app.main import app
 from app.models import Branch, Client, ClientSettings, Conversation, User
 from app.routers import webhook as webhook_router
 from app.routers.webhook import response as webhook_response
 from app.routers.webhook.session_memory import _is_session_reset_only_message
-from app.contracts.decision import DecisionSignals
 from app.schemas.consult import ConsultControllerOutput
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookResponse
