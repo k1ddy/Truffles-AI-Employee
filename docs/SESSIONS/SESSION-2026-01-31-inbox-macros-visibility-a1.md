@@ -15,6 +15,7 @@
   - Added GAP for macros visibility in STATE.md.
   - Installed console-web deps and ran lint.
   - Rebuilt and restarted console-web (Build: 9b30d183, time 2026-01-31T02:59:09Z).
+  - Rebuilt and restarted console-web with nested-form fix (Build: 0360f8e4, time 2026-01-31T03:12:01Z).
 - next:
   - Rebuild and restart console-web with latest fix; verify UI and capture screenshot evidence.
   - Update STATE.md with evidence once verified.
