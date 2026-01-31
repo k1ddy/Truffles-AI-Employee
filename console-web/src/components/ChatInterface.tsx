@@ -41,9 +41,12 @@ export default function ChatInterface({
     const inputValue = isControlled ? draft ?? "" : internalDraft;
     const setInputValue = isControlled ? onDraftChange : setInternalDraft;
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     const lastMessageIdRef = useRef<string | null>(null);
     const queryClient = useQueryClient();
     const isPlain = frame === "plain";
+    const maxTextareaHeight = 220;
+    const minTextareaHeight = 44;
 
     // Reverse messages for chronological display (oldest first)
     const sortedMessages = [...messages].reverse();
@@ -58,6 +61,17 @@ export default function ChatInterface({
             }
         }
     }, [messages]);
+
+    useEffect(() => {
+        const textarea = textareaRef.current;
+        if (!textarea) {
+            return;
+        }
+        textarea.style.height = "auto";
+        const nextHeight = Math.min(textarea.scrollHeight, maxTextareaHeight);
+        textarea.style.height = `${Math.max(nextHeight, minTextareaHeight)}px`;
+        textarea.style.overflowY = textarea.scrollHeight > maxTextareaHeight ? "auto" : "hidden";
+    }, [inputValue, maxTextareaHeight, minTextareaHeight]);
 
     // Send message mutation with optimistic updates
     const sendMutation = useMutation({
@@ -132,7 +146,7 @@ export default function ChatInterface({
     if (isLoading) {
         return (
             <div
-                className={`flex flex-col gap-4 p-4 min-h-[520px] overflow-y-auto ${
+                className={`flex flex-col gap-4 p-4 h-full min-h-0 overflow-y-auto ${
                     isPlain ? "" : "bg-muted/60 rounded-xl"
                 }`}
             >
@@ -147,14 +161,14 @@ export default function ChatInterface({
 
     return (
         <div
-            className={`flex flex-col h-full min-h-[480px] ${
+            className={`flex flex-col h-full min-h-0 ${
                 isPlain ? "" : "bg-muted/60 rounded-xl overflow-hidden"
             }`}
         >
             {/* Messages area */}
             <div
                 ref={scrollContainerRef}
-                className="flex-1 overflow-y-auto p-4 space-y-4"
+                className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4"
             >
                 {sortedMessages.length === 0 ? (
                     <div className="text-center text-muted-foreground my-auto">
@@ -203,13 +217,14 @@ export default function ChatInterface({
                     <form onSubmit={handleSubmit}>
                         <div className="flex gap-2">
                             <textarea
+                                ref={textareaRef}
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
                                 onKeyDown={handleKeyDown}
                                 placeholder="Введите сообщение. Enter — отправить, Shift+Enter — новая строка."
                                 rows={2}
                                 disabled={sendMutation.isPending}
-                                className="flex-1 px-3 py-2 border border-border/60 rounded-lg text-sm resize-none bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:bg-muted"
+                                className="flex-1 px-3 py-2 border border-border/60 rounded-lg text-sm resize-none bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:bg-muted min-h-[44px]"
                             />
                             <button
                                 type="submit"
