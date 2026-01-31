@@ -3380,6 +3380,7 @@ def test_rag_rewrite_and_scores_logged():
         branch_id=None,
         context={},
     )
+    user = SimpleNamespace(id="user-123", user_metadata={})
 
     client_query = Mock()
     client_query.filter.return_value.first.return_value = client
@@ -4413,6 +4414,7 @@ def test_audio_transcription_failure_returns_prompt():
         branch_id=None,
         context={},
     )
+    user = SimpleNamespace(id="user-123", user_metadata={})
 
     client_query = Mock()
     client_query.filter.return_value.first.return_value = client
