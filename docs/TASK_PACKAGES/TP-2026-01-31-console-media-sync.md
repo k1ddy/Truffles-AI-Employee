@@ -72,12 +72,14 @@ DoD
 Checks
 - pytest -q truffles-api/tests/test_console_media.py
 - pytest -q truffles-api/tests/test_message_endpoint.py -k "enqueue_only_media"
+- pytest -q truffles-api/tests/test_message_endpoint.py -k "manager_active_media"
 - npm --prefix console-web run generate:api
 - npm --prefix console-web run lint
 
 Evidence
 - /tmp/console_media_pytest_20260131.txt
 - /tmp/console_media_enqueue_only_pytest_20260131.txt
+- /tmp/console_media_preview_pytest_20260131.txt
 - /tmp/console_web_generate_api_20260131.txt
 - /tmp/console_web_lint_console_media_20260131.txt
 - Console media event sample (outbox payload or log snippet)
