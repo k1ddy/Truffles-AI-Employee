@@ -272,6 +272,7 @@ from app.routers.webhook.trace import (
     _record_decision_trace,
     _record_message_decision_meta,
     _update_message_decision_metadata,
+    _update_message_signal_snapshot,
 )
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.ai_service import (
@@ -302,6 +303,7 @@ from app.services.demo_salon_knowledge import (
     _has_duration_signal,
     _has_price_signal,
     _match_service,
+    _matches_service_request_lexicon,
     build_evening_greeting,
     build_quiet_hours_notice,
     compose_multi_truth_reply,
@@ -350,6 +352,28 @@ from app.services.telegram_service import TelegramService
 
 def _normalize_message_text(message_text: str | None) -> str:
     return (message_text or "").strip()
+
+
+def _compact_signal_snapshot(values: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in values.items() if value is not None}
+
+
+def _extract_pack_index_meta(client_config: dict | None) -> dict[str, Any] | None:
+    if not isinstance(client_config, dict):
+        return None
+    pack_index = client_config.get("pack_index")
+    if not isinstance(pack_index, dict):
+        return None
+    meta = _compact_signal_snapshot(
+        {
+            "schema_version": pack_index.get("schema_version"),
+            "hash": pack_index.get("hash"),
+            "version_id": pack_index.get("version_id"),
+            "compiled_at": pack_index.get("compiled_at"),
+            "source": pack_index.get("source"),
+        }
+    )
+    return meta or None
 
 
 def _detect_fast_intent(
@@ -1426,6 +1450,55 @@ def _run_intent_decomposition(
         booking_wants_flow = False
     booking_blocked = bool(booking_block_meta)
 
+    if saved_message:
+        intent_snapshot = _compact_signal_snapshot(
+            {
+                "used": intent_decomp_used,
+                "intents": intent_decomp_intents,
+                "primary": intent_decomp_primary,
+                "secondary": intent_decomp_secondary,
+                "multi_intent": intent_decomp_multi,
+                "service_query": intent_decomp_service_query,
+                "consult_intent": consult_intent,
+                "consult_topic": consult_topic,
+                "consult_question": consult_question,
+            }
+        )
+        info_snapshot = _compact_signal_snapshot(
+            {
+                "intents": sorted(info_class_intents),
+                "signals": info_signals if isinstance(info_signals, dict) else None,
+                "guest_policy_signal": guest_policy_signal,
+                "basic_info_message": basic_info_message,
+            }
+        )
+        booking_snapshot = _compact_signal_snapshot(
+            {
+                "signal": booking_signal,
+                "blocked": booking_blocked,
+                "blocked_reason": (
+                    booking_block_meta.get("booking_blocked_reason")
+                    if isinstance(booking_block_meta, dict)
+                    else None
+                ),
+                "active": booking_active,
+                "wants_flow": booking_wants_flow,
+                "expected_reply_type": expected_reply_type,
+                "expected_reply_reason": expected_reply_reason,
+                "expected_reply_shortcircuit": expected_reply_shortcircuit,
+            }
+        )
+        _update_message_signal_snapshot(
+            saved_message,
+            _compact_signal_snapshot(
+                {
+                    "intent_decomp": intent_snapshot,
+                    "info_class": info_snapshot,
+                    "booking": booking_snapshot,
+                }
+            ),
+        )
+
     context = legacy._get_conversation_context(conversation)
     context_manager = legacy._get_context_manager(context)
     return IntentDecompositionState(
@@ -1682,6 +1755,11 @@ def _run_class_router_stage(
 
     domain_out_hits = int(domain_meta.get("out_hits") or 0)
     domain_strict_in_hits = int(domain_meta.get("strict_in_hits") or 0)
+    explicit_service_signal = _has_explicit_service_signal(
+        message_text,
+        client_slug=client_slug,
+        intent_decomp_payload=intent_decomp_payload,
+    )
     class_router_result = legacy._resolve_class_router_result(
         info_intents=info_class_intents,
         info_meta=info_class_meta,
@@ -1690,6 +1768,7 @@ def _run_class_router_stage(
         domain_intent=domain_intent,
         domain_meta=domain_meta,
         router_state=router_state,
+        explicit_service_signal=explicit_service_signal,
     )
     out_of_domain_signal = class_router_result["out_of_domain_signal"]
     in_signals = class_router_result.get("in_signals") or []
@@ -1753,6 +1832,7 @@ def _run_class_router_stage(
         "anchors_in_hits": class_router_result.get("anchors_in_hits"),
         "anchors_out_hits": class_router_result.get("anchors_out_hits"),
         "out_of_domain_signal": out_of_domain_signal,
+        "explicit_service_signal": explicit_service_signal,
         "carryover_class": class_router_result.get("carryover_class"),
         "carryover_info_sections": class_router_result.get("carryover_info_sections"),
         "router_fallback_reason": class_router_result.get("router_fallback_reason"),
@@ -1788,6 +1868,71 @@ def _run_class_router_stage(
                 "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
             },
         )
+        intent_value = getattr(signals.intent, "value", None)
+        domain_snapshot = _compact_signal_snapshot(
+            {
+                "intent": getattr(domain_intent, "value", None),
+                "in_score": domain_in_score,
+                "out_score": domain_out_score,
+                "in_hits": domain_meta.get("in_hits"),
+                "out_hits": domain_meta.get("out_hits"),
+                "strict_in_hits": domain_meta.get("strict_in_hits"),
+                "matched_in": domain_meta.get("matched_in"),
+                "matched_out": domain_meta.get("matched_out"),
+                "matched_strict_in": domain_meta.get("matched_strict_in"),
+                "in_threshold": domain_meta.get("in_threshold"),
+                "out_threshold": domain_meta.get("out_threshold"),
+                "margin": domain_meta.get("margin"),
+                "in_hit_threshold": domain_meta.get("in_hit_threshold"),
+                "out_hit_threshold": domain_meta.get("out_hit_threshold"),
+                "strict_in_hit_threshold": domain_meta.get("strict_in_hit_threshold"),
+                "anchors_in": domain_meta.get("anchors_in"),
+                "anchors_out": domain_meta.get("anchors_out"),
+                "strict_in_anchors": domain_meta.get("strict_in_anchors"),
+            }
+        )
+        controller_snapshot = _compact_signal_snapshot(
+            {
+                "used": controller_used,
+                "attempted": controller_attempted,
+                "fallback": controller_fallback,
+                "low_confidence": controller_low_confidence,
+                "confidence": controller_confidence,
+                "goal": controller_goal,
+                "error": controller_error,
+                "fallback_reason": class_router_result.get("controller_fallback_reason"),
+            }
+        )
+        class_router_snapshot = _compact_signal_snapshot(
+            {
+                "classes": class_router_result.get("classes"),
+                "intents": class_router_result.get("intents"),
+                "in_signals": class_router_result.get("in_signals"),
+                "out_signals": class_router_result.get("out_signals"),
+                "explicit_service_signal": explicit_service_signal,
+                "out_of_domain_signal": out_of_domain_signal,
+                "router_fallback_reason": class_router_result.get("router_fallback_reason"),
+                "controller": controller_snapshot or None,
+            }
+        )
+        signal_snapshot = _compact_signal_snapshot(
+            {
+                "intent_signals": _compact_signal_snapshot(
+                    {
+                        "intent": intent_value,
+                        "is_greeting": signals.is_greeting,
+                        "is_thanks": signals.is_thanks,
+                        "is_ack": signals.is_ack,
+                        "is_low_signal": signals.is_low_signal,
+                        "is_status_question": signals.is_status_question,
+                    }
+                ),
+                "domain_router": domain_snapshot,
+                "class_router": class_router_snapshot,
+                "pack_index": _extract_pack_index_meta(client_config),
+            }
+        )
+        _update_message_signal_snapshot(saved_message, signal_snapshot)
 
     legacy._record_decision_trace(
         conversation,
@@ -2585,6 +2730,34 @@ def _matches_guest_policy_lexicon(
     return False
 
 
+def _has_explicit_service_signal(
+    message_text: str | None,
+    *,
+    client_slug: str | None,
+    intent_decomp_payload: dict[str, Any] | None,
+) -> bool:
+    if not message_text:
+        return False
+    normalized = _normalize_service_text(message_text)
+    if not normalized:
+        return False
+    if isinstance(intent_decomp_payload, dict):
+        raw_query = intent_decomp_payload.get("service_query")
+        raw_source = intent_decomp_payload.get("service_query_source")
+        if (
+            isinstance(raw_query, str)
+            and raw_query.strip()
+            and raw_source != "context"
+        ):
+            return True
+    if client_slug:
+        if _match_service(normalized, client_slug):
+            return True
+        if _matches_service_request_lexicon(normalized, client_slug):
+            return True
+    return False
+
+
 def _is_booking_request(text: str) -> bool:
     normalized = _normalize_text(text)
     if not normalized:
@@ -2992,6 +3165,7 @@ def _build_class_controller_result(
     class_carryover: dict | None,
     domain_intent: DomainIntent,
     domain_meta: dict | None,
+    explicit_service_signal: bool,
 ) -> dict[str, Any]:
     anchors_out_hits = int(domain_meta.get("out_hits") or 0) if isinstance(domain_meta, dict) else 0
     anchors_in_hits = int(domain_meta.get("strict_in_hits") or 0) if isinstance(domain_meta, dict) else 0
@@ -3015,6 +3189,8 @@ def _build_class_controller_result(
     if booking_signal:
         in_signals.append("booking_signal")
         classes.append("booking")
+    if explicit_service_signal:
+        in_signals.append("explicit_service")
     if anchors_in_hits > 0:
         in_signals.append("anchor_in")
     if anchors_out_hits > 0:
@@ -3070,6 +3246,7 @@ def _resolve_class_router_result(
     domain_intent: DomainIntent,
     domain_meta: dict | None,
     router_state: dict | None,
+    explicit_service_signal: bool,
 ) -> dict[str, Any]:
     result = _build_class_controller_result(
         info_intents=info_intents,
@@ -3078,6 +3255,7 @@ def _resolve_class_router_result(
         class_carryover=class_carryover,
         domain_intent=domain_intent,
         domain_meta=domain_meta,
+        explicit_service_signal=explicit_service_signal,
     )
     out_of_domain_signal = bool(result.get("out_of_domain_signal"))
 
@@ -5718,6 +5896,11 @@ async def _handle_webhook_payload(
         record_llm_budget_trace=_record_llm_budget_trace,
     )
 
+    explicit_service_signal = _has_explicit_service_signal(
+        message_text,
+        client_slug=payload.client_slug,
+        intent_decomp_payload=intent_decomp_payload,
+    )
     early_domain_intent = DomainIntent.UNKNOWN
     early_domain_meta: dict = {}
     early_out_of_domain = False
@@ -5745,7 +5928,11 @@ async def _handle_webhook_payload(
             out_hits = int(early_domain_meta.get("out_hits") or 0)
             strict_in_hits = int(early_domain_meta.get("strict_in_hits") or 0)
             early_in_signals = bool(
-                strict_in_hits > 0 or booking_signal or booking_wants_flow or early_info_intents
+                strict_in_hits > 0
+                or booking_signal
+                or booking_wants_flow
+                or early_info_intents
+                or explicit_service_signal
             )
             early_out_of_domain = bool(out_hits > 0 and not early_in_signals)
             if early_out_of_domain and _is_short_reply(message_text):
@@ -5965,6 +6152,7 @@ async def _handle_webhook_payload(
                 "domain_intent": early_domain_intent.value,
                 "out_hits": early_domain_meta.get("out_hits"),
                 "strict_in_hits": early_domain_meta.get("strict_in_hits"),
+                "explicit_service_signal": explicit_service_signal,
             },
         )
         _record_message_decision_meta(
@@ -6017,6 +6205,7 @@ async def _handle_webhook_payload(
             domain_intent=DomainIntent.UNKNOWN,
             domain_meta=None,
             router_state=router_state,
+            explicit_service_signal=explicit_service_signal,
         )
         if discount_signal:
             class_router_result = dict(class_router_result)

@@ -62,6 +62,18 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
 
     const canSend = Boolean(caseDetail && caseDetail.status === "active" && canWriteInbox);
     const canViewDiagnostics = role === "support" || role === "platform_admin" || role === "owner" || role === "admin";
+    const macroBranchId = caseDetail?.branch_id ?? selectedBranchId;
+    const canManageMacros = canWriteInbox;
+    const canToggleDetails = Boolean(selectedCaseId && caseDetail && !caseLoading && !caseError);
+    const showDetailsColumn = detailsOpen && !!selectedCaseId;
+    const hasSelection = Boolean(selectedCaseId);
+    const gridClass = showDetailsColumn
+        ? hasSelection
+            ? "xl:grid-cols-[220px_minmax(0,1fr)_320px]"
+            : "xl:grid-cols-[280px_minmax(0,1fr)_320px]"
+        : hasSelection
+            ? "xl:grid-cols-[220px_minmax(0,1fr)]"
+            : "xl:grid-cols-[280px_minmax(0,1fr)]";
 
     const handleSelectCase = (caseId: string) => {
         setSelectedCaseId(caseId);
@@ -70,6 +82,13 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
 
     const handleMacroSelect = (text: string) => {
         setDraft((prev) => (prev.trim() ? `${prev}\n${text}` : text));
+    };
+
+    const handleToggleDetails = () => {
+        if (!canToggleDetails) {
+            return;
+        }
+        setDetailsOpen((prev) => !prev);
     };
 
     const renderEmptyPane = (title: string, subtitle: string) => (
@@ -102,6 +121,8 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
         <InboxMacroChips
             onSelect={handleMacroSelect}
             disabled={!selectedCaseId || !canSend}
+            canManage={canManageMacros}
+            branchId={macroBranchId}
         />
     );
 
@@ -116,11 +137,13 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
             <div>
                 <h1 className="text-2xl font-semibold">Заявки</h1>
                 <p className="text-sm text-muted-foreground">
-                    Очередь → диалог → детали. Диагностика скрыта по умолчанию.
+                    Очередь слева, чат по центру, детали открываются по кнопке. Ответы и быстрые действия рядом с вводом.
                 </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)_320px]">
+            <div
+                className={`grid grid-cols-1 gap-6 ${gridClass}`}
+            >
                 <section className="card-surface flex flex-col min-h-[620px] p-4 xl:overflow-hidden xl:h-[calc(100vh-240px)]" data-testid="inbox-list">
                     <CaseList
                         variant="compact"
@@ -133,67 +156,101 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
 
                 <section className="flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)]" data-testid="inbox-conversation">
                     {!selectedCaseId && renderEmptyPane("Выберите заявку", "Кликните по карточке слева, чтобы открыть диалог.")}
-                    {selectedCaseId && caseLoading && renderLoadingPane()}
-                    {selectedCaseId && caseError && renderErrorPane()}
-                    {selectedCaseId && !caseLoading && !caseError && caseDetail && (
-                        <div className="card-surface p-5 flex flex-col gap-4 h-full">
-                            <div className="flex items-center justify-between xl:hidden">
-                                <p className="text-sm font-semibold">Детали заявки</p>
-                                <button
-                                    type="button"
-                                    onClick={() => setDetailsOpen((prev) => !prev)}
-                                    className="text-xs text-muted-foreground hover:text-foreground"
-                                >
-                                    {detailsOpen ? "Скрыть" : "Показать"}
-                                </button>
-                            </div>
-                            {detailsOpen && (
-                                <div className="xl:hidden">
-                                    <CaseDetailsPanel
+                    {selectedCaseId && (
+                        <div className="flex flex-col gap-4 h-full">
+                            {caseLoading && renderLoadingPane()}
+                            {caseError && renderErrorPane()}
+                            {!caseLoading && !caseError && caseDetail && (
+                                <div className="card-surface flex flex-col h-full overflow-hidden">
+                                    <CaseConversation
                                         caseDetail={caseDetail}
+                                        caseId={selectedCaseId}
                                         messages={messages}
-                                        canViewDiagnostics={canViewDiagnostics}
+                                        messagesLoading={messagesLoading}
+                                        canSend={canSend}
+                                        canWrite={canWriteInbox}
+                                        draft={draft}
+                                        onDraftChange={setDraft}
+                                        composerBefore={composerBefore}
+                                        detailsOpen={detailsOpen}
+                                        onToggleDetails={handleToggleDetails}
+                                        chatFrame="plain"
+                                        layout="inbox"
                                     />
                                 </div>
                             )}
-                            <CaseConversation
-                                caseDetail={caseDetail}
-                                caseId={selectedCaseId}
-                                messages={messages}
-                                messagesLoading={messagesLoading}
-                                canSend={canSend}
-                                canWrite={canWriteInbox}
-                                draft={draft}
-                                onDraftChange={setDraft}
-                                composerBefore={composerBefore}
-                            />
-                        </div>
-                    )}
-                    {selectedCaseId && !caseLoading && !caseError && !caseDetail && (
-                        <div className="card-surface p-6 text-center text-muted-foreground">
-                            Заявка не найдена
+                            {!caseLoading && !caseError && !caseDetail && (
+                                <div className="card-surface p-6 text-center text-muted-foreground">
+                                    Заявка не найдена
+                                </div>
+                            )}
                         </div>
                     )}
                 </section>
 
-                <section className="hidden xl:flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)] xl:overflow-y-auto" data-testid="inbox-details">
-                    {!selectedCaseId && renderEmptyPane("Детали", "Выберите заявку, чтобы увидеть контекст и trace.")}
-                    {selectedCaseId && caseLoading && renderLoadingPane()}
-                    {selectedCaseId && caseError && renderErrorPane()}
-                    {selectedCaseId && !caseLoading && !caseError && caseDetail && (
+                {showDetailsColumn && (
+                    <section className="hidden xl:flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)] xl:overflow-y-auto" data-testid="inbox-details">
+                        {!selectedCaseId && renderEmptyPane("Детали", "Выберите заявку, чтобы увидеть контекст и trace.")}
+                        {selectedCaseId && (
+                            <div className="flex flex-col gap-4" data-testid="case-details">
+                                {caseLoading && renderLoadingPane()}
+                                {caseError && renderErrorPane()}
+                                {!caseLoading && !caseError && caseDetail && (
+                                    <>
+                                        <div className="sticky top-0 z-10 flex items-center justify-between rounded-2xl border border-border/60 bg-background/90 px-4 py-3 backdrop-blur">
+                                            <p className="text-sm font-semibold">Детали заявки</p>
+                                            <button
+                                                type="button"
+                                                onClick={() => setDetailsOpen(false)}
+                                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                            >
+                                                Скрыть детали
+                                            </button>
+                                        </div>
+                                        <CaseDetailsPanel
+                                            caseDetail={caseDetail}
+                                            messages={messages}
+                                            canViewDiagnostics={canViewDiagnostics}
+                                        />
+                                    </>
+                                )}
+                                {!caseLoading && !caseError && !caseDetail && (
+                                    <div className="card-surface p-6 text-center text-muted-foreground">
+                                        Детали недоступны
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </section>
+                )}
+            </div>
+
+            {detailsOpen && canToggleDetails && caseDetail && (
+                <div className="fixed inset-0 z-40 xl:hidden">
+                    <div
+                        className="absolute inset-0 bg-foreground/20"
+                        onClick={() => setDetailsOpen(false)}
+                        aria-hidden="true"
+                    />
+                    <div className="absolute inset-y-0 right-0 flex h-full w-full max-w-[420px] flex-col gap-3 overflow-y-auto bg-background p-4 shadow-xl">
+                        <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold">Детали заявки</p>
+                            <button
+                                type="button"
+                                onClick={() => setDetailsOpen(false)}
+                                className="rounded-full border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                            >
+                                Скрыть детали
+                            </button>
+                        </div>
                         <CaseDetailsPanel
                             caseDetail={caseDetail}
                             messages={messages}
                             canViewDiagnostics={canViewDiagnostics}
                         />
-                    )}
-                    {selectedCaseId && !caseLoading && !caseError && !caseDetail && (
-                        <div className="card-surface p-6 text-center text-muted-foreground">
-                            Детали недоступны
-                        </div>
-                    )}
-                </section>
-            </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

@@ -39,6 +39,7 @@
   - booking_interrupt answers info and returns slot question.
   - Tests pass; evidence recorded in `STATE.md` (Brain/Top Architect) before merge.
 - Checks:
+  - `EVAL_TIER=chaos pytest -q truffles-api/tests/test_demo_salon_eval.py`
   - `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "SCN1 or SCN2 or SCN3 or SCN4 or SCN5"`
   - `pytest -q truffles-api/tests/test_message_endpoint.py -k "out_of_domain or service_not_found or booking_interrupt"`
 - Evidence:

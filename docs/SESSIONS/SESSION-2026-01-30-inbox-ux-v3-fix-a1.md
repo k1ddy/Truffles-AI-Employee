@@ -1,0 +1,23 @@
+# SESSION 2026-01-30-inbox-ux-v3-fix-a1 — Session 2026-01-30-inbox-ux-v3-fix-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v3-fix.md
+- branch: feat/2026-01-30-inbox-ux-v3-fix-a1
+- worktree: /home/zhan/worktrees/2026-01-30-inbox-ux-v3-fix-a1
+- base_ref: origin/main
+- scope: Inbox UX v3 fixes (adaptive queue + compact filters + nav collapse + chat frame + quick replies UX).
+- done:
+  - Session created.
+  - GAP recorded in STATE.md for Inbox UX v3 regressions.
+  - Updated Inbox layout (adaptive queue width, chat frame flush card, sticky details header).
+  - Compact queue filters with collapsible mode for open case.
+  - Sidebar width reduced + collapse toggle made more visible; selection sync now clears stale context.
+  - Quick replies error messaging improved for selection-related errors.
+  - Console e2e live: avoid strict-mode collision for case navigation locator.
+  - Lint passed: `/tmp/console_web_lint_inbox_ux_v3_fix_20260131.txt`.
+- next:
+  - Push branch + open PR when ready.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v3-fix.md
+- last_updated: 2026-01-31

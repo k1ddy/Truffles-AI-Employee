@@ -1,0 +1,24 @@
+# SESSION 2026-01-30-inbox-queue-adaptive-a1 — Session 2026-01-30-inbox-queue-adaptive-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-30-inbox-queue-adaptive.md
+- branch: feat/2026-01-30-inbox-queue-adaptive-a1
+- worktree: /home/zhan/worktrees/2026-01-30-inbox-queue-adaptive-a1
+- base_ref: origin/main
+- scope: Adaptive queue width + compact filters + chat frame fix.
+- done:
+  - Session created.
+  - Adaptive queue width + compact filters applied.
+  - Chat frame/border rendering cleaned up.
+  - Lint passed.
+- next:
+  - Capture UI screenshots after deploy.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-30-inbox-queue-adaptive.md
+  - /tmp/console_web_lint_inbox_queue_adaptive_20260130.txt
+  - console-web/src/components/InboxView.tsx
+  - console-web/src/components/CaseList.tsx
+  - console-web/src/components/ChatInterface.tsx
+  - STATE.md
+- last_updated: 2026-01-30

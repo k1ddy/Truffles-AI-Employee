@@ -215,6 +215,32 @@ def _update_message_decision_metadata(message: Message, updates: dict[str, Any])
     message.message_metadata = metadata
 
 
+def _merge_signal_snapshot(
+    current: dict[str, Any] | None,
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(current) if isinstance(current, dict) else {}
+    for key, value in updates.items():
+        if value is None:
+            continue
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = {**merged[key], **value}
+        else:
+            merged[key] = value
+    return merged
+
+
+def _update_message_signal_snapshot(message: Message, updates: dict[str, Any]) -> None:
+    if not updates:
+        return
+    metadata = dict(message.message_metadata or {})
+    decision_meta = dict(metadata.get("decision_meta") or {})
+    current = decision_meta.get("signal_snapshot")
+    decision_meta["signal_snapshot"] = _merge_signal_snapshot(current, updates)
+    metadata["decision_meta"] = decision_meta
+    message.message_metadata = metadata
+
+
 def _merge_message_timing(message: Message | None, timing_updates: dict[str, Any] | None) -> None:
     if not message or not isinstance(timing_updates, dict):
         return
@@ -321,4 +347,5 @@ __all__ = [
     "_record_message_decision_meta",
     "_merge_message_timing",
     "_update_message_decision_metadata",
+    "_update_message_signal_snapshot",
 ]

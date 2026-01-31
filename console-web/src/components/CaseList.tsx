@@ -84,7 +84,10 @@ export default function CaseList({
     const [cursor, setCursor] = useState<string | undefined>(undefined);
     const [searchValue, setSearchValue] = useState("");
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+    const [filtersCollapsed, setFiltersCollapsed] = useState(false);
     const isCompact = variant === "compact";
+    const filtersCompact = isCompact && !!selectedCaseId;
+    const headingLabel = isCompact ? "Очередь" : "Заявки";
     const sortOptions: { id: CaseFilters["sortBy"]; label: string }[] = [
         { id: "activity", label: "Активные" },
         { id: "created_at", label: "Новые" },
@@ -115,11 +118,28 @@ export default function CaseList({
         filters.branchId || filters.dateFrom || filters.dateTo || filters.hasDeliveryError || filters.hasPendingOutbox
     );
     const advancedFiltersVisible = showAdvancedFilters || advancedFiltersActive;
+    const filtersToggleLabel = filtersCollapsed
+        ? advancedFiltersActive
+            ? "Фильтры активны"
+            : "Фильтры"
+        : "Скрыть фильтры";
+    const showAdvancedFiltersRow = !filtersCollapsed && advancedFiltersVisible;
     const advancedToggleLabel = advancedFiltersActive
         ? "Фильтры активны"
         : advancedFiltersVisible
             ? "Скрыть фильтры"
             : "Расширенные фильтры";
+    const headingClass = filtersCompact ? "text-base" : isCompact ? "text-lg" : "text-xl";
+    const isTight = filtersCompact || filtersCollapsed;
+    const filterContainerClass = `flex flex-col border border-border/60 rounded-lg ${
+        isTight ? "gap-2 p-2" : "gap-3 p-3"
+    } ${isCompact ? "sticky top-0 z-10 bg-card/95 backdrop-blur" : "bg-muted"}`;
+    const searchInputClass = `px-3 border border-border/60 rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 ${
+        filtersCollapsed ? "min-w-[120px]" : "min-w-[160px]"
+    } ${isTight ? "py-1.5 text-xs" : "py-2 text-sm"}`;
+    const selectClass = `px-3 border border-border/60 rounded-lg bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 ${
+        isTight ? "py-1.5 text-xs" : "py-2 text-xs"
+    }`;
 
     const pillClass = (active: boolean) => (
         `rounded-full border px-3 py-1 text-xs font-semibold transition ${
@@ -128,6 +148,18 @@ export default function CaseList({
                 : "border-border/60 text-muted-foreground hover:text-foreground"
         }`
     );
+
+    useEffect(() => {
+        if (!filtersCompact) {
+            setFiltersCollapsed(false);
+            return;
+        }
+        if (advancedFiltersActive) {
+            setFiltersCollapsed(false);
+            return;
+        }
+        setFiltersCollapsed(true);
+    }, [filtersCompact, advancedFiltersActive]);
 
     useEffect(() => {
         if (!branchFilterEnabled && filters.branchId) {
@@ -214,7 +246,7 @@ export default function CaseList({
     if (isLoading && !cursor) {
         return (
             <div className="w-full">
-                <h2 className="text-xl font-semibold mb-4" data-testid="cases-title">Заявки</h2>
+                <h2 className="text-xl font-semibold mb-4" data-testid="cases-title">{headingLabel}</h2>
                 <TableSkeleton />
             </div>
         );
@@ -223,7 +255,7 @@ export default function CaseList({
     if (error) {
         return (
             <div className="w-full">
-                <h2 className="text-xl font-semibold mb-4" data-testid="cases-title">Заявки</h2>
+                <h2 className="text-xl font-semibold mb-4" data-testid="cases-title">{headingLabel}</h2>
                 <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center" data-testid="cases-error">
                     <p className="text-destructive mb-4">Не удалось загрузить заявки</p>
                     <button
@@ -238,38 +270,61 @@ export default function CaseList({
         );
     }
 
+    const casesCountLabel = `${sortedCases.length} ${
+        sortedCases.length === 1 ? "заявка" : sortedCases.length < 5 ? "заявки" : "заявок"
+    }${data?.has_more ? " (есть ещё)" : ""}`;
+
     return (
         <div className={isCompact ? "flex flex-col h-full" : "w-full"}>
-            <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
-                <h2 className="text-xl font-semibold" data-testid="cases-title">Заявки</h2>
-                <button
-                    onClick={() => { resetPagination(); refetch(); }}
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                    data-testid="cases-refresh"
-                >
-                    Обновить
-                </button>
+            <div className={`flex flex-wrap items-center justify-between gap-3 ${filtersCompact ? "mb-2" : "mb-3"}`}>
+                <div className="flex items-center gap-3">
+                    <h2 className={`${headingClass} font-semibold`} data-testid="cases-title">{headingLabel}</h2>
+                    {filtersCompact && (
+                        <span className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground" data-testid="cases-count">
+                            {casesCountLabel}
+                        </span>
+                    )}
+                </div>
+                <div className="flex items-center gap-3">
+                    {filtersCompact && (
+                        <button
+                            type="button"
+                            onClick={() => setFiltersCollapsed((prev) => !prev)}
+                            className={`text-xs font-semibold ${
+                                filtersCollapsed && advancedFiltersActive ? "text-amber-700" : "text-muted-foreground hover:text-foreground"
+                            }`}
+                            data-testid="cases-filters-toggle"
+                        >
+                            {filtersToggleLabel}
+                        </button>
+                    )}
+                    <button
+                        onClick={() => { resetPagination(); refetch(); }}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                        data-testid="cases-refresh"
+                    >
+                        Обновить
+                    </button>
+                </div>
             </div>
 
             <div
-                className={`flex flex-col gap-3 border border-border/60 rounded-lg p-3 ${
-                    isCompact ? "sticky top-0 z-10 bg-card/95 backdrop-blur" : "bg-muted"
-                }`}
+                className={filterContainerClass}
                 data-testid="cases-filters"
             >
-                <div className="flex w-full flex-wrap items-center gap-3">
+                <div className="flex w-full items-center gap-2 overflow-x-auto pb-1">
                     <input
                         type="text"
                         value={searchValue}
                         onChange={(e) => setSearchValue(e.target.value)}
                         placeholder="Телефон / имя / ID"
-                        className="px-3 py-2 border border-border/60 rounded-lg text-sm bg-card focus:outline-none focus:ring-2 focus:ring-primary/40 min-w-[180px]"
+                        className={searchInputClass}
                         data-testid="cases-filter-search"
                     />
                     <select
                         value={filters.status || ""}
                         onChange={(e) => { resetPagination(); setFilters({ ...filters, status: e.target.value || undefined }); }}
-                        className="px-3 py-2 border border-border/60 rounded-lg text-xs bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        className={selectClass}
                         data-testid="cases-filter-status"
                     >
                         <option value="">Все статусы</option>
@@ -277,21 +332,39 @@ export default function CaseList({
                         <option value="active">В работе</option>
                         <option value="resolved">Закрыта</option>
                     </select>
-                    <div className="flex flex-wrap items-center gap-2" data-testid="cases-filter-sort">
-                        {sortOptions.map((option) => (
-                            <button
-                                key={option.id}
-                                type="button"
-                                onClick={() => {
-                                    resetPagination();
-                                    setFilters({ ...filters, sortBy: option.id });
-                                }}
-                                className={pillClass(filters.sortBy === option.id)}
-                            >
-                                {option.label}
-                            </button>
-                        ))}
-                    </div>
+                    {filtersCollapsed ? (
+                        <select
+                            value={filters.sortBy}
+                            onChange={(e) => {
+                                resetPagination();
+                                setFilters({ ...filters, sortBy: e.target.value as CaseFilters["sortBy"] });
+                            }}
+                            className={selectClass}
+                            data-testid="cases-filter-sort-select"
+                        >
+                            {sortOptions.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                    {option.label}
+                                </option>
+                            ))}
+                        </select>
+                    ) : (
+                        <div className="flex items-center gap-2" data-testid="cases-filter-sort">
+                            {sortOptions.map((option) => (
+                                <button
+                                    key={option.id}
+                                    type="button"
+                                    onClick={() => {
+                                        resetPagination();
+                                        setFilters({ ...filters, sortBy: option.id });
+                                    }}
+                                    className={pillClass(filters.sortBy === option.id)}
+                                >
+                                    {option.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     <button
                         type="button"
                         onClick={() => {
@@ -303,15 +376,17 @@ export default function CaseList({
                     >
                         Мои
                     </button>
-                    <button
-                        type="button"
-                        onClick={() => setShowAdvancedFilters((prev) => !prev)}
-                        className="text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                        data-testid="cases-filter-advanced-toggle"
-                        disabled={advancedFiltersActive}
-                    >
-                        {advancedToggleLabel}
-                    </button>
+                    {!filtersCollapsed && (
+                        <button
+                            type="button"
+                            onClick={() => setShowAdvancedFilters((prev) => !prev)}
+                            className="text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap"
+                            data-testid="cases-filter-advanced-toggle"
+                            disabled={advancedFiltersActive}
+                        >
+                            {advancedToggleLabel}
+                        </button>
+                    )}
                     {(filters.status || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox) && (
                         <button
                             onClick={() => {
@@ -325,23 +400,23 @@ export default function CaseList({
                                     hasPendingOutbox: false,
                                 });
                             }}
-                            className="text-xs text-muted-foreground hover:text-destructive"
+                            className="text-xs text-muted-foreground hover:text-destructive whitespace-nowrap"
                             data-testid="cases-filter-clear"
                         >
                             Сбросить
                         </button>
                     )}
                 </div>
-                {advancedFiltersVisible && (
+                {showAdvancedFiltersRow && (
                     <div
-                        className="flex w-full flex-wrap items-center gap-3 border-t border-border/60 pt-3"
+                        className="flex w-full flex-wrap items-center gap-3 border-t border-border/60 pt-2"
                         data-testid="cases-filters-advanced"
                     >
                         {branchFilterEnabled && (
                             <select
                                 value={filters.branchId || ""}
                                 onChange={(e) => { resetPagination(); setFilters({ ...filters, branchId: e.target.value || undefined }); }}
-                                className="px-3 py-2 border border-border/60 rounded-lg text-xs bg-card focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                className={selectClass}
                                 data-testid="cases-filter-branch"
                             >
                                 <option value="">Все филиалы</option>
@@ -394,10 +469,11 @@ export default function CaseList({
                         </label>
                     </div>
                 )}
-                <div className="text-xs text-muted-foreground" data-testid="cases-count">
-                    {sortedCases.length} {sortedCases.length === 1 ? "заявка" : sortedCases.length < 5 ? "заявки" : "заявок"}
-                    {data?.has_more && " (есть ещё)"}
-                </div>
+                {!filtersCompact && (
+                    <div className="text-xs text-muted-foreground" data-testid="cases-count">
+                        {casesCountLabel}
+                    </div>
+                )}
             </div>
 
             {isCompact ? (
@@ -448,17 +524,17 @@ export default function CaseList({
                                     </span>
                                     {needsReply && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-yellow-100 text-yellow-800">
-                                            NEW
+                                            Нужно ответить
                                         </span>
                                     )}
                                     {isLive && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-green-100 text-green-800">
-                                            LIVE
+                                            На связи
                                         </span>
                                     )}
                                     {hasIssue && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-red-100 text-red-800">
-                                            ⚠️
+                                            Ошибка
                                         </span>
                                     )}
                                 </div>
@@ -539,17 +615,17 @@ export default function CaseList({
                                                 <span className="truncate max-w-[180px]">{c.last_message_preview || c.user_message || "-"}</span>
                                                 {needsReply && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-100 text-yellow-800">
-                                                        NEW
+                                                        Нужно ответить
                                                     </span>
                                                 )}
                                                 {isLive && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-800">
-                                                        LIVE
+                                                        На связи
                                                     </span>
                                                 )}
                                                 {hasIssue && (
                                                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-800">
-                                                        ⚠️
+                                                        Ошибка
                                                     </span>
                                                 )}
                                             </div>

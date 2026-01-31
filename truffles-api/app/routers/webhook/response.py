@@ -17,6 +17,7 @@ from app.routers.webhook.trace import (
     _record_decision_trace,
     _record_message_decision_meta,
     _update_message_decision_metadata,
+    _update_message_signal_snapshot,
 )
 from app.schemas.webhook import WebhookResponse
 
@@ -403,6 +404,35 @@ def _record_llm_degradation(
     timing_context["llm_degradation_reason"] = None
 
 
+def _record_llm_signal_snapshot(
+    *,
+    saved_message: Message | None,
+    timing_context: dict | None,
+    primary_used: bool,
+    primary_confidence: str | None,
+    primary_reason: str | None,
+    blocked_topics: list[str] | None = None,
+) -> None:
+    if not saved_message:
+        return
+    llm_used = bool(timing_context.get("llm_used")) if timing_context else False
+    llm_timeout = bool(timing_context.get("llm_timeout")) if timing_context else False
+    llm_cache_hit = bool(timing_context.get("llm_cache_hit")) if timing_context else False
+    llm_snapshot: dict[str, Any] = {
+        "used": llm_used,
+        "timeout": llm_timeout,
+        "cache_hit": llm_cache_hit,
+        "primary_used": primary_used,
+    }
+    if primary_confidence is not None:
+        llm_snapshot["primary_confidence"] = primary_confidence
+    if primary_reason:
+        llm_snapshot["primary_reason"] = primary_reason
+    if blocked_topics:
+        llm_snapshot["blocked_topics"] = blocked_topics
+    _update_message_signal_snapshot(saved_message, {"llm": llm_snapshot})
+
+
 def _ensure_rag_rewrite(
     *,
     conversation: Conversation,
@@ -499,6 +529,25 @@ def _record_rag_meta(
             saved_message,
             meta_updates,
         )
+        rag_snapshot: dict[str, Any] = {
+            "scores": rag_scores,
+            "confident": rag_confident,
+            "reason": rag_reason,
+            "attempted": bool(
+                timing_context.get("rag_attempted") if isinstance(timing_context, dict) else False
+            ),
+        }
+        best_score = timing_context.get("rag_best_score") if isinstance(timing_context, dict) else None
+        if isinstance(best_score, (int, float)):
+            rag_snapshot["best_score"] = best_score
+        _update_message_signal_snapshot(saved_message, {"rag": rag_snapshot})
+        knowledge_snapshot: dict[str, Any] = {}
+        if branch_id:
+            knowledge_snapshot["branch_id"] = branch_id
+        if knowledge_tag:
+            knowledge_snapshot["knowledge_tag"] = knowledge_tag
+        if knowledge_snapshot:
+            _update_message_signal_snapshot(saved_message, {"knowledge": knowledge_snapshot})
 
 
 def _maybe_apply_consult_return(
@@ -649,6 +698,7 @@ def _handle_consult_flow(
     )
     from app.services.demo_salon_knowledge import (
         DemoSalonDecision,
+        get_demo_salon_decision,
         get_demo_salon_service_decision,
     )
     from app.services.knowledge_service import resolve_consult_topic_candidates
@@ -694,6 +744,7 @@ def _handle_consult_flow(
             domain_intent=legacy.DomainIntent.UNKNOWN,
             domain_meta=None,
             router_state=router_state,
+            explicit_service_signal=False,
         )
 
     if not (routing.get("allow_bot_reply") and not bypass_domain_flows and message_text):
@@ -791,12 +842,23 @@ def _handle_consult_flow(
         from app.services.demo_salon_knowledge import _normalize_text
 
         normalized = _normalize_text(message_text)
+        prep_trigger = bool(
+            normalized
+            and any(token in normalized for token in ("подготов", "линз", "контейнер", "макияж"))
+            and any(token in normalized for token in ("бров", "ресниц", "лами"))
+        )
+        combo_trigger = bool(
+            normalized
+            and ("совмещ" in normalized or "в один день" in normalized)
+            and "чистк" in normalized
+            and "пилинг" in normalized
+        )
         aftercare_trigger = bool(
             normalized
             and "гель лак" in normalized
             and any(token in normalized for token in ("ухаж", "продл", "держ", "нос", "срок"))
         )
-        if aftercare_trigger:
+        if aftercare_trigger or prep_trigger or combo_trigger:
             from app.services.demo_salon_knowledge import get_demo_salon_decision
 
             truth_decision = get_demo_salon_decision(
@@ -807,7 +869,7 @@ def _handle_consult_flow(
             if (
                 truth_decision
                 and truth_decision.action == "reply"
-                and truth_decision.intent == "aftercare_gel_lac"
+                and truth_decision.intent in {"aftercare_gel_lac", "prep_brows_lashes"}
             ):
                 bot_response = truth_decision.response
                 legacy._reset_low_confidence_retry(conversation)
@@ -834,6 +896,86 @@ def _handle_consult_flow(
                     _update_message_decision_metadata(saved_message, truth_decision.meta)
                 bot_response, sent = send_and_save(bot_response)
                 result_message = "Truth gate override reply sent"
+                if not sent:
+                    result_message = f"{result_message}; response_send=failed"
+                db.commit()
+                return ConsultFlowResult(
+                    response=WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    ),
+                    consult_intent=consult_intent,
+                    consult_topic=consult_topic,
+                    consult_question=consult_question,
+                    intent_decomp_payload=intent_decomp_payload,
+                )
+            if (
+                truth_decision
+                and truth_decision.action == "escalate"
+                and truth_decision.intent == "procedure_combo"
+            ):
+                bot_response = truth_decision.response
+                legacy._reset_low_confidence_retry(conversation)
+                result_message = "Truth gate escalation reply sent"
+                _, reused, telegram_sent = legacy._reuse_active_handover(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message=message_text,
+                    source="truth_gate",
+                    intent=truth_decision.intent,
+                )
+                if reused:
+                    result_message = f"Truth gate reuse, telegram={'sent' if telegram_sent else 'failed'}"
+                elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value:
+                    record_escalation_metric("intent")
+                    result = legacy.escalate_to_pending(
+                        db=db,
+                        conversation=conversation,
+                        user_message=message_text,
+                        trigger_type="intent",
+                        trigger_value=truth_decision.intent or "policy",
+                    )
+                    if result.ok:
+                        handover = result.value
+                        telegram_sent = legacy.send_telegram_notification(
+                            db=db,
+                            handover=handover,
+                            conversation=conversation,
+                            user=user,
+                            message=message_text,
+                        )
+                        result_message = (
+                            f"Truth gate escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                        )
+                    else:
+                        result_message = f"Truth gate escalation failed: {result.error}"
+                else:
+                    result_message = "Truth gate escalation skipped (already pending)"
+                trace_payload = {
+                    "stage": "truth_gate",
+                    "decision": truth_decision.action,
+                    "intent": truth_decision.intent,
+                    "state": conversation.state,
+                    "booking_wants_flow": booking_wants_flow,
+                    "policy_type": policy_type,
+                    "consult_override": True,
+                }
+                if isinstance(getattr(truth_decision, "meta", None), dict):
+                    trace_payload.update(truth_decision.meta)
+                _record_decision_trace(conversation, trace_payload)
+                _record_message_decision_meta(
+                    saved_message,
+                    action=truth_decision.action,
+                    intent=truth_decision.intent,
+                    source="truth_gate",
+                    fast_intent=False,
+                )
+                if saved_message and isinstance(getattr(truth_decision, "meta", None), dict):
+                    _update_message_decision_metadata(saved_message, truth_decision.meta)
+                bot_response, sent = send_and_save(bot_response)
                 if not sent:
                     result_message = f"{result_message}; response_send=failed"
                 db.commit()
@@ -901,6 +1043,11 @@ def _handle_consult_flow(
             meta["consult_snapshot_playbook_error"] = result.playbook_error
         return meta
 
+    def _record_consult_snapshot_signal(meta: dict[str, Any] | None) -> None:
+        if not saved_message or not isinstance(meta, dict):
+            return
+        _update_message_signal_snapshot(saved_message, {"consult_snapshot": meta})
+
     playbook = None
     _pack_error = None
 
@@ -931,6 +1078,7 @@ def _handle_consult_flow(
                 mode=consult_snapshot_mode,
                 source=consult_snapshot_source,
             )
+            _record_consult_snapshot_signal(consult_snapshot_meta)
             legacy._record_decision_trace(
                 conversation,
                 _build_consult_snapshot_trace(
@@ -999,6 +1147,7 @@ def _handle_consult_flow(
                 mode="shadow",
                 source="shadow",
             )
+            _record_consult_snapshot_signal(consult_snapshot_meta)
             legacy._record_decision_trace(
                 conversation,
                 _build_consult_snapshot_trace(
@@ -1782,6 +1931,13 @@ def _handle_llm_primary(
     if not llm_primary_result.ok:
         llm_primary_failed = True
         llm_primary_reason = "ai_error"
+        _record_llm_signal_snapshot(
+            saved_message=saved_message,
+            timing_context=timing_context,
+            primary_used=False,
+            primary_confidence=None,
+            primary_reason=llm_primary_reason,
+        )
         return LlmPrimaryOutcome(
             response=None,
             llm_primary_result=llm_primary_result,
@@ -1793,6 +1949,13 @@ def _handle_llm_primary(
     if confidence == "bot_inactive":
         llm_primary_failed = True
         llm_primary_reason = "bot_inactive"
+        _record_llm_signal_snapshot(
+            saved_message=saved_message,
+            timing_context=timing_context,
+            primary_used=False,
+            primary_confidence=confidence,
+            primary_reason=llm_primary_reason,
+        )
         return LlmPrimaryOutcome(
             response=None,
             llm_primary_result=llm_primary_result,
@@ -1872,6 +2035,14 @@ def _handle_llm_primary(
                         "llm_cache_hit": llm_cache_hit,
                     },
                 )
+                _record_llm_signal_snapshot(
+                    saved_message=saved_message,
+                    timing_context=timing_context,
+                    primary_used=False,
+                    primary_confidence=confidence,
+                    primary_reason="llm_guard",
+                    blocked_topics=blocked_topics,
+                )
             bot_response, sent = send_and_save(bot_response, allow_quiet_hours=False)
             if not sent:
                 result_message = f"{result_message}; response_send=failed"
@@ -1921,6 +2092,13 @@ def _handle_llm_primary(
                     "llm_cache_hit": llm_cache_hit,
                 },
             )
+            _record_llm_signal_snapshot(
+                saved_message=saved_message,
+                timing_context=timing_context,
+                primary_used=True,
+                primary_confidence=confidence,
+                primary_reason=None,
+            )
         db.commit()
         return LlmPrimaryOutcome(
             response=WebhookResponse(
@@ -1936,6 +2114,13 @@ def _handle_llm_primary(
 
     llm_primary_failed = True
     llm_primary_reason = "low_confidence" if confidence == "low_confidence" else "no_response"
+    _record_llm_signal_snapshot(
+        saved_message=saved_message,
+        timing_context=timing_context,
+        primary_used=False,
+        primary_confidence=confidence,
+        primary_reason=llm_primary_reason,
+    )
     return LlmPrimaryOutcome(
         response=None,
         llm_primary_result=llm_primary_result,
@@ -2355,6 +2540,19 @@ def _handle_ai_response_action(
                             "llm_used": llm_used,
                             "llm_timeout": llm_timeout,
                             "llm_cache_hit": llm_cache_hit,
+                        },
+                    )
+                    _update_message_signal_snapshot(
+                        saved_message,
+                        {
+                            "semantic_service": {
+                                "attempted": True,
+                                "action": semantic_result.action,
+                                "score": semantic_result.score,
+                                "rewrite_used": rewrite_used,
+                                "rewrite_query": rewrite_query,
+                                "canonical_name": semantic_result.canonical_name,
+                            }
                         },
                     )
                 bot_response, sent = send_and_save(bot_response)

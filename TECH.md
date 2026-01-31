@@ -214,7 +214,14 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 **Запуск (docker‑вариант, preferred):**
 ```bash
 docker compose -f /home/zhan/truffles-main/docker-compose.console.yml up -d console-postgres console-redis console-keycloak
-docker compose -f /home/zhan/truffles-main/truffles-api/docker-compose.yml up -d console-web
+GIT_COMMIT=$(git -C /home/zhan/truffles-main rev-parse HEAD) \
+BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  docker compose -f /home/zhan/truffles-main/truffles-api/docker-compose.yml up -d console-web
+```
+
+**Console Web restart (build info wired):**
+```bash
+/home/zhan/truffles-main/scripts/restart_console_web.sh
 ```
 
 **Legacy (если console‑web ещё на PM2):**

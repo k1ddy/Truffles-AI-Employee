@@ -15,6 +15,7 @@ interface ChatInterfaceProps {
     draft?: string;
     onDraftChange?: (value: string) => void;
     composerBefore?: ReactNode;
+    frame?: "card" | "plain";
 }
 
 async function sendMessage(conversationId: string, content: string) {
@@ -33,6 +34,7 @@ export default function ChatInterface({
     draft,
     onDraftChange,
     composerBefore,
+    frame = "card",
 }: ChatInterfaceProps) {
     const isControlled = typeof onDraftChange === "function";
     const [internalDraft, setInternalDraft] = useState("");
@@ -41,6 +43,7 @@ export default function ChatInterface({
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const lastMessageIdRef = useRef<string | null>(null);
     const queryClient = useQueryClient();
+    const isPlain = frame === "plain";
 
     // Reverse messages for chronological display (oldest first)
     const sortedMessages = [...messages].reverse();
@@ -128,7 +131,11 @@ export default function ChatInterface({
 
     if (isLoading) {
         return (
-            <div className="flex flex-col gap-4 p-4 bg-muted rounded-lg min-h-[520px] overflow-y-auto">
+            <div
+                className={`flex flex-col gap-4 p-4 min-h-[520px] overflow-y-auto ${
+                    isPlain ? "" : "bg-muted/60 rounded-xl"
+                }`}
+            >
                 <div className="animate-pulse space-y-4">
                     <div className="h-16 bg-muted/70 rounded-lg w-3/4"></div>
                     <div className="h-16 bg-muted/70 rounded-lg w-2/3 self-end ml-auto"></div>
@@ -139,7 +146,11 @@ export default function ChatInterface({
     }
 
     return (
-        <div className="flex flex-col h-full min-h-[520px] bg-muted rounded-lg border border-border/60">
+        <div
+            className={`flex flex-col h-full min-h-[480px] ${
+                isPlain ? "" : "bg-muted/60 rounded-xl overflow-hidden"
+            }`}
+        >
             {/* Messages area */}
             <div
                 ref={scrollContainerRef}
@@ -155,7 +166,7 @@ export default function ChatInterface({
                         return (
                             <div
                                 key={msg.id}
-                                className={`flex flex-col max-w-[80%] ${msg.role === "user" ? "self-start" : "self-end items-end"} ${isOptimistic ? "opacity-70" : ""}`}
+                                className={`flex flex-col max-w-[92%] ${msg.role === "user" ? "self-start" : "self-end items-end"} ${isOptimistic ? "opacity-70" : ""}`}
                             >
                                 <div className="text-xs text-muted-foreground mb-1">
                                     {msg.role === "user" ? "Клиент" :
@@ -183,9 +194,9 @@ export default function ChatInterface({
 
             {/* Input area */}
             {canSend && (
-                <form onSubmit={handleSubmit} className="border-t border-border/60 p-3 bg-card rounded-b-lg">
+                <form onSubmit={handleSubmit} className="border-t border-border/60 p-3 bg-card">
                     {composerBefore && (
-                        <div className="mb-3">
+                        <div className="mb-2">
                             {composerBefore}
                         </div>
                     )}
@@ -194,7 +205,7 @@ export default function ChatInterface({
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            placeholder="Введите сообщение... (Enter для отправки)"
+                            placeholder="Введите сообщение. Enter — отправить, Shift+Enter — новая строка."
                             rows={2}
                             disabled={sendMutation.isPending}
                             className="flex-1 px-3 py-2 border border-border/60 rounded-lg text-sm resize-none bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:bg-muted"
@@ -220,8 +231,8 @@ export default function ChatInterface({
             )}
 
             {!canSend && (
-                <div className="border-t border-border/60 p-3 bg-muted rounded-b-lg text-center text-sm text-muted-foreground">
-                    Возьмите заявку чтобы отправлять сообщения
+                <div className="border-t border-border/60 p-3 bg-muted text-center text-sm text-muted-foreground">
+                    Возьмите заявку, чтобы отвечать клиенту
                 </div>
             )}
         </div>

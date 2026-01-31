@@ -140,11 +140,18 @@ outbox worker (тик 2s) или POST /admin/outbox/process (cron)
 _handle_webhook_payload(skip_persist=True)
     ↓
 behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → policy‑gates (скидки/оплата info)
-→ answer‑interpreter (expected_reply_type) → LLM‑first понимание (intent/slots JSON) + semantic resolver → early OOD (только при out‑signals без in‑signals)
+→ answer‑interpreter (expected_reply_type) → **Signal Snapshot Layer** (LLM pack‑ref‑only intent/slots + compiled pack‑index + semantic/RAG signals; fallback recorded)
+→ early OOD (только при out‑signals без in‑signals)
 → tools/packs fact‑resolver (info/consult/booking/service) → fast intent (smalltalk) → LLM‑формулировка поверх фактов → Response Guard → truth gate fallback → low‑confidence handling
     ↓
 chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backoff отсутствуют)
 ```
+
+#### Unified Reasoning Core (DEC-018)
+- **Signal Snapshot Layer:** единая точка сигналов (pack‑index, domain anchors, semantic/RAG, LLM‑router). Никаких бизнес‑лексиконов в коде.
+- **LLM contract:** LLM возвращает только pack‑ID/intent/slots + confidence (pack‑ref‑only); факты только из packs/tools.
+- **Pack‑index:** строится на publish (domain/company/client/branch), версионируется и пишется в decision_meta (pack_id/version/hash).
+- **Routing:** gates принимают решения только по snapshot; low‑confidence → deterministic fallback с фиксацией `fallback_reason`.
 
 #### Outbox payload contract + action gate
 - **Контракт payload:** валидируем перед enqueue (см. `contracts/events/outbox.webhook_payload.v1.jsonschema` и `truffles-api/app/schemas/outbox_payload.py`).  
@@ -429,7 +436,13 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Включается **только** если ожидается ответ на вопрос (`expected_reply_type` активен).
 - Делает **семантический** разбор ответа (slot/value/confidence), а не классификацию запроса.
 - Низкая уверенность/ошибка → fallback на детерминированный парсер + короткий уточняющий вопрос.
+- Если `expected_reply_match=false` → интерпретатор не применяется: слот не заполняем, идём в root‑gates, затем при активной записи возвращаем booking‑prompt.
 - Не может менять класс ответа и не влияет на Hard‑LAW/policy‑gates.
+
+### Signal Snapshot (routing signals)
+- Единая точка фиксации сигналов: domain_router anchors (client_config), pack lexicons (policy/guest/service), semantic match (RAG/Qdrant), consult topic resolver.
+- Сигналы пишутся в `decision_meta` с источником/score/threshold; используются для OOD/booking/intent gate.
+- LLM‑router остаётся primary по смыслу; детерминированные сигналы — safety/fallback, а не “истина”.
 
 ### Consult clarify (pack-only, no LLM advice)
 - Consult canon: info-first only from pack playbooks; no LLM advice/facts. If explicit info/booking request (pricing/duration/location/hours/booking) and service recognized → short-circuit to normal info/booking; advice-style consult stays in consult even if service recognized. If playbook missing and no service → max 2 clarifications (`clarify_limit=2`), then escalate `consult_no_service`.
@@ -496,6 +509,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - gap > 24h между сообщениями → полный reset памяти.
 - явный текст пользователя “новый запрос” → reset.
 - pending/manager_active → сохранить `pending_resume` (snapshot контекста) и восстановить на `pending_ack`.
+- Reset‑фразы в `pending` трактуются как `pending_ack`/`pending_close`; прямого bypass pending‑guard нет.
 
 ### Pending Resume (context snapshot)
 - При уходе в `pending` сохраняем snapshot (`expected_reply_type`, `intent_queue`, `booking`, `session_memory`).

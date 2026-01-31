@@ -1026,6 +1026,7 @@ def _build_booking_class_router_result(
         domain_intent=legacy.DomainIntent.UNKNOWN,
         domain_meta=None,
         router_state=router_state,
+        explicit_service_signal=False,
     )
 
 

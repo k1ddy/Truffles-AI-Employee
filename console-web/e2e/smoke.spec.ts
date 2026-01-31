@@ -487,9 +487,11 @@ test.describe('Inbox Features', () => {
             await openButton.click();
             await expect(page).toHaveURL(/\/cases\/[a-f0-9-]+/);
         }
-        await expect(
-            page.getByTestId('case-details').or(page.getByTestId('case-view'))
-        ).toBeVisible({ timeout: 5000 });
+        const caseVisible = page
+            .getByTestId('case-conversation')
+            .or(page.getByTestId('case-details'))
+            .or(page.getByTestId('case-view'));
+        await expect(caseVisible.first()).toBeVisible({ timeout: 10000 });
     });
 });
 

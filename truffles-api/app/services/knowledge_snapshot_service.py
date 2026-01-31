@@ -10,7 +10,11 @@ from uuid import UUID, uuid4
 
 from app.models import Branch, KnowledgeVersion
 from app.schemas.outbox_payload import TenantContext
-from app.services.knowledge_registry_service import get_current_published
+from app.services.knowledge_registry_service import (
+    build_pack_index,
+    build_pack_index_meta,
+    get_current_published,
+)
 
 
 def _serialize_for_hash(value: dict[str, Any]) -> str:
@@ -71,6 +75,9 @@ def _extract_packs(payload_json: dict) -> dict[str, Any]:
         faq = client_pack.get("faq")
     if isinstance(faq, list):
         packs["faq"] = faq
+    pack_index = build_pack_index(payload_json)
+    if isinstance(pack_index, dict):
+        packs["pack_index"] = pack_index
     return packs
 
 
@@ -159,6 +166,21 @@ def build_knowledge_snapshot(
         instance_id=branch.instance_id,
     )
 
+    pack_index_meta = None
+    pack_index = packs.get("pack_index") if isinstance(packs, dict) else None
+    if isinstance(pack_index, dict):
+        compiled_at = version.published_at or version.created_at or now
+        pack_index_meta = build_pack_index_meta(
+            pack_index,
+            version_id=version.id,
+            compiled_at=compiled_at,
+            source="knowledge_snapshot",
+        )
+
+    extensions = {"source": "knowledge_versions"}
+    if pack_index_meta:
+        extensions["pack_index"] = pack_index_meta
+
     snapshot = {
         "snapshot_id": str(uuid4()),
         "tenant_context": tenant_context_payload,
@@ -169,6 +191,6 @@ def build_knowledge_snapshot(
         "sha256": sha256_value,
         "packs": packs,
         "signature": signature,
-        "extensions": {"source": "knowledge_versions"},
+        "extensions": extensions,
     }
     return snapshot, None
