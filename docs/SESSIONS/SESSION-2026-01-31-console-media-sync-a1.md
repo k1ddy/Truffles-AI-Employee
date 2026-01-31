@@ -15,9 +15,11 @@
   - Tests added + pytest/lint run.
   - Infra analysis report added.
   - Enqueue-only inbound media now stored + signed for Console preview.
+  - Manager-active inbound media now stored + signed before gate returns.
 - next:
   - Capture live-check or CI evidence as needed.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-01-31-console-media-sync.md
   - /tmp/console_media_enqueue_only_pytest_20260131.txt
+  - /tmp/console_media_preview_pytest_20260131.txt
 - last_updated: 2026-01-31

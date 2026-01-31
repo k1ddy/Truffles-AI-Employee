@@ -5166,6 +5166,38 @@ async def _handle_webhook_payload(
         now=now,
     )
 
+    if has_media and media_info and media_policy and media_policy.get("store_media"):
+        if media_decision is None:
+            media_decision = await _evaluate_media_decision(
+                media=media_info,
+                client_id=client.id,
+                remote_jid=remote_jid,
+                policy=media_policy,
+                redis_client=media_redis_client,
+                count_rate_limit=count_rate_limit,
+            )
+        if media_decision is None or media_decision.allowed:
+            storage_path = None
+            if saved_message and isinstance(saved_message.message_metadata, dict):
+                storage_path = (saved_message.message_metadata.get("media") or {}).get("storage_path")
+            if not storage_path:
+                storage_result = await _store_media_locally(
+                    media=media_info,
+                    policy=media_policy,
+                    client_slug=client.name,
+                    conversation_id=conversation.id,
+                    message_id=message_id,
+                )
+                if saved_message:
+                    update_payload = {
+                        "storage_path": storage_result.get("path"),
+                        "stored": bool(storage_result.get("stored")),
+                        "storage_error": storage_result.get("error"),
+                        "size_bytes": storage_result.get("size_bytes") or media_info.size_bytes,
+                        "sha256": storage_result.get("sha256"),
+                    }
+                    _update_message_media_metadata(saved_message, update_payload)
+
     _forward_pending_to_telegram(
         db=db,
         client_id=client.id,
