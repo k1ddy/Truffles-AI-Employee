@@ -1,6 +1,6 @@
 # SESSION 2026-01-30-signal-snapshot-a1 — Session 2026-01-30-signal-snapshot-a1
 
-- status: active
+- status: paused
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-30-signal-snapshot-layer.md
 - branch: feat/2026-01-30-signal-snapshot-a1
@@ -16,4 +16,4 @@
   - Open PR after session_check.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-01-30-signal-snapshot-layer.md
-- last_updated: 2026-01-30
+- last_updated: 2026-01-31

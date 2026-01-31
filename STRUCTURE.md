@@ -167,6 +167,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle.md`
 - `docs/TASK_PACKAGES/TP-2026-01-30-unified-reasoning-core-dec.md`
 - `docs/TASK_PACKAGES/TP-2026-01-31-llm-pack-ref-only.md`
+- `docs/TASK_PACKAGES/TP-2026-01-31-ruff-intent-import-order.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`
