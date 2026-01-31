@@ -1,0 +1,25 @@
+# SESSION 2026-01-31-inbox-composer-visibility-a1 — Session 2026-01-31-inbox-composer-visibility-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-31-inbox-composer-visibility.md
+- branch: feat/2026-01-31-inbox-composer-visibility-a1
+- worktree: /home/zhan/worktrees/2026-01-31-inbox-composer-visibility-a1
+- base_ref: origin/main
+- scope: Inbox chat composer visibility at 100% zoom + remove obsolete TP file per owner request.
+- done:
+  - Session created.
+  - Added GAP entry in `STATE.md` for composer visibility regression.
+  - Updated ChatInterface/CaseConversation flex sizing to keep composer visible.
+  - Removed obsolete Task Package `TP-2026-01-31-inbox-macros-ui-fix.md`.
+  - Installed console-web deps and ran lint (`/tmp/console_web_lint_inbox_composer_visibility_20260131.txt`).
+  - Rebuilt/restarted console-web (`/tmp/console_web_restart_inbox_composer_visibility_20260131.txt`).
+  - Adjusted composer textarea auto-resize to keep macro inserts readable.
+  - Ran lint (`/tmp/console_web_lint_inbox_composer_autogrow_20260131.txt`).
+  - Rebuilt/restarted console-web (`/tmp/console_web_restart_inbox_composer_autogrow_20260131.txt`).
+  - User confirmed: composer visible at 100% zoom; macro inserts readable.
+- next:
+  - Run `scripts/session_check.sh`, commit, push PR after confirmation.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-31-inbox-composer-visibility.md
+- last_updated: 2026-01-31
