@@ -362,6 +362,30 @@ export default function ChatInterface({
                                                 {fileName ?? "Файл"}
                                                 {sizeLabel ? ` · ${sizeLabel}` : ""}
                                             </div>
+                                            {publicUrl && mediaType === "photo" && (
+                                                <a
+                                                    href={publicUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="mt-2 block"
+                                                >
+                                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                    <img
+                                                        src={publicUrl}
+                                                        alt={fileName ?? mediaLabel ?? "Фото"}
+                                                        loading="lazy"
+                                                        className="w-full max-w-[320px] rounded-md border border-border/40 object-cover"
+                                                    />
+                                                </a>
+                                            )}
+                                            {publicUrl && mediaType === "audio" && (
+                                                <audio
+                                                    controls
+                                                    preload="metadata"
+                                                    className="mt-2 w-full"
+                                                    src={publicUrl}
+                                                />
+                                            )}
                                             {publicUrl && (
                                                 <a
                                                     href={publicUrl}
