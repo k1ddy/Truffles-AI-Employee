@@ -83,3 +83,4 @@
 | 2026-01-31-booking-mismatch-signals-a4 | done | feat/2026-01-31-booking-mismatch-signals-a4 | /home/zhan/worktrees/2026-01-31-booking-mismatch-signals-a4 | docs/TASK_PACKAGES/TP-2026-01-31-booking-mismatch-signals.md | 2026-01-31 |
 | 2026-01-31-chaos-golden-coverage-a4 | done | feat/2026-01-31-chaos-golden-coverage-a4 | /home/zhan/worktrees/2026-01-31-chaos-golden-coverage-a4 | docs/TASK_PACKAGES/TP-2026-01-31-chaos-golden-coverage.md | 2026-01-31 |
 | 2026-02-01-scn-multiturn-eval-a4 | done | feat/2026-02-01-scn-multiturn-eval-a4 | /home/zhan/worktrees/2026-02-01-scn-multiturn-eval-a4 | docs/TASK_PACKAGES/TP-2026-02-01-scn-multiturn-eval.md | 2026-01-31 |
+| 2026-01-31-state-scn-multiturn-evidence-a4 | done | feat/2026-01-31-state-scn-multiturn-evidence-a4 | /home/zhan/worktrees/2026-01-31-state-scn-multiturn-evidence-a4 | docs/TASK_PACKAGES/TP-2026-01-31-state-scn-multiturn-evidence.md | 2026-01-31 |
