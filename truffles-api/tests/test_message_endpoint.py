@@ -341,7 +341,8 @@ def test_policy_gate_escalates_without_llm():
     saved_message = Mock()
     saved_message.message_metadata = {}
 
-    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    client_id = uuid4()
+    client = SimpleNamespace(id=client_id, name="demo_salon", config={})
     settings = SimpleNamespace(
         webhook_secret=None,
         branch_resolution_mode="disabled",
@@ -876,7 +877,8 @@ def test_truth_gate_sets_decision_meta():
     saved_message = Mock()
     saved_message.message_metadata = {}
 
-    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    client_id = uuid4()
+    client = SimpleNamespace(id=client_id, name="demo_salon", config={})
     settings = SimpleNamespace(
         webhook_secret=None,
         branch_resolution_mode="disabled",
@@ -1355,10 +1357,11 @@ def test_consult_pack_writes_decision_meta():
         branch_resolution_mode="disabled",
         remember_branch_preference=True,
     )
+    user = SimpleNamespace(id=uuid4(), user_metadata={})
     conversation_id = uuid4()
     conversation = SimpleNamespace(
         id=conversation_id,
-        user_id="user-123",
+        user_id=user.id,
         client_id=client.id,
         state=ConversationState.BOT_ACTIVE.value,
         bot_status="active",
@@ -3393,10 +3396,11 @@ def test_rag_rewrite_and_scores_logged():
         branch_resolution_mode="disabled",
         remember_branch_preference=False,
     )
+    user = SimpleNamespace(id=uuid4(), user_metadata={})
     conversation_id = uuid4()
     conversation = SimpleNamespace(
         id=conversation_id,
-        user_id="user-123",
+        user_id=user.id,
         client_id=client.id,
         state=ConversationState.BOT_ACTIVE.value,
         bot_status="active",
@@ -4516,6 +4520,140 @@ def test_audio_transcription_failure_returns_prompt():
     assert response.success is True
     assert response.bot_response == webhook_router.MSG_MEDIA_TRANSCRIPT_FAILED
     assert saved_message.message_metadata["asr"]["asr_failed"] is True
+
+
+def test_enqueue_only_media_sets_public_url():
+    saved_message = Mock()
+    saved_message.message_metadata = {"media": {"type": "photo"}}
+
+    client_id = uuid4()
+    client = SimpleNamespace(id=client_id, name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    user = SimpleNamespace(id=uuid4(), user_metadata={})
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id=user.id,
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            messageType="image",
+            message=None,
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-image-123",
+                timestamp=1234567890,
+            ),
+            mediaData={
+                "type": "image",
+                "mimetype": "image/jpeg",
+                "url": "https://app.chatflow.kz/media.jpg",
+                "fileName": "photo.jpg",
+                "size": 120,
+            },
+        ),
+    )
+
+    storage_path = "/tmp/truffles-media/demo_salon/conv/photo.jpg"
+    signed_payload = {
+        "public_url": "https://example.com/media.jpg?expires=1700000000&sig=abc",
+        "expires_at": "2026-01-01T00:00:00+00:00",
+    }
+
+    def _save_message(_db, _conversation_id, _client_id, **kwargs):
+        saved_message.message_metadata = kwargs.get("message_metadata")
+        saved_message.content = kwargs.get("content")
+        saved_message.role = kwargs.get("role")
+        return saved_message
+
+    with patch(
+        "app.routers.webhook.decision._handle_dedup_gate",
+        AsyncMock(return_value=(None, "msg-image-123")),
+    ), patch(
+        "app.routers.webhook.decision._evaluate_media_decision",
+        AsyncMock(return_value=webhook_router.MediaDecision(allowed=True)),
+    ), patch(
+        "app.routers.webhook.decision.get_or_create_user",
+        return_value=user,
+    ), patch(
+        "app.routers.webhook.decision.find_active_conversation_by_channel_ref",
+        return_value=conversation,
+    ), patch(
+        "app.routers.webhook.decision.get_or_create_conversation",
+        return_value=conversation,
+    ), patch(
+        "app.routers.webhook.decision.save_message",
+        side_effect=_save_message,
+    ), patch(
+        "app.routers.webhook.outbox._store_media_locally",
+        AsyncMock(
+            return_value={
+                "stored": True,
+                "path": storage_path,
+                "size_bytes": 120,
+                "sha256": "abc",
+            }
+        ),
+    ), patch(
+        "app.routers.webhook.media._build_signed_media_payload",
+        return_value=signed_payload,
+    ), patch(
+        "app.routers.webhook.outbox.enqueue_outbox_message",
+        return_value=True,
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                enqueue_only=True,
+                skip_persist=False,
+                conversation_id=None,
+            )
+        )
+
+    assert response.success is True
+    media_meta = saved_message.message_metadata.get("media") or {}
+    assert media_meta.get("storage_path") == storage_path
+    assert media_meta.get("public_url") == signed_payload["public_url"]
+    assert media_meta.get("expires_at") == signed_payload["expires_at"]
 
 
 def test_multi_intent_long_message_prioritizes_booking():

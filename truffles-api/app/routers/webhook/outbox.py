@@ -226,6 +226,35 @@ async def _handle_enqueue_only_accept(
     media_policy: dict | None,
     media_decision,
 ) -> WebhookResponse:
+    storage_path = None
+    store_media_enabled = bool(media_policy and media_policy.get("store_media"))
+    if media_info and store_media_enabled and (media_decision is None or media_decision.allowed):
+        if saved_message and isinstance(saved_message.message_metadata, dict):
+            storage_path = (saved_message.message_metadata.get("media") or {}).get("storage_path")
+        if not storage_path:
+            storage_result = await _store_media_locally(
+                media=media_info,
+                policy=media_policy,
+                client_slug=client.name,
+                conversation_id=conversation.id,
+                message_id=message_id,
+            )
+            if storage_result.get("stored"):
+                storage_path = storage_result.get("path")
+            if saved_message:
+                update_payload = {
+                    "storage_path": storage_result.get("path"),
+                    "stored": bool(storage_result.get("stored")),
+                    "storage_error": storage_result.get("error"),
+                    "size_bytes": storage_result.get("size_bytes") or media_info.size_bytes,
+                    "sha256": storage_result.get("sha256"),
+                }
+                _update_message_media_metadata(saved_message, update_payload)
+        elif saved_message:
+            media_meta = saved_message.message_metadata.get("media") or {}
+            if not media_meta.get("public_url"):
+                _update_message_media_metadata(saved_message, {})
+
     if (
         conversation.state in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]
         and conversation.telegram_topic_id
@@ -242,31 +271,6 @@ async def _handle_enqueue_only_accept(
                     and media_decision.allowed
                     and (media_policy or {}).get("forward_to_telegram")
                 ):
-                    storage_path = None
-                    if media_policy and media_policy.get("store_media"):
-                        if saved_message and isinstance(saved_message.message_metadata, dict):
-                            storage_path = (saved_message.message_metadata.get("media") or {}).get(
-                                "storage_path"
-                            )
-                        if not storage_path:
-                            storage_result = await _store_media_locally(
-                                media=media_info,
-                                policy=media_policy,
-                                client_slug=client.name,
-                                conversation_id=conversation.id,
-                                message_id=message_id,
-                            )
-                            if storage_result.get("stored"):
-                                storage_path = storage_result.get("path")
-                            if saved_message:
-                                update_payload = {
-                                    "storage_path": storage_result.get("path"),
-                                    "stored": bool(storage_result.get("stored")),
-                                    "storage_error": storage_result.get("error"),
-                                    "size_bytes": storage_result.get("size_bytes") or media_info.size_bytes,
-                                    "sha256": storage_result.get("sha256"),
-                                }
-                                _update_message_media_metadata(saved_message, update_payload)
                     caption = _build_media_caption(message_text, media_info)
                     forward_result = _send_telegram_media(
                         telegram=telegram,
