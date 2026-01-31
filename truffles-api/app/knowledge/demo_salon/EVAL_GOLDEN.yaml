@@ -69,3 +69,41 @@ eval_cases:
   expected_meta:
     expected_reply_type: "service_choice"
     llm_used: false
+- id: G006_BOOKING_SERVICE_TIME
+  messages:
+  - "хочу записаться"
+  - "маникюр"
+  expected_meta:
+    expected_reply_type: "time"
+    llm_used: false
+- id: G007_BOOKING_INTERRUPT
+  messages:
+  - "хочу записаться на маникюр"
+  - "сколько стоит маникюр?"
+  expected_meta:
+    booking_info_interrupt: true
+    llm_used: false
+  expected_trace_contains:
+  - stage: "booking_interrupt"
+- id: G008_LOW_SIGNAL_OOD
+  user: "мм..."
+  expected_meta:
+    action: "out_of_domain"
+    intent: "out_of_domain"
+    llm_used: false
+  expected_meta_any:
+    source:
+    - "service_semantic_guard"
+    - "no_response_guard"
+    - "router_low_confidence"
+    - "domain_router"
+    - "question_contract"
+    - "domain_anchor"
+  expected_trace_contains:
+  - stage: "out_of_domain"
+    decision_any:
+    - "service_semantic_guard"
+    - "no_response_guard"
+    - "router_low_confidence"
+    - "early_block"
+    - "expected_reply_off_topic"

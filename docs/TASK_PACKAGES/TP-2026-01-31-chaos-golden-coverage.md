@@ -1,0 +1,47 @@
+- Название/цель: rerun booking chaos-sim (fixed seed) + triage 500 + расширить golden eval trace/meta кейсы.
+- Canon refs: `STATE.md` (OPEN chaos-sim residuals), `docs/runbooks/CHAOS_SIM.md`, `SPECS/ARCHITECTURE.md`, `SPECS/SYSTEM_REFERENCE.md`, `STRATEGY/REQUIREMENTS.md`.
+- Invariant:
+  - decision_meta/decision_trace пишутся на каждом user-message и раннем возврате.
+  - `_legacy.py`/entrypoints без оркестрации; стадийность не меняется.
+  - Нет текстовых assert для LLM.
+- Scope:
+  - добавить 2–3 golden eval кейса (booking time/interrupt, low-signal OOD) в `EVAL_GOLDEN.yaml`.
+  - rerun booking-only chaos-sim с фиксированным seed, собрать artifacts и 500 triage.
+  - обновить `STATE.md` с evidence (включая 500 если повторится).
+- Out of scope:
+  - изменения логики/пакетов, LLM промптов, pack-index/versioning, live-outbound.
+- Touch-list:
+  - `truffles-api/app/knowledge/demo_salon/EVAL_GOLDEN.yaml`
+  - `truffles-api/tests/test_demo_salon_eval.py` (если потребуется для новых ожиданий)
+  - `docs/SESSIONS/SESSION-2026-01-31-chaos-golden-coverage-a4.md`
+  - `docs/SESSION_INDEX.md`
+  - `STRUCTURE.md`
+  - `STATE.md`
+- Plan:
+  1) Добавить golden eval cases (trace/meta only).
+  2) Запустить `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "golden_eval"`.
+  3) Запустить chaos-sim с `--seed 1769853069` и новым output-dir, сохранить artifacts.
+  4) Зафиксировать 500 triage (failures/events + возможные логи) и обновить `STATE.md`.
+- DoD:
+  - Golden eval расширен, тесты проходят.
+  - Chaos-sim run завершён; artifacts сохранены; 500 triage зафиксирован (если повторяется).
+  - `STATE.md` обновлён с evidence.
+- Checks:
+  - `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "golden_eval"`
+  - `python3 ops/diagnose.py chaos-sim --count 3 --kinds booking --seed 1769853069 --mode logic --skip-outbox --console-mode skip --manager-mode skip --sim-time "2026-01-24T12:00:00+06:00" --min-wait 0 --max-wait 0.2 --poll-timeout 6 --poll-interval 0.5 --dump-cases --output-dir /tmp/chaos_golden_eval_booking_rerun_20260131`
+- Evidence:
+  - pytest output: `/tmp/pytest_golden_eval_20260131b.txt`
+  - chaos-sim artifacts: `/tmp/chaos_golden_eval_booking_rerun_20260131`
+  - 500 triage: `/tmp/chaos_golden_eval_booking_rerun_20260131/failures.jsonl` + `events.jsonl`
+- Rollback:
+  - `git revert HEAD`.
+- No-go:
+  - изменения логики/стадийности, правки БД ради evidence.
+- Риски/блокеры:
+  - Повторяющийся HTTP 500 может потребовать отдельного infra-TP.
+- Branch/worktree:
+  - Branch: `feat/2026-01-31-chaos-golden-coverage-a4`
+  - Worktree: `/home/zhan/worktrees/2026-01-31-chaos-golden-coverage-a4`
+  - Base ref: `origin/main`
+  - Merge policy: PR + CI
+  - Cleanup: Brain/Top Architect
