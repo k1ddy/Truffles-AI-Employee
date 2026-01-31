@@ -140,7 +140,9 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - API: `GET /console/v1/cases`
 - Data: `handovers` + `conversations` + `users`
 - Paging: cursor зависит от `sort_by` (по умолчанию `last_activity`).
-- Filters: `status`, `branch_id`, `assigned_to_me`, `q`, `phone`, `has_delivery_error`, `has_pending_outbox`, `sort_by`.
+- Filters: `status` (`open` = `pending` + `active`), `branch_id`, `assigned_to_me`, `q`, `phone`,
+  `has_delivery_error`, `has_pending_outbox`, `sort_by`.
+- UI default: `status=open` (открытые заявки); “Все статусы” показывает закрытые.
 - Health: `last_inbound_at`, `last_outbound_at`, `last_activity_at`, `last_message_preview`, `needs_reply`, `has_delivery_error`, `has_pending_outbox`.
 - RBAC: owner/admin/manager/support read; owner/admin/manager write (take/resolve/send).
 

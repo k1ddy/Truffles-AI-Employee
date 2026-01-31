@@ -1902,7 +1902,8 @@ export interface operations {
     listCases: {
         parameters: {
             query?: {
-                status?: "pending" | "active" | "resolved";
+                /** @description Case status filter. `open` matches `pending` + `active`. */
+                status?: "open" | "pending" | "active" | "resolved";
                 q?: string;
                 branch_id?: string;
                 assigned_to_me?: boolean;

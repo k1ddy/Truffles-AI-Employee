@@ -142,9 +142,10 @@ paths:
       parameters:
         - name: status
           in: query
+          description: Case status filter. `open` matches `pending` + `active`.
           schema:
             type: string
-            enum: [pending, active, resolved]
+            enum: [open, pending, active, resolved]
         - name: q
           in: query
           schema:

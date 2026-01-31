@@ -1,6 +1,7 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
@@ -33,6 +34,7 @@ PENDING_RESUME_CLEAR_KEYS = {
     "last_service_hint",
     "last_service_hint_at",
 }
+HANDOVER_REOPEN_WINDOW_SECONDS = 4 * 60 * 60
 
 
 def _reset_context_preserving_trace(conversation: Conversation) -> None:
@@ -188,6 +190,63 @@ def _capture_pending_resume_context(context: dict | None) -> dict:
     return updated
 
 
+def _find_recent_resolved_handover(
+    db: Session,
+    conversation: Conversation,
+    *,
+    now: datetime,
+) -> Handover | None:
+    cutoff = now - timedelta(seconds=HANDOVER_REOPEN_WINDOW_SECONDS)
+    last_activity = func.coalesce(Handover.resolved_at, Handover.created_at)
+    return (
+        db.query(Handover)
+        .filter(
+            Handover.conversation_id == conversation.id,
+            Handover.client_id == conversation.client_id,
+            Handover.status == "resolved",
+            last_activity >= cutoff,
+        )
+        .order_by(last_activity.desc())
+        .first()
+    )
+
+
+def _reopen_handover(
+    handover: Handover,
+    *,
+    now: datetime,
+    trigger_type: str,
+    trigger_value: str | None,
+    user_message: str | None,
+    channel_ref: str | None,
+) -> None:
+    handover.status = "pending"
+    handover.trigger_type = trigger_type
+    handover.trigger_value = trigger_value
+    handover.user_message = user_message
+    handover.created_at = now
+    handover.context_summary = None
+    handover.notified_at = None
+    handover.first_response_at = None
+    handover.resolved_at = None
+    handover.resolved_by_id = None
+    handover.resolved_by_name = None
+    handover.resolution_time_seconds = None
+    handover.resolution_type = None
+    handover.resolution_notes = None
+    handover.manager_response = None
+    handover.manager_id = None
+    handover.assigned_to = None
+    handover.assigned_to_name = None
+    handover.telegram_message_id = None
+    handover.reminder_1_sent_at = None
+    handover.reminder_2_sent_at = None
+    handover.skipped_by = []
+    if channel_ref:
+        handover.channel_ref = channel_ref
+    handover._reopened = True
+
+
 def escalate_to_pending(
     db: Session,
     conversation: Conversation,
@@ -208,18 +267,29 @@ def escalate_to_pending(
             remote_jid = user.remote_jid if user else None
             topic_id = _build_simulated_topic_id(conversation, user)
 
-            handover = Handover(
-                conversation_id=conversation.id,
-                client_id=conversation.client_id,
-                trigger_type=trigger_type,
-                trigger_value=trigger_value,
-                user_message=user_message,
-                status="pending",
-                created_at=now,
-                channel="telegram",
-                channel_ref=remote_jid,
-            )
-            db.add(handover)
+            handover = _find_recent_resolved_handover(db, conversation, now=now)
+            if handover:
+                _reopen_handover(
+                    handover,
+                    now=now,
+                    trigger_type=trigger_type,
+                    trigger_value=trigger_value,
+                    user_message=user_message,
+                    channel_ref=remote_jid,
+                )
+            else:
+                handover = Handover(
+                    conversation_id=conversation.id,
+                    client_id=conversation.client_id,
+                    trigger_type=trigger_type,
+                    trigger_value=trigger_value,
+                    user_message=user_message,
+                    status="pending",
+                    created_at=now,
+                    channel="telegram",
+                    channel_ref=remote_jid,
+                )
+                db.add(handover)
 
             transition_state(
                 conversation,
@@ -237,9 +307,10 @@ def escalate_to_pending(
             db.flush()
 
             logger.info(
-                "Escalated conversation %s to pending (simulation), topic=%s",
+                "Escalated conversation %s to pending (simulation), topic=%s, reopened=%s",
                 conversation.id,
                 topic_id,
+                bool(getattr(handover, "_reopened", False)),
             )
             return Result.success(handover)
 
@@ -263,19 +334,29 @@ def escalate_to_pending(
             return Result.failure("Failed to create topic", "topic_error")
 
         now = datetime.now(timezone.utc)
-
-        handover = Handover(
-            conversation_id=conversation.id,
-            client_id=conversation.client_id,
-            trigger_type=trigger_type,
-            trigger_value=trigger_value,
-            user_message=user_message,
-            status="pending",
-            created_at=now,
-            channel="telegram",
-            channel_ref=remote_jid,
-        )
-        db.add(handover)
+        handover = _find_recent_resolved_handover(db, conversation, now=now)
+        if handover:
+            _reopen_handover(
+                handover,
+                now=now,
+                trigger_type=trigger_type,
+                trigger_value=trigger_value,
+                user_message=user_message,
+                channel_ref=remote_jid,
+            )
+        else:
+            handover = Handover(
+                conversation_id=conversation.id,
+                client_id=conversation.client_id,
+                trigger_type=trigger_type,
+                trigger_value=trigger_value,
+                user_message=user_message,
+                status="pending",
+                created_at=now,
+                channel="telegram",
+                channel_ref=remote_jid,
+            )
+            db.add(handover)
 
         transition_state(
             conversation,
@@ -290,7 +371,12 @@ def escalate_to_pending(
 
         db.flush()
 
-        logger.info(f"Escalated conversation {conversation.id} to pending, topic={topic_id}")
+        logger.info(
+            "Escalated conversation %s to pending, topic=%s, reopened=%s",
+            conversation.id,
+            topic_id,
+            bool(getattr(handover, "_reopened", False)),
+        )
         return Result.success(handover)
 
     except Exception as e:

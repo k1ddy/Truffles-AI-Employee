@@ -1,0 +1,25 @@
+# SESSION 2026-02-01-case-dedup-a1 — Session 2026-02-01-case-dedup-a1
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-01-case-dedup.md
+- branch: feat/2026-02-01-case-dedup-a1
+- worktree: /home/zhan/worktrees/2026-02-01-case-dedup-a1
+- base_ref: origin/main
+- scope: Case dedup (4h reopen) + Console open status default
+- done:
+  - Session created.
+  - Добавлен 4h cooldown reopen для handover, trace флаг `handover_reopened`.
+  - Console cases: status=open (pending+active) + UI default open.
+  - Обновлены docs и тесты; API types перегенерированы (openapi-typescript).
+  - console-web deps установлены, generate:api + lint зелёные.
+  - PR открыт: https://github.com/k1ddy/Truffles-AI-Employee/pull/482
+- next:
+  - Дождаться ревью и merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-01-case-dedup.md
+  - /tmp/console_case_dedup_pytest_20260201.txt
+  - /tmp/console_case_status_open_pytest_20260201.txt
+  - /tmp/console_web_generate_api_20260201.txt
+  - /tmp/console_web_lint_case_dedup_20260201.txt
+- last_updated: 2026-02-01

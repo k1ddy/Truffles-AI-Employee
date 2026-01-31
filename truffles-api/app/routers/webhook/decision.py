@@ -3819,6 +3819,7 @@ def _handle_knowledge_safe_mode_gate(
     )
     if result.ok:
         handover = result.value
+        handover_reopened = bool(getattr(handover, "_reopened", False))
         telegram_sent = send_telegram_notification(
             db=db,
             handover=handover,
@@ -3834,6 +3835,7 @@ def _handle_knowledge_safe_mode_gate(
                 "state": conversation.state,
                 "telegram_sent": telegram_sent,
                 "reason": safe_mode_reason,
+                "handover_reopened": handover_reopened,
             },
         )
         _record_message_decision_meta(
@@ -5649,6 +5651,7 @@ async def _handle_webhook_payload(
                     )
                     if result.ok:
                         handover = result.value
+                        handover_reopened = bool(getattr(handover, "_reopened", False))
                         telegram_sent = send_telegram_notification(
                             db=db,
                             handover=handover,
@@ -5661,6 +5664,16 @@ async def _handle_webhook_payload(
                         )
                         media_escalated = True
                         media_response = MSG_MEDIA_STYLE_REFERENCE
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "style_reference",
+                                "decision": "escalate",
+                                "state": conversation.state,
+                                "telegram_sent": telegram_sent,
+                                "handover_reopened": handover_reopened,
+                            },
+                        )
                     else:
                         bot_response = MSG_AI_ERROR
                         bot_response, sent = _send_and_save(bot_response)
@@ -6402,6 +6415,7 @@ async def _handle_webhook_payload(
 
         result_message = "Policy discounts reply sent"
         if decision.action == "escalate":
+            handover_reopened = False
             _, reused, telegram_sent = _reuse_active_handover(
                 db=db,
                 conversation=conversation,
@@ -6423,6 +6437,7 @@ async def _handle_webhook_payload(
                 )
                 if result.ok:
                     handover = result.value
+                    handover_reopened = bool(getattr(handover, "_reopened", False))
                     telegram_sent = send_telegram_notification(
                         db=db,
                         handover=handover,
@@ -6456,6 +6471,8 @@ async def _handle_webhook_payload(
         risk_level = discounts_policy.get("risk_level") if isinstance(discounts_policy, dict) else None
         if isinstance(risk_level, str) and risk_level:
             trace_payload["risk_level"] = risk_level
+        if decision.action == "escalate" and handover_reopened:
+            trace_payload["handover_reopened"] = True
         trace_payload.update(router_gate_meta)
         if followup_intents:
             trace_payload["followup_intents"] = followup_intents
@@ -7612,6 +7629,7 @@ async def _handle_webhook_payload(
         if isinstance(pending_media, dict):
             media_escalated = False
             handover_text = message_text.strip() if message_text else "Клиент уточнил референс."
+            handover_reopened = False
             _, reused, telegram_sent = _reuse_active_handover(
                 db=db,
                 conversation=conversation,
@@ -7633,6 +7651,7 @@ async def _handle_webhook_payload(
                 )
                 if result.ok:
                     handover = result.value
+                    handover_reopened = bool(getattr(handover, "_reopened", False))
                     telegram_sent = send_telegram_notification(
                         db=db,
                         handover=handover,
@@ -7697,6 +7716,7 @@ async def _handle_webhook_payload(
                     "stage": "style_reference",
                     "decision": "escalate_with_media",
                     "state": conversation.state,
+                    "handover_reopened": handover_reopened,
                 },
             )
             _record_message_decision_meta(
@@ -7831,6 +7851,7 @@ async def _handle_webhook_payload(
 
             if result.ok:
                 handover = result.value
+                handover_reopened = bool(getattr(handover, "_reopened", False))
                 # Send notification to Telegram
                 telegram_sent = send_telegram_notification(
                     db=db,
@@ -7848,6 +7869,7 @@ async def _handle_webhook_payload(
                         "state": conversation.state,
                         "intent": intent.value,
                         "telegram_sent": telegram_sent,
+                        "handover_reopened": handover_reopened,
                     },
                 )
                 _record_message_decision_meta(

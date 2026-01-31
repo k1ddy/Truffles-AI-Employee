@@ -22,6 +22,21 @@ def test_parse_sort_param_rejects_invalid():
         console_router._parse_sort_param("sort_by", "oops")
 
 
+def test_case_status_open_param():
+    assert console_router._parse_case_status_param("status", None) is None
+    assert console_router._parse_case_status_param("status", "") is None
+    assert console_router._parse_case_status_param("status", "open") == ["pending", "active"]
+    assert console_router._parse_case_status_param("status", "OPEN") == ["pending", "active"]
+    assert console_router._parse_case_status_param("status", "pending") == ["pending"]
+    assert console_router._parse_case_status_param("status", "active") == ["active"]
+    assert console_router._parse_case_status_param("status", "resolved") == ["resolved"]
+
+
+def test_parse_case_status_param_rejects_invalid():
+    with pytest.raises(ConsoleAPIError):
+        console_router._parse_case_status_param("status", "oops")
+
+
 def test_normalize_search_query():
     assert console_router._normalize_search_query("q", None) is None
     assert console_router._normalize_search_query("q", "   ") is None
