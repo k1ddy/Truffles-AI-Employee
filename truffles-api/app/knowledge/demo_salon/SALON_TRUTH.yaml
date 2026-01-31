@@ -300,7 +300,6 @@ policy: &policy
       - complaint
       - legal
       - medical
-      - payment
       - refund
       - reschedule
     labels:
@@ -643,6 +642,17 @@ policy: &policy
       - вернем
       - вернём
       - refund
+      - не прошла оплат
+      - не прошел оплат
+      - платеж не прош
+      - платёж не прош
+      - ошибка оплат
+      - ошибка платеж
+      - списал
+      - списани
+      - двойное спис
+      - chargeback
+      - чарджбек
       - қайтар
       - қайтару
 booking: &booking

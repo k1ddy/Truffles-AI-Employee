@@ -7,6 +7,7 @@
 ## СЕССИОННЫЙ СНИМОК (читать первым)
 
 **NOW (1 экран)**
+- DONE: Policy reclass payment_info vs refund (policy gate for payment_info; refund/payment-issue stays Hard‑LAW) — evidence: `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "policy_gates_discount_and_payment"`, `pytest -q truffles-api/tests/test_message_endpoint.py -k "policy_gate_escalates_without_llm"`, `pytest -q truffles-api/tests/test_knowledge_validation.py`.
 - DONE: Inbox macros UI (manage panel scroll + new macro visibility) — evidence: `console-web/src/components/InboxMacros.tsx`, lint `/tmp/console_web_lint_inbox_macros_ui_fix_20260131.txt`.
 - DONE: Inbox UX v3 fixes (adaptive queue width + compact filters, sidebar collapse toggle + selection sync, chat frame flush, sticky details header, quick replies selection-aware errors) — evidence: `console-web/src/components/ConsoleShell.tsx`, `console-web/src/components/CaseList.tsx`, `console-web/src/components/InboxView.tsx`, `console-web/src/components/CaseConversation.tsx`, `console-web/src/components/InboxMacros.tsx`, lint `/tmp/console_web_lint_inbox_ux_v3_fix_20260131.txt`.
 - DONE: console-web bringup (Traefik → console.truffles.kz) — evidence: `docker ps` shows `truffles-console-web` Up; `curl https://console.truffles.kz` → 200; `curl https://console.truffles.kz/api/auth/signin` → 200.
