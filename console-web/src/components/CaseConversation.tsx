@@ -217,7 +217,7 @@ export default function CaseConversation({
                 <p className="text-sm text-foreground">{contextText}</p>
             </div>
 
-            <div className="flex-1 min-h-[480px]">
+            <div className="flex-1 min-h-0">
                 <ChatInterface
                     messages={messages}
                     conversationId={caseDetail.conversation_id}

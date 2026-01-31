@@ -7,6 +7,7 @@
 ## СЕССИОННЫЙ СНИМОК (читать первым)
 
 **NOW (1 экран)**
+- DONE: Inbox composer visibility + macro insert auto-resize (input readable at 100% zoom) — evidence: `console-web/src/components/ChatInterface.tsx`, `console-web/src/components/CaseConversation.tsx`, lint `/tmp/console_web_lint_inbox_composer_autogrow_20260131.txt`, build `/tmp/console_web_restart_inbox_composer_autogrow_20260131.txt`.
 - DONE: Inbox macros UI (panel height + create flow; nested form fix) — evidence: `console-web/src/components/InboxMacros.tsx`, `console-web/src/components/ChatInterface.tsx`, lint `/tmp/console_web_lint_inbox_macros_visibility_20260131.txt`, build `/tmp/console_web_build_info_inbox_macros_visibility_20260131.txt`.
 - DONE: Policy reclass payment_info vs refund (policy gate for payment_info; refund/payment-issue stays Hard‑LAW) — evidence: `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "policy_gates_discount_and_payment"`, `pytest -q truffles-api/tests/test_message_endpoint.py -k "policy_gate_escalates_without_llm"`, `pytest -q truffles-api/tests/test_knowledge_validation.py`.
 - DONE: Inbox macros UI (manage panel scroll + new macro visibility) — evidence: `console-web/src/components/InboxMacros.tsx`, lint `/tmp/console_web_lint_inbox_macros_ui_fix_20260131.txt`.
