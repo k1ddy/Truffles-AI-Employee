@@ -28,7 +28,7 @@
 - Evidence:
   - Локальные выводы `ruff`/`pytest`.
   - Обновление `STATE.md` с evidence + ссылка на CI.
-- Rollback: `git revert <commit_sha>`.
+- Rollback: `git revert COMMIT_SHA`.
 - No-go: Никаких изменений в core-логике/entrypoints/БД.
 - Branch + Worktree + Base ref + Merge policy + Cleanup:
   - Branch: `feat/2026-01-31-ruff-intent-import-order-a1`

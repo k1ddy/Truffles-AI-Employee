@@ -6,11 +6,11 @@ from app.services.intent_service import (
     ESCALATION_INTENTS,
     REJECTION_INTENTS,
     Intent,
+    interpret_expected_reply,
     is_frustration_message,
     is_human_request_message,
     is_opt_out_message,
     is_rejection,
-    interpret_expected_reply,
     route_dialogue_controller,
     should_escalate,
 )
