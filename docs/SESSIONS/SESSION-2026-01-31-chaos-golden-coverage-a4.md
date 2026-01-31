@@ -1,0 +1,22 @@
+# SESSION 2026-01-31-chaos-golden-coverage-a4 — Session 2026-01-31-chaos-golden-coverage-a4
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-31-chaos-golden-coverage.md
+- branch: feat/2026-01-31-chaos-golden-coverage-a4
+- worktree: /home/zhan/worktrees/2026-01-31-chaos-golden-coverage-a4
+- base_ref: origin/main
+- scope: Golden eval expansion + booking chaos-sim rerun (seeded) and infra triage.
+- done:
+  - Session created.
+  - Added golden eval cases (booking time/interrupt, low-signal OOD).
+  - pytest `truffles-api/tests/test_demo_salon_eval.py -k "golden_eval"` passed.
+  - chaos-sim rerun completed with infra errors (connection refused).
+- next:
+  - Run `scripts/session_check.sh` before commit.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-31-chaos-golden-coverage.md
+  - /tmp/pytest_golden_eval_20260131b.txt
+  - /tmp/chaos_golden_eval_booking_rerun_20260131
+  - /tmp/chaos_golden_eval_booking_rerun_20260131.txt
+- last_updated: 2026-01-31

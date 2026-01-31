@@ -81,3 +81,4 @@
 | 2026-01-31-signal-snapshot-evidence-a1 | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-31-signal-snapshot-evidence.md | 2026-01-31 |
 | 2026-01-31-golden-eval-chaos-sim-a4 | done | feat/2026-01-31-golden-eval-chaos-sim-a4 | /home/zhan/worktrees/2026-01-31-golden-eval-chaos-sim-a4 | docs/TASK_PACKAGES/TP-2026-01-31-golden-eval-chaos-sim.md | 2026-01-31 |
 | 2026-01-31-booking-mismatch-signals-a4 | done | feat/2026-01-31-booking-mismatch-signals-a4 | /home/zhan/worktrees/2026-01-31-booking-mismatch-signals-a4 | docs/TASK_PACKAGES/TP-2026-01-31-booking-mismatch-signals.md | 2026-01-31 |
+| 2026-01-31-chaos-golden-coverage-a4 | done | feat/2026-01-31-chaos-golden-coverage-a4 | /home/zhan/worktrees/2026-01-31-chaos-golden-coverage-a4 | docs/TASK_PACKAGES/TP-2026-01-31-chaos-golden-coverage.md | 2026-01-31 |
