@@ -23,6 +23,7 @@ from app.services.demo_salon_knowledge import get_demo_salon_decision, get_salon
 from app.services.state_machine import ConversationState
 
 EVAL_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_salon" / "EVAL.yaml"
+EVAL_GOLDEN_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_salon" / "EVAL_GOLDEN.yaml"
 SALON_TRUTH_PATH = Path(__file__).resolve().parents[1] / "app" / "knowledge" / "demo_salon" / "SALON_TRUTH.yaml"
 EVAL_TIER = os.environ.get("EVAL_TIER", "").strip().lower()
 CORE_EVAL_IDS = {
@@ -1564,6 +1565,63 @@ def _assert_trace_stage_decision_any(
     )
 
 
+def _match_trace_expected(entry: dict, expected: dict) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    for key, value in expected.items():
+        if key.endswith("_any"):
+            actual = entry.get(key[:-4])
+            if actual not in value:
+                return False
+            continue
+        if isinstance(value, list):
+            actual = entry.get(key)
+            if not isinstance(actual, list):
+                return False
+            for item in value:
+                if item not in actual:
+                    return False
+            continue
+        if isinstance(value, str):
+            if _normalize(entry.get(key)) != _normalize(value):
+                return False
+            continue
+        if entry.get(key) != value:
+            return False
+    return True
+
+
+def _assert_trace_contains_expected(trace: list[dict], expected: dict, case_id: str) -> None:
+    for entry in trace:
+        if _match_trace_expected(entry, expected):
+            return
+    raise AssertionError(f"{case_id}: missing trace entry matching {expected}")
+
+
+def _assert_meta_expected(
+    meta: dict,
+    case_id: str,
+    expected: dict | None,
+    expected_any: dict | None,
+    expected_contains: dict | None,
+) -> None:
+    expected = expected or {}
+    expected_any = expected_any or {}
+    expected_contains = expected_contains or {}
+    for key, value in expected.items():
+        if meta.get(key) != value:
+            raise AssertionError(f"{case_id}: meta {key} mismatch")
+    for key, values in expected_any.items():
+        if not isinstance(values, list):
+            raise AssertionError(f"{case_id}: meta {key}_any must be a list")
+        if meta.get(key) not in values:
+            raise AssertionError(f"{case_id}: meta {key} not in {values}")
+    for key, values in expected_contains.items():
+        if not isinstance(values, list):
+            raise AssertionError(f"{case_id}: meta {key}_contains must be a list")
+        _assert_list_contains(meta.get(key), values, case_id, f"meta {key}")
+
+
 def _get_decision_trace(conversation: SimpleNamespace | None) -> list[dict]:
     if conversation is None:
         return []
@@ -1838,3 +1896,46 @@ def test_demo_salon_eval_cases():
             decision_trace = _get_decision_trace(conversation)
             for requirement in trace_expectations:
                 _assert_trace_contains(decision_trace, requirement, case_id)
+
+
+def test_demo_salon_golden_eval_cases():
+    data = yaml.safe_load(EVAL_GOLDEN_PATH.read_text(encoding="utf-8"))
+    cases = data.get("eval_cases", []) if isinstance(data, dict) else []
+    assert cases, "Golden eval set is empty"
+
+    for case in cases:
+        case_id = case.get("id", "<unknown>")
+        messages = case.get("messages")
+        if messages is None:
+            user_text = case.get("user", "")
+            if not isinstance(user_text, str) or not user_text.strip():
+                raise AssertionError(f"{case_id}: missing user text")
+            messages = [user_text]
+        if not isinstance(messages, list) or not messages:
+            raise AssertionError(f"{case_id}: messages must be a non-empty list")
+        for idx, message in enumerate(messages, start=1):
+            if not isinstance(message, str) or not message.strip():
+                raise AssertionError(f"{case_id}: message {idx} empty")
+
+        local_time = case.get("local_time")
+        _response, conversation, saved_message = _run_webhook_conversation(
+            messages,
+            case_id,
+            str(local_time) if local_time else None,
+        )
+        meta = saved_message.message_metadata.get("decision_meta", {})
+        _assert_meta_expected(
+            meta,
+            case_id,
+            case.get("expected_meta"),
+            case.get("expected_meta_any"),
+            case.get("expected_meta_contains"),
+        )
+
+        trace_expectations = case.get("expected_trace_contains") or []
+        if trace_expectations:
+            decision_trace = _get_decision_trace(conversation)
+            for requirement in trace_expectations:
+                if not isinstance(requirement, dict):
+                    raise AssertionError(f"{case_id}: trace expectation must be a mapping")
+                _assert_trace_contains_expected(decision_trace, requirement, case_id)

@@ -171,6 +171,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-31-ruff-intent-import-order.md`
 - `docs/TASK_PACKAGES/TP-2026-01-31-llm-wording-clarify.md`
 - `docs/TASK_PACKAGES/TP-2026-01-31-signal-snapshot-evidence.md`
+- `docs/TASK_PACKAGES/TP-2026-01-31-golden-eval-chaos-sim.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`
@@ -291,7 +292,7 @@
 | Branch | Scope | Touch-list (основные файлы/папки) |
 |--------|-------|-----------------------------------|
 | `dev` | webhook + services | `truffles-api/app/routers/webhook/`, `truffles-api/app/services/*` |
-| `data` | eval + facts | `truffles-api/app/knowledge/demo_salon/EVAL.yaml`, `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml` |
+| `data` | eval + facts | `truffles-api/app/knowledge/demo_salon/EVAL.yaml`, `truffles-api/app/knowledge/demo_salon/EVAL_GOLDEN.yaml`, `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml` |
 | `docs` | specs + состояния | `SPECS/*`, `STATE.md`, `STRUCTURE.md`, `AGENTS.md` |
 | `ops` | CI + deploy | `.github/workflows/*`, `TECH.md`, `/home/zhan/restart_api.sh`, infra compose (не в этом репо) |
 

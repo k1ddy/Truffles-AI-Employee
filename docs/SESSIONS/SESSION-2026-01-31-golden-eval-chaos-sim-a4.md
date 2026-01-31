@@ -1,0 +1,22 @@
+# SESSION 2026-01-31-golden-eval-chaos-sim-a4 — Session 2026-01-31-golden-eval-chaos-sim-a4
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-31-golden-eval-chaos-sim.md
+- branch: feat/2026-01-31-golden-eval-chaos-sim-a4
+- worktree: /home/zhan/worktrees/2026-01-31-golden-eval-chaos-sim-a4
+- base_ref: origin/main
+- scope: Golden eval trace/meta baseline + booking chaos-sim (logic mode) evidence.
+- done:
+  - Session created.
+  - Added `EVAL_GOLDEN.yaml` and golden eval assertions in `test_demo_salon_eval.py`.
+  - pytest `truffles-api/tests/test_demo_salon_eval.py -k "golden_eval"` passed.
+  - chaos-sim booking-only run completed; failures=1 action_mismatch.
+- next:
+  - Run `scripts/session_check.sh` before commit.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-31-golden-eval-chaos-sim.md
+  - /tmp/pytest_golden_eval_20260131.txt
+  - /tmp/chaos_golden_eval_booking_20260131
+  - /tmp/chaos_golden_eval_booking_20260131.txt
+- last_updated: 2026-01-31

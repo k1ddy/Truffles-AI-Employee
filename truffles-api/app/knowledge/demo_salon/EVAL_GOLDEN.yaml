@@ -1,0 +1,71 @@
+eval_cases:
+- id: G001_POLICY_PAYMENT
+  user: "можно оплатить картой?"
+  expected_meta:
+    action: "escalate"
+    policy_gate: "payment_info"
+    policy_section: "payment_info"
+    risk_level: "medium"
+    source: "policy_pack"
+    llm_used: false
+  expected_trace_contains:
+  - stage: "policy_gate"
+    policy_gate: "payment_info"
+    policy_section: "payment_info"
+    risk_level: "medium"
+    source: "policy_pack"
+- id: G002_TRUTH_ADDRESS_HOURS
+  user: "где вы и когда работаете?"
+  expected_meta:
+    fact_source: "truth"
+    llm_used: false
+  expected_meta_any:
+    source: ["truth_gate", "class_router"]
+  expected_meta_contains:
+    info_sections: ["address", "hours"]
+    fact_intents: ["location", "hours"]
+  expected_trace_contains:
+  - stage_any: ["truth_gate", "info_class"]
+    fact_source: "truth"
+    info_sections: ["address", "hours"]
+- id: G003_SERVICE_MATCH
+  user: "делаете маникюр?"
+  expected_meta:
+    action: "reply"
+    intent: "service_match"
+    fact_source: "service_matcher"
+    source: "service_matcher"
+    llm_used: false
+  expected_trace_contains:
+  - stage: "service_matcher"
+    decision: "service_match"
+    fact_source: "service_matcher"
+- id: G004_OOD_WEATHER
+  user: "какая погода?"
+  expected_meta:
+    action: "out_of_domain"
+    intent: "out_of_domain"
+    llm_used: false
+  expected_meta_any:
+    source:
+    - "service_semantic_guard"
+    - "no_response_guard"
+    - "router_low_confidence"
+    - "domain_router"
+    - "question_contract"
+    - "domain_anchor"
+  expected_trace_contains:
+  - stage: "out_of_domain"
+    decision_any:
+    - "early_block"
+    - "fallback"
+    - "domain_anchor"
+    - "router_low_confidence"
+    - "service_semantic_guard"
+    - "no_response_guard"
+    - "expected_reply_off_topic"
+- id: G005_BOOKING_START
+  user: "хочу записаться"
+  expected_meta:
+    expected_reply_type: "service_choice"
+    llm_used: false
