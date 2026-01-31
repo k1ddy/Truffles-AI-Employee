@@ -13,8 +13,9 @@
   - Console cases: status=open (pending+active) + UI default open.
   - Обновлены docs и тесты; API types перегенерированы (openapi-typescript).
   - console-web deps установлены, generate:api + lint зелёные.
+  - PR открыт: https://github.com/k1ddy/Truffles-AI-Employee/pull/482
 - next:
-  - Запустить scripts/session_check.sh, коммит + push, открыть PR.
+  - Дождаться ревью и merge.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-01-case-dedup.md
   - /tmp/console_case_dedup_pytest_20260201.txt
