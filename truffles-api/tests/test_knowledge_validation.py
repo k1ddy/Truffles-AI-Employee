@@ -31,7 +31,7 @@ def _base_payload() -> dict:
                 {"category": "Nails", "items": [{"name": "Manicure", "price": 2000}]},
             ],
             "policy": {
-                "hard_law": {"intents": ["payment"]},
+                "hard_law": {"intents": ["refund"]},
                 "payment_info": {"intent": "payment", "keywords": ["pay"]},
                 "reschedule": {"intent": "reschedule", "keywords": ["reschedule"]},
                 "cancel": {"intent": "cancel_request", "keywords": ["cancel"]},

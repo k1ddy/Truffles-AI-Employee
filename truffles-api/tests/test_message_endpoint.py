@@ -466,7 +466,7 @@ def test_policy_gate_escalates_without_llm():
     mock_llm.assert_not_called()
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("source") == "policy_pack"
-    assert meta.get("policy_gate") == "hard_law"
+    assert meta.get("policy_gate") == "payment_info"
     assert meta.get("policy_section") == "payment_info"
     assert meta.get("intent") == "payment"
     assert meta.get("action") == "escalate"

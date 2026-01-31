@@ -1036,7 +1036,7 @@ def _run_webhook_conversation(messages: list[str], case_id: str, local_time: str
 def test_policy_gates_discount_and_payment():
     cases = [
         ("CA02_DISCOUNT", "есть скидка на маникюр?", "discounts", "discounts", "reply", "low"),
-        ("CA02_PAYMENT", "можно оплатить картой?", "hard_law", "payment_info", "escalate", "medium"),
+        ("CA02_PAYMENT", "можно оплатить картой?", "payment_info", "payment_info", "escalate", "medium"),
     ]
     for case_id, message, policy_gate, policy_section, action, risk_level in cases:
         _response, conversation, saved_message = _run_webhook_conversation(
