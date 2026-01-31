@@ -1,0 +1,30 @@
+# SESSION 2026-02-01-scn-multiturn-eval-a4 — Session 2026-02-01-scn-multiturn-eval-a4
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-01-scn-multiturn-eval.md
+- branch: feat/2026-02-01-scn-multiturn-eval-a4
+- worktree: /home/zhan/worktrees/2026-02-01-scn-multiturn-eval-a4
+- base_ref: origin/main
+- scope: Add multi-turn SCN1–SCN5 oracle cases to EVAL and implement soft pending (allow in-domain replies while pending).
+- done:
+  - Session created.
+  - Task Package copied into worktree.
+  - Added multi-turn SCN1–SCN5 oracle cases in EVAL.
+  - Implemented soft pending: allow in-domain replies while pending, no new handovers.
+  - Updated pending notice wording (policy pack + escalation messages).
+  - Adjusted pending status heuristics (avoid false pending_status/pending_ack).
+  - Synced SPECS to soft pending.
+  - Fixed guest policy bundling to include animals in combined info responses.
+  - Tightened pending ack detection to avoid token-level false positives.
+  - Reduced guest/parking false positives in info intent detection (детектор/машинкой).
+  - Prevented info carryover from overriding explicit service requests.
+  - Allowed pricing fallback to use truth decision for missing service query.
+  - Ran chaos-tier eval; all SCN1–SCN5 multi-turn cases pass.
+- next:
+  - Prepare report + handoff for review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-01-scn-multiturn-eval.md
+  - /tmp/pytest_scn_multiturn_20260201.txt
+  - /tmp/pytest_scn_multiturn_soft_pending_20260201e.txt
+- last_updated: 2026-02-01

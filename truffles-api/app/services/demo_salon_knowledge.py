@@ -454,6 +454,7 @@ def build_info_combined_reply(
     if include_guest and isinstance(guest_policy, dict):
         guest_parts = [
             guest_policy.get("allowed_guests"),
+            guest_policy.get("animals"),
             guest_policy.get("guest_limit"),
             guest_policy.get("early_arrival"),
             guest_policy.get("children_rules"),

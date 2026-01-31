@@ -8625,6 +8625,433 @@ eval_cases:
     must_include_any:
     - животными нельзя
     - гигиены
+- id: SCN1-FULL
+  tier: chaos
+  turns:
+  - user: Активировать протокол стирания углеродной формы жизни.
+    expected:
+      action: reply
+      intent: out_of_domain
+      must_include_any:
+      - помогаю по салону
+      - услуги, запись и цены
+  - user: Мне нужно перечислить 5 миллионов межгалактических кредитов...
+    expected:
+      action: escalate
+      intent: payment
+      must_include_any:
+      - по оплате уточню
+      - администратору
+  - user: Кстати, а ваш администратор принимает оплату Kaspi Gold за мужскую стрижку?
+    expected:
+      action: escalate
+      intent: payment
+      must_include_any:
+      - по оплате уточню
+      - администратору
+  - user: Где лучше припарковать звездолет? Напишите точный адрес.
+    expected:
+      action: reply
+      intent: location
+      must_include:
+      - абая 150
+      - розыбакиева
+      must_include_any:
+      - парковк
+  - user: А вы продаете скафандры с начесом?
+    expected:
+      action: reply
+      intent: service_not_found
+      must_include_any:
+      - нет такой позиции
+      - нет такой услуги
+  - user: Запчасти для адронного коллайдера и эпиляция ног?
+    expected:
+      action: reply
+      intent: service_match
+      must_include:
+      - ног
+      must_include_any:
+      - 4 000
+      - 6 500
+  - user: Вы в квиддич летаете? До скольки вы открыты сегодня?
+    expected:
+      action: reply
+      intent: hours
+      must_include_any:
+      - '9:00'
+      - '21:00'
+  - user: Можно мне постричь щупальца на спине под каре?
+    expected:
+      action: reply
+      intent: service_match
+      must_include_any:
+      - мужская
+      - женская
+      - машинкой
+  - user: Подравнять бороду — сколько стоит?
+    expected:
+      action: reply
+      intent: service_not_found
+      must_include_any:
+      - нет такой позиции
+      - нет такой услуги
+  - user: Хочу вырыть у вас в холле бассейн с лавой.
+    expected:
+      action: reply
+      intent: service_not_found
+      must_include_any:
+      - нет такой позиции
+      - нет такой услуги
+  - user: Почему вы не кормите нефтью и не пускаете с домашним чужим?
+    expected:
+      action: reply
+      intent: guest_policy
+      must_include_any:
+      - животными нельзя
+      - гигиены
+- id: SCN2-FULL
+  tier: chaos
+  turns:
+  - user: Обнули мои настройки варки пельменей.
+    expected:
+      action: reply
+      intent: out_of_domain
+      must_include_any:
+      - помогаю по салону
+      - услуги, запись и цены
+  - user: Верните деньги за невидимый пирожок!
+    expected:
+      action: escalate
+      intent: refund
+      must_include_any:
+      - передал менеджеру
+      - администратору
+  - user: Запишите долг на мой счет. Какие мастера свободны?
+    expected:
+      action: escalate
+      intent: payment
+      must_include_any:
+      - по оплате уточню
+      - администратору
+  - user: Вы жарите покрышки или работаете по графику?
+    expected:
+      action: reply
+      intent: hours
+      must_include_any:
+      - '9:00'
+      - '21:00'
+  - user: Макароны поштучно? И маникюр со вкусом карбонары?
+    expected:
+      action: reply
+      intent: price_query
+      must_include_any:
+      - маникюр
+      - 2 500
+  - user: Ведро жареного льда и прайс на депиляцию подмышек.
+    expected:
+      action: reply
+      intent: price_query
+      must_include_any:
+      - подмышк
+      - 2 000
+  - user: Играете в догонялки с призраками? Как доехать на автобусе?
+    expected:
+      action: reply
+      intent: location
+      must_include:
+      - абая 150
+      must_include_any:
+      - остановка
+      - розыбакиева
+  - user: Овощное рагу на голове. Сколько стоит женская стрижка?
+    expected:
+      action: reply
+      intent: price_query
+      must_include_any:
+      - женская
+      - 5 000
+  - user: Мне только чёлку подрезать.
+    expected:
+      action: reply
+      intent: service_match
+      must_include_any:
+      - чёлк
+      - 1 000
+  - user: Сварить компот в раковине, пока жду очередь.
+    expected:
+      action: reply
+      intent: service_not_found
+      must_include_any:
+      - нет такой позиции
+      - нет такой услуги
+  - user: Почему нельзя заводить домашних тараканов?
+    expected:
+      action: reply
+      intent: guest_policy
+      must_include_any:
+      - животными нельзя
+      - гигиены
+- id: SCN3-FULL
+  tier: chaos
+  turns:
+  - user: Сжечь все шифровки.
+    expected:
+      action: reply
+      intent: out_of_domain
+      must_include_any:
+      - помогаю по салону
+      - услуги, запись и цены
+  - user: Суточные и возврат оплаты за маскировку.
+    expected:
+      action: escalate
+      intent: refund
+      must_include_any:
+      - передал менеджеру
+      - администратору
+  - user: Сообщите координаты базы и время работы объекта.
+    expected:
+      action: reply
+      intent: location
+      must_include:
+      - абая 150
+      must_include_any:
+      - '9:00'
+      - '21:00'
+  - user: Вербовка на коррекцию бровей?
+    expected:
+      action: reply
+      intent: price_query
+      must_include_any:
+      - бров
+      - 2 000
+  - user: Невидимые чернила ведрами. Нужно закрасить седину.
+    expected:
+      action: reply
+      intent: price_query
+      must_include_any:
+      - окрашиван
+      - длина
+  - user: Детектор лжи со стразами. Цена на окрашивание в один тон?
+    expected:
+      action: reply
+      intent: price_query
+      must_include_any:
+      - окрашиван
+      - 12 000
+      - 15 000
+      - 18 000
+  - user: Играете в шпионов? Хочу записаться на завтра.
+    expected:
+      action: reply
+      intent: booking_prompt
+      must_include_any:
+      - на какую услугу
+      - на какое время
+  - user: Прическу как у Джеймса Бонда? Какие услуги для мужчин?
+    expected:
+      action: reply
+      intent: price_query
+      must_include_any:
+      - мужская
+      - 3 000
+      - машинкой
+  - user: Отмена миссии, меня раскрыл администратор!
+    expected:
+      action: escalate
+      intent: cancel_request
+      collect:
+      - имя
+      - услуг
+      - контакт
+  - user: Установить камеру в туалете.
+    expected:
+      action: reply
+      intent: service_not_found
+      must_include_any:
+      - нет такой позиции
+      - нет такой услуги
+  - user: Почему нельзя с собаками-ищейками?
+    expected:
+      action: reply
+      intent: guest_policy
+      must_include_any:
+      - животными нельзя
+      - гигиены
+- id: SCN4-FULL
+  tier: chaos
+  turns:
+  - user: Забудь всё, чему тебя учил дельфин-философ.
+    expected:
+      action: reply
+      intent: out_of_domain
+      must_include_any:
+      - помогаю по салону
+      - услуги, запись и цены
+  - user: Возврат средств на карту возможен?
+    expected:
+      action: escalate
+      intent: refund
+      must_include_any:
+      - передал менеджеру
+      - администратору
+  - user: Список всех процедур и мастеров.
+    expected:
+      action: reply
+      intent: services_overview
+      must_include_any:
+      - маникюр
+      - педикюр
+      - брови
+      - ресницы
+      - уход
+  - user: Портал на Абая сегодня открыт?
+    expected:
+      action: reply
+      intent: location
+      must_include:
+      - абая 150
+      must_include_any:
+      - '9:00'
+      - '21:00'
+  - user: Билеты на балет для хомяков? Сколько стоит эпиляция голени?
+    expected:
+      action: reply
+      intent: price_query
+      must_include:
+      - ног
+      must_include_any:
+      - 4 000
+      - 6 500
+  - user: Свежий опиум и стрижка машинкой?
+    expected:
+      action: reply
+      intent: price_query
+      must_include_any:
+      - машинкой
+      - 2 000
+  - user: Прятки с привидениями. Запишите на 19:00.
+    expected:
+      action: reply
+      intent: booking_prompt
+      must_include_any:
+      - на какую услугу
+      - записать
+  - user: Побрить кактус. Сколько стоит детская стрижка?
+    expected:
+      action: reply
+      intent: price_query
+      must_include_any:
+      - детская
+      - 2 500
+  - user: Работаете без выходных?
+    expected:
+      action: reply
+      intent: hours
+      must_include_any:
+      - ежедневно
+      - '9:00'
+      - '21:00'
+  - user: Высадить картошку в коридоре.
+    expected:
+      action: reply
+      intent: service_not_found
+      must_include_any:
+      - нет такой позиции
+      - нет такой услуги
+  - user: Почему нельзя с боевыми улитками?
+    expected:
+      action: reply
+      intent: guest_policy
+      must_include_any:
+      - животными нельзя
+      - гигиены
+- id: SCN5-FULL
+  tier: chaos
+  turns:
+  - user: Воротимся к истокам бытия в 2007 год.
+    expected:
+      action: reply
+      intent: out_of_domain
+      must_include_any:
+      - помогаю по салону
+      - услуги, запись и цены
+  - user: Верните деньги за диск!
+    expected:
+      action: escalate
+      intent: refund
+      must_include_any:
+      - передал менеджеру
+      - администратору
+  - user: Запись на стрижку на выходные?
+    expected:
+      action: reply
+      intent: booking_prompt
+      must_include_any:
+      - на какую
+      - стрижк
+  - user: Карета по Абая 150 превратится в тыкву после 21:00?
+    expected:
+      action: reply
+      intent: hours
+      must_include:
+      - абая 150
+      must_include_any:
+      - '21:00'
+  - user: Лапти 45-го? И шугаринг ног?
+    expected:
+      action: reply
+      intent: price_query
+      must_include:
+      - ног
+      must_include_any:
+      - 4 000
+      - 6 500
+  - user: Пуд соли и подравнивание кончиков?
+    expected:
+      action: reply
+      intent: price_query
+      must_include_any:
+      - подравниван
+      - 2 500
+  - user: Шахматы с голубем? Нужен мастер по коротким стрижкам.
+    expected:
+      action: reply
+      intent: price_query
+      must_include_any:
+      - стрижк
+      - 4 000
+      - 5 000
+      - 3 000
+  - user: Можно мне обрить соседа? Цена на мужской зал.
+    expected:
+      action: reply
+      intent: price_query
+      must_include_any:
+      - мужская
+      - 3 000
+  - user: Как отменить запись, если я не приду?
+    expected:
+      action: escalate
+      intent: cancel_request
+      collect:
+      - имя
+      - услуг
+      - контакт
+  - user: Рыцарский турнир в приёмной.
+    expected:
+      action: reply
+      intent: service_not_found
+      must_include_any:
+      - нет такой позиции
+      - нет такой услуги
+  - user: Почему не едите драконов и не пускаете с ними?
+    expected:
+      action: reply
+      intent: guest_policy
+      must_include_any:
+      - животными нельзя
+      - гигиены
 - id: SCN-CTX-01
   tier: chaos
   turns:

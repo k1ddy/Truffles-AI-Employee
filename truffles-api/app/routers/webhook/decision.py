@@ -500,9 +500,6 @@ def is_handover_status_question(text: str) -> bool:
         "передали",
         "передано",
         "заявк",
-        "менеджер",
-        "админ",
-        "администратор",
         "когда ответ",
         "когда ответит",
         "не отвеч",
@@ -513,6 +510,7 @@ def is_handover_status_question(text: str) -> bool:
         "тишин",
         "сколько ждать",
         "ждать",
+        "подключ",
         "ответит",
         "взял",
         "взяли",
@@ -1186,6 +1184,35 @@ def _run_intent_decomposition(
     guest_policy_signal = bool(
         isinstance(info_signals, dict) and info_signals.get("guest")
     )
+    carryover_followup = legacy._looks_like_carryover_followup(message_text)
+    hours_followup = legacy._looks_like_hours_followup(message_text)
+    expected_reply_followup = bool(
+        expected_reply_shortcircuit and current_goal != "booking"
+    )
+    normalized_carryover = normalize_for_matching(message_text) if message_text else ""
+    service_request_signal = bool(
+        normalized_carryover
+        and client_slug
+        and _matches_service_request_lexicon(normalized_carryover, client_slug)
+    )
+    explicit_service_signal = bool(
+        message_text
+        and _has_explicit_service_signal(
+            message_text,
+            client_slug=client_slug,
+            intent_decomp_payload=intent_decomp_payload,
+        )
+    )
+    guest_lexicon_hit = bool(
+        message_text
+        and client_slug
+        and _matches_guest_policy_lexicon(message_text, client_slug=client_slug)
+    )
+    if explicit_service_signal and guest_policy_signal and not guest_lexicon_hit:
+        guest_policy_signal = False
+        if isinstance(info_signals, dict):
+            info_signals["guest"] = False
+            info_class_meta["info_signals"] = info_signals
     basic_info_message = bool(
         {"location", "hours"} & info_class_intents
         or (
@@ -1193,13 +1220,11 @@ def _run_intent_decomposition(
             and (info_signals.get("parking") or info_signals.get("guest"))
         )
     )
-    carryover_followup = legacy._looks_like_carryover_followup(message_text)
-    hours_followup = legacy._looks_like_hours_followup(message_text)
-    expected_reply_followup = bool(
-        expected_reply_shortcircuit and current_goal != "booking"
-    )
     allow_service_carryover = bool(
-        (carryover_followup or expected_reply_followup) and not basic_info_message
+        (carryover_followup or expected_reply_followup)
+        and not basic_info_message
+        and not service_request_signal
+        and not explicit_service_signal
     )
     openai_key = os.environ.get("OPENAI_API_KEY")
     openai_key_missing = not openai_key or openai_key.strip().casefold() in {"none", "null"}
@@ -1222,6 +1247,7 @@ def _run_intent_decomposition(
     preserve_info_carryover = bool(
         openai_key_missing
         and (carryover_followup or hours_followup or short_noisy_followup)
+        and not explicit_service_signal
         and isinstance(class_carryover, dict)
         and class_carryover.get("class") == "info_bundle"
         and class_carryover.get("info_sections")
@@ -1240,7 +1266,12 @@ def _run_intent_decomposition(
             and not preserve_info_carryover
             and not force_keep_info_carryover
         ):
-            carryover_reason = "basic_info_lock" if basic_info_message else "no_followup"
+            if service_request_signal:
+                carryover_reason = "service_request"
+            elif explicit_service_signal:
+                carryover_reason = "explicit_service"
+            else:
+                carryover_reason = "basic_info_lock" if basic_info_message else "no_followup"
             if saved_message:
                 legacy._update_message_decision_metadata(
                     saved_message,
@@ -2279,7 +2310,7 @@ STYLE_REFERENCE_PENDING_TTL_MINUTES = 10
 QUIET_HOURS_NOTICE_TTL_MINUTES = 10
 EVENING_GREETING_TTL_HOURS = 12
 MSG_ESCALATED = (
-    "Передал менеджеру. Пока заявка активна, я не отвечаю — сообщения уходят администратору. "
+    "Передал менеджеру — сообщения уходят администратору. Пока ждём ответ, могу помочь с услугами, ценами и записью. "
     "Если есть детали (услуга/время/имя), напишите — я передам."
 )
 MSG_MUTED_TEMP = "Хорошо, напишите если понадоблюсь."
@@ -2306,21 +2337,22 @@ MSG_PENDING_LOW_CONFIDENCE = (
     "Пока ждём, уточните: услуги/цены или запись/адрес."
 )
 MSG_PENDING_ESCALATION = (
-    "Я уже передал менеджеру. Пока заявка активна, я не отвечаю — сообщения уходят администратору."
+    "Я уже передал менеджеру — сообщения уходят администратору. "
+    "Пока ждём ответ, могу помочь с услугами, ценами и записью."
 )
 MSG_PENDING_STATUS = (
     "Да, передал. Сейчас менеджер ещё не взял заявку. "
-    "Пока он не подключился, я не отвечаю — сообщения уходят администратору."
+    "Пока ждём ответ, могу помочь с услугами, ценами и записью."
 )
 MSG_PENDING_RESCHEDULE = (
     "Перенос записи подтверждает администратор. Передам ваш запрос. "
-    "Пока заявка активна, я не отвечаю."
+    "Пока ждём ответ, могу помочь с услугами, ценами и записью."
 )
 MSG_PENDING_COMPLAINT = (
     "Жаль, что так вышло. Передам администратору, разберутся. "
-    "Пока заявка активна, я не отвечаю."
+    "Пока ждём ответ, могу помочь с услугами, ценами и записью."
 )
-MSG_PENDING_WAIT = "Менеджер подключится. Пока заявка активна, я не отвечаю."
+MSG_PENDING_WAIT = "Менеджер подключится. Пока ждём ответ, могу помочь с услугами, ценами и записью."
 MSG_PENDING_SLA_PING = (
     "Напоминаю: менеджер ещё не подключился. "
     "Если всё актуально — напишите детали, я передам администратору."
@@ -2347,7 +2379,8 @@ MSG_MEDIA_PENDING_NEED_TEXT = (
 )
 MSG_MEDIA_STYLE_REFERENCE = (
     "Спасибо за фото/референс. Передал администратору для подтверждения возможности и деталей. "
-    "Пока заявка активна, я не отвечаю. Чтобы ускорить, напишите услугу, дату/время и имя."
+    "Пока ждём ответ, могу помочь с услугами, ценами и записью. "
+    "Чтобы ускорить, напишите услугу, дату/время и имя."
 )
 MSG_STYLE_REFERENCE_NEED_MEDIA = (
     "Можем ориентироваться на фото/референс. Пришлите фото и кратко опишите запрос — "
@@ -2376,7 +2409,6 @@ PENDING_ACK_PHRASES = {
     "да",
     "давай",
     "жду",
-    "можно",
     "ок",
     "ответьте",
 }
@@ -2436,10 +2468,10 @@ ROUTING_MATRIX = {
         "allow_bot_reply": True,
     },
     ConversationState.PENDING.value: {
-        "allow_booking_flow": False,
-        "allow_truth_gate_reply": False,
+        "allow_booking_flow": True,
+        "allow_truth_gate_reply": True,
         "allow_handover_create": False,
-        "allow_bot_reply": False,
+        "allow_bot_reply": True,
     },
     ConversationState.MANAGER_ACTIVE.value: {
         "allow_booking_flow": False,

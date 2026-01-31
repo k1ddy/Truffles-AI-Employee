@@ -27,7 +27,9 @@ def _is_pending_ack(text: str) -> bool:
     if normalized in legacy.PENDING_ACK_PHRASES:
         return True
     tokens = normalized.split()
-    return any(token in legacy.PENDING_ACK_PHRASES for token in tokens)
+    if not tokens:
+        return False
+    return all(token in legacy.PENDING_ACK_PHRASES for token in tokens)
 
 
 def _is_pending_close(text: str) -> bool:
@@ -695,70 +697,21 @@ def _handle_pending_gate(
             bot_response=bot_response,
         )
 
-    normalized_text = legacy._normalize_text(message_text)
-    reschedule_signal = False
-    if normalized_text:
-        for token in (
-            "перенес",
-            "перенос",
-            "перезапис",
-            "перепис",
-            "сдвин",
-            "передвин",
-            "поменя",
-            "изменить запись",
-            "изменить дату",
-            "на другое время",
-            "на другой день",
-        ):
-            if token in normalized_text:
-                reschedule_signal = True
-                break
-
-    if reschedule_signal or (isinstance(pending_intent, str) and pending_intent.strip() == "reschedule"):
-        bot_response = legacy.MSG_PENDING_RESCHEDULE
-    elif isinstance(pending_intent, str) and pending_intent.strip() == "complaint":
-        bot_response = legacy.MSG_PENDING_COMPLAINT
-    elif isinstance(pending_intent, str) and pending_intent.strip() == "procedure_combo":
-        from app.models import Client
-        from app.services.demo_salon_knowledge import format_reply_from_truth
-
-        client = db.query(Client).filter(Client.id == conversation.client_id).first()
-        client_slug = None
-        if client:
-            client_slug = getattr(client, "slug", None) or getattr(client, "name", None)
-        bot_response = format_reply_from_truth("procedure_combo", client_slug=client_slug) or legacy.MSG_PENDING_WAIT
-    else:
-        bot_response = legacy.MSG_PENDING_WAIT
     trace_payload = {
-        "stage": "pending_wait",
-        "decision": "pending_wait",
+        "stage": "pending_guard",
+        "decision": "soft_pass",
         "state": conversation.state,
     }
     if isinstance(pending_intent, str) and pending_intent.strip():
         trace_payload["pending_intent"] = pending_intent.strip()
     trace_payload.update(router_pending_meta)
     legacy._record_decision_trace(conversation, trace_payload)
-    legacy._record_message_decision_meta(
-        saved_message,
-        action="pending_wait",
-        intent=None,
-        source="pending",
-        fast_intent=False,
-    )
     if saved_message:
         legacy._update_message_decision_metadata(
             saved_message,
             {
-                "pending_action": "pending_wait",
+                "pending_action": "pending_pass",
+                "pending_guard": "soft_pass",
             },
         )
-    bot_response, sent = send_and_save(bot_response)
-    result_message = "Pending wait response sent" if sent else "Pending wait response failed"
-    db.commit()
-    return WebhookResponse(
-        success=True,
-        message=result_message,
-        conversation_id=conversation.id,
-        bot_response=bot_response,
-    )
+    return None

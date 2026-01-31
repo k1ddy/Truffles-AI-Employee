@@ -83,24 +83,16 @@ def _detect_info_class_intents(
         question_like = any(_has_token_prefix(tokens, prefix) for prefix in legacy.QUESTION_WORD_PREFIXES)
     short_query = 0 < len(tokens) <= 4
 
-    parking_signal = any(
-        token in normalized
-        for token in [
-            "парков",
-            "паркинг",
-            "во дворе",
-            "двор",
-            "авто",
-            "машин",
-            "машины",
-            "машину",
-        ]
-    ) or ("мест" in normalized and ("авто" in normalized or "машин" in normalized or "машины" in normalized))
+    from app.services.demo_salon_knowledge import _has_parking_signal
+
+    parking_signal = _has_parking_signal(normalized)
     guest_prefixes = (
         "гост",
         "ребен",
         "ребён",
-        "дет",
+        "дети",
+        "детя",
+        "детск",
         "коляс",
         "ожидан",
         "подожд",
@@ -223,7 +215,9 @@ def _build_info_intent_reply(
                 "гост",
                 "ребен",
                 "ребён",
-                "дет",
+                "дети",
+                "детя",
+                "детск",
                 "коляс",
                 "ожидан",
                 "пораньше",
@@ -266,6 +260,16 @@ def _build_info_intent_reply(
         return reply, meta or None
     if intent in {"pricing", "duration"} and not service_query and message_text:
         service_query = get_demo_salon_service_hint(message_text, client_slug=client_slug)
+        if not service_query:
+            decision = get_demo_salon_decision(message_text, client_slug=client_slug)
+            if (
+                decision
+                and decision.action == "reply"
+                and decision.intent in {"service_not_found", "price_query"}
+                and decision.response
+            ):
+                meta = decision.meta if isinstance(decision.meta, dict) else None
+                return decision.response, meta or None
     if intent == "pricing":
         question = f"Сколько стоит {service_query}?" if service_query else "Сколько стоит?"
     elif intent == "duration":
@@ -653,7 +657,10 @@ def _handle_info_flow(
     if isinstance(controller_state, dict):
         controller_low_confidence = bool(controller_state.get("low_confidence"))
     explicit_service_signal = bool(
-        intent_decomp_explicit_query or router_service_query or alias_service_query
+        explicit_service_signal
+        or intent_decomp_explicit_query
+        or router_service_query
+        or alias_service_query
     )
     service_carryover_meta = legacy._get_service_carryover(
         context_manager, message_count=message_count
