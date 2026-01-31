@@ -124,6 +124,8 @@ from app.services.console_idempotency import (
 )
 from app.services.escalation_service import resolve_telegram_routing
 from app.services.knowledge_registry_service import (
+    apply_pack_index_to_client_config,
+    build_pack_index,
     get_current_published,
     list_history,
     publish_version,
@@ -3265,6 +3267,15 @@ async def publish_knowledge(
             knowledge_tag=branch.knowledge_tag,
             version_id=version.id,
         )
+        pack_index = build_pack_index(payload)
+        if pack_index:
+            apply_pack_index_to_client_config(
+                context.client,
+                pack_index=pack_index,
+                version_id=version.id,
+                compiled_at=now,
+                source="knowledge_publish",
+            )
         branch.knowledge_safe_mode = False
         branch.knowledge_safe_mode_reason = None
         branch.knowledge_safe_mode_at = now
@@ -3409,6 +3420,15 @@ async def rollback_knowledge(
             knowledge_tag=branch.knowledge_tag,
             version_id=restored.id,
         )
+        pack_index = build_pack_index(version.payload_json)
+        if pack_index:
+            apply_pack_index_to_client_config(
+                context.client,
+                pack_index=pack_index,
+                version_id=restored.id,
+                compiled_at=now,
+                source="knowledge_rollback",
+            )
         branch.knowledge_safe_mode = False
         branch.knowledge_safe_mode_reason = None
         branch.knowledge_safe_mode_at = now

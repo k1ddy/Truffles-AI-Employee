@@ -1,0 +1,24 @@
+# SESSION 2026-01-31-pack-index-a1 — Session 2026-01-31-pack-index-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-31-pack-index-anchor-sync.md
+- branch: feat/2026-01-31-pack-index-a1
+- worktree: /home/zhan/worktrees/2026-01-31-pack-index-a1
+- base_ref: origin/main
+- scope: Pack-index build/versioning + anchor-sync on publish + signal_snapshot meta + tests.
+- done:
+  - Pack-index build/versioning + anchor-sync wired to publish/rollback; pack-index meta in snapshot/signal_snapshot.
+  - Built pack-index helper (anchors/lexicons) + meta for client config.
+  - Wired pack-index into knowledge snapshot and publish anchor-sync.
+  - Added signal_snapshot pack_index meta and test.
+  - Ran `pytest -q truffles-api/tests/test_message_endpoint.py -k "signal_snapshot and pack_index"`.
+  - Ran `pytest -q truffles-api/tests/test_knowledge_snapshot_gateway.py::test_build_knowledge_snapshot_happy_path`.
+- next:
+  - Open PR.
+  - Update STATE.md with evidence and open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-31-pack-index-anchor-sync.md
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "signal_snapshot and pack_index"`
+  - `pytest -q truffles-api/tests/test_knowledge_snapshot_gateway.py::test_build_knowledge_snapshot_happy_path`
+- last_updated: 2026-01-31
