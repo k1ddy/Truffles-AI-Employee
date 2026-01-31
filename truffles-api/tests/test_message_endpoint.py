@@ -1219,6 +1219,100 @@ def test_signal_snapshot_written_on_class_router():
     assert snapshot.get("intent_signals", {}).get("intent") == "question"
 
 
+def test_signal_snapshot_records_pack_index_meta():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+    conversation = SimpleNamespace(
+        id="conv-snapshot-pack-index",
+        state=ConversationState.BOT_ACTIVE.value,
+        context={},
+    )
+    signals = DecisionSignals(
+        intent=Intent.QUESTION,
+        is_greeting=False,
+        is_thanks=False,
+        is_ack=False,
+        is_low_signal=False,
+        is_status_question=False,
+    )
+    domain_meta = {
+        "in_threshold": 0.6,
+        "out_threshold": 0.6,
+        "margin": 0.1,
+        "in_hits": 1,
+        "out_hits": 0,
+        "strict_in_hits": 0,
+        "anchors_in": 4,
+        "anchors_out": 2,
+        "strict_in_anchors": 0,
+    }
+    class_router_result = {
+        "out_of_domain_signal": False,
+        "in_signals": ["explicit_service"],
+        "out_signals": [],
+        "classes": ["info_bundle"],
+        "intents": ["location"],
+        "carryover_intents": [],
+        "carryover_class": None,
+        "carryover_info_sections": None,
+        "router_fallback_reason": None,
+        "controller_fallback_reason": None,
+        "router": {"eligible": True},
+        "controller": {
+            "used": True,
+            "attempted": True,
+            "fallback": False,
+            "low_confidence": False,
+            "confidence": 0.82,
+            "goal": "info",
+        },
+    }
+    client_config = {
+        "pack_index": {
+            "schema_version": "pack_index.v1",
+            "hash": "hash-123",
+            "version_id": "version-123",
+            "compiled_at": "2026-01-31T00:00:00+00:00",
+            "source": "knowledge_publish",
+        }
+    }
+
+    with patch(
+        "app.routers.webhook.decision._detect_intent_signals", return_value=signals
+    ), patch(
+        "app.routers.webhook._legacy.classify_domain_with_scores",
+        return_value=(DomainIntent.IN_DOMAIN, 0.77, 0.12, domain_meta),
+    ), patch(
+        "app.routers.webhook._legacy._resolve_class_router_result",
+        return_value=class_router_result,
+    ), patch(
+        "app.routers.webhook.decision._has_explicit_service_signal", return_value=True
+    ):
+        webhook_router._run_class_router_stage(
+            conversation=conversation,
+            saved_message=saved_message,
+            message_text="Где вы находитесь?",
+            client_slug="demo_salon",
+            client_config=client_config,
+            remote_jid=None,
+            timing_context={},
+            info_class_intents=set(),
+            info_class_meta={},
+            booking_signal=False,
+            class_carryover=None,
+            router_state=None,
+            intent_decomp_payload=None,
+            expected_reply_shortcircuit=False,
+            log_timing=lambda *args, **_kwargs: None,
+        )
+
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    snapshot = meta.get("signal_snapshot", {})
+    pack_index = snapshot.get("pack_index", {})
+    assert pack_index.get("hash") == "hash-123"
+    assert pack_index.get("version_id") == "version-123"
+
+
 def test_consult_pack_writes_decision_meta():
     saved_message = Mock()
     saved_message.message_metadata = {}
