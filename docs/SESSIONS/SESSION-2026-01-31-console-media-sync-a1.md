@@ -1,6 +1,6 @@
 # SESSION 2026-01-31-console-media-sync-a1 — Session 2026-01-31-console-media-sync-a1
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-31-console-media-sync.md
 - branch: feat/2026-01-31-console-media-sync-a1
