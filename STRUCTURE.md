@@ -359,6 +359,7 @@
 | `truffles-api/app/knowledge/<client_slug>/*` | Truth/policy/eval packs |
 | `knowledge/<client_slug>/*` | Канон RAG‑контента |
 | `truffles-api/app/knowledge/generic/*` | Generic pack scaffold (CI/tests) |
+| `truffles-api/app/knowledge/generic/SYSTEM_LEXICONS.yaml` | System language lexicons (shared) |
 | `knowledge/generic/*` | Generic RAG docs (CI/tests) |
 
 ---

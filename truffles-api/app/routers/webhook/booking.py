@@ -605,7 +605,7 @@ def _is_booking_related_message(
         return False
     from . import _legacy as legacy
 
-    if legacy._is_booking_request(message_text):
+    if legacy._is_booking_request(message_text, client_slug=client_slug):
         return True
     refusal_flags = legacy.detect_refusal_flags(message_text)
     if refusal_flags.get("name") or refusal_flags.get("phone"):

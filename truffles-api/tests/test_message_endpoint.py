@@ -626,6 +626,50 @@ def _build_query_side_effect(
     return _query
 
 
+def _booking_signal_snapshot(messages: list[str], *, client_slug: str = "demo_salon") -> dict:
+    message_text = messages[-1] if messages else None
+    client_config = {"domain_router": DEMO_DOMAIN_ROUTER_CONFIG}
+    booking_block_meta = webhook_router._preflight_booking_block(
+        message_text=message_text,
+        client_config=client_config,
+        booking_active=False,
+    )
+    if booking_block_meta:
+        booking_signal = False
+    else:
+        booking_signal, booking_block_meta = webhook_router._evaluate_booking_signal(
+            messages,
+            client_slug=client_slug,
+            message_text=message_text,
+        )
+    booking_snapshot = webhook_router._compact_signal_snapshot(
+        {
+            "signal": booking_signal,
+            "blocked": bool(booking_block_meta),
+            "blocked_reason": (
+                booking_block_meta.get("booking_blocked_reason")
+                if isinstance(booking_block_meta, dict)
+                else None
+            ),
+            "active": False,
+            "wants_flow": False,
+            "expected_reply_type": None,
+            "expected_reply_reason": None,
+            "expected_reply_shortcircuit": False,
+        }
+    )
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+    webhook_router._update_message_signal_snapshot(saved_message, {"booking": booking_snapshot})
+    decision_meta = (
+        saved_message.message_metadata.get("decision_meta")
+        if isinstance(saved_message.message_metadata, dict)
+        else None
+    )
+    signal_snapshot = decision_meta.get("signal_snapshot") if isinstance(decision_meta, dict) else None
+    return signal_snapshot.get("booking") if isinstance(signal_snapshot, dict) else {}
+
+
 class TestSelectHandoverUserMessage:
     def test_uses_previous_meaningful_message(self):
         messages = [
@@ -655,14 +699,8 @@ class TestBatchBookingSignals:
     def test_booking_signal_across_messages(self):
         messages = ["сколько стоит маникюр", "на завтра в 5"]
         with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint):
-            assert (
-                webhook_router._has_booking_signal(
-                    messages,
-                    client_slug="demo_salon",
-                    message_text=messages[-1],
-                )
-                is True
-            )
+            snapshot = _booking_signal_snapshot(messages)
+            assert snapshot.get("signal") is True
 
     def test_booking_signal_blocked_for_info_question(self):
         messages = ["Вы сегодня работаете? Сколько стоит педикюр?"]
@@ -670,14 +708,8 @@ class TestBatchBookingSignals:
             "app.routers.webhook._legacy.semantic_question_type",
             return_value=SimpleNamespace(kind="pricing", score=0.72, second_score=0.1),
         ):
-            assert (
-                webhook_router._has_booking_signal(
-                    messages,
-                    client_slug="demo_salon",
-                    message_text=messages[0],
-                )
-                is False
-            )
+            snapshot = _booking_signal_snapshot(messages)
+            assert snapshot.get("signal") is False
 
     def test_booking_updates_across_messages(self):
         booking = {"active": True}
@@ -6859,11 +6891,8 @@ def test_golden_cases(case):
         messages = automation.get("messages") or ([case.get("input")] if case.get("input") else [])
         messages = [msg for msg in messages if isinstance(msg, str)]
         with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint):
-            booking_signal = webhook_router._has_booking_signal(
-                messages,
-                client_slug="demo_salon",
-                message_text=messages[-1] if messages else None,
-            )
+            snapshot = _booking_signal_snapshot(messages)
+            booking_signal = snapshot.get("signal")
         opt_out = any(is_opt_out_message(msg) for msg in messages)
 
         if "expect_booking_signal" in automation:
@@ -6876,11 +6905,8 @@ def test_golden_cases(case):
         messages = automation.get("messages") or ([case.get("input")] if case.get("input") else [])
         messages = [msg for msg in messages if isinstance(msg, str)]
         with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint):
-            booking_signal = webhook_router._has_booking_signal(
-                messages,
-                client_slug="demo_salon",
-                message_text=messages[-1] if messages else None,
-            )
+            snapshot = _booking_signal_snapshot(messages)
+            booking_signal = snapshot.get("signal")
             booking_state = webhook_router._update_booking_from_messages(
                 {},
                 messages,
