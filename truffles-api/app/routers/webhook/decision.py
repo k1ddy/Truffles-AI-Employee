@@ -313,6 +313,7 @@ from app.services.demo_salon_knowledge import (
     get_demo_salon_price_reply,
     get_demo_salon_service_decision,
     get_demo_salon_service_hint,
+    load_system_lexicons,
     load_yaml_truth,
     semantic_question_type,
     semantic_service_match,
@@ -332,6 +333,7 @@ from app.services.intent_service import (
     is_human_request_message,
     is_opt_out_message,
     is_rejection,
+    is_strong_out_of_domain,
     route_dialogue_controller,
     should_escalate,
 )
@@ -2472,40 +2474,6 @@ HYGIENE_KEYWORDS = [
     "обрабатыва",
 ]
 
-
-BOOKING_REQUEST_KEYWORDS = [
-    "запис",
-    "запись",
-    "запишите",
-    "записаться",
-    "бронь",
-    "окошк",
-    "свободн",
-]
-
-SERVICE_KEYWORDS = [
-    "маникюр",
-    "маник",
-    "педикюр",
-    "стриж",
-    "окраш",
-    "мелирован",
-    "кератин",
-    "ботокс",
-    "бров",
-    "ресниц",
-    "депиляц",
-    "шугар",
-    "воск",
-    "чистк",
-    "пилинг",
-    "макияж",
-    "укладк",
-    "прическ",
-    "наращив",
-    "лак",
-]
-
 DATE_KEYWORDS = [
     "сегодня",
     "завтра",
@@ -2702,6 +2670,64 @@ def _contains_any(normalized: str, keywords: list[str]) -> bool:
     return any(keyword in normalized for keyword in keywords)
 
 
+def _merge_lang_phrase_maps(*maps: dict[str, Any] | None) -> dict[str, list[str]]:
+    merged: dict[str, list[str]] = {}
+    for mapping in maps:
+        if not isinstance(mapping, dict):
+            continue
+        for lang_key, phrases in mapping.items():
+            if not isinstance(phrases, list):
+                continue
+            bucket = merged.setdefault(lang_key, [])
+            for phrase in phrases:
+                if not isinstance(phrase, str):
+                    continue
+                cleaned = phrase.strip()
+                if cleaned and cleaned not in bucket:
+                    bucket.append(cleaned)
+    return merged
+
+
+def _collect_booking_request_lexicon(client_slug: str | None) -> dict[str, list[str]]:
+    system_lexicons = load_system_lexicons()
+    system_booking = (
+        system_lexicons.get("booking_request") if isinstance(system_lexicons, dict) else None
+    )
+    truth = load_yaml_truth(client_slug)
+    domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
+    synonyms = domain_pack.get("synonyms") if isinstance(domain_pack, dict) else None
+    domain_booking = (
+        synonyms.get("booking") if isinstance(synonyms, dict) else None
+    )
+    return _merge_lang_phrase_maps(system_booking, domain_booking)
+
+
+def _matches_booking_request_lexicon(
+    message_text: str | None,
+    *,
+    client_slug: str | None,
+) -> bool:
+    if not message_text:
+        return False
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    lexicon = _collect_booking_request_lexicon(client_slug)
+    if not lexicon:
+        return False
+    for lang_key in ("ru", "kk", "en"):
+        phrases = lexicon.get(lang_key)
+        if not isinstance(phrases, list):
+            continue
+        for phrase in phrases:
+            if not isinstance(phrase, str):
+                continue
+            candidate = normalize_for_matching(phrase)
+            if candidate and candidate in normalized:
+                return True
+    return False
+
+
 def _matches_guest_policy_lexicon(
     message_text: str | None,
     *,
@@ -2758,11 +2784,8 @@ def _has_explicit_service_signal(
     return False
 
 
-def _is_booking_request(text: str) -> bool:
-    normalized = _normalize_text(text)
-    if not normalized:
-        return False
-    return _contains_any(normalized, BOOKING_REQUEST_KEYWORDS)
+def _is_booking_request(text: str, *, client_slug: str | None) -> bool:
+    return _matches_booking_request_lexicon(text, client_slug=client_slug)
 
 
 def _is_booking_cancel(text: str, *, policy_pack: dict | None) -> bool:
@@ -2774,7 +2797,7 @@ def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
         return None
     slug = client_slug or "demo_salon"
     normalized_text = _normalize_text(text)
-    booking_like = _is_booking_request(text)
+    booking_like = _is_booking_request(text, client_slug=client_slug)
     if not booking_like:
         booking_like = bool(
             TIME_PATTERN.search(text)
@@ -2889,6 +2912,37 @@ def _normalize_class_name(class_name: str) -> str:
     return normalized
 
 
+def _preflight_booking_block(
+    *,
+    message_text: str | None,
+    client_config: dict | None,
+    booking_active: bool,
+) -> dict | None:
+    if booking_active or not message_text:
+        return None
+    if (
+        is_greeting_message(message_text)
+        or is_thanks_message(message_text)
+        or is_acknowledgement_message(message_text)
+        or is_low_signal_message(message_text)
+    ):
+        return {"booking_blocked_reason": "intent_signal"}
+    domain_intent, in_score, out_score, _ = classify_domain_with_scores(
+        message_text,
+        client_config,
+    )
+    strong_out, _ = is_strong_out_of_domain(
+        message_text,
+        domain_intent,
+        in_score,
+        out_score,
+        client_config,
+    )
+    if strong_out:
+        return {"booking_blocked_reason": "out_of_domain_signal"}
+    return None
+
+
 def _evaluate_booking_signal(
     messages: list[str],
     *,
@@ -2898,7 +2952,7 @@ def _evaluate_booking_signal(
 ) -> tuple[bool, dict | None]:
     if not messages:
         return False, None
-    if any(_is_booking_request(message) for message in messages):
+    if any(_is_booking_request(message, client_slug=client_slug) for message in messages):
         return True, None
     has_service = any(_extract_service_hint(message, client_slug) for message in messages)
     has_datetime = any(
@@ -2994,21 +3048,6 @@ INFO_ANCHOR_GROUPS: dict[str, list[tuple[str, ...]]] = {
 }
 
 QUESTION_WORD_PREFIXES = ("скольк", "где", "когда", "како")
-
-
-def _looks_like_time_only_request(message_text: str | None) -> bool:
-    if not message_text:
-        return False
-    if _is_booking_request(message_text):
-        return False
-    normalized = normalize_for_matching(message_text)
-    if not normalized:
-        return False
-    if any(keyword in normalized for keyword in SERVICE_KEYWORDS):
-        return False
-    if TIME_PATTERN.search(message_text):
-        return True
-    return bool(DATE_PATTERN.search(normalized))
 
 
 def _looks_like_hours_followup(message_text: str | None) -> bool:
@@ -5736,12 +5775,20 @@ async def _handle_webhook_payload(
             booking_active = False
     booking_block_meta = None
     if not bypass_domain_flows:
-        booking_signal, booking_block_meta = _evaluate_booking_signal(
-            booking_messages,
-            client_slug=payload.client_slug,
+        booking_block_meta = _preflight_booking_block(
             message_text=message_text,
-            relative_base=sim_now,
+            client_config=client.config if client else None,
+            booking_active=booking_active,
         )
+        if booking_block_meta:
+            booking_signal = False
+        else:
+            booking_signal, booking_block_meta = _evaluate_booking_signal(
+                booking_messages,
+                client_slug=payload.client_slug,
+                message_text=message_text,
+                relative_base=sim_now,
+            )
     else:
         booking_signal = False
 
@@ -6261,7 +6308,10 @@ async def _handle_webhook_payload(
         bot_response = decision.response or MSG_ESCALATED
         followup_intents: list[str] = []
         booking_followup = bool(booking_signal or "booking" in intent_decomp_set)
-        if not booking_followup and message_text and _is_booking_request(message_text):
+        if not booking_followup and message_text and _is_booking_request(
+            message_text,
+            client_slug=payload.client_slug,
+        ):
             booking_followup = True
         if booking_followup:
             followup_intents.append("booking")
