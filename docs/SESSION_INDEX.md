@@ -79,3 +79,4 @@
 | 2026-01-31-console-media-sync-a1 | active | feat/2026-01-31-console-media-sync-a1 | /home/zhan/worktrees/2026-01-31-console-media-sync-a1 | docs/TASK_PACKAGES/TP-2026-01-31-console-media-sync.md | 2026-01-31 |
 | 2026-01-31-llm-wording-clarify-a1 | done | feat/2026-01-31-llm-wording-clarify-a1 | /home/zhan/worktrees/2026-01-31-llm-wording-clarify-a1 | docs/TASK_PACKAGES/TP-2026-01-31-llm-wording-clarify.md | 2026-01-31 |
 | 2026-01-31-signal-snapshot-evidence-a1 | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-31-signal-snapshot-evidence.md | 2026-01-31 |
+| 2026-01-31-golden-eval-chaos-sim-a4 | done | feat/2026-01-31-golden-eval-chaos-sim-a4 | /home/zhan/worktrees/2026-01-31-golden-eval-chaos-sim-a4 | docs/TASK_PACKAGES/TP-2026-01-31-golden-eval-chaos-sim.md | 2026-01-31 |
