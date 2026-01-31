@@ -475,6 +475,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const [navCollapsed, setNavCollapsed] = useState(
         () => readLocalStorage(NAV_COLLAPSED_STORAGE_KEY) === "1"
     );
+    const navToggleLabel = navCollapsed ? "Развернуть меню" : "Свернуть меню";
 
     useEffect(() => {
         if (!contextNotice) {
@@ -590,6 +591,42 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
     };
 
+    useEffect(() => {
+        if (!data) {
+            return;
+        }
+
+        const storedCompanyId = readLocalStorage(COMPANY_ID_STORAGE_KEY);
+        const resolvedCompanyId = data.selected_company_id ?? data.client?.company_id ?? null;
+        if (data.company_selection_required) {
+            if (storedCompanyId) {
+                writeLocalStorage(COMPANY_ID_STORAGE_KEY, null);
+            }
+        } else if (resolvedCompanyId && storedCompanyId !== resolvedCompanyId) {
+            writeLocalStorage(COMPANY_ID_STORAGE_KEY, resolvedCompanyId);
+        }
+
+        const storedClientId = readLocalStorage(CLIENT_ID_STORAGE_KEY);
+        if (data.selection_required) {
+            if (storedClientId) {
+                writeLocalStorage(CLIENT_ID_STORAGE_KEY, null);
+            }
+        } else if (data.client?.id && storedClientId !== data.client.id) {
+            writeLocalStorage(CLIENT_ID_STORAGE_KEY, data.client.id);
+        }
+
+        const storedBranchId = readLocalStorage(BRANCH_ID_STORAGE_KEY);
+        if (data.branch_selection_required) {
+            if (storedBranchId) {
+                writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
+            }
+        } else if (data.selected_branch_id && storedBranchId !== data.selected_branch_id) {
+            writeLocalStorage(BRANCH_ID_STORAGE_KEY, data.selected_branch_id);
+        } else if (!data.selected_branch_id && storedBranchId) {
+            writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
+        }
+    }, [data]);
+
     if (!hasSession && status !== "loading") {
         return <PublicLanding />;
     }
@@ -598,7 +635,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         <div className="min-h-screen bg-background">
             <div className="flex min-h-screen">
                 <aside
-                    className={`hidden ${navCollapsed ? "w-16" : "w-56"} flex-col border-r border-border/60 bg-card/40 px-3 py-6 transition-[width] duration-200 md:flex`}
+                    className={`hidden ${navCollapsed ? "w-16" : "w-52"} flex-col border-r border-border/60 bg-card/40 px-2 py-6 transition-[width] duration-200 md:flex`}
                 >
                     <div
                         className={`flex px-2 ${
@@ -621,9 +658,11 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                         <button
                             type="button"
                             onClick={() => setNavCollapsed((prev) => !prev)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/60 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                            aria-label={navCollapsed ? "Развернуть меню" : "Свернуть меню"}
-                            title={navCollapsed ? "Развернуть меню" : "Свернуть меню"}
+                            className={`inline-flex items-center gap-2 rounded-full border border-border/60 text-xs font-semibold text-muted-foreground transition hover:bg-muted hover:text-foreground ${
+                                navCollapsed ? "h-9 w-9 justify-center" : "px-3 py-2"
+                            }`}
+                            aria-label={navToggleLabel}
+                            title={navToggleLabel}
                             data-testid="nav-toggle"
                         >
                             {navCollapsed ? (
@@ -631,9 +670,12 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                     <path d="M10 6l6 6-6 6" />
                                 </NavIcon>
                             ) : (
-                                <NavIcon className="h-4 w-4">
-                                    <path d="M14 6l-6 6 6 6" />
-                                </NavIcon>
+                                <>
+                                    <NavIcon className="h-4 w-4">
+                                        <path d="M14 6l-6 6 6 6" />
+                                    </NavIcon>
+                                    <span>Свернуть</span>
+                                </>
                             )}
                         </button>
                     </div>

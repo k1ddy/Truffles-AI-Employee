@@ -68,3 +68,4 @@
 | 2026-01-30-inbox-queue-adaptive-a1 | done | feat/2026-01-30-inbox-queue-adaptive-a1 | /home/zhan/worktrees/2026-01-30-inbox-queue-adaptive-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-queue-adaptive.md | 2026-01-30 |
 | 2026-01-30-inbox-queue-adaptive-ci-fix-a1 | done | feat/2026-01-30-inbox-queue-adaptive-ci-fix-a1 | /home/zhan/worktrees/2026-01-30-inbox-queue-adaptive-ci-fix-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-queue-adaptive-ci-fix.md | 2026-01-30 |
 | 2026-01-30-inbox-queue-adaptive-ci-fix2-a1 | done | feat/2026-01-30-inbox-queue-adaptive-ci-fix2-a1 | /home/zhan/worktrees/2026-01-30-inbox-queue-adaptive-ci-fix2-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-queue-adaptive-ci-fix.md | 2026-01-30 |
+| 2026-01-30-inbox-ux-v3-fix-a1 | done | feat/2026-01-30-inbox-ux-v3-fix-a1 | /home/zhan/worktrees/2026-01-30-inbox-ux-v3-fix-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v3-fix.md | 2026-01-31 |
