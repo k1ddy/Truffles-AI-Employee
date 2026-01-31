@@ -8,8 +8,8 @@ from fastapi import UploadFile
 from starlette.datastructures import Headers
 
 from app.routers import console as console_router
-from app.services.console_errors import ConsoleAPIError
 from app.services import manager_message_service
+from app.services.console_errors import ConsoleAPIError
 
 
 def test_console_media_type_resolution():

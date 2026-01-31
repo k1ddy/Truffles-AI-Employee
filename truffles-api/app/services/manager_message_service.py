@@ -9,7 +9,6 @@ from urllib.parse import parse_qs, urlparse
 from uuid import UUID, uuid4
 
 from fastapi import UploadFile
-
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
