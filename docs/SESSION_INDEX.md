@@ -74,3 +74,4 @@
 | 2026-01-31-inbox-macros-visibility-a1 | done | feat/2026-01-31-inbox-macros-visibility-a1 | /home/zhan/worktrees/2026-01-31-inbox-macros-visibility-a1 | docs/TASK_PACKAGES/TP-2026-01-31-inbox-macros-visibility.md | 2026-01-31 |
 | 2026-01-31-policy-reclass-a1 | done | feat/2026-01-31-policy-reclass-a1 | /home/zhan/worktrees/2026-01-31-policy-reclass-a1 | docs/TASK_PACKAGES/TP-2026-01-31-policy-reclass-payment-refund.md | 2026-01-31 |
 | 2026-01-31-inbox-composer-visibility-a1 | done | feat/2026-01-31-inbox-composer-visibility-a1 | /home/zhan/worktrees/2026-01-31-inbox-composer-visibility-a1 | docs/TASK_PACKAGES/TP-2026-01-31-inbox-composer-visibility.md | 2026-01-31 |
+| 2026-01-31-llm-pack-ref-only-a1 | done | feat/2026-01-31-llm-pack-ref-only-a1 | /home/zhan/worktrees/2026-01-31-llm-pack-ref-only-a1 | docs/TASK_PACKAGES/TP-2026-01-31-llm-pack-ref-only.md | 2026-01-31 |

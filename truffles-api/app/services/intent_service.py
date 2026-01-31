@@ -10,6 +10,10 @@ from typing import Any, Iterable, Tuple
 import httpx
 
 from app.logging_config import get_logger, record_llm_time
+from app.schemas.intent import (
+    validate_answer_interpreter_output,
+    validate_dialogue_controller_output,
+)
 from app.services.ai_service import (
     FAST_MODEL,
     INTENT_TIMEOUT_SECONDS,
@@ -118,9 +122,11 @@ CONTROLLER_ALLOWED_GOALS = {
 }
 OFFLINE_CONTROLLER_CLASS = "other"
 OFFLINE_CONTROLLER_GOAL = "other"
-CONTROLLER_PROMPT_FALLBACK = """# Dialogue Controller Prompt (Salon)
+CONTROLLER_PROMPT_FALLBACK = """# Dialogue Controller Prompt (pack-ref-only)
 
-Ты Dialogue Controller для салона красоты. Вход всегда JSON. Верни ТОЛЬКО JSON.
+Ты Dialogue Controller для сервисного бизнеса. Вход всегда JSON. Верни ТОЛЬКО JSON.
+Не придумывай факты о бизнесе и не используй внешний контекст: только текст клиента и входные поля.
+service_query должен быть словом/фразой только из сообщения клиента (1-6 слов), иначе пустая строка.
 
 Вход (JSON):
 ```json
@@ -791,6 +797,16 @@ def route_dialogue_controller(
             controller_retry_flag=controller_retry,
         )
         return result
+    contract, schema_error = validate_dialogue_controller_output(payload)
+    if schema_error:
+        result["error"] = "invalid_schema"
+        result["payload"] = _build_payload(
+            controller_error="invalid_schema",
+            controller_llm_ms=total_elapsed_ms,
+            controller_retry_flag=controller_retry,
+        )
+        return result
+    payload = contract.model_dump(by_alias=True)
 
     controller_class = _clean_controller_class(payload.get("class"))
     goal = _clean_controller_goal(payload.get("goal"))
@@ -988,6 +1004,11 @@ def interpret_expected_reply(
     if not isinstance(parsed, dict):
         result["error"] = "invalid_json"
         return result
+    contract, schema_error = validate_answer_interpreter_output(parsed)
+    if schema_error:
+        result["error"] = "invalid_schema"
+        return result
+    parsed = contract.model_dump()
 
     slot = _clean_answer_slot(parsed.get("slot")) or expected_slot
     error = None
