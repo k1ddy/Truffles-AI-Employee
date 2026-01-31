@@ -1,0 +1,22 @@
+# SESSION 2026-01-31-inbox-macros-visibility-a1 — Session 2026-01-31-inbox-macros-visibility-a1
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-31-inbox-macros-visibility.md
+- branch: feat/2026-01-31-inbox-macros-visibility-a1
+- worktree: /home/zhan/worktrees/2026-01-31-inbox-macros-visibility-a1
+- base_ref: origin/main
+- scope: Console Inbox macros visibility + refresh regression in UI
+- done:
+  - Session created.
+  - Checked prod console build info (Settings bundle shows commit 4187c24f, build time 2026-01-31T01:40:32Z).
+  - Updated Inbox macros panel height + create refresh behavior (see InboxMacros.tsx).
+  - Added GAP for macros visibility in STATE.md.
+  - Installed console-web deps and ran lint.
+- next:
+  - Verify UI at 1920x1080/100% and capture screenshot evidence.
+  - Update STATE.md with evidence once verified.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-31-inbox-macros-visibility.md
+  - /tmp/console_web_lint_inbox_macros_visibility_20260131.txt
+- last_updated: 2026-01-31

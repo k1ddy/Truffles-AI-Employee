@@ -96,7 +96,6 @@ function InboxMacros({
             }
             setSearchValue("");
             toast.success("Макрос сохранён");
-            queryClient.invalidateQueries({ queryKey: ["inbox-macros", branchId] });
         },
         onError: () => {
             toast.error("Не удалось сохранить макрос");
@@ -293,7 +292,7 @@ function InboxMacros({
             )}
 
             {panelOpen && (
-                <div className="rounded-lg border border-border/60 bg-card p-3 space-y-4 max-h-[70vh] overflow-y-auto">
+                <div className="rounded-lg border border-border/60 bg-card p-3 space-y-4 max-h-[60vh] xl:max-h-[40vh] overflow-y-auto">
                     {canManage && (
                         <div className="flex flex-wrap gap-2">
                             <button type="button" onClick={() => setPanelMode("use")} className={tabClass(panelMode === "use")}>
