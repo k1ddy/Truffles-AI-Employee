@@ -1,0 +1,21 @@
+# SESSION 2026-01-31-console-media-sync-a1 — Session 2026-01-31-console-media-sync-a1
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-31-console-media-sync.md
+- branch: feat/2026-01-31-console-media-sync-a1
+- worktree: /home/zhan/worktrees/2026-01-31-console-media-sync-a1
+- base_ref: origin/main
+- scope: Console media upload/send (photo/audio/document), Telegram echo, contracts + console UI, tests + infra analysis
+- done:
+  - Task Package added.
+  - Console media endpoint wired (storage, signed URL, outbox/direct send, Telegram echo).
+  - Console UI supports attachments and multipart proxy.
+  - OpenAPI updated + types generated.
+  - Tests added + pytest/lint run.
+  - Infra analysis report added.
+- next:
+  - Capture live-check or CI evidence as needed.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-31-console-media-sync.md
+- last_updated: 2026-01-31

@@ -253,6 +253,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/conversations/{conversation_id}/messages/media": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send media from manager to customer
+         * @description Uploads a media file and sends it to WhatsApp via outbox (or direct send when outbox is disabled).
+         *     Allowed types: photo, audio, document. Video is forbidden.
+         */
+        post: operations["sendManagerMedia"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inbox/macros": {
         parameters: {
             query?: never;
@@ -1189,6 +1215,11 @@ export interface components {
         SendMessageRequest: {
             content: string;
         };
+        SendMediaRequest: {
+            /** Format: binary */
+            file: string;
+            caption?: string;
+        };
         SendMessageResponse: {
             success?: boolean;
             message?: components["schemas"]["Message"];
@@ -2118,6 +2149,44 @@ export interface operations {
                     "application/json": components["schemas"]["SendMessageResponse"];
                 };
             };
+            403: components["responses"]["NotAssigned"];
+            409: components["responses"]["IdempotencyConflict"];
+        };
+    };
+    sendManagerMedia: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+                /** @description Stable key for safe retries of mutating requests. */
+                "Idempotency-Key"?: components["parameters"]["idempotency_key"];
+            };
+            path: {
+                /** @example e03933eb-780e-4d0d-890f-741bc3ca9733 */
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["SendMediaRequest"];
+            };
+        };
+        responses: {
+            /** @description Media accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendMessageResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             403: components["responses"]["NotAssigned"];
             409: components["responses"]["IdempotencyConflict"];
         };

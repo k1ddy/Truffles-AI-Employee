@@ -25,6 +25,53 @@ async function sendMessage(conversationId: string, content: string) {
     return response.data;
 }
 
+async function sendMediaMessage(conversationId: string, file: File, caption?: string) {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (caption && caption.trim()) {
+        formData.append("caption", caption.trim());
+    }
+    const response = await api.post(`/conversations/${conversationId}/messages/media`, formData);
+    return response.data;
+}
+
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"]);
+const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
+const AUDIO_EXTENSIONS = new Set([".ogg", ".mp3", ".wav", ".m4a", ".aac", ".opus"]);
+const MEDIA_LABELS: Record<string, string> = {
+    photo: "Фото",
+    audio: "Аудио",
+    document: "Документ",
+};
+
+function formatBytes(bytes?: number) {
+    if (!bytes || bytes <= 0) {
+        return null;
+    }
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+    const kb = bytes / 1024;
+    if (kb < 1024) {
+        return `${kb.toFixed(1)} KB`;
+    }
+    const mb = kb / 1024;
+    return `${mb.toFixed(1)} MB`;
+}
+
+function resolveMediaType(file: File) {
+    const extension = file.name.includes(".")
+        ? `.${file.name.split(".").pop()?.toLowerCase()}`
+        : "";
+    if (file.type.startsWith("image/") || IMAGE_EXTENSIONS.has(extension)) {
+        return "photo";
+    }
+    if (file.type.startsWith("audio/") || AUDIO_EXTENSIONS.has(extension)) {
+        return "audio";
+    }
+    return "document";
+}
+
 export default function ChatInterface({
     messages,
     conversationId,
@@ -38,10 +85,12 @@ export default function ChatInterface({
 }: ChatInterfaceProps) {
     const isControlled = typeof onDraftChange === "function";
     const [internalDraft, setInternalDraft] = useState("");
+    const [attachedFile, setAttachedFile] = useState<File | null>(null);
     const inputValue = isControlled ? draft ?? "" : internalDraft;
     const setInputValue = isControlled ? onDraftChange : setInternalDraft;
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const lastMessageIdRef = useRef<string | null>(null);
     const queryClient = useQueryClient();
     const isPlain = frame === "plain";
@@ -123,8 +172,103 @@ export default function ChatInterface({
         },
     });
 
+    const mediaMutation = useMutation({
+        mutationFn: ({ file, caption }: { file: File; caption?: string }) =>
+            sendMediaMessage(conversationId, file, caption),
+        onMutate: async ({ file, caption }) => {
+            await queryClient.cancelQueries({ queryKey: ["messages", caseId] });
+
+            const previousMessages = queryClient.getQueryData(["messages", caseId]);
+            const mediaType = resolveMediaType(file);
+            const optimisticMessage: Message = {
+                id: `temp-media-${Date.now()}`,
+                role: "manager",
+                content: caption?.trim() || `[${mediaType}]`,
+                created_at: new Date().toISOString(),
+                metadata: {
+                    media: {
+                        type: mediaType,
+                        file_name: file.name,
+                        mime: file.type,
+                        size_bytes: file.size,
+                        source: "console",
+                    },
+                    source: "console",
+                },
+            };
+
+            queryClient.setQueryData(["messages", caseId], (old: { items: Message[] } | undefined) => ({
+                items: [optimisticMessage, ...(old?.items || [])],
+            }));
+
+            if (scrollContainerRef.current) {
+                scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+            }
+
+            return { previousMessages };
+        },
+        onSuccess: (data: { success?: boolean } | undefined) => {
+            setInputValue("");
+            clearAttachment();
+            queryClient.invalidateQueries({ queryKey: ["messages", caseId] });
+            if (data?.success === false) {
+                toast.error("Не удалось отправить медиа");
+            } else {
+                toast.success("Медиа отправлено");
+            }
+        },
+        onError: (error: unknown, _, context) => {
+            if (context?.previousMessages) {
+                queryClient.setQueryData(["messages", caseId], context.previousMessages);
+            }
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            if (code === "NOT_ASSIGNED") {
+                toast.error("Вы не назначены на эту заявку");
+            } else if (code === "CASE_NOT_ACTIVE") {
+                toast.error("Заявка должна быть активной для отправки сообщений");
+            } else if (code === "MEDIA_TOO_LARGE") {
+                toast.error("Файл слишком большой");
+            } else if (code === "MEDIA_TYPE_FORBIDDEN") {
+                toast.error("Видео из консоли не поддерживается");
+            } else if (code === "MEDIA_EMPTY") {
+                toast.error("Файл пустой");
+            } else {
+                toast.error("Не удалось отправить медиа");
+            }
+        },
+    });
+
+    const isSending = sendMutation.isPending || mediaMutation.isPending;
+
+    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) {
+            return;
+        }
+        const extension = file.name.includes(".")
+            ? `.${file.name.split(".").pop()?.toLowerCase()}`
+            : "";
+        if (file.type.startsWith("video/") || VIDEO_EXTENSIONS.has(extension)) {
+            toast.error("Видео из консоли не поддерживается");
+            event.target.value = "";
+            return;
+        }
+        setAttachedFile(file);
+    };
+
+    const clearAttachment = () => {
+        setAttachedFile(null);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = "";
+        }
+    };
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        if (attachedFile) {
+            mediaMutation.mutate({ file: attachedFile, caption: inputValue });
+            return;
+        }
         const content = inputValue.trim();
         if (!content) return;
         setInputValue(""); // Clear immediately for better UX
@@ -140,6 +284,7 @@ export default function ChatInterface({
         // Escape to clear input
         if (e.key === "Escape") {
             setInputValue("");
+            clearAttachment();
         }
     };
 
@@ -177,6 +322,18 @@ export default function ChatInterface({
                 ) : (
                     sortedMessages.map((msg) => {
                         const isOptimistic = msg.id.startsWith("temp-");
+                        const mediaMeta = (msg.metadata as { media?: Record<string, unknown> } | null)?.media;
+                        const mediaType = typeof mediaMeta?.type === "string" ? mediaMeta.type : null;
+                        const mediaLabel = mediaType ? (MEDIA_LABELS[mediaType] ?? "Файл") : null;
+                        const fileName = typeof mediaMeta?.file_name === "string" ? mediaMeta.file_name : null;
+                        const publicUrl = typeof mediaMeta?.public_url === "string" ? mediaMeta.public_url : null;
+                        const sizeRaw = mediaMeta?.size_bytes;
+                        const sizeBytes = typeof sizeRaw === "number" ? sizeRaw : Number(sizeRaw);
+                        const sizeLabel = Number.isFinite(sizeBytes) ? formatBytes(sizeBytes) : null;
+                        const contentValue = msg.content?.trim();
+                        const isPlaceholder = Boolean(
+                            mediaType && contentValue && /^\[.+\]$/.test(contentValue)
+                        );
                         return (
                             <div
                                 key={msg.id}
@@ -195,7 +352,28 @@ export default function ChatInterface({
                                             : "bg-foreground text-background"
                                         }`}
                                 >
-                                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                                    {!isPlaceholder && (
+                                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                                    )}
+                                    {mediaType && (
+                                        <div className="mt-2 rounded-md border border-border/60 bg-background/70 px-2 py-1 text-xs text-foreground">
+                                            <div className="font-semibold">{mediaLabel}</div>
+                                            <div className="text-muted-foreground">
+                                                {fileName ?? "Файл"}
+                                                {sizeLabel ? ` · ${sizeLabel}` : ""}
+                                            </div>
+                                            {publicUrl && (
+                                                <a
+                                                    href={publicUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="mt-1 inline-flex text-primary underline-offset-2 hover:underline"
+                                                >
+                                                    Открыть
+                                                </a>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                                 <span className="text-xs text-muted-foreground mt-1">
                                     {isOptimistic ? "..." : new Date(msg.created_at).toLocaleString("ru-RU")}
@@ -214,24 +392,56 @@ export default function ChatInterface({
                             {composerBefore}
                         </div>
                     )}
-                    <form onSubmit={handleSubmit}>
+                    <form onSubmit={handleSubmit} className="space-y-2">
+                        {attachedFile && (
+                            <div className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-xs">
+                                <div className="min-w-0">
+                                    <div className="font-semibold text-foreground">
+                                        {MEDIA_LABELS[resolveMediaType(attachedFile)] ?? "Файл"}
+                                    </div>
+                                    <div className="truncate text-muted-foreground">
+                                        {attachedFile.name}
+                                        {formatBytes(attachedFile.size) ? ` · ${formatBytes(attachedFile.size)}` : ""}
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={clearAttachment}
+                                    className="text-muted-foreground hover:text-foreground"
+                                >
+                                    Убрать
+                                </button>
+                            </div>
+                        )}
                         <div className="flex gap-2">
+                            <label className="flex h-[44px] w-[44px] items-center justify-center rounded-lg border border-border/60 bg-background text-lg text-muted-foreground transition hover:text-foreground">
+                                <span aria-hidden="true">📎</span>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    onChange={handleFileChange}
+                                    accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                                    className="hidden"
+                                    disabled={isSending}
+                                    aria-label="Прикрепить файл"
+                                />
+                            </label>
                             <textarea
                                 ref={textareaRef}
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
                                 onKeyDown={handleKeyDown}
-                                placeholder="Введите сообщение. Enter — отправить, Shift+Enter — новая строка."
+                                placeholder="Введите сообщение или подпись к файлу. Enter — отправить."
                                 rows={2}
-                                disabled={sendMutation.isPending}
+                                disabled={isSending}
                                 className="flex-1 px-3 py-2 border border-border/60 rounded-lg text-sm resize-none bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:bg-muted min-h-[44px]"
                             />
                             <button
                                 type="submit"
-                                disabled={!inputValue.trim() || sendMutation.isPending}
+                                disabled={isSending || (!attachedFile && !inputValue.trim())}
                                 className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors"
                             >
-                                {sendMutation.isPending ? (
+                                {isSending ? (
                                     <span className="flex items-center gap-1">
                                         <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />

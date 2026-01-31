@@ -91,6 +91,7 @@
 | `docs/REPORTS/2026-01-27-control-plane-review.md` | Отчёт: Control Plane UX/RBAC/safety review | Brain/Architect |
 | `docs/REPORTS/2026-01-30-inbox-ux-standard.md` | Отчёт: Inbox UX standard (analysis + variants) | Brain/Architect |
 | `docs/REPORTS/2026-01-30-inbox-ux-v2.md` | Отчёт: Inbox UX v2 + макросы | Brain/Architect |
+| `docs/REPORTS/2026-01-31-console-media-infra-telegram.md` | Report: Console media infra + Telegram touchpoints | Brain/Architect |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
