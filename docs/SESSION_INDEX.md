@@ -70,4 +70,4 @@
 | 2026-01-30-inbox-queue-adaptive-ci-fix2-a1 | done | feat/2026-01-30-inbox-queue-adaptive-ci-fix2-a1 | /home/zhan/worktrees/2026-01-30-inbox-queue-adaptive-ci-fix2-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-queue-adaptive-ci-fix.md | 2026-01-30 |
 | 2026-01-30-inbox-ux-v3-fix-a1 | done | feat/2026-01-30-inbox-ux-v3-fix-a1 | /home/zhan/worktrees/2026-01-30-inbox-ux-v3-fix-a1 | docs/TASK_PACKAGES/TP-2026-01-30-inbox-ux-v3-fix.md | 2026-01-31 |
 | 2026-01-31-inbox-macros-ui-fix-a3 | active | feat/2026-01-31-inbox-macros-ui-fix-a3 | /home/zhan/worktrees/2026-01-31-inbox-macros-ui-fix-a3 | docs/TASK_PACKAGES/TP-2026-01-31-inbox-macros-ui-fix.md | 2026-01-31 |
-| 2026-01-31-inbox-macros-visibility-a1 | active | feat/2026-01-31-inbox-macros-visibility-a1 | /home/zhan/worktrees/2026-01-31-inbox-macros-visibility-a1 | docs/TASK_PACKAGES/TP-2026-01-31-inbox-macros-visibility.md | 2026-01-31 |
+| 2026-01-31-inbox-macros-visibility-a1 | done | feat/2026-01-31-inbox-macros-visibility-a1 | /home/zhan/worktrees/2026-01-31-inbox-macros-visibility-a1 | docs/TASK_PACKAGES/TP-2026-01-31-inbox-macros-visibility.md | 2026-01-31 |

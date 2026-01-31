@@ -1,6 +1,6 @@
 # SESSION 2026-01-31-inbox-macros-visibility-a1 — Session 2026-01-31-inbox-macros-visibility-a1
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-31-inbox-macros-visibility.md
 - branch: feat/2026-01-31-inbox-macros-visibility-a1
@@ -16,6 +16,7 @@
   - Installed console-web deps and ran lint.
   - Rebuilt and restarted console-web (Build: 9b30d183, time 2026-01-31T02:59:09Z).
   - Rebuilt and restarted console-web with nested-form fix (Build: 0360f8e4, time 2026-01-31T03:12:01Z).
+  - User confirmed: кнопка видна, макросы сохраняются и появляются.
 - next:
   - Rebuild and restart console-web with latest fix; verify UI and capture screenshot evidence.
   - Update STATE.md with evidence once verified.
