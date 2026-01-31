@@ -157,7 +157,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                 <section className="flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)]" data-testid="inbox-conversation">
                     {!selectedCaseId && renderEmptyPane("Выберите заявку", "Кликните по карточке слева, чтобы открыть диалог.")}
                     {selectedCaseId && (
-                        <div className="flex flex-col gap-4 h-full" data-testid="case-view">
+                        <div className="flex flex-col gap-4 h-full">
                             {caseLoading && renderLoadingPane()}
                             {caseError && renderErrorPane()}
                             {!caseLoading && !caseError && caseDetail && (
