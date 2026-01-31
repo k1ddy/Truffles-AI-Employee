@@ -76,3 +76,4 @@
 | 2026-01-31-inbox-composer-visibility-a1 | done | feat/2026-01-31-inbox-composer-visibility-a1 | /home/zhan/worktrees/2026-01-31-inbox-composer-visibility-a1 | docs/TASK_PACKAGES/TP-2026-01-31-inbox-composer-visibility.md | 2026-01-31 |
 | 2026-01-31-llm-pack-ref-only-a1 | done | feat/2026-01-31-llm-pack-ref-only-a1 | /home/zhan/worktrees/2026-01-31-llm-pack-ref-only-a1 | docs/TASK_PACKAGES/TP-2026-01-31-llm-pack-ref-only.md | 2026-01-31 |
 | 2026-01-31-ruff-intent-import-order-a1 | done | feat/2026-01-31-ruff-intent-import-order-a1 | /home/zhan/worktrees/2026-01-31-ruff-intent-import-order-a1 | docs/TASK_PACKAGES/TP-2026-01-31-ruff-intent-import-order.md | 2026-01-31 |
+| 2026-01-31-console-media-sync-a1 | active | feat/2026-01-31-console-media-sync-a1 | /home/zhan/worktrees/2026-01-31-console-media-sync-a1 | docs/TASK_PACKAGES/TP-2026-01-31-console-media-sync.md | 2026-01-31 |

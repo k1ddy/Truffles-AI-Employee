@@ -1,11 +1,12 @@
 import re
 import secrets
+from pathlib import Path
 from datetime import date as dt_date
 from datetime import datetime, time, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from sqlalchemy import and_, case, func, or_
@@ -135,7 +136,10 @@ from app.services.knowledge_registry_service import (
     validate_draft,
 )
 from app.services.knowledge_validation import dump_pack_yaml
-from app.services.manager_message_service import notify_client_manager_status
+from app.services.manager_message_service import (
+    notify_client_manager_status,
+    process_console_media_upload,
+)
 from app.services.onboarding_state import (
     OnboardingStep,
     advance_onboarding_step,
@@ -288,6 +292,15 @@ def _build_telegram_desktop_link(
     return link
 
 
+def _build_console_telegram_caption(manager_label: str, caption: Optional[str]) -> Optional[str]:
+    normalized_caption = _normalize_optional_text(caption)
+    label = manager_label.strip() if manager_label else "Менеджер"
+    prefix = f"🖥️ <b>{label}</b>"
+    if normalized_caption:
+        return f"{prefix}: {normalized_caption}"
+    return prefix
+
+
 _SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
@@ -316,6 +329,34 @@ def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+CONSOLE_MEDIA_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
+CONSOLE_MEDIA_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+CONSOLE_MEDIA_AUDIO_EXTENSIONS = {".ogg", ".mp3", ".wav", ".m4a", ".aac", ".opus"}
+CONSOLE_MEDIA_CAPTION_MAX = 4096
+
+
+def _normalize_media_caption(value: Optional[str]) -> Optional[str]:
+    normalized = _normalize_optional_text(value)
+    if normalized and len(normalized) > CONSOLE_MEDIA_CAPTION_MAX:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "caption слишком длинный")
+    return normalized
+
+
+def _resolve_console_media_type(file_name: Optional[str], content_type: Optional[str]) -> str:
+    name = (file_name or "").lower()
+    ext = Path(name).suffix
+    mime = (content_type or "").lower().strip()
+
+    if mime.startswith("video/") or ext in CONSOLE_MEDIA_VIDEO_EXTENSIONS:
+        raise ConsoleAPIError(400, "MEDIA_TYPE_FORBIDDEN", "Видео из консоли не поддерживается")
+
+    if mime.startswith("image/") or ext in CONSOLE_MEDIA_IMAGE_EXTENSIONS:
+        return "photo"
+    if mime.startswith("audio/") or ext in CONSOLE_MEDIA_AUDIO_EXTENSIONS:
+        return "audio"
+    return "document"
 
 
 def _resolve_branch_from_context(context: ConsoleAuthContext) -> Branch:
@@ -2321,6 +2362,160 @@ async def send_manager_message(
             content=new_message.content,
             created_at=new_message.created_at.isoformat(),
             metadata=new_message.message_metadata,
+        ),
+    )
+    if idempotency and idempotency.record:
+        finalize_idempotency(
+            db,
+            record=idempotency.record,
+            response_status=200,
+            response_body=response.model_dump(mode="json"),
+        )
+    return response
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/media",
+    response_model=ConsoleManagerMessageResponse,
+)
+async def send_manager_media(
+    conversation_id: UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    caption: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+) -> ConsoleManagerMessageResponse:
+    """Send a media message from the manager to the customer via WhatsApp."""
+    from app.logging_config import get_logger
+
+    logger = get_logger("console_send_media")
+
+    context = get_console_context(request, db)
+    require_console_permission(context, "inbox", "write")
+    idempotency = None
+    idempotency_key = _get_idempotency_key(request)
+    normalized_caption = _normalize_media_caption(caption)
+    media_type = _resolve_console_media_type(file.filename, file.content_type)
+
+    case = db.query(Handover).filter(
+        Handover.conversation_id == conversation_id,
+        Handover.client_id == context.client.id
+    ).first()
+
+    if not case:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found or access denied")
+
+    if case.status != "active" and context.role not in ("platform_admin", "owner", "admin"):
+        raise ConsoleAPIError(403, "CASE_NOT_ACTIVE", "Case must be active to send messages")
+
+    if context.role not in ("platform_admin", "owner", "admin"):
+        assigned_id = str(case.assigned_to or "").strip()
+        if assigned_id:
+            if assigned_id != str(context.agent.id):
+                raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+        else:
+            assigned_name = (case.assigned_to_name or "").strip()
+            agent_name = (context.agent.name or "").strip()
+            if assigned_name and assigned_name != agent_name:
+                raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+            if not assigned_name:
+                raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
+
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.conversation.media",
+        payload={
+            "conversation_id": str(conversation_id),
+            "media_type": media_type,
+            "file_name": file.filename,
+            "content_type": file.content_type,
+            "caption": normalized_caption,
+        },
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    try:
+        saved_message, delivery_status, _delivery_error = await process_console_media_upload(
+            db,
+            conversation=conversation,
+            handover=case,
+            agent=context.agent,
+            upload=file,
+            media_type=media_type,
+            caption=normalized_caption,
+            idempotency_key=idempotency_key,
+        )
+    except Exception:
+        if idempotency and idempotency.record:
+            release_idempotency(db, record=idempotency.record)
+        raise
+
+    if delivery_status in {"delivered", "queued"} and conversation.telegram_topic_id:
+        try:
+            routing_meta = resolve_telegram_routing(
+                db,
+                conversation=conversation,
+                client_id=context.client.id,
+            )
+            bot_token = routing_meta.get("bot_token")
+            chat_id = routing_meta.get("chat_id")
+            if bot_token and chat_id:
+                telegram = TelegramService(bot_token)
+                media_meta = (saved_message.message_metadata or {}).get("media") or {}
+                storage_path = media_meta.get("storage_path")
+                public_url = media_meta.get("public_url")
+                media_source = storage_path if storage_path and Path(storage_path).exists() else public_url
+                telegram_caption = _build_console_telegram_caption(
+                    context.agent.name or "Менеджер",
+                    normalized_caption,
+                )
+                if media_source:
+                    if media_type == "photo":
+                        telegram.send_photo(
+                            chat_id=str(chat_id),
+                            photo=media_source,
+                            caption=telegram_caption,
+                            message_thread_id=conversation.telegram_topic_id,
+                        )
+                    elif media_type == "audio":
+                        telegram.send_audio(
+                            chat_id=str(chat_id),
+                            audio=media_source,
+                            caption=telegram_caption,
+                            message_thread_id=conversation.telegram_topic_id,
+                        )
+                    else:
+                        telegram.send_document(
+                            chat_id=str(chat_id),
+                            document=media_source,
+                            caption=telegram_caption,
+                            message_thread_id=conversation.telegram_topic_id,
+                        )
+        except Exception as exc:
+            logger.warning(
+                "Telegram console media echo failed",
+                extra={"context": {"conversation_id": str(conversation_id), "error": str(exc)}},
+            )
+
+    response = ConsoleManagerMessageResponse(
+        success=delivery_status in {"delivered", "queued"},
+        message=ConsoleMessage(
+            id=saved_message.id,
+            role=saved_message.role,
+            content=saved_message.content,
+            created_at=saved_message.created_at.isoformat(),
+            metadata=saved_message.message_metadata,
         ),
     )
     if idempotency and idempotency.record:

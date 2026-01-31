@@ -32,6 +32,9 @@ function attachIdempotencyKey(client: AxiosInstance): AxiosInstance {
     client.interceptors.request.use((config) => {
         const headers = config.headers ?? {};
         config.headers = headers;
+        const isFormData =
+            typeof FormData !== "undefined" &&
+            config.data instanceof FormData;
         const selectedCompanyId = getSelectedCompanyId();
         if (selectedCompanyId && !headers["X-Company-Id"]) {
             headers["X-Company-Id"] = selectedCompanyId;
@@ -49,6 +52,9 @@ function attachIdempotencyKey(client: AxiosInstance): AxiosInstance {
                 headers["Idempotency-Key"] = crypto.randomUUID();
             }
         }
+        if (!headers["Content-Type"] && config.data && !isFormData) {
+            headers["Content-Type"] = "application/json";
+        }
         return config;
     });
 
@@ -59,9 +65,6 @@ function attachIdempotencyKey(client: AxiosInstance): AxiosInstance {
 // All requests go through /api/proxy/* which forwards to the actual API server-side.
 const api = attachIdempotencyKey(axios.create({
     baseURL: "/api/proxy",
-    headers: {
-        "Content-Type": "application/json",
-    },
 }));
 
 // Factory function to create an authenticated axios instance
@@ -70,9 +73,6 @@ export function createAuthenticatedApi(_accessToken: string | undefined): AxiosI
     void _accessToken;
     return attachIdempotencyKey(axios.create({
         baseURL: "/api/proxy",
-        headers: {
-            "Content-Type": "application/json",
-        },
     }));
 }
 

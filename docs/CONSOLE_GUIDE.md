@@ -325,6 +325,7 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
    - Desktop: `tg://privatepost?channel=<internal_id>&post=<message_id>&thread=<topic_id>`
 3) Telegram → Console: отправь сообщение из Telegram топика → оно должно появиться в Console (polling ≤ 5s).
 4) Console → Telegram: отправь сообщение из Console → оно должно уйти клиенту и отобразиться в Telegram топике (echo).
+4.1) Console → Telegram (media): отправь фото/аудио/документ → медиа должно уйти клиенту и отобразиться в Telegram топике (echo). Видео запрещено.
 5) Ops: проверь `Console → Ops` (Telegram health + outbox backlog).
 - Test message (custom text):
   ```bash

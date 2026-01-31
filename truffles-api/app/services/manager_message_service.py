@@ -6,12 +6,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 from urllib.parse import parse_qs, urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
+
+from fastapi import UploadFile
 
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.models import Agent, AgentIdentity, Branch, ClientSettings, Conversation, Handover, User
+from app.models import Agent, AgentIdentity, Branch, ClientSettings, Conversation, Handover, Message, User
 from app.services.audit_service import record_audit_event
 from app.services.chatflow_service import (
     build_signed_media_url,
@@ -19,6 +21,7 @@ from app.services.chatflow_service import (
     send_bot_response,
     send_whatsapp_media,
 )
+from app.services.console_errors import ConsoleAPIError
 from app.services.learning_service import add_to_knowledge, get_client_slug, is_owner_response
 from app.services.message_service import save_message
 from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
@@ -30,9 +33,12 @@ logger = get_logger("manager_message_service")
 
 MEDIA_STORAGE_BASE_DIR = Path(os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media"))
 MEDIA_MANAGER_DIRNAME = "manager"
+MEDIA_CONSOLE_DIRNAME = "console"
 CHATFLOW_MEDIA_TIMEOUT_SECONDS = float(os.environ.get("CHATFLOW_MEDIA_TIMEOUT_SECONDS", "90"))
 MANAGER_CONNECTED_TEMPLATE = "👤 Менеджер {name} подключился. Сейчас отвечу."
 MANAGER_DISCONNECTED_MESSAGE = "🤖 Заявка закрыта, бот снова отвечает."
+CONSOLE_MEDIA_MAX_MB = {"photo": 8, "audio": 8, "document": 10}
+CONSOLE_MEDIA_CHUNK_BYTES = 1024 * 1024
 
 
 def _safe_media_id(value: Optional[str]) -> str:
@@ -67,6 +73,67 @@ def _build_manager_media_path(
     ext = _guess_media_extension(mime_type, file_name, fallback_ext)
     target_dir = MEDIA_STORAGE_BASE_DIR / client_slug / str(conversation_id) / MEDIA_MANAGER_DIRNAME
     return target_dir / f"{safe_id}{ext}"
+
+
+def _build_console_media_path(
+    *,
+    client_slug: str,
+    conversation_id: UUID,
+    media_id: str,
+    file_name: Optional[str],
+    mime_type: Optional[str],
+    fallback_ext: str,
+) -> Path:
+    safe_id = _safe_media_id(media_id)
+    ext = _guess_media_extension(mime_type, file_name, fallback_ext)
+    target_dir = MEDIA_STORAGE_BASE_DIR / client_slug / str(conversation_id) / MEDIA_CONSOLE_DIRNAME
+    return target_dir / f"{safe_id}{ext}"
+
+
+def _resolve_console_media_max_bytes(media_type: str) -> int:
+    max_mb = CONSOLE_MEDIA_MAX_MB.get(media_type, 8)
+    return max(max_mb, 1) * 1024 * 1024
+
+
+async def _store_console_upload(
+    upload: UploadFile,
+    *,
+    target_path: Path,
+    max_bytes: int,
+) -> dict:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    size_bytes = 0
+    digest = hashlib.sha256()
+    try:
+        await upload.seek(0)
+        with target_path.open("wb") as handle:
+            while True:
+                chunk = await upload.read(CONSOLE_MEDIA_CHUNK_BYTES)
+                if not chunk:
+                    break
+                size_bytes += len(chunk)
+                if max_bytes and size_bytes > max_bytes:
+                    handle.close()
+                    if target_path.exists():
+                        target_path.unlink()
+                    return {"stored": False, "error": "too_large", "size_bytes": size_bytes}
+                digest.update(chunk)
+                handle.write(chunk)
+    except Exception as exc:
+        if target_path.exists():
+            target_path.unlink()
+        return {"stored": False, "error": f"upload_failed:{exc}"}
+    finally:
+        try:
+            await upload.close()
+        except Exception:
+            pass
+    return {
+        "stored": True,
+        "path": str(target_path),
+        "size_bytes": size_bytes,
+        "sha256": digest.hexdigest(),
+    }
 
 
 def _update_media_metadata(message, updates: dict) -> None:
@@ -495,6 +562,209 @@ def process_manager_message(
         return True, f"Message forwarded to client (conversation {conversation.id})", took_handover, handover
     else:
         return False, "Failed to send message to WhatsApp", took_handover, handover
+
+
+async def process_console_media_upload(
+    db: Session,
+    *,
+    conversation: Conversation,
+    handover: Handover,
+    agent: Agent,
+    upload: UploadFile,
+    media_type: str,
+    caption: Optional[str],
+    idempotency_key: Optional[str],
+) -> tuple[Message, str, Optional[str]]:
+    if media_type not in CONSOLE_MEDIA_MAX_MB:
+        raise ConsoleAPIError(400, "MEDIA_UNSUPPORTED", "Unsupported media type")
+
+    client_slug = get_client_slug(db, conversation.client_id) or "truffles"
+    fallback_ext = ".bin"
+    if media_type == "photo":
+        fallback_ext = ".jpg"
+    elif media_type == "audio":
+        fallback_ext = ".ogg"
+
+    target_path = _build_console_media_path(
+        client_slug=client_slug,
+        conversation_id=conversation.id,
+        media_id=str(uuid4()),
+        file_name=upload.filename,
+        mime_type=upload.content_type,
+        fallback_ext=fallback_ext,
+    )
+    store_result = await _store_console_upload(
+        upload,
+        target_path=target_path,
+        max_bytes=_resolve_console_media_max_bytes(media_type),
+    )
+    if not store_result.get("stored"):
+        error = store_result.get("error") or "upload_failed"
+        if error == "too_large":
+            raise ConsoleAPIError(400, "MEDIA_TOO_LARGE", "Файл слишком большой. Попробуйте меньший размер.")
+        raise ConsoleAPIError(500, "MEDIA_UPLOAD_FAILED", "Не удалось загрузить файл")
+
+    size_bytes = store_result.get("size_bytes") or 0
+    if size_bytes <= 0:
+        raise ConsoleAPIError(400, "MEDIA_EMPTY", "Файл пустой")
+
+    content = caption.strip() if caption and caption.strip() else f"[{media_type}]"
+    media_meta = {
+        "type": media_type,
+        "file_name": upload.filename,
+        "mime": upload.content_type,
+        "size_bytes": size_bytes,
+        "caption": caption,
+        "storage_path": str(target_path),
+        "stored": True,
+        "source": "console",
+        "sha256": store_result.get("sha256"),
+    }
+    saved_message = save_message(
+        db=db,
+        conversation_id=conversation.id,
+        client_id=conversation.client_id,
+        role="manager",
+        content=content,
+        message_metadata={"media": media_meta, "source": "console"},
+    )
+
+    record_audit_event(
+        db,
+        actor=agent,
+        event_type="message_sent",
+        entity_type="conversation",
+        entity_id=conversation.id,
+        payload={
+            "content_length": len(content),
+            "source": "web_console",
+            "media_type": media_type,
+            "media_size": size_bytes,
+        },
+        branch_id=conversation.branch_id,
+    )
+
+    relative_path = str(target_path.relative_to(MEDIA_STORAGE_BASE_DIR))
+    signed_url = build_signed_media_url(relative_path)
+    if not signed_url:
+        _update_media_metadata(saved_message, {"storage_error": "signed_url_missing"})
+        db.commit()
+        raise ConsoleAPIError(500, "MEDIA_SIGNING_FAILED", "Signed media URL unavailable")
+
+    _update_media_metadata(
+        saved_message,
+        {
+            "public_url": signed_url,
+            "expires_at": _extract_signed_url_expires_at(signed_url),
+        },
+    )
+
+    user_remote_jid = get_user_remote_jid(db, conversation.user_id)
+    remote_jid = user_remote_jid
+    if not is_probably_whatsapp_jid(remote_jid):
+        remote_jid = handover.channel_ref if is_probably_whatsapp_jid(handover.channel_ref) else None
+    if is_probably_whatsapp_jid(user_remote_jid) and handover.channel_ref != user_remote_jid:
+        if is_probably_whatsapp_jid(handover.channel_ref):
+            logger.warning(
+                "handover.channel_ref mismatch: "
+                f"'{handover.channel_ref}' != user.remote_jid '{user_remote_jid}', fixing"
+            )
+        handover.channel_ref = user_remote_jid
+
+    if not remote_jid:
+        _update_media_metadata(saved_message, {"delivery_error": "user_jid_not_found"})
+        db.commit()
+        return saved_message, "failed", "user_jid_not_found"
+
+    instance_id = get_instance_id(
+        db,
+        conversation.client_id,
+        branch_id=conversation.branch_id,
+        remote_jid=remote_jid,
+    )
+    if not instance_id:
+        _update_media_metadata(saved_message, {"delivery_error": "instance_id_not_found"})
+        db.commit()
+        return saved_message, "failed", "instance_id_not_found"
+
+    use_outbox_send = _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False)
+    if use_outbox_send:
+        now = datetime.now(timezone.utc)
+        outbox_idempotency_key = idempotency_key or build_inbound_message_id(
+            None,
+            remote_jid,
+            int(now.timestamp()),
+            caption or content,
+        )
+        media_meta_payload = {
+            "media_type": media_type,
+            "signed_url": signed_url,
+            "expires_at": _extract_signed_url_expires_at(signed_url),
+            "sha256": store_result.get("sha256"),
+            "size_bytes": size_bytes,
+            "mime_type": upload.content_type,
+            "filename": upload.filename,
+        }
+        outbox_payload = {
+            "schema_version": "outbox.v1",
+            "event_type": "whatsapp.send_media",
+            "idempotency_key": outbox_idempotency_key,
+            "client_id": str(conversation.client_id),
+            "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
+            "tenant_context": {
+                "client_id": str(conversation.client_id),
+                "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
+                "client_slug": client_slug,
+                "instance_id": instance_id,
+                "source": "console_media",
+            },
+            "conversation_id": str(conversation.id),
+            "channel": "whatsapp",
+            "created_at": now.isoformat(),
+            "payload": {
+                "remote_jid": remote_jid,
+                "instance_id": instance_id,
+                "idempotency_key": outbox_idempotency_key,
+                "media_type": media_type,
+                "media_url": signed_url,
+                "caption": caption,
+                "media_meta": media_meta_payload,
+            },
+        }
+        enqueued = enqueue_outbox_message(
+            db,
+            client_id=conversation.client_id,
+            conversation_id=conversation.id,
+            inbound_message_id=outbox_idempotency_key,
+            payload_json=outbox_payload,
+            branch_id=conversation.branch_id,
+        )
+        _update_media_metadata(
+            saved_message,
+            {
+                "outbox_enqueued": enqueued,
+                "outbox_event_type": "whatsapp.send_media",
+                "outbox_idempotency_key": outbox_idempotency_key,
+            },
+        )
+        db.commit()
+        return saved_message, "queued", None
+
+    sent = send_whatsapp_media(
+        instance_id,
+        remote_jid,
+        media_type=media_type,
+        media_url=signed_url,
+        caption=caption,
+        timeout_seconds=CHATFLOW_MEDIA_TIMEOUT_SECONDS,
+    )
+    if sent:
+        db.commit()
+        return saved_message, "delivered", None
+
+    _update_media_metadata(saved_message, {"delivery_error": "chatflow_send_failed"})
+    db.commit()
+    return saved_message, "failed", "chatflow_send_failed"
 
 
 def process_manager_media(
