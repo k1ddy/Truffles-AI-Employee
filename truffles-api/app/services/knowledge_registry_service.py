@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -8,7 +9,7 @@ from uuid import UUID
 import httpx
 
 from app.logging_config import get_logger
-from app.models import Branch, KnowledgeVersion
+from app.models import Branch, Client, KnowledgeVersion
 from app.services.knowledge_service import QDRANT_API_KEY, QDRANT_COLLECTION, QDRANT_HOST, get_embedding
 from app.services.knowledge_validation import (
     build_diff,
@@ -22,6 +23,178 @@ from app.services.knowledge_validation import (
 logger = get_logger("knowledge_registry")
 
 SERVICES_COLLECTION = "services_index"
+PACK_INDEX_SCHEMA_VERSION = "pack_index.v1"
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, tuple):
+        items = list(value)
+    elif isinstance(value, str):
+        items = [value]
+    else:
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, str):
+            item = str(item)
+        cleaned = item.strip()
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(cleaned)
+    return normalized
+
+
+def _normalize_lang_map(value: Any) -> dict[str, list[str]]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, list[str]] = {}
+    for lang_key, items in value.items():
+        if not isinstance(lang_key, str):
+            continue
+        cleaned_key = lang_key.strip().casefold()
+        if not cleaned_key:
+            continue
+        normalized_items = _coerce_string_list(items)
+        if normalized_items:
+            normalized[cleaned_key] = normalized_items
+    return normalized
+
+
+def _flatten_lang_map(value: Any) -> list[str]:
+    if isinstance(value, dict):
+        merged: list[str] = []
+        for items in value.values():
+            merged.extend(_coerce_string_list(items))
+        return _coerce_string_list(merged)
+    return _coerce_string_list(value)
+
+
+def _extract_domain_pack(payload_json: dict) -> dict[str, Any]:
+    if not isinstance(payload_json, dict):
+        return {}
+    domain_pack = payload_json.get("domain_pack")
+    if isinstance(domain_pack, dict):
+        return domain_pack
+    client_pack = payload_json.get("client_pack")
+    if isinstance(client_pack, dict) and isinstance(client_pack.get("domain_pack"), dict):
+        return client_pack["domain_pack"]
+    return {}
+
+
+def _hash_pack_index(payload: dict[str, Any]) -> str:
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def build_pack_index(payload_json: dict) -> dict[str, Any] | None:
+    domain_pack = _extract_domain_pack(payload_json)
+    if not domain_pack:
+        return None
+
+    anchors: dict[str, list[str]] = {}
+    ood_anchors = domain_pack.get("ood_anchors")
+    if isinstance(ood_anchors, dict):
+        in_domain = _flatten_lang_map(ood_anchors.get("in_domain"))
+        out_domain = _flatten_lang_map(ood_anchors.get("out_of_domain"))
+        strict_in = _flatten_lang_map(ood_anchors.get("strict_in"))
+        if in_domain:
+            anchors["in_domain"] = in_domain
+        if out_domain:
+            anchors["out_of_domain"] = out_domain
+        if strict_in:
+            anchors["strict_in"] = strict_in
+
+    lexicons: dict[str, dict[str, list[str]]] = {}
+    for key, label in (
+        ("guest_policy_lexicon", "guest_policy"),
+        ("service_request_lexicon", "service_request"),
+        ("services_overview_lexicon", "services_overview"),
+        ("datetime_lexicon", "datetime"),
+    ):
+        normalized = _normalize_lang_map(domain_pack.get(key))
+        if normalized:
+            lexicons[label] = normalized
+
+    index_payload: dict[str, Any] = {"schema_version": PACK_INDEX_SCHEMA_VERSION}
+    if anchors:
+        index_payload["anchors"] = anchors
+    if lexicons:
+        index_payload["lexicons"] = lexicons
+    if len(index_payload) == 1:
+        return None
+
+    index_hash = _hash_pack_index(index_payload)
+    index_payload["hash"] = index_hash
+    return index_payload
+
+
+def build_pack_index_meta(
+    pack_index: dict[str, Any],
+    *,
+    version_id: UUID | None,
+    compiled_at: datetime,
+    source: str,
+) -> dict[str, Any]:
+    meta: dict[str, Any] = {
+        "schema_version": pack_index.get("schema_version"),
+        "hash": pack_index.get("hash"),
+        "version_id": str(version_id) if version_id else None,
+        "compiled_at": compiled_at.isoformat(),
+        "source": source,
+    }
+    return {key: value for key, value in meta.items() if value is not None}
+
+
+def apply_pack_index_to_client_config(
+    client: Client,
+    *,
+    pack_index: dict[str, Any],
+    version_id: UUID | None,
+    compiled_at: datetime,
+    source: str,
+) -> bool:
+    if not isinstance(pack_index, dict):
+        return False
+    anchors = pack_index.get("anchors")
+    if not isinstance(anchors, dict):
+        anchors = {}
+
+    config = dict(client.config or {})
+    domain_router = dict(config.get("domain_router") or {})
+    updated = False
+    anchors_in = anchors.get("in_domain")
+    anchors_out = anchors.get("out_of_domain")
+    strict_in = anchors.get("strict_in")
+
+    if anchors_in:
+        domain_router["anchors_in"] = anchors_in
+        updated = True
+    if anchors_out:
+        domain_router["anchors_out"] = anchors_out
+        updated = True
+    if strict_in:
+        domain_router["strict_in_anchors"] = strict_in
+        updated = True
+    if updated:
+        config["domain_router"] = domain_router
+
+    config["pack_index"] = build_pack_index_meta(
+        pack_index,
+        version_id=version_id,
+        compiled_at=compiled_at,
+        source=source,
+    )
+    client.config = config
+    return True
 
 
 def get_current_published(

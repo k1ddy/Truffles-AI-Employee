@@ -358,6 +358,24 @@ def _compact_signal_snapshot(values: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value is not None}
 
 
+def _extract_pack_index_meta(client_config: dict | None) -> dict[str, Any] | None:
+    if not isinstance(client_config, dict):
+        return None
+    pack_index = client_config.get("pack_index")
+    if not isinstance(pack_index, dict):
+        return None
+    meta = _compact_signal_snapshot(
+        {
+            "schema_version": pack_index.get("schema_version"),
+            "hash": pack_index.get("hash"),
+            "version_id": pack_index.get("version_id"),
+            "compiled_at": pack_index.get("compiled_at"),
+            "source": pack_index.get("source"),
+        }
+    )
+    return meta or None
+
+
 def _detect_fast_intent(
     message_text: str,
     *,
@@ -1911,6 +1929,7 @@ def _run_class_router_stage(
                 ),
                 "domain_router": domain_snapshot,
                 "class_router": class_router_snapshot,
+                "pack_index": _extract_pack_index_meta(client_config),
             }
         )
         _update_message_signal_snapshot(saved_message, signal_snapshot)
