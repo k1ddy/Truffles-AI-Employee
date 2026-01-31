@@ -1,3 +1,4 @@
+import json
 import time
 from unittest.mock import patch
 
@@ -9,9 +10,15 @@ from app.services.intent_service import (
     is_human_request_message,
     is_opt_out_message,
     is_rejection,
+    interpret_expected_reply,
     route_dialogue_controller,
     should_escalate,
 )
+
+
+class DummyResponse:
+    def __init__(self, content: str) -> None:
+        self.content = content
 
 
 class TestIntentEnum:
@@ -135,3 +142,72 @@ class TestDialogueControllerBudget:
         payload = result["payload"]
         assert payload["controller_error"] == "deadline_exceeded"
         mock_llm.assert_not_called()
+
+
+class TestDialogueControllerSchema:
+    def test_valid_schema(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "class": "booking",
+            "goal": "booking",
+            "intents": ["booking"],
+            "slots": {"service_query": "service"},
+            "followups": [],
+            "safety_flags": [],
+            "confidence": 0.7,
+            "reason": "booking request",
+            "carryover": {},
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(
+                json.dumps(payload)
+            )
+            result = route_dialogue_controller("I want to book")
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["payload"]["class"] == "booking"
+        assert result["payload"]["goal"] == "booking"
+
+    def test_invalid_schema(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(
+                json.dumps({"goal": "booking", "confidence": 0.4})
+            )
+            result = route_dialogue_controller("I want to book")
+
+        assert result["ok"] is False
+        assert result["error"] == "invalid_schema"
+
+
+class TestAnswerInterpreterSchema:
+    def test_valid_schema(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "slot": "name",
+            "value": "Alex",
+            "confidence": 0.6,
+            "reason": "name provided",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(
+                json.dumps(payload)
+            )
+            result = interpret_expected_reply("Alex", expected_reply_type="name")
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert result["payload"]["slot"] == "name"
+        assert result["payload"]["value"] == "Alex"
+
+    def test_invalid_schema(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(
+                json.dumps({"slot": 123, "confidence": 0.5})
+            )
+            result = interpret_expected_reply("Alex", expected_reply_type="name")
+
+        assert result["ok"] is False
+        assert result["error"] == "invalid_schema"

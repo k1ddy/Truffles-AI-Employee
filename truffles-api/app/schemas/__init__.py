@@ -5,6 +5,12 @@ from app.schemas.consult import (
     validate_consult_controller_output,
     validate_consult_playbook,
 )
+from app.schemas.intent import (
+    AnswerInterpreterOutput,
+    DialogueControllerOutput,
+    validate_answer_interpreter_output,
+    validate_dialogue_controller_output,
+)
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.outbox_payload import OutboxPayloadContract, validate_outbox_payload
 from app.schemas.webhook import (
@@ -28,6 +34,10 @@ __all__ = [
     "ConsultControllerOutput",
     "validate_consult_playbook",
     "validate_consult_controller_output",
+    "DialogueControllerOutput",
+    "AnswerInterpreterOutput",
+    "validate_dialogue_controller_output",
+    "validate_answer_interpreter_output",
     "IntentContract",
     "ContextContract",
     "FactContract",

@@ -22,6 +22,9 @@
 | `contracts/capabilities/capabilities.v1.jsonschema` | Канон capabilities (channels/providers/features) | Архитектор/Backend |
 | `contracts/consult/consult_playbook.v1.jsonschema` | Канон схемы consult playbooks (domain‑agnostic) | Архитектор/Backend |
 | `contracts/consult/consult_controller_output.v1.jsonschema` | Канон контракта consult LLM‑контроллера | Архитектор/Backend |
+| `contracts/llm/` | Контракты LLM outputs (router + answer_interpreter) | Архитектор/Backend |
+| `contracts/llm/dialogue_controller_output.v1.jsonschema` | Контракт LLM‑контроллера (router) | Архитектор/Backend |
+| `contracts/llm/answer_interpreter_output.v1.jsonschema` | Контракт LLM answer_interpreter | Архитектор/Backend |
 | `contracts/integrations/provider_inbound.v1.jsonschema` | Provider inbound envelope (gateway) | Архитектор/Backend |
 | `contracts/integrations/provider_outbound.v1.jsonschema` | Provider outbound envelope (gateway) | Архитектор/Backend |
 | `contracts/integrations/media_send.v1.jsonschema` | Media send payload (signed URL) | Архитектор/Backend |
@@ -163,6 +166,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle-deploy.md`
 - `docs/TASK_PACKAGES/TP-2026-01-30-console-sidebar-toggle.md`
 - `docs/TASK_PACKAGES/TP-2026-01-30-unified-reasoning-core-dec.md`
+- `docs/TASK_PACKAGES/TP-2026-01-31-llm-pack-ref-only.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`
