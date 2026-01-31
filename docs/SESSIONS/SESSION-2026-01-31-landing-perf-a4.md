@@ -1,0 +1,35 @@
+# SESSION 2026-01-31-landing-perf-a4 — Session 2026-01-31-landing-perf-a4
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-31-landing-best-practices.md
+- branch: feat/2026-01-31-landing-perf-a4
+- worktree: /home/zhan/worktrees/2026-01-31-landing-perf-a4
+- base_ref: origin/main
+- scope: Landing perf fixes in /home/zhan/infrastructure/frontend (scroll jank, offscreen animations) + website rebuild.
+- done:
+  - Replaced scroll-driven transforms with in-view reveals in ShowcaseSection.
+  - ScenarioPlayer timers cleaned and gated by visibility; navbar scroll handler throttled.
+  - Reduced noise overlay for mobile/reduced-motion; rebuilt website container.
+  - Added SEO meta/canonical, robots/sitemap, OG asset, skip-link + aria, reduced-motion guards, security headers + gzip.
+  - Optimized logo assets (png/webp), updated logo rendering, replaced favicon.
+  - Added /subprocessors content (Hoster.kz) and GA4 wiring + CTA tracking.
+- next:
+  - Close session when ready (session_end + commit).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-31-landing-best-practices.md
+  - /tmp/landing_perf_build_20260131.txt
+  - /tmp/landing_perf_docker_build_20260131.txt
+  - /tmp/landing_perf_docker_up_20260131.txt
+  - /tmp/landing_perf_curl_after_20260131.txt
+  - /tmp/landing_perf_docker_ps_20260131.txt
+  - /tmp/landing_bestpractices_build_20260131_v5.txt
+  - /tmp/landing_bestpractices_docker_build_20260131_v5.txt
+  - /tmp/landing_bestpractices_docker_up_20260131_v5.txt
+  - /tmp/landing_bestpractices_curl_20260131_v5.txt
+  - /tmp/landing_bestpractices_robots_20260131_v5.txt
+  - /tmp/landing_bestpractices_sitemap_20260131_v5.txt
+  - /tmp/landing_bestpractices_og_20260131_v5.txt
+  - /tmp/landing_bestpractices_favicon_20260131_v5.txt
+  - /tmp/landing_lighthouse_20260131_v2.txt
+- last_updated: 2026-01-31
