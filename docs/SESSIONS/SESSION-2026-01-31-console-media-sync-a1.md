@@ -16,10 +16,12 @@
   - Infra analysis report added.
   - Enqueue-only inbound media now stored + signed for Console preview.
   - Manager-active inbound media now stored + signed before gate returns.
+  - Console chat preview falls back to origin media URL for allowed types (enables inline audio playback when signed URL missing).
 - next:
   - Capture live-check or CI evidence as needed.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-01-31-console-media-sync.md
   - /tmp/console_media_enqueue_only_pytest_20260131.txt
   - /tmp/console_media_preview_pytest_20260131.txt
+  - /tmp/console_web_lint_console_media_audio_preview_20260131.txt
 - last_updated: 2026-01-31
