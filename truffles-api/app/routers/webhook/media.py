@@ -8,9 +8,9 @@ import mimetypes
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from uuid import UUID, uuid4
 
 import httpx
@@ -19,6 +19,7 @@ from app.models import Client, Message
 from app.schemas.webhook import WebhookBody
 from app.services.ai_service import normalize_for_matching, transcribe_audio_with_fallback
 from app.services.alert_service import alert_warning
+from app.services.chatflow_service import build_signed_media_url
 from app.services.telegram_service import TelegramService
 
 
@@ -774,6 +775,38 @@ def _select_media_source(media: MediaInfo, stored_path: str | None) -> str | Non
     return None
 
 
+def _extract_signed_media_expires_at(signed_url: str) -> str | None:
+    if not signed_url:
+        return None
+    try:
+        parsed = urlparse(signed_url)
+        expires_values = parse_qs(parsed.query or "").get("expires")
+        if not expires_values:
+            return None
+        expires = int(expires_values[0])
+        return datetime.fromtimestamp(expires, tz=timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+def _build_signed_media_payload(storage_path: str | None) -> dict:
+    if not storage_path:
+        return {}
+    base_dir = Path(os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media")).resolve()
+    try:
+        relative_path = Path(storage_path).resolve().relative_to(base_dir)
+    except Exception:
+        return {}
+    signed_url = build_signed_media_url(str(relative_path))
+    if not signed_url:
+        return {}
+    payload = {"public_url": signed_url}
+    expires_at = _extract_signed_media_expires_at(signed_url)
+    if expires_at:
+        payload["expires_at"] = expires_at
+    return payload
+
+
 def _send_telegram_media(
     *,
     telegram: TelegramService,
@@ -822,6 +855,8 @@ def _update_message_media_metadata(message: Message, updates: dict) -> None:
     metadata = dict(message.message_metadata or {})
     media_meta = dict(metadata.get("media") or {})
     media_meta.update(updates)
+    if media_meta.get("storage_path") and not media_meta.get("public_url"):
+        media_meta.update(_build_signed_media_payload(media_meta.get("storage_path")))
     metadata["media"] = media_meta
     message.message_metadata = metadata
 
