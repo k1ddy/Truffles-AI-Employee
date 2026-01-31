@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from app.models import Handover, User
 from app.routers.webhook import (
     LOW_CONFIDENCE_RETRY_WINDOW_MINUTES,
     is_handover_status_question,
@@ -32,7 +33,22 @@ class TestEscalateToPending:
         db = Mock()
         user = Mock(name="Test User", phone="123")
         user.telegram_topic_id = None
-        db.query.return_value.filter.return_value.first.return_value = user
+        user_query = Mock()
+        user_query.filter.return_value = user_query
+        user_query.first.return_value = user
+        handover_query = Mock()
+        handover_query.filter.return_value = handover_query
+        handover_query.order_by.return_value = handover_query
+        handover_query.first.return_value = None
+
+        def query_side_effect(model):
+            if model is User:
+                return user_query
+            if model is Handover:
+                return handover_query
+            return Mock()
+
+        db.query.side_effect = query_side_effect
 
         conversation = Mock()
         conversation.state = ConversationState.BOT_ACTIVE.value
@@ -49,6 +65,81 @@ class TestEscalateToPending:
         assert conversation.state == ConversationState.PENDING.value
         assert conversation.telegram_topic_id == 12345
         assert conversation.retry_offered_at is None
+
+    @patch("app.services.state_service.TelegramService")
+    @patch("app.services.state_service.resolve_telegram_routing")
+    def test_handover_dedupe_reopens_recent_resolved(self, mock_routing, mock_telegram_class):
+        mock_routing.return_value = {"bot_token": "token", "chat_id": "chat_id"}
+        mock_telegram = Mock()
+        mock_telegram.create_forum_topic.return_value = 12345
+        mock_telegram_class.return_value = mock_telegram
+
+        db = Mock()
+        user = Mock(name="Test User", phone="123")
+        user.telegram_topic_id = None
+        user_query = Mock()
+        user_query.filter.return_value = user_query
+        user_query.first.return_value = user
+
+        now = datetime.now(timezone.utc)
+        handover = SimpleNamespace(
+            status="resolved",
+            trigger_type="intent",
+            trigger_value="old",
+            user_message="old",
+            created_at=now - timedelta(days=1),
+            resolved_at=now - timedelta(hours=2),
+            resolved_by_id="mgr-1",
+            resolved_by_name="Manager",
+            resolution_time_seconds=3600,
+            resolution_type="solved",
+            resolution_notes="done",
+            manager_response="ok",
+            manager_id="mgr-1",
+            assigned_to="mgr-1",
+            assigned_to_name="Manager",
+            telegram_message_id=111,
+            reminder_1_sent_at=now - timedelta(hours=3),
+            reminder_2_sent_at=now - timedelta(hours=2),
+            skipped_by=["bot"],
+            context_summary="old summary",
+            channel_ref="jid",
+        )
+        handover_query = Mock()
+        handover_query.filter.return_value = handover_query
+        handover_query.order_by.return_value = handover_query
+        handover_query.first.return_value = handover
+
+        def query_side_effect(model):
+            if model is User:
+                return user_query
+            if model is Handover:
+                return handover_query
+            return Mock()
+
+        db.query.side_effect = query_side_effect
+
+        conversation = Mock()
+        conversation.state = ConversationState.BOT_ACTIVE.value
+        conversation.id = "conv-123"
+        conversation.client_id = "client-123"
+        conversation.user_id = "user-123"
+        conversation.telegram_topic_id = None
+        conversation.retry_offered_at = datetime.now(timezone.utc)
+
+        result = escalate_to_pending(db, conversation, "Help me", "intent", "human_request")
+
+        assert result.ok is True
+        assert result.value is handover
+        assert conversation.state == ConversationState.PENDING.value
+        assert handover.status == "pending"
+        assert handover.resolved_at is None
+        assert handover.assigned_to is None
+        assert handover.assigned_to_name is None
+        assert handover.resolution_time_seconds is None
+        assert handover.created_at >= now
+        assert getattr(handover, "_reopened", False) is True
+        db.add.assert_not_called()
 
     def test_fails_from_wrong_state(self):
         db = Mock()

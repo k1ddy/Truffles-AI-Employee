@@ -71,7 +71,7 @@ export default function CaseList({
     const api = useAuthenticatedApi();
 
     const [filters, setFilters] = useState<CaseFilters>({
-        status: undefined,
+        status: "open",
         branchId: undefined,
         assignedToMe: false,
         query: undefined,
@@ -114,6 +114,7 @@ export default function CaseList({
         selectableBranches.map((branch) => [branch.id as string, branch.name ?? branch.id as string])
     );
     const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
+    const statusFilterActive = filters.status !== "open";
     const advancedFiltersActive = Boolean(
         filters.branchId || filters.dateFrom || filters.dateTo || filters.hasDeliveryError || filters.hasPendingOutbox
     );
@@ -327,6 +328,7 @@ export default function CaseList({
                         className={selectClass}
                         data-testid="cases-filter-status"
                     >
+                        <option value="open">Открытые</option>
                         <option value="">Все статусы</option>
                         <option value="pending">Ожидает</option>
                         <option value="active">В работе</option>
@@ -387,13 +389,14 @@ export default function CaseList({
                             {advancedToggleLabel}
                         </button>
                     )}
-                    {(filters.status || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox) && (
+                    {(statusFilterActive || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox) && (
                         <button
                             onClick={() => {
                                 setSearchValue("");
                                 resetPagination();
                                 setShowAdvancedFilters(false);
                                 setFilters({
+                                    status: "open",
                                     assignedToMe: false,
                                     sortBy: "activity",
                                     hasDeliveryError: false,

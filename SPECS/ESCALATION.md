@@ -159,6 +159,8 @@ _Статус реализации и evidence — в `STATE.md`._
 - `pending_status/pending_ack/pending_close` имеют приоритет над domain‑ответами.
 - Notice применяется для любых причин эскалации (LAW/policy/media/style_reference).
 - Notice отправляется **один раз** на `handover_id`; повторные inbound не создают новые handover.
+- **Cooldown reopen:** если последний `handover` по этому `conversation` в статусе `resolved` и закрыт ≤ 4h назад,
+  то при новой эскалации он переоткрывается (status → `pending`, `created_at` обновляется) вместо создания нового.
 - Все входящие сообщения после эскалации форвардятся менеджеру, независимо от формата (текст/медиа).
 - После `pending_ack` — восстановление контекста + **re‑entry** (старые слоты требуют подтверждения)
 

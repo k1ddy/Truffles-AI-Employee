@@ -861,6 +861,17 @@ def _parse_sort_param(name: str, value: Optional[str], default: str = "last_acti
     return normalized
 
 
+def _parse_case_status_param(name: str, value: Optional[str]) -> Optional[list[str]]:
+    if value is None or str(value).strip() == "":
+        return None
+    normalized = str(value).strip().lower()
+    if normalized == "open":
+        return ["pending", "active"]
+    if normalized in {"pending", "active", "resolved"}:
+        return [normalized]
+    raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
+
+
 def _resolve_case_sort_cursor(
     *,
     sort_by: str,
@@ -1287,10 +1298,9 @@ async def list_cases(
         query = query.filter(Conversation.branch_id.in_(allowed_branch_ids))
     
     # Status filter
-    if status is not None:
-        if status not in {"pending", "active", "resolved"}:
-            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
-        query = query.filter(Handover.status == status)
+    status_filters = _parse_case_status_param("status", request.query_params.get("status") or status)
+    if status_filters:
+        query = query.filter(Handover.status.in_(status_filters))
     
     # Date range filter
     if date_from is not None:
