@@ -1,0 +1,27 @@
+# SESSION 2026-01-31-inbox-macros-visibility-a1 — Session 2026-01-31-inbox-macros-visibility-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-31-inbox-macros-visibility.md
+- branch: feat/2026-01-31-inbox-macros-visibility-a1
+- worktree: /home/zhan/worktrees/2026-01-31-inbox-macros-visibility-a1
+- base_ref: origin/main
+- scope: Console Inbox macros visibility + refresh regression in UI
+- done:
+  - Session created.
+  - Checked prod console build info (Settings bundle shows commit 4187c24f, build time 2026-01-31T01:40:32Z).
+  - Updated Inbox macros panel height + create refresh behavior (see InboxMacros.tsx).
+  - Moved quick replies block outside message form to avoid nested forms (ChatInterface).
+  - Added GAP for macros visibility in STATE.md.
+  - Installed console-web deps and ran lint.
+  - Rebuilt and restarted console-web (Build: 9b30d183, time 2026-01-31T02:59:09Z).
+  - Rebuilt and restarted console-web with nested-form fix (Build: 0360f8e4, time 2026-01-31T03:12:01Z).
+  - User confirmed: кнопка видна, макросы сохраняются и появляются.
+- next:
+  - Rebuild and restart console-web with latest fix; verify UI and capture screenshot evidence.
+  - Update STATE.md with evidence once verified.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-31-inbox-macros-visibility.md
+  - /tmp/console_web_lint_inbox_macros_visibility_20260131.txt
+  - /tmp/console_web_build_info_inbox_macros_visibility_20260131.txt
+- last_updated: 2026-01-31
