@@ -6,7 +6,7 @@
 - branch: feat/2026-01-31-console-media-sync-a1
 - worktree: /home/zhan/worktrees/2026-01-31-console-media-sync-a1
 - base_ref: origin/main
-- scope: Console media upload/send (photo/audio/document), Telegram echo, contracts + console UI, tests + infra analysis
+- scope: Console media upload/send (photo/audio/document), inbound preview signed URL, Telegram echo, contracts + console UI, tests + infra analysis
 - done:
   - Task Package added.
   - Console media endpoint wired (storage, signed URL, outbox/direct send, Telegram echo).
@@ -14,8 +14,10 @@
   - OpenAPI updated + types generated.
   - Tests added + pytest/lint run.
   - Infra analysis report added.
+  - Enqueue-only inbound media now stored + signed for Console preview.
 - next:
   - Capture live-check or CI evidence as needed.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-01-31-console-media-sync.md
+  - /tmp/console_media_enqueue_only_pytest_20260131.txt
 - last_updated: 2026-01-31

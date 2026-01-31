@@ -2,6 +2,7 @@
 
 Title/Goal
 - Add console media upload + send for photo/audio/document (video forbidden), reusing the signed URL + outbox media pipeline and Telegram echo.
+- Ensure inbound client media is stored + signed for Console preview (including enqueue-only path).
 
 Canon refs
 - AGENTS.md
@@ -22,12 +23,14 @@ Invariant
 Scope
 - Backend: console endpoint for media upload + send, store to /home/zhan/truffles-media, build signed URL, enqueue outbox media (or direct send when outbox disabled), Telegram echo.
 - Frontend: add file upload in Inbox composer, send multipart, show attachment metadata in chat.
+- Inbound: store incoming media and attach signed `public_url` + `expires_at` for Console preview (also for `WEBHOOK_ENQUEUE_ONLY`).
 - Contract: OpenAPI update + regenerated types.
 - Tests: add console media coverage (allowlist + video rejection + outbox payload).
 
 Out of scope
-- Inbound media policy changes.
+- Inbound media policy changes (allowlist/limits/rate rules).
 - Provider Gateway refactors.
+- Console auto-deploy wiring.
 - Video support.
 - Any DB schema changes.
 
@@ -37,6 +40,8 @@ Touch-list
 - truffles-api/app/services/manager_message_service.py (reuse or extract helper)
 - truffles-api/app/services/chatflow_service.py (signed URL helper)
 - truffles-api/app/routers/webhook/media.py (Telegram media helper reuse)
+- truffles-api/app/routers/webhook/outbox.py (enqueue-only media store)
+- truffles-api/tests/test_message_endpoint.py (enqueue-only media preview)
 - truffles-api/tests/test_console_media.py (new)
 - contracts/console_api/openapi.v1.yaml
 - console-web/src/components/ChatInterface.tsx
@@ -52,23 +57,27 @@ Plan
 2) Store media, build signed URL, save message metadata, enqueue outbox media (or direct send if outbox disabled), echo to Telegram.
 3) Update schemas + OpenAPI for console media request/response and error codes.
 4) Update console-web to upload media via FormData and display attachment metadata in chat.
-5) Add tests, regenerate types, run lint/tests, capture evidence.
+5) Ensure inbound media storage + signed URL for preview (including enqueue-only path).
+6) Add tests, regenerate types, run lint/tests, capture evidence.
 
 DoD
 - Console uploads and sends photo/audio/document.
 - Video is rejected with clear error code/message.
 - Message metadata contains media info + signed URL (TTL).
+- Inbound media rows include `public_url` + `expires_at` for Console preview (enqueue-only path included).
 - Outbox event enqueued when OUTBOX_WORKER_ENABLED=1; direct send otherwise.
 - Telegram topic shows console media echo.
 - Tests and lint pass; OpenAPI/types synced.
 
 Checks
 - pytest -q truffles-api/tests/test_console_media.py
+- pytest -q truffles-api/tests/test_message_endpoint.py -k "enqueue_only_media"
 - npm --prefix console-web run generate:api
 - npm --prefix console-web run lint
 
 Evidence
 - /tmp/console_media_pytest_20260131.txt
+- /tmp/console_media_enqueue_only_pytest_20260131.txt
 - /tmp/console_web_generate_api_20260131.txt
 - /tmp/console_web_lint_console_media_20260131.txt
 - Console media event sample (outbox payload or log snippet)
