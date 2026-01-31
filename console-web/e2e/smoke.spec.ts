@@ -491,7 +491,7 @@ test.describe('Inbox Features', () => {
             .getByTestId('case-conversation')
             .or(page.getByTestId('case-details'))
             .or(page.getByTestId('case-view'));
-        await expect(caseVisible).toBeVisible({ timeout: 10000 });
+        await expect(caseVisible.first()).toBeVisible({ timeout: 10000 });
     });
 });
 

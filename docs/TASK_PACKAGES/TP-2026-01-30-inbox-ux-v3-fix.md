@@ -33,6 +33,7 @@ Touch-list
 - console-web/src/components/ChatInterface.tsx
 - console-web/src/components/CaseList.tsx
 - console-web/src/components/InboxMacros.tsx
+- console-web/e2e/smoke.spec.ts
 - console-web/src/app/globals.css (only if needed)
 - STATE.md
 - docs/SESSIONS/SESSION-2026-01-30-inbox-ux-v3-fix-a1.md
@@ -47,7 +48,8 @@ Plan
 5) Make details toggle obvious (header and panel close action).
 6) Restore sidebar collapse behavior + reduce width slightly.
 7) Improve quick replies error UX (selection-aware message + retry).
-8) Run console-web lint and capture evidence.
+8) Stabilize console-e2e-live locator for case navigation (avoid strict-mode collisions).
+9) Run console-web lint and capture evidence.
 
 DoD
 - Queue width shrinks when case selected; list remains readable.

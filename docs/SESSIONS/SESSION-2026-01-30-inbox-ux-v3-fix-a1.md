@@ -14,6 +14,7 @@
   - Compact queue filters with collapsible mode for open case.
   - Sidebar width reduced + collapse toggle made more visible; selection sync now clears stale context.
   - Quick replies error messaging improved for selection-related errors.
+  - Console e2e live: avoid strict-mode collision for case navigation locator.
   - Lint passed: `/tmp/console_web_lint_inbox_ux_v3_fix_20260131.txt`.
 - next:
   - Push branch + open PR when ready.
