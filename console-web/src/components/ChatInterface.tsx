@@ -327,6 +327,8 @@ export default function ChatInterface({
                         const mediaLabel = mediaType ? (MEDIA_LABELS[mediaType] ?? "Файл") : null;
                         const fileName = typeof mediaMeta?.file_name === "string" ? mediaMeta.file_name : null;
                         const publicUrl = typeof mediaMeta?.public_url === "string" ? mediaMeta.public_url : null;
+                        const originUrl = typeof mediaMeta?.url === "string" ? mediaMeta.url : null;
+                        const mediaUrl = publicUrl ?? (mediaLabel ? originUrl : null);
                         const sizeRaw = mediaMeta?.size_bytes;
                         const sizeBytes = typeof sizeRaw === "number" ? sizeRaw : Number(sizeRaw);
                         const sizeLabel = Number.isFinite(sizeBytes) ? formatBytes(sizeBytes) : null;
@@ -362,33 +364,33 @@ export default function ChatInterface({
                                                 {fileName ?? "Файл"}
                                                 {sizeLabel ? ` · ${sizeLabel}` : ""}
                                             </div>
-                                            {publicUrl && mediaType === "photo" && (
+                                            {mediaUrl && mediaType === "photo" && (
                                                 <a
-                                                    href={publicUrl}
+                                                    href={mediaUrl}
                                                     target="_blank"
                                                     rel="noreferrer"
                                                     className="mt-2 block"
                                                 >
                                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                                     <img
-                                                        src={publicUrl}
+                                                        src={mediaUrl}
                                                         alt={fileName ?? mediaLabel ?? "Фото"}
                                                         loading="lazy"
                                                         className="w-full max-w-[320px] rounded-md border border-border/40 object-cover"
                                                     />
                                                 </a>
                                             )}
-                                            {publicUrl && mediaType === "audio" && (
+                                            {mediaUrl && mediaType === "audio" && (
                                                 <audio
                                                     controls
                                                     preload="metadata"
                                                     className="mt-2 w-full"
-                                                    src={publicUrl}
+                                                    src={mediaUrl}
                                                 />
                                             )}
-                                            {publicUrl && (
+                                            {mediaUrl && (
                                                 <a
-                                                    href={publicUrl}
+                                                    href={mediaUrl}
                                                     target="_blank"
                                                     rel="noreferrer"
                                                     className="mt-1 inline-flex text-primary underline-offset-2 hover:underline"
