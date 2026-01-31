@@ -151,7 +151,7 @@ _Примечание:_ текущая реализация fact resolver опи
 - Если `expected_reply_type` активен, но `expected_reply_match=false` → считаем реплику новой: идём в root‑gates (policy/OOD/info/consult), слот **не** заполняем, затем при активной записи возвращаем booking‑prompt.
 - Если есть consult‑интент и нет Hard‑LAW → консультативный ответ обязателен, даже при наличии цен/расписания.
 - Если в сообщении есть запрос на отсутствующую услугу → явный “не оказываем” по этой услуге; остальные интенты отвечаем только если безопасны и in‑domain.
-- В `pending/manager_active` multi‑intent не обрабатываем (см. Pending guard).
+- В `manager_active` multi‑intent не обрабатываем; в `pending` допускаем in‑domain ответы без новых handover (см. Pending guard).
 
 **Booking interrupt (expected_reply_type активен):**
 - Если идёт сбор слота записи и приходит in‑domain вопрос/consult (цены/длительность/адрес/часы/уход) → ответить по фактам/consult **и в том же сообщении** вернуть booking‑prompt (продолжить запись).
@@ -161,7 +161,7 @@ _Примечание:_ текущая реализация fact resolver опи
 
 **Booking signal (P0):**
 - Сигнал записи считается активным, если есть `current_goal=booking` или `expected_reply_type`, либо LLM-Intent/slots показывают запись (service/master/time/name) с достаточной уверенностью.
-- Hard‑LAW/Policy/opt‑out/pending гейты выше booking: если они сработали, booking‑signal игнорируется до явного запроса записи.
+- Hard‑LAW/Policy/opt‑out гейты выше booking: если они сработали, booking‑signal игнорируется до явного запроса записи.
 
 **Slot-lock + booking_confirm (P0):**
 - При активной записи `expected_reply_type` фиксируется и не сбрасывается перебивками/провокациями.
@@ -173,12 +173,12 @@ _Примечание:_ текущая реализация fact resolver опи
 **Нейтральная заглушка (P0):**
 - На шум/флуд/троллинг → короткая нейтральная реплика + повтор последнего slot-вопроса.
 
-**Pending guard (P0):**
-- Если `state ∈ {pending, manager_active}` → отвечаем **только** статусом/подтверждением (pending_status/pending_wait/pending_ack/pending_close).
-- Любые multi‑intent и booking/info/consult игнорируются до выхода из `pending`; цель записи не сбрасываем, а ставим на паузу.
-- При первой эскалации обязателен notice: “передал менеджеру, пока заявка активна бот не отвечает; сообщения передаются”.
+**Pending guard (P0, soft pending):**
+- Если `state=manager_active` → бот молчит (бот‑ответы запрещены).
+- Если `state=pending` → обрабатываем in‑domain запросы (info/booking/consult) **без** создания нового handover; приоритет у `pending_status/pending_ack/pending_close`.
+- При первой эскалации обязателен notice: “передал менеджеру; сообщения передаются, пока ждём ответ, я могу помочь с услугами/ценами/записью”.
 - Reset‑фразы (“начнём сначала/заново”) в `pending` трактуются как `pending_ack` или `pending_close` по детерминированным правилам; обхода pending‑guard нет.
-- Trace/meta: `stage=pending_guard/pending_status/pending_wait`, `action ∈ {pending_status,pending_wait,pending_ack,pending_close}`.
+- Trace/meta: `stage=pending_guard/pending_status/pending_sla/pending_resume`, `pending_action ∈ {pending_status,pending_ack,pending_close,pending_sla_ping,pending_pass}`.
 
 **Consult clarify (pack-first, без LLM-советов):**
 - Consult canon: сначала playbook из `client_pack.consult_playbooks`; если playbook/topic не найден — уточнение или эскалация.
@@ -201,11 +201,11 @@ _Примечание:_ текущая реализация fact resolver опи
 
 **CTA после инфо‑ответа (standalone, вне booking):**
 - После ответа на цены/длительность/часы/адрес — добавить мягкий CTA: “Хотите записаться?”.
-- Исключения: LAW/opt‑out/OOD, `pending/manager_active`, и когда booking‑prompt уже добавлен (booking‑interrupt).
+- Исключения: LAW/opt‑out/OOD, `manager_active`, и когда booking‑prompt уже добавлен (booking‑interrupt).
 
 **CTA после consult‑ответа (standalone, вне booking):**
 - После ответа из consult‑playbook — добавить мягкий CTA: “Хотите записаться?”.
-- Исключения: LAW/opt‑out/OOD, `pending/manager_active`, booking‑prompt или intent‑queue followup уже добавлены.
+- Исключения: LAW/opt‑out/OOD, `manager_active`, booking‑prompt или intent‑queue followup уже добавлены.
 
 **Time‑awareness (P0):**
 - Рабочее время берём из pack/tools; если его нет — уведомление не показываем.
@@ -216,7 +216,7 @@ _Примечание:_ текущая реализация fact resolver опи
 - Фото без текста → короткое уточнение “Это референс? Что хотите повторить/изменить?”; цель не сбрасываем.
 - Style reference: текст без фото → `style_reference_pending` (TTL), просим фото; фото позже → эскалация даже без подписи.
 - Фото раньше текста → сохраняем ссылку/путь (TTL) и используем при явном стиле/референсе в следующем сообщении.
-- Любая эскалация (включая media‑style) предупреждает: пока заявка активна, бот не отвечает.
+- Любая эскалация (включая media‑style) предупреждает: сообщения передаются менеджеру; бот может отвечать по фактам/записи, пока ждём ответ.
 - Audio: только один ASR inflight; новый voice → “расшифровываю, можно текстом”; транскрипты обрабатываются по очереди.
 - Если приходит текст во время ASR — отвечаем на текст сразу; транскрипт учитывается в следующем шаге.
 - Низкая уверенность ASR → просим повторить текстом; цель диалога не меняется.
@@ -305,7 +305,7 @@ _Примечание:_ текущая реализация fact resolver опи
 - `service_not_offered`: ответ подразумевает наличие отсутствующей услуги или даёт цену/условия.
 - `safe_consult_only`: LLM‑совет вне playbook или с медицинскими/Hard‑LAW триггерами.
 - `hard_law_bypass`: ответ вместо эскалации при Hard‑LAW.
-- `pending_gate_broken`: в `pending/manager_active` выдан не‑pending ответ.
+- `pending_gate_broken`: в `manager_active` выдан ответ, либо в `pending` создан новый handover/эскалация вместо soft‑pending.
 - `goal_drop`: потеря `expected_reply_type/current_goal` без причины после перебивки.
 - `slot_lock_broken`: потеря активного slot-контекста при активной записи.
 

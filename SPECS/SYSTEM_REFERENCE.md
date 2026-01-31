@@ -1042,7 +1042,7 @@ chatflow_service → WhatsApp
 8) **Основные gate-ы (порядок в коде)**  
    - expected reply → branch selection → shield → session timeout  
    - forward pending to Telegram → manager_active → reengage/mute  
-   - ASR confirmation → ASR inflight guard → pending gate → media gate → debounce  
+   - ASR confirmation → ASR inflight guard → pending gate (ack/close/status/SLA) → media gate → debounce  
    - handover confirmation → booking signal → hard_law gate  
    - intent decomposition → opt_out mute → policy escalation  
    - fast_intent/smalltalk → class router → domain flows (consult/info/booking)  
@@ -1072,7 +1072,7 @@ chatflow_service → WhatsApp
 | 4 | **Session timeout reset** (`dedup._apply_session_timeout_reset`) | last_message_at > SESSION_TIMEOUT_HOURS | Reset mute/context | (no stage; log only) |
 | 5 | **Manager active** (`pending._handle_manager_active_gate`) | state=MANAGER_ACTIVE | Early return (no bot reply) | (no stage) |
 | 6 | **Reengage/mute** (`guards._handle_reengage_and_mute_gate`) | reengage confirmation or muted | Resume or skip | `stage=routing`, decision=reengage_confirmed/muted_skip/... |
-| 7 | **Pending gate** (`pending._handle_pending_gate`) | state=PENDING/manager | SLA ping/ack/close/wait | `stage=pending_sla/pending_resume/pending_wait/pending_status` |
+| 7 | **Pending gate** (`pending._handle_pending_gate`) | state=PENDING | SLA ping/ack/close/status or soft pass‑through | `stage=pending_guard/pending_sla/pending_resume/pending_status` |
 | 8 | **Media gate** (`decision` media checks) | unsupported/rejected media | Early reply | `stage=media`, decision=unsupported/rejected |
 | 9 | **Debounce gate** (`dedup._handle_debounce_gate`) | bursty inputs | Skip intermediates | `stage=debounce`, decision=skip/manager_active |
 | 10 | **Handover confirm** (`pending._handle_handover_confirmation_gate`) | pending confirmation | Escalate or clarify | `stage=handover_confirmation`, decision=confirmed/declined |

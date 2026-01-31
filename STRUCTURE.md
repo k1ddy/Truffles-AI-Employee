@@ -173,6 +173,7 @@
 - `docs/TASK_PACKAGES/TP-2026-01-31-signal-snapshot-evidence.md`
 - `docs/TASK_PACKAGES/TP-2026-01-31-chaos-golden-coverage.md`
 - `docs/TASK_PACKAGES/TP-2026-01-31-golden-eval-chaos-sim.md`
+- `docs/TASK_PACKAGES/TP-2026-02-01-scn-multiturn-eval.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`
