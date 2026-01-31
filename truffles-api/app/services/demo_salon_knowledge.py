@@ -253,6 +253,13 @@ def _load_yaml(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+_SYSTEM_LEXICONS_PATH = _KNOWLEDGE_BASE_DIR / "generic" / "SYSTEM_LEXICONS.yaml"
+
+
+def load_system_lexicons() -> dict:
+    return _load_yaml(_SYSTEM_LEXICONS_PATH)
+
+
 def load_yaml_truth(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
     return _load_yaml(_truth_path(client_slug))
 

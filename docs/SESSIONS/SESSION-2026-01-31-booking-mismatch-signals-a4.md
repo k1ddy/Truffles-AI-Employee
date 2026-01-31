@@ -1,0 +1,24 @@
+# SESSION 2026-01-31-booking-mismatch-signals-a4 — Session 2026-01-31-booking-mismatch-signals-a4
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-31-booking-mismatch-signals.md
+- branch: feat/2026-01-31-booking-mismatch-signals-a4
+- worktree: /home/zhan/worktrees/2026-01-31-booking-mismatch-signals-a4
+- base_ref: origin/main
+- scope: Booking signal data‑driven lexicons + preflight OOD/DecisionSignals gate + mismatch tests via signal_snapshot.
+- done:
+  - Session created.
+  - Added system lexicon pack + loader.
+  - Switched booking signal detection to pack lexicons + preflight block.
+  - Updated mismatch tests to assert decision_meta.signal_snapshot.
+  - Installed `python-multipart` (PEP 668 override for system pip).
+  - pytest `truffles-api/tests/test_message_endpoint.py -k "booking_signal or booking_info_interrupt or signals"` passed (8 passed, 113 deselected).
+  - pytest `truffles-api/tests/test_demo_salon_eval.py -k "booking"` passed (1 passed, 9 deselected).
+- next:
+  - Run `scripts/session_check.sh` before commit.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-31-booking-mismatch-signals.md
+  - /tmp/pytest_booking_signal_20260131.txt
+  - /tmp/pytest_booking_eval_20260131.txt
+- last_updated: 2026-01-31
