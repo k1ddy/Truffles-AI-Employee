@@ -272,6 +272,7 @@ from app.routers.webhook.trace import (
     _record_decision_trace,
     _record_message_decision_meta,
     _update_message_decision_metadata,
+    _update_message_signal_snapshot,
 )
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.ai_service import (
@@ -351,6 +352,10 @@ from app.services.telegram_service import TelegramService
 
 def _normalize_message_text(message_text: str | None) -> str:
     return (message_text or "").strip()
+
+
+def _compact_signal_snapshot(values: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in values.items() if value is not None}
 
 
 def _detect_fast_intent(
@@ -1427,6 +1432,55 @@ def _run_intent_decomposition(
         booking_wants_flow = False
     booking_blocked = bool(booking_block_meta)
 
+    if saved_message:
+        intent_snapshot = _compact_signal_snapshot(
+            {
+                "used": intent_decomp_used,
+                "intents": intent_decomp_intents,
+                "primary": intent_decomp_primary,
+                "secondary": intent_decomp_secondary,
+                "multi_intent": intent_decomp_multi,
+                "service_query": intent_decomp_service_query,
+                "consult_intent": consult_intent,
+                "consult_topic": consult_topic,
+                "consult_question": consult_question,
+            }
+        )
+        info_snapshot = _compact_signal_snapshot(
+            {
+                "intents": sorted(info_class_intents),
+                "signals": info_signals if isinstance(info_signals, dict) else None,
+                "guest_policy_signal": guest_policy_signal,
+                "basic_info_message": basic_info_message,
+            }
+        )
+        booking_snapshot = _compact_signal_snapshot(
+            {
+                "signal": booking_signal,
+                "blocked": booking_blocked,
+                "blocked_reason": (
+                    booking_block_meta.get("booking_blocked_reason")
+                    if isinstance(booking_block_meta, dict)
+                    else None
+                ),
+                "active": booking_active,
+                "wants_flow": booking_wants_flow,
+                "expected_reply_type": expected_reply_type,
+                "expected_reply_reason": expected_reply_reason,
+                "expected_reply_shortcircuit": expected_reply_shortcircuit,
+            }
+        )
+        _update_message_signal_snapshot(
+            saved_message,
+            _compact_signal_snapshot(
+                {
+                    "intent_decomp": intent_snapshot,
+                    "info_class": info_snapshot,
+                    "booking": booking_snapshot,
+                }
+            ),
+        )
+
     context = legacy._get_conversation_context(conversation)
     context_manager = legacy._get_context_manager(context)
     return IntentDecompositionState(
@@ -1796,6 +1850,70 @@ def _run_class_router_stage(
                 "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
             },
         )
+        intent_value = getattr(signals.intent, "value", None)
+        domain_snapshot = _compact_signal_snapshot(
+            {
+                "intent": getattr(domain_intent, "value", None),
+                "in_score": domain_in_score,
+                "out_score": domain_out_score,
+                "in_hits": domain_meta.get("in_hits"),
+                "out_hits": domain_meta.get("out_hits"),
+                "strict_in_hits": domain_meta.get("strict_in_hits"),
+                "matched_in": domain_meta.get("matched_in"),
+                "matched_out": domain_meta.get("matched_out"),
+                "matched_strict_in": domain_meta.get("matched_strict_in"),
+                "in_threshold": domain_meta.get("in_threshold"),
+                "out_threshold": domain_meta.get("out_threshold"),
+                "margin": domain_meta.get("margin"),
+                "in_hit_threshold": domain_meta.get("in_hit_threshold"),
+                "out_hit_threshold": domain_meta.get("out_hit_threshold"),
+                "strict_in_hit_threshold": domain_meta.get("strict_in_hit_threshold"),
+                "anchors_in": domain_meta.get("anchors_in"),
+                "anchors_out": domain_meta.get("anchors_out"),
+                "strict_in_anchors": domain_meta.get("strict_in_anchors"),
+            }
+        )
+        controller_snapshot = _compact_signal_snapshot(
+            {
+                "used": controller_used,
+                "attempted": controller_attempted,
+                "fallback": controller_fallback,
+                "low_confidence": controller_low_confidence,
+                "confidence": controller_confidence,
+                "goal": controller_goal,
+                "error": controller_error,
+                "fallback_reason": class_router_result.get("controller_fallback_reason"),
+            }
+        )
+        class_router_snapshot = _compact_signal_snapshot(
+            {
+                "classes": class_router_result.get("classes"),
+                "intents": class_router_result.get("intents"),
+                "in_signals": class_router_result.get("in_signals"),
+                "out_signals": class_router_result.get("out_signals"),
+                "explicit_service_signal": explicit_service_signal,
+                "out_of_domain_signal": out_of_domain_signal,
+                "router_fallback_reason": class_router_result.get("router_fallback_reason"),
+                "controller": controller_snapshot or None,
+            }
+        )
+        signal_snapshot = _compact_signal_snapshot(
+            {
+                "intent_signals": _compact_signal_snapshot(
+                    {
+                        "intent": intent_value,
+                        "is_greeting": signals.is_greeting,
+                        "is_thanks": signals.is_thanks,
+                        "is_ack": signals.is_ack,
+                        "is_low_signal": signals.is_low_signal,
+                        "is_status_question": signals.is_status_question,
+                    }
+                ),
+                "domain_router": domain_snapshot,
+                "class_router": class_router_snapshot,
+            }
+        )
+        _update_message_signal_snapshot(saved_message, signal_snapshot)
 
     legacy._record_decision_trace(
         conversation,
