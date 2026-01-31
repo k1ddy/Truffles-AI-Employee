@@ -9,6 +9,7 @@ import type { components } from "@/types/api.generated";
 const DEFAULT_SCOPE: components["schemas"]["InboxMacro"]["scope"] = "personal";
 
 type InboxMacro = components["schemas"]["InboxMacro"];
+type InboxMacroListResponse = components["schemas"]["InboxMacroListResponse"];
 
 type InboxMacrosProps = {
     onSelect: (text: string) => void;
@@ -77,9 +78,23 @@ function InboxMacros({
     });
 
     const createMutation = useMutation({
-        mutationFn: (payload: components["schemas"]["InboxMacroCreateRequest"]) =>
-            inboxApi.createMacro(payload, branchId),
-        onSuccess: () => {
+        mutationFn: async (payload: components["schemas"]["InboxMacroCreateRequest"]) => {
+            const response = await inboxApi.createMacro(payload, branchId);
+            return response.data;
+        },
+        onSuccess: (data) => {
+            const createdMacro = data.macro;
+            if (createdMacro) {
+                queryClient.setQueryData<InboxMacroListResponse | undefined>(
+                    ["inbox-macros", branchId],
+                    (current) => {
+                        const items = current?.items ?? [];
+                        const nextItems = items.filter((macro) => macro.id !== createdMacro.id);
+                        return { items: [createdMacro, ...nextItems] };
+                    }
+                );
+            }
+            setSearchValue("");
             toast.success("Макрос сохранён");
             queryClient.invalidateQueries({ queryKey: ["inbox-macros", branchId] });
         },
@@ -89,14 +104,30 @@ function InboxMacros({
     });
 
     const updateMutation = useMutation({
-        mutationFn: ({
+        mutationFn: async ({
             macroId,
             payload,
         }: {
             macroId: string;
             payload: components["schemas"]["InboxMacroUpdateRequest"];
-        }) => inboxApi.updateMacro(macroId, payload, branchId),
-        onSuccess: () => {
+        }) => {
+            const response = await inboxApi.updateMacro(macroId, payload, branchId);
+            return response.data;
+        },
+        onSuccess: (updatedMacro) => {
+            queryClient.setQueryData<InboxMacroListResponse | undefined>(
+                ["inbox-macros", branchId],
+                (current) => {
+                    if (!current?.items) {
+                        return current;
+                    }
+                    return {
+                        items: current.items.map((macro) =>
+                            macro.id === updatedMacro.id ? updatedMacro : macro
+                        ),
+                    };
+                }
+            );
             toast.success("Макрос обновлён");
             queryClient.invalidateQueries({ queryKey: ["inbox-macros", branchId] });
         },
@@ -106,6 +137,7 @@ function InboxMacros({
     });
 
     const macros = useMemo(() => macrosQuery.data?.items ?? [], [macrosQuery.data?.items]);
+    const sortedMacros = useMemo(() => sortMacros(macros), [macros]);
     const activeMacros = macros.filter((macro) => macro.is_active);
     const sortedActiveMacros = useMemo(() => sortMacros(activeMacros), [activeMacros]);
     const primaryMacros = sortedActiveMacros.slice(0, 6);
@@ -121,14 +153,14 @@ function InboxMacros({
     const normalizedSearch = searchValue.trim().toLowerCase();
     const filteredMacros = useMemo(() => {
         if (!normalizedSearch) {
-            return macros;
+            return sortedMacros;
         }
-        return macros.filter((macro) => {
+        return sortedMacros.filter((macro) => {
             const label = macro.label?.toLowerCase() ?? "";
             const body = macro.body?.toLowerCase() ?? "";
             return label.includes(normalizedSearch) || body.includes(normalizedSearch);
         });
-    }, [macros, normalizedSearch]);
+    }, [sortedMacros, normalizedSearch]);
     const filteredActiveMacros = filteredMacros.filter((macro) => macro.is_active);
     const personalMacros = filteredMacros.filter((macro) => macro.scope === "personal");
     const teamMacros = filteredMacros.filter((macro) => macro.scope === "team");
@@ -261,7 +293,7 @@ function InboxMacros({
             )}
 
             {panelOpen && (
-                <div className="rounded-lg border border-border/60 bg-card p-3 space-y-4">
+                <div className="rounded-lg border border-border/60 bg-card p-3 space-y-4 max-h-[70vh] overflow-y-auto">
                     {canManage && (
                         <div className="flex flex-wrap gap-2">
                             <button type="button" onClick={() => setPanelMode("use")} className={tabClass(panelMode === "use")}>

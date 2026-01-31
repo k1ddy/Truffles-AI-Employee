@@ -1,0 +1,21 @@
+# SESSION 2026-01-31-inbox-macros-ui-fix-a3 — Session 2026-01-31-inbox-macros-ui-fix-a3
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-31-inbox-macros-ui-fix.md
+- branch: feat/2026-01-31-inbox-macros-ui-fix-a3
+- worktree: /home/zhan/worktrees/2026-01-31-inbox-macros-ui-fix-a3
+- base_ref: origin/main
+- scope: Inbox macros UI (scrollable manage panel + immediate list update)
+- done:
+  - Session created.
+  - Added scrollable macros panel + immediate list update in `console-web/src/components/InboxMacros.tsx`.
+  - Lint passed: `/tmp/console_web_lint_inbox_macros_ui_fix_20260131.txt`.
+  - Updated `STATE.md` GAP -> DONE.
+- next:
+  - Commit changes and open PR.
+  - Deploy console-web after merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-31-inbox-macros-ui-fix.md
+  - /tmp/console_web_lint_inbox_macros_ui_fix_20260131.txt
+- last_updated: 2026-01-31
