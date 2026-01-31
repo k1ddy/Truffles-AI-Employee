@@ -1,6 +1,6 @@
 # SESSION 2026-01-30-signal-snapshot-a1 — Session 2026-01-30-signal-snapshot-a1
 
-- status: paused
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-01-30-signal-snapshot-layer.md
 - branch: feat/2026-01-30-signal-snapshot-a1
