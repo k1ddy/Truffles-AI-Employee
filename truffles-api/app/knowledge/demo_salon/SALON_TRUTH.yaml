@@ -1048,6 +1048,299 @@ domain_pack:
         - зарарсыздандыру
         - құрал өңдеу
         - қауіпсіздік
+  signal_lexicons:
+    hygiene_keywords:
+      ru:
+        - стерилиз
+        - инструмент
+        - обрабатываете
+        - дез
+        - сухожар
+        - уз-ванн
+        - уз ванн
+        - ультразв
+        - крафт
+        - пакет
+        - вскрыва
+        - инфек
+    hygiene_friend_inflammation_terms:
+      ru:
+        - подруг
+        - воспал
+    location_phrases:
+      ru:
+        - адрес
+        - где вы
+        - где наход
+    parking_direct_phrases:
+      ru:
+        - парков
+        - паркинг
+        - во дворе
+        - двор
+    parking_machine_prefixes:
+      ru:
+        - машинк
+    parking_exclude_phrases:
+      ru:
+        - парков
+        - паркинг
+        - двор
+        - авто
+        - остав
+        - мест
+        - стоян
+    parking_vehicle_words:
+      ru:
+        - авто
+        - машин
+        - машины
+        - машину
+    guest_waiting_prefixes:
+      ru:
+        - гост
+        - ребен
+        - ребён
+        - дети
+        - детя
+        - детск
+        - коляс
+        - ожидан
+        - пораньше
+        - раньше
+        - подожд
+        - подруг
+        - падруг
+        - заранее
+        - сопровожд
+    guest_waiting_words:
+      ru:
+        - муж
+        - супруг
+        - подруг
+        - сопровожд
+        - семья
+        - семье
+        - семьи
+    mens_service_phrases:
+      ru:
+        - мужск
+    mens_service_context_phrases:
+      ru:
+        - зал
+    mens_service_price_items:
+      ru:
+        - Мужская стрижка
+        - Стрижка машинкой
+    cancel_fee_terms:
+      ru:
+        - отмен
+        - за сколько
+    policy_complaint_exclusions:
+      ru:
+        - без задерж
+        - без опозд
+        - без опоз
+    location_directions_phrases:
+      ru:
+        - остановк
+        - как пройти
+        - как добрат
+        - как доехать
+    location_signage_phrases:
+      ru:
+        - вывеск
+    last_appointment_phrases:
+      ru:
+        - последняя запись
+        - до какого времени можно запис
+    lateness_phrases:
+      ru:
+        - опозда
+    hours_extra_phrases:
+      ru:
+        - ашык
+        - ашық
+        - бугин
+        - бүгін
+    hours_exclude_phrases:
+      ru:
+        - косметик
+        - материал
+        - бренд
+        - марки
+    services_terms:
+      ru:
+        - услуг
+        - услуги
+    services_mens_terms:
+      ru:
+        - мужчин
+        - мужские
+        - мужского
+    services_overview_phrases:
+      ru:
+        - чем занимает
+        - какие услуги
+        - что вы делаете
+        - что у вас есть
+        - какой спектр услуг
+        - какие процедуры
+        - что можно сделать
+    prep_brows_lashes_prepare_terms:
+      ru:
+        - подготов
+    prep_brows_lashes_focus_terms:
+      ru:
+        - бров
+        - ресниц
+    prep_brows_lashes_extra_terms:
+      ru:
+        - линз
+        - контейнер
+        - макияж
+    procedure_combo_require_any:
+      ru:
+        - совмещ
+        - в один день
+    procedure_combo_require_all:
+      ru:
+        - чистк
+        - пилинг
+    system_error_phrases:
+      ru:
+        - ошибка вызова вебхука
+    service_clarify_terms:
+      ru:
+        - классическ
+        - интерес
+    guest_animals_terms:
+      ru:
+        - собак
+        - животн
+        - питом
+        - домашним
+        - домашними
+        - улитк
+        - таракан
+        - дракон
+    price_manicure_terms:
+      ru:
+        - маникюр
+        - маник
+    hygiene_dry_heat_terms:
+      ru:
+        - сухожар
+    hygiene_disposables_terms:
+      ru:
+        - пилк
+        - однораз
+    brands_terms:
+      ru:
+        - какой космет
+        - материал
+        - бренд
+        - марки
+    amenities_wifi_terms:
+      ru:
+        - wifi
+        - вайфай
+        - вай фай
+        - wi fi
+    amenities_drinks_terms:
+      ru:
+        - кофе
+        - чай
+    amenities_toilet_terms:
+      ru:
+        - туалет
+        - санузел
+    gift_certificate_terms:
+      ru:
+        - сертификат
+    booking_intake_terms:
+      ru:
+        - запис
+        - запиш
+        - окошк
+        - свободн
+    same_day_terms:
+      ru:
+        - сегодня
+        - прямо сейчас
+    same_day_booking_request_terms:
+      ru:
+        - запис
+        - окошк
+        - свободн
+    aftercare_gel_lac_terms:
+      ru:
+        - гель лак
+    aftercare_gel_lac_care_terms:
+      ru:
+        - ухаж
+        - продл
+        - держ
+        - нос
+        - срок
+    promotions_stacking_phrases:
+      ru:
+        - скидки сумм
+    promotions_stacking_terms:
+      ru:
+        - скидк
+        - сумм
+    promotion_first_visit_terms:
+      ru:
+        - перв
+        - первое
+        - первый
+    promotion_birthday_terms:
+      ru:
+        - именин
+        - день рождения
+    promotion_birthday_before_after_phrases:
+      ru:
+        - до после
+    promotion_birthday_day_words:
+      ru:
+        - дней
+        - дня
+        - день
+    promotion_student_terms:
+      ru:
+        - студент
+        - пенсион
+    promotion_student_weekday_terms:
+      ru:
+        - будн
+    promotion_student_discount_terms:
+      ru:
+        - скидк
+        - акци
+        - льгот
+        - промо
+    why_price_from_required_terms:
+      ru:
+        - почему
+        - от
+    why_price_from_price_terms:
+      ru:
+        - цена
+        - стоим
+    price_objection_direct_terms:
+      ru:
+        - дороже
+    price_objection_root_terms:
+      ru:
+        - дорог
+    price_objection_exclude_terms:
+      ru:
+        - скид
+    hair_color_terms:
+      ru:
+        - цвет
+        - волос
   response_composer:
     defaults:
       ack:

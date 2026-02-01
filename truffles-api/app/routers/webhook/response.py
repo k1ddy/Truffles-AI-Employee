@@ -1647,7 +1647,7 @@ def _handle_consult_flow(
             consult_meta["consult_questions"] = [legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC]
             consult_meta["clarify_attempt"] = {"intent": "consult", "count": clarify_count}
             consult_meta["clarify_reason"] = "consult"
-            if booking_goal_locked and not consult_intent_signal:
+            if booking_goal_locked:
                 consult_meta["clarify_suppressed"] = True
             else:
                 context = legacy._get_conversation_context(conversation)
@@ -1820,7 +1820,7 @@ def _handle_consult_flow(
         bot_response = consult_decision.response
         bot_response = legacy._combine_sidecar(bot_response, intent_queue_followup)
         booking_followup = None
-        if booking_goal_locked and consult_flow_decision != "consult_clarify":
+        if booking_goal_locked:
             if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
                 booking_followup = legacy.MSG_BOOKING_ASK_SERVICE
             elif expected_reply_type == legacy.EXPECTED_REPLY_TIME:

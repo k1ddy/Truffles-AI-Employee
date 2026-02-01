@@ -14,6 +14,7 @@ from app.logging_config import get_logger, record_llm_time, record_rag_time, sta
 from app.models import Client, Message, Prompt
 from app.schemas.consult import ConsultControllerOutput, ConsultTopic, validate_consult_controller_output
 from app.services.alert_service import alert_error
+from app.services.demo_salon_knowledge import get_system_lexicon_list
 from app.services.knowledge_service import format_knowledge_context, search_knowledge
 from app.services.llm import OpenAIProvider
 from app.services.result import Result
@@ -1260,27 +1261,8 @@ def detect_multi_intent(
             return ""
         return cleaned
 
-    consult_intent_cues = (
-        "посовет",
-        "рекоменд",
-        "подскаж",
-        "подберите",
-        "подбор",
-        "совет",
-        "подойд",
-        "какой цвет",
-        "какой оттен",
-        "что выбрать",
-        "как выбрать",
-        "уход",
-        "ничего страш",
-    )
-    consult_intent_blockers = (
-        "запис",
-        "перенос",
-        "отмен",
-        "окошк",
-    )
+    consult_intent_cues = get_system_lexicon_list("consult_intent_cues")
+    consult_intent_blockers = get_system_lexicon_list("consult_intent_blockers")
 
     def _should_force_consult_intent(raw_text: str, intents: list[str]) -> bool:
         if intents and {"booking"} & set(intents):
@@ -1296,48 +1278,28 @@ def detect_multi_intent(
         normalized = normalize_for_matching(text)
         intents: list[str] = []
 
-        booking_keywords = [
-            "запис",
-            "запиш",
-            "запись",
-            "записат",
-            "перезапис",
-            "перенос",
-            "перенести",
-            "отмен",
-            "отмена",
-            "отменить",
-            "бронь",
-            "заброн",
-            "окошк",
-        ]
+        booking_keywords = get_system_lexicon_list("booking_keywords")
         if any(keyword in normalized for keyword in booking_keywords):
             intents.append("booking")
-        if re.search(r"\b(сегодня|завтра|послезавтра)\b", normalized) and re.search(r"\b\d{1,2}\b", normalized):
+        relative_day_keywords = get_system_lexicon_list("booking_relative_day_keywords")
+        if relative_day_keywords and any(
+            re.search(rf"\b{re.escape(term)}\b", normalized) for term in relative_day_keywords
+        ) and re.search(r"\b\d{1,2}\b", normalized):
             intents.append("booking")
 
-        hours_keywords = ["работаете", "график", "режим работы", "часы", "во сколько", "до скольки", "когда открыва"]
+        hours_keywords = get_system_lexicon_list("hours_keywords")
         if any(keyword in normalized for keyword in hours_keywords):
             intents.append("hours")
 
-        price_keywords = ["цена", "стоим", "стоимость", "прайс", "сколько стоит", "почем", "ценник", "скок"]
+        price_keywords = get_system_lexicon_list("price_keywords")
         if any(keyword in normalized for keyword in price_keywords):
             intents.append("pricing")
 
-        duration_keywords = [
-            "сколько длится",
-            "длится",
-            "длительность",
-            "по времени",
-            "сколько по времени",
-            "сколько времени",
-            "как долго",
-            "время процедуры",
-        ]
+        duration_keywords = get_system_lexicon_list("duration_keywords")
         if any(keyword in normalized for keyword in duration_keywords):
             intents.append("duration")
 
-        location_keywords = ["адрес", "где вы", "как добраться", "как проехать", "как доехать"]
+        location_keywords = get_system_lexicon_list("location_keywords")
         if any(keyword in normalized for keyword in location_keywords):
             intents.append("location")
 
