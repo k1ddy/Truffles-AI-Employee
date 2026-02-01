@@ -1,11 +1,10 @@
 import ast
-import hashlib
 from pathlib import Path
 
+from app.services import reasoning_core
 
 def _stage_order_hash(stage_order):
-    joined = "\n".join(stage_order)
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+    return reasoning_core.stage_order_hash(stage_order)
 
 def _load_stage_order_snapshot():
     trace_path = Path(__file__).resolve().parents[1] / "app/routers/webhook/trace.py"

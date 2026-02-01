@@ -19,6 +19,7 @@ from app.routers.webhook.media import _extract_media_info
 from app.routers.webhook.parsing import _parse_webhook_request
 from app.routers.webhook.secrets import _get_client_webhook_secret, _get_request_webhook_secret
 from app.schemas.webhook import WebhookRequest, WebhookResponse
+from app.services import reasoning_core
 from app.services.alert_service import alert_warning
 from app.services.chatflow_service import verify_signed_media_path
 
@@ -315,7 +316,7 @@ async def handle_webhook_direct(client_slug: str, request: Request, db: Session 
     elif not provided_secret:
         alert_warning("Webhook secret missing", {"client_slug": parsed.client_slug})
 
-    return await legacy._handle_webhook_payload(
+    return await reasoning_core.handle_webhook_payload(
         parsed,
         db,
         provided_secret=provided_secret,
@@ -334,7 +335,7 @@ async def handle_webhook_probe(client_slug: str):
 async def handle_webhook(payload: WebhookRequest, http_request: Request, db: Session = Depends(get_db)):
     """Handle legacy webhook wrapper (same format as ChatFlow webhook)."""
     provided_secret = _get_request_webhook_secret(http_request)
-    return await legacy._handle_webhook_payload(
+    return await reasoning_core.handle_webhook_payload(
         payload,
         db,
         provided_secret=provided_secret,

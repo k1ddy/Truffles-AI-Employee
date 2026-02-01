@@ -1,0 +1,25 @@
+# SESSION 2026-01-31-unified-reasoning-core-api-a4 — Session 2026-01-31-unified-reasoning-core-api-a4
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-01-31-unified-reasoning-core-api.md
+- branch: feat/2026-01-31-unified-reasoning-core-api-a4
+- worktree: /home/zhan/worktrees/2026-01-31-unified-reasoning-core-api-a4
+- base_ref: origin/main
+- scope: Unified Reasoning Core module/API, entrypoint wiring, DEC-018 evidence/tests.
+- done:
+  - Added reasoning core module/API and stage-order snapshot helper.
+  - Wired entrypoints (webhook http/outbox, decision_core, provider_gateway, message) to reasoning core.
+  - Added reasoning core tests and stage-order hash wiring.
+  - Updated STRUCTURE/STATE for DEC-018 evidence.
+  - Ran pytest evidence (reasoning_core, stage_order_snapshot_hash, signal_snapshot).
+  - Ran `scripts/session_check.sh`.
+- next:
+  - Run `scripts/session_check.sh`.
+  - Open PR and attach CI evidence.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-01-31-unified-reasoning-core-api.md
+  - /tmp/pytest_reasoning_core_20260201.txt
+  - /tmp/pytest_stage_order_snapshot_hash_20260201.txt
+  - /tmp/pytest_signal_snapshot_20260201.txt
+- last_updated: 2026-02-01

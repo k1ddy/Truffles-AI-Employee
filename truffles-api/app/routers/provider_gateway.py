@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.logging_config import get_logger
-from app.routers.webhook import _legacy as legacy
 from app.schemas.provider_gateway import ProviderInbound, ProviderStatus
 from app.schemas.webhook import WebhookResponse
+from app.services import reasoning_core
 from app.services.inbox_event_service import record_inbox_event
 from app.services.provider_gateway_service import translate_provider_inbound, update_outbox_status_from_provider
 
@@ -91,7 +91,7 @@ async def handle_provider_inbound(request: Request, db: Session = Depends(get_db
     if error:
         return WebhookResponse(success=False, message=error)
 
-    return await legacy._handle_webhook_payload(
+    return await reasoning_core.handle_webhook_payload(
         webhook_payload,
         db,
         provided_secret=None,
