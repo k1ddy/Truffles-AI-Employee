@@ -108,6 +108,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 - **L1 (tenant, online):** LLM классифицирует intent/slot‑гипотезы и нормализует формулировки; пишет кандидаты, не меняет факты.
 - **L2 (tenant, offline):** кластеризация `knowledge_backlog` + `handovers` → PR в `client_pack` + EVAL/chaos до merge.
 - **L3 (domain, opt‑in):** агрегированные, обезличенные кластеры → PR в `domain_pack` (без PII).
+- **DEC‑019 Pack‑Compiler:** auto‑ingest формирует кандидаты для packs и публикуется только после approval; после publish обязательна компиляция (pack‑index + signal graph + policy bundles).
 - **LLM provider:** OpenAI‑совместимые модели; локальные LLM не используются.
 
 ### Источник данных: `handovers` (как есть)

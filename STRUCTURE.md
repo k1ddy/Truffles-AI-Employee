@@ -177,6 +177,8 @@
 - `docs/TASK_PACKAGES/TP-2026-02-01-scn-multiturn-eval.md`
 - `docs/TASK_PACKAGES/TP-2026-02-01-pack-lexicons-pack-only.md`
 - `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-dsl.md`
+- `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-docs.md`
+- `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`

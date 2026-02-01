@@ -151,6 +151,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - **Signal Snapshot Layer:** единая точка сигналов (pack‑index, domain anchors, semantic/RAG, LLM‑router). Никаких бизнес‑лексиконов в коде.
 - **LLM contract:** LLM возвращает только pack‑ID/intent/slots + confidence (pack‑ref‑only); факты только из packs/tools.
 - **Pack‑index:** строится на publish (domain/company/client/branch), версионируется и пишется в decision_meta (pack_id/version/hash).
+- **DEC-019 Pack‑Compiler:** packs компилируются в deterministic artifacts (pack‑index + signal graph + policy bundles); runtime читает только compiled artifacts; Policy/Signal DSL валидируется при compile; auto‑ingest только через approval.
 - **Routing:** gates принимают решения только по snapshot; low‑confidence → deterministic fallback с фиксацией `fallback_reason`.
 
 #### Outbox payload contract + action gate

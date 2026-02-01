@@ -315,6 +315,7 @@ _Примечание:_ текущая реализация fact resolver опи
 - Slot-extract работает через LLM (естественные формулировки: “после обеда”, “в пятницу утром”); при низкой уверенности → `booking_confirm`.
 - **Enforcement‑гейты** (state/policy/LAW) выше смысла и могут перекрывать решение ради безопасности.
 - **Signal Snapshot Layer:** единая точка сигналов (pack‑index + semantic/RAG + LLM pack‑ref). Источники/версии пишем в decision_meta.
+- **DEC‑019 Pack‑Compiler:** runtime использует только compiled artifacts; Policy/Signal DSL валидируется при compile; auto‑ingest идёт через approval.
 - Semantic resolver (embeddings) подтверждает смысл; ключевые слова/якоря — только fallback из pack‑index (без кодовых словарей).
 - LLM‑контроллер — основной арбитр смысла и возвращает **только** pack‑ID/intent/slots; business‑лексиконы запрещены в коде.
 - `demo_salon` — тестовый pack; запрещены demo_salon‑only правила и “подгон под тесты”.
