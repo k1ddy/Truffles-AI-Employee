@@ -19,6 +19,8 @@
   - log: `/tmp/pytest_learning_service_2026-02-01.txt`
 - pytest: `pytest -q truffles-api/tests/test_message_endpoint.py -k "signal_snapshot and pack_index"`
   - log: `/tmp/pytest_message_signal_snapshot_2026-02-01.txt`
+- pytest: `pytest -q truffles-api/tests/test_pending_pack_lexicons.py`
+  - log: `/tmp/pytest_pending_gate_20260201.txt`
 - golden eval: `EVAL_TIER=core pytest -q truffles-api/tests/test_demo_salon_eval.py::test_demo_salon_eval_cases`
   - log: `/tmp/pytest_golden_eval_pack_compiler_2026-02-01.txt`
 - time-only guard test: `pytest -q truffles-api/tests/test_webhook_response.py::test_time_only_guard_detection`
@@ -32,6 +34,9 @@
 - chaos-sim rerun after time-only guard fix (booking, logic mode):
   - artifacts: `/tmp/chaos_pack_compiler_rerun` (report.md, failures.partial.jsonl)
   - summary: failures=23 (pending_action_mismatch/state_mismatch/action_mismatch/ood_false_positive)
+- chaos-sim rerun after pending pack lexicons + container rebuild (booking, logic mode):
+  - artifacts: `/tmp/chaos_pack_compiler_pending_fix4` (report.md, failures.partial.jsonl)
+  - summary: failures=6 (action_mismatch/state_mismatch/expected_reply_type_mismatch/ood_false_positive)
 - shadow replay report:
   - input: `/tmp/trace_bundle_pack_compiler.json`
   - report: `/tmp/shadow_replay_pack_compiler.md`
@@ -39,4 +44,6 @@
 ## Notes
 - Chaos-sim failures included HTTP 500 in the earlier run. Root cause: missing
   `_looks_like_time_only_request` symbol in webhook legacy adapter.
-- Fix landed in `truffles-api/app/routers/webhook/decision.py`; chaos-sim not rerun after fix.
+- Fix landed in `truffles-api/app/routers/webhook/decision.py`; chaos-sim rerun later.
+- Pending pack lexicons now cover pending_wait acknowledgements; pending_action_mismatch cleared
+  in `/tmp/chaos_pack_compiler_pending_fix4`.

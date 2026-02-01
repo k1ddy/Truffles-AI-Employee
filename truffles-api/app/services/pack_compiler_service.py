@@ -26,7 +26,14 @@ class PackCompilerError(RuntimeError):
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "contracts" / "packs" / "signal_graph.v1.jsonschema").is_file():
+            return parent
+    for parent in current.parents:
+        if (parent / "contracts").is_dir():
+            return parent
+    return current.parents[3]
 
 
 def _load_schema(relative_path: str) -> Draft202012Validator:

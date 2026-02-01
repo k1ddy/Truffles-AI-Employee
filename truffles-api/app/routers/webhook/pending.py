@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Conversation, Message, User
 from app.schemas.webhook import WebhookResponse
+from app.services.demo_salon_knowledge import get_system_lexicon_list
 from app.services.state_machine import ConversationState
 
 
@@ -20,30 +21,50 @@ def _normalize_pending_text(text: str) -> str:
     return normalized.replace("ё", "е")
 
 
-def _is_pending_ack(text: str) -> bool:
-    from . import _legacy as legacy
-
+def _matches_lexicon_any(text: str, key: str) -> bool:
     normalized = _normalize_pending_text(text)
-    if normalized in legacy.PENDING_ACK_PHRASES:
+    if not normalized:
+        return False
+    phrases = get_system_lexicon_list(key)
+    if not phrases:
+        return False
+    phrase_set = set(phrases)
+    if normalized in phrase_set:
+        return True
+    tokens = normalized.split()
+    if any(token in phrase_set for token in tokens):
+        return True
+    return any(" " in phrase and phrase in normalized for phrase in phrases)
+
+
+def _matches_lexicon_all_tokens(text: str, key: str) -> bool:
+    normalized = _normalize_pending_text(text)
+    if not normalized:
+        return False
+    phrases = get_system_lexicon_list(key)
+    if not phrases:
+        return False
+    phrase_set = set(phrases)
+    if normalized in phrase_set:
         return True
     tokens = normalized.split()
     if not tokens:
         return False
-    return all(token in legacy.PENDING_ACK_PHRASES for token in tokens)
+    if all(token in phrase_set for token in tokens):
+        return True
+    return any(" " in phrase and phrase in normalized for phrase in phrases)
+
+
+def _is_pending_ack(text: str) -> bool:
+    return _matches_lexicon_all_tokens(text, "pending_ack_phrases")
 
 
 def _is_pending_close(text: str) -> bool:
-    from . import _legacy as legacy
+    return _matches_lexicon_any(text, "pending_close_phrases")
 
-    normalized = _normalize_pending_text(text)
-    if normalized in legacy.PENDING_CLOSE_PHRASES:
-        return True
-    tokens = normalized.split()
-    if any(token in legacy.PENDING_CLOSE_PHRASES for token in tokens):
-        return True
-    return any(
-        " " in phrase and phrase in normalized for phrase in legacy.PENDING_CLOSE_PHRASES
-    )
+
+def _is_pending_wait(text: str) -> bool:
+    return _matches_lexicon_any(text, "pending_wait_phrases")
 
 
 def _get_pending_sla(context: dict) -> dict:
@@ -648,6 +669,32 @@ def _handle_pending_gate(
             )
         bot_response, sent = send_and_save(bot_response)
         result_message = "Pending status response sent" if sent else "Pending status response failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    if _is_pending_wait(message_text):
+        bot_response = legacy.MSG_PENDING_WAIT
+        trace_payload = {
+            "stage": "pending_wait",
+            "decision": "pending_wait",
+            "state": conversation.state,
+        }
+        trace_payload.update(router_pending_meta)
+        legacy._record_decision_trace(conversation, trace_payload)
+        if saved_message:
+            legacy._update_message_decision_metadata(
+                saved_message,
+                {
+                    "pending_action": "pending_wait",
+                },
+            )
+        bot_response, sent = send_and_save(bot_response)
+        result_message = "Pending wait response sent" if sent else "Pending wait send failed"
         db.commit()
         return WebhookResponse(
             success=True,
