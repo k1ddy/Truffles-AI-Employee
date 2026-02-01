@@ -16,6 +16,10 @@ How to use
 - Start with Roles to see navigation and access per role.
 - Use Pages for UI element-level behavior and endpoints.
 - Use System notes for cross-component flows (WhatsApp/Telegram/outbox/knowledge).
+- Use Canon vs Implemented for gap tracking against Control Plane canon.
+
+Comparison
+- `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md`
 
 Roles
 - `docs/CONSOLE_AUDIT/roles/platform_admin.md`
