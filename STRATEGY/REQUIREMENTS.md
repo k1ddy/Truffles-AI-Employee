@@ -55,6 +55,7 @@
 
 ### Точность фактов
 - [ ] Факты только из Client Pack / tools (адрес, цены, услуги, правила).
+- [ ] **Pack‑Compiler:** runtime читает только compiled artifacts; Policy/Signal DSL валидируется при compile; auto‑ingest только через approval.
 - [ ] RAG‑confidence < порога → уточнение/эскалация, не фантазия.
 - [ ] Misses пишутся в backlog и проходят валидацию перед публикацией.
 - [ ] Response Guard: финальный текст содержит только допустимые секции (ack + facts + next_step).

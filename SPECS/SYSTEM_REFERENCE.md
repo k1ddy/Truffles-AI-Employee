@@ -249,6 +249,7 @@ ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/health"
 **Замечания:**
 - `ops/sync_client.py` использует `QDRANT_API_KEY`/`QDRANT__SERVICE__API_KEY` из окружения и `BGE_M3_URL`.
 - Онбординг клиента подробно: `SPECS/MULTI_TENANT.md`.
+- DEC‑019: после внедрения Pack‑Compiler публикация packs обязана создавать compiled artifacts (pack‑index + signal graph + policy bundles); runtime читает только compiled artifacts.
 
 ---
 
