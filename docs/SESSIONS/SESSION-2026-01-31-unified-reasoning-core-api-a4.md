@@ -17,13 +17,14 @@
   - Fixed CI ruff import order in outbox payload test.
   - Updated decision_core/provider_gateway tests to patch reasoning_core.
   - Ran targeted pytest for CI-fix.
+  - Recorded green CI run in `STATE.md`.
 - next:
-  - Run `scripts/session_check.sh`.
-  - Re-run CI and record green run in `STATE.md`.
+  - (none)
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-01-31-unified-reasoning-core-api.md
   - /tmp/pytest_reasoning_core_20260201.txt
   - /tmp/pytest_stage_order_snapshot_hash_20260201.txt
   - /tmp/pytest_signal_snapshot_20260201.txt
   - /tmp/pytest_ci_fix_decision_core_provider_gateway_20260201.txt
+  - CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21553587012
 - last_updated: 2026-02-01
