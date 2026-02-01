@@ -29,6 +29,9 @@
   - artifacts: `/tmp/chaos_pack_compiler` (report.md, failures.partial.jsonl)
   - log: `/tmp/chaos_pack_compiler_run_2026-02-01.txt`
   - summary: failures=21 (action_mismatch/ood_false_positive/pending_action_mismatch/state_mismatch)
+- chaos-sim rerun after time-only guard fix (booking, logic mode):
+  - artifacts: `/tmp/chaos_pack_compiler_rerun` (report.md, failures.partial.jsonl)
+  - summary: failures=23 (pending_action_mismatch/state_mismatch/action_mismatch/ood_false_positive)
 - shadow replay report:
   - input: `/tmp/trace_bundle_pack_compiler.json`
   - report: `/tmp/shadow_replay_pack_compiler.md`

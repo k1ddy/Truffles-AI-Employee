@@ -1,6 +1,6 @@
 # SESSION 2026-02-01-pack-compiler-implementation-a1 — Session 2026-02-01-pack-compiler-implementation-a1
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md
 - branch: feat/2026-02-01-pack-compiler-implementation-a1
@@ -14,8 +14,9 @@
   - Golden eval (core) run; chaos-sim + trace bundle + shadow replay report generated.
   - Time-only guard restore added; unit test captured.
   - Pack-compiler report saved to docs/REPORTS.
+  - Chaos-sim rerun recorded (`/tmp/chaos_pack_compiler_rerun`).
 - next:
-  - Rerun chaos-sim to confirm HTTP 500 fix + check remaining failure patterns.
+  - Follow-up: investigate pending_action_mismatch/state_mismatch patterns in chaos-sim.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md
 - last_updated: 2026-02-01
