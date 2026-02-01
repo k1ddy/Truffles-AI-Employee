@@ -2058,6 +2058,14 @@
 - No-go: любые изменения в decision pipeline, LLM prompts, schema, DB manual edits.
 - Branch/Worktree/Base/Merge/Cleanup: `data/lexicon-ru-kz-mixed`; `/home/zhan/truffles-main-wt/lexicon-ru-kz-mixed`; `origin/main`; PR + CI green, merge by Top Architect/Brain; cleanup by Top Architect.
 
+### 2026-02-01 — Task Package (planned): Pack-Compiler + Policy/Signal DSL + auto-ingest (DEC-019)
+
+- Chosen issue (NOW): нужна компиляция packs в детерминированные артефакты + DSL, чтобы убрать runtime‑дрейф и подготовить auto‑ingest с approval.
+- Invariants protected: no changes to runtime pipeline/stage order; `_legacy.py` adapter-only; facts only from packs/tools; trace/meta обязательны.
+- Scope: DEC-019 + спецификация DSL/компилятора/auto‑ingest; без реализации и миграций.
+- Out of scope: runtime/DB изменения, прод‑роллаут, изменение LLM/policy логики.
+- Task Package: `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-dsl.md`.
+
 ### 2026-02-01 — P0 RU/KZ/mixed chaos webhook-fuzz (logic)
 
 - Suite: `webhook-fuzz` case `CHAOS_RU_KZ_MIXED` (11 turns, RU/KZ/mixed + noise).
