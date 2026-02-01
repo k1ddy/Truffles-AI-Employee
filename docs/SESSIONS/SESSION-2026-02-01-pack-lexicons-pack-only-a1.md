@@ -12,9 +12,9 @@
   - Adjusted booking interrupt handling to prefer truth gate for duration/pricing intents.
   - Updated consult/booking followup handling to respect booking goal locks.
   - Ran targeted pytest for signal snapshot, booking, and stage order hash.
+  - Fixed ruff import ordering in decision router (CI lint).
 - next:
-  - Update STATE.md evidence (Brain/Top Architect).
-  - Prepare commit once review is complete.
+  - Re-run CI after lint fix.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-01-pack-lexicons-pack-only.md
   - pytest -q truffles-api/tests/test_message_endpoint.py -k "signal_snapshot or booking or info_bundle"
