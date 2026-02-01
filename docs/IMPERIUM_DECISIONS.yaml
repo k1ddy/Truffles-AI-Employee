@@ -80,3 +80,7 @@ decisions:
     area: "unified_reasoning_core"
     choice: "SIGNAL_SNAPSHOT_PACK_INDEX"
     statement: "Unified Reasoning Core: a single signal snapshot feeds deterministic gates/actions; signals come from compiled pack-index (anchors/lexicons/cards), semantic/RAG, and LLM pack-ref-only outputs. LLM never creates facts; it returns pack IDs + intent/slots with confidence. Business lexicons are forbidden in code (only system language packs allowed). decision_meta records signal sources + pack versions; stage order snapshot enforced."
+  - id: "DEC-019"
+    area: "pack_compiler_dsl"
+    choice: "COMPILED_ARTIFACTS_ONLY"
+    statement: "Packs compile into versioned deterministic artifacts (pack-index + signal graph + policy bundles); runtime reads compiled artifacts only. Policy/Signal DSL defines schema + validation. Auto-ingest yields candidate packs gated by human approval; build outputs are hashed and recorded in decision_meta."
