@@ -7,20 +7,29 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
 from app.logging_config import get_logger
-from app.models import Agent, AgentIdentity, AgentLinkToken, Branch, ClientSettings, Conversation, Handover, LearnedResponse
+from app.models import (
+    Agent,
+    AgentIdentity,
+    AgentLinkToken,
+    Branch,
+    ClientSettings,
+    Conversation,
+    Handover,
+    LearnedResponse,
+)
 from app.schemas.telegram import TelegramMessage, TelegramUpdate, TelegramWebhookResponse
 from app.services.agent_link_service import consume_link_token, hash_link_token
 from app.services.audit_service import record_audit_event
+from app.services.learned_response_service import (
+    approve_learned_response,
+    is_agent_allowed_to_approve,
+    reject_learned_response,
+)
 from app.services.manager_message_service import (
     notify_client_manager_status,
     process_manager_media,
     process_manager_message,
     resolve_linked_agent,
-)
-from app.services.learned_response_service import (
-    approve_learned_response,
-    is_agent_allowed_to_approve,
-    reject_learned_response,
 )
 from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_take as state_manager_take
@@ -840,7 +849,7 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
                     "chat_id": chat_id,
                     "message_id": message_id,
                     "reply_markup": {
-                        "inline_keyboard": [[{"text": "Решено ✅", "callback_data": f"resolve_{handover_id}"}]]
+                        "inline_keyboard": [[{"text": "Решено ✅", "callback_data": f"resolve_{handover.id}"}]]
                     },
                 },
             )

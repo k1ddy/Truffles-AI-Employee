@@ -134,12 +134,6 @@ from app.services.knowledge_registry_service import (
     upsert_draft,
     validate_draft,
 )
-from app.services.pack_compiler_service import (
-    PackCompilerError,
-    build_compiled_pack_meta,
-    extract_compiled_artifacts,
-    parse_compiled_at,
-)
 from app.services.knowledge_validation import dump_pack_yaml
 from app.services.manager_message_service import (
     notify_client_manager_status,
@@ -150,6 +144,12 @@ from app.services.onboarding_state import (
     advance_onboarding_step,
     build_onboarding_status,
     ensure_onboarding_step,
+)
+from app.services.pack_compiler_service import (
+    PackCompilerError,
+    build_compiled_pack_meta,
+    extract_compiled_artifacts,
+    parse_compiled_at,
 )
 from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_take as state_manager_take
