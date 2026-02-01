@@ -14,6 +14,7 @@
   - Обновлены docs и тесты; API types перегенерированы (openapi-typescript).
   - console-web deps установлены, generate:api + lint зелёные.
   - PR открыт: https://github.com/k1ddy/Truffles-AI-Employee/pull/482
+  - Исправлена дублирующая запись active в `docs/SESSION_INDEX.md`.
 - next:
   - Дождаться ревью и merge.
 - evidence:
