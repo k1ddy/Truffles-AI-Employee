@@ -16,6 +16,7 @@ import yaml
 
 from app.logging_config import get_logger
 from app.services.knowledge_service import get_embedding
+from app.services.pack_compiler_service import compile_pack_payload
 
 _KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parents[1] / "knowledge"
 _DEFAULT_CLIENT_SLUG = "demo_salon"
@@ -365,8 +366,12 @@ def get_system_anchor_groups(intent: str) -> list[tuple[str, ...]]:
         return []
     return _normalize_anchor_groups(groups.get(intent))
 
+@lru_cache(maxsize=8)
 def load_yaml_truth(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
-    return _load_yaml(_truth_path(client_slug))
+    raw = _load_yaml(_truth_path(client_slug))
+    compiled = compile_pack_payload(raw)
+    effective = compiled.get("effective_pack") if isinstance(compiled, dict) else None
+    return effective if isinstance(effective, dict) else raw
 
 
 def load_policy_pack(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:

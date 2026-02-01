@@ -126,7 +126,6 @@ from app.services.console_idempotency import (
 from app.services.escalation_service import resolve_telegram_routing
 from app.services.knowledge_registry_service import (
     apply_pack_index_to_client_config,
-    build_pack_index,
     get_current_published,
     list_history,
     publish_version,
@@ -134,6 +133,12 @@ from app.services.knowledge_registry_service import (
     sync_qdrant_from_pack,
     upsert_draft,
     validate_draft,
+)
+from app.services.pack_compiler_service import (
+    PackCompilerError,
+    build_compiled_pack_meta,
+    extract_compiled_artifacts,
+    parse_compiled_at,
 )
 from app.services.knowledge_validation import dump_pack_yaml
 from app.services.manager_message_service import (
@@ -3454,14 +3459,22 @@ async def publish_knowledge(
             {"errors": errors, "warnings": warnings},
         )
 
-    version = publish_version(
-        db,
-        branch=branch,
-        payload_json=payload,
-        actor_id=context.agent.id,
-        source_version_id=current.id if current else None,
-    )
-    db.commit()
+    try:
+        version = publish_version(
+            db,
+            branch=branch,
+            payload_json=payload,
+            actor_id=context.agent.id,
+            source_version_id=current.id if current else None,
+        )
+        db.commit()
+    except PackCompilerError as exc:
+        raise ConsoleAPIError(
+            400,
+            "KNOWLEDGE_INVALID",
+            "Pack compiler validation failed",
+            {"errors": exc.errors},
+        ) from exc
 
     now = datetime.now(timezone.utc)
     try:
@@ -3472,14 +3485,23 @@ async def publish_knowledge(
             knowledge_tag=branch.knowledge_tag,
             version_id=version.id,
         )
-        pack_index = build_pack_index(payload)
+        compiled = extract_compiled_artifacts(version.payload_json, compile_if_missing=False)
+        pack_index = compiled.get("pack_index") if isinstance(compiled, dict) else None
         if pack_index:
+            compiled_at = parse_compiled_at(compiled.get("compiled_at") if isinstance(compiled, dict) else None)
             apply_pack_index_to_client_config(
                 context.client,
                 pack_index=pack_index,
                 version_id=version.id,
-                compiled_at=now,
+                compiled_at=compiled_at or now,
                 source="knowledge_publish",
+                compiled_meta=build_compiled_pack_meta(
+                    compiled,
+                    version_id=version.id,
+                    source="knowledge_publish",
+                )
+                if isinstance(compiled, dict)
+                else None,
             )
         branch.knowledge_safe_mode = False
         branch.knowledge_safe_mode_reason = None
@@ -3608,13 +3630,21 @@ async def rollback_knowledge(
     if version.status == "draft":
         raise ConsoleAPIError(400, "INVALID_PARAM", "Cannot rollback to draft version")
 
-    restored = restore_version(
-        db,
-        branch=branch,
-        source_version=version,
-        actor_id=context.agent.id,
-    )
-    db.commit()
+    try:
+        restored = restore_version(
+            db,
+            branch=branch,
+            source_version=version,
+            actor_id=context.agent.id,
+        )
+        db.commit()
+    except PackCompilerError as exc:
+        raise ConsoleAPIError(
+            400,
+            "KNOWLEDGE_INVALID",
+            "Pack compiler validation failed",
+            {"errors": exc.errors},
+        ) from exc
 
     now = datetime.now(timezone.utc)
     try:
@@ -3625,14 +3655,23 @@ async def rollback_knowledge(
             knowledge_tag=branch.knowledge_tag,
             version_id=restored.id,
         )
-        pack_index = build_pack_index(version.payload_json)
+        compiled = extract_compiled_artifacts(restored.payload_json, compile_if_missing=False)
+        pack_index = compiled.get("pack_index") if isinstance(compiled, dict) else None
         if pack_index:
+            compiled_at = parse_compiled_at(compiled.get("compiled_at") if isinstance(compiled, dict) else None)
             apply_pack_index_to_client_config(
                 context.client,
                 pack_index=pack_index,
                 version_id=restored.id,
-                compiled_at=now,
+                compiled_at=compiled_at or now,
                 source="knowledge_rollback",
+                compiled_meta=build_compiled_pack_meta(
+                    compiled,
+                    version_id=restored.id,
+                    source="knowledge_rollback",
+                )
+                if isinstance(compiled, dict)
+                else None,
             )
         branch.knowledge_safe_mode = False
         branch.knowledge_safe_mode_reason = None

@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Policy Bundle",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "policy_bundle.v1"
+    },
+    "policy": {
+      "type": "object",
+      "required": [
+        "hard_law",
+        "payment_info",
+        "reschedule",
+        "cancel",
+        "medical",
+        "legal",
+        "complaint",
+        "discounts",
+        "guard_topics"
+      ],
+      "properties": {
+        "hard_law": {
+          "$ref": "#/$defs/policy_section"
+        },
+        "payment_info": {
+          "$ref": "#/$defs/policy_section"
+        },
+        "reschedule": {
+          "$ref": "#/$defs/policy_section"
+        },
+        "cancel": {
+          "$ref": "#/$defs/policy_section"
+        },
+        "medical": {
+          "$ref": "#/$defs/policy_section"
+        },
+        "legal": {
+          "$ref": "#/$defs/policy_section"
+        },
+        "complaint": {
+          "$ref": "#/$defs/policy_section"
+        },
+        "discounts": {
+          "$ref": "#/$defs/policy_section"
+        },
+        "refund": {
+          "$ref": "#/$defs/policy_section"
+        },
+        "guard_topics": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/keyword_list"
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "keyword_list": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "policy_section": {
+      "type": "object",
+      "properties": {
+        "keywords": {
+          "$ref": "#/$defs/keyword_list"
+        },
+        "intent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "risk_level": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "response": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

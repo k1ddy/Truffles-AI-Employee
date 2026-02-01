@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Signal Graph",
+  "type": "object",
+  "required": [
+    "schema_version"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "signal_graph.v1"
+    },
+    "ood_anchors": {
+      "type": "object",
+      "properties": {
+        "in_domain": {
+          "$ref": "#/$defs/keyword_list"
+        },
+        "out_of_domain": {
+          "$ref": "#/$defs/keyword_list"
+        },
+        "strict_in": {
+          "$ref": "#/$defs/keyword_list"
+        }
+      },
+      "additionalProperties": false
+    },
+    "lexicons": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/lang_map"
+      }
+    },
+    "signal_lexicons": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/lang_map"
+      }
+    }
+  },
+  "$defs": {
+    "keyword_list": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "lang_map": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/keyword_list"
+      }
+    }
+  },
+  "additionalProperties": false
+}

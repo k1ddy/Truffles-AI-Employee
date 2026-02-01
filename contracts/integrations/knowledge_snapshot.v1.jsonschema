@@ -42,12 +42,9 @@
     },
     "packs": {
       "type": "object",
-      "required": ["client_pack"],
+      "required": ["compiled_pack"],
       "properties": {
-        "client_pack": {"type": "object"},
-        "consult_playbook": {"type": ["object", "null"]},
-        "service_catalog": {"type": ["object", "null"]},
-        "faq": {"type": ["array", "null"], "items": {"type": "object"}}
+        "compiled_pack": {"type": "object"}
       },
       "additionalProperties": true
     },

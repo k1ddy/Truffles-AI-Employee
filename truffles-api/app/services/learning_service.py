@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.models import Client, ClientSettings, Handover
+from app.models import Client, ClientSettings, Handover, LearnedResponse
 from app.services.alert_service import alert_error, alert_warning
 from app.services.knowledge_service import (
     QDRANT_API_KEY,
@@ -363,4 +363,165 @@ def add_to_knowledge(
     except Exception as e:
         logger.error(f"Error adding to knowledge: {e}", exc_info=True)
         alert_error("Learning service error", {"handover_id": str(handover.id), "error": str(e)})
+        return None
+
+
+def add_learned_response_to_knowledge(
+    db: Session,
+    learned_response: LearnedResponse,
+    source: str = "learned",
+) -> Optional[str]:
+    """Add approved learned response to Qdrant knowledge base."""
+    if not learned_response.question_text or not learned_response.response_text:
+        logger.warning("Cannot add learned_response: missing text")
+        return None
+
+    client_slug = get_client_slug(db, learned_response.client_id)
+    if not client_slug:
+        logger.warning(
+            "Cannot add learned_response: client_slug not found",
+            extra={"context": {"learned_response_id": str(learned_response.id)}},
+        )
+        return None
+
+    question = _trim_text(learned_response.question_text.strip())
+    answer = _trim_text(learned_response.response_text.strip())
+    if len(question) < MIN_QUESTION_LENGTH or len(answer) < MIN_ANSWER_LENGTH:
+        logger.info(
+            "Skipped learned_response: text too short",
+            extra={
+                "context": {
+                    "client_slug": client_slug,
+                    "learned_response_id": str(learned_response.id),
+                    "question_len": len(question),
+                    "answer_len": len(answer),
+                }
+            },
+        )
+        return None
+
+    if _is_low_value_text(question) or _is_low_value_text(answer):
+        logger.info(
+            "Skipped learned_response: low-value content",
+            extra={
+                "context": {
+                    "client_slug": client_slug,
+                    "learned_response_id": str(learned_response.id),
+                    "question_preview": question[:80],
+                    "answer_preview": answer[:80],
+                }
+            },
+        )
+        return None
+
+    if TEST_MODE and not (QDRANT_COLLECTION or "").endswith("_ci"):
+        logger.warning(
+            "Learning blocked: TEST_MODE requires _ci collection",
+            extra={
+                "context": {
+                    "client_slug": client_slug,
+                    "learned_response_id": str(learned_response.id),
+                    "qdrant_collection": QDRANT_COLLECTION,
+                    "learning_mode": "blocked",
+                }
+            },
+        )
+        return None
+
+    learning_mode = (os.environ.get("LEARNING_MODE") or "").strip().lower()
+    if learning_mode in {"skip", "off", "disabled"}:
+        logger.info(
+            "Learning skipped by LEARNING_MODE",
+            extra={
+                "context": {
+                    "client_slug": client_slug,
+                    "learned_response_id": str(learned_response.id),
+                    "learning_mode": learning_mode,
+                }
+            },
+        )
+        return None
+
+    if learning_mode in {"record-only", "record"}:
+        point_id = str(uuid.uuid4())
+        learned_response.qdrant_point_id = point_id
+        logger.info(
+            "Learning recorded (record-only mode)",
+            extra={
+                "context": {
+                    "client_slug": client_slug,
+                    "learned_response_id": str(learned_response.id),
+                    "point_id": point_id,
+                    "learning_mode": learning_mode,
+                }
+            },
+        )
+        alert_warning(
+            "Learning record-only",
+            {
+                "client_slug": client_slug,
+                "learned_response_id": str(learned_response.id),
+                "point_id": point_id,
+                "learning_mode": learning_mode,
+            },
+        )
+        return point_id
+
+    content = f"Вопрос: {question}\nОтвет: {answer}"
+    if len(learned_response.question_text.strip()) > len(question) or len(
+        learned_response.response_text.strip()
+    ) > len(answer):
+        logger.info("Truncated learned_response sample to fit length limits")
+
+    try:
+        embedding = get_embedding(content)
+        point_id = str(uuid.uuid4())
+        payload = {
+            "content": content,
+            "metadata": {
+                "client_slug": client_slug,
+                "source": source,
+                "learned_id": str(learned_response.id),
+                "question": question,
+                "answer": answer,
+                "learned_from": learned_response.source_name or "manager",
+            },
+        }
+        if learned_response.branch_id:
+            payload["metadata"]["branch_id"] = str(learned_response.branch_id)
+
+        with httpx.Client(timeout=30.0) as client:
+            response = client.put(
+                f"{QDRANT_HOST}/collections/{QDRANT_COLLECTION}/points",
+                headers={"api-key": QDRANT_API_KEY},
+                json={"points": [{"id": point_id, "vector": embedding, "payload": payload}]},
+            )
+
+            if response.status_code not in [200, 201]:
+                logger.error(f"Qdrant upsert error: {response.status_code} - {response.text}")
+                alert_error(
+                    "Failed to add learned_response to knowledge",
+                    {"learned_response_id": str(learned_response.id), "status": response.status_code},
+                )
+                return None
+
+        learned_response.qdrant_point_id = point_id
+        context = {
+            "point_id": point_id,
+            "client_slug": client_slug,
+            "learned_response_id": str(learned_response.id),
+            "question_len": len(question),
+            "answer_len": len(answer),
+            "source": source,
+        }
+        logger.info("Added learned_response to knowledge", extra={"context": context})
+        alert_warning("Learning success", context)
+        return point_id
+
+    except Exception as exc:
+        logger.error(f"Error adding learned_response to knowledge: {exc}", exc_info=True)
+        alert_error(
+            "Learning service error",
+            {"learned_response_id": str(learned_response.id), "error": str(exc)},
+        )
         return None

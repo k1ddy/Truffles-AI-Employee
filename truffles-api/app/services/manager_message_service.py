@@ -21,7 +21,12 @@ from app.services.chatflow_service import (
     send_whatsapp_media,
 )
 from app.services.console_errors import ConsoleAPIError
-from app.services.learning_service import add_to_knowledge, get_client_slug, is_owner_response
+from app.services.learned_response_service import (
+    create_learned_response,
+    notify_learned_response_pending,
+    resolve_auto_approve,
+)
+from app.services.learning_service import get_client_slug
 from app.services.message_service import save_message
 from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.state_service import is_simulation_context
@@ -498,34 +503,35 @@ def process_manager_message(
         )
         return True, "Simulation: manager message recorded", took_handover, handover
 
-    # Auto-learn from owner responses
+    # Auto-ingest candidate (learned_responses) with owner auto-approve
     effective_manager_id = manager_telegram_id if manager_telegram_id else None
     if not effective_manager_id and handover.assigned_to:
         assigned_raw = str(handover.assigned_to).strip()
         if assigned_raw.lstrip("-").isdigit():
             effective_manager_id = int(assigned_raw)
 
-    if effective_manager_id or manager_username:
-        if is_owner_response(
+    auto_approve, source_role = resolve_auto_approve(
+        db,
+        handover=handover,
+        agent=linked_agent,
+        manager_telegram_id=effective_manager_id,
+        manager_username=manager_username,
+    )
+    learned = create_learned_response(
+        db,
+        handover=handover,
+        source_channel="telegram",
+        source_name=resolved_manager_name,
+        source_role=source_role,
+        agent_id=linked_agent.id if linked_agent else None,
+        auto_approve=auto_approve,
+    )
+    if learned and not auto_approve:
+        notify_learned_response_pending(
             db,
-            handover.client_id,
-            effective_manager_id or 0,
-            manager_username,
-        ):
-            logger.info("Owner response detected, auto-adding to knowledge base")
-            point_id = add_to_knowledge(db, handover, source="owner")
-            if point_id:
-                logger.info(f"Successfully added to knowledge: {point_id}")
-    else:
-        logger.info(
-            "Owner response check skipped: missing manager identity",
-            extra={
-                "context": {
-                    "handover_id": str(handover.id),
-                    "chat_id": chat_id,
-                    "thread_id": message_thread_id,
-                }
-            },
+            learned_response=learned,
+            handover=handover,
+            conversation=conversation,
         )
 
     # 4. Get user's WhatsApp JID (authoritative source: user.remote_jid)
@@ -881,24 +887,36 @@ def process_manager_media(
     if caption and caption.strip():
         handover.manager_response = caption.strip()
 
-    # Auto-learn from owner responses (text only)
+    # Auto-ingest candidate (learned_responses) with owner auto-approve
     if caption and caption.strip():
         effective_manager_id = manager_telegram_id if manager_telegram_id else None
         if not effective_manager_id and handover.assigned_to:
             assigned_raw = str(handover.assigned_to).strip()
             if assigned_raw.lstrip("-").isdigit():
                 effective_manager_id = int(assigned_raw)
-        if effective_manager_id or manager_username:
-            if is_owner_response(
+        auto_approve, source_role = resolve_auto_approve(
+            db,
+            handover=handover,
+            agent=linked_agent,
+            manager_telegram_id=effective_manager_id,
+            manager_username=manager_username,
+        )
+        learned = create_learned_response(
+            db,
+            handover=handover,
+            source_channel="telegram",
+            source_name=handover.assigned_to_name,
+            source_role=source_role,
+            agent_id=linked_agent.id if linked_agent else None,
+            auto_approve=auto_approve,
+        )
+        if learned and not auto_approve:
+            notify_learned_response_pending(
                 db,
-                handover.client_id,
-                effective_manager_id or 0,
-                manager_username,
-            ):
-                logger.info("Owner media caption detected, auto-adding to knowledge base")
-                point_id = add_to_knowledge(db, handover, source="owner")
-                if point_id:
-                    logger.info(f"Successfully added to knowledge: {point_id}")
+                learned_response=learned,
+                handover=handover,
+                conversation=conversation,
+            )
 
     user_remote_jid = get_user_remote_jid(db, conversation.user_id)
     remote_jid = user_remote_jid

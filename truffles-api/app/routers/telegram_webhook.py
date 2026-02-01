@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
 from app.logging_config import get_logger
-from app.models import Agent, AgentIdentity, AgentLinkToken, Branch, ClientSettings, Conversation, Handover
+from app.models import Agent, AgentIdentity, AgentLinkToken, Branch, ClientSettings, Conversation, Handover, LearnedResponse
 from app.schemas.telegram import TelegramMessage, TelegramUpdate, TelegramWebhookResponse
 from app.services.agent_link_service import consume_link_token, hash_link_token
 from app.services.audit_service import record_audit_event
@@ -16,6 +16,11 @@ from app.services.manager_message_service import (
     process_manager_media,
     process_manager_message,
     resolve_linked_agent,
+)
+from app.services.learned_response_service import (
+    approve_learned_response,
+    is_agent_allowed_to_approve,
+    reject_learned_response,
 )
 from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_take as state_manager_take
@@ -610,7 +615,7 @@ def get_bot_token_by_chat(db: Session, chat_id: int) -> Optional[str]:
 
 
 async def handle_callback_query(update: TelegramUpdate, db: Session) -> TelegramWebhookResponse:
-    """Handle callback query (button click): take, resolve, skip."""
+    """Handle callback query (button click): take, resolve, skip, approve, reject."""
     callback = update.callback_query
 
     # Dedup: prevent double processing of same callback
@@ -622,15 +627,15 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
     if not callback.data:
         return TelegramWebhookResponse(success=False, message="No callback data")
 
-    # Parse callback_data: "action_handover_id"
+    # Parse callback_data: "action_id"
     try:
         first_underscore = callback.data.index("_")
         action = callback.data[:first_underscore]
-        handover_id = callback.data[first_underscore + 1 :]
+        entity_id = callback.data[first_underscore + 1 :]
     except ValueError:
         return TelegramWebhookResponse(success=False, message=f"Invalid callback data: {callback.data}")
 
-    logger.info(f"Callback: action={action}, handover_id={handover_id}")
+    logger.info(f"Callback: action={action}, entity_id={entity_id}")
 
     # Get manager info
     manager_telegram_id = callback.from_user.id
@@ -642,8 +647,75 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
     chat_id = callback.message.chat.id if callback.message else None
     message_id = callback.message.message_id if callback.message else None
 
+    if action in {"approve", "reject"}:
+        bot_token = get_bot_token_by_chat(db, chat_id) if chat_id else None
+        if not bot_token:
+            return TelegramWebhookResponse(success=False, message="Bot token not found")
+
+        telegram = TelegramService(bot_token)
+        learned = db.query(LearnedResponse).filter(LearnedResponse.id == entity_id).first()
+        if not learned:
+            telegram._make_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback.id, "text": "❌ Ответ не найден"},
+            )
+            return TelegramWebhookResponse(success=False, message="Learned response not found")
+
+        linked_agent = resolve_linked_agent(
+            db,
+            telegram_user_id=manager_telegram_id,
+            client_id=learned.client_id,
+            branch_id=learned.branch_id,
+        )
+        if not linked_agent or not is_agent_allowed_to_approve(
+            db, learned_response=learned, agent=linked_agent
+        ):
+            telegram._make_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback.id, "text": "⛔ Нет доступа"},
+            )
+            return TelegramWebhookResponse(success=False, message="Access denied")
+
+        if action == "approve":
+            if learned.status == "approved":
+                message = "✅ Уже одобрено"
+            elif learned.status == "rejected":
+                message = "⚠️ Уже отклонено"
+            else:
+                approve_learned_response(
+                    db,
+                    learned_response=learned,
+                    actor_id=linked_agent.id,
+                )
+                db.commit()
+                message = "✅ Добавлено"
+        else:
+            if learned.status == "rejected":
+                message = "✅ Уже отклонено"
+            elif learned.status == "approved":
+                message = "⚠️ Уже одобрено"
+            else:
+                reject_learned_response(
+                    db,
+                    learned_response=learned,
+                    actor_id=linked_agent.id,
+                )
+                db.commit()
+                message = "❌ Отклонено"
+
+        telegram._make_request(
+            "answerCallbackQuery",
+            {"callback_query_id": callback.id, "text": message},
+        )
+        if message_id:
+            telegram._make_request(
+                "editMessageReplyMarkup",
+                {"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
+            )
+        return TelegramWebhookResponse(success=True, message=message)
+
     # Find handover
-    handover = db.query(Handover).filter(Handover.id == handover_id).first()
+    handover = db.query(Handover).filter(Handover.id == entity_id).first()
     if not handover:
         bot_token = get_bot_token_by_chat(db, chat_id) if chat_id else None
         if bot_token:
@@ -651,14 +723,18 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
             telegram._make_request(
                 "answerCallbackQuery", {"callback_query_id": callback.id, "text": "❌ Заявка не найдена"}
             )
-        return TelegramWebhookResponse(success=False, message=f"Handover {handover_id} not found")
+        return TelegramWebhookResponse(success=False, message=f"Handover {entity_id} not found")
 
     # Get conversation
     conversation = db.query(Conversation).filter(Conversation.id == handover.conversation_id).first()
     if not conversation:
-        telegram._make_request(
-            "answerCallbackQuery", {"callback_query_id": callback.id, "text": "❌ Диалог не найден"}
-        )
+        bot_token = get_bot_token_by_chat(db, chat_id) if chat_id else None
+        if bot_token:
+            telegram = TelegramService(bot_token)
+            telegram._make_request(
+                "answerCallbackQuery",
+                {"callback_query_id": callback.id, "text": "❌ Диалог не найден"},
+            )
         return TelegramWebhookResponse(success=False, message="Conversation not found")
 
     linked_agent = resolve_linked_agent(

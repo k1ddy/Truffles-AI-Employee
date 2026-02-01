@@ -292,3 +292,32 @@ def format_handover_message(
 
 <b>Сообщение:</b>
 {message}"""
+
+
+def build_learned_response_buttons(learned_response_id: UUID) -> dict:
+    """Build inline keyboard for learned response moderation."""
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "✅ В базу", "callback_data": f"approve_{learned_response_id}"},
+                {"text": "❌ Отклонить", "callback_data": f"reject_{learned_response_id}"},
+            ]
+        ]
+    }
+
+
+def format_learned_response_message(
+    *,
+    question: str,
+    answer: str,
+    source_name: Optional[str],
+) -> str:
+    """Format learned response moderation message."""
+    resolved_name = source_name or "менеджер"
+    return f"""📝 <b>Новый ответ для модерации</b>
+
+<b>Вопрос:</b>
+{question}
+
+<b>Ответ ({resolved_name}):</b>
+{answer}"""

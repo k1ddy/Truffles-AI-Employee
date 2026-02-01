@@ -17,7 +17,13 @@ from app.services.knowledge_validation import (
     build_summary,
     dump_pack_yaml,
     parse_draft_text,
+    strip_compiled_artifacts,
     validate_payload,
+)
+from app.services.pack_compiler_service import (
+    PackCompilerError,
+    compile_pack_payload,
+    inject_compiled_artifacts,
 )
 
 logger = get_logger("knowledge_registry")
@@ -161,6 +167,7 @@ def apply_pack_index_to_client_config(
     version_id: UUID | None,
     compiled_at: datetime,
     source: str,
+    compiled_meta: dict[str, Any] | None = None,
 ) -> bool:
     if not isinstance(pack_index, dict):
         return False
@@ -193,6 +200,8 @@ def apply_pack_index_to_client_config(
         compiled_at=compiled_at,
         source=source,
     )
+    if compiled_meta:
+        config["compiled_pack"] = compiled_meta
     client.config = config
     return True
 
@@ -279,6 +288,12 @@ def publish_version(
     source_version_id: UUID | None,
 ) -> KnowledgeVersion:
     now = datetime.now(timezone.utc)
+    payload_clean = strip_compiled_artifacts(payload_json)
+    try:
+        compiled = compile_pack_payload(payload_clean, compiled_at=now)
+    except PackCompilerError:
+        raise
+    payload_json = inject_compiled_artifacts(payload_clean, compiled)
     pack_yaml = dump_pack_yaml(payload_json)
     checksum = build_payload_checksum(payload_json)
 

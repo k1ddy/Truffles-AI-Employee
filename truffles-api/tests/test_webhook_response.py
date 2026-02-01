@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from app.routers import webhook
+from app.routers.webhook import _legacy as legacy
 from app.routers.webhook.response import _finalize_bot_response
 
 
@@ -103,3 +104,11 @@ def test_finalize_bot_response_evening_greeting_once():
         now=now + timedelta(hours=1),
     )
     assert response == "Ответ"
+
+
+def test_time_only_guard_detection():
+    assert legacy._looks_like_time_only_request("в 7") is True
+    assert legacy._looks_like_time_only_request("на 7:30") is True
+    assert legacy._looks_like_time_only_request("э на чассов в 7") is True
+    assert legacy._looks_like_time_only_request("маникюр в 7") is False
+    assert legacy._looks_like_time_only_request("на час") is False

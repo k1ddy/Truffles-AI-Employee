@@ -114,7 +114,13 @@ def _build_consult_snapshot(
             playbook_present=False,
         )
 
-    playbook_payload = packs.get("consult_playbook")
+    compiled_pack = packs.get("compiled_pack") if isinstance(packs, dict) else None
+    effective_pack = (
+        compiled_pack.get("effective_pack") if isinstance(compiled_pack, dict) else None
+    )
+    playbook_payload = (
+        effective_pack.get("consult_playbook") if isinstance(effective_pack, dict) else None
+    )
     if not isinstance(playbook_payload, dict):
         return ConsultSnapshotShadowResult(
             playbook=None,
