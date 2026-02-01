@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.logging_config import get_logger
-from app.routers.webhook import _legacy as legacy
 from app.schemas.webhook import WebhookRequest, WebhookResponse
+from app.services import reasoning_core
 
 logger = get_logger("decision_core")
 router = APIRouter()
@@ -66,7 +66,7 @@ async def handle_decision(request: Request, db: Session = Depends(get_db)):
         )
         return WebhookResponse(success=False, message="Invalid webhook payload")
 
-    return await legacy._handle_webhook_payload(
+    return await reasoning_core.handle_webhook_payload(
         payload,
         db,
         provided_secret=None,

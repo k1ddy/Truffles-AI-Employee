@@ -6,9 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Conversation
-from app.routers.webhook import _legacy as webhook_legacy
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
+from app.services import reasoning_core
 from app.services.learning_service import get_client_slug
 
 router = APIRouter()
@@ -34,7 +34,7 @@ async def handle_message(request: MessageRequest, db: Session = Depends(get_db))
         ),
     )
 
-    response = await webhook_legacy._handle_webhook_payload(
+    response = await reasoning_core.handle_webhook_payload(
         payload,
         db,
         provided_secret=None,

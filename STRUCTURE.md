@@ -60,6 +60,7 @@
 | `truffles-api/docker-compose.test.yml` | Test‑compose overrides (test containers, no prod env) | Backend/QA |
 | `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
 | `truffles-api/app/services/console_confirmations.py` | Confirmation safeguards for destructive Console actions | Backend |
+| `truffles-api/app/services/reasoning_core.py` | Unified Reasoning Core API (signals -> gates -> actions -> compose -> trace) | Backend/Architect |
 | `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |
 | `truffles-api/app/models/console_macro.py` | DB model for Inbox macros (Console) | Backend |
 | `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |
@@ -584,6 +585,7 @@ truffles-api/
 | `truffles-api/tests/test_webhook_booking.py` | Unit: expected_reply_type и booking slot validators |
 | `truffles-api/tests/test_webhook_dedup.py` | Unit: webhook buffer/dedup helpers |
 | `truffles-api/tests/test_webhook_response.py` | Unit: CTA и quiet hours helpers |
+| `truffles-api/tests/test_reasoning_core.py` | Unit: Reasoning Core contract/wiring |
 
 ---
 

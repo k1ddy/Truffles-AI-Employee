@@ -914,8 +914,10 @@ async def _process_outbox_rows(
                 payload_json = validated_payload.model_dump(exclude_none=True)
                 payload = WebhookRequest.model_validate(payload_json)
                 client_slug = payload.client_slug
+                from app.services import reasoning_core
+
                 with start_span("outbox.process", context=span_context):
-                    response = await legacy._handle_webhook_payload(
+                    response = await reasoning_core.handle_webhook_payload(
                         payload,
                         db,
                         provided_secret=None,
@@ -1138,8 +1140,10 @@ async def _process_outbox_rows(
             )
 
             try:
+                from app.services import reasoning_core
+
                 timing_start = time.monotonic()
-                response = await legacy._handle_webhook_payload(
+                response = await reasoning_core.handle_webhook_payload(
                     base_payload,
                     db,
                     provided_secret=None,

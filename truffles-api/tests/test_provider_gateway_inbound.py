@@ -103,7 +103,7 @@ def test_provider_inbound_routes_to_webhook(client, monkeypatch):
     app.dependency_overrides[get_db] = _override_get_db
     try:
         with patch(
-            "app.routers.provider_gateway.legacy._handle_webhook_payload",
+            "app.routers.provider_gateway.reasoning_core.handle_webhook_payload",
             new_callable=AsyncMock,
         ) as mock_handle:
             mock_handle.return_value = WebhookResponse(
