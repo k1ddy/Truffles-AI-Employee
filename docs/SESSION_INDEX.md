@@ -90,3 +90,4 @@
 | 2026-02-01-case-dedup-a1 | done | feat/2026-02-01-case-dedup-a1 | /home/zhan/worktrees/2026-02-01-case-dedup-a1 | docs/TASK_PACKAGES/TP-2026-02-01-case-dedup.md | 2026-02-01 |
 | 2026-02-01-pack-lexicons-pack-only-a1 | done | feat/2026-02-01-pack-lexicons-pack-only-a1 | /home/zhan/worktrees/2026-02-01-pack-lexicons-pack-only-a1 | docs/TASK_PACKAGES/TP-2026-02-01-pack-lexicons-pack-only.md | 2026-02-01 |
 | 2026-02-01-pack-compiler-dsl-a1 | done | feat/2026-02-01-pack-compiler-dsl-a1 | /home/zhan/worktrees/2026-02-01-pack-compiler-dsl-a1 | docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-dsl.md | 2026-02-01 |
+| 2026-02-01-pack-compiler-dec019-a1 | done | feat/2026-02-01-pack-compiler-dec019-a1 | /home/zhan/worktrees/2026-02-01-pack-compiler-dec019-a1 | docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-dsl.md | 2026-02-01 |
