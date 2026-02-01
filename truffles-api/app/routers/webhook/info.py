@@ -9,6 +9,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable
 
 from app.schemas.webhook import WebhookResponse
+from app.services.demo_salon_knowledge import (
+    _has_guest_waiting_signal,
+    _has_parking_signal,
+    get_signal_lexicon_list,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -66,6 +71,7 @@ def _detect_info_class_intents(
     message_text: str | None,
     *,
     intent_decomp_set: set[str],
+    client_slug: str | None = None,
 ) -> tuple[set[str], dict[str, Any]]:
     from . import _legacy as legacy
 
@@ -83,43 +89,14 @@ def _detect_info_class_intents(
         question_like = any(_has_token_prefix(tokens, prefix) for prefix in legacy.QUESTION_WORD_PREFIXES)
     short_query = 0 < len(tokens) <= 4
 
-    from app.services.demo_salon_knowledge import _has_parking_signal
-
-    parking_signal = _has_parking_signal(normalized)
-    guest_prefixes = (
-        "гост",
-        "ребен",
-        "ребён",
-        "дети",
-        "детя",
-        "детск",
-        "коляс",
-        "ожидан",
-        "подожд",
-        "пораньше",
-        "раньше",
-        "подруг",
+    parking_signal = _has_parking_signal(normalized, client_slug=client_slug)
+    guest_signal = _has_guest_waiting_signal(normalized, client_slug=client_slug)
+    location_phrases = get_signal_lexicon_list(client_slug, "location_keywords")
+    location_signal = parking_signal or (
+        bool(location_phrases) and any(phrase in normalized for phrase in location_phrases)
     )
-    guest_signal = any(
-        token.startswith(prefix) for token in tokens for prefix in guest_prefixes
-    )
-    location_signal = parking_signal or any(
-        token in normalized
-        for token in ["адрес", "где вы", "где находитесь", "куда ехать", "локац", "как доехать"]
-    )
-    hours_signal = any(
-        token in normalized
-        for token in [
-            "работае",
-            "работайт",
-            "до скольк",
-            "во скольк",
-            "график",
-            "открыт",
-            "сейчас открыты",
-            "когда откры",
-        ]
-    )
+    hours_phrases = get_signal_lexicon_list(client_slug, "hours_keywords")
+    hours_signal = bool(hours_phrases) and any(phrase in normalized for phrase in hours_phrases)
 
     if "location" in anchor_intents and (question_like or short_query or intent_decomp_set):
         location_signal = True
@@ -155,7 +132,11 @@ def _detect_info_class_intents(
 
 
 def _looks_like_info_query(message_text: str | None, *, client_slug: str | None = None) -> bool:
-    intents, meta = _detect_info_class_intents(message_text, intent_decomp_set=set())
+    intents, meta = _detect_info_class_intents(
+        message_text,
+        intent_decomp_set=set(),
+        client_slug=client_slug,
+    )
     if intents:
         return True
     info_signals = meta.get("info_signals") if isinstance(meta, dict) else None
@@ -206,30 +187,14 @@ def _build_info_intent_reply(
     from . import _legacy as legacy
 
     normalized = legacy.normalize_for_matching(message_text) if message_text else ""
-    parking_signal = "парков" in normalized if normalized else False
-    guest_signal = False
-    if normalized:
-        guest_signal = any(
-            token in normalized
-            for token in [
-                "гост",
-                "ребен",
-                "ребён",
-                "дети",
-                "детя",
-                "детск",
-                "коляс",
-                "ожидан",
-                "пораньше",
-                "раньше",
-                "подожд",
-                "заранее",
-                "подруг",
-            ]
-        )
+    parking_signal = _has_parking_signal(normalized, client_slug=client_slug) if normalized else False
+    guest_signal = _has_guest_waiting_signal(normalized, client_slug=client_slug) if normalized else False
     location_signal = False
     if normalized:
-        location_signal = any(token in normalized for token in ["адрес", "где вы", "где наход", "где вы находитесь"])
+        location_phrases = get_signal_lexicon_list(client_slug, "location_keywords")
+        location_signal = bool(location_phrases) and any(
+            phrase in normalized for phrase in location_phrases
+        )
     include_info_bundle = include_info_bundle and (
         intent in {"location", "hours"} or location_signal or parking_signal or guest_signal
     )
@@ -569,31 +534,16 @@ def _handle_info_flow(
         normalized = legacy.normalize_for_matching(message_text)
         service_hint = get_demo_salon_service_hint(message_text, client_slug=client_slug)
         if service_hint:
-            if legacy._contains_any(
+            if _has_parking_signal(normalized, client_slug=client_slug) or _has_guest_waiting_signal(
                 normalized,
-                [
-                    "парков",
-                    "гост",
-                    "ребен",
-                    "ребён",
-                    "дет",
-                    "коляс",
-                    "ожидан",
-                    "подруг",
-                ],
+                client_slug=client_slug,
             ):
                 service_hint = None
             else:
-                presence_keywords = [
-                    "делаете",
-                    "делает",
-                    "делают",
-                    "есть",
-                    "есть ли",
-                    "оказываете",
-                    "предоставляете",
-                ]
-                presence_hint = legacy._contains_any(normalized, presence_keywords) or (
+                presence_keywords = get_signal_lexicon_list(client_slug, "service_question_keywords")
+                presence_hint = (
+                    bool(presence_keywords) and legacy._contains_any(normalized, presence_keywords)
+                ) or (
                     "?" in message_text and len(normalized.split()) <= 4
                 )
                 if presence_hint and not (

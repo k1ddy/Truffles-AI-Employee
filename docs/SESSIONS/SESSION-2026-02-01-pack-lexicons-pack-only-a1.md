@@ -1,0 +1,25 @@
+# SESSION 2026-02-01-pack-lexicons-pack-only-a1 — Session 2026-02-01-pack-lexicons-pack-only-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-01-pack-lexicons-pack-only.md
+- branch: feat/2026-02-01-pack-lexicons-pack-only-a1
+- worktree: /home/zhan/worktrees/2026-02-01-pack-lexicons-pack-only-a1
+- base_ref: origin/main
+- scope: migrate business lexicons/anchors to packs; align booking/info/consult flows with pack-only signals
+- done:
+  - Migrated business lexicons/anchors to packs and updated pack-only lookups.
+  - Adjusted booking interrupt handling to prefer truth gate for duration/pricing intents.
+  - Updated consult/booking followup handling to respect booking goal locks.
+  - Ran targeted pytest for signal snapshot, booking, and stage order hash.
+  - Fixed ruff import ordering in decision router (CI lint).
+- next:
+  - Re-run CI after lint fix.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-01-pack-lexicons-pack-only.md
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "signal_snapshot or booking or info_bundle"
+  - pytest -q truffles-api/tests/test_outbox_payload_contract.py::test_stage_order_snapshot_hash
+  - /tmp/pytest_pack_lexicons_20260201.txt
+  - /tmp/pytest_stage_order_snapshot_hash_20260201_pack_lexicons.txt
+  - /tmp/pytest_multi_intent_20260201.txt
+- last_updated: 2026-02-01

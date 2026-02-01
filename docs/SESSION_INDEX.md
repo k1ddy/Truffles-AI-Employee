@@ -88,3 +88,4 @@
 | 2026-02-01-case-dedup-a1 | active | feat/2026-02-01-case-dedup-a1 | /home/zhan/worktrees/2026-02-01-case-dedup-a1 | docs/TASK_PACKAGES/TP-2026-02-01-case-dedup.md | 2026-02-01 |
 | 2026-01-31-unified-reasoning-core-api-a4 | done | feat/2026-01-31-unified-reasoning-core-api-a4 | /home/zhan/worktrees/2026-01-31-unified-reasoning-core-api-a4 | docs/TASK_PACKAGES/TP-2026-01-31-unified-reasoning-core-api.md | 2026-02-01 |
 | 2026-02-01-case-dedup-a1 | done | feat/2026-02-01-case-dedup-a1 | /home/zhan/worktrees/2026-02-01-case-dedup-a1 | docs/TASK_PACKAGES/TP-2026-02-01-case-dedup.md | 2026-02-01 |
+| 2026-02-01-pack-lexicons-pack-only-a1 | done | feat/2026-02-01-pack-lexicons-pack-only-a1 | /home/zhan/worktrees/2026-02-01-pack-lexicons-pack-only-a1 | docs/TASK_PACKAGES/TP-2026-02-01-pack-lexicons-pack-only.md | 2026-02-01 |

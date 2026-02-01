@@ -1223,6 +1223,17 @@ def _handle_booking_interrupt(
                             meta=multi_meta if isinstance(multi_meta, dict) else None,
                         )
                         info_source = "multi_truth"
+                prefer_truth_gate = bool({"pricing", "duration"} & set(booking_info_intents))
+                if not info_decision and prefer_truth_gate:
+                    truth_gate = policy_handler.get("truth_gate")
+                    if truth_gate:
+                        info_decision = truth_gate(
+                            booking_interrupt_text,
+                            client_slug=client_slug,
+                            intent_decomp=intent_decomp_payload,
+                        )
+                        if info_decision:
+                            info_source = "truth_gate"
                 if not info_decision:
                     service_matcher = policy_handler.get("service_matcher")
                     if service_matcher:
@@ -1233,7 +1244,7 @@ def _handle_booking_interrupt(
                         )
                         if info_decision:
                             info_source = "service_matcher"
-                if not info_decision:
+                if not info_decision and not prefer_truth_gate:
                     truth_gate = policy_handler.get("truth_gate")
                     if truth_gate:
                         info_decision = truth_gate(

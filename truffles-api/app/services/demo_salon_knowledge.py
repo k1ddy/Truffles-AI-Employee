@@ -260,6 +260,111 @@ def load_system_lexicons() -> dict:
     return _load_yaml(_SYSTEM_LEXICONS_PATH)
 
 
+def _coerce_string_list(value: Any) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        items = value
+    elif isinstance(value, str):
+        items = [value]
+    else:
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, str):
+            item = str(item)
+        cleaned = item.strip()
+        if not cleaned:
+            continue
+        normalized_value = _normalize_text(cleaned)
+        if not normalized_value:
+            continue
+        key = normalized_value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(normalized_value)
+    return normalized
+
+
+def _merge_lang_map(value: Any) -> list[str]:
+    if isinstance(value, dict):
+        merged: list[str] = []
+        for items in value.values():
+            merged.extend(_coerce_string_list(items))
+        return _coerce_string_list(merged)
+    return _coerce_string_list(value)
+
+
+@lru_cache(maxsize=128)
+def get_system_lexicon_list(key: str) -> list[str]:
+    lexicons = load_system_lexicons()
+    if not isinstance(lexicons, dict):
+        return []
+    return _merge_lang_map(lexicons.get(key))
+
+
+def _load_signal_lexicons(truth: dict | None) -> dict[str, Any]:
+    if not isinstance(truth, dict):
+        return {}
+    domain_pack = truth.get("domain_pack")
+    if not isinstance(domain_pack, dict):
+        return {}
+    signal_lexicons = domain_pack.get("signal_lexicons")
+    return signal_lexicons if isinstance(signal_lexicons, dict) else {}
+
+
+@lru_cache(maxsize=256)
+def _signal_lexicon_list_cached(client_slug: str, key: str) -> list[str]:
+    truth = load_yaml_truth(client_slug)
+    signal_lexicons = _load_signal_lexicons(truth)
+    if key in signal_lexicons:
+        return _merge_lang_map(signal_lexicons.get(key))
+    return get_system_lexicon_list(key)
+
+
+def get_signal_lexicon_list(client_slug: str | None, key: str) -> list[str]:
+    slug = _normalize_client_slug(client_slug)
+    return _signal_lexicon_list_cached(slug, key)
+
+
+def _normalize_anchor_groups(value: Any) -> list[tuple[str, ...]]:
+    groups: list[tuple[str, ...]] = []
+
+    def _add_group(group: Any) -> None:
+        if isinstance(group, (list, tuple, set)):
+            prefixes = _coerce_string_list(list(group))
+            if prefixes:
+                groups.append(tuple(prefixes))
+            return
+        if isinstance(group, str):
+            prefixes = _coerce_string_list(group)
+            if prefixes:
+                groups.append(tuple(prefixes))
+
+    if isinstance(value, dict):
+        for lang_groups in value.values():
+            if isinstance(lang_groups, list):
+                for group in lang_groups:
+                    _add_group(group)
+        return groups
+    if isinstance(value, list):
+        for group in value:
+            _add_group(group)
+    return groups
+
+
+@lru_cache(maxsize=64)
+def get_system_anchor_groups(intent: str) -> list[tuple[str, ...]]:
+    lexicons = load_system_lexicons()
+    if not isinstance(lexicons, dict):
+        return []
+    groups = lexicons.get("info_anchor_groups")
+    if not isinstance(groups, dict):
+        return []
+    return _normalize_anchor_groups(groups.get(intent))
+
 def load_yaml_truth(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
     return _load_yaml(_truth_path(client_slug))
 
@@ -578,17 +683,6 @@ _SERVICE_STOPWORDS = {
     "со",
 }
 
-_OFFTOPIC_KEYWORDS = [
-    "чат бот",
-    "ботов",
-    "разработк",
-    "сайт",
-    "crm",
-    "интеграц",
-    "мессенджер",
-    "биткоин",
-]
-
 
 def _normalize_alias_tokens(text: str) -> list[str]:
     tokens = _tokenize(text)
@@ -698,7 +792,7 @@ def _is_offtopic_message(normalized: str, client_slug: str) -> bool:
         return False
     if any(phrase and phrase in normalized for phrase in _offtopic_phrases(client_slug)):
         return True
-    return _contains_any(normalized, _OFFTOPIC_KEYWORDS)
+    return _signal_contains_any(normalized, client_slug, "offtopic_keywords")
 
 
 def _match_service(normalized: str, client_slug: str) -> dict[str, Any] | None:
@@ -756,6 +850,21 @@ def _find_best_price_item(message: str, client_slug: str) -> dict[str, Any] | No
 
 def _contains_any(normalized: str, keywords: list[str]) -> bool:
     return any(keyword in normalized for keyword in keywords)
+
+
+def _signal_contains_any(normalized: str, client_slug: str | None, key: str) -> bool:
+    phrases = get_signal_lexicon_list(client_slug, key)
+    return bool(phrases) and _contains_any(normalized, phrases)
+
+
+def _signal_contains_any_words(normalized: str, client_slug: str | None, key: str) -> bool:
+    words = get_signal_lexicon_list(client_slug, key)
+    return bool(words) and _contains_any_words(normalized, words)
+
+
+def _signal_contains_all(normalized: str, client_slug: str | None, key: str) -> bool:
+    terms = get_signal_lexicon_list(client_slug, key)
+    return bool(terms) and all(term in normalized for term in terms)
 
 
 def _has_services_overview_signal(normalized: str, truth: dict | None) -> bool:
@@ -954,13 +1063,13 @@ def _should_skip_consult(
 ) -> bool:
     if not normalized:
         return True
-    if _has_price_signal(normalized, raw_text):
+    if _has_price_signal(normalized, raw_text, client_slug=client_slug):
         return True
-    if _has_duration_signal(normalized, raw_text):
+    if _has_duration_signal(normalized, raw_text, client_slug=client_slug):
         return True
     if _looks_like_hours_question(normalized, client_slug=client_slug):
         return True
-    if _contains_any(normalized, ["адрес", "где вы", "как добрат", "как доехать", "как пройти", "остановк"]):
+    if _signal_contains_any(normalized, client_slug, "consult_skip_address_phrases"):
         return True
     return False
 
@@ -968,63 +1077,34 @@ def _should_skip_consult(
 def _looks_like_hours_question(normalized: str, *, client_slug: str | None = None) -> bool:
     if not normalized:
         return False
-    if _contains_any(
-        normalized,
-        [
-            "график",
-            "до скольки",
-            "со скольки",
-            "с какого времени",
-            "с какого часа",
-            "открыты",
-            "открыто",
-            "время работы",
-            "жұмыс уақыты",
-            "жұмыс уакыты",
-            "во сколько",
-            "открывает",
-            "открываете",
-            "открываетесь",
-            "когда можно прийти",
-            "когда можно подойти",
-            "когда заканчиваете",
-            "когда заканчивает",
-            "заканчиваете",
-            "заканчивает",
-            "когда закрываетесь",
-            "когда закрывает",
-            "закрываетесь",
-            "нешеге дейін",
-            "қаншаға дейін",
-            "в будни",
-            "по будням",
-            "в выходные",
-            "по выходным",
-        ],
-    ):
+    if _signal_contains_any(normalized, client_slug, "hours_question_phrases"):
         return True
-    if _contains_any_words(normalized, ["часы", "часов"]):
+    if _signal_contains_any_words(normalized, client_slug, "hours_question_words"):
         return not _message_has_service_token(normalized, _normalize_client_slug(client_slug))
-    if "работаете" in normalized or "работайт" in normalized:
+    if _signal_contains_any(normalized, client_slug, "hours_question_work_verbs"):
         return True
-    if "работает" in normalized and _contains_any(normalized, ["вы", "салон"]):
-        if _contains_any(normalized, ["сегодня", "сейчас", "открыт", "будни", "выходн"]):
+    if _signal_contains_any(normalized, client_slug, "hours_question_work_singular") and _signal_contains_any(
+        normalized,
+        client_slug,
+        "hours_question_subject_phrases",
+    ):
+        if _signal_contains_any(normalized, client_slug, "hours_question_time_phrases"):
             return True
     return False
 
 
-def _has_parking_signal(normalized: str) -> bool:
+def _has_parking_signal(normalized: str, *, client_slug: str | None = None) -> bool:
     if not normalized:
         return False
-    if _contains_any(normalized, ["парков", "паркинг", "во дворе", "двор"]):
+    if _signal_contains_any(normalized, client_slug, "parking_direct_phrases"):
         return True
-    if "машинк" in normalized and not _contains_any(
-        normalized, ["парков", "паркинг", "двор", "авто", "остав", "мест", "стоян"]
-    ):
-        return False
-    if _contains_any(normalized, ["авто", "машин", "машины", "машину"]):
-        if _contains_any(normalized, ["мест", "остав", "став", "стоян"]):
-            return True
+    machine_prefixes = get_signal_lexicon_list(client_slug, "parking_machine_prefixes")
+    if machine_prefixes and any(prefix in normalized for prefix in machine_prefixes):
+        exclude_phrases = get_signal_lexicon_list(client_slug, "parking_exclude_phrases")
+        if exclude_phrases and not _contains_any(normalized, exclude_phrases):
+            return False
+    vehicle_words = get_signal_lexicon_list(client_slug, "parking_vehicle_words")
+    if vehicle_words and _contains_any(normalized, vehicle_words):
         return True
     return False
 
@@ -1043,67 +1123,42 @@ def _has_address_hint(normalized: str, truth: dict | None) -> bool:
     return False
 
 
-def _has_guest_waiting_signal(normalized: str) -> bool:
+def _has_guest_waiting_signal(normalized: str, *, client_slug: str | None = None) -> bool:
     if not normalized:
         return False
     tokens = normalized.split()
-    prefixes = (
-        "гост",
-        "ребен",
-        "ребён",
-        "дети",
-        "детя",
-        "детск",
-        "коляс",
-        "ожидан",
-        "пораньше",
-        "раньше",
-        "подожд",
-        "подруг",
-        "падруг",
-        "заранее",
-        "сопровожд",
-    )
-    if any(token.startswith(prefix) for token in tokens for prefix in prefixes):
+    prefixes = get_signal_lexicon_list(client_slug, "guest_waiting_prefixes")
+    if prefixes and any(token.startswith(prefix) for token in tokens for prefix in prefixes):
         return True
-    return _contains_any_words(
-        normalized,
-        ["муж", "супруг", "подруг", "сопровожд", "семья", "семье", "семьи"],
-    )
+    return _signal_contains_any_words(normalized, client_slug, "guest_waiting_words")
 
 
-def _has_price_signal(normalized: str, raw_text: str | None = None) -> bool:
-    price_keywords = ["цена", "прайс", "стоим", "стоимость", "почем", "ценник", "скок", "скока"]
-    currency_words = ["тг", "тенге", "руб", "рубл", "usd", "eur", "доллар", "евро"]
-    if _contains_any(normalized, price_keywords):
+def _has_price_signal(
+    normalized: str,
+    raw_text: str | None = None,
+    *,
+    client_slug: str | None = None,
+) -> bool:
+    if _signal_contains_any(normalized, client_slug, "price_keywords"):
         return True
-    if "сколько" in normalized and "стоит" in normalized:
-        return True
-    if _contains_any(normalized, currency_words):
+    if _signal_contains_any(normalized, client_slug, "price_currency_words"):
         return True
     if raw_text and re.search(r"[₸$€₽]", raw_text):
         return True
     return False
 
 
-def _has_duration_signal(normalized: str, raw_text: str | None = None) -> bool:
+def _has_duration_signal(
+    normalized: str,
+    raw_text: str | None = None,
+    *,
+    client_slug: str | None = None,
+) -> bool:
     if not normalized:
         return False
-    duration_keywords = [
-        "длится",
-        "длительность",
-        "сколько по времени",
-        "по времени",
-        "сколько времени",
-        "сколько занимает",
-        "как долго",
-        "время процедуры",
-    ]
-    if _contains_any(normalized, duration_keywords):
+    if _signal_contains_any(normalized, client_slug, "duration_keywords"):
         return True
     if re.search(r"\bзанимает\b", normalized):
-        return True
-    if "сколько" in normalized and "времени" in normalized:
         return True
     if raw_text:
         if _extract_minutes(raw_text) is not None:
@@ -1310,12 +1365,9 @@ def semantic_question_type(
         include_kinds = {"pricing", "duration"}
 
     if "duration" in include_kinds and _message_has_service_token(normalized, slug):
-        duration_hint = _has_duration_signal(normalized, text)
-        if not duration_hint and "сколько" in normalized:
-            duration_hint = _contains_any_words(
-                normalized,
-                ["час", "часа", "часов", "минута", "минуты", "минут"],
-            )
+        duration_hint = _has_duration_signal(normalized, text, client_slug=slug)
+        if not duration_hint and _signal_contains_any(normalized, slug, "duration_question_lead_terms"):
+            duration_hint = _signal_contains_any_words(normalized, slug, "duration_time_units")
         if duration_hint:
             return SemanticQuestionType(kind="duration", score=1.0, second_score=0.0)
 
@@ -2022,40 +2074,26 @@ def _looks_like_service_question(
         return False
     slug = _normalize_client_slug(client_slug)
     if not _message_has_service_token(normalized, slug):
-        if "запис" in normalized or "жазыл" in normalized:
+        if _signal_contains_any(normalized, slug, "booking_keywords"):
             return False
         if _looks_like_hours_question(normalized, client_slug=slug):
             return False
-        if _has_parking_signal(normalized):
+        if _has_parking_signal(normalized, client_slug=slug):
             return False
-        if _contains_any(normalized, ["адрес", "где вы", "где наход", "как доехать"]):
+        if _signal_contains_any(normalized, slug, "service_question_location_phrases"):
             return False
         if _matches_service_request_lexicon(normalized, slug):
             return True
         return False
-    if _has_price_signal(normalized, raw_text):
+    if _has_price_signal(normalized, raw_text, client_slug=slug):
         return True
-    service_keywords = [
-        "делаете",
-        "есть ли",
-        "есть",
-        "оказываете",
-        "предоставляете",
-        "можно сделать",
-        "жасайсыз",
-        "жасайсыздар",
-        "жасай ма",
-        "бар ма",
-        "қызмет көрсет",
-        "көрсетесіз",
-    ]
-    if _contains_any(normalized, service_keywords):
+    if _signal_contains_any(normalized, slug, "service_question_keywords"):
         return True
     if _matches_service_request_lexicon(normalized, slug):
         return True
     if raw_text and "?" in raw_text:
         return True
-    if "цвет" in normalized and "волос" in normalized:
+    if _signal_contains_all(normalized, slug, "hair_color_terms"):
         return True
     return False
 
@@ -2387,16 +2425,28 @@ def format_reply_from_truth(
     return None
 
 
-def _detect_promotion_intent(normalized: str) -> str | None:
-    if any(keyword in normalized for keyword in ["перв", "первое", "первый"]):
+def _detect_promotion_intent(normalized: str, *, client_slug: str | None = None) -> str | None:
+    if _signal_contains_any(normalized, client_slug, "promotion_first_visit_terms"):
         return "promotion_first_visit"
-    if "именин" in normalized or "день рождения" in normalized:
+    if _signal_contains_any(normalized, client_slug, "promotion_birthday_terms"):
         return "promotion_birthday"
-    if "до после" in normalized and _contains_any_words(normalized, ["дней", "дня", "день"]):
+    if _signal_contains_any(
+        normalized,
+        client_slug,
+        "promotion_birthday_before_after_phrases",
+    ) and _signal_contains_any_words(
+        normalized,
+        client_slug,
+        "promotion_birthday_day_words",
+    ):
         return "promotion_birthday"
-    if "студент" in normalized or "пенсион" in normalized:
+    if _signal_contains_any(normalized, client_slug, "promotion_student_terms"):
         return "promotion_student"
-    if "будн" in normalized and _contains_any(normalized, ["скидк", "акци", "льгот", "промо"]):
+    if _signal_contains_any(
+        normalized,
+        client_slug,
+        "promotion_student_weekday_terms",
+    ) and _signal_contains_any(normalized, client_slug, "promotion_student_discount_terms"):
         return "promotion_student"
     return None
 
@@ -2698,42 +2748,29 @@ def get_demo_salon_decision(
     truth = load_yaml_truth(slug)
     phrase_intents = phrase_match_intent(message, slug)
     policy_pack = load_policy_pack(slug)
-    hygiene_keywords = [
-        "стерилиз",
-        "инструмент",
-        "обрабатываете",
-        "дез",
-        "сухожар",
-        "уз-ванн",
-        "уз ванн",
-        "ультразв",
-        "крафт",
-        "пакет",
-        "вскрыва",
-        "инфек",
-    ]
-    parking_signal = _has_parking_signal(normalized)
-    guest_signal = _has_guest_waiting_signal(normalized)
+    hygiene_keywords = get_signal_lexicon_list(slug, "hygiene_keywords")
+    parking_signal = _has_parking_signal(normalized, client_slug=slug)
+    guest_signal = _has_guest_waiting_signal(normalized, client_slug=slug)
     if not guest_signal and _matches_guest_policy_lexicon(normalized, slug):
         guest_signal = True
-    location_signal = _contains_any(normalized, ["адрес", "где вы", "где наход"])
+    location_signal = _signal_contains_any(normalized, slug, "location_phrases")
     if not location_signal and _has_address_hint(normalized, truth):
         location_signal = True
-    hygiene_signal = _contains_any(normalized, hygiene_keywords)
-    if not hygiene_signal and "подруг" in normalized and "воспал" in normalized:
+    hygiene_signal = bool(hygiene_keywords) and _contains_any(normalized, hygiene_keywords)
+    if not hygiene_signal and _signal_contains_all(normalized, slug, "hygiene_friend_inflammation_terms"):
         hygiene_signal = True
-    price_signal = _has_price_signal(normalized, message)
-    duration_signal = _has_duration_signal(normalized, message)
+    price_signal = _has_price_signal(normalized, message, client_slug=slug)
+    duration_signal = _has_duration_signal(normalized, message, client_slug=slug)
     price_item = _find_best_price_item(message, slug)
     if (
         price_item is None
         and price_signal
-        and _contains_any(normalized, ["мужск"])
-        and "зал" in normalized
+        and _signal_contains_any(normalized, slug, "mens_service_phrases")
+        and _signal_contains_any(normalized, slug, "mens_service_context_phrases")
     ):
         price_item = _build_price_name_index(slug).get(_normalize_text("Мужская стрижка"))
     price_item_payload = _price_item_payload(price_item)
-    if "отмен" in normalized and "за сколько" in normalized:
+    if _signal_contains_all(normalized, slug, "cancel_fee_terms"):
         reply = format_reply_from_truth("cancel_policy", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="cancel_policy")
@@ -2745,9 +2782,10 @@ def get_demo_salon_decision(
         client_slug=slug,
     )
 
-    if policy_intent == "policy_complaint" and _contains_any(
+    if policy_intent == "policy_complaint" and _signal_contains_any(
         normalized,
-        ["без задерж", "без опозд", "без опоз"],
+        slug,
+        "policy_complaint_exclusions",
     ):
         policy_intent = None
 
@@ -2798,8 +2836,8 @@ def get_demo_salon_decision(
             default_response="Жаль, что так вышло. Передам администратору, чтобы разобрались.",
         )
 
-    if "сегодня" in normalized or "прямо сейчас" in normalized:
-        if _contains_any(normalized, ["запис", "окошк", "свободн"]):
+    if _signal_contains_any(normalized, slug, "same_day_terms"):
+        if _signal_contains_any(normalized, slug, "same_day_booking_request_terms"):
             return DemoSalonDecision(
                 action="escalate",
                 response=(
@@ -2810,8 +2848,8 @@ def get_demo_salon_decision(
             )
 
     if "aftercare_gel_lac" in phrase_intents or (
-        "гель лак" in normalized
-        and _contains_any(normalized, ["ухаж", "продл", "держ", "нос", "срок"])
+        _signal_contains_any(normalized, slug, "aftercare_gel_lac_terms")
+        and _signal_contains_any(normalized, slug, "aftercare_gel_lac_care_terms")
     ):
         reply = format_reply_from_truth("aftercare_gel_lac", client_slug=slug, truth=truth)
         if reply:
@@ -2833,12 +2871,16 @@ def get_demo_salon_decision(
                 return service_decision
         return consult_decision
 
-    if "скидки сумм" in normalized or "скидк" in normalized and "сумм" in normalized:
+    if _signal_contains_any(normalized, slug, "promotions_stacking_phrases") or _signal_contains_all(
+        normalized,
+        slug,
+        "promotions_stacking_terms",
+    ):
         reply = format_reply_from_truth("promotions_rules", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="promotions_rules")
 
-    promotion_intent = _detect_promotion_intent(normalized)
+    promotion_intent = _detect_promotion_intent(normalized, client_slug=slug)
     if promotion_intent:
         reply = format_reply_from_truth(
             "promotions",
@@ -2852,12 +2894,19 @@ def get_demo_salon_decision(
     if policy_intent == "policy_discount":
         return None
 
-    if "почему" in normalized and "от" in normalized and ("цена" in normalized or "стоим" in normalized):
+    if _signal_contains_all(normalized, slug, "why_price_from_required_terms") and _signal_contains_any(
+        normalized,
+        slug,
+        "why_price_from_price_terms",
+    ):
         reply = format_reply_from_truth("why_price_from", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="why_price_from")
 
-    if "дороже" in normalized or ("дорог" in normalized and "скид" not in normalized):
+    if _signal_contains_any(normalized, slug, "price_objection_direct_terms") or (
+        _signal_contains_any(normalized, slug, "price_objection_root_terms")
+        and not _signal_contains_any(normalized, slug, "price_objection_exclude_terms")
+    ):
         reply = format_reply_from_truth("objection_price", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="objection_price")
@@ -2877,12 +2926,12 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent=intent_name, meta=meta)
 
-    if "остановк" in normalized or "как пройти" in normalized or "как добрат" in normalized or "как доехать" in normalized:
+    if _signal_contains_any(normalized, slug, "location_directions_phrases"):
         reply = format_reply_from_truth("location_directions", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="location_directions")
 
-    if "вывеск" in normalized:
+    if _signal_contains_any(normalized, slug, "location_signage_phrases"):
         reply = format_reply_from_truth("location_signage", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="location_signage")
@@ -2896,7 +2945,7 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="parking", meta=meta)
 
-    if "последняя запись" in normalized or "до какого времени можно запис" in normalized:
+    if _signal_contains_any(normalized, slug, "last_appointment_phrases"):
         reply = format_reply_from_truth("last_appointment", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="last_appointment")
@@ -2916,7 +2965,7 @@ def get_demo_salon_decision(
             meta=multi_meta if isinstance(multi_meta, dict) else None,
         )
 
-    if "опозда" in normalized:
+    if _signal_contains_any(normalized, slug, "lateness_phrases"):
         minutes = _extract_minutes(message)
         tolerated = truth.get("booking", {}).get("lateness_policy", {}).get("tolerated_minutes", 15)
         try:
@@ -2933,11 +2982,12 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="lateness_ok")
 
-    hours_like = _looks_like_hours_question(normalized, client_slug=slug) or _contains_any(
+    hours_like = _looks_like_hours_question(normalized, client_slug=slug) or _signal_contains_any(
         normalized,
-        ["ашык", "ашық", "бугин", "бүгін"],
+        slug,
+        "hours_extra_phrases",
     )
-    if hours_like and not _contains_any(normalized, ["косметик", "материал", "бренд", "марки"]):
+    if hours_like and not _signal_contains_any(normalized, slug, "hours_exclude_phrases"):
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=guest_signal,
@@ -2946,11 +2996,14 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="hours", meta=meta)
 
-    if _contains_any(normalized, ["услуг", "услуги"]) and _contains_any(
-        normalized, ["мужчин", "мужские", "мужского"]
+    if _signal_contains_any(normalized, slug, "services_terms") and _signal_contains_any(
+        normalized,
+        slug,
+        "services_mens_terms",
     ):
+        mens_price_items = get_signal_lexicon_list(slug, "mens_service_price_items")
         reply = _format_service_price_items(
-            ["Мужская стрижка", "Стрижка машинкой"],
+            mens_price_items,
             slug,
         )
         if reply:
@@ -2965,31 +3018,26 @@ def get_demo_salon_decision(
                 meta=meta,
             )
 
-    if "services_overview" in phrase_intents or _contains_any(
+    if "services_overview" in phrase_intents or _signal_contains_any(
         normalized,
-        [
-            "чем занимает",
-            "какие услуги",
-            "что вы делаете",
-            "что у вас есть",
-            "какой спектр услуг",
-            "какие процедуры",
-            "что можно сделать",
-        ],
+        slug,
+        "services_overview_phrases",
     ) or _has_services_overview_signal(normalized, truth):
         reply = format_reply_from_truth("services_overview", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="services_overview")
 
     if "prep_brows_lashes" in phrase_intents or (
-        "подготов" in normalized and _contains_any(normalized, ["бров", "ресниц"])
-    ) or _contains_any(normalized, ["линз", "контейнер", "макияж"]):
+        _signal_contains_any(normalized, slug, "prep_brows_lashes_prepare_terms")
+        and _signal_contains_any(normalized, slug, "prep_brows_lashes_focus_terms")
+    ) or _signal_contains_any(normalized, slug, "prep_brows_lashes_extra_terms"):
         reply = format_reply_from_truth("prep_brows_lashes", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="prep_brows_lashes")
 
     if "procedure_combo" in phrase_intents or (
-        _contains_any(normalized, ["совмещ", "в один день"]) and _contains_any(normalized, ["чистк", "пилинг"])
+        _signal_contains_any(normalized, slug, "procedure_combo_require_any")
+        and _signal_contains_any(normalized, slug, "procedure_combo_require_all")
     ):
         reply = format_reply_from_truth("procedure_combo", client_slug=slug, truth=truth)
         if reply:
@@ -3000,29 +3048,17 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="style_reference")
 
-    if "system_error" in phrase_intents or "ошибка вызова вебхука" in normalized:
+    if "system_error" in phrase_intents or _signal_contains_any(normalized, slug, "system_error_phrases"):
         reply = format_reply_from_truth("system_error", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="system_error")
 
-    if "service_clarify" in phrase_intents or ("классическ" in normalized and "интерес" in normalized):
+    if "service_clarify" in phrase_intents or _signal_contains_all(normalized, slug, "service_clarify_terms"):
         reply = format_reply_from_truth("service_clarify", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="service_clarify")
 
-    if _contains_any(
-        normalized,
-        [
-            "собак",
-            "животн",
-            "питом",
-            "домашним",
-            "домашними",
-            "улитк",
-            "таракан",
-            "дракон",
-        ],
-    ):
+    if _signal_contains_any(normalized, slug, "guest_animals_terms"):
         reply = format_reply_from_truth("guest_animals", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="guest_policy")
@@ -3145,7 +3181,7 @@ def get_demo_salon_decision(
 
     question_meta_for_price = question_meta if question_type and question_type.kind == "pricing" else None
     if "price_manicure" in phrase_intents or (
-        _contains_any(normalized, ["маникюр", "маник"]) and price_signal and not price_item
+        _signal_contains_any(normalized, slug, "price_manicure_terms") and price_signal and not price_item
     ):
         service_query_meta = _resolve_service_query_meta(
             message,
@@ -3169,46 +3205,46 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="hygiene")
 
-    if _contains_any(normalized, ["сухожар"]):
+    if _signal_contains_any(normalized, slug, "hygiene_dry_heat_terms"):
         reply = format_reply_from_truth("hygiene_dry_heat", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="hygiene")
 
-    if _contains_any(normalized, ["пилк", "однораз"]):
+    if _signal_contains_any(normalized, slug, "hygiene_disposables_terms"):
         reply = format_reply_from_truth("hygiene_disposables", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="hygiene")
 
-    if _contains_any(normalized, ["какой космет", "материал", "бренд", "марки"]):
+    if _signal_contains_any(normalized, slug, "brands_terms"):
         reply = format_reply_from_truth("brands", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="brands")
 
-    if _contains_any(normalized, ["wifi", "вайфай", "вай фай", "wi fi"]):
+    if _signal_contains_any(normalized, slug, "amenities_wifi_terms"):
         reply = format_reply_from_truth("amenities_wifi", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="amenities")
 
-    if _contains_any(normalized, ["кофе", "чай"]):
+    if _signal_contains_any(normalized, slug, "amenities_drinks_terms"):
         reply = format_reply_from_truth("amenities_drinks", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="amenities")
 
-    if _contains_any(normalized, ["туалет", "санузел"]) and not _matches_service_request_lexicon(
+    if _signal_contains_any(normalized, slug, "amenities_toilet_terms") and not _matches_service_request_lexicon(
         normalized, slug
     ):
         reply = format_reply_from_truth("amenities_toilet", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="amenities")
 
-    if "сертификат" in normalized:
+    if _signal_contains_any(normalized, slug, "gift_certificate_terms"):
         reply = format_reply_from_truth("gift_certificate", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="gift_certificate")
 
     if (
         "order_booking" in phrase_intents
-        or _contains_any(normalized, ["запис", "запиш", "окошк", "свободн"])
+        or _signal_contains_any(normalized, slug, "booking_intake_terms")
     ):
         reply = format_reply_from_truth("booking_intake", client_slug=slug, truth=truth)
         if reply:

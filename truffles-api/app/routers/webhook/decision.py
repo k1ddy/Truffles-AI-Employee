@@ -313,6 +313,9 @@ from app.services.demo_salon_knowledge import (
     get_demo_salon_price_reply,
     get_demo_salon_service_decision,
     get_demo_salon_service_hint,
+    get_signal_lexicon_list,
+    get_system_anchor_groups,
+    get_system_lexicon_list,
     load_system_lexicons,
     load_yaml_truth,
     semantic_question_type,
@@ -495,28 +498,8 @@ def is_handover_status_question(text: str) -> bool:
         return False
 
     normalized = text.strip().casefold()
-    keywords = [
-        "передал",
-        "передали",
-        "передано",
-        "заявк",
-        "когда ответ",
-        "когда ответит",
-        "не отвеч",
-        "не отвечает",
-        "почему не отвеч",
-        "почему молч",
-        "молч",
-        "тишин",
-        "сколько ждать",
-        "ждать",
-        "подключ",
-        "ответит",
-        "взял",
-        "взяли",
-        "беру",
-    ]
-    return any(k in normalized for k in keywords)
+    keywords = get_system_lexicon_list("handover_status_keywords")
+    return bool(keywords) and any(k in normalized for k in keywords)
 
 
 def _apply_expected_reply_contract(
@@ -2468,10 +2451,10 @@ ROUTING_MATRIX = {
         "allow_bot_reply": True,
     },
     ConversationState.PENDING.value: {
-        "allow_booking_flow": True,
-        "allow_truth_gate_reply": True,
+        "allow_booking_flow": False,
+        "allow_truth_gate_reply": False,
         "allow_handover_create": False,
-        "allow_bot_reply": True,
+        "allow_bot_reply": False,
     },
     ConversationState.MANAGER_ACTIVE.value: {
         "allow_booking_flow": False,
@@ -2998,9 +2981,14 @@ def _evaluate_booking_signal(
     booking_signal = has_service and has_datetime
     if booking_signal and message_text:
         normalized = normalize_for_matching(message_text)
-        if normalized and _contains_any(normalized, ["совмещ", "в один день"]) and _contains_any(
-            normalized,
-            ["чистк", "пилинг"],
+        procedure_combo_any = get_signal_lexicon_list(client_slug, "procedure_combo_require_any")
+        procedure_combo_all = get_signal_lexicon_list(client_slug, "procedure_combo_require_all")
+        if (
+            normalized
+            and procedure_combo_any
+            and procedure_combo_all
+            and _contains_any(normalized, procedure_combo_any)
+            and _contains_any(normalized, procedure_combo_all)
         ):
             return False, {"booking_blocked_reason": "procedure_combo"}
         segments = [segment.strip() for segment in re.split(r"[?!\.,;]+", message_text) if segment.strip()]
@@ -3039,47 +3027,13 @@ def _has_booking_signal(
 
 
 INFO_ANCHOR_GROUPS: dict[str, list[tuple[str, ...]]] = {
-    "pricing": [
-        ("цен",),
-        ("стоим",),
-        ("скольк", "стоит"),
-        ("поч",),
-    ],
-    "duration": [
-        ("длит",),
-        ("длител",),
-        ("скольк", "врем"),
-        ("врем", "заним"),
-        ("минут",),
-        ("час",),
-    ],
-    "hours": [
-        ("график",),
-        ("режим", "работ"),
-        ("каког", "врем"),
-        ("работ", "скольк"),
-        ("работ", "когда"),
-        ("работ", "до"),
-        ("откры",),
-        ("закры",),
-    ],
-    "location": [
-        ("адрес",),
-        ("где", "наход"),
-        ("где", "вы"),
-        ("локац",),
-        ("перекр",),
-        ("угол",),
-        ("ориентир",),
-        ("как", "доех"),
-        ("как", "добрат"),
-        ("как", "найт"),
-        ("куда", "ехать"),
-        ("улиц",),
-    ],
+    "pricing": get_system_anchor_groups("pricing"),
+    "duration": get_system_anchor_groups("duration"),
+    "hours": get_system_anchor_groups("hours"),
+    "location": get_system_anchor_groups("location"),
 }
 
-QUESTION_WORD_PREFIXES = ("скольк", "где", "когда", "како")
+QUESTION_WORD_PREFIXES = tuple(get_system_lexicon_list("question_word_prefixes"))
 
 
 def _looks_like_hours_followup(message_text: str | None) -> bool:
@@ -3088,23 +3042,8 @@ def _looks_like_hours_followup(message_text: str | None) -> bool:
     normalized = normalize_for_matching(message_text)
     if not normalized:
         return False
-    if _contains_any(normalized, ["по времени", "по часам", "по час"]):
-        return True
-    return _contains_any(
-        normalized,
-        [
-            "график",
-            "до скольк",
-            "во скольк",
-            "время работы",
-            "часы",
-            "часов",
-            "работае",
-            "открыт",
-            "когда откры",
-            "открывает",
-        ],
-    )
+    phrases = get_system_lexicon_list("hours_followup_phrases")
+    return bool(phrases) and _contains_any(normalized, phrases)
 
 
 def _looks_like_carryover_followup(message_text: str | None) -> bool:
@@ -3116,17 +3055,8 @@ def _looks_like_carryover_followup(message_text: str | None) -> bool:
     tokens = _tokenize_for_matching(normalized)
     if not tokens:
         return False
-    followup_phrases = [
-        "по времени",
-        "по цене",
-        "по стоимости",
-        "по длитель",
-        "по адресу",
-        "по месту",
-        "по час",
-        "по график",
-    ]
-    if _contains_any(normalized, followup_phrases):
+    followup_phrases = get_system_lexicon_list("carryover_followup_phrases")
+    if followup_phrases and _contains_any(normalized, followup_phrases):
         return True
     if tokens[0].startswith("скольк") and "мест" in normalized:
         return True
@@ -3134,22 +3064,11 @@ def _looks_like_carryover_followup(message_text: str | None) -> bool:
         pricing_groups = INFO_ANCHOR_GROUPS.get("pricing", [])
         if pricing_groups and _count_anchor_hits(tokens, pricing_groups) > 0:
             return True
-    if tokens[0] in {"и", "а", "еще", "ещё"} and _contains_any(
-        normalized,
-        [
-            "сколько",
-            "когда",
-            "где",
-            "до скольк",
-            "во скольк",
-            "цена",
-            "стоим",
-            "длител",
-            "время",
-            "час",
-        ],
-    ):
-        return True
+    lead_tokens = set(get_system_lexicon_list("carryover_followup_lead_tokens"))
+    question_phrases = get_system_lexicon_list("carryover_followup_question_phrases")
+    if lead_tokens and question_phrases and tokens[0] in lead_tokens:
+        if _contains_any(normalized, question_phrases):
+            return True
     return False
 
 
