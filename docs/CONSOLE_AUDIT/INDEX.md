@@ -21,6 +21,9 @@ How to use
 Comparison
 - `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md`
 
+Reports
+- `docs/REPORTS/2026-02-01-console-web-fact-audit.md`
+
 Roles
 - `docs/CONSOLE_AUDIT/roles/platform_admin.md`
 - `docs/CONSOLE_AUDIT/roles/owner.md`

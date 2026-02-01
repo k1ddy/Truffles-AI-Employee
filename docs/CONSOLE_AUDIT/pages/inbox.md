@@ -28,7 +28,7 @@ Queue (CaseList)
   - Assigned: "Мои" toggle.
   - Advanced (expandable): Branch, date from/to, "Есть ошибки", "В очереди".
 - Refresh button: re-fetches cases.
-- Load more button when `has_more`.
+- Load more button when `has_more` (fetches next cursor page; current UI replaces list, no append).
 - Auto refresh: every 10s (foreground only).
 
 Case rows (compact view)

@@ -94,3 +94,4 @@
 | 2026-02-01-pack-compiler-implementation-a1 | done | feat/2026-02-01-pack-compiler-implementation-a1 | /home/zhan/worktrees/2026-02-01-pack-compiler-implementation-a1 | docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md | 2026-02-01 |
 | 2026-02-01-console-web-inventory-a4 | done | feat/2026-02-01-console-web-inventory-a4 | /home/zhan/worktrees/2026-02-01-console-web-inventory-a4 | docs/TASK_PACKAGES/TP-2026-02-01-console-web-inventory.md | 2026-02-01 |
 | 2026-02-01-console-web-canon-compare-a4 | done | feat/2026-02-01-console-web-canon-compare-a4 | /home/zhan/worktrees/2026-02-01-console-web-canon-compare-a4 | docs/TASK_PACKAGES/TP-2026-02-01-console-web-canon-compare.md | 2026-02-01 |
+| 2026-02-01-console-web-fact-audit2-a4 | done | feat/2026-02-01-console-web-fact-audit2-a4 | /home/zhan/worktrees/2026-02-01-console-web-fact-audit2-a4 | docs/TASK_PACKAGES/TP-2026-02-01-console-web-fact-audit.md | 2026-02-01 |
