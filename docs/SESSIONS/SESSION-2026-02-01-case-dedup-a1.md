@@ -1,6 +1,6 @@
 # SESSION 2026-02-01-case-dedup-a1 — Session 2026-02-01-case-dedup-a1
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-01-case-dedup.md
 - branch: feat/2026-02-01-case-dedup-a1
