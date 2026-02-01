@@ -10,10 +10,11 @@ from uuid import UUID, uuid4
 
 from app.models import Branch, KnowledgeVersion
 from app.schemas.outbox_payload import TenantContext
-from app.services.knowledge_registry_service import (
-    build_pack_index,
-    build_pack_index_meta,
-    get_current_published,
+from app.services.knowledge_registry_service import build_pack_index_meta, get_current_published
+from app.services.pack_compiler_service import (
+    build_compiled_pack_meta,
+    extract_compiled_artifacts,
+    parse_compiled_at,
 )
 
 
@@ -60,25 +61,10 @@ def _coerce_payload(payload_json: dict | None) -> dict | None:
 
 
 def _extract_packs(payload_json: dict) -> dict[str, Any]:
-    client_pack = payload_json.get("client_pack") if isinstance(payload_json, dict) else None
-    packs: dict[str, Any] = {"client_pack": client_pack or {}}
-    consult_playbook = payload_json.get("consult_playbook")
-    if isinstance(consult_playbook, dict):
-        packs["consult_playbook"] = consult_playbook
-    service_catalog = None
-    if isinstance(client_pack, dict):
-        service_catalog = client_pack.get("services_catalog")
-    if isinstance(service_catalog, dict):
-        packs["service_catalog"] = service_catalog
-    faq = payload_json.get("faq")
-    if not isinstance(faq, list) and isinstance(client_pack, dict):
-        faq = client_pack.get("faq")
-    if isinstance(faq, list):
-        packs["faq"] = faq
-    pack_index = build_pack_index(payload_json)
-    if isinstance(pack_index, dict):
-        packs["pack_index"] = pack_index
-    return packs
+    compiled = extract_compiled_artifacts(payload_json, compile_if_missing=False)
+    if isinstance(compiled, dict):
+        return {"compiled_pack": compiled}
+    return {}
 
 
 def _build_tenant_context(
@@ -150,7 +136,14 @@ def build_knowledge_snapshot(
         return None, "invalid_payload"
 
     packs = _extract_packs(payload_json)
-    sha256_value = _hash_packs(packs)
+    compiled_pack = packs.get("compiled_pack") if isinstance(packs, dict) else None
+    if not isinstance(compiled_pack, dict):
+        return None, "compiled_pack_missing"
+    sha256_value = (
+        compiled_pack.get("hash")
+        if isinstance(compiled_pack.get("hash"), str)
+        else _hash_packs(packs)
+    )
 
     now = datetime.now(timezone.utc)
     ttl_seconds = int(os.environ.get("KNOWLEDGE_SNAPSHOT_TTL_SECONDS", "0"))
@@ -167,19 +160,32 @@ def build_knowledge_snapshot(
     )
 
     pack_index_meta = None
-    pack_index = packs.get("pack_index") if isinstance(packs, dict) else None
+    compiled_pack_meta = None
+    pack_index = compiled_pack.get("pack_index")
     if isinstance(pack_index, dict):
-        compiled_at = version.published_at or version.created_at or now
+        compiled_at = (
+            parse_compiled_at(compiled_pack.get("compiled_at"))
+            or version.published_at
+            or version.created_at
+            or now
+        )
         pack_index_meta = build_pack_index_meta(
             pack_index,
             version_id=version.id,
             compiled_at=compiled_at,
             source="knowledge_snapshot",
         )
+    compiled_pack_meta = build_compiled_pack_meta(
+        compiled_pack,
+        version_id=version.id,
+        source="knowledge_snapshot",
+    )
 
     extensions = {"source": "knowledge_versions"}
     if pack_index_meta:
         extensions["pack_index"] = pack_index_meta
+    if compiled_pack_meta:
+        extensions["compiled_pack"] = compiled_pack_meta
 
     snapshot = {
         "snapshot_id": str(uuid4()),

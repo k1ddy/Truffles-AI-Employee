@@ -381,6 +381,24 @@ def _extract_pack_index_meta(client_config: dict | None) -> dict[str, Any] | Non
     return meta or None
 
 
+def _extract_compiled_pack_meta(client_config: dict | None) -> dict[str, Any] | None:
+    if not isinstance(client_config, dict):
+        return None
+    compiled_pack = client_config.get("compiled_pack")
+    if not isinstance(compiled_pack, dict):
+        return None
+    meta = _compact_signal_snapshot(
+        {
+            "schema_version": compiled_pack.get("schema_version"),
+            "hash": compiled_pack.get("hash"),
+            "version_id": compiled_pack.get("version_id"),
+            "compiled_at": compiled_pack.get("compiled_at"),
+            "source": compiled_pack.get("source"),
+        }
+    )
+    return meta or None
+
+
 def _detect_fast_intent(
     message_text: str,
     *,
@@ -1946,6 +1964,7 @@ def _run_class_router_stage(
                 "domain_router": domain_snapshot,
                 "class_router": class_router_snapshot,
                 "pack_index": _extract_pack_index_meta(client_config),
+                "compiled_pack": _extract_compiled_pack_meta(client_config),
             }
         )
         _update_message_signal_snapshot(saved_message, signal_snapshot)
@@ -2508,6 +2527,22 @@ DATE_KEYWORDS = [
 
 TIME_PATTERN = re.compile(r"\b\d{1,2}[:.]\d{2}\b")
 TIME_HOUR_PATTERN = re.compile(r"\b(?:в|к)\s*(?:[01]?\d|2[0-3])\b", re.IGNORECASE)
+TIME_ONLY_AMPM_PATTERN = re.compile(r"^\d{1,2}(?:am|pm)$", re.IGNORECASE)
+TIME_ONLY_ALLOWED_TOKENS = {
+    "в",
+    "во",
+    "к",
+    "ко",
+    "на",
+    "около",
+    "примерно",
+    "после",
+    "до",
+    "ну",
+    "э",
+    "м",
+}
+TIME_ONLY_ALLOWED_PREFIXES = ("час", "мин", "вечер", "утр", "дн", "ноч")
 DATE_PATTERN = re.compile(
     r"\b(?:сегодня|завтра|послезавтра|понедель\w*|вторник\w*|сред\w*|четверг\w*|пятниц\w*|суббот\w*|воскрес\w*|утром|днем|днём|вечером)\b",
     re.IGNORECASE,
@@ -2872,6 +2907,38 @@ def _extract_datetime(
     if date_match:
         return date_match.group(0)
     return None
+
+
+def _looks_like_time_only_request(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    tokens = _tokenize_for_matching(normalized)
+    if not tokens:
+        return False
+    has_time_token = False
+    has_time_marker = bool(TIME_PATTERN.search(message_text) or TIME_HOUR_PATTERN.search(message_text))
+    for token in tokens:
+        if token.isdigit():
+            if len(token) <= 2:
+                has_time_token = True
+                continue
+            if has_time_marker and len(token) in (3, 4):
+                has_time_token = True
+                continue
+            return False
+        if TIME_ONLY_AMPM_PATTERN.fullmatch(token):
+            has_time_token = True
+            continue
+        if token in TIME_ONLY_ALLOWED_TOKENS:
+            continue
+        if any(token.startswith(prefix) for prefix in TIME_ONLY_ALLOWED_PREFIXES):
+            has_time_marker = True
+            continue
+        return False
+    return has_time_token
 
 
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration"}

@@ -36,6 +36,15 @@ REQUIRED_POLICY_FIELDS = [
 REQUIRED_PACK_FIELDS = REQUIRED_CLIENT_PACK_FIELDS + REQUIRED_POLICY_FIELDS
 
 _MISSING = object()
+_COMPILED_ARTIFACTS_KEY = "compiled_artifacts"
+
+
+def strip_compiled_artifacts(payload: dict | None) -> dict | None:
+    if not isinstance(payload, dict):
+        return payload
+    if _COMPILED_ARTIFACTS_KEY not in payload:
+        return payload
+    return {key: value for key, value in payload.items() if key != _COMPILED_ARTIFACTS_KEY}
 
 
 def _get_nested_value(data: dict, path: str) -> Any:
@@ -170,6 +179,7 @@ def build_diff(current_payload: dict | None, next_payload: dict) -> str:
 def dump_pack_yaml(payload: dict | None) -> str:
     if not payload:
         return ""
+    payload = strip_compiled_artifacts(payload)
     return yaml.safe_dump(
         payload,
         sort_keys=False,
@@ -178,6 +188,7 @@ def dump_pack_yaml(payload: dict | None) -> str:
 
 
 def build_payload_checksum(payload: dict) -> str:
+    payload = strip_compiled_artifacts(payload)
     payload_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
 

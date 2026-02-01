@@ -3,7 +3,12 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from app.services.learning_service import add_to_knowledge, get_client_slug, is_owner_response
+from app.services.learning_service import (
+    add_learned_response_to_knowledge,
+    add_to_knowledge,
+    get_client_slug,
+    is_owner_response,
+)
 
 
 class TestIsOwnerResponse:
@@ -332,3 +337,33 @@ class TestAddToKnowledge:
         assert result is not None
         call_args = mock_httpx.return_value.__enter__.return_value.put.call_args
         assert call_args[1]["json"]["points"][0]["payload"]["metadata"]["learned_from"] == "manager"
+
+
+class TestAddLearnedResponseToKnowledge:
+    @patch("app.services.learning_service.get_embedding")
+    @patch("app.services.learning_service.httpx.Client")
+    def test_adds_to_qdrant_successfully(self, mock_httpx, mock_embedding):
+        mock_db = Mock()
+        mock_client = Mock()
+        mock_client.name = "test_client"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_client
+
+        mock_embedding.return_value = [0.1] * 1024
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_httpx.return_value.__enter__.return_value.put.return_value = mock_response
+
+        learned = Mock()
+        learned.id = uuid.uuid4()
+        learned.client_id = uuid.uuid4()
+        learned.branch_id = uuid.uuid4()
+        learned.question_text = "What is the price?"
+        learned.response_text = "The price is 10000 tenge"
+        learned.source_name = "Owner"
+        learned.qdrant_point_id = None
+
+        point_id = add_learned_response_to_knowledge(mock_db, learned)
+
+        assert point_id is not None
+        assert learned.qdrant_point_id == point_id

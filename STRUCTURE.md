@@ -25,6 +25,10 @@
 | `contracts/llm/` | Контракты LLM outputs (router + answer_interpreter) | Архитектор/Backend |
 | `contracts/llm/dialogue_controller_output.v1.jsonschema` | Контракт LLM‑контроллера (router) | Архитектор/Backend |
 | `contracts/llm/answer_interpreter_output.v1.jsonschema` | Контракт LLM answer_interpreter | Архитектор/Backend |
+| `contracts/packs/` | Pack-compiler artifacts (signal graph, indexes) | Архитектор/Backend |
+| `contracts/packs/signal_graph.v1.jsonschema` | Канон сигнального графа (anchors/lexicons) | Архитектор/Backend |
+| `contracts/policy/` | Policy DSL bundles | Архитектор/Backend |
+| `contracts/policy/policy_bundle.v1.jsonschema` | Канон policy bundle (guards/sections) | Архитектор/Backend |
 | `contracts/integrations/provider_inbound.v1.jsonschema` | Provider inbound envelope (gateway) | Архитектор/Backend |
 | `contracts/integrations/provider_outbound.v1.jsonschema` | Provider outbound envelope (gateway) | Архитектор/Backend |
 | `contracts/integrations/media_send.v1.jsonschema` | Media send payload (signed URL) | Архитектор/Backend |
@@ -55,12 +59,15 @@
 | `docker-compose.yml` | **Заглушка:** инфра‑стек в `/home/zhan/infrastructure/docker-compose*.yml` | DevOps |
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `ops/diagnose.py` | Диагностика диалогов/trace/outbox + `dialog-report` (one-command) | QA/OPS/Brain |
+| `ops/shadow_replay.py` | Shadow replay report (decision_meta/trace comparison) | QA/OPS/Brain |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
 | `truffles-api/docker-compose.test.yml` | Test‑compose overrides (test containers, no prod env) | Backend/QA |
 | `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
 | `truffles-api/app/services/console_confirmations.py` | Confirmation safeguards for destructive Console actions | Backend |
 | `truffles-api/app/services/reasoning_core.py` | Unified Reasoning Core API (signals -> gates -> actions -> compose -> trace) | Backend/Architect |
+| `truffles-api/app/services/pack_compiler_service.py` | Pack compiler (compiled artifacts, hashing, schema validation) | Backend/Architect |
+| `truffles-api/app/services/learned_response_service.py` | Auto-ingest + approval wiring for learned responses | Backend |
 | `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |
 | `truffles-api/app/models/console_macro.py` | DB model for Inbox macros (Console) | Backend |
 | `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |
@@ -93,6 +100,7 @@
 | `docs/REPORTS/2026-01-30-inbox-ux-standard.md` | Отчёт: Inbox UX standard (analysis + variants) | Brain/Architect |
 | `docs/REPORTS/2026-01-30-inbox-ux-v2.md` | Отчёт: Inbox UX v2 + макросы | Brain/Architect |
 | `docs/REPORTS/2026-01-31-console-media-infra-telegram.md` | Report: Console media infra + Telegram touchpoints | Brain/Architect |
+| `docs/REPORTS/2026-02-01-pack-compiler-implementation.md` | Report: Pack compiler implementation evidence + chaos-sim summary | Brain/Architect |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
@@ -590,6 +598,8 @@ truffles-api/
 | `truffles-api/tests/test_webhook_dedup.py` | Unit: webhook buffer/dedup helpers |
 | `truffles-api/tests/test_webhook_response.py` | Unit: CTA и quiet hours helpers |
 | `truffles-api/tests/test_reasoning_core.py` | Unit: Reasoning Core contract/wiring |
+| `truffles-api/tests/test_pack_compiler.py` | Unit: pack compiler artifacts + checksum |
+| `truffles-api/tests/test_policy_dsl.py` | Unit: policy DSL schema validation |
 
 ---
 

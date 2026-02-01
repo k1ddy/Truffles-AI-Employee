@@ -11,6 +11,7 @@ from app.database import get_db
 from app.knowledge_gateway_app import app
 from app.schemas.outbox_payload import TenantContext
 from app.services.knowledge_snapshot_service import build_knowledge_snapshot
+from app.services.pack_compiler_service import compile_pack_payload, inject_compiled_artifacts
 
 
 @pytest.fixture
@@ -79,9 +80,26 @@ def test_build_knowledge_snapshot_happy_path():
     query.filter.return_value.first.return_value = branch
     db.query.return_value = query
 
+    base_payload = {
+        "client_pack": {
+            "services_catalog": {"services": []},
+            "policy": {
+                "hard_law": {},
+                "payment_info": {},
+                "reschedule": {},
+                "cancel": {},
+                "medical": {},
+                "legal": {},
+                "complaint": {},
+                "discounts": {},
+                "guard_topics": {"refund": ["refund"]},
+            },
+        }
+    }
+    compiled = compile_pack_payload(base_payload)
     version = SimpleNamespace(
         id=uuid4(),
-        payload_json={"client_pack": {"services_catalog": {"services": []}}},
+        payload_json=inject_compiled_artifacts(base_payload, compiled),
     )
 
     tenant_context = TenantContext(client_id=client_id, branch_id=branch_id)
@@ -95,4 +113,37 @@ def test_build_knowledge_snapshot_happy_path():
     assert snapshot is not None
     assert snapshot["tenant_context"]["client_slug"] == "demo_salon"
     assert snapshot["tenant_context"]["branch_slug"] == "branch-1"
-    assert snapshot["packs"]["service_catalog"]["services"] == []
+    compiled_pack = snapshot["packs"]["compiled_pack"]
+    effective_pack = compiled_pack["effective_pack"]
+    assert effective_pack["client_pack"]["services_catalog"]["services"] == []
+
+
+def test_build_knowledge_snapshot_requires_compiled_pack():
+    db = Mock()
+    client_id = uuid4()
+    branch_id = uuid4()
+    branch = SimpleNamespace(
+        id=branch_id,
+        client_id=client_id,
+        slug="branch-1",
+        instance_id="demo-instance",
+        client=SimpleNamespace(name="demo_salon"),
+    )
+    query = Mock()
+    query.filter.return_value.first.return_value = branch
+    db.query.return_value = query
+
+    version = SimpleNamespace(
+        id=uuid4(),
+        payload_json={"client_pack": {"services_catalog": {"services": []}}},
+    )
+
+    tenant_context = TenantContext(client_id=client_id, branch_id=branch_id)
+    with patch(
+        "app.services.knowledge_snapshot_service.get_current_published",
+        return_value=version,
+    ):
+        snapshot, error = build_knowledge_snapshot(db, tenant_context=tenant_context)
+
+    assert snapshot is None
+    assert error == "compiled_pack_missing"

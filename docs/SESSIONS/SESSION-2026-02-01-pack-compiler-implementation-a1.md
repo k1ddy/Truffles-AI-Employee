@@ -1,0 +1,21 @@
+# SESSION 2026-02-01-pack-compiler-implementation-a1 — Session 2026-02-01-pack-compiler-implementation-a1
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md
+- branch: feat/2026-02-01-pack-compiler-implementation-a1
+- worktree: /home/zhan/worktrees/2026-02-01-pack-compiler-implementation-a1
+- base_ref: origin/main
+- scope: Implement Pack-Compiler + Policy/Signal DSL + auto-ingest (compiled artifacts only) with tests/evidence.
+- done:
+  - Pack compiler + DSL schemas wired; knowledge snapshot now compiled-pack only.
+  - Auto-ingest learned_responses approval flow wired (roles + Telegram callbacks).
+  - Shadow replay report tool added.
+  - Golden eval (core) run; chaos-sim + trace bundle + shadow replay report generated.
+  - Time-only guard restore added; unit test captured.
+  - Pack-compiler report saved to docs/REPORTS.
+- next:
+  - Rerun chaos-sim to confirm HTTP 500 fix + check remaining failure patterns.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md
+- last_updated: 2026-02-01
