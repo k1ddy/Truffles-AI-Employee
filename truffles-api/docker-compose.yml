@@ -3,7 +3,8 @@ version: "3.8"
 services:
   truffles-api:
     build:
-      context: .
+      context: ..
+      dockerfile: truffles-api/Dockerfile
       args:
         APP_VERSION: ${APP_VERSION:-local}
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
@@ -34,7 +35,8 @@ services:
 
   truffles-outbox:
     build:
-      context: .
+      context: ..
+      dockerfile: truffles-api/Dockerfile
     container_name: truffles-outbox
     command: python -m app.workers.outbox
     env_file:
@@ -49,7 +51,8 @@ services:
 
   truffles-sentinel:
     build:
-      context: .
+      context: ..
+      dockerfile: truffles-api/Dockerfile
     container_name: truffles-sentinel
     command: python -m app.workers.sentinel
     env_file:

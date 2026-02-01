@@ -1710,6 +1710,15 @@ def is_thanks_message(text: str) -> bool:
         return False
     if normalized in THANKS_PHRASES:
         return True
+    pack_phrases = get_system_lexicon_list("thanks_phrases")
+    if pack_phrases:
+        if normalized in pack_phrases:
+            return True
+        tokens = normalized.split()
+        if any(token in pack_phrases for token in tokens):
+            return True
+        if any(" " in phrase and phrase in normalized for phrase in pack_phrases):
+            return True
     tokens = normalized.split()
     if len(tokens) == 2 and tokens[0] in THANKS_PHRASES:
         if "?" in text or any(ch.isdigit() for ch in text):

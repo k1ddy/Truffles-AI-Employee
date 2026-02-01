@@ -1,0 +1,26 @@
+# SESSION 2026-02-01-pack-compiler-pending-a1 — Session 2026-02-01-pack-compiler-pending-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-pending-gap.md
+- branch: feat/2026-02-01-pack-compiler-pending-a1
+- worktree: /home/zhan/worktrees/2026-02-01-pack-compiler-pending-a1
+- base_ref: origin/main
+- scope: Pending pack lexicons + pack-compiler container schema path + chaos-sim rerun.
+- done:
+  - Pending ack/close/wait lexicons moved to packs; added RU/KK variants (no code dictionaries).
+  - Pending gate uses pack lexicons; added pending_wait coverage for "понял"/"понятно"/"ясно"/"лагодарю".
+  - Pack compiler repo-root detection hardened; contracts copied into image; compose build context updated.
+  - Added/updated pending pack-lexicon tests; pytest run recorded.
+  - Rebuilt truffles-api container; chaos-sim rerun (pending_action_mismatch cleared).
+  - Remaining chaos-sim failures accepted as baseline GAP in `STATE.md`.
+- next:
+  - Triage remaining chaos-sim failures (action_mismatch/ood_false_positive/expected_reply_type_mismatch/state_mismatch).
+  - Decide whether to adjust booking/ood routing or accept as baseline gaps.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-pending-gap.md
+  - /tmp/pytest_pending_gate_20260201.txt
+  - /tmp/chaos_pack_compiler_pending_fix4/report.md
+  - /tmp/chaos_pack_compiler_pending_fix4/failures.partial.jsonl
+  - docs/REPORTS/2026-02-01-pack-compiler-implementation.md
+- last_updated: 2026-02-01

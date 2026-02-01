@@ -2405,25 +2405,6 @@ MEMORY_PROFILE_ENABLED = os.environ.get("MEMORY_PROFILE_ENABLED", "").strip().lo
     "yes",
 }
 
-PENDING_ACK_PHRASES = {
-    "ага",
-    "актуально",
-    "да",
-    "давай",
-    "жду",
-    "ок",
-    "ответьте",
-}
-PENDING_CLOSE_PHRASES = {
-    "закрыто",
-    "решено",
-    "не надо",
-    "уже сделал",
-    "по телефону",
-    "спасибо все",
-    "спасибо всё",
-}
-
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
 MSG_BOOKING_ASK_NAME = "Как вас зовут?"
