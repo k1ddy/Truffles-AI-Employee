@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.services import reasoning_core
 
+
 def _stage_order_hash(stage_order):
     return reasoning_core.stage_order_hash(stage_order)
 
