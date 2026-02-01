@@ -93,3 +93,4 @@
 | 2026-02-01-pack-compiler-dec019-a1 | done | feat/2026-02-01-pack-compiler-dec019-a1 | /home/zhan/worktrees/2026-02-01-pack-compiler-dec019-a1 | docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-dsl.md | 2026-02-01 |
 | 2026-02-01-pack-compiler-docs-a1 | done | feat/2026-02-01-pack-compiler-docs-a1 | /home/zhan/worktrees/2026-02-01-pack-compiler-docs-a1 | docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-docs.md | 2026-02-01 |
 | 2026-02-01-pack-compiler-implementation-a1 | done | feat/2026-02-01-pack-compiler-implementation-a1 | /home/zhan/worktrees/2026-02-01-pack-compiler-implementation-a1 | docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md | 2026-02-01 |
+| 2026-02-01-console-web-inventory-a4 | done | feat/2026-02-01-console-web-inventory-a4 | /home/zhan/worktrees/2026-02-01-console-web-inventory-a4 | docs/TASK_PACKAGES/TP-2026-02-01-console-web-inventory.md | 2026-02-01 |
