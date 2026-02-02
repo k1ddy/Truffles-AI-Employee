@@ -335,6 +335,7 @@
 | `SPECS/ESCALATION.md` | Эскалация, статусы, SLA‑поведение |
 | `SPECS/ARCHITECTURE.md` | Рантайм‑архитектура и Decision Graph |
 | `SPECS/CONTROL_PLANE.md` | Канон консоли как Control Plane (UX/роли/онбординг) |
+| `SPECS/VERTICAL_PACK_KIT.md` | Minimum Data Contract + SAFE_MODE readiness |
 | `docs/SESSION_START_PROMPT.txt` | Минимальный протокол старта и проверки фактов |
 | `TECH.md` | Доступы, команды, где что работает |
 | `truffles-api/app/routers/webhook/` | Входящие WhatsApp (direct + legacy). Модули: `_legacy.py`, `booking.py`, `branch_selection.py`, `context_manager.py`, `decision.py`, `dedup.py`, `guards.py`, `http.py`, `info.py`, `media.py`, `outbox.py`, `parsing.py`, `pending.py`, `policy.py`, `response.py`, `router_sla.py`, `secrets.py`, `session_memory.py`, `shield.py`, `trace.py`. |
@@ -412,6 +413,7 @@
 | `ACTIVE_LEARNING.md` | Автообучение на ответах менеджеров | Модерация, Qdrant |
 | `CONSULTANT.md` | Поведение бота, 9 правил, границы | Промпт, LLM, ответы |
 | `ARCHITECTURE.md` | Техническая архитектура, стек, потоки | Новые компоненты |
+| `VERTICAL_PACK_KIT.md` | Minimum Data Contract + SAFE_MODE readiness | Онбординг/качество данных |
 | `INFRASTRUCTURE.md` | Инфраструктура, безопасность, CI/CD, тесты | DevOps, качество |
 | `MULTI_TENANT.md` | Мультитенантность, онбординг | Новый заказчик |
 | `SYSTEM_REFERENCE.md` | Системные референсы (интеграции/точки правды) | При аудите/интеграциях |

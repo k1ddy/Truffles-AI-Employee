@@ -17,8 +17,13 @@ REQUIRED_CLIENT_PACK_FIELDS = [
     "client_pack.salon.services_summary",
     "client_pack.salon.communication.languages",
     "client_pack.services_catalog.services",
+    "client_pack.service_duration_estimates",
     "client_pack.booking.collect_fields",
     "client_pack.booking.bot_can_confirm",
+    "client_pack.guest_policy",
+    "client_pack.safety.medical_note",
+    "client_pack.pricing.price_from_reason",
+    "client_pack.quality.expectations_photo",
     "client_pack.price_list",
 ]
 
@@ -47,8 +52,14 @@ MINIMUM_DATA_REQUIRED_FIELDS = [
     "client_pack.salon.services_summary",
     "client_pack.salon.communication.languages",
     "client_pack.services_catalog.services",
+    "client_pack.service_duration_estimates",
+    "client_pack.booking.collect_fields",
+    "client_pack.booking.bot_can_confirm",
     "client_pack.price_list",
     "client_pack.guest_policy",
+    "client_pack.safety.medical_note",
+    "client_pack.pricing.price_from_reason",
+    "client_pack.quality.expectations_photo",
     "client_pack.policy.hard_law",
     "client_pack.policy.payment_info",
     "client_pack.policy.reschedule",
@@ -70,6 +81,7 @@ _MINIMUM_DATA_DURATION_KEYS = (
 
 _MISSING = object()
 _COMPILED_ARTIFACTS_KEY = "compiled_artifacts"
+_LANGUAGE_ALIASES = {"kz": "kk"}
 
 
 def strip_compiled_artifacts(payload: dict | None) -> dict | None:
@@ -121,8 +133,10 @@ def _normalize_language_list(value: Any) -> list[str]:
         if not isinstance(item, str):
             item = str(item)
         cleaned = item.strip().casefold()
-        if cleaned:
-            normalized.append(cleaned)
+        if not cleaned:
+            continue
+        cleaned = _LANGUAGE_ALIASES.get(cleaned, cleaned)
+        normalized.append(cleaned)
     return normalized
 
 
@@ -154,6 +168,18 @@ def get_missing_required_fields(
         value = _get_nested_value(normalized, path)
         if value is _MISSING or _is_empty_value(value):
             missing.append(path)
+    language_path = "client_pack.salon.communication.languages"
+    language_value = _get_nested_value(normalized, language_path)
+    if (
+        language_value is not _MISSING
+        and not _is_empty_value(language_value)
+        and language_path not in missing
+    ):
+        normalized_languages = set(_normalize_language_list(language_value))
+        if not normalized_languages or not set(MINIMUM_DATA_REQUIRED_LANGUAGES).issubset(
+            normalized_languages
+        ):
+            missing.append(language_path)
     return missing
 
 
@@ -163,13 +189,17 @@ def get_missing_minimum_data_fields(payload: dict) -> list[str]:
         normalized,
         required_fields=MINIMUM_DATA_REQUIRED_FIELDS,
     )
-    if "client_pack.services_catalog.services" not in missing and not _has_duration_data(normalized):
+    if (
+        "client_pack.services_catalog.services" not in missing
+        and "client_pack.service_duration_estimates" not in missing
+        and not _has_duration_data(normalized)
+    ):
         missing.append("client_pack.service_duration_estimates")
     if "client_pack.salon.communication.languages" not in missing:
         languages = _get_nested_value(normalized, "client_pack.salon.communication.languages")
         if languages is not _MISSING:
             normalized_languages = set(_normalize_language_list(languages))
-            if normalized_languages and not set(MINIMUM_DATA_REQUIRED_LANGUAGES).issubset(
+            if not normalized_languages or not set(MINIMUM_DATA_REQUIRED_LANGUAGES).issubset(
                 normalized_languages
             ):
                 missing.append("client_pack.salon.communication.languages")
