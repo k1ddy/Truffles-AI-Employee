@@ -2,7 +2,7 @@
 
 **Статус:** CANON  
 **Owner:** Top Architect  
-**Обновлено:** 2026-01-22  
+**Обновлено:** 2026-02-02  
 **Scope:** архитектура рантайма, decision graph, компоненты и потоки.  
 **Out of scope:** тарифы/продажи, evidence/CI.  
 **Links:** `SPECS/CONSULTANT.md`, `SPECS/INFRASTRUCTURE.md`, `STATE.md`.
@@ -141,6 +141,7 @@ _handle_webhook_payload(skip_persist=True)
     ↓
 behavioral shield (spam/toxic) → pending/opt‑out/Hard‑LAW escalation → policy‑gates (скидки/оплата info)
 → answer‑interpreter (expected_reply_type) → **Signal Snapshot Layer** (LLM pack‑ref‑only intent/slots + compiled pack‑index + semantic/RAG signals; fallback recorded)
+→ **Hybrid LLM‑plan** (outcome/tool_action/pack_refs) → plan validator (safety/state/tool_args; tool‑first)
 → early OOD (только при out‑signals без in‑signals)
 → tools/packs fact‑resolver (info/consult/booking/service) → fast intent (smalltalk) → LLM‑формулировка поверх фактов → Response Guard → truth gate fallback → low‑confidence handling
     ↓
@@ -150,6 +151,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 #### Unified Reasoning Core (DEC-018)
 - **Signal Snapshot Layer:** единая точка сигналов (pack‑index, domain anchors, semantic/RAG, LLM‑router). Никаких бизнес‑лексиконов в коде.
 - **LLM contract:** LLM возвращает только pack‑ID/intent/slots + confidence (pack‑ref‑only); факты только из packs/tools.
+- **Hybrid LLM‑plan (DEC-020):** LLM возвращает план JSON (outcome/tool_action/tool_args/pack_refs/language/confidence/goal); валидатор проверяет безопасность/состояние/аргументы и гарантирует tool‑first.
 - **Pack‑index:** строится на publish (domain/company/client/branch), версионируется и пишется в decision_meta (pack_id/version/hash).
 - **DEC-019 Pack‑Compiler:** packs компилируются в deterministic artifacts (pack‑index + signal graph + policy bundles); runtime читает только compiled artifacts; Policy/Signal DSL валидируется при compile; auto‑ingest только через approval.
 - **Routing:** gates принимают решения только по snapshot; low‑confidence → deterministic fallback с фиксацией `fallback_reason`.

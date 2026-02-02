@@ -2,7 +2,7 @@
 
 **Статус:** CANON  
 **Owner:** Жанбол  
-**Обновлено:** 2026-01-22  
+**Обновлено:** 2026-02-02  
 **Scope:** приоритеты и фазы развития технической части.  
 **Out of scope:** реализация задач, evidence.  
 **Links:** `STATE.md`, `SPECS/ARCHITECTURE.md`, `SPECS/INFRASTRUCTURE.md`.
@@ -15,7 +15,7 @@
 
 1. **Safety/Policy выше смысла; LAW‑гейты и truth‑first всегда.**
 2. **Deterministic Core** для безопасности/состояний и факт‑коммита (tools/packs).
-3. **LLM‑first понимание** (intent/slots/summary) с детерминированным commit и валидацией.
+3. **LLM‑first понимание** через Hybrid LLM‑plan (строгий JSON‑план) с детерминированным commit и валидацией.
 4. **Гибрид обязателен.** Семантический resolver (embeddings) + tools; ключевые слова — только fallback.
 5. **Факты только из tools/packs.** Response Guard блокирует “лишнее”.
 6. **Один Decision Graph.** Решения идут по фиксированной цепочке, без “долгих размышлений”.
@@ -128,6 +128,7 @@
 
 ### P0 — LLM‑first понимание + tool‑only факты
 - Зафиксировать DEC + канон‑доки (Vision/Requirements/Architecture/Consultant/Active‑Learning/Multi‑Tenant).
+- Hybrid LLM‑plan контракт + валидатор (plan → validate → tool → compose).
 - Tool‑контракты фактов + Response Guard (ноль галлюцинаций).
 - Semantic resolver (embeddings + thresholds) для RU/KZ/mixed, keywords → fallback.
 - CI deploy без конфликтов; `/admin/version` всегда = HEAD.
@@ -171,8 +172,9 @@ _Сводка для ориентира; актуальный статус и ev
 ## БЛИЖАЙШИЕ ЗАДАЧИ (P0)
 
 1. DEC + синхронизация канон‑доков под LLM‑first + tool‑only facts.
-2. Спецификация tool‑контрактов и Response Guard.
-3. Спецификация semantic resolver (embeddings + thresholds) + RU/KZ/mixed стратегия.
+2. Спецификация Hybrid LLM‑plan (JSON контракт + валидатор + tool‑first).
+3. Спецификация tool‑контрактов и Response Guard.
+4. Спецификация semantic resolver (embeddings + thresholds) + RU/KZ/mixed стратегия.
 
 ## БЛИЖАЙШИЕ ЗАДАЧИ (P1)
 
@@ -192,7 +194,7 @@ _Сводка для ориентира; актуальный статус и ev
 
 ---
 
-*Обновлено: 2026-01-14*
+*Обновлено: 2026-02-02*
 
 ---
 ## 4) Базовая реализация (что уже есть)

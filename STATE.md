@@ -8,6 +8,8 @@
 
 **NOW (1 экран)**
 - DONE: DEC-019 Pack-Compiler + Policy/Signal DSL + auto-ingest (draft) — evidence: `docs/IMPERIUM_DECISIONS.yaml`.
+- DONE: DEC-020 Hybrid LLM‑plan (plan → validate → tool → compose; tool‑first; pack‑only; lexicons fallback) — evidence: `docs/IMPERIUM_DECISIONS.yaml`, `STRATEGY/VISION.md`, `STRATEGY/REQUIREMENTS.md`, `STRATEGY/TECH_ROADMAP.md`, `SPECS/ARCHITECTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/SYSTEM_REFERENCE.md`, `SPECS/ESCALATION.md`, `docs/TASK_PACKAGES/TP-2026-02-02-hybrid-llm-plan-dec.md`.
+- PLAN: Hybrid LLM‑plan implementation (router plan JSON + validator + tool‑first) — Task Package: `docs/TASK_PACKAGES/TP-2026-02-02-hybrid-llm-plan-implementation.md`.
 - DONE: DEC-019 owner-doc sync + implementation TP (compiled artifacts only) — evidence: `SPECS/ARCHITECTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/SYSTEM_REFERENCE.md`, `SPECS/ACTIVE_LEARNING.md`, `STRATEGY/REQUIREMENTS.md`, `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md`, `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-docs.md`, `STRUCTURE.md`.
 - DONE: Pack-Compiler runtime (compiled artifacts only + policy/signal schemas + compiled snapshot) — evidence: `truffles-api/app/services/pack_compiler_service.py`, `contracts/packs/signal_graph.v1.jsonschema`, `contracts/policy/policy_bundle.v1.jsonschema`, `truffles-api/app/services/knowledge_registry_service.py`, `truffles-api/app/services/knowledge_snapshot_service.py`, `truffles-api/app/services/knowledge_snapshot_consumer.py`, `truffles-api/app/routers/webhook/decision.py`, `truffles-api/app/services/demo_salon_knowledge.py`, `/tmp/pytest_pack_compiler_2026-02-01.txt`, `/tmp/pytest_policy_dsl_2026-02-01.txt`, `/tmp/pytest_knowledge_snapshot_gateway_2026-02-01.txt`, `/tmp/pytest_message_signal_snapshot_2026-02-01.txt`.
 - DONE: Auto-ingest approvals (learned_responses queue + Telegram approve/reject + auto-approve roles + draft apply) — evidence: `truffles-api/app/services/learned_response_service.py`, `truffles-api/app/services/learning_service.py`, `truffles-api/app/services/manager_message_service.py`, `truffles-api/app/services/telegram_service.py`, `truffles-api/app/routers/telegram_webhook.py`, `/tmp/pytest_learning_service_2026-02-01.txt`.
@@ -30,6 +32,7 @@
 - DONE: Web Console inventory audit (roles + pages, implementation-backed) — evidence: `docs/CONSOLE_AUDIT/INDEX.md`.
 - DONE: Web Console canon vs implemented comparison — evidence: `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md`.
 - DONE: Web Console fact audit (implemented UI + API evidence + UX/bug findings) — evidence: `docs/REPORTS/2026-02-01-console-web-fact-audit.md`, `/tmp/console_web_fact_20260201`.
+- DONE: Calendar default date uses local timezone (no UTC day shift) + smoke test check — evidence: `console-web/src/app/calendar/page.tsx`, `console-web/e2e/smoke.spec.ts`, lint `/tmp/console_calendar_default_date_lint_20260202.txt` (next missing), e2e `/tmp/console_calendar_default_date_e2e_20260202.txt` (playwright missing).
 - DONE: Console audit findings fixed (return-to-bot, branch gating, inbox load more, SLA sort, calendar date) — evidence: PRs #493–#497 (https://github.com/k1ddy/Truffles-AI-Employee/pull/493, https://github.com/k1ddy/Truffles-AI-Employee/pull/494, https://github.com/k1ddy/Truffles-AI-Employee/pull/495, https://github.com/k1ddy/Truffles-AI-Employee/pull/496, https://github.com/k1ddy/Truffles-AI-Employee/pull/497), CI runs https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21575689168, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21576082316, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21575902168, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21575159164, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21578194809, build `4614530` at `2026-02-01T00:01:02Z`.
 - DONE: Console branch-gating for case messages + manager sends — evidence: `truffles-api/app/routers/console.py`, `truffles-api/tests/test_console_cases_helpers.py`, `/tmp/console_branch_gating_cases_helpers_20260202.txt`.
 - DONE: Inbox "Load more" appends to list (pagination state) — evidence: `console-web/src/components/CaseList.tsx`, `/tmp/console_inbox_load_more_lint_20260202.txt`.
@@ -1999,6 +2002,8 @@
 - Status: p90 still > 10s target; keep P0 outbox latency OPEN.
 
 ### 2026-01-22 — Plan #1 (proposed): Canon shift to LLM‑first understanding + tool‑only facts (no hallucinations)
+
+**Status:** записано как DEC‑020 (Hybrid LLM‑plan) с синхронизацией канон‑доков.
 
 - **Context / problem:**
   - Бот “не знает что отвечать” из‑за детерминизма на ключевых словах, особенно RU/KZ/mixed.
