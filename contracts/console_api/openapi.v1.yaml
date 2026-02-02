@@ -185,7 +185,7 @@ paths:
           description: Sort order for inbox results.
           schema:
             type: string
-            enum: [last_activity, created_at]
+            enum: [last_activity, created_at, sla]
             default: last_activity
         - name: date_from
           in: query
