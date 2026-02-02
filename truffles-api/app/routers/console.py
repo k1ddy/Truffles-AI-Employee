@@ -375,6 +375,21 @@ def _resolve_branch_from_context(context: ConsoleAuthContext) -> Branch:
     raise ConsoleAPIError(400, "BRANCH_SELECTION_REQUIRED", "Branch selection required")
 
 
+def _require_branch_access(
+    context: ConsoleAuthContext,
+    branch_id: Optional[UUID],
+    *,
+    message: str,
+) -> None:
+    if branch_id is None:
+        return
+    if context.role in ("platform_admin", "owner", "admin"):
+        return
+    allowed_branch_ids = {branch.id for branch in context.branches}
+    if branch_id not in allowed_branch_ids:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", message)
+
+
 def _ensure_unique_branch_field(
     db: Session,
     *,
@@ -1935,6 +1950,11 @@ async def get_case_messages(
     case = db.query(Handover).filter(Handover.id == case_id, Handover.client_id == context.client.id).first()
     if not case:
         raise ConsoleAPIError(404, "NOT_FOUND", "Case not found")
+
+    conversation = db.query(Conversation).filter(Conversation.id == case.conversation_id).first()
+    if not conversation:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+    _require_branch_access(context, conversation.branch_id, message="Access to this case denied")
         
     query = db.query(Message).filter(Message.conversation_id == case.conversation_id)
     query = query.order_by(Message.created_at.desc())
@@ -2228,6 +2248,11 @@ async def send_manager_message(
     
     if not case:
         raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found or access denied")
+
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+    _require_branch_access(context, conversation.branch_id, message="Access to this conversation denied")
     
     # Only allow if case is active and assigned to this agent, or agent is owner/admin
     if case.status != "active" and context.role not in ("platform_admin", "owner", "admin"):
@@ -2245,11 +2270,6 @@ async def send_manager_message(
                 raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
             if not assigned_name:
                 raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
-    
-    # Get conversation to find user
-    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
-    if not conversation:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
 
     idempotency = start_idempotency(
         db,
@@ -2420,6 +2440,11 @@ async def send_manager_media(
     if not case:
         raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found or access denied")
 
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+    _require_branch_access(context, conversation.branch_id, message="Access to this conversation denied")
+
     if case.status != "active" and context.role not in ("platform_admin", "owner", "admin"):
         raise ConsoleAPIError(403, "CASE_NOT_ACTIVE", "Case must be active to send messages")
 
@@ -2435,10 +2460,6 @@ async def send_manager_media(
                 raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
             if not assigned_name:
                 raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
-
-    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
-    if not conversation:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
 
     idempotency = start_idempotency(
         db,

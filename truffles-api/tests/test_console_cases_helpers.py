@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
@@ -71,3 +73,33 @@ def test_resolve_case_sort_cursor():
         last_activity_at=last_activity,
         created_at=created_at,
     ) == created_at
+
+
+def test_require_branch_access_allows_matching_branch():
+    branch_id = uuid4()
+    context = SimpleNamespace(
+        role="manager",
+        branches=[SimpleNamespace(id=branch_id)],
+    )
+    console_router._require_branch_access(context, branch_id, message="Access denied")
+
+
+def test_require_branch_access_allows_admin():
+    branch_id = uuid4()
+    context = SimpleNamespace(
+        role="platform_admin",
+        branches=[],
+    )
+    console_router._require_branch_access(context, branch_id, message="Access denied")
+
+
+def test_require_branch_access_denies_other_branch():
+    branch_id = uuid4()
+    context = SimpleNamespace(
+        role="manager",
+        branches=[SimpleNamespace(id=uuid4())],
+    )
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._require_branch_access(context, branch_id, message="Access denied")
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
