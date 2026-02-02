@@ -24,3 +24,6 @@ class ClientSettings(Base):
     require_branch_for_pricing = Column(Boolean, default=True)
     auto_approve_roles = Column(Text, default="owner,admin")
     webhook_secret = Column(Text)
+    learning_consent_status = Column(Text, default="unknown")
+    learning_anonymization_mode = Column(Text, default="redact")
+    learning_retention_days = Column(Integer, default=180)

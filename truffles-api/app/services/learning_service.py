@@ -1,6 +1,8 @@
 import os
 import re
 import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -25,6 +27,11 @@ TEST_MODE = os.environ.get("TEST_MODE", "").strip().lower() in {"1", "true", "ye
 MAX_KNOWLEDGE_TEXT_LENGTH = 2000
 MIN_QUESTION_LENGTH = 5
 MIN_ANSWER_LENGTH = 5
+DEFAULT_LEARNING_RETENTION_DAYS = int(os.environ.get("LEARNING_RETENTION_DAYS", "180"))
+DEFAULT_ANONYMIZATION_MODE = os.environ.get("LEARNING_ANONYMIZATION_MODE", "redact").strip().lower()
+ALLOWED_CONSENT_STATUSES = {"granted", "declined", "unknown"}
+ALLOWED_ANONYMIZATION_MODES = {"redact", "strict"}
+REDACTION_PHONE_MIN_DIGITS = 9
 LOW_VALUE_TEXTS = {
     "ок",
     "окей",
@@ -54,6 +61,140 @@ PLACEHOLDER_PATTERNS = (
     re.compile(r"^передал", re.IGNORECASE),
     re.compile(r"^передали", re.IGNORECASE),
 )
+
+EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+URL_PATTERN = re.compile(r"\bhttps?://[^\s]+|\bwww\.[^\s]+", re.IGNORECASE)
+HANDLE_PATTERN = re.compile(r"@[A-Za-z0-9_]{3,}", re.IGNORECASE)
+PHONE_PATTERN = re.compile(r"(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)")
+CARD_PATTERN = re.compile(r"(?<!\d)(?:\d[ -]*?){13,19}(?!\d)")
+
+
+@dataclass(frozen=True)
+class LearningPolicy:
+    consent_status: str
+    anonymization_mode: str
+    retention_days: int
+    allowed: bool
+
+
+def _normalize_learning_consent(value: Optional[str]) -> str:
+    if not value:
+        return "unknown"
+    normalized = value.strip().lower()
+    return normalized if normalized in ALLOWED_CONSENT_STATUSES else "unknown"
+
+
+def _normalize_anonymization_mode(value: Optional[str]) -> str:
+    if not value:
+        return DEFAULT_ANONYMIZATION_MODE
+    normalized = value.strip().lower()
+    if normalized in ALLOWED_ANONYMIZATION_MODES:
+        return normalized
+    return "off"
+
+
+def _normalize_retention_days(value: Optional[int]) -> int:
+    if value is None:
+        return DEFAULT_LEARNING_RETENTION_DAYS
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_LEARNING_RETENTION_DAYS
+    return parsed if parsed > 0 else 0
+
+
+def get_learning_policy(db: Session, client_id: UUID) -> LearningPolicy:
+    settings = (
+        db.query(ClientSettings)
+        .filter(ClientSettings.client_id == client_id)
+        .first()
+    )
+    consent_status = _normalize_learning_consent(
+        getattr(settings, "learning_consent_status", None)
+    )
+    anonymization_mode = _normalize_anonymization_mode(
+        getattr(settings, "learning_anonymization_mode", None)
+    )
+    retention_days = _normalize_retention_days(
+        getattr(settings, "learning_retention_days", None)
+    )
+    allowed = (
+        consent_status == "granted"
+        and anonymization_mode in ALLOWED_ANONYMIZATION_MODES
+        and retention_days > 0
+    )
+    return LearningPolicy(
+        consent_status=consent_status,
+        anonymization_mode=anonymization_mode,
+        retention_days=retention_days,
+        allowed=allowed,
+    )
+
+
+def evaluate_candidate_eligibility(
+    policy: LearningPolicy,
+    *,
+    retention_expires_at: Optional[datetime],
+    now: Optional[datetime] = None,
+) -> tuple[bool, Optional[str]]:
+    current = now or datetime.now(timezone.utc)
+    if policy.consent_status != "granted":
+        return False, "consent_not_granted"
+    if policy.anonymization_mode not in ALLOWED_ANONYMIZATION_MODES:
+        return False, "anonymization_disabled"
+    if isinstance(retention_expires_at, datetime) and retention_expires_at <= current:
+        return False, "retention_expired"
+    return True, None
+
+
+def _redact_phone(match: re.Match) -> str:
+    digits = re.sub(r"\D", "", match.group(0))
+    if len(digits) < REDACTION_PHONE_MIN_DIGITS:
+        return match.group(0)
+    return "[PHONE]"
+
+
+def _redact_card(match: re.Match) -> str:
+    digits = re.sub(r"\D", "", match.group(0))
+    if len(digits) < 13 or len(digits) > 19:
+        return match.group(0)
+    return "[CARD]"
+
+
+def redact_text(text: str, mode: str) -> tuple[str, dict[str, int]]:
+    if not text:
+        return "", {}
+    if mode not in ALLOWED_ANONYMIZATION_MODES:
+        return text, {}
+
+    summary: dict[str, int] = {}
+    redacted = text
+
+    def _apply(pattern: re.Pattern, label: str, repl) -> None:
+        nonlocal redacted
+
+        def _replace(match: re.Match) -> str:
+            replacement = repl(match) if callable(repl) else repl
+            if replacement != match.group(0):
+                summary[label] = summary.get(label, 0) + 1
+            return replacement
+
+        redacted = pattern.sub(_replace, redacted)
+
+    _apply(EMAIL_PATTERN, "email", "[EMAIL]")
+    _apply(URL_PATTERN, "url", "[URL]")
+    _apply(HANDLE_PATTERN, "handle", "[HANDLE]")
+    _apply(PHONE_PATTERN, "phone", _redact_phone)
+    _apply(CARD_PATTERN, "card", _redact_card)
+
+    redacted = re.sub(r"\s{2,}", " ", redacted).strip()
+    return redacted, summary
+
+
+def build_retention_expires_at(now: datetime, retention_days: int) -> Optional[datetime]:
+    if retention_days <= 0:
+        return None
+    return now + timedelta(days=retention_days)
 
 
 def _normalize_text(text: str) -> str:
@@ -185,6 +326,22 @@ def add_to_knowledge(
         )
         return None
 
+    policy = get_learning_policy(db, handover.client_id)
+    if not policy.allowed:
+        logger.info(
+            "Learning skipped: consent not granted",
+            extra={
+                "context": {
+                    "handover_id": str(handover.id),
+                    "client_id": str(handover.client_id),
+                    "consent_status": policy.consent_status,
+                    "anonymization_mode": policy.anonymization_mode,
+                    "retention_days": policy.retention_days,
+                }
+            },
+        )
+        return None
+
     client_slug = get_client_slug(db, handover.client_id)
     if not client_slug:
         logger.warning(f"Cannot add to knowledge: client_slug not found for {handover.client_id}")
@@ -195,8 +352,23 @@ def add_to_knowledge(
         return None
 
     # Format content for indexing
-    question = _trim_text(handover.user_message.strip())
-    answer = _trim_text(handover.manager_response.strip())
+    question_raw = _trim_text(handover.user_message.strip())
+    answer_raw = _trim_text(handover.manager_response.strip())
+    question, question_redactions = redact_text(question_raw, policy.anonymization_mode)
+    answer, answer_redactions = redact_text(answer_raw, policy.anonymization_mode)
+    if not question or not answer:
+        logger.info(
+            "Skipped learning: redaction removed content",
+            extra={
+                "context": {
+                    "client_slug": client_slug,
+                    "handover_id": str(handover.id),
+                    "question_redactions": question_redactions,
+                    "answer_redactions": answer_redactions,
+                }
+            },
+        )
+        return None
     if len(question) < MIN_QUESTION_LENGTH or len(answer) < MIN_ANSWER_LENGTH:
         logger.info(
             "Skipped learning: text too short",
@@ -309,6 +481,17 @@ def add_to_knowledge(
     content = f"Вопрос: {question}\nОтвет: {answer}"
     if len(handover.user_message.strip()) > len(question) or len(handover.manager_response.strip()) > len(answer):
         logger.info("Truncated knowledge sample to fit length limits")
+    if question_redactions or answer_redactions:
+        logger.info(
+            "Learning content redacted",
+            extra={
+                "context": {
+                    "handover_id": str(handover.id),
+                    "question_redactions": question_redactions,
+                    "answer_redactions": answer_redactions,
+                }
+            },
+        )
 
     try:
         # Get embedding
@@ -317,30 +500,29 @@ def add_to_knowledge(
         # Generate point ID
         point_id = str(uuid.uuid4())
 
+        retention_expires_at = build_retention_expires_at(
+            datetime.now(timezone.utc),
+            policy.retention_days,
+        )
+        metadata = {
+            "client_slug": client_slug,
+            "source": source,
+            "handover_id": str(handover.id),
+            "question": question,
+            "answer": answer,
+            "learned_from": handover.assigned_to_name or "manager",
+            "retention_expires_at": retention_expires_at.isoformat() if retention_expires_at else None,
+        }
+        if getattr(handover, "branch_id", None):
+            metadata["branch_id"] = str(handover.branch_id)
+        payload = {"content": content, "metadata": metadata}
+
         # Upsert to Qdrant
         with httpx.Client(timeout=30.0) as client:
             response = client.put(
                 f"{QDRANT_HOST}/collections/{QDRANT_COLLECTION}/points",
                 headers={"api-key": QDRANT_API_KEY},
-                json={
-                    "points": [
-                        {
-                            "id": point_id,
-                            "vector": embedding,
-                            "payload": {
-                                "content": content,
-                                "metadata": {
-                                    "client_slug": client_slug,
-                                    "source": source,
-                                    "handover_id": str(handover.id),
-                                    "question": question,
-                                    "answer": answer,
-                                    "learned_from": handover.assigned_to_name or "manager",
-                                },
-                            },
-                        }
-                    ]
-                },
+                json={"points": [{"id": point_id, "vector": embedding, "payload": payload}]},
             )
 
             if response.status_code not in [200, 201]:
@@ -376,6 +558,24 @@ def add_learned_response_to_knowledge(
         logger.warning("Cannot add learned_response: missing text")
         return None
 
+    policy = get_learning_policy(db, learned_response.client_id)
+    allowed, reason = evaluate_candidate_eligibility(
+        policy,
+        retention_expires_at=learned_response.retention_expires_at,
+    )
+    if not allowed:
+        logger.info(
+            "Learning skipped: candidate not eligible",
+            extra={
+                "context": {
+                    "learned_response_id": str(learned_response.id),
+                    "client_id": str(learned_response.client_id),
+                    "reason": reason,
+                }
+            },
+        )
+        return None
+
     client_slug = get_client_slug(db, learned_response.client_id)
     if not client_slug:
         logger.warning(
@@ -384,8 +584,23 @@ def add_learned_response_to_knowledge(
         )
         return None
 
-    question = _trim_text(learned_response.question_text.strip())
-    answer = _trim_text(learned_response.response_text.strip())
+    question_raw = _trim_text(learned_response.question_text.strip())
+    answer_raw = _trim_text(learned_response.response_text.strip())
+    question, question_redactions = redact_text(question_raw, policy.anonymization_mode)
+    answer, answer_redactions = redact_text(answer_raw, policy.anonymization_mode)
+    if not question or not answer:
+        logger.info(
+            "Skipped learned_response: redaction removed content",
+            extra={
+                "context": {
+                    "client_slug": client_slug,
+                    "learned_response_id": str(learned_response.id),
+                    "question_redactions": question_redactions,
+                    "answer_redactions": answer_redactions,
+                }
+            },
+        )
+        return None
     if len(question) < MIN_QUESTION_LENGTH or len(answer) < MIN_ANSWER_LENGTH:
         logger.info(
             "Skipped learned_response: text too short",
@@ -472,6 +687,17 @@ def add_learned_response_to_knowledge(
         learned_response.response_text.strip()
     ) > len(answer):
         logger.info("Truncated learned_response sample to fit length limits")
+    if question_redactions or answer_redactions:
+        logger.info(
+            "Learned response content redacted",
+            extra={
+                "context": {
+                    "learned_response_id": str(learned_response.id),
+                    "question_redactions": question_redactions,
+                    "answer_redactions": answer_redactions,
+                }
+            },
+        )
 
     try:
         embedding = get_embedding(content)
@@ -485,6 +711,11 @@ def add_learned_response_to_knowledge(
                 "question": question,
                 "answer": answer,
                 "learned_from": learned_response.source_name or "manager",
+                "retention_expires_at": (
+                    learned_response.retention_expires_at.isoformat()
+                    if learned_response.retention_expires_at
+                    else None
+                ),
             },
         }
         if learned_response.branch_id:

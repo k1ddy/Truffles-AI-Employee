@@ -3,12 +3,24 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+import app.services.learning_service as learning_service
 from app.services.learning_service import (
     add_learned_response_to_knowledge,
     add_to_knowledge,
     get_client_slug,
     is_owner_response,
 )
+
+
+@pytest.fixture(autouse=True)
+def _allow_learning_policy(monkeypatch):
+    policy = Mock()
+    policy.consent_status = "granted"
+    policy.anonymization_mode = "redact"
+    policy.retention_days = 180
+    policy.allowed = True
+    monkeypatch.setattr(learning_service, "get_learning_policy", Mock(return_value=policy))
+    return policy
 
 
 class TestIsOwnerResponse:
@@ -310,6 +322,34 @@ class TestAddToKnowledge:
         # Verify the call was made with correct source
         call_args = mock_httpx.return_value.__enter__.return_value.put.call_args
         assert call_args[1]["json"]["points"][0]["payload"]["metadata"]["source"] == "owner"
+
+    @patch("app.services.learning_service.get_embedding")
+    @patch("app.services.learning_service.httpx.Client")
+    def test_redacts_pii_in_payload(self, mock_httpx, mock_embedding):
+        mock_db = Mock()
+        mock_client = Mock()
+        mock_client.name = "test_client"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_client
+
+        mock_embedding.return_value = [0.1] * 1024
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_httpx.return_value.__enter__.return_value.put.return_value = mock_response
+
+        mock_handover = Mock()
+        mock_handover.id = uuid.uuid4()
+        mock_handover.client_id = uuid.uuid4()
+        mock_handover.user_message = "Напишите на test@example.com или +7 777 123 45 67"
+        mock_handover.manager_response = "Связаться можно по адресу owner@example.com"
+        mock_handover.assigned_to_name = "Owner"
+
+        result = add_to_knowledge(mock_db, mock_handover)
+
+        assert result is not None
+        call_args = mock_httpx.return_value.__enter__.return_value.put.call_args
+        payload = call_args[1]["json"]["points"][0]["payload"]
+        assert "[EMAIL]" in payload["metadata"]["question"]
+        assert "[PHONE]" in payload["metadata"]["question"]
 
     @patch("app.services.learning_service.get_embedding")
     @patch("app.services.learning_service.httpx.Client")
