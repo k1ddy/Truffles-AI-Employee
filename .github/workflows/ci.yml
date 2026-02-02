@@ -700,7 +700,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
-          context: ./truffles-api
+          context: .
           file: ./truffles-api/Dockerfile
           push: true
           tags: |
@@ -719,7 +719,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
-          context: ./truffles-api
+          context: .
           file: ./truffles-api/Dockerfile
           push: true
           tags: |
