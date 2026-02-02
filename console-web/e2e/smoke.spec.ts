@@ -92,7 +92,7 @@ async function selectOptionIfNeeded(
     const options = selector.locator('option');
     const optionCount = await options.count();
     if (optionCount < 2) {
-        return true;
+        return false;
     }
 
     const value = await options.nth(1).getAttribute('value');
@@ -137,6 +137,21 @@ async function resolveSelectionGate(page: import('@playwright/test').Page) {
     await selectOptionIfNeeded(contextClient);
     const contextBranch = page.getByTestId('context-branch-select');
     await selectOptionIfNeeded(contextBranch);
+}
+
+async function resolveSelectionGateWithRetry(
+    page: import('@playwright/test').Page,
+    selectionGate: import('@playwright/test').Locator,
+    attempts = 3
+) {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        await resolveSelectionGate(page);
+        if (!(await selectionGate.isVisible().catch(() => false))) {
+            return true;
+        }
+        await page.waitForTimeout(800);
+    }
+    return !(await selectionGate.isVisible().catch(() => false));
 }
 
 async function clearStoredContext(page: import('@playwright/test').Page) {
@@ -409,13 +424,13 @@ async function openInbox(page: import('@playwright/test').Page) {
     await gotoConsoleRoot(page);
     const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
     const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
-    await resolveSelectionGate(page);
+    await resolveSelectionGateWithRetry(page, selectionGate);
     if (await selectionGate.isVisible().catch(() => false)) {
         const resolved = await ensureTenantSelection(page);
         if (resolved) {
             await page.reload({ waitUntil: 'domcontentloaded' });
         }
-        await resolveSelectionGate(page);
+        await resolveSelectionGateWithRetry(page, selectionGate);
     }
     await expect
         .poll(
@@ -429,13 +444,16 @@ async function openInbox(page: import('@playwright/test').Page) {
             { timeout: 20000 }
         )
         .toBe(true);
+    if (await selectionGate.isVisible().catch(() => false)) {
+        await resolveSelectionGateWithRetry(page, selectionGate);
+    }
     const errorPanel = page.getByTestId('cases-error');
     if (await errorPanel.isVisible().catch(() => false)) {
         const resolved = await ensureTenantSelection(page);
         if (resolved) {
             await page.reload({ waitUntil: 'domcontentloaded' });
         }
-        await resolveSelectionGate(page);
+        await resolveSelectionGateWithRetry(page, selectionGate);
         const retry = page.getByTestId('cases-retry');
         if (await retry.isVisible().catch(() => false)) {
             await retry.click();

@@ -17,11 +17,15 @@ def _base_payload() -> dict:
                     {"name": "Haircut"},
                 ]
             },
+            "booking": {"collect_fields": ["name", "phone"], "bot_can_confirm": True},
             "price_list": [
                 {"category": "Hair", "items": [{"name": "Haircut", "price": 1000}]},
             ],
             "guest_policy": {"allowed_guests": "ok"},
             "service_duration_estimates": {"haircut": "30"},
+            "safety": {"medical_note": "Ask admin"},
+            "pricing": {"price_from_reason": "Depends on length"},
+            "quality": {"expectations_photo": "Bring a reference"},
             "policy": {
                 "hard_law": {"intents": ["refund"]},
                 "payment_info": {"intent": "payment", "keywords": ["pay"]},
