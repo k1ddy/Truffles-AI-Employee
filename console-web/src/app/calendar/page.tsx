@@ -78,7 +78,10 @@ async function createBooking(data: BookingCreateRequest): Promise<BookingActionR
 }
 
 function formatDate(date: Date): string {
-    return date.toISOString().split("T")[0];
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
 }
 
 export default function CalendarPage() {
@@ -227,10 +230,16 @@ export default function CalendarPage() {
                     {/* Debug/Error info */}
                     {specialistsError && (
                         <div className="card-surface p-4 text-destructive">
-                            <h3 className="font-semibold mb-2">Ошибка загрузки мастеров</h3>
-                            <pre className="text-xs overflow-auto">
-                                {JSON.stringify(specialistsErrorData, null, 2)}
-                            </pre>
+                            <h3 className="font-semibold mb-1">Не удалось загрузить список мастеров</h3>
+                            <p className="text-sm text-muted-foreground">
+                                Проверьте соединение и попробуйте обновить страницу.
+                            </p>
+                            <details className="mt-2 text-xs text-muted-foreground">
+                                <summary className="cursor-pointer">Технические детали</summary>
+                                <pre className="mt-2 overflow-auto whitespace-pre-wrap">
+                                    {JSON.stringify(specialistsErrorData, null, 2)}
+                                </pre>
+                            </details>
                         </div>
                     )}
 
@@ -289,10 +298,14 @@ export default function CalendarPage() {
 
                             {/* Date */}
                             <div>
-                                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                                <label
+                                    className="block text-sm font-medium text-muted-foreground mb-1"
+                                    htmlFor="calendar-date"
+                                >
                                     Дата
                                 </label>
                                 <input
+                                    id="calendar-date"
                                     type="date"
                                     value={selectedDate}
                                     onChange={(e) => {

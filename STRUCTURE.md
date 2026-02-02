@@ -90,6 +90,7 @@
 | `console-web/public/brand/` | Бренд‑ассеты консоли (логотипы) | Frontend |
 | `docs/CONSOLE_GUIDE.md` | Guide по Console (API, тесты, дебаг) | Frontend/Backend |
 | `docs/CONSOLE_AUDIT/` | Полная инвентаризация Console (ролевая карта + страницы + код/интеграции) | Frontend/Backend/Architect |
+| `docs/CONSOLE_AUDIT/UX_BACKLOG.md` | UX backlog (bugs/UX debt) по реализованной Console | Frontend/Backend/Architect |
 | `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
 | `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
@@ -107,6 +108,7 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-canon.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-verify-test.md`

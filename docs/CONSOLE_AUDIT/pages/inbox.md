@@ -24,12 +24,12 @@ Queue (CaseList)
 - Search input: "Телефон / имя / ID" (debounced 300ms).
 - Filters:
   - Status: Открытые / Все / Ожидает / В работе / Закрыта.
-  - Sort: Активные / Новые / Срочные (SLA).
+- Sort: Активные / Новые / Срочные (SLA; `sort_by=sla` server-side).
   - Assigned: "Мои" toggle.
   - Advanced (expandable): Branch, date from/to, "Есть ошибки", "В очереди".
 - Refresh button: re-fetches cases.
-- Load more button when `has_more` (fetches next cursor page; current UI replaces list, no append).
-- Auto refresh: every 10s (foreground only).
+- Load more button when `has_more` (fetches next cursor page and appends to the list).
+- Auto refresh: every 10s (foreground only), toggle "Автообновление: Вкл/Выкл".
 
 Case rows (compact view)
 - Shows customer name/phone, status badge, preview, branch, last activity, SLA.

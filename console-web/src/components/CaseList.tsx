@@ -86,6 +86,7 @@ export default function CaseList({
     const [searchValue, setSearchValue] = useState("");
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const [filtersCollapsed, setFiltersCollapsed] = useState(false);
+    const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
     const isCompact = variant === "compact";
     const filtersCompact = isCompact && !!selectedCaseId;
     const headingLabel = isCompact ? "Очередь" : "Заявки";
@@ -134,6 +135,10 @@ export default function CaseList({
             : "Расширенные фильтры";
     const headingClass = filtersCompact ? "text-base" : isCompact ? "text-lg" : "text-xl";
     const isTight = filtersCompact || filtersCollapsed;
+    const autoRefreshLabel = autoRefreshEnabled ? "Автообновление: Вкл" : "Автообновление: Выкл";
+    const autoRefreshButtonClass = autoRefreshEnabled
+        ? "text-emerald-700 hover:text-emerald-900"
+        : "text-muted-foreground hover:text-foreground";
     const filterContainerClass = `flex flex-col border border-border/60 rounded-lg ${
         isTight ? "gap-2 p-2" : "gap-3 p-3"
     } ${isCompact ? "sticky top-0 z-10 bg-card/95 backdrop-blur" : "bg-muted"}`;
@@ -213,7 +218,7 @@ export default function CaseList({
             }
         },
         enabled: hasToken,
-        refetchInterval: 10000, // Auto-refresh every 10 seconds
+        refetchInterval: autoRefreshEnabled ? 10000 : false, // Auto-refresh every 10 seconds
         refetchIntervalInBackground: false, // Only refresh when tab is active
     });
 
@@ -325,6 +330,15 @@ export default function CaseList({
                         data-testid="cases-refresh"
                     >
                         Обновить
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setAutoRefreshEnabled((prev) => !prev)}
+                        className={`text-xs font-semibold ${autoRefreshButtonClass}`}
+                        aria-pressed={autoRefreshEnabled}
+                        data-testid="cases-auto-refresh-toggle"
+                    >
+                        {autoRefreshLabel}
                     </button>
                 </div>
             </div>
