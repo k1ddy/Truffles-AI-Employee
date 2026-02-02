@@ -5842,6 +5842,125 @@ def test_expected_reply_type_invalid_choice_keeps_contract():
     assert meta.get("expected_reply_reason") == "invalid_choice"
 
 
+def test_llm_plan_collect_sets_expected_reply_type():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Сколько стоит?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-llm-plan-collect-1",
+                timestamp=1234567897,
+            ),
+        ),
+    )
+
+    plan_payload = {
+        "outcome": "collect",
+        "tool_action": "info",
+        "tool_args": {},
+        "pack_refs": ["pricing"],
+        "language": "ru",
+        "confidence": 0.9,
+        "reason": "need_service",
+        "goal": "info",
+        "slot_state": {},
+        "open_questions": ["service"],
+    }
+    plan_result = {
+        "ok": True,
+        "payload": plan_payload,
+        "error": None,
+        "raw": json.dumps(plan_payload, ensure_ascii=False),
+        "attempted": True,
+        "elapsed_ms": 12.5,
+    }
+    domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
+
+    with patch("app.routers.webhook.decision.route_llm_plan", return_value=plan_result), patch(
+        "app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)
+    ), patch(
+        "app.routers.webhook.decision.format_reply_from_truth", return_value="Уточните услугу."
+    ), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response == "Уточните услугу."
+    assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
+    assert meta.get("llm_plan", {}).get("validated") is True
+    assert meta.get("llm_plan", {}).get("payload", {}).get("tool_action") == "info"
+
+
 def test_short_intent_hint_bypasses_early_ood():
     saved_message = Mock()
     saved_message.message_metadata = {}

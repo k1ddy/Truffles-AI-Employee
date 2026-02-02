@@ -327,6 +327,7 @@ from app.services.demo_salon_knowledge import (
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
     CONTROLLER_TIMEOUT_SECONDS,
+    PLAN_CONFIDENCE_THRESHOLD,
     DomainIntent,
     Intent,
     classify_domain_with_scores,
@@ -338,6 +339,7 @@ from app.services.intent_service import (
     is_rejection,
     is_strong_out_of_domain,
     route_dialogue_controller,
+    route_llm_plan,
     should_escalate,
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
@@ -2924,6 +2926,8 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
 
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration"}
 INFO_INTENTS = {"pricing", "hours", "duration", "location", "promotions"}
+LLM_PLAN_ALLOWED_OUTCOMES = {"fact", "collect", "handoff"}
+LLM_PLAN_ALLOWED_TOOL_ACTIONS = {"info", "consult", "booking", "handoff", "collect"}
 CONSULT_INTERRUPT_INTENTS = {"booking", "pricing", "duration", "location", "hours"}
 INFO_INTENT_PRIORITY_SERVICE = ("pricing", "duration", "location", "hours")
 INFO_INTENT_PRIORITY_GENERIC = ("location", "hours", "pricing", "duration")
@@ -2966,6 +2970,93 @@ SESSION_MEMORY_RESET_PHRASES = (
     "начнём заново",
     "давай сначала",
 )
+
+
+def _normalize_plan_refs(refs: list[str] | None) -> list[str]:
+    if not refs:
+        return []
+    cleaned: list[str] = []
+    for item in refs:
+        if not isinstance(item, str):
+            continue
+        value = item.strip()
+        if value:
+            cleaned.append(value.casefold())
+    return cleaned
+
+
+def _normalize_plan_slot_state(slot_state: dict[str, str] | None) -> dict[str, str]:
+    if not isinstance(slot_state, dict):
+        return {}
+    cleaned: dict[str, str] = {}
+    for key, value in slot_state.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            continue
+        normalized_key = key.strip().casefold()
+        if normalized_key not in BOOKING_SLOT_ORDER:
+            continue
+        value = value.strip()
+        if value:
+            cleaned[normalized_key] = value
+    return cleaned
+
+
+def _normalize_plan_questions(open_questions: list[str] | None) -> list[str]:
+    return _normalize_plan_refs(open_questions)
+
+
+def _plan_outcome_matches_action(outcome: str | None, tool_action: str | None) -> bool:
+    if not outcome or not tool_action:
+        return False
+    if outcome == "handoff":
+        return tool_action == "handoff"
+    if outcome == "fact":
+        return tool_action in {"info", "consult"}
+    if outcome == "collect":
+        return tool_action in {"collect", "booking", "info"}
+    return False
+
+
+def _validate_plan_slot_value(
+    slot_key: str,
+    value: str,
+    *,
+    client_slug: str | None,
+) -> str | None:
+    if slot_key == "service":
+        return _validate_service_slot(value, allow_freeform=True, client_slug=client_slug)
+    if slot_key == "datetime":
+        return _validate_datetime_slot(value, allow_freeform=True, client_slug=client_slug)
+    if slot_key == "name":
+        return _validate_name_slot(value, allow_freeform=True, client_slug=client_slug)
+    return None
+
+
+def _select_plan_collect_slot(
+    *,
+    open_questions: list[str],
+    pack_refs: list[str],
+    tool_action: str | None,
+    goal: str | None,
+) -> str | None:
+    for slot_key in BOOKING_SLOT_ORDER:
+        if slot_key in open_questions:
+            return slot_key
+    if tool_action == "info" and {"pricing", "duration"} & set(pack_refs):
+        return "service"
+    if goal and goal.strip().casefold() == "booking":
+        return "service"
+    return None
+
+
+def _collect_plan_consult_refs(client_slug: str | None) -> tuple[list[str], str | None]:
+    from app.services.consult_pack_service import load_consult_playbook
+
+    playbook, error = load_consult_playbook(client_slug)
+    if error or not playbook:
+        return [], error or "consult_playbook_missing"
+    refs = [topic.id for topic in playbook.topics if getattr(topic, "id", None)]
+    return refs, None
 
 
 def _normalize_class_name(class_name: str) -> str:
@@ -6478,6 +6569,628 @@ async def _handle_webhook_payload(
             conversation_id=conversation.id,
             bot_response=bot_response,
         )
+
+    if (
+        routing["allow_bot_reply"]
+        and not bypass_domain_flows
+        and message_text
+        and not expected_reply_shortcircuit
+        and expected_reply_type is None
+    ):
+        plan_slot_state: dict[str, str] = {}
+        if isinstance(booking, dict):
+            for slot_key in BOOKING_SLOT_ORDER:
+                value = booking.get(slot_key)
+                if isinstance(value, str) and value.strip():
+                    plan_slot_state[slot_key] = value.strip()
+        info_refs = sorted(INFO_INTENTS)
+        consult_refs, consult_refs_error = _collect_plan_consult_refs(payload.client_slug)
+        plan_result = route_llm_plan(
+            message_text,
+            expected_reply_type=expected_reply_type,
+            current_goal=current_goal,
+            slot_state=plan_slot_state,
+            info_refs=info_refs,
+            consult_refs=consult_refs,
+            client_slug=payload.client_slug,
+            client_config=client.config if client else None,
+            timing_context=timing_context,
+        )
+        plan_payload = plan_result.get("payload") if isinstance(plan_result, dict) else None
+        plan_outcome = None
+        plan_tool_action = None
+        plan_confidence = None
+        plan_pack_refs: list[str] = []
+        plan_open_questions: list[str] = []
+        plan_slot_state_normalized: dict[str, str] = {}
+        plan_slot_state_validated: dict[str, str] = {}
+        plan_tool_args: dict[str, Any] = {}
+        plan_goal = None
+        plan_validation_error = None
+        plan_valid = False
+        resolved_pack_refs: list[str] = []
+        plan_collect_slot = None
+
+        if isinstance(plan_payload, dict):
+            raw_outcome = plan_payload.get("outcome")
+            if isinstance(raw_outcome, str):
+                plan_outcome = raw_outcome.strip().casefold()
+            raw_tool_action = plan_payload.get("tool_action")
+            if isinstance(raw_tool_action, str):
+                plan_tool_action = raw_tool_action.strip().casefold()
+            raw_confidence = plan_payload.get("confidence")
+            if isinstance(raw_confidence, (int, float)):
+                plan_confidence = float(raw_confidence)
+            raw_tool_args = plan_payload.get("tool_args")
+            if isinstance(raw_tool_args, dict):
+                plan_tool_args = dict(raw_tool_args)
+            plan_pack_refs = _normalize_plan_refs(plan_payload.get("pack_refs"))
+            plan_open_questions = [
+                item
+                for item in _normalize_plan_questions(plan_payload.get("open_questions"))
+                if item in BOOKING_SLOT_ORDER
+            ]
+            raw_goal = plan_payload.get("goal")
+            if isinstance(raw_goal, str):
+                normalized_goal = raw_goal.strip().casefold()
+                plan_goal = normalized_goal or None
+            plan_slot_state_normalized = _normalize_plan_slot_state(plan_payload.get("slot_state"))
+            for slot_key, value in plan_slot_state_normalized.items():
+                validated_value = _validate_plan_slot_value(
+                    slot_key,
+                    value,
+                    client_slug=payload.client_slug,
+                )
+                if validated_value:
+                    plan_slot_state_validated[slot_key] = validated_value
+
+            if plan_confidence is None or plan_confidence < PLAN_CONFIDENCE_THRESHOLD:
+                plan_validation_error = "low_confidence"
+            elif plan_outcome not in LLM_PLAN_ALLOWED_OUTCOMES:
+                plan_validation_error = "outcome_invalid"
+            elif not plan_tool_action or plan_tool_action not in LLM_PLAN_ALLOWED_TOOL_ACTIONS:
+                plan_validation_error = "tool_action_invalid"
+            elif not _plan_outcome_matches_action(plan_outcome, plan_tool_action):
+                plan_validation_error = "outcome_tool_mismatch"
+            else:
+                allowed_info_map = {ref.casefold(): ref for ref in info_refs}
+                allowed_consult_map = {ref.casefold(): ref for ref in consult_refs}
+                if plan_tool_action == "info":
+                    if not plan_pack_refs:
+                        plan_validation_error = "pack_refs_missing"
+                    else:
+                        for ref in plan_pack_refs:
+                            resolved = allowed_info_map.get(ref)
+                            if not resolved:
+                                plan_validation_error = "pack_ref_invalid"
+                                break
+                            resolved_pack_refs.append(resolved)
+                elif plan_tool_action == "consult":
+                    if consult_refs_error:
+                        plan_validation_error = "consult_refs_missing"
+                    elif not plan_pack_refs:
+                        plan_validation_error = "pack_refs_missing"
+                    else:
+                        for ref in plan_pack_refs:
+                            resolved = allowed_consult_map.get(ref)
+                            if not resolved:
+                                plan_validation_error = "pack_ref_invalid"
+                                break
+                            resolved_pack_refs.append(resolved)
+                elif plan_pack_refs:
+                    plan_validation_error = "pack_refs_not_allowed"
+
+            if plan_validation_error is None and plan_tool_action == "collect":
+                plan_collect_slot = _select_plan_collect_slot(
+                    open_questions=plan_open_questions,
+                    pack_refs=plan_pack_refs,
+                    tool_action=plan_tool_action,
+                    goal=plan_goal,
+                )
+                if not plan_collect_slot:
+                    plan_validation_error = "collect_slot_missing"
+
+            if plan_validation_error is None:
+                plan_valid = True
+                plan_pack_refs = resolved_pack_refs or []
+
+        llm_plan_meta = {
+            "attempted": plan_result.get("attempted") if isinstance(plan_result, dict) else False,
+            "ok": plan_result.get("ok") if isinstance(plan_result, dict) else False,
+            "error": plan_result.get("error") if isinstance(plan_result, dict) else None,
+            "elapsed_ms": plan_result.get("elapsed_ms") if isinstance(plan_result, dict) else 0.0,
+            "payload": plan_payload,
+            "raw": plan_result.get("raw") if isinstance(plan_result, dict) else None,
+            "validated": plan_valid,
+            "validation_error": plan_validation_error,
+        }
+        if saved_message:
+            _update_message_decision_metadata(saved_message, {"llm_plan": llm_plan_meta})
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "routing",
+                "decision": "llm_plan",
+                "attempted": llm_plan_meta["attempted"],
+                "ok": llm_plan_meta["ok"],
+                "error": llm_plan_meta["error"],
+                "validated": plan_valid,
+                "validation_error": plan_validation_error,
+                "confidence": plan_confidence,
+                "outcome": plan_outcome,
+                "tool_action": plan_tool_action,
+                "pack_refs": plan_pack_refs or resolved_pack_refs,
+                "open_questions": plan_open_questions,
+            },
+        )
+
+        if plan_valid and plan_tool_action:
+            plan_service_query = None
+            raw_service_query = plan_tool_args.get("service_query")
+            if isinstance(raw_service_query, str) and raw_service_query.strip():
+                plan_service_query = _validate_plan_slot_value(
+                    "service",
+                    raw_service_query.strip(),
+                    client_slug=payload.client_slug,
+                )
+            if not plan_service_query:
+                plan_service_query = plan_slot_state_validated.get("service")
+            if not plan_service_query and isinstance(booking, dict):
+                booking_service = booking.get("service")
+                if isinstance(booking_service, str) and booking_service.strip():
+                    plan_service_query = _validate_plan_slot_value(
+                        "service",
+                        booking_service.strip(),
+                        client_slug=payload.client_slug,
+                    )
+
+            if plan_tool_action == "info":
+                plan_info_intents = list(dict.fromkeys(plan_pack_refs))
+                plan_info_set = set(plan_info_intents)
+                requires_service = bool({"pricing", "duration"} & plan_info_set)
+                if requires_service and not plan_service_query:
+                    context = _get_conversation_context(conversation)
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=EXPECTED_REPLY_SERVICE,
+                        reason="llm_plan_collect",
+                        now=now,
+                    )
+                    bot_response = format_reply_from_truth(
+                        "service_clarify", client_slug=payload.client_slug
+                    )
+                    if not bot_response:
+                        bot_response = MSG_FACT_GUARD_CLARIFY
+                    _reset_low_confidence_retry(conversation)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "question_contract",
+                            "decision": "llm_plan_collect",
+                            "state": conversation.state,
+                            "missing_slot": "service",
+                        },
+                    )
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="reply",
+                        intent="service_clarify",
+                        source="llm_plan",
+                        fast_intent=False,
+                    )
+                    bot_response, sent = _send_and_save(bot_response)
+                    result_message = (
+                        "LLM plan collect response sent"
+                        if sent
+                        else "LLM plan collect response failed"
+                    )
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
+
+                plan_intent_payload = {
+                    "multi_intent": len(plan_info_intents) > 1,
+                    "primary_intent": plan_info_intents[0] if plan_info_intents else "",
+                    "secondary_intents": plan_info_intents[1:],
+                    "intents": plan_info_intents,
+                    "service_query": plan_service_query or "",
+                    "service_query_source": "llm_plan",
+                    "service_query_score": 1.0 if plan_service_query else 0.0,
+                    "consult_intent": False,
+                    "consult_topic": "",
+                    "consult_question": "",
+                }
+                if booking_wants_flow:
+                    booking_interrupt_response = _handle_booking_interrupt(
+                        db=db,
+                        conversation=conversation,
+                        user=user,
+                        message_text=message_text,
+                        saved_message=saved_message,
+                        client_slug=payload.client_slug,
+                        routing=routing,
+                        bypass_domain_flows=bypass_domain_flows,
+                        booking_wants_flow=booking_wants_flow,
+                        consult_intent=False,
+                        intent_decomp_used=True,
+                        intent_decomp_set=plan_info_set,
+                        intent_decomp_payload=plan_intent_payload,
+                        info_class_intents=plan_info_set,
+                        expected_reply_type=expected_reply_type,
+                        expected_reply_matched=expected_reply_matched,
+                        expected_reply_shortcircuit=expected_reply_shortcircuit,
+                        batch_non_booking_message=batch_non_booking_message,
+                        booking_messages=booking_messages,
+                        booking_context=booking_context,
+                        booking=booking,
+                        current_goal=current_goal,
+                        basic_info_message=basic_info_message,
+                        session_memory_reset_reason=session_memory_reset_reason,
+                        memory_expected_reply_type=memory_expected_reply_type,
+                        policy_handler=policy_handler,
+                        policy_type=policy_type,
+                        now=now,
+                        message_count=message_count,
+                        consult_return_pending=consult_return_pending,
+                        consult_return_prompt=consult_return_prompt,
+                        consult_context=consult_context,
+                        consult_return_reason=consult_return_reason,
+                        maybe_apply_fact_guard=_maybe_apply_fact_guard,
+                        send_and_save=_send_and_save,
+                        send_response=_send_response,
+                        finalize_response=_finalize_bot_response,
+                    )
+                    if booking_interrupt_response:
+                        return booking_interrupt_response
+                else:
+                    info_flow_result = _handle_info_flow(
+                        db=db,
+                        conversation=conversation,
+                        user=user,
+                        message_text=message_text,
+                        saved_message=saved_message,
+                        client_slug=payload.client_slug,
+                        routing=routing,
+                        bypass_domain_flows=bypass_domain_flows,
+                        booking_wants_flow=booking_wants_flow,
+                        policy_handler=policy_handler,
+                        intent_decomp_used=True,
+                        intent_decomp_intents=plan_info_intents,
+                        intent_decomp_set=plan_info_set,
+                        intent_decomp_payload=plan_intent_payload,
+                        intent_decomp_service_query=plan_service_query,
+                        info_class_intents=plan_info_set,
+                        info_class_meta={},
+                        booking_signal=booking_signal,
+                        class_carryover=class_carryover,
+                        router_state=router_state,
+                        allow_service_carryover=allow_service_carryover,
+                        context_manager=context_manager,
+                        current_goal=current_goal,
+                        message_count=message_count,
+                        now=now,
+                        consult_return_pending=consult_return_pending,
+                        consult_return_prompt=consult_return_prompt,
+                        consult_context=consult_context,
+                        consult_return_reason=consult_return_reason,
+                        multi_intent_other_followup=multi_intent_other_followup,
+                        maybe_apply_fact_guard=_maybe_apply_fact_guard,
+                        send_and_save=_send_and_save,
+                        send_response=_send_response,
+                        finalize_response=_finalize_bot_response,
+                    )
+                    if info_flow_result.response:
+                        return info_flow_result.response
+
+            elif plan_tool_action == "consult":
+                consult_topic = plan_pack_refs[0] if plan_pack_refs else None
+                consult_question = None
+                raw_consult_question = plan_tool_args.get("consult_question")
+                if isinstance(raw_consult_question, str):
+                    consult_question = raw_consult_question.strip() or None
+                consult_result = _handle_consult_flow(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message_text=message_text,
+                    saved_message=saved_message,
+                    client_slug=payload.client_slug,
+                    policy_type=policy_type,
+                    policy_pack=policy_pack,
+                    policy_handler=policy_handler,
+                    routing=routing,
+                    bypass_domain_flows=bypass_domain_flows,
+                    booking_wants_flow=booking_wants_flow,
+                    booking_active=booking_active,
+                    booking_signal=booking_signal,
+                    intent_decomp_set=intent_decomp_set,
+                    consult_intent=True,
+                    consult_topic=consult_topic,
+                    consult_question=consult_question,
+                    intent_decomp_payload=intent_decomp_payload,
+                    intent_decomp_service_query=intent_decomp_service_query,
+                    info_class_intents=info_class_intents,
+                    intent_queue_followup=intent_queue_followup,
+                    current_goal=current_goal,
+                    expected_reply_type=expected_reply_type,
+                    consult_context=consult_context,
+                    message_count=message_count,
+                    now=now,
+                    timing_context=timing_context,
+                    client_config=client.config if client else None,
+                    send_and_save=_send_and_save,
+                    record_escalation_metric=_record_escalation_metric,
+                )
+                if consult_result.response:
+                    return consult_result.response
+
+            elif plan_tool_action == "booking":
+                plan_booking_state = dict(booking) if isinstance(booking, dict) else {}
+                if not plan_booking_state.get("active"):
+                    plan_booking_state["active"] = True
+                    plan_booking_state["started_at"] = now.isoformat()
+                for slot_key, value in plan_slot_state_validated.items():
+                    if not plan_booking_state.get(slot_key):
+                        plan_booking_state[slot_key] = value
+                booking_result = _handle_booking_flow(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message_text=message_text,
+                    saved_message=saved_message,
+                    client_slug=payload.client_slug,
+                    routing=routing,
+                    bypass_domain_flows=bypass_domain_flows,
+                    booking_wants_flow=True,
+                    booking_active=True,
+                    booking_signal=True,
+                    booking_messages=booking_messages,
+                    booking_context=context,
+                    booking=plan_booking_state,
+                    expected_reply_type=expected_reply_type,
+                    expected_reply_matched=expected_reply_matched,
+                    basic_info_message=basic_info_message,
+                    session_memory_reset_reason=session_memory_reset_reason,
+                    memory_expected_reply_type=memory_expected_reply_type,
+                    policy_handler=policy_handler,
+                    policy_pack=policy_pack,
+                    now=now,
+                    message_count=message_count,
+                    multi_intent_booking_followup=multi_intent_booking_followup,
+                    consult_return_pending=consult_return_pending,
+                    consult_return_prompt=consult_return_prompt,
+                    consult_context=consult_context,
+                    consult_return_reason=consult_return_reason,
+                    send_and_save=_send_and_save,
+                    send_response=_send_response,
+                    finalize_response=_finalize_bot_response,
+                    log_timing=_log_timing,
+                    record_escalation_metric=_record_escalation_metric,
+                )
+                if booking_result.response:
+                    return booking_result.response
+                if booking_result.booking_t0 is not None and not booking_result.booking_logged:
+                    _log_timing(
+                        "booking_ms", (time.monotonic() - booking_result.booking_t0) * 1000
+                    )
+
+            elif plan_tool_action == "handoff":
+                handover_message = message_text or "Клиент запросил менеджера."
+                _, reused, telegram_sent = _reuse_active_handover(
+                    db=db,
+                    conversation=conversation,
+                    user=user,
+                    message=handover_message,
+                    source="llm_plan",
+                    intent="llm_plan",
+                )
+                if reused:
+                    bot_response = MSG_ESCALATED
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="escalate",
+                        intent="llm_plan",
+                        source="llm_plan",
+                        fast_intent=False,
+                    )
+                    bot_response, sent = _send_and_save(bot_response)
+                    result_message = (
+                        f"LLM plan reuse escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                    )
+                elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
+                    "allow_handover_create", False
+                ):
+                    _record_escalation_metric("intent")
+                    result = escalate_to_pending(
+                        db=db,
+                        conversation=conversation,
+                        user_message=handover_message,
+                        trigger_type="intent",
+                        trigger_value="llm_plan",
+                    )
+                    if result.ok:
+                        handover = result.value
+                        handover_reopened = bool(getattr(handover, "_reopened", False))
+                        telegram_sent = send_telegram_notification(
+                            db=db,
+                            handover=handover,
+                            conversation=conversation,
+                            user=user,
+                            message=handover_message,
+                        )
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "escalation",
+                                "decision": "created",
+                                "state": conversation.state,
+                                "intent": "llm_plan",
+                                "telegram_sent": telegram_sent,
+                                "handover_reopened": handover_reopened,
+                            },
+                        )
+                        _record_message_decision_meta(
+                            saved_message,
+                            action="escalate",
+                            intent="llm_plan",
+                            source="llm_plan",
+                            fast_intent=False,
+                        )
+                        bot_response = MSG_ESCALATED
+                        bot_response, sent = _send_and_save(bot_response)
+                        result_message = (
+                            f"LLM plan escalation, telegram={'sent' if telegram_sent else 'failed'}"
+                        )
+                    else:
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "escalation",
+                                "decision": "failed",
+                                "state": conversation.state,
+                                "intent": "llm_plan",
+                                "error": result.error_code,
+                            },
+                        )
+                        bot_response = MSG_AI_ERROR
+                        bot_response, sent = _send_and_save(bot_response)
+                        result_message = (
+                            "LLM plan escalation failed"
+                            if sent
+                            else "LLM plan escalation response failed"
+                        )
+                else:
+                    bot_response = MSG_ESCALATED
+                    bot_response, sent = _send_and_save(bot_response)
+                    result_message = "LLM plan escalation skipped (already pending)"
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+
+            elif plan_tool_action == "collect" and plan_collect_slot:
+                collect_as_booking = (
+                    plan_collect_slot in {"datetime", "name"}
+                    or plan_goal == "booking"
+                    or booking_wants_flow
+                )
+                if collect_as_booking:
+                    booking_state = dict(booking) if isinstance(booking, dict) else {}
+                    if not booking_state.get("active"):
+                        booking_state["active"] = True
+                        booking_state["started_at"] = now.isoformat()
+                    for slot_key, value in plan_slot_state_validated.items():
+                        if not booking_state.get(slot_key):
+                            booking_state[slot_key] = value
+                    booking_state["last_question"] = plan_collect_slot
+                    prompt = None
+                    if plan_collect_slot == "service":
+                        prompt = MSG_BOOKING_ASK_SERVICE
+                    elif plan_collect_slot == "datetime":
+                        prompt = MSG_BOOKING_ASK_DATETIME
+                    elif plan_collect_slot == "name":
+                        prompt = MSG_BOOKING_ASK_NAME
+                    context = _get_conversation_context(conversation)
+                    context = _set_booking_context(context, booking_state)
+                    _set_conversation_context(conversation, context)
+                    booking_expected = _expected_reply_for_booking_question(plan_collect_slot)
+                    if prompt and booking_expected:
+                        context = _set_expected_reply_context(
+                            conversation=conversation,
+                            saved_message=saved_message,
+                            context=context,
+                            expected_reply_type=booking_expected,
+                            reason="booking_prompt",
+                            now=now,
+                        )
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "booking",
+                            "decision": "prompt",
+                            "state": conversation.state,
+                            "missing_slot": plan_collect_slot,
+                            "source": "llm_plan",
+                        },
+                    )
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="booking_prompt",
+                        intent="booking",
+                        source="llm_plan",
+                        fast_intent=False,
+                    )
+                    bot_response = prompt or MSG_BOOKING_ASK_DATETIME
+                    bot_response = _maybe_apply_consult_return(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        bot_response=bot_response,
+                        consult_return_pending=consult_return_pending,
+                        consult_return_prompt=consult_return_prompt,
+                        consult_context=consult_context,
+                        reason=consult_return_reason or "llm_plan_booking",
+                    )
+                    _reset_low_confidence_retry(conversation)
+                    bot_response, sent = _send_and_save(bot_response)
+                    result_message = (
+                        "LLM plan booking prompt sent"
+                        if sent
+                        else "LLM plan booking prompt failed"
+                    )
+                else:
+                    context = _get_conversation_context(conversation)
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=EXPECTED_REPLY_SERVICE,
+                        reason="llm_plan_collect",
+                        now=now,
+                    )
+                    bot_response = format_reply_from_truth(
+                        "service_clarify", client_slug=payload.client_slug
+                    )
+                    if not bot_response:
+                        bot_response = MSG_FACT_GUARD_CLARIFY
+                    _reset_low_confidence_retry(conversation)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "question_contract",
+                            "decision": "llm_plan_collect",
+                            "state": conversation.state,
+                            "missing_slot": plan_collect_slot,
+                        },
+                    )
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="reply",
+                        intent="service_clarify",
+                        source="llm_plan",
+                        fast_intent=False,
+                    )
+                    bot_response, sent = _send_and_save(bot_response)
+                    result_message = (
+                        "LLM plan collect response sent"
+                        if sent
+                        else "LLM plan collect response failed"
+                    )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
 
     if intent_queue_event:
         _record_decision_trace(

@@ -1,0 +1,22 @@
+# SESSION 2026-02-02-hybrid-llm-plan-implementation-a1 — Session 2026-02-02-hybrid-llm-plan-implementation-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-02-hybrid-llm-plan-implementation.md
+- branch: feat/2026-02-02-hybrid-llm-plan-implementation-a1
+- worktree: /home/zhan/worktrees/2026-02-02-hybrid-llm-plan-implementation-a1
+- base_ref: feat/2026-02-02-hybrid-llm-plan-dec-a1
+- scope: Hybrid LLM plan — контракт, prompt, pipeline, тесты/evidence.
+- done:
+  - Подключил llm_plan контракт + prompt + валидатор.
+  - Встроил llm_plan stage в decision pipeline с tool-first и collect.
+  - Добавил тесты: llm_plan collect + reuse appointment.
+- next:
+  - Прогнать checks из TP и сохранить evidence.
+  - Обновить STATE.md (evidence + статус).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-02-hybrid-llm-plan-implementation.md
+  - /tmp/pytest_message_endpoint_hybrid_llm_plan.txt
+  - /tmp/pytest_golden_eval_hybrid_llm_plan.txt
+  - /tmp/chaos_hybrid_llm_plan
+- last_updated: 2026-02-02
