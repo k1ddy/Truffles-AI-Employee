@@ -534,7 +534,10 @@ test.describe('Navigation', () => {
         await page.getByTestId('nav-calendar').click();
         await expect(page).toHaveURL(urlPathPattern('/calendar'));
         await expect(page.getByTestId('calendar-page')).toBeVisible();
-        const dateInput = page.getByLabel('Дата');
+        let dateInput = page.getByLabel('Дата');
+        if (!(await dateInput.isVisible())) {
+            dateInput = page.locator('input[type="date"]');
+        }
         await expect(dateInput).toBeVisible();
         const localDate = await page.evaluate(() => {
             const now = new Date();

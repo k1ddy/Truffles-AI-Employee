@@ -8,6 +8,7 @@
 - base_ref: origin/main
 - scope: Calendar default date uses local timezone + smoke test coverage.
 - done:
+  - Fixed calendar smoke selector to handle live calendar date input
   - Replaced UTC-based formatDate with local date formatting.
   - Added Playwright smoke check for calendar default date.
   - Ran console-web lint and e2e commands (both missing local deps).
