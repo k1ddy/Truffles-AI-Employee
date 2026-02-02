@@ -97,3 +97,4 @@
 | 2026-02-01-console-web-canon-compare-a4 | done | feat/2026-02-01-console-web-canon-compare-a4 | /home/zhan/worktrees/2026-02-01-console-web-canon-compare-a4 | docs/TASK_PACKAGES/TP-2026-02-01-console-web-canon-compare.md | 2026-02-01 |
 | 2026-02-01-console-web-fact-audit2-a4 | done | feat/2026-02-01-console-web-fact-audit2-a4 | /home/zhan/worktrees/2026-02-01-console-web-fact-audit2-a4 | docs/TASK_PACKAGES/TP-2026-02-01-console-web-fact-audit.md | 2026-02-01 |
 | 2026-02-01-merge-origin-main-a4 | done | feat/2026-02-01-merge-origin-main-a4 | /home/zhan/worktrees/2026-02-01-merge-origin-main-a4 | docs/TASK_PACKAGES/TP-2026-02-01-merge-origin-main.md | 2026-02-02 |
+| 2026-02-02-console-web-fix-tps-a4 | done | feat/2026-02-02-console-web-fix-tps-a4 | /home/zhan/worktrees/2026-02-02-console-web-fix-tps-a4 | docs/TASK_PACKAGES/TP-2026-02-02-console-web-fix-tps.md | 2026-02-02 |
