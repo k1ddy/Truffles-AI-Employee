@@ -2100,7 +2100,7 @@ components:
           format: uuid
         status:
           type: string
-          enum: [pending, active, resolved]
+          enum: [pending, active, resolved, bot_handling]
         trigger_type:
           type: string
         trigger_value:

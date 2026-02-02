@@ -152,6 +152,7 @@ from app.services.pack_compiler_service import (
     parse_compiled_at,
 )
 from app.services.state_service import manager_resolve as state_manager_resolve
+from app.services.state_service import manager_return as state_manager_return
 from app.services.state_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
 
@@ -1842,7 +1843,7 @@ async def return_case(
                 release_idempotency(db, record=idempotency.record)
             raise ConsoleAPIError(403, "NOT_ASSIGNED", "You are not assigned to this case")
 
-    result = state_manager_resolve(
+    result = state_manager_return(
         db,
         conversation,
         case,
@@ -1853,8 +1854,6 @@ async def return_case(
         if idempotency and idempotency.record:
             release_idempotency(db, record=idempotency.record)
         raise ConsoleAPIError(409, "CASE_ALREADY_RESOLVED", result.error or "Case already resolved")
-
-    case.resolution_notes = "Returned to bot by manager"
 
     record_audit_event(
         db,
