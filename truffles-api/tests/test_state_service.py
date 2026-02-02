@@ -17,6 +17,7 @@ from app.services.state_service import (
     check_invariants,
     escalate_to_pending,
     manager_resolve,
+    manager_return,
     manager_take,
 )
 
@@ -253,6 +254,64 @@ class TestManagerResolve:
         handover = Mock()
 
         result = manager_resolve(db, conversation, handover, "mgr-123", "Manager")
+
+        assert result.ok is False
+        assert result.error_code == "invalid_state"
+
+
+class TestManagerReturn:
+    def test_success_from_manager_active(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.MANAGER_ACTIVE.value
+        conversation.id = "conv-123"
+        conversation.retry_offered_at = datetime.now(timezone.utc)
+        conversation.context = {"keep": True}
+
+        handover = Mock()
+        handover.status = "active"
+        handover.created_at = datetime.now(timezone.utc)
+        handover.resolved_at = datetime.now(timezone.utc)
+        handover.resolved_by_name = "Old Manager"
+        handover.resolution_notes = "old"
+        handover.assigned_to = "mgr-123"
+        handover.assigned_to_name = "Old Manager"
+
+        result = manager_return(db, conversation, handover, "mgr-123", "Manager Name")
+
+        assert result.ok is True
+        assert conversation.state == ConversationState.BOT_ACTIVE.value
+        assert conversation.retry_offered_at is None
+        assert handover.status == "bot_handling"
+        assert handover.resolved_at is None
+        assert handover.resolved_by_name is None
+        assert handover.resolution_notes is None
+        assert handover.assigned_to is None
+        assert handover.assigned_to_name is None
+
+    def test_success_from_pending(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.PENDING.value
+        conversation.id = "conv-123"
+
+        handover = Mock()
+        handover.status = "pending"
+
+        result = manager_return(db, conversation, handover, "mgr-123", "Manager")
+
+        assert result.ok is True
+        assert conversation.state == ConversationState.BOT_ACTIVE.value
+        assert handover.status == "bot_handling"
+
+    def test_fails_from_bot_active(self):
+        db = Mock()
+        conversation = Mock()
+        conversation.state = ConversationState.BOT_ACTIVE.value
+
+        handover = Mock()
+
+        result = manager_return(db, conversation, handover, "mgr-123", "Manager")
 
         assert result.ok is False
         assert result.error_code == "invalid_state"
