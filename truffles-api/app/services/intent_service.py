@@ -13,6 +13,7 @@ from app.logging_config import get_logger, record_llm_time
 from app.schemas.intent import (
     validate_answer_interpreter_output,
     validate_dialogue_controller_output,
+    validate_llm_plan_output,
 )
 from app.services.ai_service import (
     FAST_MODEL,
@@ -73,6 +74,11 @@ _DEFAULT_CONTROLLER_MODEL = (
     "gpt-4o-mini" if FAST_MODEL.strip().lower().startswith("gpt-5") else FAST_MODEL
 )
 CONTROLLER_MODEL = os.environ.get("ROUTER_MODEL", _DEFAULT_CONTROLLER_MODEL).strip()
+PLAN_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "llm_plan.md"
+PLAN_TIMEOUT_SECONDS = float(os.environ.get("LLM_PLAN_TIMEOUT_SECONDS", "3.0"))
+PLAN_MAX_TOKENS = int(os.environ.get("LLM_PLAN_MAX_TOKENS", "220"))
+PLAN_MODEL = os.environ.get("LLM_PLAN_MODEL", CONTROLLER_MODEL).strip()
+PLAN_CONFIDENCE_THRESHOLD = float(os.environ.get("LLM_PLAN_CONFIDENCE_THRESHOLD", "0.3"))
 ANSWER_INTERPRETER_TIMEOUT_SECONDS = float(
     os.environ.get("ANSWER_INTERPRETER_TIMEOUT_SECONDS", "2.5")
 )
@@ -188,7 +194,17 @@ service_query должен быть словом/фразой только из 
 - confidence: 0.0–1.0. Если сомневаешься — 0.0.
 """
 
+PLAN_PROMPT_FALLBACK = """# Hybrid LLM Plan Prompt
+Return JSON only (no markdown). Required fields: outcome, tool_action, confidence.
+Optional fields: tool_args, pack_refs, language, reason, goal, slot_state, open_questions.
+Use tool_action and pack_refs only from the allowed lists provided in the input.
+slot_state and open_questions may only use: service, datetime, name.
+For info pricing/duration, include tool_args.service_query (or slot_state.service).
+If missing required args, set outcome=collect and list open_questions accordingly.
+"""
+
 _CONTROLLER_PROMPT_CACHE: str | None = None
+_PLAN_PROMPT_CACHE: str | None = None
 
 
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
@@ -210,6 +226,21 @@ def _load_controller_prompt() -> str:
         logger.warning("Dialogue controller prompt fallback in use")
         _CONTROLLER_PROMPT_CACHE = CONTROLLER_PROMPT_FALLBACK.strip()
     return _CONTROLLER_PROMPT_CACHE
+
+
+def _load_plan_prompt() -> str:
+    global _PLAN_PROMPT_CACHE
+    if _PLAN_PROMPT_CACHE is not None:
+        return _PLAN_PROMPT_CACHE
+    try:
+        _PLAN_PROMPT_CACHE = PLAN_PROMPT_PATH.read_text(encoding="utf-8").strip()
+    except Exception as exc:
+        logger.warning(f"LLM plan prompt load failed: {exc}")
+        _PLAN_PROMPT_CACHE = ""
+    if not _PLAN_PROMPT_CACHE:
+        logger.warning("LLM plan prompt fallback in use")
+        _PLAN_PROMPT_CACHE = PLAN_PROMPT_FALLBACK.strip()
+    return _PLAN_PROMPT_CACHE
 
 
 def _clean_controller_class(value: str | None) -> str | None:
@@ -859,6 +890,147 @@ def route_dialogue_controller(
         controller_error="none",
         controller_retry_flag=controller_retry,
     )
+    return result
+
+
+def route_llm_plan(
+    message: str,
+    *,
+    expected_reply_type: str | None = None,
+    current_goal: str | None = None,
+    slot_state: dict | None = None,
+    info_refs: list[str] | None = None,
+    consult_refs: list[str] | None = None,
+    client_slug: str | None = None,
+    client_config: dict | None = None,
+    timing_context: dict | None = None,
+) -> dict:
+    result: dict[str, Any] = {
+        "ok": False,
+        "payload": None,
+        "error": None,
+        "raw": None,
+        "attempted": False,
+        "elapsed_ms": 0.0,
+    }
+    normalized = (message or "").strip()
+    if not normalized:
+        result["error"] = "empty_message"
+        return result
+    prompt = _load_plan_prompt()
+    if not prompt:
+        result["error"] = "prompt_missing"
+        return result
+    if not os.environ.get("OPENAI_API_KEY"):
+        result["error"] = "no_api_key"
+        return result
+    if not _should_attempt_llm(
+        timing_context,
+        timeout_seconds=PLAN_TIMEOUT_SECONDS,
+        stage="plan_llm",
+    ):
+        result["error"] = "deadline_exceeded"
+        return result
+
+    budget_meta = consume_llm_budget(
+        client_slug=client_slug or "unknown",
+        client_config=client_config,
+        scope="plan",
+    )
+    _append_llm_budget_event(timing_context, budget_meta)
+    if not budget_meta.get("allowed", True):
+        result["error"] = "budget_exceeded"
+        return result
+
+    plan_input: dict[str, Any] = {
+        "task": "llm_plan",
+        "message": message,
+        "expected_reply_type": expected_reply_type,
+        "current_goal": current_goal,
+        "slot_state": slot_state or {},
+        "allowed": {
+            "tool_actions": ["info", "consult", "booking", "handoff", "collect"],
+            "info_refs": list(info_refs or []),
+            "consult_refs": list(consult_refs or []),
+        },
+    }
+
+    llm = get_llm_provider()
+    temperature = 0.0
+    model_name = PLAN_MODEL.strip().lower()
+    if model_name.startswith("gpt-5"):
+        temperature = 1.0
+
+    messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": json.dumps(plan_input, ensure_ascii=False)},
+    ]
+    llm_start = time.monotonic()
+    response = None
+    error = None
+    try:
+        response = llm.generate(
+            messages=messages,
+            max_tokens=PLAN_MAX_TOKENS,
+            model=PLAN_MODEL,
+            timeout_seconds=PLAN_TIMEOUT_SECONDS,
+            temperature=temperature,
+        )
+    except httpx.TimeoutException:
+        error = "timeout"
+    except Exception as exc:
+        logger.warning(f"LLM plan failed: {exc}")
+        error = "error"
+
+    elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
+    result["attempted"] = True
+    result["elapsed_ms"] = elapsed_ms
+    _log_timing(
+        "plan_llm_ms",
+        elapsed_ms,
+        timing_context=timing_context,
+        extra={
+            "model_name": PLAN_MODEL,
+            "model_tier": "fast",
+            "timeout": error == "timeout",
+            "timeout_seconds": PLAN_TIMEOUT_SECONDS,
+            "max_tokens": PLAN_MAX_TOKENS,
+            "temperature": temperature,
+        },
+    )
+    record_llm_time(client_slug, "plan_llm_ms", elapsed_ms)
+
+    if error is not None:
+        result["error"] = error
+        return result
+
+    content = (response.content or "").strip() if response else ""
+    result["raw"] = content
+    if not content:
+        result["error"] = "empty_response"
+        return result
+
+    payload = None
+    try:
+        payload = json.loads(content)
+    except Exception:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                payload = json.loads(match.group(0))
+            except Exception:
+                payload = None
+    if not isinstance(payload, dict):
+        result["error"] = "invalid_json"
+        return result
+
+    contract, schema_error = validate_llm_plan_output(payload)
+    if schema_error:
+        result["error"] = "invalid_schema"
+        return result
+
+    result["ok"] = True
+    result["payload"] = contract.model_dump()
     return result
 
 

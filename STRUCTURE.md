@@ -25,6 +25,7 @@
 | `contracts/llm/` | Контракты LLM outputs (router + answer_interpreter) | Архитектор/Backend |
 | `contracts/llm/dialogue_controller_output.v1.jsonschema` | Контракт LLM‑контроллера (router) | Архитектор/Backend |
 | `contracts/llm/answer_interpreter_output.v1.jsonschema` | Контракт LLM answer_interpreter | Архитектор/Backend |
+| `contracts/llm/llm_plan_output.v1.jsonschema` | Контракт Hybrid LLM plan | Архитектор/Backend |
 | `contracts/packs/` | Pack-compiler artifacts (signal graph, indexes) | Архитектор/Backend |
 | `contracts/packs/signal_graph.v1.jsonschema` | Канон сигнального графа (anchors/lexicons) | Архитектор/Backend |
 | `contracts/policy/` | Policy DSL bundles | Архитектор/Backend |
@@ -527,6 +528,7 @@ truffles-api/
 | `system_prompt_v1.md` | Текущий системный промпт бота |
 | `intent_classifier.md` | Промпт для классификации |
 | `summarizer.md` | Промпт для суммаризации |
+| `llm_plan.md` | Промпт Hybrid LLM plan |
 
 ---
 

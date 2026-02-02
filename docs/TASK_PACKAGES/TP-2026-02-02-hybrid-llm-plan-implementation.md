@@ -54,7 +54,7 @@
 - Branch/worktree/base/merge/cleanup:
   - Branch: `feat/2026-02-02-hybrid-llm-plan-implementation-a1`
   - Worktree: `/home/zhan/worktrees/2026-02-02-hybrid-llm-plan-implementation-a1`
-  - Base: `origin/main`
+  - Base: `feat/2026-02-02-hybrid-llm-plan-dec-a1`
   - Merge: PR -> main
   - Cleanup: `scripts/session_end.sh --status done` + remove worktree/branch
 - Риски/блокеры: риск переобучения валидатора или рост false‑positive; нужно аккуратно ограничить правилами pack/tools.

@@ -72,6 +72,15 @@ def _normalize_slots(value: Any) -> dict[str, str]:
     return cleaned
 
 
+def _normalize_optional_string(value: Any, *, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field}_invalid")
+    cleaned = value.strip()
+    return cleaned or None
+
+
 class DialogueControllerOutput(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -147,6 +156,50 @@ class AnswerInterpreterOutput(BaseModel):
         return value.strip()
 
 
+class LlmPlanOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    outcome: str
+    tool_action: str | None = None
+    tool_args: dict[str, Any] = Field(default_factory=dict)
+    pack_refs: list[str] = Field(default_factory=list)
+    language: str | None = None
+    confidence: float = Field(..., ge=0, le=1)
+    reason: str | None = None
+    goal: str | None = None
+    slot_state: dict[str, str] = Field(default_factory=dict)
+    open_questions: list[str] = Field(default_factory=list)
+
+    @field_validator("outcome", mode="before")
+    @classmethod
+    def _validate_outcome(cls, value: Any) -> str:
+        return _normalize_required_string(value, field="outcome")
+
+    @field_validator("tool_action", "language", "reason", "goal", mode="before")
+    @classmethod
+    def _validate_optional_fields(cls, value: Any, info) -> str | None:
+        return _normalize_optional_string(value, field=info.field_name)
+
+    @field_validator("tool_args", mode="before")
+    @classmethod
+    def _validate_tool_args(cls, value: Any) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("tool_args_invalid")
+        return dict(value)
+
+    @field_validator("pack_refs", "open_questions", mode="before")
+    @classmethod
+    def _validate_string_lists(cls, value: Any, info) -> list[str]:
+        return _normalize_string_list(value, field=info.field_name)
+
+    @field_validator("slot_state", mode="before")
+    @classmethod
+    def _validate_slot_state(cls, value: Any) -> dict[str, str]:
+        return _normalize_slots(value)
+
+
 def validate_dialogue_controller_output(
     payload_json: dict[str, Any],
 ) -> tuple[DialogueControllerOutput | None, str | None]:
@@ -164,4 +217,14 @@ def validate_answer_interpreter_output(
         contract = AnswerInterpreterOutput.model_validate(payload_json)
     except ValidationError as exc:
         return None, f"answer_interpreter_error:{_summarize_validation_error(exc)}"
+    return contract, None
+
+
+def validate_llm_plan_output(
+    payload_json: dict[str, Any],
+) -> tuple[LlmPlanOutput | None, str | None]:
+    try:
+        contract = LlmPlanOutput.model_validate(payload_json)
+    except ValidationError as exc:
+        return None, f"llm_plan_error:{_summarize_validation_error(exc)}"
     return contract, None
