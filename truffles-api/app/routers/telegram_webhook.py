@@ -22,6 +22,7 @@ from app.services.agent_link_service import consume_link_token, hash_link_token
 from app.services.audit_service import record_audit_event
 from app.services.learned_response_service import (
     approve_learned_response,
+    evaluate_learned_response_eligibility,
     is_agent_allowed_to_approve,
     reject_learned_response,
 )
@@ -691,13 +692,28 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
             elif learned.status == "rejected":
                 message = "⚠️ Уже отклонено"
             else:
-                approve_learned_response(
+                allowed, reason = evaluate_learned_response_eligibility(
                     db,
                     learned_response=learned,
-                    actor_id=linked_agent.id,
                 )
-                db.commit()
-                message = "✅ Добавлено"
+                if not allowed:
+                    reason_label = {
+                        "consent_not_granted": "нет согласия",
+                        "anonymization_disabled": "анонимизация выключена",
+                        "retention_expired": "истек срок хранения",
+                    }.get(reason, "ограничено политикой")
+                    message = f"⛔ Нельзя одобрить: {reason_label}"
+                else:
+                    applied = approve_learned_response(
+                        db,
+                        learned_response=learned,
+                        actor_id=linked_agent.id,
+                    )
+                    db.commit()
+                    if applied:
+                        message = "✅ Добавлено"
+                    else:
+                        message = "⚠️ Одобрено без применения"
         else:
             if learned.status == "rejected":
                 message = "✅ Уже отклонено"

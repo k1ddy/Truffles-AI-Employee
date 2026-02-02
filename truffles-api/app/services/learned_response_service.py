@@ -12,7 +12,14 @@ from app.models import Agent, ClientSettings, Handover, LearnedResponse
 from app.services.escalation_service import resolve_telegram_routing
 from app.services.knowledge_registry_service import get_current_published, upsert_draft
 from app.services.knowledge_validation import strip_compiled_artifacts
-from app.services.learning_service import add_learned_response_to_knowledge, is_owner_response
+from app.services.learning_service import (
+    add_learned_response_to_knowledge,
+    build_retention_expires_at,
+    evaluate_candidate_eligibility,
+    get_learning_policy,
+    is_owner_response,
+    redact_text,
+)
 from app.services.telegram_service import (
     TelegramService,
     build_learned_response_buttons,
@@ -193,6 +200,18 @@ def notify_learned_response_pending(
     return True
 
 
+def evaluate_learned_response_eligibility(
+    db: Session,
+    *,
+    learned_response: LearnedResponse,
+) -> tuple[bool, Optional[str]]:
+    policy = get_learning_policy(db, learned_response.client_id)
+    return evaluate_candidate_eligibility(
+        policy,
+        retention_expires_at=learned_response.retention_expires_at,
+    )
+
+
 def create_learned_response(
     db: Session,
     *,
@@ -205,14 +224,48 @@ def create_learned_response(
 ) -> LearnedResponse | None:
     if not handover.user_message or not handover.manager_response:
         return None
-    question = handover.user_message.strip()
-    answer = handover.manager_response.strip()
+    policy = get_learning_policy(db, handover.client_id)
+    if not policy.allowed:
+        logger.info(
+            "Learned response skipped: consent not granted",
+            extra={
+                "context": {
+                    "handover_id": str(handover.id),
+                    "client_id": str(handover.client_id),
+                    "consent_status": policy.consent_status,
+                    "anonymization_mode": policy.anonymization_mode,
+                    "retention_days": policy.retention_days,
+                }
+            },
+        )
+        return None
+
+    question_raw = handover.user_message.strip()
+    answer_raw = handover.manager_response.strip()
+    question, question_redactions = redact_text(question_raw, policy.anonymization_mode)
+    answer, answer_redactions = redact_text(answer_raw, policy.anonymization_mode)
+    if not question or not answer:
+        logger.info(
+            "Learned response skipped: redaction removed content",
+            extra={
+                "context": {
+                    "handover_id": str(handover.id),
+                    "question_redactions": question_redactions,
+                    "answer_redactions": answer_redactions,
+                }
+            },
+        )
+        return None
     if len(question) < MIN_QUESTION_LENGTH or len(answer) < MIN_ANSWER_LENGTH:
         return None
     if _is_low_value_text(question) or _is_low_value_text(answer):
         return None
 
     now = datetime.now(timezone.utc)
+    retention_expires_at = build_retention_expires_at(now, policy.retention_days)
+    redaction_summary = None
+    if question_redactions or answer_redactions:
+        redaction_summary = {"question": question_redactions, "answer": answer_redactions}
     learned = LearnedResponse(
         client_id=handover.client_id,
         branch_id=handover.branch_id,
@@ -225,6 +278,12 @@ def create_learned_response(
         source_role=source_role,
         source_channel=source_channel,
         agent_id=agent_id,
+        consent_status=policy.consent_status,
+        anonymization_mode=policy.anonymization_mode,
+        retention_expires_at=retention_expires_at,
+        candidate_type="faq",
+        candidate_payload={"question": question, "answer": answer},
+        redaction_summary=redaction_summary,
         status="pending",
         created_at=now,
         updated_at=now,
@@ -246,6 +305,21 @@ def approve_learned_response(
     learned_response: LearnedResponse,
     actor_id: Optional[UUID],
 ) -> bool:
+    allowed, reason = evaluate_learned_response_eligibility(
+        db,
+        learned_response=learned_response,
+    )
+    if not allowed:
+        logger.info(
+            "Learned response approval blocked",
+            extra={
+                "context": {
+                    "learned_response_id": str(learned_response.id),
+                    "reason": reason,
+                }
+            },
+        )
+        return False
     now = datetime.now(timezone.utc)
     learned_response.status = "approved"
     learned_response.approved_by = actor_id
@@ -314,7 +388,33 @@ def apply_learned_response_to_draft(
     faq = client_pack.get("faq")
     if not isinstance(faq, list):
         faq = []
-    normalized_question = _normalize_text(learned_response.question_text)
+    candidate_type = (learned_response.candidate_type or "faq").strip().lower()
+    if candidate_type != "faq":
+        logger.info(
+            "Learned response skipped: unsupported candidate_type",
+            extra={
+                "context": {
+                    "learned_response_id": str(learned_response.id),
+                    "candidate_type": candidate_type,
+                }
+            },
+        )
+        return False
+
+    question = learned_response.question_text
+    answer = learned_response.response_text
+    if isinstance(learned_response.candidate_payload, dict):
+        payload_question = learned_response.candidate_payload.get("question")
+        payload_answer = learned_response.candidate_payload.get("answer")
+        if isinstance(payload_question, str) and payload_question.strip():
+            question = payload_question.strip()
+        if isinstance(payload_answer, str) and payload_answer.strip():
+            answer = payload_answer.strip()
+
+    if not question or not answer:
+        return False
+
+    normalized_question = _normalize_text(question)
     for item in faq:
         if not isinstance(item, dict):
             continue
@@ -324,8 +424,8 @@ def apply_learned_response_to_draft(
             return True
 
     entry = {
-        "question": learned_response.question_text,
-        "answer": learned_response.response_text,
+        "question": question,
+        "answer": answer,
         "source": learned_response.source,
         "handover_id": str(learned_response.handover_id) if learned_response.handover_id else None,
     }

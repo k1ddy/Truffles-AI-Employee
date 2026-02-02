@@ -33,6 +33,10 @@ interface BotConfig {
     booking_enabled: boolean;
     enable_reminders: boolean;
     enable_owner_escalation: boolean;
+    learning_consent_status?: string | null;
+    learning_anonymization_mode?: string | null;
+    learning_retention_days?: number | null;
+    data_sharing?: string | null;
 }
 
 interface SettingsData {
@@ -262,6 +266,23 @@ export default function SettingsPage() {
                             <ConfigCard label="Тон общения" value={config.tone} />
                             <ConfigCard label="Авто-обучение" value={config.autolearn_enabled} type="boolean" />
                             <ConfigCard label="Бронирование" value={config.booking_enabled} type="boolean" />
+                        </div>
+                    ) : (
+                        <p className="text-muted-foreground text-center py-4">Нет данных</p>
+                    )}
+                </div>
+
+                {/* Learning & Data */}
+                <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-learning">
+                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        🧠 Обучение и данные
+                    </h2>
+                    {config ? (
+                        <div>
+                            <ConfigCard label="Consent статус" value={config.learning_consent_status} />
+                            <ConfigCard label="Анонимизация" value={config.learning_anonymization_mode} />
+                            <ConfigCard label="Retention (дней)" value={config.learning_retention_days} />
+                            <ConfigCard label="Data sharing" value={config.data_sharing} />
                         </div>
                     ) : (
                         <p className="text-muted-foreground text-center py-4">Нет данных</p>

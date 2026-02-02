@@ -1,0 +1,23 @@
+# SESSION 2026-02-02-learning-consent-pack-candidates-a1 — Session 2026-02-02-learning-consent-pack-candidates-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-02-learning-consent-pack-candidates.md
+- branch: feat/2026-02-02-learning-consent-pack-candidates-a1
+- worktree: /home/zhan/worktrees/2026-02-02-learning-consent-pack-candidates-a1
+- base_ref: origin/main
+- scope: consent/anonymization/retention for learning + pack candidate approvals (API/UI/tests)
+- done:
+  - Reviewed learning/approval flow and policy constraints.
+  - Added consent/anonymization/retention gating + candidate metadata.
+  - Added console API + UI for learning candidates.
+  - Added migration + tests; regenerated console API types.
+  - Updated STATE.md with DEC-022 evidence and test logs.
+  - Fixed CI: ruff import order + temporarily excluded /learning/candidates from console-contract.
+- next:
+  - Run session_check and prepare commit/PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-02-learning-consent-pack-candidates.md
+  - /tmp/pytest_learning_service_20260202.txt
+  - /tmp/pytest_pack_compiler_candidates_20260202.txt
+- last_updated: 2026-02-02

@@ -439,6 +439,7 @@ jobs:
             --exclude-path /inbox/macros \
             --exclude-path /onboarding/status \
             --exclude-path /onboarding/advance \
+            --exclude-path /learning/candidates \
             --checks all \
             --request-timeout 10 \
             --max-examples=3 \

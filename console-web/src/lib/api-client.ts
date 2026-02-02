@@ -496,11 +496,15 @@ export type KnowledgeRollbackResponse = {
     success?: boolean;
     version_id?: string | null;
 };
+export type LearningCandidate = components["schemas"]["LearningCandidate"];
+export type LearningCandidateListResponse = components["schemas"]["LearningCandidateListResponse"];
+export type LearningCandidateActionResponse = components["schemas"]["LearningCandidateActionResponse"];
 
 // Query params
 export type ListCasesParams = operations["listCases"]["parameters"]["query"];
 export type ListInboxMacrosParams = operations["listInboxMacros"]["parameters"]["query"];
 export type ListAuditParams = operations["listAuditEvents"]["parameters"]["query"];
+export type ListLearningCandidatesParams = operations["listLearningCandidates"]["parameters"]["query"];
 export type ListCompaniesParams = operations["listAdminCompanies"]["parameters"]["query"];
 export type ListClientsParams = operations["listAdminClients"]["parameters"]["query"];
 export type ListBranchesParams = operations["listAdminBranches"]["parameters"]["query"];
@@ -668,6 +672,16 @@ export const knowledgeApi = {
             version_id: versionId,
             confirmation_id: confirmationId,
         }),
+};
+
+/** Learning candidates endpoints */
+export const learningApi = {
+    list: (params?: ListLearningCandidatesParams) =>
+        apiClient.get<LearningCandidateListResponse>("/learning/candidates", { params }),
+    approve: (candidateId: string) =>
+        apiClient.post<LearningCandidateActionResponse>(`/learning/candidates/${candidateId}/approve`),
+    reject: (candidateId: string) =>
+        apiClient.post<LearningCandidateActionResponse>(`/learning/candidates/${candidateId}/reject`),
 };
 
 // Export default client
