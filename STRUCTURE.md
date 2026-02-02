@@ -208,6 +208,8 @@
 - `docs/TASK_PACKAGES/TP-2026-01-27-console-contract-stabilization.md`
 - `docs/TASK_PACKAGES/TP-2026-01-29-livecheck-ca03-ca06.md`
 - `docs/TASK_PACKAGES/TP-2026-01-29-livecheck-ca03-ca06.md`
+- `docs/TASK_PACKAGES/TP-2026-02-02-hybrid-llm-plan-dec.md`
+- `docs/TASK_PACKAGES/TP-2026-02-02-hybrid-llm-plan-implementation.md`
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Статус:** CANON  
 **Owner:** Top Architect  
-**Обновлено:** 2026-01-29  
+**Обновлено:** 2026-02-02  
 **Scope:** поведение бота (info/consult/booking), LAW/policy/clarify, формат ответа.  
 **Out of scope:** реализация, evidence/CI.  
 **Links:** `SPECS/ARCHITECTURE.md`, `SPECS/ESCALATION.md`, `docs/SESSION_START_PROMPT.txt`, `STATE.md`.
@@ -143,6 +143,19 @@ _Примечание:_ текущая реализация fact resolver опи
 - **Clarify limit:** максимум 2 уточнения (`clarify_limit=2`), далее эскалация.
 - Clarify policy: одно уточнение = один слот; выбираем самый информативный слот для разблокировки ответа/записи.
 - Если есть frustration/human_request или явный opt-out → без уточнений, сразу handoff/мьют по правилам выше.
+
+**Hybrid LLM‑plan (DEC-020):**
+- LLM возвращает **план** (JSON‑контракт) с `outcome/tool_action/tool_args/pack_refs/language/confidence/goal/slot_state`, а не “готовый текст”.
+- Валидатор обязателен: pack_refs для FACT/CONSULT/INFO, валидные tool_args для инструментов; иначе → COLLECT/clarify.
+- **Tool‑first:** при валидном `tool_action` инструмент вызывается всегда; ответ формируется только из результата tool/pack.
+
+**Минимальный what‑if набор (P0, без сценарного кода):**
+- Подтверждение записи → только `calendar.get_booking`, без повторного `book_slot`.
+- Повторная “запишите” → `book_slot` с idempotency_key (без дублей).
+- Конфликт слота → `list_slots` и выбор, без обещаний.
+- Недостаточные слоты → один уточняющий вопрос, инструмент не вызывается.
+- Перенос/отмена → `reschedule/cancel` с подтверждением только после success инструмента.
+- Шум/эмодзи на слот‑вопрос → `low_signal`, слот не заполняется, повторить вопрос без сброса цели.
 
 **Multi-intent contract (P0):**
 - `primary_goal` определяется по приоритету: активный booking (`expected_reply_type` + `expected_reply_match=true` или явный booking‑signal) → consult → info → smalltalk/OOD.
