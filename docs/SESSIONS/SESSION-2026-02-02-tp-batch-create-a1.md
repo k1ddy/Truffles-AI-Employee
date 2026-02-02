@@ -1,0 +1,21 @@
+# SESSION 2026-02-02-tp-batch-create-a1 — Session 2026-02-02-tp-batch-create-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-02-tp-batch-create.md
+- branch: feat/2026-02-02-tp-batch-create-a1
+- worktree: /home/zhan/worktrees/2026-02-02-tp-batch-create-a1
+- base_ref: origin/main
+- scope: Создать три TP (vertical pack kit, minimum data + safe-mode, consent + pack candidates) и обновить STATE/STRUCTURE.
+- done:
+  - Созданы TP: vertical pack kit, minimum data + safe-mode, consent + pack candidates.
+  - Обновлены `STATE.md` и `STRUCTURE.md`.
+  - Обновлены session log и index.
+- next:
+  - Run `scripts/session_end.sh --status done`, commit.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-02-tp-batch-create.md
+  - docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-kit.md
+  - docs/TASK_PACKAGES/TP-2026-02-02-minimum-data-safe-mode.md
+  - docs/TASK_PACKAGES/TP-2026-02-02-learning-consent-pack-candidates.md
+- last_updated: 2026-02-02

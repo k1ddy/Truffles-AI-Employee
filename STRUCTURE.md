@@ -108,6 +108,10 @@
 
 **Активные Task Packages:**
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-canon.md`
+- `docs/TASK_PACKAGES/TP-2026-02-02-tp-batch-create.md`
+- `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-kit.md`
+- `docs/TASK_PACKAGES/TP-2026-02-02-minimum-data-safe-mode.md`
+- `docs/TASK_PACKAGES/TP-2026-02-02-learning-consent-pack-candidates.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-verify-test.md`
