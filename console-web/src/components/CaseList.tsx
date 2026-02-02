@@ -82,6 +82,7 @@ export default function CaseList({
         sortBy: "activity",
     });
     const [cursor, setCursor] = useState<string | undefined>(undefined);
+    const [caseItems, setCaseItems] = useState<Case[]>([]);
     const [searchValue, setSearchValue] = useState("");
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const [filtersCollapsed, setFiltersCollapsed] = useState(false);
@@ -102,6 +103,7 @@ export default function CaseList({
                 query: trimmed || undefined,
             }));
             setCursor(undefined);
+            setCaseItems([]);
         }, 300);
         return () => clearTimeout(handle);
     }, [searchValue]);
@@ -165,6 +167,7 @@ export default function CaseList({
     useEffect(() => {
         if (!branchFilterEnabled && filters.branchId) {
             setCursor(undefined);
+            setCaseItems([]);
             setFilters((prev) => ({ ...prev, branchId: undefined }));
         }
     }, [branchFilterEnabled, filters.branchId]);
@@ -213,7 +216,24 @@ export default function CaseList({
         refetchIntervalInBackground: false, // Only refresh when tab is active
     });
 
-    const cases = data?.items ?? [];
+    useEffect(() => {
+        if (!data?.items) {
+            return;
+        }
+        if (!cursor) {
+            setCaseItems(data.items);
+            return;
+        }
+        setCaseItems((prev) => {
+            const byId = new Map(prev.map((item) => [item.id, item]));
+            data.items.forEach((item) => {
+                byId.set(item.id, item);
+            });
+            return Array.from(byId.values());
+        });
+    }, [data, cursor]);
+
+    const cases = caseItems;
 
     // Sort by SLA if selected
     const sortedCases = [...cases].sort((a, b) => {
@@ -238,6 +258,7 @@ export default function CaseList({
 
     const resetPagination = () => {
         setCursor(undefined);
+        setCaseItems([]);
     };
 
     if (!session) {
