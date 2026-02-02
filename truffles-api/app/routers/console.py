@@ -876,7 +876,7 @@ def _parse_sort_param(name: str, value: Optional[str], default: str = "last_acti
     if value is None or str(value).strip() == "":
         return default
     normalized = str(value).strip().lower()
-    if normalized not in {"last_activity", "created_at"}:
+    if normalized not in {"last_activity", "created_at", "sla"}:
         raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
     return normalized
 
@@ -1377,14 +1377,22 @@ async def list_cases(
 
     # Sorting & Pagination (Cursor based on selected sort)
     sort_expr = Handover.created_at
+    sort_desc = True
     if sort_by_value == "last_activity":
         sort_expr = func.coalesce(latest_message_subq.c.created_at, Handover.created_at)
-
-    query = query.order_by(sort_expr.desc(), Handover.created_at.desc())
+    elif sort_by_value == "sla":
+        sort_expr = Handover.created_at
+        sort_desc = False
 
     cursor_date = _parse_cursor_param(cursor)
-    if cursor_date is not None:
-        query = query.filter(sort_expr < cursor_date)
+    if sort_desc:
+        query = query.order_by(sort_expr.desc(), Handover.created_at.desc())
+        if cursor_date is not None:
+            query = query.filter(sort_expr < cursor_date)
+    else:
+        query = query.order_by(sort_expr.asc(), Handover.created_at.asc())
+        if cursor_date is not None:
+            query = query.filter(sort_expr > cursor_date)
 
     # Select handover + conversation + customer
     items = query.with_entities(

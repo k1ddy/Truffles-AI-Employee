@@ -185,6 +185,7 @@ export default function CaseList({
                 if (includeSort) {
                     if (filters.sortBy === "activity") params.append("sort_by", "last_activity");
                     if (filters.sortBy === "created_at") params.append("sort_by", "created_at");
+                    if (filters.sortBy === "sla") params.append("sort_by", "sla");
                 }
                 if (cursor) params.append("cursor", cursor);
                 params.append("limit", "20");
@@ -215,20 +216,18 @@ export default function CaseList({
 
     const cases = data?.items ?? [];
 
-    // Sort by SLA if selected
-    const sortedCases = [...cases].sort((a, b) => {
-        if (filters.sortBy === "sla") {
-            const slaA = getSlaIndicator(a.created_at).minutes;
-            const slaB = getSlaIndicator(b.created_at).minutes;
-            return slaB - slaA; // Oldest first (highest SLA breach)
-        }
-        if (filters.sortBy === "activity") {
-            const aTime = a.last_inbound_at || a.last_activity_at || a.created_at;
-            const bTime = b.last_inbound_at || b.last_activity_at || b.created_at;
-            return new Date(bTime).getTime() - new Date(aTime).getTime();
-        }
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    });
+    // Keep server order for SLA; local sort for other modes.
+    const sortedCases =
+        filters.sortBy === "sla"
+            ? cases
+            : [...cases].sort((a, b) => {
+                if (filters.sortBy === "activity") {
+                    const aTime = a.last_inbound_at || a.last_activity_at || a.created_at;
+                    const bTime = b.last_inbound_at || b.last_activity_at || b.created_at;
+                    return new Date(bTime).getTime() - new Date(aTime).getTime();
+                }
+                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+            });
 
     const loadMore = () => {
         if (data?.cursor) {
