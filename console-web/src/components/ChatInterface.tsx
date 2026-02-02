@@ -18,6 +18,17 @@ interface ChatInterfaceProps {
     frame?: "card" | "plain";
 }
 
+type LocalMessageStatus = "sending" | "failed";
+type LocalMessageKind = "text" | "media";
+type LocalMessage = Message & {
+    localId: string;
+    localStatus: LocalMessageStatus;
+    localKind: LocalMessageKind;
+};
+
+const isLocalMessage = (message: Message | LocalMessage): message is LocalMessage =>
+    "localStatus" in message;
+
 async function sendMessage(conversationId: string, content: string) {
     const response = await api.post(`/conversations/${conversationId}/messages`, {
         content,
@@ -86,6 +97,7 @@ export default function ChatInterface({
     const isControlled = typeof onDraftChange === "function";
     const [internalDraft, setInternalDraft] = useState("");
     const [attachedFile, setAttachedFile] = useState<File | null>(null);
+    const [localMessages, setLocalMessages] = useState<LocalMessage[]>([]);
     const inputValue = isControlled ? draft ?? "" : internalDraft;
     const setInputValue = isControlled ? onDraftChange : setInternalDraft;
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -97,8 +109,40 @@ export default function ChatInterface({
     const maxTextareaHeight = 220;
     const minTextareaHeight = 44;
 
-    // Reverse messages for chronological display (oldest first)
-    const sortedMessages = [...messages].reverse();
+    const createLocalId = (prefix: string) =>
+        `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    const addLocalMessage = (message: LocalMessage) => {
+        setLocalMessages((prev) => [message, ...prev]);
+    };
+    const updateLocalMessageStatus = (localId: string, status: LocalMessageStatus) => {
+        setLocalMessages((prev) =>
+            prev.map((message) =>
+                message.localId === localId
+                    ? {
+                        ...message,
+                        localStatus: status,
+                    }
+                    : message
+            )
+        );
+    };
+    const removeLocalMessage = (localId: string) => {
+        setLocalMessages((prev) => prev.filter((message) => message.localId !== localId));
+    };
+    const retryLocalMessage = (message: LocalMessage) => {
+        if (message.localKind !== "text") {
+            return;
+        }
+        const content = message.content?.trim();
+        if (!content) {
+            return;
+        }
+        removeLocalMessage(message.localId);
+        sendMutation.mutate(content);
+    };
+
+    const displayMessages = localMessages.length ? [...localMessages, ...messages] : messages;
+    const sortedMessages = [...displayMessages].reverse();
 
     // Scroll to bottom on new messages
     useEffect(() => {
@@ -110,6 +154,10 @@ export default function ChatInterface({
             }
         }
     }, [messages]);
+
+    useEffect(() => {
+        setLocalMessages([]);
+    }, [caseId]);
 
     useEffect(() => {
         const textarea = textareaRef.current;
@@ -126,40 +174,37 @@ export default function ChatInterface({
     const sendMutation = useMutation({
         mutationFn: (content: string) => sendMessage(conversationId, content),
         onMutate: async (content) => {
-            // Cancel any outgoing refetches
             await queryClient.cancelQueries({ queryKey: ["messages", caseId] });
-
-            // Snapshot previous value
-            const previousMessages = queryClient.getQueryData(["messages", caseId]);
-
-            // Optimistically add the new message
-            const optimisticMessage: Message = {
-                id: `temp-${Date.now()}`,
+            const localId = createLocalId("temp");
+            const optimisticMessage: LocalMessage = {
+                id: localId,
+                localId,
+                localStatus: "sending",
+                localKind: "text",
                 role: "manager",
                 content,
                 created_at: new Date().toISOString(),
             };
-
-            queryClient.setQueryData(["messages", caseId], (old: { items: Message[] } | undefined) => ({
-                items: [optimisticMessage, ...(old?.items || [])],
-            }));
+            addLocalMessage(optimisticMessage);
 
             // Scroll to bottom on optimistic update
             if (scrollContainerRef.current) {
                 scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
             }
 
-            return { previousMessages };
+            return { localId };
         },
-        onSuccess: () => {
+        onSuccess: (_, __, context) => {
+            if (context?.localId) {
+                removeLocalMessage(context.localId);
+            }
             setInputValue("");
             queryClient.invalidateQueries({ queryKey: ["messages", caseId] });
             toast.success("Сообщение отправлено");
         },
         onError: (error: unknown, _, context) => {
-            // Rollback on error
-            if (context?.previousMessages) {
-                queryClient.setQueryData(["messages", caseId], context.previousMessages);
+            if (context?.localId) {
+                updateLocalMessageStatus(context.localId, "failed");
             }
             const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
             if (code === "NOT_ASSIGNED") {
@@ -176,12 +221,13 @@ export default function ChatInterface({
         mutationFn: ({ file, caption }: { file: File; caption?: string }) =>
             sendMediaMessage(conversationId, file, caption),
         onMutate: async ({ file, caption }) => {
-            await queryClient.cancelQueries({ queryKey: ["messages", caseId] });
-
-            const previousMessages = queryClient.getQueryData(["messages", caseId]);
             const mediaType = resolveMediaType(file);
-            const optimisticMessage: Message = {
-                id: `temp-media-${Date.now()}`,
+            const localId = createLocalId("temp-media");
+            const optimisticMessage: LocalMessage = {
+                id: localId,
+                localId,
+                localStatus: "sending",
+                localKind: "media",
                 role: "manager",
                 content: caption?.trim() || `[${mediaType}]`,
                 created_at: new Date().toISOString(),
@@ -196,30 +242,33 @@ export default function ChatInterface({
                     source: "console",
                 },
             };
-
-            queryClient.setQueryData(["messages", caseId], (old: { items: Message[] } | undefined) => ({
-                items: [optimisticMessage, ...(old?.items || [])],
-            }));
+            addLocalMessage(optimisticMessage);
 
             if (scrollContainerRef.current) {
                 scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
             }
 
-            return { previousMessages };
+            return { localId };
         },
-        onSuccess: (data: { success?: boolean } | undefined) => {
+        onSuccess: (data: { success?: boolean } | undefined, _, context) => {
+            if (data?.success === false) {
+                if (context?.localId) {
+                    updateLocalMessageStatus(context.localId, "failed");
+                }
+                toast.error("Не удалось отправить медиа");
+                return;
+            }
+            if (context?.localId) {
+                removeLocalMessage(context.localId);
+            }
             setInputValue("");
             clearAttachment();
             queryClient.invalidateQueries({ queryKey: ["messages", caseId] });
-            if (data?.success === false) {
-                toast.error("Не удалось отправить медиа");
-            } else {
-                toast.success("Медиа отправлено");
-            }
+            toast.success("Медиа отправлено");
         },
         onError: (error: unknown, _, context) => {
-            if (context?.previousMessages) {
-                queryClient.setQueryData(["messages", caseId], context.previousMessages);
+            if (context?.localId) {
+                updateLocalMessageStatus(context.localId, "failed");
             }
             const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
             if (code === "NOT_ASSIGNED") {
@@ -321,7 +370,11 @@ export default function ChatInterface({
                     </div>
                 ) : (
                     sortedMessages.map((msg) => {
-                        const isOptimistic = msg.id.startsWith("temp-");
+                        const isLocal = isLocalMessage(msg);
+                        const localStatus = isLocal ? msg.localStatus : null;
+                        const isSending = localStatus === "sending";
+                        const isFailed = localStatus === "failed";
+                        const statusSuffix = isSending ? " (отправка...)" : isFailed ? " (не доставлено)" : "";
                         const mediaMeta = (msg.metadata as { media?: Record<string, unknown> } | null)?.media;
                         const mediaType = typeof mediaMeta?.type === "string" ? mediaMeta.type : null;
                         const mediaLabel = mediaType ? (MEDIA_LABELS[mediaType] ?? "Файл") : null;
@@ -339,12 +392,12 @@ export default function ChatInterface({
                         return (
                             <div
                                 key={msg.id}
-                                className={`flex flex-col max-w-[92%] ${msg.role === "user" ? "self-start" : "self-end items-end"} ${isOptimistic ? "opacity-70" : ""}`}
+                                className={`flex flex-col max-w-[92%] ${msg.role === "user" ? "self-start" : "self-end items-end"} ${isSending ? "opacity-70" : ""}`}
                             >
-                                <div className="text-xs text-muted-foreground mb-1">
+                                <div className={`text-xs mb-1 ${isFailed ? "text-amber-700" : "text-muted-foreground"}`}>
                                     {msg.role === "user" ? "Клиент" :
                                         msg.role === "manager" ? "Менеджер" : "Бот"}
-                                    {isOptimistic && " (отправка...)"}
+                                    {statusSuffix}
                                 </div>
                                 <div
                                     className={`p-3 rounded-lg ${msg.role === "user"
@@ -402,8 +455,17 @@ export default function ChatInterface({
                                     )}
                                 </div>
                                 <span className="text-xs text-muted-foreground mt-1">
-                                    {isOptimistic ? "..." : new Date(msg.created_at).toLocaleString("ru-RU")}
+                                    {isSending ? "..." : isFailed ? "Не доставлено" : new Date(msg.created_at).toLocaleString("ru-RU")}
                                 </span>
+                                {isFailed && isLocal && msg.localKind === "text" && (
+                                    <button
+                                        type="button"
+                                        onClick={() => retryLocalMessage(msg)}
+                                        className="mt-1 text-xs text-amber-700 hover:text-amber-800 underline underline-offset-4"
+                                    >
+                                        Повторить
+                                    </button>
+                                )}
                             </div>
                         );
                     })
