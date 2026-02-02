@@ -20,7 +20,7 @@ Open UX debt / code smells (implemented)
 
 | ID | Area | Issue | Impact | Evidence | Status |
 | --- | --- | --- | --- | --- | --- |
-| UX-01 | Calendar | Error banner renders raw JSON payload for specialists load failure. | Non-user-friendly error output, potential data leakage. | `console-web/src/app/calendar/page.tsx` (specialistsError `<pre>`). | Open |
+| UX-01 | Calendar | Error banner renders raw JSON payload for specialists load failure. | Non-user-friendly error output, potential data leakage. | `console-web/src/app/calendar/page.tsx` (specialistsError details), PR #500, CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21580883767. | Fixed |
 | UX-02 | Calendar | Date input locked to `min=today`; past bookings cannot be viewed from UI. | No historical review/reschedule from calendar UI. | `console-web/src/app/calendar/page.tsx` (`min={formatDate(new Date())}`). | Open |
 | UX-03 | Inbox | Auto-refresh every 10s without pause/indicator. | Queue can change while scrolling or selecting a case. | `console-web/src/components/CaseList.tsx` (`refetchInterval: 10000`). | Open |
 | UX-04 | Settings / Provisioning | JSON-only inputs for `billing_info`, `working_hours`, `booking_settings`. | High error rate; no guided forms or inline validation. | `console-web/src/components/ProvisioningWizard.tsx` (JSON textareas + `parseOptionalJson`). | Open |
