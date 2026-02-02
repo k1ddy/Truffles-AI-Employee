@@ -1,0 +1,125 @@
+# Web Console — Canon vs Implemented (comparison)
+
+Scope
+- Сопоставление канона (Control Plane + Console Guide) с фактической реализацией Web Console.
+- Только реализованное поведение; без планов и wish‑листов.
+
+Sources (canon)
+- `SPECS/CONTROL_PLANE.md` (roles/RBAC, IA, onboarding, UX standards).
+- `docs/CONSOLE_GUIDE.md` (phase contracts, UI/API mapping, tenancy rules).
+- `STRATEGY/REQUIREMENTS.md` (жёсткие продуктовые ограничения).
+
+Sources (implemented)
+- `docs/CONSOLE_AUDIT/INDEX.md` + `docs/CONSOLE_AUDIT/pages/*` + `docs/CONSOLE_AUDIT/roles/*`.
+
+Legend
+- [match] реализовано как в каноне.
+- [partial] частично реализовано или отличается по деталям.
+- [missing] отсутствует в реализации.
+- [ahead] реализовано шире, чем описано в каноне (канон/notes устарели).
+
+---
+
+## 1) Roles & RBAC
+
+### Runtime roles
+- [match] Реальные роли в коде: platform_admin/owner/admin/manager/support. Canon: `SPECS/CONTROL_PLANE.md` (Runtime roles). Impl: `docs/CONSOLE_AUDIT/roles/*`.
+- [missing] Specialist/Viewer роли не реализованы. Canon: `SPECS/CONTROL_PLANE.md` (Roles). Impl: отсутствуют в RBAC (`console-web/src/lib/api-client.ts`).
+
+### Platform Admin
+- [match] Доступ к Tenants, Ops, Audit, Inbox, Settings/Provisioning, Knowledge, Team, Calendar. Canon: `SPECS/CONTROL_PLANE.md` (RBAC + IA). Impl: `docs/CONSOLE_AUDIT/roles/platform_admin.md`.
+- [missing] Integrations registry (nav/страница). Canon: `SPECS/CONTROL_PLANE.md` (IA: Integrations). Impl: отсутствует в навигации (`docs/CONSOLE_AUDIT/pages/global-shell.md`).
+
+### Owner/Admin
+- [match] Полный доступ к Inbox/Calendar/Knowledge/Team/Settings/Ops/Audit. Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/roles/owner.md`, `docs/CONSOLE_AUDIT/roles/admin.md`.
+- [missing] Integrations/Insights страницы. Canon: `SPECS/CONTROL_PLANE.md` (IA). Impl: отсутствуют в nav.
+
+### Manager
+- [match] Inbox + Calendar (read/write). Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/roles/manager.md`.
+- [partial] Knowledge read-only: реализовано как read, без write. Canon: `SPECS/CONTROL_PLANE.md` (Manager: read‑only Knowledge). Impl: `docs/CONSOLE_AUDIT/pages/knowledge.md`.
+- [missing] Team directory (read-only). Canon: `SPECS/CONTROL_PLANE.md` (IA: Manager includes Team directory). Impl: Team недоступен (`console-web/src/lib/api-client.ts`).
+
+### Support
+- [match] Read-only Inbox + Ops + Audit, diagnostics visible. Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/roles/support.md`.
+- [missing] Read-only Provisioning (support). Canon: `SPECS/CONTROL_PLANE.md` (Provisioning read includes support). Impl: Settings/Provisioning недоступны support.
+
+---
+
+## 2) Tenant context & selection gate
+
+- [match] Context bar (Company/Client/Branch), localStorage keys, selection gate based on `/console/v1/me`. Canon: `docs/CONSOLE_GUIDE.md` (Tenancy rules). Impl: `docs/CONSOLE_AUDIT/pages/global-shell.md`.
+- [ahead] Company selection в UI реализован (selector + gate). Canon note: `SPECS/CONTROL_PLANE.md` (Implementation note: company selection отсутствует) — устаревшее. Impl: `docs/CONSOLE_AUDIT/pages/global-shell.md`.
+- [match] Fail‑closed: при selection_required UI блокирует контент. Canon: `SPECS/CONTROL_PLANE.md` §3. Impl: `ConsoleShell` gate.
+
+---
+
+## 3) Navigation / IA
+
+- [match] Реализованные пункты навигации: Inbox, Calendar, Knowledge, Team, Settings, Ops, Audit, Tenants (platform_admin). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `docs/CONSOLE_AUDIT/pages/global-shell.md`.
+- [missing] Integrations page (owner/admin/platform admin). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: отсутствует.
+- [missing] Insights/Analytics (optional). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: отсутствует.
+
+---
+
+## 4) Pages & flows
+
+### Inbox (Cases)
+- [match] 2‑pane default + details toggle (desktop), details drawer on mobile. Canon: `SPECS/CONTROL_PLANE.md` §9.1. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
+- [match] Queue signals: имя/телефон, превью, SLA, tags “Нужно ответить / На связи / Ошибка”. Canon: `SPECS/CONTROL_PLANE.md` §9.2. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
+- [match] Default sort by activity + filters (status/assigned/search/advanced). Canon: `SPECS/CONTROL_PLANE.md` §9.2. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
+- [match] Branch filter только при «All branches». Canon: `SPECS/CONTROL_PLANE.md` §9.2. Impl: `console-web/src/components/CaseList.tsx`.
+- [partial] Action bar: реализованы “Взять/Закрыть”; отсутствует “Передать/Эскалировать”. Canon: `SPECS/CONTROL_PLANE.md` §9.3. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
+- [match] Quick replies/macros + управление в Inbox. Canon: `SPECS/CONTROL_PLANE.md` §9.3. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
+- [match] Context strip (“Суть запроса/Последнее сообщение”). Canon: `SPECS/CONTROL_PLANE.md` §9.3. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
+- [match] Diagnostics tab gated for support/admin/owner/platform_admin. Canon: `SPECS/CONTROL_PLANE.md` §9.5. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
+- [partial] Consultant tab: есть assigned/status/last outbound, но нет first_response/resolve метрик. Canon: `SPECS/CONTROL_PLANE.md` §9.4. Impl: `console-web/src/components/CaseDetailsPanel.tsx`.
+
+### Case deep link
+- [match] `/cases/{id}` открывает тот же UX без очереди. Canon: `docs/CONSOLE_GUIDE.md` (Case view). Impl: `docs/CONSOLE_AUDIT/pages/case-detail.md`.
+
+### Calendar
+- [match] Специалист → слоты → создать запись. Canon: `SPECS/CONTROL_PLANE.md` §8. Impl: `docs/CONSOLE_AUDIT/pages/calendar.md`.
+
+### Knowledge Studio
+- [match] Draft → Validate → Preview → Publish → History → Rollback. Canon: `SPECS/CONTROL_PLANE.md` §7 и `docs/CONSOLE_GUIDE.md` (Phase 3). Impl: `docs/CONSOLE_AUDIT/pages/knowledge.md`.
+- [match] Publish gate + warning ack + confirmation for rollback. Canon: `SPECS/CONTROL_PLANE.md` §7 + §5. Impl: `docs/CONSOLE_AUDIT/pages/knowledge.md`.
+
+### Team
+- [partial] Users list + roles + Telegram linking есть; отсутствуют invite/disable. Canon: `SPECS/CONTROL_PLANE.md` §8. Impl: `docs/CONSOLE_AUDIT/pages/team.md`.
+- [partial] Specialists list есть, но нет управления working_hours/availability. Canon: `SPECS/CONTROL_PLANE.md` §8. Impl: `docs/CONSOLE_AUDIT/pages/team.md`.
+- [missing] Team directory доступен для manager (read-only). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: Team скрыт для manager.
+
+### Settings + Provisioning Wizard
+- [match] Wizard steps и server‑side onboarding flow. Canon: `SPECS/CONTROL_PLANE.md` §5 + `docs/CONSOLE_GUIDE.md` (Phase 2). Impl: `docs/CONSOLE_AUDIT/pages/settings.md`.
+- [match] Capabilities tri‑state editor + effective view. Canon: `SPECS/CONTROL_PLANE.md` §6. Impl: `docs/CONSOLE_AUDIT/pages/settings.md`.
+- [partial] Support read‑only provisioning отсутствует. Canon: `SPECS/CONTROL_PLANE.md` (Provisioning read includes support). Impl: Settings недоступны support.
+
+### Ops / Status
+- [partial] Полный Ops‑экран доступен owner/admin/support; канон ожидает «короткий статус» для owner/admin и полный для platform_admin. Canon: `SPECS/CONTROL_PLANE.md` §10. Impl: `docs/CONSOLE_AUDIT/pages/ops.md`.
+
+### Audit
+- [match] Read‑only Audit доступен owner/admin/support. Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/pages/audit.md`.
+
+### Tenants (platform admin)
+- [match] Управление company/client/branch + подтверждения для destructive. Canon: `SPECS/CONTROL_PLANE.md` (Platform Admin scope + safeguards). Impl: `docs/CONSOLE_AUDIT/pages/tenants.md`.
+
+---
+
+## 5) Cross‑cutting safeguards
+
+- [match] Destructive confirmations (branch deactivation, knowledge rollback). Canon: `SPECS/CONTROL_PLANE.md` §5. Impl: `docs/CONSOLE_AUDIT/pages/tenants.md`, `docs/CONSOLE_AUDIT/pages/knowledge.md`.
+- [match] Idempotency для console‑мутаций (client‑side idempotency key). Canon: `docs/CONSOLE_GUIDE.md` (Phase 2). Impl: `console-web/src/lib/api.ts`.
+
+---
+
+## 6) GAP summary (canon vs implemented)
+
+- Integrations page отсутствует (owner/admin/platform admin).
+- Insights/Analytics page отсутствует.
+- Manager не имеет Team directory (read-only).
+- Support не имеет read‑only доступа к Provisioning.
+- Specialist/Viewer роли не реализованы.
+- Inbox action “Передать/Эскалировать” отсутствует (есть только take/resolve).
+- Consultant tab не показывает first_response/resolve метрики.
+- Team Users не поддерживает invite/disable; Specialists без управления working_hours/availability.
+- Ops страница не разделяет «короткий статус» vs «полный Ops» по роли.
