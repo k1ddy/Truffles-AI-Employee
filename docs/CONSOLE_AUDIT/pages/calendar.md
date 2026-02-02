@@ -32,6 +32,7 @@ Key UI elements
 Behavior
 - Default date is set to the user's local date (no UTC shift).
 - Date input enforces `min=today` (past dates are not selectable).
+- Specialists load error shows a user-friendly message with expandable technical details.
 
 API endpoints used
 - Specialists: `GET /calendar/specialists`.
