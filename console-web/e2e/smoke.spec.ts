@@ -30,6 +30,72 @@ function urlPathPattern(path: string) {
     return new RegExp(`${path.replace(/\//g, '\\/')}(\\?|$)`);
 }
 
+async function waitForSettingsResponse(page: import('@playwright/test').Page, timeout = 15000) {
+    return page.waitForResponse(
+        (response) => matchesPath(response.url(), ['/console/v1/settings', '/api/proxy/settings']),
+        { timeout },
+    );
+}
+
+async function readResponseBody(response: import('@playwright/test').Response) {
+    try {
+        return await response.text();
+    } catch {
+        return '';
+    }
+}
+
+async function handleSettingsResponse(page: import('@playwright/test').Page, response: import('@playwright/test').Response) {
+    if (response.ok()) {
+        return;
+    }
+    let bodyText = await readResponseBody(response);
+    let errorCode: string | null = null;
+    try {
+        const parsed = JSON.parse(bodyText) as { code?: string; error_code?: string; message?: string };
+        errorCode = parsed.code || parsed.error_code || null;
+        bodyText = parsed.message ? `${parsed.message} (${parsed.code || parsed.error_code || 'unknown'})` : bodyText;
+    } catch {
+        // Keep raw body text.
+    }
+    console.log(`[settings] response ${response.status()}: ${bodyText}`);
+    const selectionErrors = new Set([
+        'COMPANY_SELECTION_REQUIRED',
+        'CLIENT_SELECTION_REQUIRED',
+        'BRANCH_SELECTION_REQUIRED',
+        'TENANT_MISMATCH',
+    ]);
+    if (errorCode && selectionErrors.has(errorCode)) {
+        const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
+        const resolved = await ensureTenantSelection(page);
+        const retryPromise = waitForSettingsResponse(page);
+        if (resolved) {
+            await page.reload({ waitUntil: 'domcontentloaded' });
+        }
+        await resolveSelectionGateWithRetry(page, selectionGate);
+        const retryResponse = await retryPromise;
+        if (retryResponse.ok()) {
+            return;
+        }
+        const retryBody = await readResponseBody(retryResponse);
+        console.log(`[settings] retry response ${retryResponse.status()}: ${retryBody}`);
+        throw new Error(`Settings API retry failed (${retryResponse.status()}): ${retryBody}`);
+    }
+    throw new Error(`Settings API failed (${response.status()}): ${bodyText}`);
+}
+
+async function openSettings(page: import('@playwright/test').Page) {
+    const selectionChanged = await ensureTenantSelection(page);
+    if (selectionChanged) {
+        await page.reload({ waitUntil: 'domcontentloaded' });
+    }
+    const settingsResponse = waitForSettingsResponse(page);
+    await page.getByTestId('nav-settings').click();
+    await expect(page).toHaveURL(urlPathPattern('/settings'));
+    await expect(page.getByTestId('settings-title')).toBeVisible();
+    await handleSettingsResponse(page, await settingsResponse);
+}
+
 async function resolveAuthOrigin(page: import('@playwright/test').Page) {
     await page.goto(buildSignInUrl(baseURL), { waitUntil: 'domcontentloaded' });
     const providerForm = page.locator('form[action*="keycloak"]').first();
@@ -541,9 +607,7 @@ test.describe('Navigation', () => {
     });
 
     test('should navigate to Settings @smoke', async ({ page }) => {
-        await page.getByTestId('nav-settings').click();
-        await expect(page).toHaveURL(urlPathPattern('/settings'));
-        await expect(page.getByTestId('settings-title')).toBeVisible();
+        await openSettings(page);
         await expect(page.getByTestId('settings-branches')).toBeVisible();
         await expectRowsOrEmpty(page, 'settings-branch-row', 'settings-branches-empty');
     });
@@ -672,9 +736,7 @@ test.describe('Audit Log', () => {
 test.describe('Settings Page', () => {
     test.beforeEach(async ({ page }) => {
         await openInbox(page);
-        await page.getByTestId('nav-settings').click();
-        await expect(page).toHaveURL(urlPathPattern('/settings'));
-        await expect(page.getByTestId('settings-title')).toBeVisible();
+        await openSettings(page);
     });
 
     test('should display branches section @smoke', async ({ page }) => {

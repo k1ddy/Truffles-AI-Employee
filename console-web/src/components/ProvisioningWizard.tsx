@@ -19,6 +19,15 @@ type OnboardingStepStatus = components["schemas"]["OnboardingStepStatus"];
 type AgentRole = ConsoleRole;
 
 const DEFAULT_TIMEZONE = "Asia/Almaty";
+const WORKING_DAYS = [
+    { id: "mon", label: "Пн" },
+    { id: "tue", label: "Вт" },
+    { id: "wed", label: "Ср" },
+    { id: "thu", label: "Чт" },
+    { id: "fri", label: "Пт" },
+    { id: "sat", label: "Сб" },
+    { id: "sun", label: "Вс" },
+] as const;
 
 const WIZARD_STEPS = [
     { id: "branch_draft", label: "Филиал", hint: "Draft" },
@@ -189,6 +198,19 @@ function fromTriState(value: string): boolean | null {
     return null;
 }
 
+function formatEffectiveValue(value: string | number | boolean | null | undefined): string {
+    if (value === true) {
+        return "Включено";
+    }
+    if (value === false) {
+        return "Выключено";
+    }
+    if (value === null || value === undefined || value === "") {
+        return "—";
+    }
+    return String(value);
+}
+
 function isNonEmptyRecord(value: unknown): value is Record<string, unknown> {
     if (!value || typeof value !== "object") {
         return false;
@@ -222,6 +244,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const [companyName, setCompanyName] = useState("");
     const [companyId, setCompanyId] = useState("");
     const [billingInfo, setBillingInfo] = useState("");
+    const [billingContract, setBillingContract] = useState("");
+    const [billingCurrency, setBillingCurrency] = useState("");
     const [clientSlug, setClientSlug] = useState("");
     const [clientId, setClientId] = useState("");
     const [branchData, setBranchData] = useState<ProvisioningBranch | null>(null);
@@ -236,6 +260,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         workingHours: "",
         bookingSettings: "",
     });
+    const [workingHoursDays, setWorkingHoursDays] = useState<string[]>([]);
+    const [workingHoursStart, setWorkingHoursStart] = useState("");
+    const [workingHoursEnd, setWorkingHoursEnd] = useState("");
+    const [bookingDefaultDuration, setBookingDefaultDuration] = useState("");
+    const [bookingBufferMin, setBookingBufferMin] = useState("");
     const [activateOnSave, setActivateOnSave] = useState(true);
     const [agentForm, setAgentForm] = useState({
         name: "",
@@ -262,6 +291,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         if (!branchData) {
             return;
         }
+        setWorkingHoursDays([]);
+        setWorkingHoursStart("");
+        setWorkingHoursEnd("");
+        setBookingDefaultDuration("");
+        setBookingBufferMin("");
         setBranchForm({
             name: branchData.name ?? "",
             slug: branchData.slug ?? "",
@@ -280,8 +314,221 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     }, [branchData]);
 
     useEffect(() => {
+        if (!billingInfo.trim()) {
+            return;
+        }
+        if (billingContract || billingCurrency) {
+            return;
+        }
+        const parsed = parseOptionalJson(billingInfo, "billing_info");
+        if (!parsed.value) {
+            return;
+        }
+        const contract = parsed.value.contract;
+        const currency = parsed.value.currency;
+        if (typeof contract === "string") {
+            setBillingContract(contract);
+        }
+        if (typeof currency === "string") {
+            setBillingCurrency(currency);
+        }
+    }, [billingInfo, billingContract, billingCurrency]);
+
+    useEffect(() => {
+        if (!branchForm.workingHours.trim()) {
+            return;
+        }
+        if (workingHoursDays.length || workingHoursStart || workingHoursEnd) {
+            return;
+        }
+        const parsed = parseOptionalJson(branchForm.workingHours, "working_hours");
+        if (!parsed.value) {
+            return;
+        }
+        const availableDays = new Set(WORKING_DAYS.map((day) => day.id));
+        const dayKeys = Object.keys(parsed.value).filter((day) => availableDays.has(day));
+        if (dayKeys.length) {
+            setWorkingHoursDays(dayKeys);
+        }
+        const firstDay = dayKeys[0];
+        if (firstDay) {
+            const slots = parsed.value[firstDay];
+            if (Array.isArray(slots) && slots[0] && typeof slots[0] === "object") {
+                const slot = slots[0] as { start?: unknown; end?: unknown };
+                if (typeof slot.start === "string") {
+                    setWorkingHoursStart(slot.start);
+                }
+                if (typeof slot.end === "string") {
+                    setWorkingHoursEnd(slot.end);
+                }
+            }
+        }
+    }, [branchForm.workingHours, workingHoursDays.length, workingHoursStart, workingHoursEnd]);
+
+    useEffect(() => {
+        if (!branchForm.bookingSettings.trim()) {
+            return;
+        }
+        if (bookingDefaultDuration || bookingBufferMin) {
+            return;
+        }
+        const parsed = parseOptionalJson(branchForm.bookingSettings, "booking_settings");
+        if (!parsed.value) {
+            return;
+        }
+        const defaultDuration = parsed.value.default_duration_min;
+        const bufferMin = parsed.value.buffer_min;
+        if (typeof defaultDuration === "number" || typeof defaultDuration === "string") {
+            setBookingDefaultDuration(String(defaultDuration));
+        }
+        if (typeof bufferMin === "number" || typeof bufferMin === "string") {
+            setBookingBufferMin(String(bufferMin));
+        }
+    }, [branchForm.bookingSettings, bookingDefaultDuration, bookingBufferMin]);
+
+    useEffect(() => {
         setAutoStepSync(true);
     }, [branchData?.id]);
+
+    const buildBillingInfoPayload = () => {
+        const payload: Record<string, unknown> = {};
+        const contract = billingContract.trim();
+        const currency = billingCurrency.trim();
+        if (contract) {
+            payload.contract = contract;
+        }
+        if (currency) {
+            payload.currency = currency;
+        }
+        return Object.keys(payload).length ? payload : undefined;
+    };
+
+    const applyBillingToJson = () => {
+        const payload = buildBillingInfoPayload();
+        setBillingInfo(payload ? JSON.stringify(payload, null, 2) : "");
+    };
+
+    const loadBillingFromJson = () => {
+        const parsed = parseOptionalJson(billingInfo, "billing_info");
+        if (parsed.error) {
+            toast.error(parsed.error);
+            return;
+        }
+        const payload = (parsed.value ?? {}) as Record<string, unknown>;
+        const contract = payload.contract;
+        const currency = payload.currency;
+        setBillingContract(typeof contract === "string" ? contract : "");
+        setBillingCurrency(typeof currency === "string" ? currency : "");
+    };
+
+    const buildWorkingHoursPayload = (): { value?: Record<string, unknown>; error?: string } => {
+        const selectedDays = workingHoursDays;
+        const start = workingHoursStart.trim();
+        const end = workingHoursEnd.trim();
+        if (!selectedDays.length && !start && !end) {
+            return {};
+        }
+        if (!selectedDays.length) {
+            return { error: "Укажите рабочие дни" };
+        }
+        if (!start || !end) {
+            return { error: "Укажите время открытия и закрытия" };
+        }
+        const payload: Record<string, unknown> = {};
+        selectedDays.forEach((day) => {
+            payload[day] = [{ start, end }];
+        });
+        return { value: payload };
+    };
+
+    const applyWorkingHoursToJson = () => {
+        const built = buildWorkingHoursPayload();
+        if (built.error) {
+            toast.error(built.error);
+            return;
+        }
+        const nextValue = built.value ? JSON.stringify(built.value, null, 2) : "";
+        setBranchForm((prev) => ({ ...prev, workingHours: nextValue }));
+    };
+
+    const loadWorkingHoursFromJson = () => {
+        const parsed = parseOptionalJson(branchForm.workingHours, "working_hours");
+        if (parsed.error) {
+            toast.error(parsed.error);
+            return;
+        }
+        const payload = (parsed.value ?? {}) as Record<string, unknown>;
+        const orderedDays = WORKING_DAYS.map((day) => day.id);
+        const dayKeys = orderedDays.filter((day) => Array.isArray(payload[day]));
+        setWorkingHoursDays(dayKeys);
+        setWorkingHoursStart("");
+        setWorkingHoursEnd("");
+        const firstDay = dayKeys[0];
+        if (!firstDay) {
+            return;
+        }
+        const slots = payload[firstDay];
+        if (Array.isArray(slots) && slots[0] && typeof slots[0] === "object") {
+            const slot = slots[0] as { start?: unknown; end?: unknown };
+            if (typeof slot.start === "string") {
+                setWorkingHoursStart(slot.start);
+            }
+            if (typeof slot.end === "string") {
+                setWorkingHoursEnd(slot.end);
+            }
+        }
+    };
+
+    const buildBookingSettingsPayload = (): { value?: Record<string, unknown>; error?: string } => {
+        const defaultDurationRaw = bookingDefaultDuration.trim();
+        const bufferMinRaw = bookingBufferMin.trim();
+        if (!defaultDurationRaw && !bufferMinRaw) {
+            return {};
+        }
+        const payload: Record<string, unknown> = {};
+        if (defaultDurationRaw) {
+            const parsed = Number(defaultDurationRaw);
+            if (Number.isNaN(parsed)) {
+                return { error: "default_duration_min: укажите число" };
+            }
+            payload.default_duration_min = parsed;
+        }
+        if (bufferMinRaw) {
+            const parsed = Number(bufferMinRaw);
+            if (Number.isNaN(parsed)) {
+                return { error: "buffer_min: укажите число" };
+            }
+            payload.buffer_min = parsed;
+        }
+        return { value: payload };
+    };
+
+    const applyBookingSettingsToJson = () => {
+        const built = buildBookingSettingsPayload();
+        if (built.error) {
+            toast.error(built.error);
+            return;
+        }
+        const nextValue = built.value ? JSON.stringify(built.value, null, 2) : "";
+        setBranchForm((prev) => ({ ...prev, bookingSettings: nextValue }));
+    };
+
+    const loadBookingSettingsFromJson = () => {
+        const parsed = parseOptionalJson(branchForm.bookingSettings, "booking_settings");
+        if (parsed.error) {
+            toast.error(parsed.error);
+            return;
+        }
+        const payload = (parsed.value ?? {}) as Record<string, unknown>;
+        const defaultDuration = payload.default_duration_min;
+        const bufferMin = payload.buffer_min;
+        setBookingDefaultDuration((typeof defaultDuration === "number" || typeof defaultDuration === "string")
+            ? String(defaultDuration)
+            : "");
+        setBookingBufferMin((typeof bufferMin === "number" || typeof bufferMin === "string")
+            ? String(bufferMin)
+            : "");
+    };
 
     const { data: capabilitiesData, isLoading: capabilitiesLoading, error: capabilitiesError, refetch: refetchCapabilities } = useQuery({
         queryKey: ["admin-capabilities", clientId, branchData?.id],
@@ -526,6 +773,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         return mergeCapabilities(clientPayload, capabilitiesDraft);
     }, [capabilitiesData, capabilitiesDraft]);
 
+    const effectiveCapabilities = capabilitiesData?.effective ?? null;
     const hasWorkingHours = isNonEmptyRecord(branchData?.working_hours);
     const hasBookingSettings = isNonEmptyRecord(branchData?.booking_settings);
     const bookingEnabled = capabilitiesPreview.features?.booking_mode != null;
@@ -599,9 +847,16 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.error(billing.error);
             return;
         }
+        let billingPayload = billing.value;
+        if (!billingPayload) {
+            billingPayload = buildBillingInfoPayload();
+            if (billingPayload) {
+                setBillingInfo(JSON.stringify(billingPayload, null, 2));
+            }
+        }
         createCompanyMutation.mutate({
             name,
-            billing_info: billing.value,
+            billing_info: billingPayload,
         });
     };
 
@@ -722,13 +977,46 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.error(bookingSettings.error);
             return;
         }
-        if (!workingHours.value && !bookingSettings.value) {
+        let workingPayload = workingHours.value;
+        let bookingPayload = bookingSettings.value;
+        let nextWorkingJson: string | null = null;
+        let nextBookingJson: string | null = null;
+        if (!workingPayload) {
+            const built = buildWorkingHoursPayload();
+            if (built.error) {
+                toast.error(built.error);
+                return;
+            }
+            workingPayload = built.value;
+            if (built.value) {
+                nextWorkingJson = JSON.stringify(built.value, null, 2);
+            }
+        }
+        if (!bookingPayload) {
+            const built = buildBookingSettingsPayload();
+            if (built.error) {
+                toast.error(built.error);
+                return;
+            }
+            bookingPayload = built.value;
+            if (built.value) {
+                nextBookingJson = JSON.stringify(built.value, null, 2);
+            }
+        }
+        if (!workingPayload && !bookingPayload) {
             toast.error("Заполните working_hours или booking_settings");
             return;
         }
+        if (nextWorkingJson || nextBookingJson) {
+            setBranchForm((prev) => ({
+                ...prev,
+                workingHours: nextWorkingJson ?? prev.workingHours,
+                bookingSettings: nextBookingJson ?? prev.bookingSettings,
+            }));
+        }
         patchBranchMutation.mutate({
-            working_hours: workingHours.value,
-            booking_settings: bookingSettings.value,
+            working_hours: workingPayload,
+            booking_settings: bookingPayload,
         });
     };
 
@@ -787,6 +1075,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             workingHours: "",
             bookingSettings: "",
         });
+        setWorkingHoursDays([]);
+        setWorkingHoursStart("");
+        setWorkingHoursEnd("");
+        setBookingDefaultDuration("");
+        setBookingBufferMin("");
         setCreatedAgents([]);
         setCapabilitiesDraft(normalizeCapabilities());
         setCapabilitiesTouched(false);
@@ -859,15 +1152,62 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                         placeholder="Truffles Beauty"
                         disabled={!canEdit}
                     />
-                    <label className="mt-3 block text-xs text-muted-foreground">billing_info (JSON, optional)</label>
-                    <textarea
-                        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
-                        rows={3}
-                        value={billingInfo}
-                        onChange={(event) => setBillingInfo(event.target.value)}
-                        placeholder='{"contract":"B2B","currency":"KZT"}'
-                        disabled={!canEdit}
-                    />
+                    <label className="mt-3 block text-xs text-muted-foreground">billing_info</label>
+                    <div className="mt-2 space-y-3 rounded-lg border border-border/60 bg-muted/10 p-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                                <label className="text-xs text-muted-foreground">Договор</label>
+                                <input
+                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                    value={billingContract}
+                                    onChange={(event) => setBillingContract(event.target.value)}
+                                    placeholder="B2B"
+                                    disabled={!canEdit}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-muted-foreground">Валюта</label>
+                                <input
+                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                    value={billingCurrency}
+                                    onChange={(event) => setBillingCurrency(event.target.value)}
+                                    placeholder="KZT"
+                                    disabled={!canEdit}
+                                />
+                            </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-xs">
+                            <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={applyBillingToJson}
+                                disabled={!canEdit}
+                            >
+                                Применить в JSON
+                            </button>
+                            <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={loadBillingFromJson}
+                                disabled={!canEdit}
+                            >
+                                Загрузить из JSON
+                            </button>
+                        </div>
+                        <details className="rounded-lg border border-border/60 bg-background p-3">
+                            <summary className="cursor-pointer text-xs text-muted-foreground">
+                                billing_info JSON
+                            </summary>
+                            <textarea
+                                className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
+                                rows={3}
+                                value={billingInfo}
+                                onChange={(event) => setBillingInfo(event.target.value)}
+                                placeholder='{"contract":"B2B","currency":"KZT"}'
+                                disabled={!canEdit}
+                            />
+                        </details>
+                    </div>
                     <button
                         type="button"
                         className="btn-primary mt-4"
@@ -1225,27 +1565,150 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                             Специалисты добавляются в Phase 4 (Team + Calendar).
                         </p>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-xs text-muted-foreground">working_hours (JSON)</label>
-                                <textarea
-                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
-                                    rows={7}
-                                    value={branchForm.workingHours}
-                                    onChange={(event) => setBranchForm((prev) => ({ ...prev, workingHours: event.target.value }))}
-                                    placeholder='{"mon":[{"start":"09:00","end":"20:00"}]}'
-                                    disabled={!canEdit}
-                                />
+                            <div className="rounded-lg border border-border/60 bg-background p-3 space-y-3">
+                                <h4 className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                                    Working hours
+                                </h4>
+                                <div>
+                                    <label className="text-xs text-muted-foreground">Рабочие дни</label>
+                                    <div className="mt-2 flex flex-wrap gap-3">
+                                        {WORKING_DAYS.map((day) => (
+                                            <label key={day.id} className="flex items-center gap-2 text-xs">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={workingHoursDays.includes(day.id)}
+                                                    onChange={(event) => {
+                                                        const checked = event.target.checked;
+                                                        setWorkingHoursDays((prev) => {
+                                                            const next = checked
+                                                                ? [...prev, day.id]
+                                                                : prev.filter((item) => item !== day.id);
+                                                            const ordered = WORKING_DAYS.map((item) => item.id);
+                                                            return ordered.filter((item) => next.includes(item));
+                                                        });
+                                                    }}
+                                                    disabled={!canEdit}
+                                                />
+                                                {day.label}
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-xs text-muted-foreground">Открытие</label>
+                                        <input
+                                            type="time"
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={workingHoursStart}
+                                            onChange={(event) => setWorkingHoursStart(event.target.value)}
+                                            disabled={!canEdit}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-muted-foreground">Закрытие</label>
+                                        <input
+                                            type="time"
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={workingHoursEnd}
+                                            onChange={(event) => setWorkingHoursEnd(event.target.value)}
+                                            disabled={!canEdit}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex flex-wrap gap-2 text-xs">
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={applyWorkingHoursToJson}
+                                        disabled={!canEdit}
+                                    >
+                                        Применить в JSON
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={loadWorkingHoursFromJson}
+                                        disabled={!canEdit}
+                                    >
+                                        Загрузить из JSON
+                                    </button>
+                                </div>
+                                <details className="rounded-lg border border-border/60 bg-muted/10 p-3">
+                                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                                        working_hours JSON
+                                    </summary>
+                                    <textarea
+                                        className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
+                                        rows={6}
+                                        value={branchForm.workingHours}
+                                        onChange={(event) => setBranchForm((prev) => ({ ...prev, workingHours: event.target.value }))}
+                                        placeholder='{"mon":[{"start":"09:00","end":"20:00"}]}'
+                                        disabled={!canEdit}
+                                    />
+                                </details>
                             </div>
-                            <div>
-                                <label className="text-xs text-muted-foreground">booking_settings (JSON)</label>
-                                <textarea
-                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
-                                    rows={7}
-                                    value={branchForm.bookingSettings}
-                                    onChange={(event) => setBranchForm((prev) => ({ ...prev, bookingSettings: event.target.value }))}
-                                    placeholder='{"default_duration_min":60,"buffer_min":10}'
-                                    disabled={!canEdit}
-                                />
+                            <div className="rounded-lg border border-border/60 bg-background p-3 space-y-3">
+                                <h4 className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                                    Booking settings
+                                </h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-xs text-muted-foreground">Длительность, мин</label>
+                                        <input
+                                            type="number"
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={bookingDefaultDuration}
+                                            onChange={(event) => setBookingDefaultDuration(event.target.value)}
+                                            placeholder="60"
+                                            min={0}
+                                            disabled={!canEdit}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-muted-foreground">Буфер, мин</label>
+                                        <input
+                                            type="number"
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={bookingBufferMin}
+                                            onChange={(event) => setBookingBufferMin(event.target.value)}
+                                            placeholder="10"
+                                            min={0}
+                                            disabled={!canEdit}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex flex-wrap gap-2 text-xs">
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={applyBookingSettingsToJson}
+                                        disabled={!canEdit}
+                                    >
+                                        Применить в JSON
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={loadBookingSettingsFromJson}
+                                        disabled={!canEdit}
+                                    >
+                                        Загрузить из JSON
+                                    </button>
+                                </div>
+                                <details className="rounded-lg border border-border/60 bg-muted/10 p-3">
+                                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                                        booking_settings JSON
+                                    </summary>
+                                    <textarea
+                                        className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
+                                        rows={6}
+                                        value={branchForm.bookingSettings}
+                                        onChange={(event) => setBranchForm((prev) => ({ ...prev, bookingSettings: event.target.value }))}
+                                        placeholder='{"default_duration_min":60,"buffer_min":10}'
+                                        disabled={!canEdit}
+                                    />
+                                </details>
                             </div>
                         </div>
                         <button
@@ -1578,12 +2041,93 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                             {capabilitiesError && (
                                 <p className="text-xs text-destructive">Не удалось загрузить capabilities.</p>
                             )}
-                            {capabilitiesData?.effective && (
-                                <pre className="text-xs bg-muted/40 border border-border/60 rounded-lg p-3 overflow-auto">
-                                    {JSON.stringify(capabilitiesData.effective, null, 2)}
-                                </pre>
+                            {effectiveCapabilities && (
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                        <div className="rounded-lg border border-border/60 bg-muted/10 p-3">
+                                            <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                                                Domain
+                                            </div>
+                                            <div className="mt-2 flex items-center justify-between">
+                                                <span>domain_slug</span>
+                                                <span className="font-mono">
+                                                    {formatEffectiveValue(effectiveCapabilities.domain_slug)}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div className="rounded-lg border border-border/60 bg-muted/10 p-3">
+                                            <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                                                Channels
+                                            </div>
+                                            <div className="mt-2 space-y-1">
+                                                <div className="flex items-center justify-between">
+                                                    <span>whatsapp</span>
+                                                    <span>{formatEffectiveValue(effectiveCapabilities.channels?.whatsapp)}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span>telegram</span>
+                                                    <span>{formatEffectiveValue(effectiveCapabilities.channels?.telegram)}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span>instagram</span>
+                                                    <span>{formatEffectiveValue(effectiveCapabilities.channels?.instagram)}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="rounded-lg border border-border/60 bg-muted/10 p-3">
+                                            <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                                                Providers
+                                            </div>
+                                            <div className="mt-2 space-y-1">
+                                                <div className="flex items-center justify-between">
+                                                    <span>availability</span>
+                                                    <span>{formatEffectiveValue(effectiveCapabilities.providers?.availability_provider)}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span>crm</span>
+                                                    <span>{formatEffectiveValue(effectiveCapabilities.providers?.crm_provider)}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span>calendar</span>
+                                                    <span>{formatEffectiveValue(effectiveCapabilities.providers?.calendar_provider)}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="rounded-lg border border-border/60 bg-muted/10 p-3">
+                                            <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                                                Features
+                                            </div>
+                                            <div className="mt-2 space-y-1">
+                                                <div className="flex items-center justify-between">
+                                                    <span>booking_mode</span>
+                                                    <span>{formatEffectiveValue(effectiveCapabilities.features?.booking_mode)}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span>knowledge_upload</span>
+                                                    <span>{formatEffectiveValue(effectiveCapabilities.features?.knowledge_upload)}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span>analytics</span>
+                                                    <span>{formatEffectiveValue(effectiveCapabilities.features?.analytics)}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span>auto_learn</span>
+                                                    <span>{formatEffectiveValue(effectiveCapabilities.features?.auto_learn)}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <details className="rounded-lg border border-border/60 bg-background p-3">
+                                        <summary className="cursor-pointer text-xs text-muted-foreground">
+                                            Raw JSON
+                                        </summary>
+                                        <pre className="mt-2 text-xs bg-muted/40 border border-border/60 rounded-lg p-3 overflow-auto">
+                                            {JSON.stringify(effectiveCapabilities, null, 2)}
+                                        </pre>
+                                    </details>
+                                </div>
                             )}
-                            {!capabilitiesLoading && !capabilitiesData?.effective && (
+                            {!capabilitiesLoading && !effectiveCapabilities && (
                                 <p className="text-xs text-muted-foreground">Нет данных.</p>
                             )}
                         </div>
