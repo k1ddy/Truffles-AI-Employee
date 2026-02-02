@@ -44,6 +44,14 @@ _Любые статусы ниже — DERIVED; единственный ист
 
 Источник флага: `clients.config.data_sharing` (см. `SPECS/MULTI_TENANT.md`).
 
+### Consent + anonymization + retention (DEC-022)
+
+- Consent хранится в `client_settings.learning_consent_status` (`unknown|granted|declined`).
+- Режим анонимизации — `client_settings.learning_anonymization_mode` (`redact|strict|off`).
+- Retention для learning-артефактов — `client_settings.learning_retention_days` + `learned_responses.retention_expires_at`.
+- Без consent кандидаты не создаются; approval блокируется при `retention_expired` или `anonymization_disabled`.
+- В `learned_responses` сохраняются только обезличенные тексты (PII редактируется).
+
 ---
 
 ## КАЛИБРОВКА ПО КАЖДОМУ САЛОНУ (процесс)
@@ -141,6 +149,9 @@ handover_id     UUID REFERENCES handovers(id),
 
 question_text   TEXT NOT NULL,
 response_text   TEXT NOT NULL,
+consent_status  TEXT,
+anonymization_mode TEXT,
+retention_expires_at TIMESTAMP,
 
 source          TEXT DEFAULT 'manager',
 source_role     TEXT,
@@ -153,6 +164,8 @@ approved_at     TIMESTAMP,
 rejected_at     TIMESTAMP,
 
 qdrant_point_id TEXT,
+candidate_type  TEXT DEFAULT 'faq',
+candidate_payload JSONB,
 
 use_count       INTEGER DEFAULT 0,
 last_used_at    TIMESTAMP,

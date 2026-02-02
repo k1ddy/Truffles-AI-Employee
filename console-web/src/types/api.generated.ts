@@ -682,6 +682,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/learning/candidates": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** List learning candidates */
+        get: operations["listLearningCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/learning/candidates/{candidate_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve learning candidate */
+        post: operations["approveLearningCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/learning/candidates/{candidate_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject learning candidate */
+        post: operations["rejectLearningCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/audit": {
         parameters: {
             query?: never;
@@ -1301,6 +1371,10 @@ export interface components {
             booking_enabled?: boolean;
             enable_reminders?: boolean;
             enable_owner_escalation?: boolean;
+            learning_consent_status?: string | null;
+            learning_anonymization_mode?: string | null;
+            learning_retention_days?: number | null;
+            data_sharing?: string | null;
         };
         SettingsResponse: {
             branches?: components["schemas"]["Branch"][];
@@ -1313,6 +1387,39 @@ export interface components {
             escalation_timeout_minutes?: number;
         };
         SettingsUpdateResponse: {
+            success?: boolean;
+            message?: string;
+        };
+        LearningCandidate: {
+            /** Format: uuid */
+            id?: string;
+            status?: string;
+            question_text?: string;
+            response_text?: string;
+            source_name?: string | null;
+            source_role?: string | null;
+            source_channel?: string | null;
+            candidate_type?: string | null;
+            /** Format: uuid */
+            branch_id?: string | null;
+            /** Format: uuid */
+            handover_id?: string | null;
+            created_at?: string | null;
+            updated_at?: string | null;
+            approved_at?: string | null;
+            rejected_at?: string | null;
+            retention_expires_at?: string | null;
+            consent_status?: string | null;
+            anonymization_mode?: string | null;
+            can_approve?: boolean;
+            ineligible_reason?: string | null;
+        };
+        LearningCandidateListResponse: {
+            items?: components["schemas"]["LearningCandidate"][];
+            cursor?: string | null;
+            has_more?: boolean;
+        };
+        LearningCandidateActionResponse: {
             success?: boolean;
             message?: string;
         };
@@ -2810,6 +2917,100 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeRollbackResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listLearningCandidates: {
+        parameters: {
+            query?: {
+                status?: "pending" | "approved" | "rejected";
+                limit?: number;
+                cursor?: string;
+            };
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Learning candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LearningCandidateListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    approveLearningCandidate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Approval result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LearningCandidateActionResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    rejectLearningCandidate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reject result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LearningCandidateActionResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

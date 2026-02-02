@@ -440,12 +440,50 @@ class ConsoleBotConfig(BaseModel):
     # Escalation
     enable_reminders: bool = True
     enable_owner_escalation: bool = False
+    # Learning consent
+    learning_consent_status: Optional[str] = None
+    learning_anonymization_mode: Optional[str] = None
+    learning_retention_days: Optional[int] = None
+    data_sharing: Optional[str] = None
 
 
 class ConsoleSettingsResponse(BaseModel):
     branches: list[ConsoleBranch]
     agents: list[ConsoleAgentInfo]
     bot_config: Optional[ConsoleBotConfig] = None
+
+
+class ConsoleLearningCandidate(BaseModel):
+    id: UUID
+    status: str
+    question_text: str
+    response_text: str
+    source_name: Optional[str] = None
+    source_role: Optional[str] = None
+    source_channel: Optional[str] = None
+    candidate_type: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    handover_id: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    approved_at: Optional[str] = None
+    rejected_at: Optional[str] = None
+    retention_expires_at: Optional[str] = None
+    consent_status: Optional[str] = None
+    anonymization_mode: Optional[str] = None
+    can_approve: bool = False
+    ineligible_reason: Optional[str] = None
+
+
+class ConsoleLearningCandidateListResponse(BaseModel):
+    items: list[ConsoleLearningCandidate]
+    cursor: Optional[str] = None
+    has_more: bool
+
+
+class ConsoleLearningCandidateActionResponse(BaseModel):
+    success: bool
+    message: str
 
 
 class ConsoleCapabilitiesRecord(BaseModel):
