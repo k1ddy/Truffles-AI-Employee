@@ -57,7 +57,7 @@
 ### Точность фактов
 - [ ] Факты только из Client Pack / tools (адрес, цены, услуги, правила).
 - [ ] **Pack‑Compiler:** runtime читает только compiled artifacts; Policy/Signal DSL валидируется при compile; auto‑ingest только через approval.
-- [ ] **Minimum Data Contract:** для каждой ниши обязательны услуги/цены/длительности + адрес/часы + политики/гости + дисклеймеры + RU/KZ варианты; при нехватке данных включается safe‑mode (FACT/COLLECT/HANDOFF).
+- [ ] **Minimum Data Contract:** для каждой ниши обязательны услуги/цены/длительности + адрес/часы + политики/гости + дисклеймеры + RU/KZ варианты; при нехватке данных включается safe‑mode (FACT/COLLECT/HANDOFF, FACT только из pack‑фактов).
 - [ ] RAG‑confidence < порога → уточнение/эскалация, не фантазия.
 - [ ] Misses пишутся в backlog и проходят валидацию перед публикацией.
 - [ ] Response Guard: финальный текст содержит только допустимые секции (ack + facts + next_step).

@@ -1,0 +1,22 @@
+# SESSION 2026-02-02-minimum-data-canon-alignment-a1 — Session 2026-02-02-minimum-data-canon-alignment-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-02-minimum-data-canon-alignment.md
+- branch: feat/2026-02-02-minimum-data-canon-alignment-a1
+- worktree: /home/zhan/worktrees/2026-02-02-minimum-data-canon-alignment-a1
+- base_ref: origin/main
+- scope: Canonize Minimum Data Contract + SAFE_MODE outcomes; add VERTICAL_PACK_KIT spec; sync onboarding validation/UI; tests.
+- done:
+  - Session created.
+  - Updated safe-mode canon and onboarding mandatory data list in docs.
+  - Added `SPECS/VERTICAL_PACK_KIT.md` with minimum data contract + safe-mode semantics.
+  - Synced validation + UI labels to new contract; tests executed.
+- next:
+  - Review diff, run session_check, open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-02-minimum-data-canon-alignment.md
+  - /tmp/pytest_knowledge_validation_min_data_canon_20260202.txt
+  - /tmp/pytest_console_onboarding_state_min_data_canon_20260202.txt
+  - /tmp/console_web_lint_min_data_canon_alignment_20260202b.txt
+- last_updated: 2026-02-02

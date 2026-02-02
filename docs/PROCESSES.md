@@ -272,7 +272,10 @@ POST /console/v1/cases/{case_id}/return
 **Mandatory branch data (required before go-live)**
 - Address + hours
 - Services + pricing
-- Policies (refund/reschedule/medical/payment)
+- Service durations (estimates or per-service duration notes)
+- Policies (refund/reschedule/medical/payment) + guest rules
+- Required disclaimers (medical constraints, "price from" variability, results expectations)
+- RU/KZ variants declared for user-facing text (at least `ru` + `kk` in languages)
 - Master full names (schedule slots later via CRM/calendar integration)
   - Enforced via knowledge pack validation + Go/No-Go gate (required fields).
 
@@ -291,8 +294,8 @@ POST /console/v1/cases/{case_id}/return
 - Phone connected to multiple instances -> stop (loop risk).
 
 **Safe mode (explicit approval only)**
-- Allowed outcomes: `COLLECT` or `HANDOFF` only.
-- No `FACT` replies until branch data is complete.
+- Allowed outcomes: `FACT`, `COLLECT`, `HANDOFF` only.
+- `FACT` is allowed only for verified pack facts; no inference or booking commit.
 
 **Example**
 Company: "Mira Salon"

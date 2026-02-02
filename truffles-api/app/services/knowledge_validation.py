@@ -16,8 +16,13 @@ REQUIRED_CLIENT_PACK_FIELDS = [
     "client_pack.salon.services_summary",
     "client_pack.salon.communication.languages",
     "client_pack.services_catalog.services",
+    "client_pack.service_duration_estimates",
     "client_pack.booking.collect_fields",
     "client_pack.booking.bot_can_confirm",
+    "client_pack.guest_policy",
+    "client_pack.safety.medical_note",
+    "client_pack.pricing.price_from_reason",
+    "client_pack.quality.expectations_photo",
     "client_pack.price_list",
 ]
 
@@ -37,6 +42,8 @@ REQUIRED_PACK_FIELDS = REQUIRED_CLIENT_PACK_FIELDS + REQUIRED_POLICY_FIELDS
 
 _MISSING = object()
 _COMPILED_ARTIFACTS_KEY = "compiled_artifacts"
+_REQUIRED_LANGUAGE_CODES = {"ru", "kk"}
+_LANGUAGE_ALIASES = {"kz": "kk"}
 
 
 def strip_compiled_artifacts(payload: dict | None) -> dict | None:
@@ -72,6 +79,18 @@ def _normalize_payload(data: dict) -> dict:
     return {"client_pack": data}
 
 
+def _normalize_language_code(value: str) -> str:
+    normalized = value.strip().lower()
+    return _LANGUAGE_ALIASES.get(normalized, normalized)
+
+
+def _has_required_languages(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    normalized = {_normalize_language_code(item) for item in value if isinstance(item, str)}
+    return _REQUIRED_LANGUAGE_CODES.issubset(normalized)
+
+
 def get_missing_required_fields(
     payload: dict,
     *,
@@ -84,6 +103,15 @@ def get_missing_required_fields(
         value = _get_nested_value(normalized, path)
         if value is _MISSING or _is_empty_value(value):
             missing.append(path)
+    language_path = "client_pack.salon.communication.languages"
+    language_value = _get_nested_value(normalized, language_path)
+    if (
+        language_value is not _MISSING
+        and not _is_empty_value(language_value)
+        and language_path not in missing
+        and not _has_required_languages(language_value)
+    ):
+        missing.append(language_path)
     return missing
 
 

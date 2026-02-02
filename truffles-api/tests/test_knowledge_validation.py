@@ -17,7 +17,7 @@ def _base_payload() -> dict:
                 "address": {"full": "Main street, 1"},
                 "hours": {"days": ["mon"], "open": "09:00", "close": "18:00"},
                 "services_summary": "Hair and nails",
-                "communication": {"languages": ["ru"]},
+                "communication": {"languages": ["ru", "kk"]},
             },
             "services_catalog": {
                 "services": [
@@ -25,7 +25,12 @@ def _base_payload() -> dict:
                     {"name": "Manicure", "price_items": ["Manicure"]},
                 ]
             },
+            "service_duration_estimates": {"haircut_min": "40-60"},
             "booking": {"collect_fields": ["name", "phone"], "bot_can_confirm": True},
+            "guest_policy": {"allowed_guests": "yes"},
+            "safety": {"medical_note": "Ask admin"},
+            "pricing": {"price_from_reason": "Depends on length"},
+            "quality": {"expectations_photo": "Bring a photo"},
             "price_list": [
                 {"category": "Hair", "items": [{"name": "Haircut", "price": 1000}]},
                 {"category": "Nails", "items": [{"name": "Manicure", "price": 2000}]},
@@ -63,6 +68,14 @@ def test_validate_payload_missing_required_field():
     payload["client_pack"]["salon"].pop("name")
     errors, warnings = validate_payload(payload)
     assert any("client_pack.salon.name" in err for err in errors)
+    assert warnings == []
+
+
+def test_validate_payload_requires_ru_kk_languages():
+    payload = _base_payload()
+    payload["client_pack"]["salon"]["communication"]["languages"] = ["ru"]
+    errors, warnings = validate_payload(payload)
+    assert any("client_pack.salon.communication.languages" in err for err in errors)
     assert warnings == []
 
 
