@@ -230,10 +230,16 @@ export default function CalendarPage() {
                     {/* Debug/Error info */}
                     {specialistsError && (
                         <div className="card-surface p-4 text-destructive">
-                            <h3 className="font-semibold mb-2">Ошибка загрузки мастеров</h3>
-                            <pre className="text-xs overflow-auto">
-                                {JSON.stringify(specialistsErrorData, null, 2)}
-                            </pre>
+                            <h3 className="font-semibold mb-1">Не удалось загрузить список мастеров</h3>
+                            <p className="text-sm text-muted-foreground">
+                                Проверьте соединение и попробуйте обновить страницу.
+                            </p>
+                            <details className="mt-2 text-xs text-muted-foreground">
+                                <summary className="cursor-pointer">Технические детали</summary>
+                                <pre className="mt-2 overflow-auto whitespace-pre-wrap">
+                                    {JSON.stringify(specialistsErrorData, null, 2)}
+                                </pre>
+                            </details>
                         </div>
                     )}
 
