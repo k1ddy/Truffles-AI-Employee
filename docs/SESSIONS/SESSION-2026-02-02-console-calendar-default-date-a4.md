@@ -1,0 +1,20 @@
+# SESSION 2026-02-02-console-calendar-default-date-a4 — Session 2026-02-02-console-calendar-default-date-a4
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-02-console-web-fix-calendar-default-date.md
+- branch: feat/2026-02-02-console-calendar-default-date-a4
+- worktree: /home/zhan/worktrees/2026-02-02-console-calendar-default-date-a4
+- base_ref: origin/main
+- scope: Calendar default date uses local timezone + smoke test coverage.
+- done:
+  - Replaced UTC-based formatDate with local date formatting.
+  - Added Playwright smoke check for calendar default date.
+  - Ran console-web lint and e2e commands (both missing local deps).
+- next:
+  - Commit, push, open PR, wait for CI.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-02-console-web-fix-calendar-default-date.md
+  - /tmp/console_calendar_default_date_lint_20260202.txt
+  - /tmp/console_calendar_default_date_e2e_20260202.txt
+- last_updated: 2026-02-02

@@ -529,6 +529,22 @@ test.describe('Navigation', () => {
         await expect(page.getByTestId('settings-branches')).toBeVisible();
         await expectRowsOrEmpty(page, 'settings-branch-row', 'settings-branches-empty');
     });
+
+    test('should open Calendar with local date default @smoke', async ({ page }) => {
+        await page.getByTestId('nav-calendar').click();
+        await expect(page).toHaveURL(urlPathPattern('/calendar'));
+        await expect(page.getByTestId('calendar-page')).toBeVisible();
+        const dateInput = page.getByLabel('Дата');
+        await expect(dateInput).toBeVisible();
+        const localDate = await page.evaluate(() => {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        });
+        await expect(dateInput).toHaveValue(localDate);
+    });
 });
 
 // =========================================
