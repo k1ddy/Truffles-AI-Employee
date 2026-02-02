@@ -8,6 +8,8 @@
 
 **NOW (1 экран)**
 - DONE: DEC-019 Pack-Compiler + Policy/Signal DSL + auto-ingest (draft) — evidence: `docs/IMPERIUM_DECISIONS.yaml`.
+- DONE: DEC-020 Hybrid LLM‑plan (plan → validate → tool → compose; tool‑first; pack‑only; lexicons fallback) — evidence: `docs/IMPERIUM_DECISIONS.yaml`, `STRATEGY/VISION.md`, `STRATEGY/REQUIREMENTS.md`, `STRATEGY/TECH_ROADMAP.md`, `SPECS/ARCHITECTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/SYSTEM_REFERENCE.md`, `SPECS/ESCALATION.md`, `docs/TASK_PACKAGES/TP-2026-02-02-hybrid-llm-plan-dec.md`.
+- PLAN: Hybrid LLM‑plan implementation (router plan JSON + validator + tool‑first) — Task Package: `docs/TASK_PACKAGES/TP-2026-02-02-hybrid-llm-plan-implementation.md`.
 - DONE: DEC-019 owner-doc sync + implementation TP (compiled artifacts only) — evidence: `SPECS/ARCHITECTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/SYSTEM_REFERENCE.md`, `SPECS/ACTIVE_LEARNING.md`, `STRATEGY/REQUIREMENTS.md`, `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md`, `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-docs.md`, `STRUCTURE.md`.
 - DONE: Pack-Compiler runtime (compiled artifacts only + policy/signal schemas + compiled snapshot) — evidence: `truffles-api/app/services/pack_compiler_service.py`, `contracts/packs/signal_graph.v1.jsonschema`, `contracts/policy/policy_bundle.v1.jsonschema`, `truffles-api/app/services/knowledge_registry_service.py`, `truffles-api/app/services/knowledge_snapshot_service.py`, `truffles-api/app/services/knowledge_snapshot_consumer.py`, `truffles-api/app/routers/webhook/decision.py`, `truffles-api/app/services/demo_salon_knowledge.py`, `/tmp/pytest_pack_compiler_2026-02-01.txt`, `/tmp/pytest_policy_dsl_2026-02-01.txt`, `/tmp/pytest_knowledge_snapshot_gateway_2026-02-01.txt`, `/tmp/pytest_message_signal_snapshot_2026-02-01.txt`.
 - DONE: Auto-ingest approvals (learned_responses queue + Telegram approve/reject + auto-approve roles + draft apply) — evidence: `truffles-api/app/services/learned_response_service.py`, `truffles-api/app/services/learning_service.py`, `truffles-api/app/services/manager_message_service.py`, `truffles-api/app/services/telegram_service.py`, `truffles-api/app/routers/telegram_webhook.py`, `/tmp/pytest_learning_service_2026-02-01.txt`.
@@ -1998,6 +2000,8 @@
 - Status: p90 still > 10s target; keep P0 outbox latency OPEN.
 
 ### 2026-01-22 — Plan #1 (proposed): Canon shift to LLM‑first understanding + tool‑only facts (no hallucinations)
+
+**Status:** записано как DEC‑020 (Hybrid LLM‑plan) с синхронизацией канон‑доков.
 
 - **Context / problem:**
   - Бот “не знает что отвечать” из‑за детерминизма на ключевых словах, особенно RU/KZ/mixed.

@@ -2,7 +2,7 @@
 
 **Статус:** CANON (critical)  
 **Owner:** Жанбол  
-**Обновлено:** 2026-01-28  
+**Обновлено:** 2026-02-02  
 **Scope:** эскалация, состояния, роли, Telegram‑workflow, SLA.  
 **Out of scope:** реализация кода, внешние обещания.  
 **Links:** `SPECS/ACTIVE_LEARNING.md`, `SPECS/ARCHITECTURE.md`, `STATE.md`.
@@ -143,6 +143,10 @@ _Статус реализации и evidence — в `STATE.md`._
 ---
 
 ## Правила поведения бота [РЕАЛИЗОВАНО]
+
+**Hybrid LLM‑plan guard (DEC-020):**
+- План LLM не может обходить `manager_active`/`pending`/Hard‑LAW; состояние и policy всегда выше tool‑плана.
+- Tool‑action выполняется только если это разрешено текущим состоянием и политиками (иначе COLLECT/ожидание).
 
 ### Когда `bot_active`:
 - Бот отвечает на все сообщения

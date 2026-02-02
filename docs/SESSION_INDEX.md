@@ -106,3 +106,4 @@
 | 2026-02-02-console-inbox-load-more-a4 | done | feat/2026-02-02-console-inbox-load-more-a4 | /home/zhan/worktrees/2026-02-02-console-inbox-load-more-a4 | docs/TASK_PACKAGES/TP-2026-02-02-console-web-fix-inbox-load-more.md | 2026-02-02 |
 | 2026-02-02-console-sla-sort-a4 | done | feat/2026-02-02-console-sla-sort-a4 | /home/zhan/worktrees/2026-02-02-console-sla-sort-a4 | docs/TASK_PACKAGES/TP-2026-02-02-console-web-fix-sla-sort.md | 2026-02-02 |
 | 2026-02-02-console-calendar-default-date-a4 | done | feat/2026-02-02-console-calendar-default-date-a4 | /home/zhan/worktrees/2026-02-02-console-calendar-default-date-a4 | docs/TASK_PACKAGES/TP-2026-02-02-console-web-fix-calendar-default-date.md | 2026-02-02 |
+| 2026-02-02-hybrid-llm-plan-dec-a1 | done | feat/2026-02-02-hybrid-llm-plan-dec-a1 | /home/zhan/worktrees/2026-02-02-hybrid-llm-plan-dec-a1 | docs/TASK_PACKAGES/TP-2026-02-02-hybrid-llm-plan-dec.md | 2026-02-02 |
