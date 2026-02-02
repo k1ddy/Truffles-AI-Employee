@@ -16,8 +16,8 @@ from app.services.state_machine import ConversationState
 from app.services.state_service import (
     check_invariants,
     escalate_to_pending,
-    manager_return,
     manager_resolve,
+    manager_return,
     manager_take,
 )
 
