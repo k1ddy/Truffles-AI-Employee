@@ -10,11 +10,12 @@ ENV APP_VERSION=$APP_VERSION
 ENV GIT_COMMIT=$GIT_COMMIT
 ENV BUILD_TIME=$BUILD_TIME
 
-COPY requirements.txt .
+COPY truffles-api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app/ ./app/
-COPY tests/ ./tests/
+COPY truffles-api/app/ ./app/
+COPY truffles-api/tests/ ./tests/
+COPY contracts/ ./contracts/
 
 EXPOSE 8000
 
