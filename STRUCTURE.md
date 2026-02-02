@@ -611,6 +611,9 @@ truffles-api/
 | `truffles-api/tests/test_webhook_dedup.py` | Unit: webhook buffer/dedup helpers |
 | `truffles-api/tests/test_webhook_response.py` | Unit: CTA и quiet hours helpers |
 | `truffles-api/tests/test_reasoning_core.py` | Unit: Reasoning Core contract/wiring |
+| `truffles-api/tests/test_minimum_data_contract.py` | Unit: Minimum Data Contract validator |
+| `truffles-api/tests/test_safe_mode_gate.py` | Unit: Minimum Data safe-mode gate |
+| `truffles-api/tests/test_admin_health.py` | Unit: Admin health minimum-data readiness |
 | `truffles-api/tests/test_pack_compiler.py` | Unit: pack compiler artifacts + checksum |
 | `truffles-api/tests/test_policy_dsl.py` | Unit: policy DSL schema validation |
 

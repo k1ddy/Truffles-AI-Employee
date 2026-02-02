@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, Mock
 
+import app.services.health_service as health_service
 from app.services.health_service import check_and_heal_conversations, get_system_health
 from app.services.state_machine import ConversationState
 
@@ -92,9 +93,14 @@ class TestCheckAndHealConversations:
 
 
 class TestGetSystemHealth:
-    def test_returns_conversation_counts(self):
+    def test_returns_conversation_counts(self, monkeypatch):
         db = MagicMock()
         db.query.return_value.filter.return_value.count.side_effect = [10, 2, 1, 3, 1]
+        monkeypatch.setattr(
+            health_service,
+            "build_minimum_data_status",
+            lambda _db: {"version": "minimum_data_contract.v1"},
+        )
 
         result = get_system_health(db)
 
@@ -103,10 +109,16 @@ class TestGetSystemHealth:
         assert result["conversations"]["manager_active"] == 1
         assert result["handovers"]["pending"] == 3
         assert result["handovers"]["active"] == 1
+        assert result["minimum_data_contract"]["version"] == "minimum_data_contract.v1"
 
-    def test_returns_checked_at_timestamp(self):
+    def test_returns_checked_at_timestamp(self, monkeypatch):
         db = MagicMock()
         db.query.return_value.filter.return_value.count.return_value = 0
+        monkeypatch.setattr(
+            health_service,
+            "build_minimum_data_status",
+            lambda _db: {"version": "minimum_data_contract.v1"},
+        )
 
         result = get_system_health(db)
 

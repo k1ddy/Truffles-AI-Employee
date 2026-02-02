@@ -191,21 +191,22 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 #### Stage order (gates/early returns)
 1) Preflight rejects и outbox-only путь → early return с `preflight`/`outbox`/`outbox_payload_guard` trace (если conversation резолвится; иначе trace не пишется).
 2) Контракт + план Decision Graph → `contract`, `decision_graph`.
-3) Session memory + re-entry + carryover cleanup → `session_memory`, `re_entry`, `class_carryover`, `service_carryover`, `consult_context`.
-4) Expected reply (answer interpreter) → `question_contract`.
-5) Branch selection prompt/confirm → early return с `branch_selection` trace.
-6) Behavioral shield → `shield` (drop/escalate).
-7) Policy/Hard-LAW gate → `policy_gate`.
-8) State/pending/mute gates → `routing`, `rejection`, `pending_*`.
-9) Media-only handling → `media`.
-10) Debounce/hand‑over confirmation → early return с `debounce`/`handover_confirmation` trace.
-11) Router + intent decomposition + carryover guard → `intent_decomposition`, `class_router`, `intent`, `carryover_guard`.
-12) Domain flows (booking/info/consult) → `booking_gate`, `complaint_guard`, `out_of_domain`, `consult_flow`, `intent_queue`, `booking`, `consult`, `clarify_guard`, `booking_interrupt`, `service_matcher`, `truth_gate`, `multi_truth`, `service_semantic_matcher`, `time_only_guard`, `info_class`.
-13) Fast intent (smalltalk) before LLM → `fast_intent`.
-14) LLM response/fallback → `llm_guard`, `ai_response`, `rewrite`, `budget_gate`, `llm_degradation`.
-15) Post-response hooks (summary/consult return) → `context_manager`, `consult_return`.
-16) Escalation/state updates → `escalation`, `state_transition`.
-17) Action gate (missing action) → `action_gate`.
+3) Safe-mode gate (knowledge sync/minimum data) → `knowledge_safe_mode`, `minimum_data_safe_mode`.
+4) Session memory + re-entry + carryover cleanup → `session_memory`, `re_entry`, `class_carryover`, `service_carryover`, `consult_context`.
+5) Expected reply (answer interpreter) → `question_contract`.
+6) Branch selection prompt/confirm → early return с `branch_selection` trace.
+7) Behavioral shield → `shield` (drop/escalate).
+8) Policy/Hard-LAW gate → `policy_gate`.
+9) State/pending/mute gates → `routing`, `rejection`, `pending_*`.
+10) Media-only handling → `media`.
+11) Debounce/hand‑over confirmation → early return с `debounce`/`handover_confirmation` trace.
+12) Router + intent decomposition + carryover guard → `intent_decomposition`, `class_router`, `intent`, `carryover_guard`.
+13) Domain flows (booking/info/consult) → `booking_gate`, `complaint_guard`, `out_of_domain`, `consult_flow`, `intent_queue`, `booking`, `consult`, `clarify_guard`, `booking_interrupt`, `service_matcher`, `truth_gate`, `multi_truth`, `service_semantic_matcher`, `time_only_guard`, `info_class`.
+14) Fast intent (smalltalk) before LLM → `fast_intent`.
+15) LLM response/fallback → `llm_guard`, `ai_response`, `rewrite`, `budget_gate`, `llm_degradation`.
+16) Post-response hooks (summary/consult return) → `context_manager`, `consult_return`.
+17) Escalation/state updates → `escalation`, `state_transition`.
+18) Action gate (missing action) → `action_gate`.
 
 #### Legacy stage map (stage → condition → action → trace)
 | Stage | Condition | Action | Trace |
@@ -225,6 +226,8 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 | `rewrite` | RAG rewrite применён/пропущен | Запись rewrite_used/text | decision_trace.stage=`rewrite` (`truffles-api/app/routers/webhook/_legacy.py:1816`) |
 | `contract` | Контракты context/intent/fact/action/response | OK/error по схеме | decision_trace.stage=`contract` (`truffles-api/app/routers/webhook/_legacy.py:2070`) |
 | `decision_graph` | План Decision Graph | Запись plan_id + стадий | decision_trace.stage=`decision_graph` (`truffles-api/app/routers/webhook/_legacy.py:2087`) |
+| `knowledge_safe_mode` | branch.knowledge_safe_mode=true | Pending wait / handoff | decision_trace.stage=`knowledge_safe_mode` (`truffles-api/app/routers/webhook/decision.py`) |
+| `minimum_data_safe_mode` | Minimum Data Contract missing | Pending wait / handoff | decision_trace.stage=`minimum_data_safe_mode` (`truffles-api/app/routers/webhook/decision.py`) |
 | `fact_guard` | fact_source есть, фактов нет | Clarify или escalate | decision_trace.stage=`fact_guard` (`truffles-api/app/routers/webhook/_legacy.py:2251`) |
 | `fact_resolver` | Факты/источники собраны | Resolved/missing | decision_trace.stage=`fact_resolver` (`truffles-api/app/routers/webhook/_legacy.py:2331`) |
 | `session_memory` | Reset/contract_error/expected_reply_fallback | Обновление/сброс памяти | decision_trace.stage=`session_memory` (`truffles-api/app/routers/webhook/_legacy.py:2409`) |
