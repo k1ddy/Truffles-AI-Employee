@@ -32,6 +32,7 @@
 - DONE: Web Console inventory audit (roles + pages, implementation-backed) — evidence: `docs/CONSOLE_AUDIT/INDEX.md`.
 - DONE: Web Console canon vs implemented comparison — evidence: `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md`.
 - DONE: Web Console fact audit (implemented UI + API evidence + UX/bug findings) — evidence: `docs/REPORTS/2026-02-01-console-web-fact-audit.md`, `/tmp/console_web_fact_20260201`.
+- DONE: Calendar default date uses local timezone (no UTC day shift) + smoke test check — evidence: `console-web/src/app/calendar/page.tsx`, `console-web/e2e/smoke.spec.ts`, lint `/tmp/console_calendar_default_date_lint_20260202.txt` (next missing), e2e `/tmp/console_calendar_default_date_e2e_20260202.txt` (playwright missing).
 - DONE: Console branch-gating for case messages + manager sends — evidence: `truffles-api/app/routers/console.py`, `truffles-api/tests/test_console_cases_helpers.py`, `/tmp/console_branch_gating_cases_helpers_20260202.txt`.
 - DONE: Inbox "Load more" appends to list (pagination state) — evidence: `console-web/src/components/CaseList.tsx`, `/tmp/console_inbox_load_more_lint_20260202.txt`.
 - DONE: Console return-to-bot uses `bot_handling` (not resolved) + contract/UI update — evidence: `truffles-api/app/services/state_service.py`, `truffles-api/app/routers/console.py`, `contracts/console_api/openapi.v1.yaml`, `console-web/src/types/api.generated.ts`, `console-web/src/utils/labels.ts`, `/tmp/console_return_state_service_20260202.txt`, `/tmp/console_return_console_web_lint_20260202.txt`.
