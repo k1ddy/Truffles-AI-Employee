@@ -292,10 +292,14 @@ export default function CalendarPage() {
 
                             {/* Date */}
                             <div>
-                                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                                <label
+                                    className="block text-sm font-medium text-muted-foreground mb-1"
+                                    htmlFor="calendar-date"
+                                >
                                     Дата
                                 </label>
                                 <input
+                                    id="calendar-date"
                                     type="date"
                                     value={selectedDate}
                                     onChange={(e) => {

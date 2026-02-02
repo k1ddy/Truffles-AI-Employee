@@ -11,10 +11,13 @@
   - Replaced UTC-based formatDate with local date formatting.
   - Added Playwright smoke check for calendar default date.
   - Ran console-web lint and e2e commands (both missing local deps).
+  - CI console-e2e-live failed: calendar date input not found via label.
+  - Added label `htmlFor` + input `id` to expose date input to tests/ARIA.
 - next:
-  - Commit, push, open PR, wait for CI.
+  - Commit, push, wait for CI.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-02-console-web-fix-calendar-default-date.md
   - /tmp/console_calendar_default_date_lint_20260202.txt
   - /tmp/console_calendar_default_date_e2e_20260202.txt
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21577369522
 - last_updated: 2026-02-02
