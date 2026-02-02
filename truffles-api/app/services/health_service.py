@@ -3,7 +3,12 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.models import Conversation, Handover, User
+from app.models import Branch, Conversation, Handover, User
+from app.services.knowledge_registry_service import get_current_published
+from app.services.knowledge_validation import (
+    MINIMUM_DATA_CONTRACT_VERSION,
+    evaluate_minimum_data_contract,
+)
 from app.services.state_machine import ConversationState
 from app.services.state_service import force_state
 
@@ -192,6 +197,44 @@ def check_and_heal_conversations(db: Session) -> dict:
     }
 
 
+def build_minimum_data_status(db: Session) -> dict:
+    branches = (
+        db.query(Branch)
+        .filter(Branch.is_active.is_(True))
+        .all()
+    )
+    missing_branches: list[dict] = []
+    ready_count = 0
+
+    for branch in branches:
+        published = get_current_published(db, branch_id=branch.id)
+        if not published or not isinstance(published.payload_json, dict):
+            missing_fields = ["knowledge_published"]
+        else:
+            status = evaluate_minimum_data_contract(published.payload_json)
+            missing_fields = status.missing_fields
+
+        if missing_fields:
+            missing_branches.append(
+                {
+                    "branch_id": str(branch.id),
+                    "knowledge_tag": branch.knowledge_tag,
+                    "missing_fields": missing_fields,
+                }
+            )
+        else:
+            ready_count += 1
+
+    total = len(branches)
+    return {
+        "version": MINIMUM_DATA_CONTRACT_VERSION,
+        "branches_total": total,
+        "ready_count": ready_count,
+        "missing_count": total - ready_count,
+        "missing": missing_branches,
+    }
+
+
 def get_system_health(db: Session) -> dict:
     """Получить общее состояние системы."""
 
@@ -215,6 +258,7 @@ def get_system_health(db: Session) -> dict:
             "pending": pending_handovers,
             "active": active_handovers,
         },
+        "minimum_data_contract": build_minimum_data_status(db),
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 

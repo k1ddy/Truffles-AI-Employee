@@ -1,0 +1,24 @@
+# SESSION 2026-02-02-minimum-data-safe-mode-a1 — Session 2026-02-02-minimum-data-safe-mode-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-02-minimum-data-safe-mode.md
+- branch: feat/2026-02-02-minimum-data-safe-mode-a1
+- worktree: /home/zhan/worktrees/2026-02-02-minimum-data-safe-mode-a1
+- base_ref: origin/main
+- scope: Minimum Data Contract validator + runtime safe-mode gate + readiness health.
+- done:
+  - Session created.
+  - Added minimum data contract validation and readiness metadata.
+  - Wired minimum-data safe-mode gate + stage order update.
+  - Exposed minimum data readiness in admin health.
+  - Added tests and updated architecture/structure docs.
+- next:
+  - Review diff and finalize.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-02-minimum-data-safe-mode.md
+  - /tmp/pytest_minimum_data_contract_20260202.txt
+  - /tmp/pytest_safe_mode_gate_20260202.txt
+  - /tmp/pytest_admin_health_20260202.txt
+  - /tmp/pytest_stage_order_hash_20260202.txt
+- last_updated: 2026-02-02
