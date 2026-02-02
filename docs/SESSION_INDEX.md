@@ -93,3 +93,4 @@
 | 2026-02-01-pack-compiler-docs-a1 | done | feat/2026-02-01-pack-compiler-docs-a1 | /home/zhan/worktrees/2026-02-01-pack-compiler-docs-a1 | docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-docs.md | 2026-02-01 |
 | 2026-02-01-pack-compiler-implementation-a1 | done | feat/2026-02-01-pack-compiler-implementation-a1 | /home/zhan/worktrees/2026-02-01-pack-compiler-implementation-a1 | docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md | 2026-02-01 |
 | 2026-02-01-pack-compiler-pending-a1 | done | feat/2026-02-01-pack-compiler-pending-a1 | /home/zhan/worktrees/2026-02-01-pack-compiler-pending-a1 | docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-pending-gap.md | 2026-02-01 |
+| 2026-02-02-ci-build-push-context-a1 | done | feat/2026-02-02-ci-build-push-context-a1 | /home/zhan/worktrees/2026-02-02-ci-build-push-context-a1 | docs/TASK_PACKAGES/TP-2026-02-02-ci-build-push-context.md | 2026-02-02 |
