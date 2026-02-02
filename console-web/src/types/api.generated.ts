@@ -1912,7 +1912,7 @@ export interface operations {
                 has_pending_outbox?: boolean;
                 last_activity_since?: string;
                 /** @description Sort order for inbox results. */
-                sort_by?: "last_activity" | "created_at";
+                sort_by?: "last_activity" | "created_at" | "sla";
                 date_from?: string;
                 date_to?: string;
                 /** @description Pagination cursor (opaque) */
