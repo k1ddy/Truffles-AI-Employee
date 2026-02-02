@@ -29,7 +29,7 @@ Queue (CaseList)
   - Advanced (expandable): Branch, date from/to, "Есть ошибки", "В очереди".
 - Refresh button: re-fetches cases.
 - Load more button when `has_more` (fetches next cursor page and appends to the list).
-- Auto refresh: every 10s (foreground only).
+- Auto refresh: every 10s (foreground only), toggle "Автообновление: Вкл/Выкл".
 
 Case rows (compact view)
 - Shows customer name/phone, status badge, preview, branch, last activity, SLA.
