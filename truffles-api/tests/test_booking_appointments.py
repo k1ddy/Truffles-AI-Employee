@@ -88,6 +88,62 @@ def test_create_booking_appointment_collect_preferences():
     assert kwargs["commit"] is False
 
 
+def test_create_booking_appointment_reuses_existing():
+    now = datetime(2026, 1, 30, 9, 0, tzinfo=timezone.utc)
+    branch_id = uuid4()
+    client_id = uuid4()
+    conversation = SimpleNamespace(id=uuid4(), client_id=client_id, branch_id=branch_id)
+    user = SimpleNamespace(
+        id=uuid4(),
+        phone="+77001234567",
+        remote_jid="77001234567@s.whatsapp.net",
+        name="Алия",
+    )
+    booking_state = {
+        "service": "маникюр",
+        "datetime": "2026-02-02 10:00",
+        "name": "Алия",
+    }
+    branch = SimpleNamespace(
+        id=branch_id,
+        timezone="Asia/Almaty",
+        booking_settings={"booking_mode": "collect_preferences", "availability_provider": "none"},
+    )
+    existing = SimpleNamespace(id=uuid4(), status="CONFIRMED")
+
+    db = Mock()
+    appointment_query = _make_query(existing)
+    branch_query = _make_query(branch)
+    service_query = _make_query(None)
+
+    def _query(model):
+        if model is Branch:
+            return branch_query
+        if model is Appointment:
+            return appointment_query
+        if model is Service:
+            return service_query
+        return Mock()
+
+    db.query.side_effect = _query
+
+    with patch("app.routers.webhook.booking.SchedulingService") as scheduling_cls:
+        created, meta = booking_router._create_booking_appointment(
+            db=db,
+            conversation=conversation,
+            user=user,
+            booking_state=booking_state,
+            now=now,
+            saved_message=None,
+        )
+
+    assert created == existing
+    assert meta["appointment_id"] == str(existing.id)
+    assert meta["appointment_reused"] is True
+    assert meta["appointment_status"] == "CONFIRMED"
+    scheduling_cls.assert_not_called()
+
+
 def test_create_booking_appointment_missing_branch_skips():
     conversation = SimpleNamespace(id=uuid4(), client_id=uuid4(), branch_id=None)
     db = Mock()
