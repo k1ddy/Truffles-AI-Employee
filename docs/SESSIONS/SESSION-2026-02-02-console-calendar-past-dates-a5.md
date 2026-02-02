@@ -1,6 +1,6 @@
 # SESSION 2026-02-02-console-calendar-past-dates-a5 — Session 2026-02-02-console-calendar-past-dates-a5
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-02-console-calendar-past-dates.md
 - branch: feat/2026-02-02-console-calendar-past-dates-a5
@@ -8,12 +8,16 @@
 - base_ref: origin/main
 - scope: Calendar toggle to show past dates
 - done:
+  - CI green (run 21591186760)
   - Session created.
   - Added past dates toggle and date clamp on disable.
   - Lint attempt failed (next not found): `/tmp/console_calendar_past_dates_lint_20260202.txt`.
+  - CI: https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21591186760
 - next:
   - Run lint and open PR.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-02-console-calendar-past-dates.md
   - /tmp/console_calendar_past_dates_lint_20260202.txt
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/507
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21591186760
 - last_updated: 2026-02-02

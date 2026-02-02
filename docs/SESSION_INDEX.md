@@ -117,4 +117,4 @@
 | 2026-02-02-tp-batch-create-a1 | done | feat/2026-02-02-tp-batch-create-a1 | /home/zhan/worktrees/2026-02-02-tp-batch-create-a1 | docs/TASK_PACKAGES/TP-2026-02-02-tp-batch-create.md | 2026-02-02 |
 | 2026-02-02-minimum-data-safe-mode-a1 | done | feat/2026-02-02-minimum-data-safe-mode-a1 | /home/zhan/worktrees/2026-02-02-minimum-data-safe-mode-a1 | docs/TASK_PACKAGES/TP-2026-02-02-minimum-data-safe-mode.md | 2026-02-02 |
 | 2026-02-02-minimum-data-canon-alignment-a1 | done | feat/2026-02-02-minimum-data-canon-alignment-a1 | /home/zhan/worktrees/2026-02-02-minimum-data-canon-alignment-a1 | docs/TASK_PACKAGES/TP-2026-02-02-minimum-data-canon-alignment.md | 2026-02-02 |
-| 2026-02-02-console-calendar-past-dates-a5 | active | feat/2026-02-02-console-calendar-past-dates-a5 | /home/zhan/worktrees/2026-02-02-console-calendar-past-dates-a5 | docs/TASK_PACKAGES/TP-2026-02-02-console-calendar-past-dates.md | 2026-02-02 |
+| 2026-02-02-console-calendar-past-dates-a5 | done | feat/2026-02-02-console-calendar-past-dates-a5 | /home/zhan/worktrees/2026-02-02-console-calendar-past-dates-a5 | docs/TASK_PACKAGES/TP-2026-02-02-console-calendar-past-dates.md | 2026-02-02 |
