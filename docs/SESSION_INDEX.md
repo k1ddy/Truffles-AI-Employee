@@ -109,3 +109,5 @@
 | 2026-02-02-hybrid-llm-plan-dec-a1 | done | feat/2026-02-02-hybrid-llm-plan-dec-a1 | /home/zhan/worktrees/2026-02-02-hybrid-llm-plan-dec-a1 | docs/TASK_PACKAGES/TP-2026-02-02-hybrid-llm-plan-dec.md | 2026-02-02 |
 | 2026-02-02-console-audit-followup-a4 | done | feat/2026-02-02-console-audit-followup-a4 | /home/zhan/worktrees/2026-02-02-console-audit-followup-a4 | docs/TASK_PACKAGES/TP-2026-02-02-console-web-audit-followup.md | 2026-02-02 |
 | 2026-02-02-vertical-pack-canon-a1 | done | feat/2026-02-02-vertical-pack-canon-a1 | /home/zhan/worktrees/2026-02-02-vertical-pack-canon-a1 | docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-canon.md | 2026-02-02 |
+| 2026-02-02-console-inbox-auto-refresh-toggle-a4 | active | feat/2026-02-02-console-inbox-auto-refresh-toggle-a4 | /home/zhan/worktrees/2026-02-02-console-inbox-auto-refresh-toggle-a4 | docs/TASK_PACKAGES/TP-2026-02-02-console-inbox-auto-refresh-toggle.md | 2026-02-02 |
+| 2026-02-02-console-calendar-error-ui-a4 | done | feat/2026-02-02-console-calendar-error-ui-a4 | /home/zhan/worktrees/2026-02-02-console-calendar-error-ui-a4 | docs/TASK_PACKAGES/TP-2026-02-02-console-calendar-error-ui.md | 2026-02-02 |
