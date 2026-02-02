@@ -84,3 +84,7 @@ decisions:
     area: "pack_compiler_dsl"
     choice: "COMPILED_ARTIFACTS_ONLY"
     statement: "Packs compile into versioned deterministic artifacts (pack-index + signal graph + policy bundles); runtime reads compiled artifacts only. Policy/Signal DSL defines schema + validation. Auto-ingest yields candidate packs gated by human approval; build outputs are hashed and recorded in decision_meta."
+  - id: "DEC-020"
+    area: "hybrid_llm_plan"
+    choice: "PLAN_VALIDATE_TOOL_COMPOSE"
+    statement: "Hybrid LLM-plan: LLM returns a strict JSON plan (outcome, tool_action, tool_args, pack_refs, language, confidence, reason, goal, slot_state, open_questions); deterministic validator enforces safety/state/pack_ref and tool-args; valid tool_action MUST execute tool; responses are composed only from packs/tools; lexicons remain fallback."

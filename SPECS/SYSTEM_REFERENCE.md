@@ -2,7 +2,7 @@
 
 **Статус:** CANON  
 **Owner:** Top Architect  
-**Обновлено:** 2026-01-28  
+**Обновлено:** 2026-02-02  
 **Scope:** техсправка и операционные детали; поведение бота см. `SPECS/ARCHITECTURE.md` и `SPECS/CONSULTANT.md`.  
 **Out of scope:** продуктовые обещания, SLA продаж.  
 **Links:** `SPECS/ARCHITECTURE.md`, `SPECS/INFRASTRUCTURE.md`, `TECH.md`, `STATE.md`.
@@ -1094,6 +1094,12 @@ chatflow_service → WhatsApp
 - Пишем в `decision_meta` источники/score/threshold **и pack version/hash**, чтобы объяснять OOD/booking/intent решения.
 - Канон: anchors в `client_config` синхронизируются из pack при publish; дрейф считается дефектом.
 - LLM‑выход обязан быть pack‑ref‑only; при несоответствии → deterministic fallback + `llm_pack_ref_error` в meta.
+
+**Hybrid LLM‑plan (DEC-020)**
+- LLM возвращает **план** в строгом JSON: `outcome`, `tool_action`, `tool_args`, `pack_refs`, `language`, `confidence`, `reason`, `goal`, `slot_state`, `open_questions`.
+- Валидатор обязан проверить safety/state/pack_refs и валидность `tool_args`; при ошибке → `COLLECT/clarify`, без “придумывания”.
+- **Tool‑first:** если `tool_action` валиден, инструмент вызывается обязательно; ответ собирается из tool‑результата и pack‑фраз.
+- План фиксируется в `decision_meta` как вход для аудита (LLM‑text не используется для проверки).
 
 **Media/ASR ordering**
 - `style_reference_pending` (context) links text↔photo order; TTL clears stale references.
