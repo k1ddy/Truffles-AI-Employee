@@ -177,7 +177,7 @@ export default function CaseList({
         }
     }, [branchFilterEnabled, filters.branchId]);
 
-    const { data, isLoading, error, refetch, isFetching } = useQuery({
+    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuery({
         queryKey: ["cases", filters, cursor],
         queryFn: async (): Promise<CasesResponse> => {
             const buildParams = (includeSort: boolean) => {
@@ -221,6 +221,14 @@ export default function CaseList({
         refetchInterval: autoRefreshEnabled ? 10000 : false, // Auto-refresh every 10 seconds
         refetchIntervalInBackground: false, // Only refresh when tab is active
     });
+    const lastUpdatedTime = dataUpdatedAt
+        ? new Date(dataUpdatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+        : null;
+    const refreshStatusLabel = isFetching
+        ? "Обновление..."
+        : lastUpdatedTime
+            ? `Обновлено: ${lastUpdatedTime}`
+            : null;
 
     useEffect(() => {
         if (!data?.items) {
@@ -340,6 +348,16 @@ export default function CaseList({
                     >
                         {autoRefreshLabel}
                     </button>
+                    {refreshStatusLabel && (
+                        <span
+                            className={`text-xs ${
+                                isFetching ? "text-emerald-700 animate-pulse" : "text-muted-foreground"
+                            }`}
+                            data-testid="cases-refresh-status"
+                        >
+                            {refreshStatusLabel}
+                        </span>
+                    )}
                 </div>
             </div>
 

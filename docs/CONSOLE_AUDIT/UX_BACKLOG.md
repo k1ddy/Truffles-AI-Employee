@@ -25,6 +25,8 @@ Open UX debt / code smells (implemented)
 | UX-03 | Inbox | Auto-refresh every 10s without pause/indicator. | Queue can change while scrolling or selecting a case. | `console-web/src/components/CaseList.tsx` (auto-refresh toggle), PR TBD, CI TBD. | Fixed |
 | UX-04 | Settings / Provisioning | JSON-only inputs for `billing_info`, `working_hours`, `booking_settings`. | High error rate; no guided forms or inline validation. | `console-web/src/components/ProvisioningWizard.tsx` (JSON textareas + `parseOptionalJson`). | Open |
 | UX-05 | Settings / Provisioning | Effective capabilities displayed as raw JSON block. | Hard to read/verify changes; no schema help. | `console-web/src/components/ProvisioningWizard.tsx` (effective JSON preview). | Open |
+| UX-06 | Inbox | Нет видимости свежести списка (last updated / fetching). | Операторы не понимают актуальность очереди. | `console-web/src/components/CaseList.tsx`. | Fixed |
+| UX-07 | Inbox | Ошибки отправки видны только в toast, нет статуса/повтора. | Потеря сообщений и неясный статус. | `console-web/src/components/ChatInterface.tsx`. | Fixed |
 
 Related inventory docs
 - `docs/CONSOLE_AUDIT/pages/inbox.md`
