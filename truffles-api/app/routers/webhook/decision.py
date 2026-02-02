@@ -342,6 +342,12 @@ from app.services.intent_service import (
     route_llm_plan,
     should_escalate,
 )
+from app.services.knowledge_registry_service import get_current_published
+from app.services.knowledge_validation import (
+    MINIMUM_DATA_CONTRACT_VERSION,
+    MinimumDataContractStatus,
+    evaluate_minimum_data_contract,
+)
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
 from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.state_machine import ConversationState
@@ -3776,6 +3782,211 @@ def _reuse_active_handover(
     return handover, True, telegram_sent
 
 
+def _build_minimum_data_contract_status(
+    db: Session,
+    *,
+    branch_id: UUID | None,
+) -> MinimumDataContractStatus:
+    if not branch_id:
+        return MinimumDataContractStatus(ready=True, missing_fields=[])
+    published = get_current_published(db, branch_id=branch_id)
+    if not published or not isinstance(published.payload_json, dict):
+        return MinimumDataContractStatus(ready=False, missing_fields=["knowledge_published"])
+    return evaluate_minimum_data_contract(published.payload_json)
+
+
+def _record_minimum_data_contract_meta(
+    saved_message: Message | None,
+    status: MinimumDataContractStatus,
+) -> None:
+    if not saved_message:
+        return
+    _update_message_decision_metadata(
+        saved_message,
+        {
+            "minimum_data_contract": {
+                "version": MINIMUM_DATA_CONTRACT_VERSION,
+                "ready": status.ready,
+                "missing_fields": status.missing_fields,
+            }
+        },
+    )
+
+
+def _handle_minimum_data_safe_mode_gate(
+    *,
+    db: Session,
+    conversation: Conversation,
+    user: User,
+    saved_message: Message | None,
+    message_text: str,
+    status: MinimumDataContractStatus,
+    send_and_save,
+) -> WebhookResponse | None:
+    if status.ready or not status.missing_fields:
+        return None
+    if not conversation.branch_id:
+        return None
+
+    missing_fields = status.missing_fields
+    if conversation.state != ConversationState.BOT_ACTIVE.value:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "minimum_data_safe_mode",
+                "decision": "pending_state",
+                "state": conversation.state,
+                "reason": "minimum_data_contract",
+                "missing_fields": missing_fields,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="pending_wait",
+            intent=None,
+            source="minimum_data_safe_mode",
+            fast_intent=False,
+        )
+        bot_response, sent = send_and_save(MSG_PENDING_WAIT)
+        result_message = (
+            "Minimum data safe-mode pending wait sent"
+            if sent
+            else "Minimum data safe-mode pending wait failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    handover_message = message_text
+    _, reused, telegram_sent = _reuse_active_handover(
+        db=db,
+        conversation=conversation,
+        user=user,
+        message=handover_message,
+        source="minimum_data_safe_mode",
+        intent="safe_mode",
+    )
+    if reused:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "minimum_data_safe_mode",
+                "decision": "reused",
+                "state": conversation.state,
+                "telegram_sent": telegram_sent,
+                "reason": "minimum_data_contract",
+                "missing_fields": missing_fields,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="pending_escalation",
+            intent=None,
+            source="minimum_data_safe_mode",
+            fast_intent=False,
+        )
+        bot_response, sent = send_and_save(MSG_ESCALATED)
+        result_message = (
+            "Minimum data safe-mode escalation reused"
+            if sent
+            else "Minimum data safe-mode escalation reuse failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    result = escalate_to_pending(
+        db=db,
+        conversation=conversation,
+        user_message=handover_message,
+        trigger_type="minimum_data_contract",
+        trigger_value=str(conversation.branch_id),
+    )
+    if result.ok:
+        handover = result.value
+        handover_reopened = bool(getattr(handover, "_reopened", False))
+        telegram_sent = send_telegram_notification(
+            db=db,
+            handover=handover,
+            conversation=conversation,
+            user=user,
+            message=handover_message,
+        )
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "minimum_data_safe_mode",
+                "decision": "created",
+                "state": conversation.state,
+                "telegram_sent": telegram_sent,
+                "reason": "minimum_data_contract",
+                "missing_fields": missing_fields,
+                "handover_reopened": handover_reopened,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action="pending_escalation",
+            intent=None,
+            source="minimum_data_safe_mode",
+            fast_intent=False,
+        )
+        bot_response, sent = send_and_save(MSG_ESCALATED)
+        result_message = (
+            "Minimum data safe-mode escalation created"
+            if sent
+            else "Minimum data safe-mode escalation send failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
+
+    logger.error("Minimum data safe-mode escalation failed: %s", result.error)
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "minimum_data_safe_mode",
+            "decision": "failed",
+            "state": conversation.state,
+            "error": result.error,
+            "reason": "minimum_data_contract",
+            "missing_fields": missing_fields,
+        },
+    )
+    _record_message_decision_meta(
+        saved_message,
+        action="pending_escalation",
+        intent=None,
+        source="minimum_data_safe_mode",
+        fast_intent=False,
+    )
+    bot_response, sent = send_and_save(MSG_ESCALATED)
+    result_message = (
+        "Minimum data safe-mode escalation failed"
+        if sent
+        else "Minimum data safe-mode escalation failed to send"
+    )
+    db.commit()
+    return WebhookResponse(
+        success=True,
+        message=result_message,
+        conversation_id=conversation.id,
+        bot_response=bot_response,
+    )
+
+
 def _handle_knowledge_safe_mode_gate(
     *,
     db: Session,
@@ -5021,12 +5232,29 @@ async def _handle_webhook_payload(
         _persist_timing_snapshot()
         return final_text, sent
 
+    minimum_data_status = _build_minimum_data_contract_status(
+        db,
+        branch_id=conversation.branch_id,
+    )
+    _record_minimum_data_contract_meta(saved_message, minimum_data_status)
+
     safe_mode_response = _handle_knowledge_safe_mode_gate(
         db=db,
         conversation=conversation,
         user=user,
         saved_message=saved_message,
         message_text=message_text,
+        send_and_save=_send_and_save,
+    )
+    if safe_mode_response:
+        return safe_mode_response
+    safe_mode_response = _handle_minimum_data_safe_mode_gate(
+        db=db,
+        conversation=conversation,
+        user=user,
+        saved_message=saved_message,
+        message_text=message_text,
+        status=minimum_data_status,
         send_and_save=_send_and_save,
     )
     if safe_mode_response:
