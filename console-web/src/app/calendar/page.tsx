@@ -87,6 +87,7 @@ function formatDate(date: Date): string {
 export default function CalendarPage() {
     const { data: session } = useSession();
     const queryClient = useQueryClient();
+    const today = formatDate(new Date());
 
     const { data: meData } = useQuery({
         queryKey: ["console-me"],
@@ -103,13 +104,14 @@ export default function CalendarPage() {
 
     // Form state
     const [selectedSpecialist, setSelectedSpecialist] = useState<string>("");
-    const [selectedDate, setSelectedDate] = useState<string>(formatDate(new Date()));
+    const [selectedDate, setSelectedDate] = useState<string>(today);
     const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
     const [selectedService, setSelectedService] = useState<{ name: string; duration_min: number; price: number } | null>(null);
     const [customerName, setCustomerName] = useState("");
     const [customerPhone, setCustomerPhone] = useState("");
     const [notes, setNotes] = useState("");
     const [showForm, setShowForm] = useState(false);
+    const [showPastDates, setShowPastDates] = useState(false);
 
     // Queries
     const { data: specialistsData, isError: specialistsError, error: specialistsErrorData } = useQuery({
@@ -312,9 +314,26 @@ export default function CalendarPage() {
                                         setSelectedDate(e.target.value);
                                         setSelectedSlot(null);
                                     }}
-                                    min={formatDate(new Date())}
+                                    min={showPastDates ? undefined : today}
                                     className="w-full px-3 py-2 border border-border/60 rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
                                 />
+                                <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                    <input
+                                        type="checkbox"
+                                        checked={showPastDates}
+                                        onChange={(event) => {
+                                            const enabled = event.target.checked;
+                                            setShowPastDates(enabled);
+                                            if (!enabled && selectedDate < today) {
+                                                setSelectedDate(today);
+                                                setSelectedSlot(null);
+                                            }
+                                        }}
+                                        className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                        data-testid="calendar-show-past-dates"
+                                    />
+                                    Показывать прошлые даты
+                                </label>
                             </div>
                         </div>
                     </div>
