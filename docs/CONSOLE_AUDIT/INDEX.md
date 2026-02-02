@@ -24,6 +24,9 @@ Comparison
 Reports
 - `docs/REPORTS/2026-02-01-console-web-fact-audit.md`
 
+Backlog
+- `docs/CONSOLE_AUDIT/UX_BACKLOG.md`
+
 Roles
 - `docs/CONSOLE_AUDIT/roles/platform_admin.md`
 - `docs/CONSOLE_AUDIT/roles/owner.md`

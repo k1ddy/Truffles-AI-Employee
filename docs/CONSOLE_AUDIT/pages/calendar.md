@@ -29,6 +29,10 @@ Key UI elements
 - Bookings list:
   - Time range, status badge, specialist name, customer details, service.
 
+Behavior
+- Default date is set to the user's local date (no UTC shift).
+- Date input enforces `min=today` (past dates are not selectable).
+
 API endpoints used
 - Specialists: `GET /calendar/specialists`.
 - Slots: `GET /calendar/slots?specialist_id=...&date=...&duration=...`.

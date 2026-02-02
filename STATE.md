@@ -30,6 +30,7 @@
 - DONE: Web Console inventory audit (roles + pages, implementation-backed) — evidence: `docs/CONSOLE_AUDIT/INDEX.md`.
 - DONE: Web Console canon vs implemented comparison — evidence: `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md`.
 - DONE: Web Console fact audit (implemented UI + API evidence + UX/bug findings) — evidence: `docs/REPORTS/2026-02-01-console-web-fact-audit.md`, `/tmp/console_web_fact_20260201`.
+- DONE: Console audit findings fixed (return-to-bot, branch gating, inbox load more, SLA sort, calendar date) — evidence: PRs #493–#497 (https://github.com/k1ddy/Truffles-AI-Employee/pull/493, https://github.com/k1ddy/Truffles-AI-Employee/pull/494, https://github.com/k1ddy/Truffles-AI-Employee/pull/495, https://github.com/k1ddy/Truffles-AI-Employee/pull/496, https://github.com/k1ddy/Truffles-AI-Employee/pull/497), CI runs https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21575689168, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21576082316, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21575902168, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21575159164, https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21578194809, build `4614530` at `2026-02-01T00:01:02Z`.
 - DONE: Console branch-gating for case messages + manager sends — evidence: `truffles-api/app/routers/console.py`, `truffles-api/tests/test_console_cases_helpers.py`, `/tmp/console_branch_gating_cases_helpers_20260202.txt`.
 - DONE: Inbox "Load more" appends to list (pagination state) — evidence: `console-web/src/components/CaseList.tsx`, `/tmp/console_inbox_load_more_lint_20260202.txt`.
 - DONE: Console return-to-bot uses `bot_handling` (not resolved) + contract/UI update — evidence: `truffles-api/app/services/state_service.py`, `truffles-api/app/routers/console.py`, `contracts/console_api/openapi.v1.yaml`, `console-web/src/types/api.generated.ts`, `console-web/src/utils/labels.ts`, `/tmp/console_return_state_service_20260202.txt`, `/tmp/console_return_console_web_lint_20260202.txt`.
@@ -848,6 +849,7 @@
 | **Старт сессии** | `docs/SESSION_START_PROMPT.txt` | При изменении правил запуска |
 | **Сводка** | `SUMMARY.md` | После инвентаризации/крупных изменений |
 | **Console audit** | `docs/CONSOLE_AUDIT/` | При изменениях UI Console |
+| **Console UX backlog** | `docs/CONSOLE_AUDIT/UX_BACKLOG.md` | При обновлении UX debt/bugs |
 | **Анкета** | `CHATGPT_QUESTIONS_ANSWERS.md` | При обновлении ответов |
 | | | |
 | **Эскалация** | `SPECS/ESCALATION.md` | handovers, напоминания, Telegram |
