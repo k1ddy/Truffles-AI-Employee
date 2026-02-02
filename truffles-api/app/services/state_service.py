@@ -474,6 +474,56 @@ def manager_resolve(
         return Result.failure(str(e), "resolve_error")
 
 
+def manager_return(
+    db: Session,
+    conversation: Conversation,
+    handover: Handover,
+    manager_id: str,
+    manager_name: str,
+    *,
+    preserve_context: bool = True,
+) -> Result[bool]:
+    """Атомарный переход manager_active/pending → bot_active без закрытия handover."""
+
+    if conversation.state not in [ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value]:
+        return Result.failure(f"Cannot return from state {conversation.state}", "invalid_state")
+
+    try:
+        transition_state(
+            conversation,
+            ConversationState.BOT_ACTIVE,
+            allow_same=False,
+            enforce=True,
+            handover=handover,
+        )
+        conversation.bot_muted_until = None
+        conversation.no_count = 0
+        conversation.retry_offered_at = None
+        if not preserve_context:
+            _reset_context_preserving_trace(conversation)
+        elif not isinstance(conversation.context, dict):
+            conversation.context = {}
+
+        handover.status = "bot_handling"
+        handover.resolved_at = None
+        handover.resolved_by_id = None
+        handover.resolved_by_name = None
+        handover.resolution_time_seconds = None
+        handover.resolution_type = None
+        handover.resolution_notes = None
+        handover.assigned_to = None
+        handover.assigned_to_name = None
+
+        db.flush()
+
+        logger.info(f"Manager {manager_name} returned conversation {conversation.id} to bot")
+        return Result.success(True)
+
+    except Exception as e:
+        logger.error(f"Manager return failed: {e}")
+        return Result.failure(str(e), "return_error")
+
+
 def check_invariants(conversation: Conversation, handover: Handover = None) -> list[str]:
     """Проверить инварианты состояния. Возвращает список нарушений."""
     violations = []

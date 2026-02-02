@@ -1097,7 +1097,7 @@ export interface components {
             /** Format: uuid */
             conversation_id?: string;
             /** @enum {string} */
-            status?: "pending" | "active" | "resolved";
+            status?: "pending" | "active" | "resolved" | "bot_handling";
             trigger_type?: string;
             trigger_value?: string | null;
             context_summary?: string | null;

@@ -100,3 +100,4 @@
 | 2026-02-01-merge-origin-main-a4 | done | feat/2026-02-01-merge-origin-main-a4 | /home/zhan/worktrees/2026-02-01-merge-origin-main-a4 | docs/TASK_PACKAGES/TP-2026-02-01-merge-origin-main.md | 2026-02-02 |
 | 2026-02-02-console-web-fix-tps-a4 | done | feat/2026-02-02-console-web-fix-tps-a4 | /home/zhan/worktrees/2026-02-02-console-web-fix-tps-a4 | docs/TASK_PACKAGES/TP-2026-02-02-console-web-fix-tps.md | 2026-02-02 |
 | 2026-02-02-merge-origin-main-a4 | done | feat/2026-02-02-merge-origin-main-a4 | /home/zhan/worktrees/2026-02-02-merge-origin-main-a4 | docs/TASK_PACKAGES/TP-2026-02-02-merge-origin-main.md | 2026-02-02 |
+| 2026-02-02-console-return-to-bot-a4 | done | feat/2026-02-02-console-return-to-bot-a4 | /home/zhan/worktrees/2026-02-02-console-return-to-bot-a4 | docs/TASK_PACKAGES/TP-2026-02-02-console-web-fix-return-to-bot.md | 2026-02-02 |

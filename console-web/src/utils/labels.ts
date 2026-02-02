@@ -9,6 +9,7 @@ export function getStatusLabel(status: string): string {
         pending: "Ожидает",
         active: "В работе",
         resolved: "Закрыт",
+        bot_handling: "Бот отвечает",
         escalated: "Эскалация",
     };
     return labels[status] || status;
