@@ -22,6 +22,8 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 ALLOWED_BRANCH_MODES = {"by_instance", "ask_user", "hybrid"}
 ALLOWED_MANAGER_SCOPES = {"branch", "global"}
 ALLOWED_AUTO_APPROVE_ROLES = {"owner", "admin", "manager", "support"}
+ALLOWED_LEARNING_CONSENT_STATUSES = {"unknown", "granted", "declined"}
+ALLOWED_LEARNING_ANON_MODES = {"redact", "strict", "off"}
 MEDIA_STORAGE_DIR = Path(os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media"))
 MEDIA_CLEANUP_TTL_DAYS = int(os.environ.get("MEDIA_CLEANUP_TTL_DAYS", "7"))
 MEDIA_STORAGE_WARN_BYTES = int(os.environ.get("MEDIA_STORAGE_WARN_BYTES", str(5 * 1024 * 1024 * 1024)))
@@ -50,6 +52,9 @@ class SettingsUpdate(BaseModel):
     manager_scope: Optional[str] = None
     require_branch_for_pricing: Optional[bool] = None
     auto_approve_roles: Optional[list[str]] = None
+    learning_consent_status: Optional[str] = None
+    learning_anonymization_mode: Optional[str] = None
+    learning_retention_days: Optional[int] = None
 
     @field_validator("auto_approve_roles", mode="before")
     @classmethod
@@ -290,6 +295,21 @@ async def get_settings(client_slug: str, db: Session = Depends(get_db)):
             else True
         ),
         "auto_approve_roles": auto_approve_roles,
+        "learning_consent_status": (
+            settings.learning_consent_status
+            if settings and settings.learning_consent_status is not None
+            else "unknown"
+        ),
+        "learning_anonymization_mode": (
+            settings.learning_anonymization_mode
+            if settings and settings.learning_anonymization_mode is not None
+            else "redact"
+        ),
+        "learning_retention_days": (
+            settings.learning_retention_days
+            if settings and settings.learning_retention_days is not None
+            else 180
+        ),
     }
 
 
@@ -348,6 +368,24 @@ async def update_settings(client_slug: str, data: SettingsUpdate, db: Session = 
                 status_code=400,
                 detail=f"auto_approve_roles invalid: {', '.join(unknown_roles)}",
             )
+    if data.learning_consent_status is not None:
+        if data.learning_consent_status not in ALLOWED_LEARNING_CONSENT_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail="learning_consent_status must be unknown, granted, or declined",
+            )
+    if data.learning_anonymization_mode is not None:
+        if data.learning_anonymization_mode not in ALLOWED_LEARNING_ANON_MODES:
+            raise HTTPException(
+                status_code=400,
+                detail="learning_anonymization_mode must be redact, strict, or off",
+            )
+    if data.learning_retention_days is not None:
+        if data.learning_retention_days < 0 or data.learning_retention_days > 3650:
+            raise HTTPException(
+                status_code=400,
+                detail="learning_retention_days must be between 0 and 3650",
+            )
 
     # Find or create settings
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
@@ -375,6 +413,12 @@ async def update_settings(client_slug: str, data: SettingsUpdate, db: Session = 
         settings.require_branch_for_pricing = data.require_branch_for_pricing
     if data.auto_approve_roles is not None:
         settings.auto_approve_roles = ",".join(data.auto_approve_roles)
+    if data.learning_consent_status is not None:
+        settings.learning_consent_status = data.learning_consent_status
+    if data.learning_anonymization_mode is not None:
+        settings.learning_anonymization_mode = data.learning_anonymization_mode
+    if data.learning_retention_days is not None:
+        settings.learning_retention_days = data.learning_retention_days
 
     db.commit()
 

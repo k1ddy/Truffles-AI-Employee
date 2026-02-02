@@ -1,7 +1,7 @@
 import uuid
 
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, Text
-from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 
 from app.database import Base
 
@@ -23,6 +23,13 @@ class LearnedResponse(Base):
     source_role = Column(Text)
     source_channel = Column(Text)
     agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"))
+
+    consent_status = Column(Text)
+    anonymization_mode = Column(Text)
+    retention_expires_at = Column(TIMESTAMP(timezone=True))
+    candidate_type = Column(Text, default="faq")
+    candidate_payload = Column(JSONB)
+    redaction_summary = Column(JSONB)
 
     status = Column(Text, default="pending")  # pending, approved, rejected
     approved_by = Column(UUID(as_uuid=True), ForeignKey("agents.id"))

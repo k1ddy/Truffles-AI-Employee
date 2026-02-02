@@ -33,3 +33,20 @@ def test_payload_checksum_ignores_compiled_artifacts() -> None:
     payload_with_compiled = inject_compiled_artifacts(payload, compiled)
 
     assert build_payload_checksum(payload_with_compiled) == checksum
+
+
+def test_pack_compiler_keeps_faq_candidates() -> None:
+    payload = _load_demo_payload()
+    faq_entry = {"question": "Какая у вас гарантия?", "answer": "Гарантия обсуждается с мастером."}
+    client_pack = payload.setdefault("client_pack", {})
+    faq_list = client_pack.get("faq")
+    if not isinstance(faq_list, list):
+        faq_list = []
+    faq_list.append(faq_entry)
+    client_pack["faq"] = faq_list
+    payload["client_pack"] = client_pack
+
+    compiled = compile_pack_payload(payload)
+    effective = compiled.get("effective_pack", {}).get("client_pack", {}).get("faq", [])
+
+    assert faq_entry in effective

@@ -24,6 +24,7 @@ from app.models import (
     Company,
     Conversation,
     Handover,
+    LearnedResponse,
     KnowledgeVersion,
     Message,
     OutboxMessage,
@@ -78,6 +79,9 @@ from app.schemas.console import (
     ConsoleKnowledgeRollbackResponse,
     ConsoleKnowledgeValidateRequest,
     ConsoleKnowledgeValidateResponse,
+    ConsoleLearningCandidate,
+    ConsoleLearningCandidateActionResponse,
+    ConsoleLearningCandidateListResponse,
     ConsoleMacroCreateRequest,
     ConsoleMacroCreateResponse,
     ConsoleMacroListResponse,
@@ -135,6 +139,12 @@ from app.services.knowledge_registry_service import (
     validate_draft,
 )
 from app.services.knowledge_validation import dump_pack_yaml
+from app.services.learned_response_service import (
+    approve_learned_response,
+    is_agent_allowed_to_approve,
+    reject_learned_response,
+)
+from app.services.learning_service import evaluate_candidate_eligibility, get_learning_policy
 from app.services.manager_message_service import (
     notify_client_manager_status,
     process_console_media_upload,
@@ -871,6 +881,32 @@ def _parse_cursor_param(value: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _format_learning_block_reason(reason: Optional[str]) -> str:
+    return {
+        "consent_not_granted": "consent_not_granted",
+        "anonymization_disabled": "anonymization_disabled",
+        "retention_expired": "retention_expired",
+    }.get(reason, "policy_blocked")
+
+
+def _resolve_learning_candidate_eligibility(
+    learned_response: LearnedResponse,
+    *,
+    policy,
+    now: datetime,
+) -> tuple[bool, Optional[str]]:
+    if learned_response.status != "pending":
+        return False, f"status_{learned_response.status}"
+    allowed, reason = evaluate_candidate_eligibility(
+        policy,
+        retention_expires_at=learned_response.retention_expires_at,
+        now=now,
+    )
+    if not allowed:
+        return False, reason
+    return True, None
 
 
 def _parse_sort_param(name: str, value: Optional[str], default: str = "last_activity") -> str:
@@ -2849,6 +2885,9 @@ async def get_settings(
     client_settings = db.query(ClientSettings).filter(ClientSettings.client_id == context.client.id).first()
     
     bot_config = None
+    data_sharing = None
+    if isinstance(context.client.config, dict):
+        data_sharing = context.client.config.get("data_sharing")
     if client_settings:
         bot_config = ConsoleBotConfig(
             reminder_timeout_1=getattr(client_settings, 'reminder_timeout_1', None),
@@ -2862,6 +2901,10 @@ async def get_settings(
             booking_enabled=getattr(client_settings, 'booking_enabled', False),
             enable_reminders=getattr(client_settings, 'enable_reminders', True),
             enable_owner_escalation=getattr(client_settings, 'enable_owner_escalation', False),
+            learning_consent_status=getattr(client_settings, 'learning_consent_status', None),
+            learning_anonymization_mode=getattr(client_settings, 'learning_anonymization_mode', None),
+            learning_retention_days=getattr(client_settings, 'learning_retention_days', None),
+            data_sharing=data_sharing,
         )
     
     return ConsoleSettingsResponse(
@@ -3770,6 +3813,224 @@ async def rollback_knowledge(
         success=True,
         version_id=restored.id,
     )
+
+
+@router.get(
+    "/learning/candidates",
+    response_model=ConsoleLearningCandidateListResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_learning_candidates(
+    request: Request,
+    status: Optional[str] = Query(None),
+    limit: int = Query(25, ge=1, le=200),
+    cursor: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleLearningCandidateListResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "knowledge", "read")
+    branch = _resolve_branch_from_context(context)
+
+    query = (
+        db.query(LearnedResponse)
+        .filter(
+            LearnedResponse.client_id == context.client.id,
+            LearnedResponse.branch_id == branch.id,
+        )
+    )
+    if status:
+        normalized = status.strip().lower()
+        if normalized not in {"pending", "approved", "rejected"}:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
+        query = query.filter(LearnedResponse.status == normalized)
+
+    cursor_date = _parse_cursor_param(cursor)
+    if cursor_date is not None:
+        query = query.filter(LearnedResponse.created_at < cursor_date)
+
+    items = (
+        query.order_by(LearnedResponse.created_at.desc())
+        .limit(limit + 1)
+        .all()
+    )
+    has_more = len(items) > limit
+    if has_more:
+        items = items[:limit]
+
+    next_cursor = items[-1].created_at.isoformat() if has_more and items else None
+    policy = get_learning_policy(db, context.client.id)
+    now = datetime.now(timezone.utc)
+
+    def _serialize_candidate(item: LearnedResponse) -> ConsoleLearningCandidate:
+        can_approve, reason = _resolve_learning_candidate_eligibility(
+            item,
+            policy=policy,
+            now=now,
+        )
+        return ConsoleLearningCandidate(
+            id=item.id,
+            status=item.status,
+            question_text=item.question_text,
+            response_text=item.response_text,
+            source_name=item.source_name,
+            source_role=item.source_role,
+            source_channel=item.source_channel,
+            candidate_type=item.candidate_type,
+            branch_id=item.branch_id,
+            handover_id=item.handover_id,
+            created_at=item.created_at.isoformat() if item.created_at else None,
+            updated_at=item.updated_at.isoformat() if item.updated_at else None,
+            approved_at=item.approved_at.isoformat() if item.approved_at else None,
+            rejected_at=item.rejected_at.isoformat() if item.rejected_at else None,
+            retention_expires_at=(
+                item.retention_expires_at.isoformat()
+                if item.retention_expires_at
+                else None
+            ),
+            consent_status=item.consent_status,
+            anonymization_mode=item.anonymization_mode,
+            can_approve=can_approve,
+            ineligible_reason=_format_learning_block_reason(reason) if not can_approve else None,
+        )
+
+    return ConsoleLearningCandidateListResponse(
+        items=[_serialize_candidate(item) for item in items],
+        cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
+@router.post(
+    "/learning/candidates/{candidate_id}/approve",
+    response_model=ConsoleLearningCandidateActionResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def approve_learning_candidate(
+    candidate_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleLearningCandidateActionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "knowledge",
+        "write",
+        message="Only owner/admin can approve learning candidates",
+    )
+    branch = _resolve_branch_from_context(context)
+
+    learned = (
+        db.query(LearnedResponse)
+        .filter(
+            LearnedResponse.id == candidate_id,
+            LearnedResponse.client_id == context.client.id,
+        )
+        .first()
+    )
+    if not learned:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Learning candidate not found")
+    if learned.branch_id and learned.branch_id != branch.id:
+        raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+    if not is_agent_allowed_to_approve(db, learned_response=learned, agent=context.agent):
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Access denied")
+
+    if learned.status == "approved":
+        return ConsoleLearningCandidateActionResponse(success=True, message="Already approved")
+    if learned.status == "rejected":
+        return ConsoleLearningCandidateActionResponse(success=False, message="Already rejected")
+
+    policy = get_learning_policy(db, context.client.id)
+    allowed, reason = _resolve_learning_candidate_eligibility(
+        learned,
+        policy=policy,
+        now=datetime.now(timezone.utc),
+    )
+    if not allowed:
+        return ConsoleLearningCandidateActionResponse(
+            success=False,
+            message=f"Blocked: {_format_learning_block_reason(reason)}",
+        )
+
+    applied = approve_learned_response(
+        db,
+        learned_response=learned,
+        actor_id=context.agent.id,
+    )
+    db.commit()
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=branch.id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="learning_candidate_approved",
+        entity_type="learned_response",
+        entity_id=learned.id,
+        payload={"applied_to_pack": applied},
+    )
+
+    message = "Approved and applied" if applied else "Approved (not applied)"
+    return ConsoleLearningCandidateActionResponse(success=True, message=message)
+
+
+@router.post(
+    "/learning/candidates/{candidate_id}/reject",
+    response_model=ConsoleLearningCandidateActionResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def reject_learning_candidate(
+    candidate_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleLearningCandidateActionResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "knowledge",
+        "write",
+        message="Only owner/admin can reject learning candidates",
+    )
+    branch = _resolve_branch_from_context(context)
+
+    learned = (
+        db.query(LearnedResponse)
+        .filter(
+            LearnedResponse.id == candidate_id,
+            LearnedResponse.client_id == context.client.id,
+        )
+        .first()
+    )
+    if not learned:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Learning candidate not found")
+    if learned.branch_id and learned.branch_id != branch.id:
+        raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+    if not is_agent_allowed_to_approve(db, learned_response=learned, agent=context.agent):
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Access denied")
+
+    if learned.status == "rejected":
+        return ConsoleLearningCandidateActionResponse(success=True, message="Already rejected")
+    if learned.status == "approved":
+        return ConsoleLearningCandidateActionResponse(success=False, message="Already approved")
+
+    reject_learned_response(
+        db,
+        learned_response=learned,
+        actor_id=context.agent.id,
+    )
+    db.commit()
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=branch.id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="learning_candidate_rejected",
+        entity_type="learned_response",
+        entity_id=learned.id,
+        payload=None,
+    )
+
+    return ConsoleLearningCandidateActionResponse(success=True, message="Rejected")
 
 
 @router.get(

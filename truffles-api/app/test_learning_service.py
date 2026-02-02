@@ -3,7 +3,19 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+import app.services.learning_service as learning_service
 from app.services.learning_service import add_to_knowledge, get_client_slug, is_owner_response
+
+
+@pytest.fixture(autouse=True)
+def _allow_learning_policy(monkeypatch):
+    policy = Mock()
+    policy.consent_status = "granted"
+    policy.anonymization_mode = "redact"
+    policy.retention_days = 180
+    policy.allowed = True
+    monkeypatch.setattr(learning_service, "get_learning_policy", Mock(return_value=policy))
+    return policy
 
 
 class TestIsOwnerResponse:
