@@ -50,7 +50,7 @@ async function fetchSettings(): Promise<SettingsData> {
 }
 
 
-function ConfigCard({ label, value, type = "text" }: { label: string; value: string | number | boolean | null; type?: string }) {
+function ConfigCard({ label, value, type = "text" }: { label: string; value: string | number | boolean | null | undefined; type?: string }) {
     let displayValue: React.ReactNode = value;
 
     if (type === "boolean") {
