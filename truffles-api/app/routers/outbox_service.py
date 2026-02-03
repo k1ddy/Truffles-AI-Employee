@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.logging_config import get_logger
+from app.services.appointment_reminder_service import process_reminder_jobs
+from app.services.calendar_sync_service import schedule_inbound_syncs
 from app.services.outbox_service import (
     claim_pending_outbox_batches,
     release_stale_processing,
@@ -57,6 +59,7 @@ async def process_outbox(request: Request, db: Session = Depends(get_db)):
         max_attempts=max_attempts,
         retry_backoff_seconds=retry_backoff_seconds,
     )
+    inbound_results = schedule_inbound_syncs(db)
     rows = claim_pending_outbox_batches(
         db,
         limit=limit,
@@ -72,6 +75,11 @@ async def process_outbox(request: Request, db: Session = Depends(get_db)):
         max_attempts=max_attempts,
         retry_backoff_seconds=retry_backoff_seconds,
     )
+    reminder_results = process_reminder_jobs(db)
+    if inbound_results.get("scheduled") or inbound_results.get("errors"):
+        results["calendar_inbound"] = inbound_results
+    if reminder_results.get("total"):
+        results["reminder_jobs"] = reminder_results
     if released["released"] or released["failed"]:
         results["released_stale"] = released["released"]
         results["failed_stale"] = released["failed"]

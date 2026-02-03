@@ -1,9 +1,11 @@
 import asyncio
 import os
 import time
+from datetime import datetime, timedelta, timezone
 
 from app.database import SessionLocal
 from app.logging_config import get_logger, setup_logging
+from app.services.calendar_sync_service import schedule_inbound_syncs
 from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
 
 setup_logging()
@@ -94,6 +96,7 @@ async def run_worker():
     from app.routers.webhook import _process_outbox_rows
 
     logger.info("Starting Outbox Worker...")
+    next_inbound_schedule_at: datetime | None = None
     while True:
         try:
             (
@@ -121,7 +124,25 @@ async def run_worker():
                         "Outbox stale processing released",
                         extra={"context": {**released, "stale_seconds": stale_seconds}},
                     )
-                
+
+                now = datetime.now(timezone.utc)
+                if next_inbound_schedule_at is None or now >= next_inbound_schedule_at:
+                    try:
+                        inbound_results = schedule_inbound_syncs(db, now=now)
+                    except Exception as exc:
+                        inbound_results = {"interval_seconds": 60, "scheduled": 0, "errors": 1}
+                        logger.warning(
+                            "Inbound calendar sync scheduling failed",
+                            extra={"context": {"error": str(exc)[:200]}},
+                        )
+                    schedule_interval = inbound_results.get("interval_seconds") or 60
+                    next_inbound_schedule_at = now + timedelta(seconds=max(schedule_interval, 60))
+                    if inbound_results.get("scheduled") or inbound_results.get("errors"):
+                        logger.info(
+                            "Inbound calendar sync scheduled",
+                            extra={"context": inbound_results},
+                        )
+
                 # 2. Process pending messages
                 while True:
                     rows = claim_pending_outbox_batches(

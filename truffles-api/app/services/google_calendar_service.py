@@ -125,6 +125,7 @@ class GoogleCalendarService:
             return None
             
         from app.models.google_calendar_token import GoogleCalendarToken
+        from app.services.calendar_sync_service import ensure_calendar_connection
         
         parts = state.split(":")
         client_id = UUID(parts[0])
@@ -186,6 +187,14 @@ class GoogleCalendarService:
             )
             self.db.add(token)
         
+        if branch_id:
+            ensure_calendar_connection(
+                self.db,
+                client_id=client_id,
+                branch_id=branch_id,
+                provider="google_calendar",
+                calendar_id="primary",
+            )
         self.db.commit()
         return token
     
@@ -291,10 +300,11 @@ class GoogleCalendarService:
         calendar_id: str,
         client_id: UUID,
         branch_id: Optional[UUID],
-        booking: Any,
-        specialist_name: str
-    ) -> Optional[str]:
-        """Create a calendar event for a booking."""
+        appointment: Any,
+        specialist_name: Optional[str],
+        service_name: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Create a calendar event for an appointment."""
         if not self.available:
             return None
             
@@ -305,15 +315,20 @@ class GoogleCalendarService:
         try:
             service = build("calendar", "v3", credentials=credentials)
             
+            summary_service = service_name or getattr(appointment, "service_type", None) or "Запись"
+            summary_name = appointment.customer_name or "Клиент"
             event = {
-                "summary": f"{booking.service_type or 'Запись'} - {booking.customer_name or 'Клиент'}",
-                "description": f"Телефон: {booking.customer_phone or 'Не указан'}\n\nПримечания: {booking.notes or '-'}",
+                "summary": f"{summary_service} - {summary_name}",
+                "description": (
+                    f"Телефон: {appointment.customer_phone or 'Не указан'}\n\n"
+                    f"Примечания: {appointment.notes or '-'}"
+                ),
                 "start": {
-                    "dateTime": booking.start_at.isoformat(),
+                    "dateTime": appointment.start_at.isoformat(),
                     "timeZone": "Asia/Almaty"
                 },
                 "end": {
-                    "dateTime": booking.end_at.isoformat(),
+                    "dateTime": appointment.end_at.isoformat(),
                     "timeZone": "Asia/Almaty"
                 },
                 "reminders": {
@@ -327,11 +342,105 @@ class GoogleCalendarService:
             
             result = service.events().insert(calendarId=calendar_id, body=event).execute()
             logger.info(f"Created Google Calendar event: {result.get('id')}")
-            return result.get("id")
+            return {"id": result.get("id"), "etag": result.get("etag"), "raw": result}
             
         except Exception as e:
             logger.error(f"Failed to create calendar event: {e}")
             return None
+
+    def update_event(
+        self,
+        calendar_id: str,
+        client_id: UUID,
+        branch_id: Optional[UUID],
+        event_id: str,
+        appointment: Any,
+        specialist_name: Optional[str],
+        service_name: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Update a calendar event for an appointment."""
+        if not self.available:
+            return None
+
+        credentials = self.get_credentials(client_id, branch_id)
+        if not credentials:
+            return None
+
+        try:
+            service = build("calendar", "v3", credentials=credentials)
+            summary_service = service_name or getattr(appointment, "service_type", None) or "Запись"
+            summary_name = appointment.customer_name or "Клиент"
+            event = {
+                "summary": f"{summary_service} - {summary_name}",
+                "description": (
+                    f"Телефон: {appointment.customer_phone or 'Не указан'}\n\n"
+                    f"Примечания: {appointment.notes or '-'}"
+                ),
+                "start": {
+                    "dateTime": appointment.start_at.isoformat(),
+                    "timeZone": "Asia/Almaty",
+                },
+                "end": {
+                    "dateTime": appointment.end_at.isoformat(),
+                    "timeZone": "Asia/Almaty",
+                },
+            }
+            result = service.events().patch(calendarId=calendar_id, eventId=event_id, body=event).execute()
+            logger.info("Updated Google Calendar event: %s", result.get("id"))
+            return {"id": result.get("id"), "etag": result.get("etag"), "raw": result}
+        except Exception as e:
+            logger.error(f"Failed to update calendar event: {e}")
+            return None
+
+    def list_events(
+        self,
+        calendar_id: str,
+        client_id: UUID,
+        branch_id: Optional[UUID],
+        *,
+        sync_token: Optional[str] = None,
+        time_min: Optional[datetime] = None,
+        time_max: Optional[datetime] = None,
+    ) -> tuple[list[dict[str, Any]], Optional[str], Optional[str]]:
+        """List calendar events with optional sync token."""
+        if not self.available:
+            return [], None, "provider_unavailable"
+
+        credentials = self.get_credentials(client_id, branch_id)
+        if not credentials:
+            return [], None, "credentials_missing"
+
+        try:
+            service = build("calendar", "v3", credentials=credentials)
+            params: dict[str, Any] = {
+                "calendarId": calendar_id,
+                "singleEvents": True,
+                "showDeleted": True,
+                "maxResults": 2500,
+            }
+            if sync_token:
+                params["syncToken"] = sync_token
+            else:
+                if time_min:
+                    params["timeMin"] = time_min.isoformat()
+                if time_max:
+                    params["timeMax"] = time_max.isoformat()
+                params["orderBy"] = "startTime"
+
+            result = service.events().list(**params).execute()
+            events = result.get("items", []) if isinstance(result, dict) else []
+            next_token = result.get("nextSyncToken") if isinstance(result, dict) else None
+            return events, next_token, None
+        except HttpError as exc:
+            status_code = getattr(exc, "status_code", None)
+            if status_code is None and getattr(exc, "resp", None) is not None:
+                status_code = getattr(exc.resp, "status", None)
+            if status_code == 410:
+                return [], None, "sync_token_invalid"
+            return [], None, "provider_error"
+        except Exception as exc:
+            logger.error("Failed to list calendar events: %s", exc)
+            return [], None, "provider_error"
     
     def delete_event(
         self,

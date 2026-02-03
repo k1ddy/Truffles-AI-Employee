@@ -128,3 +128,4 @@
 | 2026-02-03-console-redeploy-verify-a5 | done | feat/2026-02-03-console-redeploy-verify-a5 | /home/zhan/worktrees/2026-02-03-console-redeploy-verify-a5 | docs/TASK_PACKAGES/TP-2026-02-03-console-redeploy-verify.md | 2026-02-03 |
 | 2026-02-03-console-settings-typefix-a5 | done | feat/2026-02-03-console-settings-typefix-a5 | /home/zhan/worktrees/2026-02-03-console-settings-typefix-a5 | docs/TASK_PACKAGES/TP-2026-02-03-console-settings-typefix.md | 2026-02-03 |
 | 2026-02-03-tp-booking-full-cycle-gcal-a1 | done | feat/2026-02-03-tp-booking-full-cycle-gcal-a1 | /home/zhan/worktrees/2026-02-03-tp-booking-full-cycle-gcal-a1 | docs/TASK_PACKAGES/TP-2026-02-03-booking-full-cycle-gcal.md | 2026-02-03 |
+| 2026-02-03-booking-full-cycle-gcal-a1 | active | feat/2026-02-03-booking-full-cycle-gcal-a1 | /home/zhan/worktrees/2026-02-03-booking-full-cycle-gcal-a1 | docs/TASK_PACKAGES/TP-2026-02-03-booking-full-cycle-gcal.md | 2026-02-03 |

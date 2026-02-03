@@ -17,12 +17,14 @@ from app.logging_config import get_logger
 from app.models.appointment_service import AppointmentService as AppointmentServiceModel
 from app.models.appointment_sync_state import AppointmentSyncState
 from app.models.specialist import Specialist
+from app.services.appointment_reminder_service import schedule_default_reminders
 from app.services.appointment_service import (
     AppointmentConflictError,
     AppointmentNotFoundError,
     SchedulingService,
     SpecialistNotFoundError,
 )
+from app.services.calendar_sync_service import enqueue_appointment_sync
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_errors import ConsoleAPIError
 from app.services.google_calendar_service import GoogleCalendarService
@@ -265,6 +267,21 @@ async def create_booking(
             created_by=context.agent.id,
             conversation_id=UUID(data.conversation_id) if data.conversation_id else None,
         )
+
+        if specialist.branch and isinstance(specialist.branch.booking_settings, dict):
+            availability_provider = specialist.branch.booking_settings.get("availability_provider")
+            if availability_provider == "google_calendar":
+                enqueue_appointment_sync(
+                    db,
+                    appointment=booking,
+                    action="create",
+                    commit=True,
+                )
+        schedule_default_reminders(
+            db,
+            appointment=booking,
+            commit=True,
+        )
         
         logger.info(
             f"Booking created: {booking.id}",
@@ -439,6 +456,16 @@ async def cancel_booking(
             )
             .scalar()
         )
+
+        if booking.branch and isinstance(booking.branch.booking_settings, dict):
+            availability_provider = booking.branch.booking_settings.get("availability_provider")
+            if availability_provider == "google_calendar":
+                enqueue_appointment_sync(
+                    db,
+                    appointment=booking,
+                    action="cancel",
+                    commit=True,
+                )
         
         return BookingActionResponse(
             success=True,

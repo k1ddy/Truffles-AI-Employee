@@ -2936,7 +2936,21 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration"}
 INFO_INTENTS = {"pricing", "hours", "duration", "location", "promotions"}
 LLM_PLAN_ALLOWED_OUTCOMES = {"fact", "collect", "handoff"}
-LLM_PLAN_ALLOWED_TOOL_ACTIONS = {"info", "consult", "booking", "handoff", "collect"}
+LLM_PLAN_ALLOWED_TOOL_ACTIONS = {
+    "info",
+    "consult",
+    "booking",
+    "handoff",
+    "collect",
+    "calendar.list_slots",
+    "calendar.book_slot",
+    "calendar.get_booking",
+    "calendar.reschedule",
+    "calendar.cancel",
+    "catalog.service_query",
+    "catalog.location",
+    "catalog.portfolio",
+}
 CONSULT_INTERRUPT_INTENTS = {"booking", "pricing", "duration", "location", "hours"}
 INFO_INTENT_PRIORITY_SERVICE = ("pricing", "duration", "location", "hours")
 INFO_INTENT_PRIORITY_GENERIC = ("location", "hours", "pricing", "duration")
@@ -3020,9 +3034,13 @@ def _plan_outcome_matches_action(outcome: str | None, tool_action: str | None) -
     if outcome == "handoff":
         return tool_action == "handoff"
     if outcome == "fact":
-        return tool_action in {"info", "consult"}
+        return tool_action in {"info", "consult"} or tool_action.startswith("calendar.") or tool_action.startswith(
+            "catalog."
+        )
     if outcome == "collect":
-        return tool_action in {"collect", "booking", "info"}
+        return tool_action in {"collect", "booking", "info"} or tool_action.startswith(
+            "calendar."
+        ) or tool_action.startswith("catalog.")
     return False
 
 
@@ -6973,6 +6991,65 @@ async def _handle_webhook_payload(
                         "service",
                         booking_service.strip(),
                         client_slug=payload.client_slug,
+                    )
+
+            from app.services.tool_registry_service import execute_tool_action, is_tool_action
+
+            if is_tool_action(plan_tool_action):
+                tool_result = execute_tool_action(
+                    db,
+                    tool_action=plan_tool_action,
+                    tool_args=plan_tool_args,
+                    conversation_id=conversation.id if conversation else None,
+                    branch_id=conversation.branch_id if conversation else None,
+                    client_slug=payload.client_slug,
+                    service_query=plan_service_query,
+                    now=now,
+                    user_name=getattr(user, "name", None) if user else None,
+                    user_phone=getattr(user, "phone", None) if user else None,
+                )
+                if tool_result.handled:
+                    if saved_message:
+                        tool_meta = {
+                            "tool_action": plan_tool_action,
+                            "tool_args": plan_tool_args,
+                        }
+                        tool_meta.update(tool_result.decision_meta)
+                        _update_message_decision_metadata(saved_message, tool_meta)
+                    trace_payload = dict(tool_result.trace)
+                    trace_payload.setdefault("tool_action", plan_tool_action)
+                    trace_payload.setdefault("tool_args", plan_tool_args)
+                    _record_decision_trace(conversation, trace_payload)
+                    if tool_result.expected_reply_type:
+                        context = _get_conversation_context(conversation)
+                        context = _set_expected_reply_context(
+                            conversation=conversation,
+                            saved_message=saved_message,
+                            context=context,
+                            expected_reply_type=tool_result.expected_reply_type,
+                            reason="llm_plan_tool",
+                            now=now,
+                        )
+                    bot_response = tool_result.response_text or MSG_FACT_GUARD_CLARIFY
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="reply",
+                        intent=plan_tool_action,
+                        source="tool_registry",
+                        fast_intent=False,
+                    )
+                    bot_response, sent = _send_and_save(bot_response)
+                    result_message = (
+                        "LLM plan tool response sent"
+                        if sent
+                        else "LLM plan tool response failed"
+                    )
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
                     )
 
             if plan_tool_action == "info":

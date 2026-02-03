@@ -1,0 +1,30 @@
+# SESSION 2026-02-03-booking-full-cycle-gcal-a1 — Booking full cycle + gcal
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-03-booking-full-cycle-gcal.md
+- branch: feat/2026-02-03-booking-full-cycle-gcal-a1
+- worktree: /home/zhan/worktrees/2026-02-03-booking-full-cycle-gcal-a1
+- base_ref: origin/main
+- scope: Calendar provider sync (outbox/inbound busy), tool registry (calendar/catalog), reminder jobs, tests/docs
+- done:
+  - Calendar sync service (outbound/inbound) + outbox handling + provider health gate.
+  - Inbound sync scheduling via outbox worker + /admin/outbox/process + /outbox/process.
+  - Tool registry actions for calendar/catalog and booking tool-first flow.
+  - Reminder jobs scheduling/cancel handling + outbox processing hook.
+  - Tests for calendar provider sync, reminder jobs, booking appointments, message endpoint (booking).
+  - Docs: CONSULTANT/ARCHITECTURE tool+reminder notes, STRUCTURE updates.
+  - Live-check CA10 outbox (minimum data safe-mode) with decision_meta/trace + outbox status.
+- next:
+  - Run CI; capture SQL evidence for sync states, calendar blocks, reminder jobs.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-03-booking-full-cycle-gcal.md
+  - /tmp/pytest_booking_appointments_20260203.txt
+  - /tmp/pytest_message_endpoint_booking_20260203.txt
+  - /tmp/pytest_calendar_provider_sync_20260203.txt
+  - /tmp/pytest_calendar_provider_sync_inbound_schedule_20260203.txt
+  - /tmp/pytest_outbox_service_app_20260203.txt
+  - /tmp/pytest_reminder_jobs_20260203.txt
+  - /tmp/livecheck_ca10_outbox_20260203.jsonl
+  - /tmp/livecheck_ca10_outbox_explain_20260203.txt
+- last_updated: 2026-02-03

@@ -149,6 +149,16 @@ _Примечание:_ текущая реализация fact resolver опи
 - Валидатор обязателен: pack_refs для FACT/CONSULT/INFO, валидные tool_args для инструментов; иначе → COLLECT/clarify.
 - **Tool‑first:** при валидном `tool_action` инструмент вызывается всегда; ответ формируется только из результата tool/pack.
 
+**Tool registry (calendar/catalog):**
+- `calendar.list_slots`: `date` или `start_at`, optional `duration_min/specialist_id`; при отсутствии даты → COLLECT и `expected_reply_type=time`.
+- `calendar.book_slot`: `start_at/end_at`, optional `specialist_id/service_query/customer_name/customer_phone`; при нездоровом провайдере → collect_preferences без обещания слота.
+- `calendar.get_booking`: `appointment_id` (optional, иначе по последней записи разговора).
+- `calendar.reschedule`: `appointment_id + start_at/end_at` → `RESCHEDULE_REQUESTED`, outbox‑sync, пересборка напоминаний.
+- `calendar.cancel`: `appointment_id + reason` → `CANCELLED`, outbox‑sync, отмена напоминаний.
+- `catalog.service_query`: `service_query` (или slot_state.service) → длительность/цена/мастера из БД.
+- `catalog.location`: адрес/гео из pack truth.
+- `catalog.portfolio`: ссылка/медиа из pack (например, Instagram или каталог).
+
 **Минимальный what‑if набор (P0, без сценарного кода):**
 - Подтверждение записи → только `calendar.get_booking`, без повторного `book_slot`.
 - Повторная “запишите” → `book_slot` с idempotency_key (без дублей).

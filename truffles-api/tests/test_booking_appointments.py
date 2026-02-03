@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
@@ -19,7 +19,8 @@ def _make_query(result):
     return query
 
 
-def test_create_booking_appointment_collect_preferences():
+def test_create_booking_appointment_collect_preferences(monkeypatch):
+    monkeypatch.setenv("TZ", "Asia/Almaty")
     now = datetime(2026, 1, 30, 9, 0, tzinfo=timezone.utc)
     branch_id = uuid4()
     client_id = uuid4()
@@ -62,7 +63,14 @@ def test_create_booking_appointment_collect_preferences():
 
     db.query.side_effect = _query
 
-    appointment = SimpleNamespace(id=uuid4(), status="PENDING_CONFIRMATION")
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        status="PENDING_CONFIRMATION",
+        client_id=client_id,
+        branch_id=branch_id,
+        start_at=now + timedelta(days=1),
+        end_at=now + timedelta(days=1, hours=1),
+    )
     with patch("app.routers.webhook.booking.SchedulingService") as scheduling_cls:
         scheduling_cls.return_value.create_appointment.return_value = appointment
 

@@ -69,6 +69,9 @@
 | `truffles-api/app/services/reasoning_core.py` | Unified Reasoning Core API (signals -> gates -> actions -> compose -> trace) | Backend/Architect |
 | `truffles-api/app/services/pack_compiler_service.py` | Pack compiler (compiled artifacts, hashing, schema validation) | Backend/Architect |
 | `truffles-api/app/services/learned_response_service.py` | Auto-ingest + approval wiring for learned responses | Backend |
+| `truffles-api/app/services/calendar_sync_service.py` | Calendar provider sync via outbox + cursors + busy blocks | Backend |
+| `truffles-api/app/services/tool_registry_service.py` | Tool registry executor (calendar/catalog) for LLM plan | Backend |
+| `truffles-api/app/services/appointment_reminder_service.py` | Appointment reminder/follow-up jobs + outbox enqueue | Backend |
 | `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |
 | `truffles-api/app/models/console_macro.py` | DB model for Inbox macros (Console) | Backend |
 | `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |

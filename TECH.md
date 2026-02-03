@@ -178,6 +178,11 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `BOOKING_CONFIRM_ENABLED` — включить LLM-first slot_extract + booking_confirm (default: false).
 - `BOOKING_CONFIRM_CONFIDENCE_THRESHOLD` — порог уверенности для подтверждения слота (default: 0.9).
 - `CALENDAR_TOKEN_ENC_KEY` — ключ pgcrypto для шифрования OAuth токенов календаря (обязателен после включения sync).
+- `CALENDAR_SYNC_INBOUND_ENABLED` — включает расписание inbound sync через outbox (default: true).
+- `CALENDAR_SYNC_INBOUND_INTERVAL_SECONDS` — минимальный интервал inbound sync на branch (default: max(60, `CALENDAR_SYNC_STALE_SECONDS`/2), либо 300 при `CALENDAR_SYNC_STALE_SECONDS=0`).
+- `CALENDAR_SYNC_STALE_SECONDS` — порог staleness для health gate (default: 900).
+- `CALENDAR_SYNC_LOOKBACK_DAYS` — глубина lookback для inbound sync (default: 14).
+- `CALENDAR_SYNC_LOOKAHEAD_DAYS` — глубина lookahead для inbound sync (default: 60).
 - `AUDIO_TRANSCRIPTION_ENABLED` — включить транскрибацию коротких голосовых (default: false).
 - `AUDIO_TRANSCRIPTION_MAX_MB` — максимум размера голосового для транскрипции (default: 2).
 - `AUDIO_TRANSCRIPTION_MODEL` — модель транскрипции (default: whisper-1).

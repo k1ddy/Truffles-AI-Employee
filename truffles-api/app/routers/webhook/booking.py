@@ -820,12 +820,14 @@ def _parse_booking_datetime(value: str | None, *, tz_name: str | None, now: date
     return parsed
 
 
-def _resolve_booking_settings(settings: dict | None) -> tuple[str, str, str]:
+def _resolve_booking_settings(settings: dict | None, *, provider_ready: bool | None = None) -> tuple[str, str, str]:
     raw = settings if isinstance(settings, dict) else {}
     booking_mode = raw.get("booking_mode", "collect_preferences")
     availability_provider = raw.get("availability_provider", "none")
     effective_mode = booking_mode
     if booking_mode == "confirm_slots" and availability_provider in {"none", "", None}:
+        effective_mode = "collect_preferences"
+    if booking_mode == "confirm_slots" and provider_ready is False:
         effective_mode = "collect_preferences"
     return booking_mode, availability_provider, effective_mode
 
@@ -873,7 +875,25 @@ def _create_booking_appointment(
         meta["appointment_reused"] = True
         return existing, meta
 
-    booking_mode, availability_provider, effective_mode = _resolve_booking_settings(branch.booking_settings)
+    provider_ready = None
+    if isinstance(branch.booking_settings, dict):
+        availability_provider = branch.booking_settings.get("availability_provider")
+        if availability_provider == "google_calendar":
+            from app.services.calendar_sync_service import get_provider_health
+
+            health = get_provider_health(
+                db,
+                client_id=conversation.client_id,
+                branch_id=branch_id,
+            )
+            provider_ready = health.ready
+            meta["provider_ready"] = health.ready
+            meta["provider_reason"] = health.reason
+
+    booking_mode, availability_provider, effective_mode = _resolve_booking_settings(
+        branch.booking_settings,
+        provider_ready=provider_ready,
+    )
     meta.update(
         {
             "booking_mode": booking_mode,
@@ -881,7 +901,7 @@ def _create_booking_appointment(
             "effective_booking_mode": effective_mode,
         }
     )
-    if effective_mode != "collect_preferences":
+    if effective_mode not in {"collect_preferences", "confirm_slots"}:
         meta["appointment_skip_reason"] = "booking_mode_not_supported"
         return None, meta
 
@@ -945,6 +965,13 @@ def _create_booking_appointment(
     if getattr(conversation, "id", None):
         correlation_id = str(conversation.id)
 
+    appointment_status = "PENDING_CONFIRMATION"
+    confirmation_policy = None
+    if isinstance(branch.booking_settings, dict):
+        confirmation_policy = branch.booking_settings.get("confirmation_policy")
+    if effective_mode == "confirm_slots" and confirmation_policy == "client":
+        appointment_status = "CONFIRMED"
+
     try:
         appointment = SchedulingService(db).create_appointment(
             client_id=conversation.client_id,
@@ -958,7 +985,7 @@ def _create_booking_appointment(
             notes=None,
             created_by=None,
             conversation_id=conversation.id,
-            status="PENDING_CONFIRMATION",
+            status=appointment_status,
             source="bot",
             confirmation_policy=None,
             audit={
@@ -978,6 +1005,23 @@ def _create_booking_appointment(
 
     meta["appointment_id"] = str(appointment.id)
     meta["appointment_status"] = appointment.status
+
+    if availability_provider == "google_calendar":
+        from app.services.calendar_sync_service import enqueue_appointment_sync
+
+        enqueued, enqueue_error = enqueue_appointment_sync(
+            db,
+            appointment=appointment,
+            action="create",
+            commit=False,
+        )
+        meta["calendar_sync_enqueued"] = bool(enqueued)
+        if enqueue_error:
+            meta["calendar_sync_error"] = enqueue_error
+    from app.services.appointment_reminder_service import schedule_default_reminders
+
+    reminders = schedule_default_reminders(db, appointment=appointment, commit=False)
+    meta["reminder_jobs_scheduled"] = len(reminders)
     return appointment, meta
 
 

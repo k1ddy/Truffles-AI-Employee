@@ -6,6 +6,8 @@ Purpose
 Interface
 - get_availability(request: AvailabilityRequest) -> Result[AvailabilityResult]
 - create_booking(request: BookingCreateRequest) -> Result[BookingCreateResult]
+- get_booking(request: BookingGetRequest) -> Result[BookingGetResult]
+- reschedule_booking(request: BookingRescheduleRequest) -> Result[BookingRescheduleResult]
 - cancel_booking(request: BookingCancelRequest) -> Result[BookingCancelResult]
 
 AvailabilityRequest
@@ -45,6 +47,28 @@ BookingCancelRequest
 
 BookingCancelResult
 - cancelled: boolean
+- raw: object
+
+BookingGetRequest
+- booking_id: string
+- metadata: object
+
+BookingGetResult
+- booking_id: string
+- status: string
+- start_at: date-time
+- end_at: date-time
+- raw: object
+
+BookingRescheduleRequest
+- booking_id: string
+- start_at: date-time
+- end_at: date-time
+- metadata: object
+
+BookingRescheduleResult
+- booking_id: string
+- status: string
 - raw: object
 
 Rules
