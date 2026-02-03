@@ -1,0 +1,117 @@
+# SESSION 2026-02-03-booking-confirm-full-verify-a6 — Session 2026-02-03-booking-confirm-full-verify-a6
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-03-booking-confirm-full-verify.md
+- branch: feat/2026-02-03-booking-confirm-full-verify-a6
+- worktree: /home/zhan/worktrees/2026-02-03-booking-confirm-full-verify-a6
+- base_ref: origin/main
+- scope: Booking confirmation verification + unblock minimum_data_contract + container ruff config + confirm_slots/provider readiness
+- done:
+  - Session created.
+  - Task Package drafted.
+  - Preflight: /admin/version + /admin/health + SQL (branches, calendar, cursors).
+  - Container tests run (custom compose to avoid port 8000 bind); pytest + compileall OK.
+  - Live-check attempted (CA05/CA05-commit/CA12/CA10) → blocked by minimum_data safe-mode/pending.
+  - SQL evidence + livecheck emit-evidence captured; STATE.md updated.
+  - Published updated demo_salon branch_b knowledge pack; minimum_data_contract ready.
+  - Docker image updated to include pyproject ruff config; ruff check passes.
+  - Re-ran CA05/CA05-commit/CA12 live-checks; booking commit + outbox evidence captured.
+  - Re-ran booking/calendar pytest + compileall in test image.
+  - Refreshed branch_b calendar sync cursor; provider health ready.
+  - Cancelled stale appointments to reuse allowlist JIDs.
+  - Re-ran CA05/CA12 live-checks with confirm_slots provider-ready; appointments CONFIRMED.
+  - Captured SQL/explain evidence for appointments, sync states, outbox (booking + calendar), calendar blocks.
+  - Added booking confirm runbook + verification script for quickstart.
+  - Added quickstart note to `AGENTS.md` for booking confirm verification.
+  - Outbox event errors no longer overwrite decision_meta/trace; CA05/CA12 re-verified after container rebuild.
+- next:
+  - Decide on follow-ups for outbox_payload_guard errors and calendar sync failures (real OAuth vs mock).
+  - Decide whether to force slot-confirmation prompt path (LLM low-confidence) for coverage.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-03-booking-confirm-full-verify.md
+  - docs/TASK_PACKAGES/TP-2026-02-03-booking-confirm-unblock.md
+  - docs/TASK_PACKAGES/TP-2026-02-03-booking-confirm-runbook.md
+  - docs/runbooks/BOOKING_CONFIRM_VERIFY.md
+  - scripts/booking_confirm_verify.sh
+  - docs/TASK_PACKAGES/TP-2026-02-03-outbox-calendar-sync-trace-guard.md
+  - /tmp/booking-confirm-20260203-121324
+  - /tmp/booking-confirm-20260203-121324/livecheck_ca05_booking_commit.jsonl
+  - /tmp/booking-confirm-20260203-121324/livecheck_ca12_booking_full.jsonl
+  - /tmp/booking-confirm-20260203-121324/sql_message_decision_meta_ca05_fix.txt
+  - /tmp/admin_version_20260203.txt
+  - /tmp/admin_health_20260203.json
+  - /tmp/admin_health_20260203b.json
+  - /tmp/sql_demo_salon_client_20260203.txt
+  - /tmp/sql_demo_salon_branches_20260203.txt
+  - /tmp/sql_demo_salon_branches_order_20260203.txt
+  - /tmp/sql_demo_salon_calendar_connections_20260203.txt
+  - /tmp/sql_demo_salon_calendar_tokens_20260203.txt
+  - /tmp/sql_demo_salon_calendar_cursors_20260203.txt
+  - /tmp/sql_branch_b_knowledge_versions_20260203.txt
+  - /tmp/sql_branch_b_booking_settings_20260203b.txt
+  - /tmp/pytest_booking_appointments_20260203.txt
+  - /tmp/pytest_webhook_booking_20260203.txt
+  - /tmp/pytest_calendar_provider_sync_20260203.txt
+  - /tmp/pytest_message_endpoint_booking_20260203.txt
+  - /tmp/compileall_services_routers_20260203.txt
+  - /tmp/ruff_check_app_tests_20260203.txt
+  - /tmp/pytest_booking_appointments_20260203b.txt
+  - /tmp/pytest_calendar_provider_sync_20260203b.txt
+  - /tmp/compileall_services_routers_20260203b.txt
+  - /tmp/ruff_check_app_tests_20260203b.txt
+  - /tmp/livecheck_ca05_booking_20260203.jsonl
+  - /tmp/livecheck_ca05_booking_commit_20260203.jsonl
+  - /tmp/livecheck_ca12_booking_full_20260203.jsonl
+  - /tmp/livecheck_ca10_outbox_20260203.jsonl
+  - /tmp/livecheck_ca05_booking_evidence_20260203.md
+  - /tmp/livecheck_ca05_booking_commit_evidence_20260203.md
+  - /tmp/livecheck_ca12_booking_full_evidence_20260203.md
+  - /tmp/livecheck_ca10_outbox_evidence_20260203.md
+  - /tmp/livecheck_ca05_booking_20260203b.jsonl
+  - /tmp/livecheck_ca05_booking_commit_20260203b.jsonl
+  - /tmp/livecheck_ca12_booking_full_20260203b.jsonl
+  - /tmp/livecheck_ca05_booking_evidence_20260203b.md
+  - /tmp/livecheck_ca05_booking_commit_evidence_20260203b.md
+  - /tmp/livecheck_ca12_booking_full_evidence_20260203b.md
+  - /tmp/sql_livecheck_messages_meta_20260203.txt
+  - /tmp/sql_livecheck_conversations_context_20260203.txt
+  - /tmp/sql_livecheck_outbox_20260203.txt
+  - /tmp/sql_livecheck_appointments_20260203.txt
+  - /tmp/sql_livecheck_appointment_sync_states_20260203.txt
+  - /tmp/sql_livecheck_messages_meta_20260203b.txt
+  - /tmp/sql_livecheck_outbox_20260203b.txt
+  - /tmp/sql_livecheck_appointments_20260203b.txt
+  - /tmp/sql_livecheck_appointment_sync_states_20260203b.txt
+  - /tmp/sql_livecheck_calendar_blocks_20260203b.txt
+  - /tmp/sql_livecheck_appointment_audit_20260203b.txt
+  - /tmp/admin_health_20260203e.json
+  - /tmp/provider_health_branch_b_20260203e.txt
+  - /tmp/provider_health_branch_b_20260203g.txt
+  - /tmp/sql_branch_b_instance_id_20260203e.txt
+  - /tmp/sql_branch_b_calendar_connections_20260203f.txt
+  - /tmp/sql_branch_b_calendar_tokens_20260203f.txt
+  - /tmp/sql_branch_b_calendar_cursors_20260203f.txt
+  - /tmp/sql_branch_b_calendar_cursor_refresh_20260203g.txt
+  - /tmp/sql_branch_b_timezone_20260203g.txt
+  - /tmp/appointments_cancelled_20260203g.txt
+  - /tmp/livecheck_ca05_booking_commit_20260203e.jsonl
+  - /tmp/livecheck_ca12_booking_full_20260203e.jsonl
+  - /tmp/livecheck_ca05_booking_commit_20260203f.jsonl
+  - /tmp/livecheck_ca12_booking_full_20260203f.jsonl
+  - /tmp/livecheck_ca05_booking_commit_20260203g.jsonl
+  - /tmp/livecheck_ca12_booking_full_20260203g.jsonl
+  - /tmp/explain_ca05_booking_commit_20260203e.txt
+  - /tmp/explain_ca12_booking_full_20260203e.txt
+  - /tmp/explain_ca05_booking_commit_20260203g.txt
+  - /tmp/explain_ca12_booking_full_20260203g.txt
+  - /tmp/sql_livecheck_appointments_20260203g.txt
+  - /tmp/sql_livecheck_appointment_audit_20260203f.txt
+  - /tmp/sql_livecheck_appointment_audit_20260203g.txt
+  - /tmp/sql_livecheck_appointment_sync_states_20260203g.txt
+  - /tmp/sql_livecheck_outbox_booking_send_20260203g.txt
+  - /tmp/sql_livecheck_outbox_calendar_sync_20260203g.txt
+  - /tmp/sql_livecheck_outbox_idempotency_20260203g.txt
+  - /tmp/sql_livecheck_calendar_blocks_20260203g.txt
+  - /tmp/sql_message_decision_meta_ca05_20260203g.txt
+- last_updated: 2026-02-03

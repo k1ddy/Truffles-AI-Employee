@@ -538,16 +538,18 @@ async def _process_outbox_rows(
         outbox_id: str,
         reason: str,
         stage: str = "outbox_payload_guard",
+        record_trace: bool = True,
+        record_message: bool = True,
     ) -> None:
         info = pick_info.get(outbox_id, {})
         conversation = None
-        if info.get("conversation_id"):
+        if record_trace and info.get("conversation_id"):
             conversation = (
                 db.query(Conversation)
                 .filter(Conversation.id == info.get("conversation_id"))
                 .first()
             )
-        if conversation:
+        if record_trace and conversation:
             _record_decision_trace(
                 conversation,
                 {
@@ -557,8 +559,8 @@ async def _process_outbox_rows(
                     "state": conversation.state,
                 },
             )
-        message = _resolve_outbox_message(outbox_id)
-        if message:
+        message = _resolve_outbox_message(outbox_id) if record_message else None
+        if record_message and message:
             _record_message_decision_meta(
                 message,
                 action="error",
@@ -865,7 +867,10 @@ async def _process_outbox_rows(
                             "unsupported_action",
                         }:
                             _record_outbox_payload_error(
-                                outbox_id=outbox_id_str, reason=f"event:{error}"
+                                outbox_id=outbox_id_str,
+                                reason=f"event:{error}",
+                                record_trace=False,
+                                record_message=False,
                             )
                             mark_outbox_status(
                                 db,
@@ -887,7 +892,12 @@ async def _process_outbox_rows(
                     results["sent"] += 1
                     return
                 if event_type not in {"whatsapp.send_text", "whatsapp.send_media"}:
-                    _record_outbox_payload_error(outbox_id=outbox_id_str, reason=f"event:{event_type}")
+                    _record_outbox_payload_error(
+                        outbox_id=outbox_id_str,
+                        reason=f"event:{event_type}",
+                        record_trace=False,
+                        record_message=False,
+                    )
                     mark_outbox_status(
                         db,
                         outbox_id=outbox_id,
