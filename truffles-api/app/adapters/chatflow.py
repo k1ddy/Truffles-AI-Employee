@@ -29,7 +29,9 @@ class ChatFlowAdapter(MessagingPort):
             instance_id=instance_id,
             remote_jid=to,
             message=text,
-            idempotency_key=options.idempotency_key
+            idempotency_key=options.idempotency_key,
+            notify_on_failure=False,
+            record_metrics=False,
         )
 
         if result.is_ok():
@@ -66,7 +68,9 @@ class ChatFlowAdapter(MessagingPort):
             remote_jid=to,
             media_type=media_type,
             media_url=media_url,
-            caption=options.caption
+            caption=options.caption,
+            notify_on_failure=False,
+            record_metrics=False,
         )
 
         if success:

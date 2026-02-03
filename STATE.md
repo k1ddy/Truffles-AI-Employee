@@ -7,6 +7,7 @@
 ## СЕССИОННЫЙ СНИМОК (читать первым)
 
 **NOW (1 экран)**
+- DONE: Delivery failure fallback + Telegram alerts; handovers.trigger_type constraint expanded to runtime values — evidence: `truffles-api/migrations/019_add_handover_trigger_types.sql`, `/tmp/handovers_trigger_type_migration_20260202.txt`, `/tmp/pytest_reasoning_core_delivery_failure_20260202.txt`, `/tmp/pytest_branch_routing_media_only_20260202.txt`.
 - DONE: DEC-019 Pack-Compiler + Policy/Signal DSL + auto-ingest (draft) — evidence: `docs/IMPERIUM_DECISIONS.yaml`.
 - DONE: DEC-020 Hybrid LLM‑plan (plan → validate → tool → compose; tool‑first; pack‑only; lexicons fallback) — evidence: `docs/IMPERIUM_DECISIONS.yaml`, `STRATEGY/VISION.md`, `STRATEGY/REQUIREMENTS.md`, `STRATEGY/TECH_ROADMAP.md`, `SPECS/ARCHITECTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/SYSTEM_REFERENCE.md`, `SPECS/ESCALATION.md`, `docs/TASK_PACKAGES/TP-2026-02-02-hybrid-llm-plan-dec.md`.
 - DONE: Hybrid LLM‑plan implementation (router plan JSON + validator + tool‑first) — evidence: `contracts/llm/llm_plan_output.v1.jsonschema`, `prompts/llm_plan.md`, `truffles-api/app/schemas/intent.py`, `truffles-api/app/services/intent_service.py`, `truffles-api/app/routers/webhook/decision.py`, `truffles-api/tests/test_message_endpoint.py`, `truffles-api/tests/test_booking_appointments.py`, `/tmp/pytest_message_endpoint_hybrid_llm_plan.txt`, `/tmp/pytest_golden_eval_hybrid_llm_plan.txt`, `/tmp/chaos_hybrid_llm_plan` (summary/report/failures).

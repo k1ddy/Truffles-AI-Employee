@@ -12,7 +12,12 @@ from sqlalchemy.orm import Session
 
 from app.adapters.chatflow import ChatFlowAdapter
 from app.adapters.provider_gateway import ProviderGatewayAdapter
-from app.logging_config import get_logger, record_outbox_latency, start_span
+from app.logging_config import (
+    get_logger,
+    record_delivery_failure,
+    record_outbox_latency,
+    start_span,
+)
 from app.models import Conversation, OutboxMessage, User
 from app.ports.messaging import MessageOptions
 from app.routers.webhook.media import (
@@ -35,6 +40,7 @@ from app.services.outbox_service import (
     enqueue_outbox_message,
     mark_outbox_status,
 )
+from app.services.alert_service import alert_error
 from app.services.state_machine import ConversationState
 from app.services.state_service import is_simulation_context
 from app.services.telegram_service import TelegramService
@@ -603,6 +609,40 @@ async def _process_outbox_rows(
                 },
             )
 
+    def _notify_outbox_failure(
+        *,
+        outbox_id: str,
+        reason: str,
+        error: str | None = None,
+        provider: str | None = None,
+        attempts: int | None = None,
+    ) -> None:
+        info = pick_info.get(outbox_id, {})
+        if info.get("simulation_mode"):
+            return
+        client_slug = info.get("client_slug")
+        record_delivery_failure(
+            client_slug,
+            source="outbox",
+            provider=provider or "internal",
+            reason=reason,
+        )
+        alert_error(
+            "Outbox delivery failed",
+            {
+                "outbox_id": outbox_id,
+                "client_slug": client_slug,
+                "conversation_id": str(info.get("conversation_id"))
+                if info.get("conversation_id")
+                else None,
+                "inbound_message_id": info.get("inbound_message_id"),
+                "provider": provider or "internal",
+                "reason": reason,
+                "error": error,
+                "attempts": attempts,
+            },
+        )
+
     def _persist_outbox_timing(
         *,
         outbox_id: str,
@@ -798,6 +838,13 @@ async def _process_outbox_rows(
                         last_error=f"invalid_payload:unsupported_event:{event_type}"[:500],
                         next_attempt_at=None,
                     )
+                    _notify_outbox_failure(
+                        outbox_id=outbox_id_str,
+                        reason="invalid_payload",
+                        error=f"event:{event_type}",
+                        provider="internal",
+                        attempts=int(row.get("attempts") or 0),
+                    )
                     results["failed"] += 1
                     return
                 payload = payload_json.get("payload") or {}
@@ -812,6 +859,13 @@ async def _process_outbox_rows(
                         status="FAILED",
                         last_error="invalid_payload:missing_fields",
                         next_attempt_at=None,
+                    )
+                    _notify_outbox_failure(
+                        outbox_id=outbox_id_str,
+                        reason="invalid_payload",
+                        error="event:missing_fields",
+                        provider="internal",
+                        attempts=int(row.get("attempts") or 0),
                     )
                     results["failed"] += 1
                     return
@@ -855,6 +909,13 @@ async def _process_outbox_rows(
                             last_error="invalid_payload:missing_text",
                             next_attempt_at=None,
                         )
+                        _notify_outbox_failure(
+                            outbox_id=outbox_id_str,
+                            reason="invalid_payload",
+                            error="event:missing_text",
+                            provider=provider_name,
+                            attempts=int(row.get("attempts") or 0),
+                        )
                         results["failed"] += 1
                         return
                     with start_span("outbox.send", context=span_context) as span:
@@ -872,6 +933,13 @@ async def _process_outbox_rows(
                             status="FAILED",
                             last_error="invalid_payload:missing_media",
                             next_attempt_at=None,
+                        )
+                        _notify_outbox_failure(
+                            outbox_id=outbox_id_str,
+                            reason="invalid_payload",
+                            error="event:missing_media",
+                            provider=provider_name,
+                            attempts=int(row.get("attempts") or 0),
                         )
                         results["failed"] += 1
                         return
@@ -908,6 +976,13 @@ async def _process_outbox_rows(
                         status="FAILED",
                         last_error=f"invalid_payload:{payload_error}"[:500],
                         next_attempt_at=None,
+                    )
+                    _notify_outbox_failure(
+                        outbox_id=outbox_id_str,
+                        reason="invalid_payload",
+                        error=payload_error,
+                        provider="internal",
+                        attempts=int(row.get("attempts") or 0),
                     )
                     results["failed"] += 1
                     return
@@ -1008,6 +1083,14 @@ async def _process_outbox_rows(
                     last_error=str(exc)[:500],
                     next_attempt_at=None,
                 )
+                provider_name = payload_json.get("provider") or "chatflow"
+                _notify_outbox_failure(
+                    outbox_id=outbox_id_str,
+                    reason="max_attempts",
+                    error=str(exc),
+                    provider=provider_name,
+                    attempts=attempts,
+                )
                 results["failed"] += 1
                 return
             backoff = retry_backoff_seconds * (2 ** max(attempts - 1, 0))
@@ -1087,6 +1170,13 @@ async def _process_outbox_rows(
                             status="FAILED",
                             last_error=f"invalid_payload:{payload_error}"[:500],
                             next_attempt_at=None,
+                        )
+                        _notify_outbox_failure(
+                            outbox_id=outbox_id_str,
+                            reason="invalid_payload",
+                            error=payload_error,
+                            provider="internal",
+                            attempts=int(row.get("attempts") or 0),
                         )
                         results["failed"] += 1
                     invalid_count += 1
@@ -1236,6 +1326,13 @@ async def _process_outbox_rows(
                             status="FAILED",
                             last_error=str(exc)[:500],
                             next_attempt_at=None,
+                        )
+                        _notify_outbox_failure(
+                            outbox_id=str(outbox_id),
+                            reason="max_attempts",
+                            error=str(exc),
+                            provider="internal",
+                            attempts=attempts,
                         )
                         results["failed"] += 1
                         continue

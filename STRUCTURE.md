@@ -83,6 +83,7 @@
 | `truffles-api/migrations/016_add_console_confirmations.sql` | Migration: console_confirmations (destructive safeguards) | Backend/OPS |
 | `truffles-api/migrations/017_add_console_macros.sql` | Migration: console_macros (Inbox быстрые ответы) | Backend/OPS |
 | `truffles-api/migrations/018_add_learning_consent_pack_candidates.sql` | Migration: learning consent + anonymization/retention + pack candidates | Backend/OPS |
+| `truffles-api/migrations/019_add_handover_trigger_types.sql` | Migration: expand handovers.trigger_type allowed values | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
