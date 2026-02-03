@@ -95,6 +95,8 @@ export default function SettingsPage() {
     const role = meData?.agent?.role ?? "manager";
     const canReadSettings = canAccessConsole(role, "settings", "read");
     const canWriteSettings = canAccessConsole(role, "settings", "write");
+    const canReadProvisioning = canAccessConsole(role, "provisioning", "read");
+    const canViewSettings = canReadSettings || canReadProvisioning;
 
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["settings"],
@@ -164,7 +166,7 @@ export default function SettingsPage() {
         );
     }
 
-    if (!canReadSettings) {
+    if (!canViewSettings) {
         return (
             <AccessDenied message="Эта роль не имеет доступа к настройкам." />
         );
@@ -205,6 +207,7 @@ export default function SettingsPage() {
     }
 
     const config = data?.bot_config;
+    const provisioningAccessSection = canReadSettings ? "settings" : "provisioning";
 
     return (
         <div className="max-w-5xl mx-auto p-6" data-testid="settings-page">
@@ -219,203 +222,207 @@ export default function SettingsPage() {
                 <span className="font-mono">{buildTimeLabel}</span>
             </div>
 
-            <ProvisioningWizard session={session} />
+            {canReadProvisioning && (
+                <ProvisioningWizard session={session} accessSection={provisioningAccessSection} />
+            )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* SLA & Reminders */}
-                <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-sla">
-                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        ⏱️ SLA и напоминания
-                    </h2>
-                    {config ? (
-                        <div>
-                            <ConfigCard label="Первое напоминание" value={config.reminder_timeout_1} type="minutes" />
-                            <ConfigCard label="Второе напоминание" value={config.reminder_timeout_2} type="minutes" />
-                            <ConfigCard label="Авто-закрытие" value={config.auto_close_timeout} type="minutes" />
-                            <ConfigCard label="Напоминания включены" value={config.enable_reminders} type="boolean" />
-                            <ConfigCard label="Эскалация на владельца" value={config.enable_owner_escalation} type="boolean" />
-                        </div>
-                    ) : (
-                        <p className="text-muted-foreground text-center py-4">Нет данных</p>
-                    )}
-                </div>
-
-                {/* Quiet Hours */}
-                <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-quiet-hours">
-                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        🌙 Тихие часы
-                    </h2>
-                    {config ? (
-                        <div>
-                            <ConfigCard label="Тихие часы" value={config.quiet_hours_enabled} type="boolean" />
-                            <ConfigCard label="Начало" value={config.quiet_hours_start} />
-                            <ConfigCard label="Конец" value={config.quiet_hours_end} />
-                        </div>
-                    ) : (
-                        <p className="text-muted-foreground text-center py-4">Нет данных</p>
-                    )}
-                </div>
-
-                {/* Bot Behavior */}
-                <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-bot">
-                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        🤖 Поведение бота
-                    </h2>
-                    {config ? (
-                        <div>
-                            <ConfigCard label="Тон общения" value={config.tone} />
-                            <ConfigCard label="Авто-обучение" value={config.autolearn_enabled} type="boolean" />
-                            <ConfigCard label="Бронирование" value={config.booking_enabled} type="boolean" />
-                        </div>
-                    ) : (
-                        <p className="text-muted-foreground text-center py-4">Нет данных</p>
-                    )}
-                </div>
-
-                {/* Learning & Data */}
-                <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-learning">
-                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        🧠 Обучение и данные
-                    </h2>
-                    {config ? (
-                        <div>
-                            <ConfigCard label="Consent статус" value={config.learning_consent_status} />
-                            <ConfigCard label="Анонимизация" value={config.learning_anonymization_mode} />
-                            <ConfigCard label="Retention (дней)" value={config.learning_retention_days} />
-                            <ConfigCard label="Data sharing" value={config.data_sharing} />
-                        </div>
-                    ) : (
-                        <p className="text-muted-foreground text-center py-4">Нет данных</p>
-                    )}
-                </div>
-
-                {/* Telegram Connector */}
-                <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-telegram-connector">
-                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        📨 Telegram коннектор
-                    </h2>
-                    <p className="text-sm text-muted-foreground mb-3">
-                        Проверка и тест отправки в Telegram (client scope, owner/admin/platform admin).
-                    </p>
-                    <div className="flex items-center gap-2">
-                        <button
-                            type="button"
-                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                            onClick={() =>
-                                verifyMutation.mutate({
-                                    targetKey: "client",
-                                    label: "client",
-                                    payload: { scope: "client" },
-                                })
-                            }
-                            disabled={verifyTarget === "client" || !canWriteSettings}
-                            data-testid="settings-telegram-verify"
-                        >
-                            {verifyTarget === "client" ? "Отправка..." : "Verify"}
-                        </button>
-                        <button
-                            type="button"
-                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                            onClick={() =>
-                                testMutation.mutate({
-                                    targetKey: "client",
-                                    label: "client",
-                                    payload: { scope: "client" },
-                                })
-                            }
-                            disabled={testTarget === "client" || !canWriteSettings}
-                            data-testid="settings-telegram-test"
-                        >
-                            {testTarget === "client" ? "Отправка..." : "Send test"}
-                        </button>
-                        {!canWriteSettings && (
-                            <span className="text-xs text-muted-foreground">Только owner/admin/platform admin</span>
-                        )}
-                    </div>
-                </div>
-
-                {/* Branches (TG-02) */}
-                <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-branches">
-                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        🏢 Филиалы
-                    </h2>
-                    <div className="space-y-2">
-                        {data?.branches.map((branch) => (
-                            <div
-                                key={branch.id}
-                                className="flex items-center justify-between p-3 bg-muted rounded"
-                                data-testid="settings-branch-row"
-                            >
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-medium">{branch.name}</span>
-                                        <span className="text-sm text-muted-foreground">({branch.slug})</span>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground mt-1">
-                                        instance_id: {branch.instance_id || "—"}
-                                    </div>
-                                    {/* Telegram status */}
-                                    <div className="flex items-center gap-1 mt-1">
-                                        {branch.telegram_chat_id ? (
-                                            <>
-                                                <span className="text-primary text-xs">📨</span>
-                                                <span className="text-xs text-muted-foreground font-mono">
-                                                    {branch.telegram_chat_id.slice(0, 15)}...
-                                                </span>
-                                            </>
-                                        ) : (
-                                            <span className="text-xs text-muted-foreground">Telegram не настроен</span>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span
-                                        className={`px-2 py-0.5 rounded text-xs ${branch.is_active
-                                            ? "bg-green-100 text-green-800"
-                                            : "bg-muted text-muted-foreground"
-                                            }`}
-                                    >
-                                        {branch.is_active ? "Активен" : "Неактивен"}
-                                    </span>
-                                    <button
-                                        type="button"
-                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                        onClick={() =>
-                                            verifyMutation.mutate({
-                                                targetKey: branch.id,
-                                                label: branch.name,
-                                                payload: { scope: "branch", branch_id: branch.id },
-                                            })
-                                        }
-                                        disabled={!branch.telegram_chat_id || verifyTarget === branch.id || !canWriteSettings}
-                                        data-testid="settings-branch-verify"
-                                    >
-                                        {verifyTarget === branch.id ? "Отправка..." : "Verify"}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                        onClick={() =>
-                                            testMutation.mutate({
-                                                targetKey: branch.id,
-                                                label: branch.name,
-                                                payload: { scope: "branch", branch_id: branch.id },
-                                            })
-                                        }
-                                        disabled={!branch.telegram_chat_id || testTarget === branch.id || !canWriteSettings}
-                                        data-testid="settings-branch-test"
-                                    >
-                                        {testTarget === branch.id ? "Отправка..." : "Send test"}
-                                    </button>
-                                </div>
+            {canReadSettings && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* SLA & Reminders */}
+                    <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-sla">
+                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                            ⏱️ SLA и напоминания
+                        </h2>
+                        {config ? (
+                            <div>
+                                <ConfigCard label="Первое напоминание" value={config.reminder_timeout_1} type="minutes" />
+                                <ConfigCard label="Второе напоминание" value={config.reminder_timeout_2} type="minutes" />
+                                <ConfigCard label="Авто-закрытие" value={config.auto_close_timeout} type="minutes" />
+                                <ConfigCard label="Напоминания включены" value={config.enable_reminders} type="boolean" />
+                                <ConfigCard label="Эскалация на владельца" value={config.enable_owner_escalation} type="boolean" />
                             </div>
-                        ))}
-                        {data?.branches.length === 0 && (
-                            <p className="text-muted-foreground text-center py-2" data-testid="settings-branches-empty">Нет филиалов</p>
+                        ) : (
+                            <p className="text-muted-foreground text-center py-4">Нет данных</p>
                         )}
                     </div>
+
+                    {/* Quiet Hours */}
+                    <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-quiet-hours">
+                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                            🌙 Тихие часы
+                        </h2>
+                        {config ? (
+                            <div>
+                                <ConfigCard label="Тихие часы" value={config.quiet_hours_enabled} type="boolean" />
+                                <ConfigCard label="Начало" value={config.quiet_hours_start} />
+                                <ConfigCard label="Конец" value={config.quiet_hours_end} />
+                            </div>
+                        ) : (
+                            <p className="text-muted-foreground text-center py-4">Нет данных</p>
+                        )}
+                    </div>
+
+                    {/* Bot Behavior */}
+                    <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-bot">
+                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                            🤖 Поведение бота
+                        </h2>
+                        {config ? (
+                            <div>
+                                <ConfigCard label="Тон общения" value={config.tone} />
+                                <ConfigCard label="Авто-обучение" value={config.autolearn_enabled} type="boolean" />
+                                <ConfigCard label="Бронирование" value={config.booking_enabled} type="boolean" />
+                            </div>
+                        ) : (
+                            <p className="text-muted-foreground text-center py-4">Нет данных</p>
+                        )}
+                    </div>
+
+                    {/* Learning & Data */}
+                    <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-learning">
+                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                            🧠 Обучение и данные
+                        </h2>
+                        {config ? (
+                            <div>
+                                <ConfigCard label="Consent статус" value={config.learning_consent_status} />
+                                <ConfigCard label="Анонимизация" value={config.learning_anonymization_mode} />
+                                <ConfigCard label="Retention (дней)" value={config.learning_retention_days} />
+                                <ConfigCard label="Data sharing" value={config.data_sharing} />
+                            </div>
+                        ) : (
+                            <p className="text-muted-foreground text-center py-4">Нет данных</p>
+                        )}
+                    </div>
+
+                    {/* Telegram Connector */}
+                    <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-telegram-connector">
+                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                            📨 Telegram коннектор
+                        </h2>
+                        <p className="text-sm text-muted-foreground mb-3">
+                            Проверка и тест отправки в Telegram (client scope, owner/admin/platform admin).
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                onClick={() =>
+                                    verifyMutation.mutate({
+                                        targetKey: "client",
+                                        label: "client",
+                                        payload: { scope: "client" },
+                                    })
+                                }
+                                disabled={verifyTarget === "client" || !canWriteSettings}
+                                data-testid="settings-telegram-verify"
+                            >
+                                {verifyTarget === "client" ? "Отправка..." : "Verify"}
+                            </button>
+                            <button
+                                type="button"
+                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                onClick={() =>
+                                    testMutation.mutate({
+                                        targetKey: "client",
+                                        label: "client",
+                                        payload: { scope: "client" },
+                                    })
+                                }
+                                disabled={testTarget === "client" || !canWriteSettings}
+                                data-testid="settings-telegram-test"
+                            >
+                                {testTarget === "client" ? "Отправка..." : "Send test"}
+                            </button>
+                            {!canWriteSettings && (
+                                <span className="text-xs text-muted-foreground">Только owner/admin/platform admin</span>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Branches (TG-02) */}
+                    <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-branches">
+                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                            🏢 Филиалы
+                        </h2>
+                        <div className="space-y-2">
+                            {data?.branches.map((branch) => (
+                                <div
+                                    key={branch.id}
+                                    className="flex items-center justify-between p-3 bg-muted rounded"
+                                    data-testid="settings-branch-row"
+                                >
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-medium">{branch.name}</span>
+                                            <span className="text-sm text-muted-foreground">({branch.slug})</span>
+                                        </div>
+                                        <div className="text-xs text-muted-foreground mt-1">
+                                            instance_id: {branch.instance_id || "—"}
+                                        </div>
+                                        {/* Telegram status */}
+                                        <div className="flex items-center gap-1 mt-1">
+                                            {branch.telegram_chat_id ? (
+                                                <>
+                                                    <span className="text-primary text-xs">📨</span>
+                                                    <span className="text-xs text-muted-foreground font-mono">
+                                                        {branch.telegram_chat_id.slice(0, 15)}...
+                                                    </span>
+                                                </>
+                                            ) : (
+                                                <span className="text-xs text-muted-foreground">Telegram не настроен</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span
+                                            className={`px-2 py-0.5 rounded text-xs ${branch.is_active
+                                                ? "bg-green-100 text-green-800"
+                                                : "bg-muted text-muted-foreground"
+                                                }`}
+                                        >
+                                            {branch.is_active ? "Активен" : "Неактивен"}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onClick={() =>
+                                                verifyMutation.mutate({
+                                                    targetKey: branch.id,
+                                                    label: branch.name,
+                                                    payload: { scope: "branch", branch_id: branch.id },
+                                                })
+                                            }
+                                            disabled={!branch.telegram_chat_id || verifyTarget === branch.id || !canWriteSettings}
+                                            data-testid="settings-branch-verify"
+                                        >
+                                            {verifyTarget === branch.id ? "Отправка..." : "Verify"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onClick={() =>
+                                                testMutation.mutate({
+                                                    targetKey: branch.id,
+                                                    label: branch.name,
+                                                    payload: { scope: "branch", branch_id: branch.id },
+                                                })
+                                            }
+                                            disabled={!branch.telegram_chat_id || testTarget === branch.id || !canWriteSettings}
+                                            data-testid="settings-branch-test"
+                                        >
+                                            {testTarget === branch.id ? "Отправка..." : "Send test"}
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                            {data?.branches.length === 0 && (
+                                <p className="text-muted-foreground text-center py-2" data-testid="settings-branches-empty">Нет филиалов</p>
+                            )}
+                        </div>
+                    </div>
                 </div>
-            </div>
+            )}
 
             <div className="card-surface p-5 mt-6" data-testid="settings-team-link">
                 <div className="flex flex-wrap items-center justify-between gap-4">

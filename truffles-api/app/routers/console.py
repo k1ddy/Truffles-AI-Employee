@@ -4735,8 +4735,8 @@ async def create_agent(
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
 
-    if body.role == "manager" and not body.branch_id:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id required for manager role")
+    if body.role in {"manager", "specialist"} and not body.branch_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id required for manager/specialist role")
     if body.role == "platform_admin" and context.role != "platform_admin":
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Only platform admin can assign platform_admin role")
 

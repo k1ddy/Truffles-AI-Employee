@@ -1,0 +1,22 @@
+# SESSION 2026-02-03-console-rbac-ia-a6 — Session 2026-02-03-console-rbac-ia-a6
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-03-console-rbac-ia.md
+- branch: feat/2026-02-03-console-rbac-ia-a6
+- worktree: /home/zhan/worktrees/2026-02-03-console-rbac-ia-a6
+- base_ref: origin/main
+- scope: RBAC/IA parity (manager Team read-only, support provisioning read-only, specialist/viewer roles, Ops short/full)
+- done:
+  - Session created.
+  - Task Packages drafted for console audit phases 1-4.
+  - RBAC/IA changes implemented (roles + gating + Ops short/full).
+  - Tests + lint run (see evidence).
+- next:
+  - Review diff + update STATE.md (Brain/Architect) before merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-03-console-rbac-ia.md
+  - /tmp/pytest_console_rbac_20260203.txt
+  - /tmp/pytest_console_auth_access_roles_20260203.txt
+  - /tmp/console_web_lint_rbac_20260203.txt
+- last_updated: 2026-02-03
