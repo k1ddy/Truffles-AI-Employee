@@ -345,7 +345,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         if (!parsed.value) {
             return;
         }
-        const availableDays = new Set(WORKING_DAYS.map((day) => day.id));
+        const availableDays = new Set<string>(WORKING_DAYS.map((day) => day.id));
         const dayKeys = Object.keys(parsed.value).filter((day) => availableDays.has(day));
         if (dayKeys.length) {
             setWorkingHoursDays(dayKeys);
