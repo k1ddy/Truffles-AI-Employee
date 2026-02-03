@@ -239,7 +239,7 @@ class ConsoleConfirmationResponse(BaseModel):
 class ConsoleAgentCreateRequest(BaseModel):
     client_id: UUID
     branch_id: Optional[UUID] = None
-    role: Literal["owner", "admin", "manager", "support", "platform_admin"]
+    role: Literal["owner", "admin", "manager", "support", "platform_admin", "specialist", "viewer"]
     name: Optional[str] = None
     is_active: Optional[bool] = True
     oidc_subject: Optional[str] = None
@@ -289,6 +289,9 @@ class ConsoleCase(BaseModel):
     context_summary: Optional[str] = None
     user_message: Optional[str] = None
     assigned_to_name: Optional[str] = None
+    first_response_at: Optional[str] = None
+    resolved_at: Optional[str] = None
+    resolution_time_seconds: Optional[int] = None
     branch_id: Optional[UUID] = None
     channel: Optional[str] = None
     created_at: str

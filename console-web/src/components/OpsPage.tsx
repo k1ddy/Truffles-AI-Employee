@@ -148,6 +148,7 @@ export default function OpsPage() {
     const canReadOps = canAccessConsole(role, "ops", "read");
     const canWriteOps = canAccessConsole(role, "ops", "write");
     const canWriteSettings = canAccessConsole(role, "settings", "write");
+    const isFullOps = role === "platform_admin";
 
     const { data: health, isLoading: healthLoading, refetch: refetchHealth } = useQuery({
         queryKey: ["health"],
@@ -159,12 +160,12 @@ export default function OpsPage() {
     const { data: metrics, isLoading: metricsLoading, error: metricsError } = useQuery({
         queryKey: ["metrics-daily"],
         queryFn: fetchMetrics,
-        enabled: !!session && canReadOps,
+        enabled: !!session && canReadOps && isFullOps,
         refetchInterval: 60000,
     });
 
     // TG-03: Telegram Health
-    const { data: telegramHealth } = useQuery({
+    const { data: telegramHealth, isLoading: telegramLoading } = useQuery({
         queryKey: ["telegram-health"],
         queryFn: fetchTelegramHealth,
         enabled: !!session && canReadOps,
@@ -174,7 +175,7 @@ export default function OpsPage() {
     const { data: outboxData, isLoading: outboxLoading, error: outboxError, refetch: refetchOutbox } = useQuery({
         queryKey: ["ops-outbox", outboxStatus],
         queryFn: () => fetchOutbox(outboxStatus),
-        enabled: !!session && canReadOps,
+        enabled: !!session && canReadOps && isFullOps,
         refetchInterval: 30000,
     });
 
@@ -263,7 +264,7 @@ export default function OpsPage() {
         };
     }, [outboxData]);
 
-    const isLoading = healthLoading || metricsLoading;
+    const isLoading = healthLoading || (isFullOps && metricsLoading) || (!isFullOps && telegramLoading);
 
     if (!session) {
         return (
@@ -314,6 +315,13 @@ export default function OpsPage() {
                 </div>
             </div>
 
+            {!isFullOps && (
+                <div className="mb-6 rounded-lg border border-border/60 bg-muted/40 p-4 text-sm text-muted-foreground" data-testid="ops-short-note">
+                    Краткий статус. Полный Ops доступен только platform admin.
+                    {health?.status && health.status !== "ok" ? " Есть деградации — обратитесь к platform admin." : ""}
+                </div>
+            )}
+
             {/* Overall Health */}
             <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-health-card">
                 <div className="flex items-center justify-between mb-4">
@@ -325,31 +333,32 @@ export default function OpsPage() {
                 </p>
             </div>
 
-            {/* Daily Metrics */}
-            <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-metrics-card">
-                <h2 className="text-lg font-semibold mb-4">
-                    Метрики за сегодня
-                    <span className="text-sm font-normal text-muted-foreground ml-2">
-                        ({metrics?.date || "сегодня"})
-                    </span>
-                </h2>
-                {metricsError ? (
-                    <div className="text-sm text-muted-foreground text-center py-4">
-                        Не удалось загрузить метрики
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <MetricCard label="Всего заявок" value={metrics?.total_cases ?? 0} />
-                        <MetricCard label="Ожидает" value={metrics?.pending_cases ?? 0} />
-                        <MetricCard label="В работе" value={metrics?.active_cases ?? 0} />
-                        <MetricCard
-                            label="Закрыто"
-                            value={metrics?.resolved_cases ?? 0}
-                            subtext={metrics?.avg_resolution_hours ? `Средн: ${metrics.avg_resolution_hours}ч` : undefined}
-                        />
-                    </div>
-                )}
-            </div>
+            {isFullOps && (
+                <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-metrics-card">
+                    <h2 className="text-lg font-semibold mb-4">
+                        Метрики за сегодня
+                        <span className="text-sm font-normal text-muted-foreground ml-2">
+                            ({metrics?.date || "сегодня"})
+                        </span>
+                    </h2>
+                    {metricsError ? (
+                        <div className="text-sm text-muted-foreground text-center py-4">
+                            Не удалось загрузить метрики
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <MetricCard label="Всего заявок" value={metrics?.total_cases ?? 0} />
+                            <MetricCard label="Ожидает" value={metrics?.pending_cases ?? 0} />
+                            <MetricCard label="В работе" value={metrics?.active_cases ?? 0} />
+                            <MetricCard
+                                label="Закрыто"
+                                value={metrics?.resolved_cases ?? 0}
+                                subtext={metrics?.avg_resolution_hours ? `Средн: ${metrics.avg_resolution_hours}ч` : undefined}
+                            />
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Components */}
             <div className="bg-card border border-border/60 rounded-lg p-6 mb-6">
@@ -432,125 +441,126 @@ export default function OpsPage() {
                 </div>
             </div>
 
-            {/* Message Queue */}
-            <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-queue-card">
-                <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold">Очередь сообщений</h2>
-                    <span
-                        className={`text-2xl font-bold ${(health?.outbox_backlog || 0) > 100
-                        ? "text-red-600"
-                        : (health?.outbox_backlog || 0) > 10
-                            ? "text-yellow-600"
-                            : "text-green-600"
-                        }`}
-                        data-testid="ops-queue-count"
-                    >
-                        {health?.outbox_backlog ?? 0}
-                    </span>
-                </div>
-                <div className="flex flex-wrap gap-2 mb-4">
-                    {([
-                        { value: "failed", label: "Failed", count: outboxCounts.failed },
-                        { value: "pending", label: "Pending", count: outboxCounts.pending },
-                        { value: "processing", label: "Processing", count: outboxCounts.processing },
-                        { value: "all", label: "All", count: outboxCounts.total },
-                    ] as const).map((item) => (
-                        <button
-                            key={item.value}
-                            type="button"
-                            onClick={() => setOutboxStatus(item.value)}
-                            className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                                outboxStatus === item.value
-                                    ? "border-primary text-primary"
-                                    : "border-border/60 text-muted-foreground hover:text-foreground"
+            {isFullOps && (
+                <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-queue-card">
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-semibold">Очередь сообщений</h2>
+                        <span
+                            className={`text-2xl font-bold ${(health?.outbox_backlog || 0) > 100
+                            ? "text-red-600"
+                            : (health?.outbox_backlog || 0) > 10
+                                ? "text-yellow-600"
+                                : "text-green-600"
                             }`}
+                            data-testid="ops-queue-count"
                         >
-                            {item.label} · {item.count}
-                        </button>
-                    ))}
-                    {outboxStatus === "failed" && (
-                        <button
-                            type="button"
-                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                            onClick={() => outboxRetry.mutate(undefined)}
-                            disabled={outboxRetry.isPending || !canWriteOps}
-                        >
-                            {outboxRetry.isPending ? "Ретрай..." : "Retry failed"}
-                        </button>
-                    )}
-                    {!canWriteOps && (
-                        <span className="text-xs text-muted-foreground">Ретрай доступен только owner/admin/platform admin</span>
+                            {health?.outbox_backlog ?? 0}
+                        </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mb-4">
+                        {([
+                            { value: "failed", label: "Failed", count: outboxCounts.failed },
+                            { value: "pending", label: "Pending", count: outboxCounts.pending },
+                            { value: "processing", label: "Processing", count: outboxCounts.processing },
+                            { value: "all", label: "All", count: outboxCounts.total },
+                        ] as const).map((item) => (
+                            <button
+                                key={item.value}
+                                type="button"
+                                onClick={() => setOutboxStatus(item.value)}
+                                className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                                    outboxStatus === item.value
+                                        ? "border-primary text-primary"
+                                        : "border-border/60 text-muted-foreground hover:text-foreground"
+                                }`}
+                            >
+                                {item.label} · {item.count}
+                            </button>
+                        ))}
+                        {outboxStatus === "failed" && (
+                            <button
+                                type="button"
+                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                onClick={() => outboxRetry.mutate(undefined)}
+                                disabled={outboxRetry.isPending || !canWriteOps}
+                            >
+                                {outboxRetry.isPending ? "Ретрай..." : "Retry failed"}
+                            </button>
+                        )}
+                        {!canWriteOps && (
+                            <span className="text-xs text-muted-foreground">Ретрай доступен только owner/admin/platform admin</span>
+                        )}
+                    </div>
+                    {outboxLoading ? (
+                        <div className="text-sm text-muted-foreground">Загрузка...</div>
+                    ) : outboxError ? (
+                        <div className="text-sm text-muted-foreground">Не удалось загрузить очередь</div>
+                    ) : outboxData?.items?.length ? (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="text-xs text-muted-foreground">
+                                    <tr className="text-left border-b border-border/60">
+                                        <th className="py-2 pr-3">Статус</th>
+                                        <th className="py-2 pr-3">Попытки</th>
+                                        <th className="py-2 pr-3">Канал</th>
+                                        <th className="py-2 pr-3">Сообщение</th>
+                                        <th className="py-2 pr-3">Ошибка</th>
+                                        <th className="py-2 pr-3">Обновлено</th>
+                                        <th className="py-2 pr-3 text-right">Действия</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {outboxData.items.map((item) => (
+                                        <tr key={item.id} className="border-b border-border/40">
+                                            <td className="py-2 pr-3">
+                                                <span
+                                                    className={`px-2 py-1 rounded text-xs font-medium ${
+                                                        item.status === "failed"
+                                                            ? "bg-red-100 text-red-800"
+                                                            : item.status === "pending"
+                                                                ? "bg-yellow-100 text-yellow-800"
+                                                                : "bg-blue-100 text-blue-800"
+                                                    }`}
+                                                >
+                                                    {item.status}
+                                                </span>
+                                            </td>
+                                            <td className="py-2 pr-3">{item.attempts}</td>
+                                            <td className="py-2 pr-3">{item.channel || "—"}</td>
+                                            <td className="py-2 pr-3">
+                                                <div className="text-xs text-foreground">{item.message_preview || "—"}</div>
+                                                {item.remote_jid && (
+                                                    <div className="text-xs text-muted-foreground">{item.remote_jid}</div>
+                                                )}
+                                            </td>
+                                            <td className="py-2 pr-3">
+                                                <span className="text-xs text-destructive">{item.last_error || "—"}</span>
+                                            </td>
+                                            <td className="py-2 pr-3">
+                                                {item.updated_at ? new Date(item.updated_at).toLocaleString("ru-RU") : "—"}
+                                            </td>
+                                            <td className="py-2 pr-3 text-right">
+                                                {item.status === "failed" && (
+                                                    <button
+                                                        type="button"
+                                                        className="text-xs text-primary hover:text-primary/80 disabled:opacity-50"
+                                                        onClick={() => outboxRetry.mutate([item.id])}
+                                                        disabled={outboxRetry.isPending || !canWriteOps}
+                                                    >
+                                                        Retry
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="text-sm text-muted-foreground">Очередь пуста</div>
                     )}
                 </div>
-                {outboxLoading ? (
-                    <div className="text-sm text-muted-foreground">Загрузка...</div>
-                ) : outboxError ? (
-                    <div className="text-sm text-muted-foreground">Не удалось загрузить очередь</div>
-                ) : outboxData?.items?.length ? (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                            <thead className="text-xs text-muted-foreground">
-                                <tr className="text-left border-b border-border/60">
-                                    <th className="py-2 pr-3">Статус</th>
-                                    <th className="py-2 pr-3">Попытки</th>
-                                    <th className="py-2 pr-3">Канал</th>
-                                    <th className="py-2 pr-3">Сообщение</th>
-                                    <th className="py-2 pr-3">Ошибка</th>
-                                    <th className="py-2 pr-3">Обновлено</th>
-                                    <th className="py-2 pr-3 text-right">Действия</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {outboxData.items.map((item) => (
-                                    <tr key={item.id} className="border-b border-border/40">
-                                        <td className="py-2 pr-3">
-                                            <span
-                                                className={`px-2 py-1 rounded text-xs font-medium ${
-                                                    item.status === "failed"
-                                                        ? "bg-red-100 text-red-800"
-                                                        : item.status === "pending"
-                                                            ? "bg-yellow-100 text-yellow-800"
-                                                            : "bg-blue-100 text-blue-800"
-                                                }`}
-                                            >
-                                                {item.status}
-                                            </span>
-                                        </td>
-                                        <td className="py-2 pr-3">{item.attempts}</td>
-                                        <td className="py-2 pr-3">{item.channel || "—"}</td>
-                                        <td className="py-2 pr-3">
-                                            <div className="text-xs text-foreground">{item.message_preview || "—"}</div>
-                                            {item.remote_jid && (
-                                                <div className="text-xs text-muted-foreground">{item.remote_jid}</div>
-                                            )}
-                                        </td>
-                                        <td className="py-2 pr-3">
-                                            <span className="text-xs text-destructive">{item.last_error || "—"}</span>
-                                        </td>
-                                        <td className="py-2 pr-3">
-                                            {item.updated_at ? new Date(item.updated_at).toLocaleString("ru-RU") : "—"}
-                                        </td>
-                                        <td className="py-2 pr-3 text-right">
-                                            {item.status === "failed" && (
-                                                <button
-                                                    type="button"
-                                                    className="text-xs text-primary hover:text-primary/80 disabled:opacity-50"
-                                                    onClick={() => outboxRetry.mutate([item.id])}
-                                                    disabled={outboxRetry.isPending || !canWriteOps}
-                                                >
-                                                    Retry
-                                                </button>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                ) : (
-                    <div className="text-sm text-muted-foreground">Очередь пуста</div>
-                )}
-            </div>
+            )}
 
             {/* Navigation */}
             <div className="text-center">

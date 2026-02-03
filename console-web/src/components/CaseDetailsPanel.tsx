@@ -9,6 +9,21 @@ function formatTimestamp(value?: string | null) {
     return new Date(value).toLocaleString("ru-RU");
 }
 
+function formatDuration(seconds?: number | null) {
+    if (seconds === null || seconds === undefined) {
+        return "—";
+    }
+    if (seconds < 60) {
+        return `${seconds} сек`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    if (hours > 0) {
+        return `${hours} ч ${minutes % 60} мин`;
+    }
+    return `${minutes} мин`;
+}
+
 function getRoleLabel(role: string) {
     if (role === "user") {
         return "Клиент";
@@ -330,6 +345,18 @@ export default function CaseDetailsPanel({
                         <div className="flex items-center justify-between text-xs mt-2">
                             <span className="text-muted-foreground">Последний ответ:</span>
                             <span>{formatTimestamp(caseDetail.last_outbound_at)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs mt-2">
+                            <span className="text-muted-foreground">Первый ответ:</span>
+                            <span>{formatTimestamp(caseDetail.first_response_at)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs mt-2">
+                            <span className="text-muted-foreground">Решено:</span>
+                            <span>{formatTimestamp(caseDetail.resolved_at)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs mt-2">
+                            <span className="text-muted-foreground">Время решения:</span>
+                            <span>{formatDuration(caseDetail.resolution_time_seconds)}</span>
                         </div>
                     </SectionCard>
                 </div>
