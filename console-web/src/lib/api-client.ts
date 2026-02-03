@@ -80,7 +80,7 @@ export const ErrorCodes = {
 
 export type ErrorCode = keyof typeof ErrorCodes;
 
-export type ConsoleRole = "platform_admin" | "owner" | "admin" | "manager" | "support";
+export type ConsoleRole = "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
 export type ConsoleSection =
     | "inbox"
     | "knowledge"
@@ -95,20 +95,20 @@ export type ConsoleAction = "read" | "write";
 
 export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRole[]>> = {
     inbox: {
-        read: ["platform_admin", "owner", "admin", "manager", "support"],
+        read: ["platform_admin", "owner", "admin", "manager", "support", "viewer"],
         write: ["platform_admin", "owner", "admin", "manager"],
     },
     knowledge: {
-        read: ["platform_admin", "owner", "admin", "manager"],
+        read: ["platform_admin", "owner", "admin", "manager", "viewer"],
         write: ["platform_admin", "owner", "admin"],
     },
     team: {
-        read: ["platform_admin", "owner", "admin"],
+        read: ["platform_admin", "owner", "admin", "manager"],
         write: ["platform_admin", "owner", "admin"],
     },
     calendar: {
-        read: ["platform_admin", "owner", "admin", "manager"],
-        write: ["platform_admin", "owner", "admin", "manager"],
+        read: ["platform_admin", "owner", "admin", "manager", "specialist", "viewer"],
+        write: ["platform_admin", "owner", "admin", "manager", "specialist"],
     },
     settings: {
         read: ["platform_admin", "owner", "admin"],
@@ -119,7 +119,7 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
         write: ["platform_admin", "owner", "admin"],
     },
     audit: {
-        read: ["platform_admin", "owner", "admin", "support"],
+        read: ["platform_admin", "owner", "admin", "support", "viewer"],
         write: [],
     },
     tenants: {

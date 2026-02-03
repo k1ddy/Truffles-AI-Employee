@@ -42,23 +42,31 @@ class ConsoleAuthContext:
 
 
 _jwks_client: Optional[PyJWKClient] = None
-_role_priority = {"platform_admin": -1, "owner": 0, "admin": 1, "manager": 2, "support": 3}
+_role_priority = {
+    "platform_admin": -1,
+    "owner": 0,
+    "admin": 1,
+    "manager": 2,
+    "support": 3,
+    "viewer": 4,
+    "specialist": 5,
+}
 _console_rbac_matrix: dict[str, dict[str, tuple[str, ...]]] = {
     "inbox": {
-        "read": ("platform_admin", "owner", "admin", "manager", "support"),
+        "read": ("platform_admin", "owner", "admin", "manager", "support", "viewer"),
         "write": ("platform_admin", "owner", "admin", "manager"),
     },
     "knowledge": {
-        "read": ("platform_admin", "owner", "admin", "manager"),
+        "read": ("platform_admin", "owner", "admin", "manager", "viewer"),
         "write": ("platform_admin", "owner", "admin"),
     },
     "team": {
-        "read": ("platform_admin", "owner", "admin"),
+        "read": ("platform_admin", "owner", "admin", "manager"),
         "write": ("platform_admin", "owner", "admin"),
     },
     "calendar": {
-        "read": ("platform_admin", "owner", "admin", "manager"),
-        "write": ("platform_admin", "owner", "admin", "manager"),
+        "read": ("platform_admin", "owner", "admin", "manager", "specialist", "viewer"),
+        "write": ("platform_admin", "owner", "admin", "manager", "specialist"),
     },
     "settings": {
         "read": ("platform_admin", "owner", "admin"),
@@ -69,7 +77,7 @@ _console_rbac_matrix: dict[str, dict[str, tuple[str, ...]]] = {
         "write": ("platform_admin", "owner", "admin"),
     },
     "audit": {
-        "read": ("platform_admin", "owner", "admin", "support"),
+        "read": ("platform_admin", "owner", "admin", "support", "viewer"),
         "write": (),
     },
     "provisioning": {

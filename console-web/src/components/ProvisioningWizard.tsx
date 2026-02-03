@@ -1032,10 +1032,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             name: agentForm.name.trim() || undefined,
             oidc_subject: agentForm.oidcSubject.trim() || undefined,
         };
-        if (roleValue === "manager") {
+        if (roleValue === "manager" || roleValue === "specialist") {
             const branchId = agentForm.branchId || branchData?.id;
             if (!branchId) {
-                toast.error("branch_id обязателен для manager");
+                toast.error("branch_id обязателен для manager/specialist");
                 return;
             }
             payload.branch_id = branchId;
@@ -1429,7 +1429,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 {currentStep.id === "team" && (
                     <div className="space-y-4">
                         <p className="text-sm text-muted-foreground">
-                            Создайте owner/admin пользователей для доступа в Console. Manager требует branch_id.
+                            Создайте owner/admin пользователей для доступа в Console. Manager/Specialist требуют branch_id.
                         </p>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
@@ -1453,7 +1453,9 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                     <option value="owner">owner</option>
                                     <option value="admin">admin</option>
                                     <option value="manager">manager</option>
+                                    <option value="specialist">specialist</option>
                                     <option value="support">support</option>
+                                    <option value="viewer">viewer</option>
                                 </select>
                             </div>
                             <div>
@@ -1473,7 +1475,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                     value={agentForm.branchId}
                                     onChange={(event) => setAgentForm((prev) => ({ ...prev, branchId: event.target.value }))}
                                     placeholder={branchData?.id || "UUID филиала"}
-                                    disabled={!canEdit || agentForm.role !== "manager"}
+                                    disabled={!canEdit || !["manager", "specialist"].includes(agentForm.role)}
                                 />
                             </div>
                         </div>
