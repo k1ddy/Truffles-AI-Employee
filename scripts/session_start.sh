@@ -5,7 +5,7 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/session_start.sh --session-id ID --task-package PATH [--title TITLE]
                                [--branch NAME] [--worktree PATH] [--base-ref REF] [--agent SUFFIX]
-                               [--force-new]
+                               [--force-new] [--auto-commit]
 
 Creates a new worktree + branch and registers a session log + index entry.
 Defaults:
@@ -16,6 +16,7 @@ Defaults:
   task-package: <required; must exist>
   agent:      required (or via SESSION_AGENT) and must match session-id suffix
   force-new:  allow new session even when open sessions exist for the same agent
+  auto-commit: commit session log + index after creation (or set SESSION_AUTO_COMMIT=1)
 USAGE
 }
 
@@ -26,6 +27,7 @@ branch=""
 worktree=""
 base_ref="origin/main"
 force_new="false"
+auto_commit="false"
 agent=""
 
 while [[ $# -gt 0 ]]; do
@@ -38,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     --base-ref) base_ref="$2"; shift 2;;
     --agent) agent="$2"; shift 2;;
     --force-new) force_new="true"; shift 1;;
+    --auto-commit) auto_commit="true"; shift 1;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 1;;
   esac
@@ -99,6 +102,10 @@ fi
 if [[ ! -f "$repo_root/$task_package" ]]; then
   echo "ERROR: Task Package not found: ${task_package}" >&2
   exit 1
+fi
+
+if [[ "${SESSION_AUTO_COMMIT:-}" == "1" || "${SESSION_AUTO_COMMIT:-}" == "true" ]]; then
+  auto_commit="true"
 fi
 
 index_file_root="$repo_root/docs/SESSION_INDEX.md"
@@ -184,6 +191,16 @@ fi
 
 if ! grep -q "^| ${session_id} |" "$index_file"; then
   echo "| ${session_id} | active | ${branch} | ${worktree} | ${task_package} | $(date +%F) |" >> "$index_file"
+fi
+
+if [[ "$auto_commit" == "true" ]]; then
+  git -C "$worktree" add "docs/SESSIONS/SESSION-${session_id}.md" "docs/SESSION_INDEX.md"
+  if ! git -C "$worktree" diff --cached --quiet; then
+    if ! git -C "$worktree" commit -m "chore: start session ${session_id}"; then
+      echo "ERROR: auto-commit failed; run scripts/session_check.sh and commit manually." >&2
+      exit 1
+    fi
+  fi
 fi
 
 echo "Session created: ${session_file}"

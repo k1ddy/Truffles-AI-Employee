@@ -47,6 +47,7 @@
 | `scripts/session_check.sh` | Проверка сессии перед commit/push | Все роли |
 | `scripts/session_end.sh` | Закрытие сессии + index обновление | Все роли |
 | `scripts/session_resume.sh` | Возобновить активную сессию после compaction (по умолчанию SESSION_AGENT) | Все роли |
+| `scripts/session_index_rebuild.sh` | Пересобрать `docs/SESSION_INDEX.md` из `docs/SESSIONS/*` | Brain/Architect |
 | `scripts/session_audit.sh` | Аудит сессий (статусы/сироты) | Brain/Architect |
 | `scripts/session_gate.sh` | Gate для doc-only и session log | Brain/Architect |
 | `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
