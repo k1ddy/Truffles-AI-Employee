@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useSession } from "next-auth/react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { signOut, useSession } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Image from "next/image";
@@ -9,12 +9,25 @@ import Link from "next/link";
 import toast from "react-hot-toast";
 
 import LoginButton from "@/components/LoginButton";
-import { authApi, canAccessConsole, type ConsoleAction, type ConsoleRole, type ConsoleSection } from "@/lib/api-client";
+import {
+    authApi,
+    canAccessConsole,
+    parseApiError,
+    type ConsoleAction,
+    type ConsoleRole,
+    type ConsoleSection,
+} from "@/lib/api-client";
 
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
 const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 const COMPANY_ID_STORAGE_KEY = "console:company_id";
 const NAV_COLLAPSED_STORAGE_KEY = "console:nav_collapsed";
+const AUTH_ERROR_CODES = new Set(["AUTH_REQUIRED", "TOKEN_EXPIRED", "TOKEN_INVALID"]);
+
+type SessionAuth = {
+    accessToken?: string;
+    error?: string;
+};
 
 type ClientSummary = {
     id?: string;
@@ -161,6 +174,12 @@ function writeLocalStorage(key: string, value: string | null) {
         return;
     }
     window.localStorage.setItem(key, value);
+}
+
+function clearConsoleContext() {
+    writeLocalStorage(COMPANY_ID_STORAGE_KEY, null);
+    writeLocalStorage(CLIENT_ID_STORAGE_KEY, null);
+    writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
 }
 
 function formatCompanyLabel(companyName?: string | null, companyId?: string | null): string {
@@ -449,12 +468,16 @@ function PublicLanding() {
 }
 
 export default function ConsoleShell({ children }: { children: React.ReactNode }) {
-    const { status } = useSession();
+    const { status, data: session } = useSession();
     const pathname = usePathname();
-    const hasSession = status === "authenticated";
+    const sessionAuth = session as SessionAuth | null;
+    const sessionError = sessionAuth?.error;
+    const accessToken = sessionAuth?.accessToken;
+    const hasSession = status === "authenticated" && !!accessToken && !sessionError;
     const queryClient = useQueryClient();
     const isInboxPage = pathname === "/" || pathname.startsWith("/cases");
     const contentWidthClass = isInboxPage ? "max-w-[1440px]" : "max-w-6xl";
+    const signOutTriggered = useRef(false);
 
     const { data, isLoading, isFetching, error, refetch } = useQuery({
         queryKey: ["console-me"],
@@ -464,6 +487,30 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         },
         enabled: hasSession,
     });
+
+    useEffect(() => {
+        if (signOutTriggered.current || status !== "authenticated") {
+            return;
+        }
+
+        if (sessionError || !accessToken) {
+            signOutTriggered.current = true;
+            clearConsoleContext();
+            toast.error("Сессия истекла. Войдите снова.");
+            signOut({ callbackUrl: "/" });
+            return;
+        }
+
+        if (error) {
+            const parsed = parseApiError(error);
+            if (AUTH_ERROR_CODES.has(parsed.code)) {
+                signOutTriggered.current = true;
+                clearConsoleContext();
+                toast.error("Сессия истекла. Войдите снова.");
+                signOut({ callbackUrl: "/" });
+            }
+        }
+    }, [accessToken, error, sessionError, status]);
 
     const role = data?.agent?.role ?? "manager";
     const navItems = useMemo(
