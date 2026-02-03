@@ -64,8 +64,9 @@ Common failures and fixes
 - Instance mismatch: payload instance_id != branch.instance_id. Fix: use branch instance_id.
 - Outbox payload guard: calendar sync events rejected. Fix: allow `calendar.sync_outbound` in payload validator (known GAP).
 - Date parsing flips: input `YYYY-MM-DD` interpreted as `YYYY-DD-MM` in ru locale. Use explicit format or ISO parser.
+- OAuth callback redirects to `0.0.0.0`: set `NEXTAUTH_URL` (or `NEXT_PUBLIC_CONSOLE_URL`) to the Console public URL and retry.
 
 Notes
 - Script uses dry-run by default; DB writes require `--apply`.
 - Canceling appointments is optional and explicit.
-- Calendar sync outbox may fail if OAuth tokens are placeholders.
+- Calendar sync outbox may fail if OAuth tokens are placeholders. Fix: set `GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI` on API, complete OAuth via `/console/v1/calendar/google/connect` (callback `/api/calendar/callback`).
