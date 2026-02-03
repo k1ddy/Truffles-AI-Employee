@@ -28,6 +28,9 @@ export interface Case {
     user_message: string | null;
     created_at: string;
     assigned_to_name: string | null;
+    first_response_at?: string | null;
+    resolved_at?: string | null;
+    resolution_time_seconds?: number | null;
     channel: string;
     sla_status?: string;
     // Customer info

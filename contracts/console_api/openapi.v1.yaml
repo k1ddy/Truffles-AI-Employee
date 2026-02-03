@@ -2214,6 +2214,17 @@ components:
         assigned_to_name:
           type: string
           nullable: true
+        first_response_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_time_seconds:
+          type: integer
+          nullable: true
         branch_id:
           type: string
           format: uuid

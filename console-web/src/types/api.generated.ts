@@ -1173,6 +1173,11 @@ export interface components {
             context_summary?: string | null;
             user_message?: string | null;
             assigned_to_name?: string | null;
+            /** Format: date-time */
+            first_response_at?: string | null;
+            /** Format: date-time */
+            resolved_at?: string | null;
+            resolution_time_seconds?: number | null;
             /** Format: uuid */
             branch_id?: string | null;
             /** @enum {string|null} */

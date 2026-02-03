@@ -34,6 +34,10 @@ async function resolveCase(caseId: string): Promise<void> {
     await api.post(`/cases/${caseId}/resolve`);
 }
 
+async function returnCase(caseId: string): Promise<void> {
+    await api.post(`/cases/${caseId}/return`);
+}
+
 function SlaBadge({ status }: { status?: string }) {
     const styles = {
         ok: "bg-green-100 text-green-800",
@@ -101,6 +105,26 @@ export default function CaseConversation({
                 queryClient.invalidateQueries({ queryKey: ["cases"] });
             } else {
                 toast.error("Не удалось закрыть заявку");
+            }
+        },
+    });
+
+    const returnMutation = useMutation({
+        mutationFn: () => returnCase(caseId),
+        onSuccess: () => {
+            toast.success("Заявка передана боту");
+            queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
+            handleResolved();
+        },
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            if (code === "CASE_ALREADY_RESOLVED") {
+                toast.error("Заявка уже закрыта");
+                queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+                queryClient.invalidateQueries({ queryKey: ["cases"] });
+            } else {
+                toast.error("Не удалось передать заявку");
             }
         },
     });
@@ -190,13 +214,22 @@ export default function CaseConversation({
                                         </button>
                                     )}
                                     {isActive && (
-                                        <button
-                                            onClick={() => resolveMutation.mutate()}
-                                            disabled={resolveMutation.isPending}
-                                            className="bg-foreground text-background px-4 py-2 rounded hover:bg-foreground/90 disabled:opacity-50"
-                                        >
-                                            {resolveMutation.isPending ? "Закрываем..." : "Закрыть заявку"}
-                                        </button>
+                                        <>
+                                            <button
+                                                onClick={() => resolveMutation.mutate()}
+                                                disabled={resolveMutation.isPending}
+                                                className="bg-foreground text-background px-4 py-2 rounded hover:bg-foreground/90 disabled:opacity-50"
+                                            >
+                                                {resolveMutation.isPending ? "Закрываем..." : "Закрыть заявку"}
+                                            </button>
+                                            <button
+                                                onClick={() => returnMutation.mutate()}
+                                                disabled={returnMutation.isPending}
+                                                className="border border-border/60 px-4 py-2 rounded text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50"
+                                            >
+                                                {returnMutation.isPending ? "Передаём..." : "Передать/Эскалировать"}
+                                            </button>
+                                        </>
                                     )}
                                 </>
                             ) : (
