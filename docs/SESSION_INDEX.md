@@ -124,3 +124,4 @@
 | 2026-02-02-requirements-consent-canon-docs-a1 | done | feat/2026-02-02-requirements-consent-canon-docs-a1 | /home/zhan/worktrees/2026-02-02-requirements-consent-canon-docs-a1 | docs/TASK_PACKAGES/TP-2026-02-02-requirements-consent-canon.md | 2026-02-02 |
 | 2026-02-02-delivery-failure-alerts-a1 | done | feat/2026-02-02-delivery-failure-alerts-a1 | /home/zhan/worktrees/2026-02-02-delivery-failure-alerts-a1 | docs/TASK_PACKAGES/TP-2026-02-02-delivery-failure-alerts.md | 2026-02-03 |
 | 2026-02-03-console-merge-verify-a5 | done | feat/2026-02-03-console-merge-verify-a5 | /home/zhan/worktrees/2026-02-03-console-merge-verify-a5 | docs/TASK_PACKAGES/TP-2026-02-03-console-merge-verify.md | 2026-02-03 |
+| 2026-02-03-console-redeploy-verify-a5 | done | feat/2026-02-03-console-redeploy-verify-a5 | /home/zhan/worktrees/2026-02-03-console-redeploy-verify-a5 | docs/TASK_PACKAGES/TP-2026-02-03-console-redeploy-verify.md | 2026-02-03 |
