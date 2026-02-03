@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-03-booking-full-cycle-gcal-a1 | active | feat/2026-02-03-booking-full-cycle-gcal-a1 | /home/zhan/worktrees/2026-02-03-booking-full-cycle-gcal-a1 | docs/TASK_PACKAGES/TP-2026-02-03-booking-full-cycle-gcal.md | 2026-02-03 |
 | 2026-01-30-console-web-deploy-inbox-ux-v3-a1 | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-30-console-web-deploy-inbox-ux-v3.md | 2026-01-30 |
 | 2026-01-27-inbox-service-tp-arch | done | docs/2026-01-27-inbox-service-tp-arch | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 |
 | 2026-01-27-inbox-service-shadow-arch | done | feat/2026-01-27-inbox-service-shadow-arch | /home/zhan/worktrees/2026-01-27-inbox-service-shadow-arch | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 (gate-fix) |
@@ -128,4 +129,3 @@
 | 2026-02-03-console-redeploy-verify-a5 | done | feat/2026-02-03-console-redeploy-verify-a5 | /home/zhan/worktrees/2026-02-03-console-redeploy-verify-a5 | docs/TASK_PACKAGES/TP-2026-02-03-console-redeploy-verify.md | 2026-02-03 |
 | 2026-02-03-console-settings-typefix-a5 | done | feat/2026-02-03-console-settings-typefix-a5 | /home/zhan/worktrees/2026-02-03-console-settings-typefix-a5 | docs/TASK_PACKAGES/TP-2026-02-03-console-settings-typefix.md | 2026-02-03 |
 | 2026-02-03-tp-booking-full-cycle-gcal-a1 | done | feat/2026-02-03-tp-booking-full-cycle-gcal-a1 | /home/zhan/worktrees/2026-02-03-tp-booking-full-cycle-gcal-a1 | docs/TASK_PACKAGES/TP-2026-02-03-booking-full-cycle-gcal.md | 2026-02-03 |
-| 2026-02-03-booking-full-cycle-gcal-a1 | active | feat/2026-02-03-booking-full-cycle-gcal-a1 | /home/zhan/worktrees/2026-02-03-booking-full-cycle-gcal-a1 | docs/TASK_PACKAGES/TP-2026-02-03-booking-full-cycle-gcal.md | 2026-02-03 |

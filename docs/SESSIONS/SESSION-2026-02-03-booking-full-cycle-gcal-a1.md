@@ -15,8 +15,9 @@
   - Tests for calendar provider sync, reminder jobs, booking appointments, message endpoint (booking).
   - Docs: CONSULTANT/ARCHITECTURE tool+reminder notes, STRUCTURE updates.
   - Live-check CA10 outbox (minimum data safe-mode) with decision_meta/trace + outbox status.
+  - Restarted API + workers to pick up calendar sync envs.
 - next:
-  - Run CI; capture SQL evidence for sync states, calendar blocks, reminder jobs.
+  - Wait for CI; capture SQL evidence for sync states, calendar blocks, reminder jobs after calendar connections exist.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-03-booking-full-cycle-gcal.md
   - /tmp/pytest_booking_appointments_20260203.txt
@@ -27,4 +28,12 @@
   - /tmp/pytest_reminder_jobs_20260203.txt
   - /tmp/livecheck_ca10_outbox_20260203.jsonl
   - /tmp/livecheck_ca10_outbox_explain_20260203.txt
+  - /tmp/livecheck_ca05_booking_commit_20260203.jsonl
+  - /tmp/livecheck_ca05_booking_commit_explain_20260203.txt
+  - /tmp/sql_calendar_connections_count_20260203.txt
+  - /tmp/sql_google_calendar_tokens_count_20260203.txt
+  - /tmp/sql_appointment_sync_states_count_20260203.txt
+  - /tmp/sql_calendar_blocks_count_20260203.txt
+  - /tmp/sql_reminder_jobs_count_20260203.txt
+  - /tmp/sql_minimum_data_contract_20260203.txt
 - last_updated: 2026-02-03
