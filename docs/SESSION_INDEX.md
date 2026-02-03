@@ -133,3 +133,4 @@
 | 2026-02-03-booking-confirm-full-verify-a6 | active | feat/2026-02-03-booking-confirm-full-verify-a6 | /home/zhan/worktrees/2026-02-03-booking-confirm-full-verify-a6 | docs/TASK_PACKAGES/TP-2026-02-03-booking-confirm-full-verify.md | 2026-02-03 |
 | 2026-02-03-console-rbac-ia-a6 | done | feat/2026-02-03-console-rbac-ia-a6 | /home/zhan/worktrees/2026-02-03-console-rbac-ia-a6 | docs/TASK_PACKAGES/TP-2026-02-03-console-rbac-ia.md | 2026-02-03 |
 | 2026-02-03-console-inbox-escalate-metrics-a6 | done | feat/2026-02-03-console-inbox-escalate-metrics-a6 | /home/zhan/worktrees/2026-02-03-console-inbox-escalate-metrics-a6 | docs/TASK_PACKAGES/TP-2026-02-03-console-inbox-escalate-metrics.md | 2026-02-03 |
+| 2026-02-03-console-prod-overlay-a6 | done | feat/2026-02-03-console-prod-overlay-a6 | /home/zhan/worktrees/2026-02-03-console-prod-overlay-a6 | docs/TASK_PACKAGES/TP-2026-02-03-console-prod-overlay.md | 2026-02-03 |
