@@ -7,7 +7,7 @@ import Link from "next/link";
 import toast from "react-hot-toast";
 
 import api from "@/lib/api";
-import { agentsApi, authApi, canAccessConsole, settingsApi, type ConsoleRole } from "@/lib/api-client";
+import { agentsApi, authApi, canAccessConsole, type ConsoleRole } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
@@ -57,6 +57,8 @@ function RoleBadge({ role }: { role?: string | null }) {
         admin: "bg-secondary text-secondary-foreground",
         manager: "bg-green-100 text-green-800",
         support: "bg-muted text-muted-foreground",
+        specialist: "bg-blue-100 text-blue-800",
+        viewer: "bg-slate-100 text-slate-700",
     };
     const label = role ?? "—";
     return (
@@ -100,27 +102,21 @@ function UsersPanel({
     const { handleError } = useErrorHandler();
     const queryClient = useQueryClient();
     const canManage = canAccessConsole(role, "team", "write");
+    const canReadTeam = canAccessConsole(role, "team", "read");
+    const canViewProvisioning =
+        canAccessConsole(role, "settings", "read") || canAccessConsole(role, "provisioning", "read");
     const [linkTokens, setLinkTokens] = useState<Record<string, TelegramLinkResponse>>({});
     const [linkTarget, setLinkTarget] = useState<string | null>(null);
-
-    const settingsQuery = useQuery({
-        queryKey: ["settings"],
-        queryFn: async () => (await settingsApi.get()).data,
-        enabled: !!session && canManage,
-    });
 
     const agentsQuery = useQuery({
         queryKey: ["agents"],
         queryFn: async () => (await agentsApi.list()).data,
-        enabled: !!session && canManage,
+        enabled: !!session && canReadTeam,
     });
 
     const agents = useMemo(() => {
-        if (canManage) {
-            return (agentsQuery.data?.items ?? []) as Array<AgentBase | AgentWithIdentities>;
-        }
-        return (settingsQuery.data?.agents ?? []) as Array<AgentBase | AgentWithIdentities>;
-    }, [canManage, agentsQuery.data, settingsQuery.data]);
+        return (agentsQuery.data?.items ?? []) as Array<AgentBase | AgentWithIdentities>;
+    }, [agentsQuery.data]);
 
     const activeCount = agents.filter((agent) => agent.is_active).length;
     const owners = agents.filter((agent) => agent.role === "owner").length;
@@ -154,7 +150,7 @@ function UsersPanel({
                             Управление ролями и доступом. Telegram linking доступен только owner/admin/platform admin.
                         </p>
                     </div>
-                    {canManage ? (
+                    {canViewProvisioning ? (
                         <Link className="btn-ghost" href="/settings">
                             Открыть provisioning
                         </Link>
@@ -181,19 +177,18 @@ function UsersPanel({
             </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {(settingsQuery.isLoading || agentsQuery.isLoading) && (
+                {agentsQuery.isLoading && (
                     <div className="card-surface p-6 animate-pulse text-sm text-muted-foreground">
                         Загрузка команды...
                     </div>
                 )}
-                {(!settingsQuery.isLoading && (settingsQuery.error || agentsQuery.error)) && (
+                {!agentsQuery.isLoading && agentsQuery.error && (
                     <div className="card-surface p-6 text-sm text-destructive">
                         Не удалось загрузить команду.
                         <button
                             type="button"
                             className="btn-ghost mt-3"
                             onClick={() => {
-                                settingsQuery.refetch();
                                 agentsQuery.refetch();
                             }}
                         >
@@ -201,12 +196,12 @@ function UsersPanel({
                         </button>
                     </div>
                 )}
-                {!settingsQuery.isLoading && agents.length === 0 && (
+                {!agentsQuery.isLoading && agents.length === 0 && (
                     <div className="card-surface p-6 text-sm text-muted-foreground">
                         Нет участников команды.
                     </div>
                 )}
-                {!settingsQuery.isLoading && agents.length > 0 && agents.map((agent, index) => {
+                {!agentsQuery.isLoading && agents.length > 0 && agents.map((agent, index) => {
                     const identity = resolveTelegramIdentity(agent);
                     const linkData = agent.id ? linkTokens[agent.id] : undefined;
                     const displayHandle = identity?.username ? `@${identity.username}` : identity?.external_id;
@@ -477,7 +472,7 @@ export default function TeamPage() {
                             Knowledge Studio
                         </Link>
                     )}
-                    {canAccessConsole(role, "settings", "read") && (
+                    {(canAccessConsole(role, "settings", "read") || canAccessConsole(role, "provisioning", "read")) && (
                         <Link className="btn-primary" href="/settings">
                             Provisioning
                         </Link>

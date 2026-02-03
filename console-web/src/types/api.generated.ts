@@ -949,12 +949,12 @@ export interface components {
             id?: string;
             name?: string | null;
             /** @enum {string} */
-            role?: "platform_admin" | "owner" | "admin" | "manager" | "support";
+            role?: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
             /** Format: uuid */
             client_id?: string;
             /**
              * Format: uuid
-             * @description Required when role=manager.
+             * @description Required when role=manager or specialist.
              */
             branch_id?: string | null;
             is_active?: boolean;
@@ -972,7 +972,7 @@ export interface components {
             id?: string;
             name?: string | null;
             /** @enum {string} */
-            role?: "platform_admin" | "owner" | "admin" | "manager" | "support";
+            role?: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
             /** Format: uuid */
             client_id?: string;
             /** Format: uuid */
@@ -1259,7 +1259,7 @@ export interface components {
             /** Format: uuid */
             branch_id?: string | null;
             /** @enum {string} */
-            role: "platform_admin" | "owner" | "admin" | "manager" | "support";
+            role: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
             name?: string | null;
             is_active?: boolean | null;
             oidc_subject?: string | null;

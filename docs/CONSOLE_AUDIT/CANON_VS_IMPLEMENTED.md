@@ -23,8 +23,7 @@ Legend
 ## 1) Roles & RBAC
 
 ### Runtime roles
-- [match] Реальные роли в коде: platform_admin/owner/admin/manager/support. Canon: `SPECS/CONTROL_PLANE.md` (Runtime roles). Impl: `docs/CONSOLE_AUDIT/roles/*`.
-- [missing] Specialist/Viewer роли не реализованы. Canon: `SPECS/CONTROL_PLANE.md` (Roles). Impl: отсутствуют в RBAC (`console-web/src/lib/api-client.ts`).
+- [match] Реальные роли в коде: platform_admin/owner/admin/manager/support/specialist/viewer. Canon: `SPECS/CONTROL_PLANE.md` (Runtime roles). Impl: `console-web/src/lib/api-client.ts`, `truffles-api/app/services/console_auth.py`.
 
 ### Platform Admin
 - [match] Доступ к Tenants, Ops, Audit, Inbox, Settings/Provisioning, Knowledge, Team, Calendar. Canon: `SPECS/CONTROL_PLANE.md` (RBAC + IA). Impl: `docs/CONSOLE_AUDIT/roles/platform_admin.md`.
@@ -37,11 +36,11 @@ Legend
 ### Manager
 - [match] Inbox + Calendar (read/write). Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/roles/manager.md`.
 - [partial] Knowledge read-only: реализовано как read, без write. Canon: `SPECS/CONTROL_PLANE.md` (Manager: read‑only Knowledge). Impl: `docs/CONSOLE_AUDIT/pages/knowledge.md`.
-- [missing] Team directory (read-only). Canon: `SPECS/CONTROL_PLANE.md` (IA: Manager includes Team directory). Impl: Team недоступен (`console-web/src/lib/api-client.ts`).
+- [match] Team directory (read-only). Canon: `SPECS/CONTROL_PLANE.md` (IA: Manager includes Team directory). Impl: `console-web/src/lib/api-client.ts`, `console-web/src/app/team/page.tsx`.
 
 ### Support
 - [match] Read-only Inbox + Ops + Audit, diagnostics visible. Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/roles/support.md`.
-- [missing] Read-only Provisioning (support). Canon: `SPECS/CONTROL_PLANE.md` (Provisioning read includes support). Impl: Settings/Provisioning недоступны support.
+- [match] Read-only Provisioning (support). Canon: `SPECS/CONTROL_PLANE.md` (Provisioning read includes support). Impl: `console-web/src/app/settings/page.tsx`.
 
 ---
 
@@ -95,7 +94,7 @@ Legend
 - [partial] Support read‑only provisioning отсутствует. Canon: `SPECS/CONTROL_PLANE.md` (Provisioning read includes support). Impl: Settings недоступны support.
 
 ### Ops / Status
-- [partial] Полный Ops‑экран доступен owner/admin/support; канон ожидает «короткий статус» для owner/admin и полный для platform_admin. Canon: `SPECS/CONTROL_PLANE.md` §10. Impl: `docs/CONSOLE_AUDIT/pages/ops.md`.
+- [match] Owner/admin/support видят короткий статус; platform_admin — полный Ops. Canon: `SPECS/CONTROL_PLANE.md` §10. Impl: `console-web/src/components/OpsPage.tsx`.
 
 ### Audit
 - [match] Read‑only Audit доступен owner/admin/support. Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/pages/audit.md`.
@@ -116,10 +115,6 @@ Legend
 
 - Integrations page отсутствует (owner/admin/platform admin).
 - Insights/Analytics page отсутствует.
-- Manager не имеет Team directory (read-only).
-- Support не имеет read‑only доступа к Provisioning.
-- Specialist/Viewer роли не реализованы.
 - Inbox action “Передать/Эскалировать” отсутствует (есть только take/resolve).
 - Consultant tab не показывает first_response/resolve метрики.
 - Team Users не поддерживает invite/disable; Specialists без управления working_hours/availability.
-- Ops страница не разделяет «короткий статус» vs «полный Ops» по роли.

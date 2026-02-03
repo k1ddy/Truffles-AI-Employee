@@ -71,6 +71,8 @@ const ROLE_LABELS: Record<ConsoleRole, string> = {
     admin: "Admin",
     manager: "Manager",
     support: "Support",
+    specialist: "Специалист",
+    viewer: "Viewer",
 };
 
 function NavIcon({ children, className }: { children: ReactNode; className?: string }) {
@@ -465,7 +467,16 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
 
     const role = data?.agent?.role ?? "manager";
     const navItems = useMemo(
-        () => NAV_ITEMS.filter((item) => canAccessConsole(role, item.section, item.action ?? "read")),
+        () =>
+            NAV_ITEMS.filter((item) => {
+                if (item.section === "settings") {
+                    return (
+                        canAccessConsole(role, "settings", item.action ?? "read")
+                        || canAccessConsole(role, "provisioning", "read")
+                    );
+                }
+                return canAccessConsole(role, item.section, item.action ?? "read");
+            }),
         [role]
     );
 
