@@ -85,6 +85,22 @@ def test_resolve_case_sort_cursor():
     ) == created_at
 
 
+def test_format_case_metrics():
+    first_response_at = datetime.now(timezone.utc)
+    resolved_at = first_response_at + timedelta(minutes=12)
+    handover = SimpleNamespace(
+        first_response_at=first_response_at,
+        resolved_at=resolved_at,
+        resolution_time_seconds=720,
+    )
+
+    metrics = console_router._format_case_metrics(handover)
+
+    assert metrics["first_response_at"] == first_response_at.isoformat()
+    assert metrics["resolved_at"] == resolved_at.isoformat()
+    assert metrics["resolution_time_seconds"] == 720
+
+
 def test_require_branch_access_allows_matching_branch():
     branch_id = uuid4()
     context = SimpleNamespace(

@@ -1,0 +1,21 @@
+# SESSION 2026-02-03-console-inbox-escalate-metrics-a6 — Session 2026-02-03-console-inbox-escalate-metrics-a6
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-03-console-inbox-escalate-metrics.md
+- branch: feat/2026-02-03-console-inbox-escalate-metrics-a6
+- worktree: /home/zhan/worktrees/2026-02-03-console-inbox-escalate-metrics-a6
+- base_ref: origin/main
+- scope: Inbox action “Передать/Эскалировать” + Consultant metrics (first_response/resolve) in API/UI
+- done:
+  - Session created.
+  - Added return-to-bot action button in Inbox and surfaced first_response/resolve metrics.
+  - API schemas + OpenAPI updated; generated types regenerated.
+  - Tests + lint run (see evidence).
+- next:
+  - Review diff and proceed to commit.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-03-console-inbox-escalate-metrics.md
+  - /tmp/pytest_console_cases_helpers_20260203.txt
+  - /tmp/console_web_lint_inbox_escalate_20260203.txt
+- last_updated: 2026-02-03

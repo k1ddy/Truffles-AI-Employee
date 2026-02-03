@@ -67,11 +67,11 @@ Legend
 - [match] Queue signals: имя/телефон, превью, SLA, tags “Нужно ответить / На связи / Ошибка”. Canon: `SPECS/CONTROL_PLANE.md` §9.2. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
 - [match] Default sort by activity + filters (status/assigned/search/advanced). Canon: `SPECS/CONTROL_PLANE.md` §9.2. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
 - [match] Branch filter только при «All branches». Canon: `SPECS/CONTROL_PLANE.md` §9.2. Impl: `console-web/src/components/CaseList.tsx`.
-- [partial] Action bar: реализованы “Взять/Закрыть”; отсутствует “Передать/Эскалировать”. Canon: `SPECS/CONTROL_PLANE.md` §9.3. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
+- [match] Action bar: “Взять/Закрыть/Передать/Эскалировать” (role‑based). Canon: `SPECS/CONTROL_PLANE.md` §9.3. Impl: `console-web/src/components/CaseConversation.tsx`.
 - [match] Quick replies/macros + управление в Inbox. Canon: `SPECS/CONTROL_PLANE.md` §9.3. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
 - [match] Context strip (“Суть запроса/Последнее сообщение”). Canon: `SPECS/CONTROL_PLANE.md` §9.3. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
 - [match] Diagnostics tab gated for support/admin/owner/platform_admin. Canon: `SPECS/CONTROL_PLANE.md` §9.5. Impl: `docs/CONSOLE_AUDIT/pages/inbox.md`.
-- [partial] Consultant tab: есть assigned/status/last outbound, но нет first_response/resolve метрик. Canon: `SPECS/CONTROL_PLANE.md` §9.4. Impl: `console-web/src/components/CaseDetailsPanel.tsx`.
+- [match] Consultant tab: assigned/status + first_response/resolve метрики. Canon: `SPECS/CONTROL_PLANE.md` §9.4. Impl: `console-web/src/components/CaseDetailsPanel.tsx`.
 
 ### Case deep link
 - [match] `/cases/{id}` открывает тот же UX без очереди. Canon: `docs/CONSOLE_GUIDE.md` (Case view). Impl: `docs/CONSOLE_AUDIT/pages/case-detail.md`.
@@ -115,6 +115,4 @@ Legend
 
 - Integrations page отсутствует (owner/admin/platform admin).
 - Insights/Analytics page отсутствует.
-- Inbox action “Передать/Эскалировать” отсутствует (есть только take/resolve).
-- Consultant tab не показывает first_response/resolve метрики.
 - Team Users не поддерживает invite/disable; Specialists без управления working_hours/availability.

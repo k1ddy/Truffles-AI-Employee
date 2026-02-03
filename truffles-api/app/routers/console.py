@@ -569,6 +569,14 @@ def _resolve_last_activity_channel(
     return None
 
 
+def _format_case_metrics(handover: Handover) -> dict:
+    return {
+        "first_response_at": handover.first_response_at.isoformat() if handover.first_response_at else None,
+        "resolved_at": handover.resolved_at.isoformat() if handover.resolved_at else None,
+        "resolution_time_seconds": handover.resolution_time_seconds,
+    }
+
+
 def _fetch_case_health(db: Session, conversation: Conversation) -> dict:
     latest_message = (
         db.query(Message)
@@ -1485,6 +1493,7 @@ async def list_cases(
                 branch_id=conversation.branch_id,
                 channel=handover.channel,
                 created_at=handover.created_at.isoformat(),
+                **_format_case_metrics(handover),
                 sla_status=_calculate_sla_status(handover.created_at),
                 customer_name=user.name if user else None,
                 customer_phone=user.phone if user else None,
@@ -1601,6 +1610,7 @@ async def take_case(
                 created_at=case.created_at.isoformat(),
                 assigned_to_name=case.assigned_to_name,
                 branch_id=branch_id,
+                **_format_case_metrics(case),
             ),
             sync=ConsoleCaseActionSync(
                 telegram=_build_sync_status("skipped", "already_taken"),
@@ -1673,6 +1683,7 @@ async def take_case(
                 created_at=case.created_at.isoformat(),
                 assigned_to_name=case.assigned_to_name,
                 branch_id=branch_id,
+                **_format_case_metrics(case),
             ),
             sync=ConsoleCaseActionSync(
                 telegram=telegram_status,
@@ -1814,6 +1825,7 @@ async def resolve_case(
                 trigger_type=case.trigger_type,
                 created_at=case.created_at.isoformat(),
                 branch_id=branch_id,
+                **_format_case_metrics(case),
             ),
             sync=ConsoleCaseActionSync(
                 telegram=telegram_status,
@@ -1954,6 +1966,7 @@ async def return_case(
                 trigger_type=case.trigger_type,
                 created_at=case.created_at.isoformat(),
                 branch_id=branch_id,
+                **_format_case_metrics(case),
             ),
             sync=ConsoleCaseActionSync(
                 telegram=telegram_status,
@@ -2242,6 +2255,7 @@ async def get_case(
         branch_id=branch_id,
         channel=case.channel,
         created_at=case.created_at.isoformat(),
+        **_format_case_metrics(case),
         sla_status=sla_status,
         customer_name=customer_name,
         customer_phone=customer_phone,
