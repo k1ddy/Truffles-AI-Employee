@@ -1,0 +1,33 @@
+# SESSION 2026-02-03-console-prod-overlay-a6 — Session 2026-02-03-console-prod-overlay-a6
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-03-console-prod-overlay.md
+- branch: feat/2026-02-03-console-prod-overlay-a6
+- worktree: /home/zhan/worktrees/2026-02-03-console-prod-overlay-a6
+- base_ref: origin/main
+- scope: Verify prod console-web build freshness and diagnose selection overlay on console.truffles.kz
+- done:
+  - Session created.
+  - Verified prod console-web build SHA/time vs `origin/main` and API version.
+  - Collected `/console/v1/me` selection flags and console-web refresh error logs.
+  - Added session refresh guard to sign out on token refresh failures and unblock selection.
+  - Ran console-web lint.
+  - Redeployed console-web to apply overlay fix.
+- next:
+  - None.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-03-console-prod-overlay.md
+  - /tmp/console_web_build_env_20260203.txt
+  - /tmp/console_web_container_status_20260203.txt
+  - /tmp/console_origin_main_sha_20260203.txt
+  - /tmp/console_build_ancestor_check_20260203.txt
+  - /tmp/console_health_full_20260203.txt
+  - /tmp/console_me_summary_20260203.txt
+  - /tmp/console_me_company_only_20260203.txt
+  - /tmp/console_web_refresh_errors_20260203.txt
+  - /tmp/console_web_lint_console_prod_overlay_20260203.txt
+  - /tmp/console_web_redeploy_console_prod_overlay_20260203.txt
+  - /tmp/console_web_build_env_console_prod_overlay_20260203.txt
+  - /tmp/console_web_container_status_console_prod_overlay_20260203.txt
+- last_updated: 2026-02-03
