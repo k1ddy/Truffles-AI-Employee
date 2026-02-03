@@ -320,3 +320,62 @@ def test_get_or_create_conversation_sets_branch_id():
     )
 
     assert conversation.branch_id == branch_id
+
+
+def test_preflight_accepts_media_only_payload():
+    client = SimpleNamespace(id=uuid4(), name="demo_salon")
+    settings = SimpleNamespace(branch_resolution_mode="by_instance", webhook_secret=None)
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=client.id,
+        instance_id="inst-123",
+        knowledge_tag="branch-tag",
+        is_active=True,
+    )
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = branch
+    branch_query.filter.return_value.all.return_value = []
+
+    def _query_side_effect(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Branch or getattr(model, "key", None) == "phone":
+            return branch_query
+        return Mock()
+
+    db = Mock()
+    db.query.side_effect = _query_side_effect
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            messageType="audio",
+            mediaData={"type": "audio", "url": "https://example.com/voice.ogg"},
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                instanceId="inst-123",
+            ),
+        ),
+    )
+
+    response, preflight_payload = _run_preflight(
+        payload,
+        db,
+        provided_secret=None,
+        enforce_secret=False,
+        conversation_id=None,
+        resolve_trace_conversation=lambda **_: None,
+        record_early_trace=lambda *args, **kwargs: False,
+    )
+
+    assert response is None
+    assert preflight_payload["is_media_without_text"] is True
+    assert preflight_payload["message_text"] == "[audio]"

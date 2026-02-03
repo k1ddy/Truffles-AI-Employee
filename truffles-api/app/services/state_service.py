@@ -380,6 +380,13 @@ def escalate_to_pending(
         return Result.success(handover)
 
     except Exception as e:
+        try:
+            db.rollback()
+        except Exception as rollback_exc:
+            logger.warning(
+                "Escalation rollback failed",
+                extra={"context": {"error": str(rollback_exc)}},
+            )
         logger.error(f"Escalation failed: {e}")
         return Result.failure(str(e), "escalation_error")
 

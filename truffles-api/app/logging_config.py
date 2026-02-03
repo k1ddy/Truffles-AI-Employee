@@ -148,6 +148,12 @@ ESCALATION_COUNT = _get_or_create_metric(
     "Escalations triggered.",
     ("client_slug", "trigger"),
 )
+DELIVERY_FAILURE_COUNT = _get_or_create_metric(
+    Counter,
+    "delivery_failure_count",
+    "Delivery failures (webhook/outbox/provider).",
+    ("client_slug", "source", "provider", "reason"),
+)
 DATABASE_HEALTH_STATUS = _get_or_create_metric(
     Gauge,
     "health_check_database_status",
@@ -219,6 +225,23 @@ def record_outbox_latency(client_slug: str | None, wait_ms: float | None) -> Non
     if wait_ms < 0:
         return
     OUTBOX_LATENCY.labels(client_slug=_normalize_client_slug(client_slug)).observe(wait_ms / 1000.0)
+
+
+def record_delivery_failure(
+    client_slug: str | None,
+    *,
+    source: str,
+    provider: str,
+    reason: str,
+) -> None:
+    if DELIVERY_FAILURE_COUNT is None:
+        return
+    DELIVERY_FAILURE_COUNT.labels(
+        client_slug=_normalize_client_slug(client_slug),
+        source=str(source or "unknown"),
+        provider=str(provider or "unknown"),
+        reason=str(reason or "unknown"),
+    ).inc()
 
 
 def record_llm_time(client_slug: str | None, stage: str, elapsed_ms: float) -> None:

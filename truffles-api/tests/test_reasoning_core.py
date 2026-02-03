@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
 
+from app.contracts.result import Ok
 from app.routers.webhook import decision as decision_router
 from app.routers.webhook import trace as trace_router
-from app.schemas.webhook import WebhookBody, WebhookRequest, WebhookResponse
+from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookResponse
 from app.services import reasoning_core
 
 
@@ -57,3 +59,50 @@ async def test_reasoning_core_delegates_to_decision(monkeypatch):
     assert captured["kwargs"]["batch_messages"] == ["a", "b"]
     assert captured["kwargs"]["outbox_ids"] == ["o1"]
     assert captured["kwargs"]["outbox_created_at"] == outbox_created_at
+
+
+@pytest.mark.asyncio
+async def test_reasoning_core_fallback_on_exception(monkeypatch):
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="hi",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                instanceId="inst-1",
+                messageId="msg-1",
+            ),
+        ),
+    )
+    db = Mock()
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    send_calls: dict[str, object] = {}
+
+    def fake_send_message_safe(*args, **kwargs):
+        send_calls["called"] = True
+        return Ok("ok")
+
+    monkeypatch.setattr(decision_router, "_handle_webhook_payload", boom)
+    monkeypatch.setattr(reasoning_core, "send_message_safe", fake_send_message_safe)
+    monkeypatch.setattr(reasoning_core, "alert_error", lambda *args, **kwargs: None)
+
+    response = await reasoning_core.handle_webhook_payload(
+        payload,
+        db,
+        provided_secret=None,
+        enforce_secret=False,
+        enqueue_only=False,
+        skip_persist=False,
+        conversation_id=None,
+        batch_messages=None,
+        outbox_ids=None,
+        outbox_created_at=None,
+    )
+
+    assert response.success is True
+    assert response.bot_response == decision_router.MSG_DELIVERY_FAILED
+    assert send_calls.get("called") is True
+    db.rollback.assert_called_once()

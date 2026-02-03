@@ -20,7 +20,7 @@ Provisioning Wizard
 - Read-only banner shown when role lacks write access.
 - Company card:
   - Existing Company ID input (optional).
-  - Name + billing_info JSON inputs.
+  - Name + billing_info guided fields (contract, currency) with apply/load JSON controls and raw JSON textarea.
   - "Создать компанию" button.
 - Client card:
   - Existing Client ID input (optional).
@@ -33,9 +33,9 @@ Provisioning Wizard
   - Команда: create agent (name, role, OIDC subject, branch_id for manager) + created agents list.
   - Telegram: telegram_chat_id input; "Сохранить chat_id"; shows current chat_id.
   - Знания: knowledge_tag input; "Сохранить knowledge_tag".
-  - Booking: working_hours JSON + booking_settings JSON; "Сохранить booking данные".
+  - Booking: working_hours guided days/time + JSON details; booking_settings guided duration/buffer + JSON details; "Сохранить booking данные".
   - Go/No-Go: capabilities overrides (domain_slug, channels, providers, booking_mode, knowledge_upload/analytics/auto_learn),
-    readiness checklist, "Специалисты добавлены" checkbox, "Сохранить capabilities", effective capabilities JSON.
+    readiness checklist, "Специалисты добавлены" checkbox, "Сохранить capabilities", effective capabilities summary cards + raw JSON.
 - Controls: "Сбросить" resets local form state; "Назад"/"Далее" navigation.
   - "Далее" calls onboarding advance and is blocked when required fields are missing or the step is locked.
 

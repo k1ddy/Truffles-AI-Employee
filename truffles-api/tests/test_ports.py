@@ -39,6 +39,8 @@ class TestChatFlowAdapter(unittest.TestCase):
             remote_jid="123",
             message="hello",
             idempotency_key="id1",
+            notify_on_failure=False,
+            record_metrics=False,
         )
 
     @patch("app.services.chatflow_service.send_message_safe")

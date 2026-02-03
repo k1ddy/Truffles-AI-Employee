@@ -15,6 +15,7 @@ Resolved findings (fixed)
 - Inbox load more append (PR #495) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21575902168.
 - SLA sort server-side (PR #496) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21575159164.
 - Calendar default date local (PR #497) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21578194809, build `4614530` (`2026-02-01T00:01:02Z`).
+- Provisioning guided inputs + effective capabilities summary (PR #509) — CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21593761664.
 
 Open UX debt / code smells (implemented)
 
@@ -23,8 +24,8 @@ Open UX debt / code smells (implemented)
 | UX-01 | Calendar | Error banner renders raw JSON payload for specialists load failure. | Non-user-friendly error output, potential data leakage. | `console-web/src/app/calendar/page.tsx` (specialistsError details), PR #500, CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21580883767. | Fixed |
 | UX-02 | Calendar | Date input locked to `min=today`; past bookings cannot be viewed from UI. | No historical review/reschedule from calendar UI. | `console-web/src/app/calendar/page.tsx` (past dates toggle), PR TBD, CI TBD. | Fixed |
 | UX-03 | Inbox | Auto-refresh every 10s without pause/indicator. | Queue can change while scrolling or selecting a case. | `console-web/src/components/CaseList.tsx` (auto-refresh toggle), PR TBD, CI TBD. | Fixed |
-| UX-04 | Settings / Provisioning | JSON-only inputs for `billing_info`, `working_hours`, `booking_settings`. | High error rate; no guided forms or inline validation. | `console-web/src/components/ProvisioningWizard.tsx` (JSON textareas + `parseOptionalJson`). | Open |
-| UX-05 | Settings / Provisioning | Effective capabilities displayed as raw JSON block. | Hard to read/verify changes; no schema help. | `console-web/src/components/ProvisioningWizard.tsx` (effective JSON preview). | Open |
+| UX-04 | Settings / Provisioning | JSON-only inputs for `billing_info`, `working_hours`, `booking_settings`. | High error rate; no guided forms or inline validation. | `console-web/src/components/ProvisioningWizard.tsx` (guided inputs + JSON sync), PR #509 https://github.com/k1ddy/Truffles-AI-Employee/pull/509, CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21593761664. | Fixed |
+| UX-05 | Settings / Provisioning | Effective capabilities displayed as raw JSON block. | Hard to read/verify changes; no schema help. | `console-web/src/components/ProvisioningWizard.tsx` (summary cards + raw JSON details), PR #509 https://github.com/k1ddy/Truffles-AI-Employee/pull/509, CI https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21593761664. | Fixed |
 | UX-06 | Inbox | Нет видимости свежести списка (last updated / fetching). | Операторы не понимают актуальность очереди. | `console-web/src/components/CaseList.tsx`. | Fixed |
 | UX-07 | Inbox | Ошибки отправки видны только в toast, нет статуса/повтора. | Потеря сообщений и неясный статус. | `console-web/src/components/ChatInterface.tsx`. | Fixed |
 

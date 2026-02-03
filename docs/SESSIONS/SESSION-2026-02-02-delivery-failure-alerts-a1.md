@@ -1,0 +1,40 @@
+# SESSION 2026-02-02-delivery-failure-alerts-a1 — Session 2026-02-02-delivery-failure-alerts-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-02-delivery-failure-alerts.md
+- branch: feat/2026-02-02-delivery-failure-alerts-a1
+- worktree: /home/zhan/worktrees/2026-02-02-delivery-failure-alerts-a1
+- base_ref: origin/main
+- scope: Delivery-failure fallback/alerts + handover trigger constraint + tests.
+- done:
+  - Added handover trigger constraint migration + monitoring hooks.
+  - Added webhook fallback + outbox failure alerts/metrics.
+  - Added/updated tests for fallback + media-only preflight.
+  - Added Prometheus alert rules for delivery failures + reloaded Prometheus config.
+  - Rebuilt/restarted truffles-api/outbox/sentinel from worktree build.
+  - Simulated outbox invalid payload to trigger delivery_failure_count + Prometheus alert.
+  - Ran fallback live-check via forced exception (allowlisted JID) to confirm fallback response send.
+  - Restarted truffles-outbox-service using local image build.
+  - Fixed CI: import ordering + ChatFlowAdapter test expectation.
+- next:
+  - Apply migration on DB + capture evidence logs/metrics.
+  - Update STATE.md with evidence.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-02-delivery-failure-alerts.md
+  - /tmp/handovers_trigger_type_migration_20260202.txt
+  - pytest -q truffles-api/tests/test_reasoning_core.py
+  - pytest -q truffles-api/tests/test_branch_routing_instance.py
+  - /home/zhan/infrastructure/alert_rules.yml
+  - /tmp/prometheus_reload_20260202.txt
+  - /tmp/prometheus_rules_delivery_failure_20260202.txt
+  - /tmp/outbox_invalid_insert_20260202b.txt
+  - /tmp/outbox_process_20260202b.txt
+  - /tmp/outbox_failure_row_20260202.txt
+  - /tmp/metrics_delivery_failure_20260202b.txt
+  - /tmp/prometheus_alerts_delivery_failure_20260202b.txt
+  - /tmp/fallback_livecheck_20260202.txt
+  - /tmp/outbox_service_restart_20260202.txt
+  - /tmp/ruff_check_delivery_fix_20260203.txt
+  - /tmp/pytest_test_ports_delivery_fix_20260203.txt
+- last_updated: 2026-02-03

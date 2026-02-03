@@ -83,6 +83,7 @@
 | `truffles-api/migrations/016_add_console_confirmations.sql` | Migration: console_confirmations (destructive safeguards) | Backend/OPS |
 | `truffles-api/migrations/017_add_console_macros.sql` | Migration: console_macros (Inbox быстрые ответы) | Backend/OPS |
 | `truffles-api/migrations/018_add_learning_consent_pack_candidates.sql` | Migration: learning consent + anonymization/retention + pack candidates | Backend/OPS |
+| `truffles-api/migrations/019_add_handover_trigger_types.sql` | Migration: expand handovers.trigger_type allowed values | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
@@ -114,6 +115,10 @@
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-kit.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-minimum-data-safe-mode.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-learning-consent-pack-candidates.md`
+- `docs/TASK_PACKAGES/TP-2026-02-03-console-merge-verify.md`
+- `docs/TASK_PACKAGES/TP-2026-02-03-console-redeploy-verify.md`
+- `docs/TASK_PACKAGES/TP-2026-02-03-console-settings-typefix.md`
+- `docs/TASK_PACKAGES/TP-2026-02-02-console-provisioning-ux.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-console-calendar-past-dates.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-console-pr-cleanup.md`
 - `docs/TASK_PACKAGES/TP-2026-02-03-calendar-provider-dec.md`
