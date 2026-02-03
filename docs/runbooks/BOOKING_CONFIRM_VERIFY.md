@@ -68,4 +68,4 @@ Common failures and fixes
 Notes
 - Script uses dry-run by default; DB writes require `--apply`.
 - Canceling appointments is optional and explicit.
-- Calendar sync outbox may fail if OAuth tokens are placeholders.
+- Calendar sync outbox may fail if OAuth tokens are placeholders. Fix: set `GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI` on API, complete OAuth via `/console/v1/calendar/google/connect` (callback `/api/calendar/callback`).

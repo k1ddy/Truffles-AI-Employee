@@ -25,6 +25,9 @@
   - Added booking confirm runbook + verification script for quickstart.
   - Added quickstart note to `AGENTS.md` for booking confirm verification.
   - Outbox event errors no longer overwrite decision_meta/trace; CA05/CA12 re-verified after container rebuild.
+  - Added console-web OAuth callback proxy route; rebuilt console-web container.
+  - Set Google OAuth env for API (GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI) and restarted API/outbox containers.
+  - Generated Google OAuth auth URL for demo_salon/branch_b (awaiting user consent).
 - next:
   - Decide on follow-ups for outbox_payload_guard errors and calendar sync failures (real OAuth vs mock).
   - Decide whether to force slot-confirmation prompt path (LLM low-confidence) for coverage.
@@ -35,6 +38,8 @@
   - docs/runbooks/BOOKING_CONFIRM_VERIFY.md
   - scripts/booking_confirm_verify.sh
   - docs/TASK_PACKAGES/TP-2026-02-03-outbox-calendar-sync-trace-guard.md
+  - docs/TASK_PACKAGES/TP-2026-02-03-calendar-oauth-callback.md
+  - console-web/src/app/api/calendar/callback/route.ts
   - /tmp/booking-confirm-20260203-121324
   - /tmp/booking-confirm-20260203-121324/livecheck_ca05_booking_commit.jsonl
   - /tmp/booking-confirm-20260203-121324/livecheck_ca12_booking_full.jsonl

@@ -95,6 +95,7 @@
 | `console-web/eslint.config.js` | ESLint flat config для console-web | Frontend |
 | `console-web/.env.e2e.example` | Шаблон env для console‑e2e | Frontend/QA |
 | `console-web/public/brand/` | Бренд‑ассеты консоли (логотипы) | Frontend |
+| `console-web/src/app/api/calendar/callback/route.ts` | Console API proxy for Google Calendar OAuth callback | Frontend |
 | `docs/CONSOLE_GUIDE.md` | Guide по Console (API, тесты, дебаг) | Frontend/Backend |
 | `docs/CONSOLE_AUDIT/` | Полная инвентаризация Console (ролевая карта + страницы + код/интеграции) | Frontend/Backend/Architect |
 | `docs/CONSOLE_AUDIT/UX_BACKLOG.md` | UX backlog (bugs/UX debt) по реализованной Console | Frontend/Backend/Architect |
@@ -122,6 +123,7 @@
 - `docs/TASK_PACKAGES/TP-2026-02-02-minimum-data-safe-mode.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-learning-consent-pack-candidates.md`
 - `docs/TASK_PACKAGES/TP-2026-02-03-booking-full-cycle-gcal.md`
+- `docs/TASK_PACKAGES/TP-2026-02-03-calendar-oauth-callback.md`
 - `docs/TASK_PACKAGES/TP-2026-02-03-outbox-calendar-sync-trace-guard.md`
 - `docs/TASK_PACKAGES/TP-2026-02-03-console-merge-verify.md`
 - `docs/TASK_PACKAGES/TP-2026-02-03-console-redeploy-verify.md`
