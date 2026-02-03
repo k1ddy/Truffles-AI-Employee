@@ -555,6 +555,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Inbound‑sync: внешние события пишутся в `calendar_blocks` (busy) и не переписывают SoT.
 - Конфликты провайдера (edit/delete synced event) → `RESCHEDULE_REQUESTED` + handoff, без авто‑перезаписи.
 - `confirm_slots` разрешён только при здоровом провайдере и свежем sync‑курсорe; иначе `collect_preferences`.
+- Напоминания/фоллоу‑ап: `reminder_jobs` создаются при записи, отправка — через outbox с consent‑gate.
 
 ### Behavioral Shield (реализовано)
 - Цель: отсечь спам/машинную скорость и токсичные сообщения до LLM.

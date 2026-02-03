@@ -22,6 +22,7 @@ from app.models.calendar_block import CalendarBlock
 from app.models.service import Service
 from app.models.specialist import Specialist
 from app.models.specialist_service import SpecialistService
+from app.services.appointment_reminder_service import mark_pending_reminders_failed
 
 logger = get_logger(__name__)
 
@@ -309,6 +310,12 @@ class SchedulingService:
         if reason:
             appointment.notes = f"{appointment.notes or ''}\nCancel: {reason}".strip()
         appointment.updated_at = datetime.now(timezone.utc)
+        mark_pending_reminders_failed(
+            self.db,
+            appointment_id=appointment.id,
+            reason="cancelled",
+            commit=False,
+        )
         self.db.commit()
 
         return appointment

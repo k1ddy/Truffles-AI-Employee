@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Client, ClientSettings, Prompt
 from app.services.alert_service import alert_warning
+from app.services.calendar_sync_service import schedule_inbound_syncs
 from app.services.health_service import check_and_heal_conversations, get_system_health
 from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
 
@@ -448,6 +449,7 @@ async def process_outbox(
         max_attempts=max_attempts,
         retry_backoff_seconds=retry_backoff_seconds,
     )
+    inbound_results = schedule_inbound_syncs(db)
     rows = claim_pending_outbox_batches(
         db,
         limit=limit,
@@ -463,6 +465,8 @@ async def process_outbox(
         max_attempts=max_attempts,
         retry_backoff_seconds=retry_backoff_seconds,
     )
+    if inbound_results.get("scheduled") or inbound_results.get("errors"):
+        results["calendar_inbound"] = inbound_results
     if released["released"] or released["failed"]:
         results["released_stale"] = released["released"]
         results["failed_stale"] = released["failed"]

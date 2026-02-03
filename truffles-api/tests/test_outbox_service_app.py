@@ -55,6 +55,12 @@ def test_outbox_service_processes(client, monkeypatch):
             "app.routers.outbox_service.claim_pending_outbox_batches",
             return_value=[{"id": "row-1"}],
         ) as mock_claim, patch(
+            "app.routers.outbox_service.schedule_inbound_syncs",
+            return_value={"scheduled": 0, "errors": 0},
+        ) as mock_inbound, patch(
+            "app.routers.outbox_service.process_reminder_jobs",
+            return_value={"total": 0, "sent": 0, "failed": 0},
+        ) as mock_reminders, patch(
             "app.routers.webhook._process_outbox_rows",
             new=AsyncMock(return_value={"sent": 1, "failed": 0}),
         ) as mock_process:
@@ -67,6 +73,8 @@ def test_outbox_service_processes(client, monkeypatch):
             assert data["failed_stale"] == 0
             mock_release.assert_called_once()
             mock_claim.assert_called_once()
+            mock_inbound.assert_called_once()
+            mock_reminders.assert_called_once()
             mock_process.assert_awaited_once()
     finally:
         app.dependency_overrides.pop(get_db, None)

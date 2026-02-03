@@ -35,6 +35,12 @@ from app.routers.webhook.trace import (
 from app.schemas.outbox_payload import validate_outbox_payload
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.alert_service import alert_error
+from app.services.calendar_sync_service import (
+    OUTBOX_EVENT_CALENDAR_SYNC_INBOUND,
+    OUTBOX_EVENT_CALENDAR_SYNC_OUTBOUND,
+    process_inbound_sync_event,
+    process_outbound_sync_event,
+)
 from app.services.escalation_service import get_telegram_credentials
 from app.services.outbox_service import (
     build_inbound_message_id,
@@ -833,6 +839,53 @@ async def _process_outbox_rows(
         try:
             if _is_outbox_event(payload_json):
                 event_type = payload_json.get("event_type")
+                if event_type in {
+                    OUTBOX_EVENT_CALENDAR_SYNC_OUTBOUND,
+                    OUTBOX_EVENT_CALENDAR_SYNC_INBOUND,
+                }:
+                    if event_type == OUTBOX_EVENT_CALENDAR_SYNC_OUTBOUND:
+                        ok, error = process_outbound_sync_event(
+                            db=db,
+                            payload_json=payload_json,
+                        )
+                    else:
+                        ok, error = process_inbound_sync_event(
+                            db=db,
+                            payload_json=payload_json,
+                        )
+                    if not ok:
+                        if error in {
+                            "missing_fields",
+                            "invalid_appointment_id",
+                            "appointment_not_found",
+                            "missing_branch_id",
+                            "invalid_branch_id",
+                            "branch_not_found",
+                            "connection_missing",
+                            "unsupported_action",
+                        }:
+                            _record_outbox_payload_error(
+                                outbox_id=outbox_id_str, reason=f"event:{error}"
+                            )
+                            mark_outbox_status(
+                                db,
+                                outbox_id=outbox_id,
+                                status="FAILED",
+                                last_error=f"invalid_payload:{error}"[:500],
+                                next_attempt_at=None,
+                            )
+                            _notify_outbox_failure(
+                                outbox_id=outbox_id_str,
+                                reason="invalid_payload",
+                                error=f"event:{error}",
+                                provider="calendar",
+                                attempts=int(row.get("attempts") or 0),
+                            )
+                            results["failed"] += 1
+                            return
+                        raise RuntimeError(f"calendar_sync_failed:{error or 'unknown'}")
+                    results["sent"] += 1
+                    return
                 if event_type not in {"whatsapp.send_text", "whatsapp.send_media"}:
                     _record_outbox_payload_error(outbox_id=outbox_id_str, reason=f"event:{event_type}")
                     mark_outbox_status(

@@ -253,13 +253,15 @@ class BookingService:
             # Sync with Google Calendar (async-safe, after commit)
             if specialist.google_calendar_id:
                 try:
-                    event_id = self.calendar_service.create_event(
+                    result = self.calendar_service.create_event(
                         calendar_id=specialist.google_calendar_id,
                         client_id=client_id,
                         branch_id=booking.branch_id,
-                        booking=booking,
-                        specialist_name=specialist.name
+                        appointment=booking,
+                        specialist_name=specialist.name,
+                        service_name=booking.service_type,
                     )
+                    event_id = result.get("id") if isinstance(result, dict) else None
                     if event_id:
                         booking.google_event_id = event_id
                         booking.google_sync_status = "synced"
