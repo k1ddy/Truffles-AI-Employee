@@ -49,7 +49,9 @@ BookingCancelResult
 
 Rules
 - Idempotency required for create_booking.
-- Errors are returned as Result.fail with stable codes (CALENDAR_TIMEOUT, SLOT_UNAVAILABLE).
+- Errors are returned as Result.fail with stable codes (CALENDAR_TIMEOUT, SLOT_UNAVAILABLE, CALENDAR_CONFLICT, CALENDAR_STALE).
+- Provider data never overwrites SoT; inbound provider events map to busy blocks only.
+- Availability must be fresh; stale data should return CALENDAR_STALE (caller falls back to collect_preferences).
 
 Notes
 - Breaking changes require a new version file (calendar_port.v2.md).

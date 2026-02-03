@@ -306,3 +306,19 @@ gaps:
     acceptance_tests:
       - "Consent prompt shown once; pending stored; yes persists memory in conversation.context"
       - "MEMORY_PROFILE_ENABLED=0 produces no memory writes"
+
+  - id: "GAP-025"
+    title: "Calendar provider sync for appointments not implemented"
+    status: "NOT_IMPLEMENTED"
+    why_it_matters: "confirm_slots and live availability cannot be safely enabled; external calendar drift risks double-booking."
+    evidence:
+      - "truffles-api/app/services/google_calendar_service.py (OAuth + direct API; no outbox sync)"
+      - "truffles-api/app/routers/calendar.py (reads AppointmentSyncState only)"
+      - "truffles-api/app/models/calendar_sync_cursor.py (no runtime usage)"
+      - "truffles-api/app/services/booking_service.py (legacy direct Google sync)"
+      - "SPECS/ARCHITECTURE.md (requires outbox-based provider sync)"
+    proposed_fix_mvp: "Add outbox-based outbound sync (appointments->Google) + inbound busy->calendar_blocks; record appointment_sync_states + conflict policy; staleness gate for confirm_slots."
+    acceptance_tests:
+      - "Appointment create enqueues outbox event and updates appointment_sync_states with external_id"
+      - "Inbound Google event creates/updates calendar_blocks only (no SoT overwrite)"
+      - "Stale sync disables confirm_slots and falls back to collect_preferences"

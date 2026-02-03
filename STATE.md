@@ -12,6 +12,7 @@
 - DONE: DEC-020 Hybrid LLM‑plan (plan → validate → tool → compose; tool‑first; pack‑only; lexicons fallback) — evidence: `docs/IMPERIUM_DECISIONS.yaml`, `STRATEGY/VISION.md`, `STRATEGY/REQUIREMENTS.md`, `STRATEGY/TECH_ROADMAP.md`, `SPECS/ARCHITECTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/SYSTEM_REFERENCE.md`, `SPECS/ESCALATION.md`, `docs/TASK_PACKAGES/TP-2026-02-02-hybrid-llm-plan-dec.md`.
 - DONE: Hybrid LLM‑plan implementation (router plan JSON + validator + tool‑first) — evidence: `contracts/llm/llm_plan_output.v1.jsonschema`, `prompts/llm_plan.md`, `truffles-api/app/schemas/intent.py`, `truffles-api/app/services/intent_service.py`, `truffles-api/app/routers/webhook/decision.py`, `truffles-api/tests/test_message_endpoint.py`, `truffles-api/tests/test_booking_appointments.py`, `/tmp/pytest_message_endpoint_hybrid_llm_plan.txt`, `/tmp/pytest_golden_eval_hybrid_llm_plan.txt`, `/tmp/chaos_hybrid_llm_plan` (summary/report/failures).
 - GAP: Hybrid LLM‑plan chaos-sim failures (action_mismatch/expected_reply_type_mismatch/missing_decision_meta/trace/ood_false_positive) — evidence: `/tmp/chaos_hybrid_llm_plan` (summary + failures.partial.jsonl).
+- GAP: Calendar provider sync (appointments→Google + inbound busy blocks + staleness gate) not implemented — evidence: `truffles-api/app/services/google_calendar_service.py`, `truffles-api/app/routers/calendar.py`, `truffles-api/app/models/calendar_sync_cursor.py`, `truffles-api/app/services/booking_service.py`, `SPECS/ARCHITECTURE.md`.
 - DONE: DEC-019 owner-doc sync + implementation TP (compiled artifacts only) — evidence: `SPECS/ARCHITECTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/SYSTEM_REFERENCE.md`, `SPECS/ACTIVE_LEARNING.md`, `STRATEGY/REQUIREMENTS.md`, `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md`, `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-docs.md`, `STRUCTURE.md`.
 - DONE: Pack-Compiler runtime (compiled artifacts only + policy/signal schemas + compiled snapshot) — evidence: `truffles-api/app/services/pack_compiler_service.py`, `contracts/packs/signal_graph.v1.jsonschema`, `contracts/policy/policy_bundle.v1.jsonschema`, `truffles-api/app/services/knowledge_registry_service.py`, `truffles-api/app/services/knowledge_snapshot_service.py`, `truffles-api/app/services/knowledge_snapshot_consumer.py`, `truffles-api/app/routers/webhook/decision.py`, `truffles-api/app/services/demo_salon_knowledge.py`, `/tmp/pytest_pack_compiler_2026-02-01.txt`, `/tmp/pytest_policy_dsl_2026-02-01.txt`, `/tmp/pytest_knowledge_snapshot_gateway_2026-02-01.txt`, `/tmp/pytest_message_signal_snapshot_2026-02-01.txt`.
 - DONE: Auto-ingest approvals (learned_responses queue + Telegram approve/reject + auto-approve roles + draft apply) — evidence: `truffles-api/app/services/learned_response_service.py`, `truffles-api/app/services/learning_service.py`, `truffles-api/app/services/manager_message_service.py`, `truffles-api/app/services/telegram_service.py`, `truffles-api/app/routers/telegram_webhook.py`, `/tmp/pytest_learning_service_2026-02-01.txt`.
@@ -302,6 +303,11 @@
 ### 2026-01-24 — Calendar scheduling DEC + specs (DONE)
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-calendar-dec-phase0.md`
 - Evidence: DEC‑013 в `docs/IMPERIUM_DECISIONS.yaml`; канон‑доки обновлены (`SPECS/ARCHITECTURE.md`, `SPECS/MULTI_TENANT.md`).
+
+### 2026-02-03 — Calendar provider policy (PLAN)
+- Task Package: `docs/TASK_PACKAGES/TP-2026-02-03-calendar-provider-dec.md`
+- Scope: outbound/inbound sync policy, conflict handling, staleness gate for confirm_slots.
+- Evidence: doc-only updates (DEC/specs/GAP).
 
 ### 2026-01-24 — Calendar scheduling data model + migrations (DONE)
 - Task Package: `docs/TASK_PACKAGES/TP-2026-01-24-calendar-data-model-phase1.md`
