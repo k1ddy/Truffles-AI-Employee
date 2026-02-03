@@ -1,0 +1,24 @@
+# SESSION 2026-02-03-session-index-hygiene-a1 — Session index hygiene
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-03-session-index-hygiene.md
+- branch: feat/2026-02-03-session-index-hygiene-a1
+- worktree: /home/zhan/worktrees/2026-02-03-session-index-hygiene-a1
+- base_ref: origin/main
+- scope: Session index drift guard (rebuild script + session_start auto-commit).
+- done:
+  - Added session_index_rebuild script for SESSION_INDEX recovery.
+  - Added session_start auto-commit option (ENV/flag) for session log + index.
+  - Updated AGENTS/STRUCTURE/STATE guidance for session drift control.
+  - Checks: `bash -n scripts/session_start.sh scripts/session_index_rebuild.sh`.
+- next:
+  - Ready for commit/PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-03-session-index-hygiene.md
+  - scripts/session_index_rebuild.sh
+  - scripts/session_start.sh
+  - AGENTS.md
+  - STRUCTURE.md
+  - STATE.md
+- last_updated: 2026-02-03

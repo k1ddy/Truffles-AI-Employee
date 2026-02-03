@@ -204,6 +204,8 @@ LLM даёт смысл (intent/slots) и формулировку; коммит
 - Каждая сессия фиксируется в `docs/SESSIONS/SESSION-<id>.md` и `docs/SESSION_INDEX.md` **до** начала правок.
 - Task Package готов до старта сессии; без него `scripts/session_start.sh` не запускать.
 - Старт сессии: `scripts/session_start.sh --session-id ... --task-package docs/TASK_PACKAGES/TP-....md` (создаёт worktree/branch + лог; Task Package должен существовать).
+- Чтобы не копить незакомиченные session-артефакты, можно включать авто-коммит: `SESSION_AUTO_COMMIT=1 scripts/session_start.sh ...` (фиксирует session log + index в ветке).
+- Если `docs/SESSION_INDEX.md` дрейфит/конфликтует — пересобрать его из `docs/SESSIONS/*` скриптом `scripts/session_index_rebuild.sh`.
 - После compaction/амнезии: использовать `scripts/session_resume.sh` и продолжать в указанном worktree (новую сессию не создавать). Новый `session_start` разрешён только с `--force-new` и осознанным параллельным процессом.
 - `session_id` обязателен и должен включать суффикс агента: `YYYY-MM-DD-<slug>-<agent>` (пример: `2026-01-27-contracts-a1`).
 - `SESSION_AGENT` обязателен (например: `a1`, `a2`, `a3`). `session_start`/`session_resume`/`session_check` блокируют кросс‑агентные сессии.
