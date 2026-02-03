@@ -19,6 +19,7 @@
 - GAP: Calendar sync outbound failed for confirm_slots appointments (outbox status FAILED; placeholder tokens / no OAuth) — evidence: `/tmp/sql_livecheck_outbox_calendar_sync_20260203g.txt`, `/tmp/sql_branch_b_calendar_tokens_20260203f.txt`.
 - DONE: Outbox event errors no longer overwrite decision_meta/trace for calendar sync payloads — evidence: `truffles-api/app/routers/webhook/outbox.py`, `/tmp/booking-confirm-20260203-121324/livecheck_ca05_booking_commit.jsonl`, `/tmp/booking-confirm-20260203-121324/livecheck_ca12_booking_full.jsonl`, `/tmp/booking-confirm-20260203-121324/sql_message_decision_meta_ca05_fix.txt`.
 - DONE: Console OAuth callback proxy for Google Calendar — evidence: `console-web/src/app/api/calendar/callback/route.ts`.
+- GAP: OAuth callback redirect fails on remote host (redirect_uri points to `console.truffles.kz`, console build not updated on remote; redirect lands on `0.0.0.0:3000`), blocking Google tokens — evidence: user report + PR #521 `https://github.com/k1ddy/Truffles-AI-Employee/pull/521`.
 - GAP: Slot confirmation prompt path not exercised (slot_confirmation_required=false on deterministic slot matches) — evidence: `/tmp/livecheck_ca12_booking_full_20260203g.jsonl`.
 - DONE: Booking confirm verification runbook + script for fast start/evidence — evidence: `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`, `scripts/booking_confirm_verify.sh`.
 - DONE: Session index drift guard (rebuild script + auto-commit on session_start) — evidence: `scripts/session_index_rebuild.sh`, `scripts/session_start.sh`, `AGENTS.md`, `STRUCTURE.md`.
