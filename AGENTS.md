@@ -178,6 +178,7 @@ LLM даёт смысл (intent/slots) и формулировку; коммит
   - `scripts/test_api_container.sh` (предпочтительно).
   - или `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml ...`
 - `ops/diagnose.py` — это live‑check/trace, **не** замена pytest. Используй после тестов, когда нужно проверить живой поток.
+- Быстрый старт booking confirm: `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` + `scripts/booking_confirm_verify.sh`.
 
 **Локальные тесты:**
 - локально можно запускать для скорости,

@@ -52,6 +52,7 @@
 | `scripts/session_gate.sh` | Gate для doc-only и session log | Brain/Architect |
 | `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
 | `scripts/test_api_container.sh` | Контейнерный pytest (drift‑safe, sanitized env) | Backend/QA |
+| `scripts/booking_confirm_verify.sh` | Runbook скрипт: booking confirm verification + evidence | QA/OPS/Brain |
 | `scripts/restart_knowledge_gateway.sh` | Перезапуск Knowledge Gateway (shadow) | OPS |
 | `scripts/restart_provider_gateway.sh` | Перезапуск Provider Gateway (shadow) | OPS |
 | `scripts/restart_inbox_service.sh` | Перезапуск Inbox Service (shadow) | OPS |
@@ -99,6 +100,7 @@
 | `docs/CONSOLE_AUDIT/UX_BACKLOG.md` | UX backlog (bugs/UX debt) по реализованной Console | Frontend/Backend/Architect |
 | `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
 | `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |
+| `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` | Booking confirm verification runbook | QA/OPS/Brain |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
 | `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |
 | `docs/REPORTS/` | Отчёты по прогонам/изменениям | Brain/Architect |
@@ -120,6 +122,7 @@
 - `docs/TASK_PACKAGES/TP-2026-02-02-minimum-data-safe-mode.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-learning-consent-pack-candidates.md`
 - `docs/TASK_PACKAGES/TP-2026-02-03-booking-full-cycle-gcal.md`
+- `docs/TASK_PACKAGES/TP-2026-02-03-outbox-calendar-sync-trace-guard.md`
 - `docs/TASK_PACKAGES/TP-2026-02-03-console-merge-verify.md`
 - `docs/TASK_PACKAGES/TP-2026-02-03-console-redeploy-verify.md`
 - `docs/TASK_PACKAGES/TP-2026-02-03-console-settings-typefix.md`
