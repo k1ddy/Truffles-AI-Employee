@@ -6,9 +6,9 @@ from uuid import UUID
 
 import pytest
 
+from app.contracts.result import Ok
 from app.routers.webhook import decision as decision_router
 from app.routers.webhook import trace as trace_router
-from app.contracts.result import Ok
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookResponse
 from app.services import reasoning_core
 

@@ -16,6 +16,7 @@
   - Simulated outbox invalid payload to trigger delivery_failure_count + Prometheus alert.
   - Ran fallback live-check via forced exception (allowlisted JID) to confirm fallback response send.
   - Restarted truffles-outbox-service using local image build.
+  - Fixed CI: import ordering + ChatFlowAdapter test expectation.
 - next:
   - Apply migration on DB + capture evidence logs/metrics.
   - Update STATE.md with evidence.
@@ -34,4 +35,6 @@
   - /tmp/prometheus_alerts_delivery_failure_20260202b.txt
   - /tmp/fallback_livecheck_20260202.txt
   - /tmp/outbox_service_restart_20260202.txt
+  - /tmp/ruff_check_delivery_fix_20260203.txt
+  - /tmp/pytest_test_ports_delivery_fix_20260203.txt
 - last_updated: 2026-02-03

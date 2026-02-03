@@ -34,13 +34,13 @@ from app.routers.webhook.trace import (
 )
 from app.schemas.outbox_payload import validate_outbox_payload
 from app.schemas.webhook import WebhookRequest, WebhookResponse
+from app.services.alert_service import alert_error
 from app.services.escalation_service import get_telegram_credentials
 from app.services.outbox_service import (
     build_inbound_message_id,
     enqueue_outbox_message,
     mark_outbox_status,
 )
-from app.services.alert_service import alert_error
 from app.services.state_machine import ConversationState
 from app.services.state_service import is_simulation_context
 from app.services.telegram_service import TelegramService
@@ -67,16 +67,20 @@ def _coerce_outbox_created_at(value: datetime | None) -> datetime:
         return value.replace(tzinfo=timezone.utc)
     return value
 
+
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
     if value is None:
         return default
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
+
 def _use_provider_gateway_outbound() -> bool:
     return _is_env_enabled(os.environ.get("PROVIDER_GATEWAY_OUTBOUND_ENABLED"), default=False)
 
+
 def _is_outbox_event(payload_json: dict | None) -> bool:
     return isinstance(payload_json, dict) and payload_json.get("schema_version") == "outbox.v1"
+
 
 def _is_send_text_event(payload_json: dict | None) -> bool:
     return _is_outbox_event(payload_json) and payload_json.get("event_type") == "whatsapp.send_text"
