@@ -115,6 +115,7 @@
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-kit.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-minimum-data-safe-mode.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-learning-consent-pack-candidates.md`
+- `docs/TASK_PACKAGES/TP-2026-02-03-console-merge-verify.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-console-provisioning-ux.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-console-calendar-past-dates.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-console-pr-cleanup.md`
