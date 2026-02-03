@@ -551,6 +551,10 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Branch‑scope: календарь, токены, настройки и права строго по `branch_id`, с `timezone` на филиале.
 - При деградации провайдера — fail‑closed на `collect_preferences` + эскалация, без обещаний слотов.
 - Данные бизнеса (мастера, часы, услуги/длительности/буферы) — только из БД/онбординга, без хардкода.
+- Outbound‑sync: изменения `appointments` пишутся в `appointment_sync_states` и отправляются в провайдера только через outbox.
+- Inbound‑sync: внешние события пишутся в `calendar_blocks` (busy) и не переписывают SoT.
+- Конфликты провайдера (edit/delete synced event) → `RESCHEDULE_REQUESTED` + handoff, без авто‑перезаписи.
+- `confirm_slots` разрешён только при здоровом провайдере и свежем sync‑курсорe; иначе `collect_preferences`.
 
 ### Behavioral Shield (реализовано)
 - Цель: отсечь спам/машинную скорость и токсичные сообщения до LLM.

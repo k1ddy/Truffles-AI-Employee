@@ -116,6 +116,7 @@
 - `docs/TASK_PACKAGES/TP-2026-02-02-learning-consent-pack-candidates.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-console-calendar-past-dates.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-console-pr-cleanup.md`
+- `docs/TASK_PACKAGES/TP-2026-02-03-calendar-provider-dec.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-p0.md`
 - `docs/TASK_PACKAGES/TP-2026-01-23-console-telegram-verify-test.md`

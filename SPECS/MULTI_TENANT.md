@@ -516,6 +516,7 @@ client_pack:
 Если `availability_provider` = `none/manual` (включая Excel/TXT), бот **не обещает слоты**, только собирает предпочтения.
 Branch‑overrides допустимы для `booking_mode`, `availability_provider`, `confirmation_policy` и `timezone`.
 Календарь и токены по умолчанию **per‑branch**, без кросс‑branch доступа.
+`confirm_slots` разрешён только при здоровом провайдере и свежем sync‑курсоре; иначе fallback в `collect_preferences`.
 
 **Оплата (только info):**
 ```yaml

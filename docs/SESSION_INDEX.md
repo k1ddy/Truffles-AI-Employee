@@ -121,3 +121,4 @@
 | 2026-02-02-console-pr-cleanup-a5 | done | feat/2026-02-02-console-pr-cleanup-a5 | /home/zhan/worktrees/2026-02-02-console-pr-cleanup-a5 | docs/TASK_PACKAGES/TP-2026-02-02-console-pr-cleanup.md | 2026-02-02 |
 | 2026-02-02-learning-consent-pack-candidates-a1 | done | feat/2026-02-02-learning-consent-pack-candidates-a1 | /home/zhan/worktrees/2026-02-02-learning-consent-pack-candidates-a1 | docs/TASK_PACKAGES/TP-2026-02-02-learning-consent-pack-candidates.md | 2026-02-02 |
 | 2026-02-02-requirements-consent-canon-docs-a1 | done | feat/2026-02-02-requirements-consent-canon-docs-a1 | /home/zhan/worktrees/2026-02-02-requirements-consent-canon-docs-a1 | docs/TASK_PACKAGES/TP-2026-02-02-requirements-consent-canon.md | 2026-02-02 |
+| 2026-02-03-calendar-provider-dec-a1 | done | feat/2026-02-03-calendar-provider-dec-a1 | /home/zhan/worktrees/2026-02-03-calendar-provider-dec-a1 | docs/TASK_PACKAGES/TP-2026-02-03-calendar-provider-dec.md | 2026-02-03 |
