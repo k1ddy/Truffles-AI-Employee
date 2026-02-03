@@ -2,8 +2,28 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 
+function resolveOrigin(request: NextRequest) {
+    const forwardedHost = request.headers.get('x-forwarded-host') ?? request.headers.get('host');
+    const forwardedProto =
+        request.headers.get('x-forwarded-proto') ?? request.nextUrl.protocol.replace(':', '');
+    let origin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : request.nextUrl.origin;
+    if (origin.includes('0.0.0.0') || origin.includes('[::]')) {
+        const fallback = process.env.NEXTAUTH_URL ?? process.env.NEXT_PUBLIC_CONSOLE_URL;
+        if (fallback) {
+            try {
+                origin = new URL(fallback).origin;
+            } catch {
+                origin = origin.replace('0.0.0.0', 'localhost').replace('[::]', 'localhost');
+            }
+        } else {
+            origin = origin.replace('0.0.0.0', 'localhost').replace('[::]', 'localhost');
+        }
+    }
+    return origin;
+}
+
 export async function GET(request: NextRequest) {
-    const origin = request.nextUrl.origin;
+    const origin = resolveOrigin(request);
     const code = request.nextUrl.searchParams.get('code');
     const state = request.nextUrl.searchParams.get('state');
 

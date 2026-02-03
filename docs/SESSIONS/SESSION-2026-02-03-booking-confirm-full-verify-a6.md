@@ -28,6 +28,7 @@
   - Added console-web OAuth callback proxy route; rebuilt console-web container.
   - Set Google OAuth env for API (GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI) and restarted API/outbox containers.
   - Generated Google OAuth auth URL for demo_salon/branch_b (awaiting user consent).
+  - Hardened OAuth callback redirect origin (avoid 0.0.0.0 host).
 - next:
   - Decide on follow-ups for outbox_payload_guard errors and calendar sync failures (real OAuth vs mock).
   - Decide whether to force slot-confirmation prompt path (LLM low-confidence) for coverage.
