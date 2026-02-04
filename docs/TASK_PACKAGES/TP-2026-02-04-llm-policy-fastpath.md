@@ -34,7 +34,9 @@
 ## Touch-list
 - `truffles-api/app/routers/webhook/decision.py`
 - `truffles-api/app/services/intent_service.py`
+- `truffles-api/app/services/demo_salon_knowledge.py`
 - `contracts/llm/llm_policy_core_output.v1.jsonschema` (new)
+- `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`
 - `truffles-api/tests/test_message_endpoint.py`
 - `truffles-api/tests/test_intent.py` (if touched)
 - `STATE.md` (evidence before merge)
