@@ -2526,6 +2526,12 @@ components:
         avg_resolution_hours:
           type: number
           nullable: true
+        total_client_messages:
+          type: integer
+          nullable: true
+        total_bot_messages:
+          type: integer
+          nullable: true
 
     OutboxCounts:
       type: object

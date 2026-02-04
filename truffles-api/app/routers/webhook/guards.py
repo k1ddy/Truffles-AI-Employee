@@ -291,7 +291,14 @@ def _handle_clarify_limit_escalation(
         legacy._update_message_decision_metadata(saved_message, {"clarify_limit": True})
     if finalize_response:
         bot_response = finalize_response(bot_response)
-    legacy.save_message(db, conversation.id, conversation.client_id, role="assistant", content=bot_response)
+    legacy.save_message(
+        db,
+        conversation.id,
+        conversation.client_id,
+        role="assistant",
+        content=bot_response,
+        message_metadata={"source": "bot"},
+    )
     sent = send_response(bot_response)
     if not sent:
         result_message = f"{result_message}; response_send=failed"

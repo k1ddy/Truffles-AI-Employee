@@ -18,7 +18,8 @@
 ALTER TABLE metrics_daily
   ADD COLUMN IF NOT EXISTS rag_low_conf_rate NUMERIC(6, 4),
   ADD COLUMN IF NOT EXISTS clarify_rate NUMERIC(6, 4),
-  ADD COLUMN IF NOT EXISTS clarify_success_rate NUMERIC(6, 4);
+  ADD COLUMN IF NOT EXISTS clarify_success_rate NUMERIC(6, 4),
+  ADD COLUMN IF NOT EXISTS total_bot_messages INTEGER DEFAULT 0;
 
 WITH params AS (
   SELECT
@@ -95,6 +96,26 @@ user_messages AS (
   WHERE m.role = 'user'
     AND m.created_at >= b.start_ts
     AND m.created_at < b.end_ts
+    AND COALESCE((m.metadata->>'simulation_mode')::boolean, FALSE) = FALSE
+),
+bot_messages AS (
+  SELECT
+    COUNT(*) AS total_bot_messages
+  FROM messages m
+  JOIN bounds b ON m.client_id = b.client_id
+  WHERE m.role = 'assistant'
+    AND m.created_at >= b.start_ts
+    AND m.created_at < b.end_ts
+    AND (
+      m.metadata->>'source' = 'bot'
+      OR (
+        NOT (m.metadata ? 'source')
+        AND COALESCE((m.metadata->>'system')::boolean, FALSE) = FALSE
+        AND NULLIF(m.metadata->>'event', '') IS NULL
+        AND (m.metadata->'decision_meta'->>'pending_action') IS NULL
+        AND (m.metadata->'decision_meta'->>'pending_sla_ping') IS NULL
+      )
+    )
 ),
 handovers_day AS (
   SELECT COUNT(*) AS total_handovers
@@ -136,6 +157,7 @@ INSERT INTO metrics_daily (
   clarify_rate,
   clarify_success_rate,
   total_user_messages,
+  total_bot_messages,
   total_outbox_sent,
   total_outbox_failed,
   total_llm_used,
@@ -161,6 +183,7 @@ SELECT
   COALESCE(ROUND(um.total_clarify::numeric / NULLIF(um.total_user_messages, 0), 4), 0),
   COALESCE(ROUND(um.total_clarify_success::numeric / NULLIF(um.total_clarify, 0), 4), 0),
   COALESCE(um.total_user_messages, 0),
+  COALESCE(bm.total_bot_messages, 0),
   COALESCE(os.total_outbox_sent, 0),
   COALESCE(ofx.total_outbox_failed, 0),
   COALESCE(um.total_llm_used, 0),
@@ -173,6 +196,7 @@ SELECT
   NOW()
 FROM bounds b
 LEFT JOIN user_messages um ON TRUE
+LEFT JOIN bot_messages bm ON TRUE
 LEFT JOIN handovers_day h ON TRUE
 LEFT JOIN outbox_sent os ON TRUE
 LEFT JOIN outbox_failed ofx ON TRUE
@@ -187,6 +211,7 @@ ON CONFLICT (metric_date, client_id) DO UPDATE SET
   clarify_rate = EXCLUDED.clarify_rate,
   clarify_success_rate = EXCLUDED.clarify_success_rate,
   total_user_messages = EXCLUDED.total_user_messages,
+  total_bot_messages = EXCLUDED.total_bot_messages,
   total_outbox_sent = EXCLUDED.total_outbox_sent,
   total_outbox_failed = EXCLUDED.total_outbox_failed,
   total_llm_used = EXCLUDED.total_llm_used,

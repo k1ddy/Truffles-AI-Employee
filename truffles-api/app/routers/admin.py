@@ -595,6 +595,7 @@ async def get_metrics(
                   clarify_rate,
                   clarify_success_rate,
                   total_user_messages,
+                  total_bot_messages,
                   total_outbox_sent,
                   total_outbox_failed,
                   total_llm_used,
