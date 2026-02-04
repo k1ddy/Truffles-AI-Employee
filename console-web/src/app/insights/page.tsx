@@ -170,18 +170,21 @@ function TrendCard({
     values,
     valueFormatter,
     detail,
+    tooltip,
 }: {
     label: string;
     values: Array<number | null | undefined>;
     valueFormatter: (value: number | null | undefined) => string;
     detail?: string | null;
+    tooltip?: string | null;
 }) {
     const latest = getLatestValue(values);
     return (
         <div className="rounded-lg border border-border/60 bg-muted/60 p-3">
             <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                    {label}
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                    <span>{label}</span>
+                    {tooltip ? <InfoTooltip text={tooltip} /> : null}
                 </div>
                 <div className="text-sm font-semibold text-foreground">
                     {valueFormatter(latest)}
@@ -201,6 +204,7 @@ function KpiTile({
     status,
     detail,
     hint,
+    tooltip,
     children,
 }: {
     label: string;
@@ -208,12 +212,16 @@ function KpiTile({
     status?: string | null;
     detail?: string | null;
     hint?: string | null;
+    tooltip?: string | null;
     children?: React.ReactNode;
 }) {
     return (
         <div className="bg-muted rounded-lg p-4">
             <div className="flex items-center justify-between gap-2">
-                <div className="text-sm text-muted-foreground">{label}</div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <span>{label}</span>
+                    {tooltip ? <InfoTooltip text={tooltip} /> : null}
+                </div>
                 <StatusBadge status={status} />
             </div>
             {children ?? (
@@ -224,6 +232,59 @@ function KpiTile({
         </div>
     );
 }
+
+function InfoTooltip({ text }: { text: string }) {
+    return (
+        <span className="relative inline-flex items-center group">
+            <button
+                type="button"
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-border/60 text-[10px] font-semibold text-muted-foreground transition hover:text-foreground hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                aria-label={text}
+                title={text}
+            >
+                ?
+            </button>
+            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 rounded-lg border border-border/60 bg-card px-3 py-2 text-[11px] text-foreground opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+                {text}
+            </span>
+        </span>
+    );
+}
+
+const INSIGHTS_TOOLTIPS = {
+    clientMessages:
+        "Считаем: входящие user-сообщения за день. Значит: активность клиентов. Польза: объем входящего спроса.",
+    botReplies:
+        "Считаем: ответы ассистента за день. Значит: сколько запросов закрыто ботом. Польза: уровень автоматизации.",
+    totalCases:
+        "Считаем: все заявки (handover), созданные за день. Значит: сколько обращений требует внимания. Польза: нагрузка.",
+    pendingCases:
+        "Считаем: заявки со статусом pending. Значит: очередь без ответа. Польза: контроль SLA.",
+    activeCases:
+        "Считаем: заявки со статусом active. Значит: кейсы в работе. Польза: видна текущая загрузка.",
+    resolvedCases:
+        "Считаем: заявки со статусом resolved за день. Значит: сколько кейсов завершено. Польза: скорость обработки.",
+    avgResolution:
+        "Считаем: среднее время от создания до закрытия заявки. Значит: типовая длительность обработки. Польза: эффективность.",
+    botClosed:
+        "Считаем: диалоги с бот-ответом, без handover и без новых входящих 24ч. Значит: % самозакрытия. Польза: доля самообслуживания.",
+    managerTimeSaved:
+        "Оценка: ответы бота × медиана ручного ответа. Значит: ориентир сэкономленного времени. Польза: эффект автоматизации.",
+    bookingConversion:
+        "Считаем: записи с conversation_id и входящим сообщением за 24ч / входящие диалоги. Значит: доля диалогов, ставших записью. Польза: эффективность продаж.",
+    firstResponse:
+        "Считаем: время от первого user-сообщения до первого ответа (бот/менеджер), p50/p90. Значит: скорость реакции. Польза: качество сервиса.",
+    firstResponseP50:
+        "Считаем: время от первого user-сообщения до первого ответа (бот/менеджер), p50. Значит: скорость реакции. Польза: качество сервиса.",
+    afterHours:
+        "Считаем: входящие вне графика и есть бот-ответ <=10 минут. Значит: покрытие после часов. Польза: сервис 24/7.",
+    escalationQuality:
+        "Считаем: handover с заполненными слотами (услуга, время, контакт). Значит: полнота данных для менеджера. Польза: быстрее закрывать заявки.",
+    lossRisk:
+        "Считаем: outbox FAILED и no_response за день (спасено видно ниже). Значит: где теряем клиентов. Польза: контроль доставки.",
+    topThemes:
+        "Считаем: intent и info_sections из decision_meta по входящим. Значит: частые темы и боли. Польза: что улучшать в знаниях и оффере.",
+} as const;
 
 export default function InsightsPage() {
     const { data: session } = useSession();
@@ -426,18 +487,40 @@ export default function InsightsPage() {
                         <KpiTile
                             label="Сообщений от клиентов"
                             value={formatCount(metrics?.total_client_messages)}
+                            tooltip={INSIGHTS_TOOLTIPS.clientMessages}
                         />
                         <KpiTile
                             label="Ответов бота"
                             value={formatCount(metrics?.total_bot_messages)}
+                            tooltip={INSIGHTS_TOOLTIPS.botReplies}
                         />
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                        <KpiTile label="Всего заявок" value={metrics?.total_cases ?? 0} />
-                        <KpiTile label="Ожидают ответа" value={metrics?.pending_cases ?? 0} />
-                        <KpiTile label="В работе" value={metrics?.active_cases ?? 0} />
-                        <KpiTile label="Закрыты" value={metrics?.resolved_cases ?? 0} />
-                        <KpiTile label="Среднее время" value={formatHours(metrics?.avg_resolution_hours)} />
+                        <KpiTile
+                            label="Всего заявок"
+                            value={metrics?.total_cases ?? 0}
+                            tooltip={INSIGHTS_TOOLTIPS.totalCases}
+                        />
+                        <KpiTile
+                            label="Ожидают ответа"
+                            value={metrics?.pending_cases ?? 0}
+                            tooltip={INSIGHTS_TOOLTIPS.pendingCases}
+                        />
+                        <KpiTile
+                            label="В работе"
+                            value={metrics?.active_cases ?? 0}
+                            tooltip={INSIGHTS_TOOLTIPS.activeCases}
+                        />
+                        <KpiTile
+                            label="Закрыты"
+                            value={metrics?.resolved_cases ?? 0}
+                            tooltip={INSIGHTS_TOOLTIPS.resolvedCases}
+                        />
+                        <KpiTile
+                            label="Среднее время"
+                            value={formatHours(metrics?.avg_resolution_hours)}
+                            tooltip={INSIGHTS_TOOLTIPS.avgResolution}
+                        />
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         <KpiTile
@@ -446,6 +529,7 @@ export default function InsightsPage() {
                             status={metrics?.bot_closed_status}
                             detail={botClosedDetail}
                             hint={botClosedHint}
+                            tooltip={INSIGHTS_TOOLTIPS.botClosed}
                         />
                         <KpiTile
                             label="Экономия времени менеджера"
@@ -453,6 +537,7 @@ export default function InsightsPage() {
                             status={metrics?.manager_time_saved_status}
                             detail={`Медиана ответа: ${formatSeconds(metrics?.manager_median_response_seconds)}`}
                             hint="Оценка на основе медианы ручных ответов"
+                            tooltip={INSIGHTS_TOOLTIPS.managerTimeSaved}
                         />
                         <KpiTile
                             label="Конверсия в запись"
@@ -460,6 +545,7 @@ export default function InsightsPage() {
                             status={metrics?.booking_status}
                             detail={bookingDetail}
                             hint={bookingHint}
+                            tooltip={INSIGHTS_TOOLTIPS.bookingConversion}
                         />
                         <KpiTile
                             label="Время до первого ответа (p50/p90)"
@@ -468,6 +554,7 @@ export default function InsightsPage() {
                             )}`}
                             status={metrics?.first_response_status}
                             detail={responseDetail}
+                            tooltip={INSIGHTS_TOOLTIPS.firstResponse}
                         />
                         <KpiTile
                             label="После-часов покрытие"
@@ -475,6 +562,7 @@ export default function InsightsPage() {
                             status={metrics?.after_hours_status}
                             detail={afterHoursDetail}
                             hint={afterHoursHint}
+                            tooltip={INSIGHTS_TOOLTIPS.afterHours}
                         />
                         <KpiTile
                             label="Качество эскалаций"
@@ -482,6 +570,7 @@ export default function InsightsPage() {
                             status={metrics?.escalation_quality_status}
                             detail={escalationDetail}
                             hint={escalationHint}
+                            tooltip={INSIGHTS_TOOLTIPS.escalationQuality}
                         />
                         <KpiTile
                             label="Потери / риски"
@@ -491,11 +580,13 @@ export default function InsightsPage() {
                             status={metrics?.loss_risk_status}
                             detail={lossDetail}
                             hint="FAILED / no_response за день"
+                            tooltip={INSIGHTS_TOOLTIPS.lossRisk}
                         />
                         <KpiTile
                             label="Топ темы и боли"
                             status={metrics?.top_intents_status}
                             detail={metrics?.intent_missing_total ? `Без intent: ${formatCount(metrics?.intent_missing_total)}` : null}
+                            tooltip={INSIGHTS_TOOLTIPS.topThemes}
                         >
                             <div className="mt-2 grid gap-3 md:grid-cols-2">
                                 <div>
@@ -552,32 +643,38 @@ export default function InsightsPage() {
                                 label="Закрыты без человека"
                                 values={botClosedTrend}
                                 valueFormatter={formatPercent}
+                                tooltip={INSIGHTS_TOOLTIPS.botClosed}
                             />
                             <TrendCard
                                 label="Конверсия в запись"
                                 values={bookingTrend}
                                 valueFormatter={formatPercent}
+                                tooltip={INSIGHTS_TOOLTIPS.bookingConversion}
                             />
                             <TrendCard
                                 label="Ответ p50"
                                 values={responseTrend}
                                 valueFormatter={formatSeconds}
+                                tooltip={INSIGHTS_TOOLTIPS.firstResponseP50}
                             />
                             <TrendCard
                                 label="После-часов покрытие"
                                 values={afterHoursTrend}
                                 valueFormatter={formatPercent}
+                                tooltip={INSIGHTS_TOOLTIPS.afterHours}
                             />
                             <TrendCard
                                 label="Качество эскалаций"
                                 values={escalationTrend}
                                 valueFormatter={formatPercent}
+                                tooltip={INSIGHTS_TOOLTIPS.escalationQuality}
                             />
                             <TrendCard
                                 label="Потери/риски"
                                 values={lossTrend}
                                 valueFormatter={formatCount}
                                 detail={lossTrendDetail}
+                                tooltip={INSIGHTS_TOOLTIPS.lossRisk}
                             />
                         </div>
                     </div>
