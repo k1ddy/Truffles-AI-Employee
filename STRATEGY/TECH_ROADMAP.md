@@ -7,15 +7,15 @@
 **Out of scope:** реализация задач, evidence.  
 **Links:** `STATE.md`, `SPECS/ARCHITECTURE.md`, `SPECS/INFRASTRUCTURE.md`.
 
-**Цель:** управляемый LLM‑консультант для салонов с детерминированным ядром и “живым” ответом.
+**Цель:** управляемый LLM‑консультант для салонов с LLM policy core и hard‑safety/policy защитой.
 
 ---
 
 ## КАНОН (не меняется)
 
 1. **Safety/Policy выше смысла; LAW‑гейты и truth‑first всегда.**
-2. **Deterministic Core** для безопасности/состояний и факт‑коммита (tools/packs).
-3. **LLM‑first понимание** через Hybrid LLM‑plan (строгий JSON‑план) с детерминированным commit и валидацией.
+2. **LLM policy core** принимает решение и держит цель диалога; safety‑слой — только hard‑safety/policy и контракт tools/packs.
+3. **LLM‑first понимание** через Hybrid LLM‑plan (строгий JSON‑план) с валидацией и hard‑enforcement по safety/policy.
 4. **Гибрид обязателен.** Семантический resolver (embeddings) + tools; ключевые слова — только fallback.
 5. **Факты только из tools/packs.** Response Guard блокирует “лишнее”.
 6. **Один Decision Graph.** Решения идут по фиксированной цепочке, без “долгих размышлений”.
@@ -277,7 +277,7 @@ _Сводка для ориентира; актуальный статус и ev
 **Зачем:** старые ошибки и зависимости (LLM‑ключи/внешние индексы) ломают базовые сценарии и CI.  
 **Принцип:** исправления должны быть совместимы с новой архитектурой и потом “переезжать” в A1–A7 без переделок.
 
-### A0.1 Deterministic Expected Reply (service)
+### A0.1 Offline-safe Expected Reply (service)
 **Почему:** expected_reply=service не должен зависеть от LLM‑ключа или внешнего индекса.  
 **Stage Card:**
 - Вход: `truffles-api/app/services/intent_service.py`, `truffles-api/app/routers/webhook/_legacy.py`, `SALON_TRUTH.yaml`.
@@ -285,7 +285,7 @@ _Сводка для ориентира; актуальный статус и ev
   1) Если LLM‑ключ отсутствует/ошибка — считать интерпретатор disabled.
   2) При `expected_reply_type=service` использовать только локальный service catalog (data pack).
   3) Добавить алиасы “общих” запросов услуги в data pack (например, “ногти”).
-- Выход: deterministic service‑match без LLM/индекса.
+- Выход: rule‑based service‑match без LLM/индекса.
 - Проверка: CI core/long (кейсы service_choice), trace/meta показывают локальный источник.
 - Риски/Stop-line: если сервисный матч зависит от LLM или внешнего индекса — stop.
 
@@ -395,7 +395,7 @@ _Сводка для ориентира; актуальный статус и ev
   1) Policy‑решения только по policy‑pack (без LLM‑обходов).
   2) Если правил нет — эскалация.
   3) Hard‑LAW всегда выше любых semantic сигналов.
-- Выход: детерминированный Policy Gate.
+- Выход: Policy Gate с hard‑enforcement (без LLM‑обходов).
 - Проверка: CI core/long; trace содержит policy_gate/risk_level.
 - Риски/Stop-line: обходы policy через LLM или эвристику.
 

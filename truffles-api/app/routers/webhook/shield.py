@@ -117,6 +117,9 @@ def _handle_shield_gate(
     saved_message: Message | None,
     send_and_save,
     record_escalation_metric,
+    booking_active: bool = False,
+    booking_wants_flow: bool = False,
+    booking_slot_signal: bool = False,
     skip_persist: bool,
 ) -> WebhookResponse | None:
     from . import _legacy as legacy
@@ -177,6 +180,8 @@ def _handle_shield_gate(
 
     is_toxic = _is_toxic_message(message_text)
     is_nonsense = _is_nonsense_message(message_text)
+    if is_nonsense and (booking_active or booking_wants_flow or booking_slot_signal):
+        return None
     if (is_toxic or is_nonsense) and conversation.state == legacy.ConversationState.BOT_ACTIVE.value:
         reason = "toxic" if is_toxic else "nonsense"
         legacy._record_decision_trace(

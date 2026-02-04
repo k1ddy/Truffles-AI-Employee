@@ -63,6 +63,7 @@ from app.routers.webhook.booking import (
     _is_blocked_slot_message,
     _is_booking_confirm_enabled,
     _is_booking_related_message,
+    _is_booking_slot_signal,
     _is_booking_time_service_decision,
     _match_expected_reply,
     _next_booking_prompt,
@@ -968,6 +969,7 @@ def _run_intent_decomposition(
     bypass_domain_flows: bool,
     booking_signal: bool,
     booking_block_meta: dict | None,
+    booking_slot_signal: bool,
     booking_context: dict | None,
     booking: dict | None,
     booking_active: bool,
@@ -1415,6 +1417,9 @@ def _run_intent_decomposition(
                 )
     intent_decomp_has_booking = "booking" in intent_decomp_set
     intent_decomp_info = intent_decomp_set & legacy.BOOKING_INFO_QUESTION_TYPES
+    booking_slot_override = booking_slot_signal and (
+        not intent_decomp_used or not intent_decomp_set or intent_decomp_set <= {"other"}
+    )
     if expected_reply_shortcircuit:
         if not expected_reply_reason or expected_reply_reason == "booking_prompt":
             booking_signal = True
@@ -1430,11 +1435,16 @@ def _run_intent_decomposition(
                     "booking_blocked_reason": "info_question",
                     "question_intents": sorted(intent_decomp_info),
                 }
-            elif intent_decomp_used and intent_decomp_set and intent_decomp_set != {"other"}:
+            elif (
+                intent_decomp_used
+                and intent_decomp_set
+                and intent_decomp_set != {"other"}
+                and not booking_slot_override
+            ):
                 booking_block_meta = {
                     "booking_blocked_reason": "intent_decomp_no_booking",
                 }
-            elif not intent_decomp_used:
+            elif not intent_decomp_used and not booking_slot_override:
                 booking_block_meta = {
                     "booking_blocked_reason": "intent_decomp_missing",
                 }
@@ -1517,6 +1527,7 @@ def _run_intent_decomposition(
         booking_snapshot = _compact_signal_snapshot(
             {
                 "signal": booking_signal,
+                "slot_signal": booking_slot_signal,
                 "blocked": booking_blocked,
                 "blocked_reason": (
                     booking_block_meta.get("booking_blocked_reason")
@@ -5811,6 +5822,16 @@ async def _handle_webhook_payload(
         return pending_response
 
     # 4.9 Behavioral shield (pre-LAW/policy).
+    shield_booking_slot_signal = False
+    if message_text:
+        shield_booking_slot_signal = _is_booking_slot_signal(
+            message_text,
+            client_slug=payload.client_slug,
+        )
+    shield_context = _get_conversation_context(conversation)
+    shield_booking_state = _get_booking_context(shield_context)
+    shield_booking_active = bool(shield_booking_state.get("active"))
+    shield_booking_wants_flow = bool(shield_booking_active or shield_booking_slot_signal)
     shield_response = _handle_shield_gate(
         db=db,
         conversation=conversation,
@@ -5821,6 +5842,9 @@ async def _handle_webhook_payload(
         saved_message=saved_message,
         send_and_save=_send_and_save,
         record_escalation_metric=_record_escalation_metric,
+        booking_active=shield_booking_active,
+        booking_wants_flow=shield_booking_wants_flow,
+        booking_slot_signal=shield_booking_slot_signal,
         skip_persist=skip_persist,
     )
     if shield_response:
@@ -6164,6 +6188,12 @@ async def _handle_webhook_payload(
             booking_context = _clear_service_hint(booking_context)
             _set_conversation_context(conversation, booking_context)
             booking_active = False
+    booking_slot_signal = False
+    if message_text:
+        booking_slot_signal = _is_booking_slot_signal(
+            message_text,
+            client_slug=payload.client_slug,
+        )
     booking_block_meta = None
     if not bypass_domain_flows:
         booking_block_meta = _preflight_booking_block(
@@ -6180,6 +6210,8 @@ async def _handle_webhook_payload(
                 message_text=message_text,
                 relative_base=sim_now,
             )
+            if booking_slot_signal and not booking_signal and not booking_block_meta:
+                booking_signal = True
     else:
         booking_signal = False
 
@@ -6216,6 +6248,7 @@ async def _handle_webhook_payload(
         bypass_domain_flows=bypass_domain_flows,
         booking_signal=booking_signal,
         booking_block_meta=booking_block_meta,
+        booking_slot_signal=booking_slot_signal,
         booking_context=booking_context,
         booking=booking,
         booking_active=booking_active,
