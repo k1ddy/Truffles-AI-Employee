@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import random
+import re
 import time
 import urllib.request
 from typing import Any
@@ -257,6 +258,7 @@ def _validate_dialog(dialog: dict[str, Any], *, min_turns: int, max_turns: int) 
 def _call_openai(prompt: str, *, api_key: str, model: str, base_url: str) -> str:
     payload = {
         "model": model,
+        "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": "Return JSON only."},
             {"role": "user", "content": prompt},
@@ -274,6 +276,21 @@ def _call_openai(prompt: str, *, api_key: str, model: str, base_url: str) -> str
     with urllib.request.urlopen(req, timeout=40) as resp:
         body = json.loads(resp.read().decode("utf-8"))
     return body["choices"][0]["message"]["content"]
+
+
+def _parse_llm_json(content: str) -> dict[str, Any]:
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(text[start : end + 1])
+        raise
 
 
 def _generate_llm_dialogs(
@@ -299,7 +316,7 @@ def _generate_llm_dialogs(
         f"media_mode={media_mode}, media_kind={media_kind}."
     )
     content = _call_openai(prompt, api_key=api_key, model=model, base_url=base_url)
-    payload = json.loads(content)
+    payload = _parse_llm_json(content)
     dialogs = payload.get("dialogs") or []
     if not isinstance(dialogs, list):
         return []

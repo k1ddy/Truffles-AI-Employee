@@ -1,6 +1,6 @@
 # SESSION 2026-02-04-consultant-livecheck-a6 — Consultant live dialog check
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-04-consultant-livecheck.md
 - branch: feat/2026-02-04-consultant-livecheck-a6
@@ -22,13 +22,19 @@
   - Live dialog booking scenarios rerun with webhook secret + fresh JIDs (5 dialogs, 65 turns); evidence `/tmp/booking_dialog_runs_20260204-041403/` (run_summary/outbox_payloads/trace_bundles).
   - Drafted DEC-023 LLM policy core + Task Package `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-dec.md`.
   - Updated canon docs to align with LLM policy core (AGENTS/STRATEGY/SPECS/PROCESSES/IMPERIUM_DECISIONS/IMPERIUM_GAPS).
+  - Ran booking confirm verify (CA05 booking-commit + CA12 booking-full) on demo_salon/branch_b; evidence `/tmp/booking-confirm-20260204-110404`.
+  - Ran 5 LLM-generated booking dialogs via webhook; evidence `/tmp/booking_llm_runs_20260204-154404` (scenarios + dialog reports).
+  - Stabilized LLM scenario generator (response_format + code-fence tolerant parsing); smoke output `/tmp/booking_llm_scenario_smoke.json`.
 - next:
-  - Decide whether to run CA05 booking-commit (blocked by minimum_data_contract in /admin/health).
+  - Review LLM dialog reports for missing assistant replies; decide remediation path.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-04-consultant-livecheck.md
   - /tmp/booking_dialog_runs_20260204-012816
   - /tmp/booking_dialog_runs_20260204-014810
   - /tmp/booking_dialog_runs_20260204-041403
+  - /tmp/booking-confirm-20260204-110404
+  - /tmp/booking_llm_runs_20260204-154404
+  - /tmp/booking_llm_scenario_smoke.json
   - docs/IMPERIUM_DECISIONS.yaml
   - docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-dec.md
 - last_updated: 2026-02-04
