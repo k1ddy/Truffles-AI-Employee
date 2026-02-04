@@ -26,7 +26,7 @@ Legend
 - [match] Реальные роли в коде: platform_admin/owner/admin/manager/support/specialist/viewer. Canon: `SPECS/CONTROL_PLANE.md` (Runtime roles). Impl: `console-web/src/lib/api-client.ts`, `truffles-api/app/services/console_auth.py`.
 
 ### Platform Admin
-- [match] Доступ к Tenants, Ops, Audit, Inbox, Settings/Provisioning, Knowledge, Team, Calendar. Canon: `SPECS/CONTROL_PLANE.md` (RBAC + IA). Impl: `docs/CONSOLE_AUDIT/roles/platform_admin.md`.
+- [match] Доступ к Tenants, Ops, Audit, Inbox, Settings/Provisioning, Knowledge, Team, Calendar, Insights. Canon: `SPECS/CONTROL_PLANE.md` (RBAC + IA). Impl: `docs/CONSOLE_AUDIT/roles/platform_admin.md`.
 - [missing] Integrations registry (nav/страница). Canon: `SPECS/CONTROL_PLANE.md` (IA: Integrations). Impl: отсутствует в навигации (`docs/CONSOLE_AUDIT/pages/global-shell.md`).
 
 ### Owner/Admin
@@ -54,7 +54,7 @@ Legend
 
 ## 3) Navigation / IA
 
-- [match] Реализованные пункты навигации: Inbox, Calendar, Knowledge, Team, Settings, Ops, Audit, Tenants (platform_admin). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `docs/CONSOLE_AUDIT/pages/global-shell.md`.
+- [match] Реализованные пункты навигации: Inbox, Calendar, Knowledge, Team, Settings, Ops, Audit, Insights, Tenants (platform_admin). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `docs/CONSOLE_AUDIT/pages/global-shell.md`.
 - [missing] Integrations page (owner/admin/platform admin). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: отсутствует.
 - [match] Insights/Analytics (optional). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/app/insights/page.tsx`, `console-web/src/components/ConsoleShell.tsx`.
 

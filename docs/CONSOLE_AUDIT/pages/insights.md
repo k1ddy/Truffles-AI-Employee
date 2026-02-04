@@ -7,7 +7,7 @@ UI entry points
 - `console-web/src/app/insights/page.tsx`
 
 Roles
-- Read: owner, admin.
+- Read: platform_admin, owner, admin.
 
 Sections
 - Daily metrics summary (total/pending/active/resolved, average resolution time).

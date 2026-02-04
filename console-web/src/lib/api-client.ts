@@ -112,7 +112,7 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
         write: ["platform_admin", "owner", "admin", "manager", "specialist"],
     },
     insights: {
-        read: ["owner", "admin"],
+        read: ["platform_admin", "owner", "admin"],
         write: [],
     },
     settings: {

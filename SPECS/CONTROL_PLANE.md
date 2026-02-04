@@ -84,7 +84,7 @@
 
 **Manager:** Inbox, Calendar, read‑only Knowledge, Team directory.
 
-**Platform Admin:** Tenants, Inbox (support), Ops, Audit, Integrations registry.
+**Platform Admin:** Tenants, Inbox (support), Ops, Audit, Integrations registry, Insights.
 
 ---
 
