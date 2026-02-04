@@ -14,8 +14,9 @@
   - Applied DB migrations (handover meta, outbox status events, alert events, analytics table).
   - Ran daily snapshot for client `truffles` and verified latest analytics row.
   - Added KPI trend series + sparkline charts; fixed SQL ambiguity in top intents/sections.
+  - Deployed API + console-web; backfilled KPI snapshot for last 7 days (client `truffles`).
 - next:
-  - Deploy API/UI changes and verify Insights trends in Console.
+  - Verify Insights trends in Console UI (post-deploy smoke).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-05-console-analytics-kpis.md
   - /tmp/analytics_migration_019_metrics_analytics_daily.txt
@@ -24,6 +25,10 @@
   - /tmp/analytics_migration_022_alert_events.txt
   - /tmp/analytics_daily_snapshot_20260204_retry.txt
   - /tmp/analytics_metrics_analytics_daily_latest.txt
+  - /tmp/api_redeploy_analytics_kpis_20260205.txt
+  - /tmp/console_web_redeploy_insights_kpis_20260205.txt
+  - /tmp/analytics_backfill_7d_20260205.txt
+  - /tmp/analytics_metrics_analytics_daily_7d_20260205.txt
   - /tmp/pytest_console_analytics_20260205_trends.txt
   - /tmp/console_web_lint_analytics_20260205_trends.txt
 - last_updated: 2026-02-05
