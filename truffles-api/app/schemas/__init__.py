@@ -8,10 +8,10 @@ from app.schemas.consult import (
 from app.schemas.intent import (
     AnswerInterpreterOutput,
     DialogueControllerOutput,
+    LlmPolicyCoreOutput,
     validate_answer_interpreter_output,
     validate_dialogue_controller_output,
     validate_llm_policy_core_output,
-    LlmPolicyCoreOutput,
 )
 from app.schemas.message import MessageRequest, MessageResponse
 from app.schemas.outbox_payload import OutboxPayloadContract, validate_outbox_payload
