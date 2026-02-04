@@ -12,6 +12,7 @@ Navigation (sidebar + mobile)
 - Команда (`/team`)
 - Статус (`/ops`)
 - Журнал (`/audit`)
+- Аналитика (`/insights`)
 - Настройки (`/settings`)
 
 Access summary (RBAC)
@@ -22,6 +23,7 @@ Access summary (RBAC)
 - Settings: read/write (provisioning wizard + Telegram verify/test + bot config view).
 - Ops: read/write (outbox retry, telegram verify/test).
 - Audit: read-only.
+- Insights: read-only (daily metrics).
 - Tenants: read/write (company/client/branch list + edit + provisioning wizard).
 
 Selection gates
