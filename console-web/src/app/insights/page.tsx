@@ -240,7 +240,6 @@ function InfoTooltip({ text }: { text: string }) {
                 type="button"
                 className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-border/60 text-[10px] font-semibold text-muted-foreground transition hover:text-foreground hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 aria-label={text}
-                title={text}
             >
                 ?
             </button>
