@@ -557,6 +557,13 @@ paths:
             type: string
             format: date
           description: Defaults to today
+        - name: trend_days
+          in: query
+          schema:
+            type: integer
+            minimum: 3
+            maximum: 60
+          description: Trend window size (defaults to 7)
       responses:
         "200":
           description: Daily metrics
@@ -2509,6 +2516,61 @@ components:
         outbox_backlog:
           type: integer
 
+    KpiStatus:
+      type: string
+      enum: [fact, estimate, need]
+
+    AnalyticsTopIntent:
+      type: object
+      required: [intent, count, share]
+      properties:
+        intent:
+          type: string
+        count:
+          type: integer
+        share:
+          type: number
+
+    AnalyticsTopSection:
+      type: object
+      required: [section, count, share]
+      properties:
+        section:
+          type: string
+        count:
+          type: integer
+        share:
+          type: number
+
+    AnalyticsTrendPoint:
+      type: object
+      required: [date]
+      properties:
+        date:
+          type: string
+          format: date
+        bot_closed_rate:
+          type: number
+          nullable: true
+        booking_conversion_rate:
+          type: number
+          nullable: true
+        first_response_p50_seconds:
+          type: number
+          nullable: true
+        after_hours_coverage_rate:
+          type: number
+          nullable: true
+        escalation_quality_rate:
+          type: number
+          nullable: true
+        outbox_failed_total:
+          type: integer
+          nullable: true
+        no_response_alert_total:
+          type: integer
+          nullable: true
+
     MetricsDailyResponse:
       type: object
       properties:
@@ -2531,6 +2593,115 @@ components:
           nullable: true
         total_bot_messages:
           type: integer
+          nullable: true
+        inbound_conversations_total:
+          type: integer
+          nullable: true
+        bot_closed_sessions:
+          type: integer
+          nullable: true
+        bot_closed_total_sessions:
+          type: integer
+          nullable: true
+        bot_closed_incomplete_total:
+          type: integer
+          nullable: true
+        bot_closed_rate:
+          type: number
+          nullable: true
+        bot_closed_status:
+          $ref: "#/components/schemas/KpiStatus"
+        manager_median_response_seconds:
+          type: number
+          nullable: true
+        manager_time_saved_seconds_estimate:
+          type: number
+          nullable: true
+        manager_time_saved_status:
+          $ref: "#/components/schemas/KpiStatus"
+        booking_total:
+          type: integer
+          nullable: true
+        booking_attributed:
+          type: integer
+          nullable: true
+        booking_missing_conversation_total:
+          type: integer
+          nullable: true
+        booking_conversion_rate:
+          type: number
+          nullable: true
+        booking_status:
+          $ref: "#/components/schemas/KpiStatus"
+        first_response_p50_seconds:
+          type: number
+          nullable: true
+        first_response_p90_seconds:
+          type: number
+          nullable: true
+        first_response_missing_total:
+          type: integer
+          nullable: true
+        first_response_status:
+          $ref: "#/components/schemas/KpiStatus"
+        after_hours_total:
+          type: integer
+          nullable: true
+        after_hours_covered:
+          type: integer
+          nullable: true
+        after_hours_missing_total:
+          type: integer
+          nullable: true
+        after_hours_coverage_rate:
+          type: number
+          nullable: true
+        after_hours_status:
+          $ref: "#/components/schemas/KpiStatus"
+        escalation_total:
+          type: integer
+          nullable: true
+        escalation_quality_total:
+          type: integer
+          nullable: true
+        escalation_meta_missing_total:
+          type: integer
+          nullable: true
+        escalation_quality_rate:
+          type: number
+          nullable: true
+        escalation_quality_status:
+          $ref: "#/components/schemas/KpiStatus"
+        outbox_failed_total:
+          type: integer
+          nullable: true
+        outbox_saved_total:
+          type: integer
+          nullable: true
+        no_response_alert_total:
+          type: integer
+          nullable: true
+        loss_risk_status:
+          $ref: "#/components/schemas/KpiStatus"
+        intent_missing_total:
+          type: integer
+          nullable: true
+        top_intents:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsTopIntent"
+          nullable: true
+        top_info_sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsTopSection"
+          nullable: true
+        top_intents_status:
+          $ref: "#/components/schemas/KpiStatus"
+        analytics_trend:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsTrendPoint"
           nullable: true
 
     OutboxCounts:

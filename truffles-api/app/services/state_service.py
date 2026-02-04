@@ -5,7 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.models import Conversation, Handover, User
+from app.models import Conversation, Handover, Message, User
 from app.services.escalation_service import get_or_create_topic, resolve_telegram_routing
 from app.services.result import Result
 from app.services.state_machine import ConversationState, is_transition_allowed
@@ -35,6 +35,75 @@ PENDING_RESUME_CLEAR_KEYS = {
     "last_service_hint_at",
 }
 HANDOVER_REOPEN_WINDOW_SECONDS = 4 * 60 * 60
+
+
+def _normalize_slot_value(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _extract_decision_meta(message: Message | None) -> dict:
+    if not message or not isinstance(message.message_metadata, dict):
+        return {}
+    decision_meta = message.message_metadata.get("decision_meta")
+    return decision_meta if isinstance(decision_meta, dict) else {}
+
+
+def _build_handover_meta(conversation: Conversation, message: Message | None, user: User | None) -> dict | None:
+    decision_meta = _extract_decision_meta(message)
+    meta: dict = {}
+    intent = decision_meta.get("intent")
+    if isinstance(intent, str) and intent.strip():
+        meta["intent"] = intent.strip()
+    info_sections = decision_meta.get("info_sections")
+    if isinstance(info_sections, list):
+        cleaned_sections = [item.strip() for item in info_sections if isinstance(item, str) and item.strip()]
+        if cleaned_sections:
+            meta["info_sections"] = cleaned_sections
+
+    slots: dict[str, str] = {}
+    raw_slots = decision_meta.get("slots")
+    if isinstance(raw_slots, dict):
+        for key in ("service", "datetime", "name", "phone"):
+            value = _normalize_slot_value(raw_slots.get(key))
+            if value:
+                slots[key] = value
+
+    context = conversation.context if isinstance(conversation.context, dict) else {}
+    booking = context.get("booking") if isinstance(context, dict) else None
+    if isinstance(booking, dict):
+        for key in ("service", "datetime", "name", "phone"):
+            if key in slots:
+                continue
+            value = _normalize_slot_value(booking.get(key))
+            if value:
+                slots[key] = value
+
+    if user:
+        if "name" not in slots:
+            name = _normalize_slot_value(getattr(user, "name", None))
+            if name:
+                slots["name"] = name
+        if "phone" not in slots:
+            phone = _normalize_slot_value(getattr(user, "phone", None))
+            if phone:
+                slots["phone"] = phone
+
+    if slots:
+        meta["slots"] = slots
+
+    return meta or None
+
+
+def _get_latest_user_message(db: Session, conversation_id: uuid.UUID) -> Message | None:
+    return (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id, Message.role == "user")
+        .order_by(Message.created_at.desc())
+        .first()
+    )
 
 
 def _reset_context_preserving_trace(conversation: Conversation) -> None:
@@ -219,6 +288,8 @@ def _reopen_handover(
     trigger_value: str | None,
     user_message: str | None,
     channel_ref: str | None,
+    trigger_message_id: uuid.UUID | None = None,
+    meta: dict | None = None,
 ) -> None:
     handover.status = "pending"
     handover.trigger_type = trigger_type
@@ -242,6 +313,10 @@ def _reopen_handover(
     handover.reminder_1_sent_at = None
     handover.reminder_2_sent_at = None
     handover.skipped_by = []
+    if trigger_message_id:
+        handover.trigger_message_id = trigger_message_id
+    if meta:
+        handover.meta = meta
     if channel_ref:
         handover.channel_ref = channel_ref
     handover._reopened = True
@@ -266,6 +341,8 @@ def escalate_to_pending(
             user = db.query(User).filter(User.id == conversation.user_id).first()
             remote_jid = user.remote_jid if user else None
             topic_id = _build_simulated_topic_id(conversation, user)
+            trigger_message = _get_latest_user_message(db, conversation.id)
+            handover_meta = _build_handover_meta(conversation, trigger_message, user)
 
             handover = _find_recent_resolved_handover(db, conversation, now=now)
             if handover:
@@ -276,6 +353,8 @@ def escalate_to_pending(
                     trigger_value=trigger_value,
                     user_message=user_message,
                     channel_ref=remote_jid,
+                    trigger_message_id=trigger_message.id if trigger_message else None,
+                    meta=handover_meta,
                 )
             else:
                 handover = Handover(
@@ -288,6 +367,8 @@ def escalate_to_pending(
                     created_at=now,
                     channel="telegram",
                     channel_ref=remote_jid,
+                    trigger_message_id=trigger_message.id if trigger_message else None,
+                    meta=handover_meta,
                 )
                 db.add(handover)
 
@@ -328,6 +409,8 @@ def escalate_to_pending(
         telegram = TelegramService(bot_token)
         user = db.query(User).filter(User.id == conversation.user_id).first()
         remote_jid = user.remote_jid if user else None
+        trigger_message = _get_latest_user_message(db, conversation.id)
+        handover_meta = _build_handover_meta(conversation, trigger_message, user)
 
         topic_id = get_or_create_topic(db, telegram, chat_id, conversation, user)
         if not topic_id:
@@ -343,6 +426,8 @@ def escalate_to_pending(
                 trigger_value=trigger_value,
                 user_message=user_message,
                 channel_ref=remote_jid,
+                trigger_message_id=trigger_message.id if trigger_message else None,
+                meta=handover_meta,
             )
         else:
             handover = Handover(
@@ -355,6 +440,8 @@ def escalate_to_pending(
                 created_at=now,
                 channel="telegram",
                 channel_ref=remote_jid,
+                trigger_message_id=trigger_message.id if trigger_message else None,
+                meta=handover_meta,
             )
             db.add(handover)
 

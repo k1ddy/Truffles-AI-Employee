@@ -2,6 +2,7 @@ from app.models.agent import Agent
 from app.models.agent_identity import AgentIdentity
 from app.models.agent_link_token import AgentLinkToken
 from app.models.agent_membership import AgentMembership
+from app.models.alert_event import AlertEvent
 from app.models.booking import Booking
 from app.models.branch import Branch
 from app.models.client import Client
@@ -18,6 +19,7 @@ from app.models.knowledge_version import KnowledgeVersion
 from app.models.learned_response import LearnedResponse
 from app.models.message import Message
 from app.models.outbox_message import OutboxMessage
+from app.models.outbox_status_event import OutboxStatusEvent
 from app.models.prompt import Prompt
 from app.models.specialist import Specialist
 from app.models.user import User
@@ -31,6 +33,7 @@ __all__ = [
     "AgentIdentity",
     "AgentLinkToken",
     "Branch",
+    "AlertEvent",
     "Booking",
     "User",
     "Conversation",
@@ -43,6 +46,7 @@ __all__ = [
     "ConsoleMacro",
     "Prompt",
     "OutboxMessage",
+    "OutboxStatusEvent",
     "LearnedResponse",
     "KnowledgeVersion",
     "Specialist",
