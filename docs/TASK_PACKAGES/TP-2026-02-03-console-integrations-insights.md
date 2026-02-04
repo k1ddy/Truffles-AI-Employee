@@ -1,37 +1,41 @@
 # TP-2026-02-03-console-integrations-insights
 
-- Название/цель: Добавить Integrations registry и минимальный Insights/Analytics (read-only).
+- Название/цель: Добавить Insights/Analytics страницу (read-only) для владельцев/админов.
 - Canon refs: `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md`, `SPECS/CONTROL_PLANE.md` (IA), `docs/CONSOLE_GUIDE.md`.
 - Invariant:
   - Только read-only UI; без изменений в данных.
   - RBAC fail-closed.
 - Scope:
-  - Новые страницы `/integrations` и `/insights`.
-  - Навигация + RBAC gating.
-  - Данные из существующих API (settings/telegram/metrics) или минимальный read-only endpoint при необходимости.
+  - Новая страница `/insights` (read-only).
+  - Навигация + RBAC gating (owner/admin).
+  - Метрики из существующего `/console/v1/metrics/daily`.
 - Out of scope:
-  - Новая аналитическая платформа.
-  - Интеграции с внешними провайдерами.
+  - Integrations registry.
+  - Новая аналитическая платформа или новые источники данных.
 - Touch-list:
   - `console-web/src/components/ConsoleShell.tsx`
-  - `console-web/src/app/integrations/page.tsx`
   - `console-web/src/app/insights/page.tsx`
   - `console-web/src/lib/api-client.ts`
-  - `truffles-api/app/services/console_auth.py` (если меняется RBAC)
-  - `contracts/console_api/openapi.v1.yaml` (если добавляется endpoint)
-  - `console-web/src/types/api.generated.ts`
+  - `docs/CONSOLE_AUDIT/INDEX.md`
+  - `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md`
+  - `docs/CONSOLE_AUDIT/pages/global-shell.md`
+  - `docs/CONSOLE_AUDIT/pages/insights.md`
+  - `docs/CONSOLE_AUDIT/roles/owner.md`
+  - `docs/CONSOLE_AUDIT/roles/admin.md`
+  - `STRUCTURE.md`
+  - `STATE.md`
 - Plan:
-  1. Определить минимальный набор данных + RBAC.
-  2. Реализовать страницы (read-only) на существующих API.
-  3. Обновить навигацию.
-  4. Lint/tests + doc update.
+  1. Зафиксировать RBAC для Insights и минимальный набор метрик.
+  2. Реализовать `/insights` (read-only) на `/metrics/daily`.
+  3. Обновить навигацию + docs (audit pages/index + structure).
+  4. Lint/tests + запись в `STATE.md`.
 - DoD:
-  - Страницы доступны нужным ролям.
-  - Данные загружаются, нет write-действий.
+  - Insights доступен owner/admin, данные отображаются, нет write-действий.
+  - Навигация обновлена, RBAC fail-closed.
   - Lint зелёный.
 - Checks:
   - `npm --prefix console-web run lint`
-  - `npm --prefix console-web run generate:api` (если меняли OpenAPI)
+  - Test waiver: новый e2e/units test не добавляем (нет готового harness/fixtures для Insights); ручная проверка после deploy.
 - Evidence:
   - Логи линта в `/tmp/*`.
   - Запись в `STATE.md` (Brain/Architect) до merge.
@@ -40,10 +44,10 @@
 - No-go:
   - Новые данные/метрики без явного решения.
 - Риски/блокеры:
-  - Уточнить минимальный набор метрик/интеграций.
+  - Метрики `/metrics/daily` gated как Ops; убедиться, что RBAC в UI согласован.
 - Branch/Worktree/Base/Merge/Cleanup:
-  - Branch: `feat/2026-02-03-console-integrations-insights-a6`
-  - Worktree: `/home/zhan/worktrees/2026-02-03-console-integrations-insights-a6`
+  - Branch: `feat/2026-02-03-console-insights-a6`
+  - Worktree: `/home/zhan/worktrees/2026-02-03-console-insights-a6`
   - Base ref: `origin/main`
   - Merge policy: merge-only
   - Cleanup: удалить worktree/branch после merge
