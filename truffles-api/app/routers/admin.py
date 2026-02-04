@@ -17,6 +17,7 @@ from app.services.alert_service import alert_warning
 from app.services.calendar_sync_service import schedule_inbound_syncs
 from app.services.health_service import check_and_heal_conversations, get_system_health
 from app.services.metrics_daily_service import (
+    ensure_metrics_daily_columns,
     get_metrics_daily_backfill_max_days,
     get_metrics_daily_default_date,
     get_metrics_daily_status_allowlist,
@@ -569,6 +570,8 @@ async def get_metrics(
     client = db.query(Client).filter(Client.name == client_slug).first()
     if not client:
         raise HTTPException(status_code=404, detail=f"Client '{client_slug}' not found")
+
+    ensure_metrics_daily_columns(db)
 
     if metric_date:
         try:
