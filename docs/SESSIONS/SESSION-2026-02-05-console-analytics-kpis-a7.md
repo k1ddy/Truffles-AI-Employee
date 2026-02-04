@@ -1,6 +1,6 @@
 # SESSION 2026-02-05-console-analytics-kpis-a7 — Session 2026-02-05-console-analytics-kpis-a7
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-05-console-analytics-kpis.md
 - branch: feat/2026-02-05-console-analytics-kpis-a7
@@ -19,6 +19,7 @@
   - Deployed local API image from commit `677da6aa` (GHCR bypass) and verified `/admin/version`.
   - Verified `metrics_analytics_daily` rows exist for `demo_salon`.
   - Added KPI tooltip copy for Insights tiles and trends.
+  - Merged PR #533 and redeployed console-web with KPI tooltips.
 - next:
   - Verify Insights trends in Console UI (post-deploy smoke).
 - evidence:
@@ -46,4 +47,5 @@
   - /tmp/analytics_client_ids_20260205.txt
   - /tmp/analytics_metrics_demo_salon_20260205.txt
   - /tmp/console_web_lint_insights_tooltips_20260205.txt
+  - /tmp/console_web_redeploy_insights_tooltips_20260205.txt
 - last_updated: 2026-02-05
