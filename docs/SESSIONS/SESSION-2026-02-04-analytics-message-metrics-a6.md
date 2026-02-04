@@ -1,0 +1,21 @@
+# SESSION 2026-02-04-analytics-message-metrics-a6 — Session 2026-02-04-analytics-message-metrics-a6
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-04-analytics-message-metrics.md
+- branch: feat/2026-02-04-analytics-message-metrics-a6
+- worktree: /home/zhan/worktrees/2026-02-04-analytics-message-metrics-a6
+- base_ref: origin/main
+- scope: Analytics message metrics (client inbound + bot replies), backend export + Insights UI.
+- done:
+  - Added bot/reminder source tagging for outbound messages.
+  - Extended metrics_daily snapshot with bot reply counts.
+  - Exposed metrics in Console API and updated Insights UI.
+  - Regenerated console API types and updated audit docs.
+  - Added billing counting business doc with evidence sources.
+- next:
+  - Run `scripts/session_check.sh`, commit, open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-04-analytics-message-metrics.md
+  - /tmp/console_web_lint_analytics_message_metrics_20260204.txt
+- last_updated: 2026-02-04

@@ -10,6 +10,7 @@ Roles
 - Read: platform_admin, owner, admin.
 
 Sections
+- Message volume (client inbound, bot replies).
 - Daily metrics summary (total/pending/active/resolved, average resolution time).
 - Date picker with refresh.
 
@@ -25,6 +26,7 @@ Backend handlers
   - `get_metrics_daily`.
 
 Data sources
+- `metrics_daily` (pre-aggregated message volume).
 - `handovers`, `conversations` (daily case metrics).
 
 Related code
