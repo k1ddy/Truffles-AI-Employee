@@ -74,6 +74,7 @@
 | `truffles-api/app/services/calendar_sync_service.py` | Calendar provider sync via outbox + cursors + busy blocks | Backend |
 | `truffles-api/app/services/tool_registry_service.py` | Tool registry executor (calendar/catalog) for LLM plan | Backend |
 | `truffles-api/app/services/appointment_reminder_service.py` | Appointment reminder/follow-up jobs + outbox enqueue | Backend |
+| `truffles-api/app/services/metrics_daily_service.py` | Daily metrics snapshot (metrics_daily) | Backend |
 | `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |
 | `truffles-api/app/models/console_macro.py` | DB model for Inbox macros (Console) | Backend |
 | `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |
@@ -216,6 +217,7 @@
 - `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-dsl.md`
 - `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-docs.md`
 - `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md`
+- `docs/TASK_PACKAGES/TP-2026-02-04-metrics-daily-auto.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`

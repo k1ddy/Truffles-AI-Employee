@@ -1,7 +1,7 @@
 """Admin API endpoints for managing bot configuration."""
 
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
@@ -16,6 +16,12 @@ from app.models import Client, ClientSettings, Prompt
 from app.services.alert_service import alert_warning
 from app.services.calendar_sync_service import schedule_inbound_syncs
 from app.services.health_service import check_and_heal_conversations, get_system_health
+from app.services.metrics_daily_service import (
+    get_metrics_daily_backfill_max_days,
+    get_metrics_daily_default_date,
+    get_metrics_daily_status_allowlist,
+    run_metrics_daily_snapshot,
+)
 from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -614,6 +620,63 @@ async def get_metrics(
 
     payload = {key: _coerce_metric_value(value) for key, value in row.items()}
     payload["client_slug"] = client_slug
+    return payload
+
+
+@router.post("/metrics/snapshot")
+async def run_metrics_snapshot(
+    client_slug: Optional[str] = None,
+    metric_date: Optional[str] = None,
+    days: Optional[int] = None,
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    _require_admin_token(x_admin_token)
+
+    if metric_date:
+        try:
+            target_date = date.fromisoformat(metric_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="metric_date must be YYYY-MM-DD") from exc
+    else:
+        target_date = get_metrics_daily_default_date()
+
+    max_days = get_metrics_daily_backfill_max_days()
+    safe_days = days if days is not None else 1
+    if safe_days < 1:
+        safe_days = 1
+    if safe_days > max_days:
+        safe_days = max_days
+
+    client_ids = None
+    status_allowlist = None
+    if client_slug:
+        client = db.query(Client).filter(Client.name == client_slug).first()
+        if not client:
+            raise HTTPException(status_code=404, detail=f"Client '{client_slug}' not found")
+        client_ids = [client.id]
+    else:
+        status_allowlist = get_metrics_daily_status_allowlist()
+
+    results = []
+    for offset in range(safe_days - 1, -1, -1):
+        metric_day = target_date - timedelta(days=offset)
+        result = run_metrics_daily_snapshot(
+            db,
+            metric_date=metric_day,
+            client_ids=client_ids,
+            status_allowlist=status_allowlist,
+        )
+        results.append(result)
+
+    payload = {
+        "client_slug": client_slug,
+        "metric_date": target_date.isoformat(),
+        "days": safe_days,
+        "results": results,
+    }
+    if status_allowlist is not None:
+        payload["status_allowlist"] = status_allowlist
     return payload
 
 
