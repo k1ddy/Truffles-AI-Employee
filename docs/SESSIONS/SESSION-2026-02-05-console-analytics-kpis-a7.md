@@ -18,6 +18,7 @@
   - Backfilled KPI snapshot for last 7 days (client `demo_salon`) and today for `truffles`.
   - Deployed local API image from commit `677da6aa` (GHCR bypass) and verified `/admin/version`.
   - Verified `metrics_analytics_daily` rows exist for `demo_salon`.
+  - Added KPI tooltip copy for Insights tiles and trends.
 - next:
   - Verify Insights trends in Console UI (post-deploy smoke).
 - evidence:
@@ -44,4 +45,5 @@
   - /tmp/analytics_api_version_local_20260205.txt
   - /tmp/analytics_client_ids_20260205.txt
   - /tmp/analytics_metrics_demo_salon_20260205.txt
+  - /tmp/console_web_lint_insights_tooltips_20260205.txt
 - last_updated: 2026-02-05
