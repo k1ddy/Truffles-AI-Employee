@@ -13,6 +13,7 @@
   - Livecheck CA06 consult succeeded; evidence `/tmp/livecheck_ca06_consult_20260204.txt`.
   - Live dialog booking script run via webhook (custom sequence); evidence `/tmp/live_dialog_booking_message_ids_20260204.json`, `/tmp/outbox_payload_live_dialog_booking_20260204.json`, `/tmp/trace_bundle_live_dialog_LC-DIALOG-07099f34.json`, `/tmp/trace_bundle_live_dialog_LC-DIALOG-722f2abc.json`, `/tmp/trace_bundle_live_dialog_LC-DIALOG-f8546bf3.json`, `/tmp/trace_bundle_live_dialog_LC-DIALOG-5f533133.json`.
   - GAP recorded in `STATE.md` for live booking dialog deviation (see evidence above).
+  - Added booking dialog scenario generator + runbook section; smoke output `/tmp/booking_dialog_scenarios_smoke.json`.
 - next:
   - Decide whether to run CA05 booking-commit (blocked by minimum_data_contract in /admin/health).
 - evidence:

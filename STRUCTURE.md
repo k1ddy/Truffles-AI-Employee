@@ -53,6 +53,7 @@
 | `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
 | `scripts/test_api_container.sh` | Контейнерный pytest (drift‑safe, sanitized env) | Backend/QA |
 | `scripts/booking_confirm_verify.sh` | Runbook скрипт: booking confirm verification + evidence | QA/OPS/Brain |
+| `scripts/booking_dialog_scenarios.py` | Генератор booking‑диалогов (10–15 ходов, перебивки, медиа‑шаблоны) | QA/OPS |
 | `scripts/restart_knowledge_gateway.sh` | Перезапуск Knowledge Gateway (shadow) | OPS |
 | `scripts/restart_provider_gateway.sh` | Перезапуск Provider Gateway (shadow) | OPS |
 | `scripts/restart_inbox_service.sh` | Перезапуск Inbox Service (shadow) | OPS |
