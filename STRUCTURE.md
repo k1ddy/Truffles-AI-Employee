@@ -26,6 +26,7 @@
 | `contracts/llm/dialogue_controller_output.v1.jsonschema` | Контракт LLM‑контроллера (router) | Архитектор/Backend |
 | `contracts/llm/answer_interpreter_output.v1.jsonschema` | Контракт LLM answer_interpreter | Архитектор/Backend |
 | `contracts/llm/llm_plan_output.v1.jsonschema` | Контракт Hybrid LLM plan | Архитектор/Backend |
+| `contracts/llm/llm_policy_core_output.v1.jsonschema` | Контракт LLM policy core | Архитектор/Backend |
 | `contracts/packs/` | Pack-compiler artifacts (signal graph, indexes) | Архитектор/Backend |
 | `contracts/packs/signal_graph.v1.jsonschema` | Канон сигнального графа (anchors/lexicons) | Архитектор/Backend |
 | `contracts/policy/` | Policy DSL bundles | Архитектор/Backend |
@@ -127,6 +128,7 @@
 
 **Активные Task Packages:**
 - `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-dec.md`
+- `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-impl.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-canon.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-tp-batch-create.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-kit.md`
@@ -565,6 +567,7 @@ truffles-api/
 | `intent_classifier.md` | Промпт для классификации |
 | `summarizer.md` | Промпт для суммаризации |
 | `llm_plan.md` | Промпт Hybrid LLM plan |
+| `llm_policy_core.md` | Промпт LLM policy core |
 
 ---
 

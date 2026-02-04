@@ -14,6 +14,7 @@ from app.schemas.intent import (
     validate_answer_interpreter_output,
     validate_dialogue_controller_output,
     validate_llm_plan_output,
+    validate_llm_policy_core_output,
 )
 from app.services.ai_service import (
     FAST_MODEL,
@@ -79,6 +80,15 @@ PLAN_TIMEOUT_SECONDS = float(os.environ.get("LLM_PLAN_TIMEOUT_SECONDS", "3.0"))
 PLAN_MAX_TOKENS = int(os.environ.get("LLM_PLAN_MAX_TOKENS", "220"))
 PLAN_MODEL = os.environ.get("LLM_PLAN_MODEL", CONTROLLER_MODEL).strip()
 PLAN_CONFIDENCE_THRESHOLD = float(os.environ.get("LLM_PLAN_CONFIDENCE_THRESHOLD", "0.3"))
+POLICY_CORE_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "llm_policy_core.md"
+POLICY_CORE_TIMEOUT_SECONDS = float(
+    os.environ.get("LLM_POLICY_CORE_TIMEOUT_SECONDS", "3.0")
+)
+POLICY_CORE_MAX_TOKENS = int(os.environ.get("LLM_POLICY_CORE_MAX_TOKENS", "240"))
+POLICY_CORE_MODEL = os.environ.get("LLM_POLICY_CORE_MODEL", PLAN_MODEL).strip()
+POLICY_CORE_CONFIDENCE_THRESHOLD = float(
+    os.environ.get("LLM_POLICY_CORE_CONFIDENCE_THRESHOLD", "0.3")
+)
 ANSWER_INTERPRETER_TIMEOUT_SECONDS = float(
     os.environ.get("ANSWER_INTERPRETER_TIMEOUT_SECONDS", "2.5")
 )
@@ -202,9 +212,17 @@ slot_state and open_questions may only use: service, datetime, name.
 For info pricing/duration, include tool_args.service_query (or slot_state.service).
 If missing required args, set outcome=collect and list open_questions accordingly.
 """
+POLICY_CORE_PROMPT_FALLBACK = """# LLM Policy Core Prompt
+Return JSON only (no markdown). Required fields: action, tool_action, confidence.
+Optional fields: tool_args, pack_refs, slots, next_question, open_questions, needs_manager,
+risk_signals, language, reason, goal.
+Use tool_action and pack_refs only from the allowed lists provided in the input.
+slots/open_questions/next_question may only use: service, datetime, name.
+"""
 
 _CONTROLLER_PROMPT_CACHE: str | None = None
 _PLAN_PROMPT_CACHE: str | None = None
+_POLICY_CORE_PROMPT_CACHE: str | None = None
 
 
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
@@ -241,6 +259,23 @@ def _load_plan_prompt() -> str:
         logger.warning("LLM plan prompt fallback in use")
         _PLAN_PROMPT_CACHE = PLAN_PROMPT_FALLBACK.strip()
     return _PLAN_PROMPT_CACHE
+
+
+def _load_policy_core_prompt() -> str:
+    global _POLICY_CORE_PROMPT_CACHE
+    if _POLICY_CORE_PROMPT_CACHE is not None:
+        return _POLICY_CORE_PROMPT_CACHE
+    try:
+        _POLICY_CORE_PROMPT_CACHE = POLICY_CORE_PROMPT_PATH.read_text(
+            encoding="utf-8"
+        ).strip()
+    except Exception as exc:
+        logger.warning(f"LLM policy core prompt load failed: {exc}")
+        _POLICY_CORE_PROMPT_CACHE = ""
+    if not _POLICY_CORE_PROMPT_CACHE:
+        logger.warning("LLM policy core prompt fallback in use")
+        _POLICY_CORE_PROMPT_CACHE = POLICY_CORE_PROMPT_FALLBACK.strip()
+    return _POLICY_CORE_PROMPT_CACHE
 
 
 def _clean_controller_class(value: str | None) -> str | None:
@@ -1039,6 +1074,161 @@ def route_llm_plan(
         return result
 
     contract, schema_error = validate_llm_plan_output(payload)
+    if schema_error:
+        result["error"] = "invalid_schema"
+        return result
+
+    result["ok"] = True
+    result["payload"] = contract.model_dump()
+    return result
+
+
+def route_llm_policy_core(
+    message: str,
+    *,
+    expected_reply_type: str | None = None,
+    current_goal: str | None = None,
+    slot_state: dict | None = None,
+    info_refs: list[str] | None = None,
+    consult_refs: list[str] | None = None,
+    client_slug: str | None = None,
+    client_config: dict | None = None,
+    timing_context: dict | None = None,
+) -> dict:
+    result: dict[str, Any] = {
+        "ok": False,
+        "payload": None,
+        "error": None,
+        "raw": None,
+        "attempted": False,
+        "elapsed_ms": 0.0,
+    }
+    normalized = (message or "").strip()
+    if not normalized:
+        result["error"] = "empty_message"
+        return result
+    prompt = _load_policy_core_prompt()
+    if not prompt:
+        result["error"] = "prompt_missing"
+        return result
+    if not os.environ.get("OPENAI_API_KEY"):
+        result["error"] = "no_api_key"
+        return result
+    if not _should_attempt_llm(
+        timing_context,
+        timeout_seconds=POLICY_CORE_TIMEOUT_SECONDS,
+        stage="policy_core_llm",
+    ):
+        result["error"] = "deadline_exceeded"
+        return result
+
+    budget_meta = consume_llm_budget(
+        client_slug=client_slug or "unknown",
+        client_config=client_config,
+        scope="policy_core",
+    )
+    _append_llm_budget_event(timing_context, budget_meta)
+    if not budget_meta.get("allowed", True):
+        result["error"] = "budget_exceeded"
+        return result
+
+    policy_input: dict[str, Any] = {
+        "task": "llm_policy_core",
+        "message": message,
+        "expected_reply_type": expected_reply_type,
+        "current_goal": current_goal,
+        "slot_state": slot_state or {},
+        "allowed": {
+            "tool_actions": [
+                "info",
+                "consult",
+                "booking",
+                "handoff",
+                "collect",
+                "calendar.list_slots",
+                "calendar.book_slot",
+                "calendar.get_booking",
+                "calendar.reschedule",
+                "calendar.cancel",
+                "catalog.service_query",
+                "catalog.location",
+                "catalog.portfolio",
+            ],
+            "info_refs": list(info_refs or []),
+            "consult_refs": list(consult_refs or []),
+        },
+    }
+
+    llm = get_llm_provider()
+    temperature = 0.0
+    model_name = POLICY_CORE_MODEL.strip().lower()
+    if model_name.startswith("gpt-5"):
+        temperature = 1.0
+
+    messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": json.dumps(policy_input, ensure_ascii=False)},
+    ]
+    llm_start = time.monotonic()
+    response = None
+    error = None
+    try:
+        response = llm.generate(
+            messages=messages,
+            max_tokens=POLICY_CORE_MAX_TOKENS,
+            model=POLICY_CORE_MODEL,
+            timeout_seconds=POLICY_CORE_TIMEOUT_SECONDS,
+            temperature=temperature,
+        )
+    except httpx.TimeoutException:
+        error = "timeout"
+    except Exception as exc:
+        logger.warning(f"LLM policy core failed: {exc}")
+        error = "error"
+
+    elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
+    result["attempted"] = True
+    result["elapsed_ms"] = elapsed_ms
+    _log_timing(
+        "policy_core_llm_ms",
+        elapsed_ms,
+        timing_context=timing_context,
+        extra={
+            "model_name": POLICY_CORE_MODEL,
+            "model_tier": "fast",
+            "timeout": error == "timeout",
+            "timeout_seconds": POLICY_CORE_TIMEOUT_SECONDS,
+            "max_tokens": POLICY_CORE_MAX_TOKENS,
+            "temperature": temperature,
+        },
+    )
+    record_llm_time(client_slug, "policy_core_llm_ms", elapsed_ms)
+
+    if error is not None:
+        result["error"] = error
+        return result
+
+    content = (response.content or "").strip() if response else ""
+    result["raw"] = content
+    if not content:
+        result["error"] = "empty_response"
+        return result
+
+    payload = None
+    try:
+        payload = json.loads(content)
+    except Exception:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                payload = json.loads(match.group(0))
+            except Exception:
+                payload = None
+    if not isinstance(payload, dict):
+        result["error"] = "invalid_json"
+        return result
+
+    contract, schema_error = validate_llm_policy_core_output(payload)
     if schema_error:
         result["error"] = "invalid_schema"
         return result

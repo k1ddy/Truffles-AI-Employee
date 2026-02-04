@@ -1,0 +1,18 @@
+# SESSION 2026-02-04-llm-policy-core-impl-a7 — Session 2026-02-04-llm-policy-core-impl-a7
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-impl.md
+- branch: feat/2026-02-04-llm-policy-core-impl-a7
+- worktree: /home/zhan/worktrees/2026-02-04-llm-policy-core-impl-a7
+- base_ref: origin/main
+- scope: DEC-023 runtime implementation kickoff (TP + state/structure updates + PR)
+- done:
+  - Session created.
+  - Drafted TP for LLM policy core implementation.
+  - Added GAP entry and STRUCTURE active TP reference.
+- next:
+  - Open PR and start implementation per TP.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-impl.md
+- last_updated: 2026-02-04
