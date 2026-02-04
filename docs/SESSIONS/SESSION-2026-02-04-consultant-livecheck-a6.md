@@ -15,8 +15,10 @@
   - GAP recorded in `STATE.md` for live booking dialog deviation (see evidence above).
   - Added booking dialog scenario generator + runbook section; smoke output `/tmp/booking_dialog_scenarios_smoke.json`.
   - Added AGENTS.md guidance for booking dialog generator usage.
+  - Ran 5 live dialog scenarios (69 turns) via webhook; evidence `/tmp/booking_dialog_runs_20260204-012816/` (run_summary/outbox_payloads/trace_bundles).
 - next:
   - Decide whether to run CA05 booking-commit (blocked by minimum_data_contract in /admin/health).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-04-consultant-livecheck.md
+  - /tmp/booking_dialog_runs_20260204-012816
 - last_updated: 2026-02-04
