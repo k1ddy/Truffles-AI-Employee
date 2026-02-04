@@ -120,6 +120,7 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-dec.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-canon.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-tp-batch-create.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-kit.md`

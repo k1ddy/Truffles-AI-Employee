@@ -5815,6 +5815,16 @@ async def _handle_webhook_payload(
         return pending_response
 
     # 4.9 Behavioral shield (pre-LAW/policy).
+    shield_booking_slot_signal = False
+    if message_text:
+        shield_booking_slot_signal = _is_booking_slot_signal(
+            message_text,
+            client_slug=payload.client_slug,
+        )
+    shield_context = _get_conversation_context(conversation)
+    shield_booking_state = _get_booking_context(shield_context)
+    shield_booking_active = bool(shield_booking_state.get("active"))
+    shield_booking_wants_flow = bool(shield_booking_active or shield_booking_slot_signal)
     shield_response = _handle_shield_gate(
         db=db,
         conversation=conversation,
@@ -5825,9 +5835,9 @@ async def _handle_webhook_payload(
         saved_message=saved_message,
         send_and_save=_send_and_save,
         record_escalation_metric=_record_escalation_metric,
-        booking_active=booking_active,
-        booking_wants_flow=booking_wants_flow,
-        booking_slot_signal=booking_slot_signal,
+        booking_active=shield_booking_active,
+        booking_wants_flow=shield_booking_wants_flow,
+        booking_slot_signal=shield_booking_slot_signal,
         skip_persist=skip_persist,
     )
     if shield_response:

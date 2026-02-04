@@ -96,3 +96,7 @@ decisions:
     area: "data_consent_learning"
     choice: "CONSENT_ANONYMIZED_ONLY"
     statement: "Learning/improvement uses only consented and anonymized data; per-tenant isolation is mandatory; cross-tenant reuse is opt-in only; retention policy applies to raw inputs and derived artifacts."
+  - id: "DEC-023"
+    area: "decision_model"
+    choice: "LLM_POLICY_CORE"
+    statement: "LLM is the policy core and sole decision-maker for dialog actions (FACT/COLLECT/HANDOFF). Deterministic code validates LLM output schema, enforces hard policy/safety, and executes tools; expected-reply/pending/router gates do not override LLM decisions. Escalation only on explicit user request or policy risk; OOD responses must soft-return to domain. Facts only via packs/tools."
