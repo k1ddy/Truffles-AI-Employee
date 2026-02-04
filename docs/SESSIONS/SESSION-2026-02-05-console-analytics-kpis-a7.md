@@ -21,6 +21,7 @@
   - Added KPI tooltip copy for Insights tiles and trends.
   - Merged PR #533 and redeployed console-web with KPI tooltips.
   - Simplified KPI tooltip copy (plain language) and redeployed console-web.
+  - Removed native browser tooltip to avoid double hints.
 - next:
   - Verify Insights trends in Console UI (post-deploy smoke).
 - evidence:
@@ -51,4 +52,6 @@
   - /tmp/console_web_redeploy_insights_tooltips_20260205.txt
   - /tmp/console_web_lint_insights_tooltips_simple_20260205.txt
   - /tmp/console_web_redeploy_insights_tooltips_simple_20260205.txt
+  - /tmp/console_web_lint_insights_tooltips_no_native_20260205.txt
+  - /tmp/console_web_redeploy_insights_tooltips_no_native_20260205.txt
 - last_updated: 2026-02-05
