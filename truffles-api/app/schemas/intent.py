@@ -200,6 +200,62 @@ class LlmPlanOutput(BaseModel):
         return _normalize_slots(value)
 
 
+class LlmPolicyCoreOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    action: str
+    tool_action: str | None = None
+    tool_args: dict[str, Any] = Field(default_factory=dict)
+    pack_refs: list[str] = Field(default_factory=list)
+    slots: dict[str, str] = Field(default_factory=dict)
+    next_question: str | None = None
+    open_questions: list[str] = Field(default_factory=list)
+    needs_manager: bool = False
+    risk_signals: list[str] = Field(default_factory=list)
+    language: str | None = None
+    confidence: float = Field(..., ge=0, le=1)
+    reason: str | None = None
+    goal: str | None = None
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def _validate_action(cls, value: Any) -> str:
+        return _normalize_required_string(value, field="action")
+
+    @field_validator("tool_action", "language", "reason", "goal", "next_question", mode="before")
+    @classmethod
+    def _validate_optional_fields(cls, value: Any, info) -> str | None:
+        return _normalize_optional_string(value, field=info.field_name)
+
+    @field_validator("tool_args", mode="before")
+    @classmethod
+    def _validate_tool_args(cls, value: Any) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("tool_args_invalid")
+        return dict(value)
+
+    @field_validator("pack_refs", "open_questions", "risk_signals", mode="before")
+    @classmethod
+    def _validate_string_lists(cls, value: Any, info) -> list[str]:
+        return _normalize_string_list(value, field=info.field_name)
+
+    @field_validator("slots", mode="before")
+    @classmethod
+    def _validate_slots(cls, value: Any) -> dict[str, str]:
+        return _normalize_slots(value)
+
+    @field_validator("needs_manager", mode="before")
+    @classmethod
+    def _validate_needs_manager(cls, value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return value
+        raise ValueError("needs_manager_invalid")
+
+
 def validate_dialogue_controller_output(
     payload_json: dict[str, Any],
 ) -> tuple[DialogueControllerOutput | None, str | None]:
@@ -227,4 +283,14 @@ def validate_llm_plan_output(
         contract = LlmPlanOutput.model_validate(payload_json)
     except ValidationError as exc:
         return None, f"llm_plan_error:{_summarize_validation_error(exc)}"
+    return contract, None
+
+
+def validate_llm_policy_core_output(
+    payload_json: dict[str, Any],
+) -> tuple[LlmPolicyCoreOutput | None, str | None]:
+    try:
+        contract = LlmPolicyCoreOutput.model_validate(payload_json)
+    except ValidationError as exc:
+        return None, f"llm_policy_core_error:{_summarize_validation_error(exc)}"
     return contract, None

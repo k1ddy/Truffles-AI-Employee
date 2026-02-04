@@ -37,9 +37,12 @@ from app.services.intent_service import (
     is_strong_out_of_domain,
 )
 from app.services.knowledge_snapshot_consumer import ConsultSnapshotShadowResult
+from app.services.knowledge_validation import MinimumDataContractStatus
 from app.services.message_service import select_handover_user_message
 from app.services.result import Result
 from app.services.state_machine import ConversationState
+
+MINIMUM_DATA_READY = MinimumDataContractStatus(ready=True, missing_fields=[])
 
 
 @pytest.fixture
@@ -288,7 +291,7 @@ class TestMessageEndpoint:
             with patch(
                 "app.routers.message.get_client_slug", return_value="demo_salon"
             ), patch(
-                "app.routers.message.webhook_legacy._handle_webhook_payload",
+                "app.routers.message.reasoning_core.handle_webhook_payload",
                 new_callable=AsyncMock,
             ) as mock_handle:
                 mock_handle.return_value = WebhookResponse(
@@ -804,10 +807,10 @@ class TestRoutingPolicy:
 
     def test_routing_policy_pending(self):
         policy = webhook_router._get_routing_policy(ConversationState.PENDING.value)
-        assert policy["allow_booking_flow"] is False
+        assert policy["allow_booking_flow"] is True
         assert policy["allow_handover_create"] is False
-        assert policy["allow_truth_gate_reply"] is False
-        assert policy["allow_bot_reply"] is False
+        assert policy["allow_truth_gate_reply"] is True
+        assert policy["allow_bot_reply"] is True
 
     def test_routing_policy_manager_active(self):
         policy = webhook_router._get_routing_policy(ConversationState.MANAGER_ACTIVE.value)
@@ -821,7 +824,7 @@ class TestRoutingPolicy:
             booking_active=False,
             booking_signal=True,
         )
-        assert should_run is False
+        assert should_run is True
 
     def test_demo_truth_gate_skips_when_booking(self):
         policy = webhook_router._get_routing_policy(ConversationState.PENDING.value)
@@ -965,6 +968,9 @@ def test_truth_gate_sets_decision_meta():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ):
@@ -1899,6 +1905,9 @@ def test_consult_snapshot_shadow_disabled():
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
+    ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
         "app.routers.webhook._legacy.generate_bot_response"
@@ -2051,6 +2060,9 @@ def test_consult_snapshot_shadow_records_trace_and_meta():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
@@ -2212,6 +2224,9 @@ def test_consult_snapshot_shadow_records_error():
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
+    ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
         "app.routers.webhook._legacy.generate_bot_response"
@@ -2370,6 +2385,9 @@ def test_consult_snapshot_cutover_fallback_uses_legacy_pack():
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
+    ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
         "app.routers.webhook._legacy.generate_bot_response"
@@ -2502,6 +2520,9 @@ def test_consult_snapshot_cutover_strict_clarifies():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
@@ -3064,6 +3085,9 @@ def test_semantic_service_matcher_handles_low_confidence_match():
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
+    ), patch(
         "app.routers.webhook._legacy._extract_service_hint", return_value="маникюр"
     ):
         response = asyncio.run(
@@ -3178,6 +3202,9 @@ def test_semantic_service_matcher_handles_low_confidence_suggest():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ), patch(
         "app.routers.webhook._legacy._extract_service_hint", return_value="массаж ног"
     ):
@@ -3299,6 +3326,9 @@ def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ), patch(
         "app.routers.webhook._legacy._extract_service_hint", return_value="маникюр"
     ):
@@ -3715,6 +3745,9 @@ def test_service_matcher_short_circuits_llm():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
@@ -4155,6 +4188,9 @@ def test_llm_guard_blocks_payment_response():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -5842,7 +5878,7 @@ def test_expected_reply_type_invalid_choice_keeps_contract():
     assert meta.get("expected_reply_reason") == "invalid_choice"
 
 
-def test_llm_plan_collect_sets_expected_reply_type():
+def test_llm_policy_core_collect_sets_expected_reply_type():
     saved_message = Mock()
     saved_message.message_metadata = {}
 
@@ -5902,8 +5938,8 @@ def test_llm_plan_collect_sets_expected_reply_type():
         ),
     )
 
-    plan_payload = {
-        "outcome": "collect",
+    policy_payload = {
+        "action": "collect",
         "tool_action": "info",
         "tool_args": {},
         "pack_refs": ["pricing"],
@@ -5911,22 +5947,25 @@ def test_llm_plan_collect_sets_expected_reply_type():
         "confidence": 0.9,
         "reason": "need_service",
         "goal": "info",
-        "slot_state": {},
+        "slots": {},
+        "next_question": "service",
         "open_questions": ["service"],
+        "needs_manager": False,
+        "risk_signals": [],
     }
-    plan_result = {
+    policy_result = {
         "ok": True,
-        "payload": plan_payload,
+        "payload": policy_payload,
         "error": None,
-        "raw": json.dumps(plan_payload, ensure_ascii=False),
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
         "attempted": True,
         "elapsed_ms": 12.5,
     }
     domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
 
-    with patch("app.routers.webhook.decision.route_llm_plan", return_value=plan_result), patch(
-        "app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)
-    ), patch(
+    with patch(
+        "app.routers.webhook.decision.route_llm_policy_core", return_value=policy_result
+    ), patch("app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)), patch(
         "app.routers.webhook.decision.format_reply_from_truth", return_value="Уточните услугу."
     ), patch(
         "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
@@ -5957,8 +5996,8 @@ def test_llm_plan_collect_sets_expected_reply_type():
     assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
-    assert meta.get("llm_plan", {}).get("validated") is True
-    assert meta.get("llm_plan", {}).get("payload", {}).get("tool_action") == "info"
+    assert meta.get("llm_policy_core", {}).get("validated") is True
+    assert meta.get("llm_policy_core", {}).get("payload", {}).get("tool_action") == "info"
 
 
 def test_short_intent_hint_bypasses_early_ood():

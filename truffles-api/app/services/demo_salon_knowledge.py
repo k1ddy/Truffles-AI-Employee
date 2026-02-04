@@ -369,6 +369,8 @@ def get_system_anchor_groups(intent: str) -> list[tuple[str, ...]]:
 @lru_cache(maxsize=8)
 def load_yaml_truth(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
     raw = _load_yaml(_truth_path(client_slug))
+    if not raw:
+        return {}
     compiled = compile_pack_payload(raw)
     effective = compiled.get("effective_pack") if isinstance(compiled, dict) else None
     return effective if isinstance(effective, dict) else raw
