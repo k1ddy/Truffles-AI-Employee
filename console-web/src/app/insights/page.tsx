@@ -25,6 +25,13 @@ function formatHours(value: number | null | undefined): string {
     return `${value.toFixed(1)} ч`;
 }
 
+function formatCount(value: number | null | undefined): string {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+        return "—";
+    }
+    return value.toLocaleString("ru-RU");
+}
+
 function MetricTile({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
     return (
         <div className="bg-muted rounded-lg p-4 text-center">
@@ -97,7 +104,7 @@ export default function InsightsPage() {
                 <div>
                     <h1 className="text-2xl font-bold mb-1" data-testid="insights-title">Аналитика</h1>
                     <p className="text-sm text-muted-foreground">
-                        Ежедневная сводка по заявкам и скорости ответа.
+                        Ежедневная сводка по сообщениям и заявкам.
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -133,10 +140,17 @@ export default function InsightsPage() {
             </div>
 
             {isLoading ? (
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5 animate-pulse" data-testid="insights-loading">
-                    {[...Array(5)].map((_, index) => (
-                        <div key={index} className="h-24 bg-muted/70 rounded-lg"></div>
-                    ))}
+                <div className="space-y-4" data-testid="insights-loading">
+                    <div className="grid gap-4 md:grid-cols-2 animate-pulse">
+                        {[...Array(2)].map((_, index) => (
+                            <div key={`msg-${index}`} className="h-24 bg-muted/70 rounded-lg"></div>
+                        ))}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5 animate-pulse">
+                        {[...Array(5)].map((_, index) => (
+                            <div key={`case-${index}`} className="h-24 bg-muted/70 rounded-lg"></div>
+                        ))}
+                    </div>
                 </div>
             ) : error ? (
                 <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-6 text-center" data-testid="insights-error">
@@ -150,12 +164,18 @@ export default function InsightsPage() {
                     </button>
                 </div>
             ) : (
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5" data-testid="insights-metrics">
-                    <MetricTile label="Всего заявок" value={metrics?.total_cases ?? 0} />
-                    <MetricTile label="Ожидают ответа" value={metrics?.pending_cases ?? 0} />
-                    <MetricTile label="В работе" value={metrics?.active_cases ?? 0} />
-                    <MetricTile label="Закрыты" value={metrics?.resolved_cases ?? 0} />
-                    <MetricTile label="Среднее время" value={formatHours(metrics?.avg_resolution_hours)} />
+                <div className="space-y-4" data-testid="insights-metrics">
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <MetricTile label="Сообщений от клиентов" value={formatCount(metrics?.total_client_messages)} />
+                        <MetricTile label="Ответов бота" value={formatCount(metrics?.total_bot_messages)} />
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                        <MetricTile label="Всего заявок" value={metrics?.total_cases ?? 0} />
+                        <MetricTile label="Ожидают ответа" value={metrics?.pending_cases ?? 0} />
+                        <MetricTile label="В работе" value={metrics?.active_cases ?? 0} />
+                        <MetricTile label="Закрыты" value={metrics?.resolved_cases ?? 0} />
+                        <MetricTile label="Среднее время" value={formatHours(metrics?.avg_resolution_hours)} />
+                    </div>
                 </div>
             )}
         </div>
