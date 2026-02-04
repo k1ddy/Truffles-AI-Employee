@@ -6195,8 +6195,8 @@ def test_llm_policy_core_allows_plan_with_expected_reply(monkeypatch):
         ),
     )
 
-    plan_payload = {
-        "outcome": "collect",
+    policy_payload = {
+        "action": "collect",
         "tool_action": "collect",
         "tool_args": {},
         "pack_refs": [],
@@ -6204,22 +6204,25 @@ def test_llm_policy_core_allows_plan_with_expected_reply(monkeypatch):
         "confidence": 0.9,
         "reason": "need_service",
         "goal": "booking",
-        "slot_state": {},
+        "slots": {},
+        "next_question": "service",
         "open_questions": ["service"],
+        "needs_manager": False,
+        "risk_signals": [],
     }
-    plan_result = {
+    policy_result = {
         "ok": True,
-        "payload": plan_payload,
+        "payload": policy_payload,
         "error": None,
-        "raw": json.dumps(plan_payload, ensure_ascii=False),
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
         "attempted": True,
         "elapsed_ms": 12.5,
     }
     domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
 
-    with patch("app.routers.webhook.decision.route_llm_plan", return_value=plan_result) as plan_mock, patch(
-        "app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)
-    ), patch(
+    with patch(
+        "app.routers.webhook.decision.route_llm_policy_core", return_value=policy_result
+    ) as policy_mock, patch("app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)), patch(
         "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
     ), patch(
         "app.routers.webhook._legacy._get_policy_handler", return_value=None
@@ -6247,9 +6250,9 @@ def test_llm_policy_core_allows_plan_with_expected_reply(monkeypatch):
 
     assert response.success is True
     assert webhook_router.MSG_BOOKING_ASK_SERVICE in response.bot_response
-    assert plan_mock.called is True
+    assert policy_mock.called is True
     meta = saved_message.message_metadata.get("decision_meta", {})
-    assert meta.get("llm_policy_core", {}).get("enabled") is True
+    assert meta.get("llm_policy_core", {}).get("validated") is True
 
 
 def test_unknown_state_fallback_sends_reply():
@@ -6313,10 +6316,17 @@ def test_unknown_state_fallback_sends_reply():
     )
 
     domain_result = (DomainIntent.UNKNOWN, 0.0, 0.0, {"out_hits": 0, "strict_in_hits": 0})
-    plan_result = {"ok": False, "payload": None, "error": "skip", "raw": None, "attempted": False, "elapsed_ms": 0.0}
+    policy_result = {
+        "ok": False,
+        "payload": None,
+        "error": "skip",
+        "raw": None,
+        "attempted": False,
+        "elapsed_ms": 0.0,
+    }
 
     with patch("app.routers.webhook.decision._resolve_action", return_value=DecisionOutcome("unknown_state")), patch(
-        "app.routers.webhook.decision.route_llm_plan", return_value=plan_result
+        "app.routers.webhook.decision.route_llm_policy_core", return_value=policy_result
     ), patch(
         "app.routers.webhook.decision._handle_llm_primary",
         return_value=SimpleNamespace(

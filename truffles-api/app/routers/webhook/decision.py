@@ -4759,6 +4759,7 @@ async def _handle_webhook_payload(
         LLM_POLICY_CORE_ENABLED
         and routing.get("allow_bot_reply", False)
         and message_text
+        and os.environ.get("OPENAI_API_KEY")
     )
     if llm_policy_core_guard_only:
         timing_context["llm_policy_core_enabled"] = True
