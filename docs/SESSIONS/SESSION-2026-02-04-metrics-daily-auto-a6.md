@@ -19,4 +19,5 @@
   - docs/TASK_PACKAGES/TP-2026-02-04-metrics-daily-auto.md
   - Snapshot attempt: POST /admin/metrics/snapshot (localhost) returned 404 (API not redeployed).
   - Snapshot attempt after restart returned SQL syntax error on :client_id::uuid; fix pending (CAST).
+  - /admin/metrics returned 500 (missing total_bot_messages column); align service SQL with snapshot script.
 - last_updated: 2026-02-04
