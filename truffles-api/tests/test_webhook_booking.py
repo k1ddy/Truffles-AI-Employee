@@ -69,3 +69,18 @@ def test_match_expected_reply_for_name():
 
     assert matched is True
     assert value == "Лиза"
+
+
+@pytest.mark.parametrize(
+    "message_text,expected",
+    [
+        ("Можно на 19:00?", True),
+        ("Меня зовут Лена", True),
+        ("Телефон +7 701 111 22 33", True),
+        ("Сколько стоит маникюр?", False),
+    ],
+)
+def test_booking_slot_signal(message_text, expected):
+    result = webhook._is_booking_slot_signal(message_text, client_slug="demo_salon")
+
+    assert result is expected

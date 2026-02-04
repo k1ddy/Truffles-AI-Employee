@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from app.services.demo_salon_knowledge import DemoSalonDecision
 
 BOOKING_SLOT_ORDER = ("service", "datetime", "name")
+PHONE_PATTERN = re.compile(r"\+?\d[\d\s\-\(\)]{8,}\d")
 _LAYOUT_SWAP_MAP = str.maketrans(
     {
         "q": "й",
@@ -595,7 +596,7 @@ def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None
 
 
 def _is_booking_related_message(
-    message_text: str,
+    message_text: str | None,
     client_slug: str | None,
     *,
     allow_name: bool = True,
@@ -617,6 +618,29 @@ def _is_booking_related_message(
     if allow_name and _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug):
         return True
     return False
+
+
+def _looks_like_phone(message_text: str | None) -> bool:
+    if not message_text:
+        return False
+    match = PHONE_PATTERN.search(message_text)
+    if not match:
+        return False
+    digits = re.sub(r"\D", "", match.group(0))
+    return len(digits) >= 10
+
+
+def _is_booking_slot_signal(message_text: str | None, *, client_slug: str | None) -> bool:
+    if not message_text:
+        return False
+    if _looks_like_phone(message_text):
+        return True
+    return _is_booking_related_message(
+        message_text,
+        client_slug,
+        allow_name=True,
+        allow_service=False,
+    )
 
 
 def _select_last_non_booking_message(messages: list[str], *, client_slug: str | None) -> str | None:
@@ -1594,6 +1618,10 @@ def _handle_booking_interrupt(
                         )
                         prompt = None
 
+                booking_slot_signal = _is_booking_slot_signal(
+                    message_text,
+                    client_slug=client_slug,
+                )
                 if prompt and not booking_time_service_interrupt and not booking_interrupt_info and booking_prompt_repeat:
                     context_manager = legacy._get_context_manager(context)
                     clarify_guard_reason = legacy._booking_clarify_guard_reason(
@@ -1601,6 +1629,8 @@ def _handle_booking_interrupt(
                         basic_info_message=basic_info_message,
                         session_memory_reset_reason=session_memory_reset_reason,
                         memory_expected_reply_type=memory_expected_reply_type,
+                        message_text=message_text,
+                        booking_slot_signal=booking_slot_signal,
                     )
                     if clarify_guard_reason:
                         if saved_message:
@@ -2250,6 +2280,10 @@ def _handle_booking_flow(
                 and expected_reply_type == booking_expected
                 and expected_reply_matched is False
             )
+            booking_slot_signal = _is_booking_slot_signal(
+                message_text,
+                client_slug=client_slug,
+            )
             if prompt and booking_expected:
                 context = legacy._set_expected_reply_context(
                     conversation=conversation,
@@ -2268,6 +2302,8 @@ def _handle_booking_flow(
                         basic_info_message=basic_info_message,
                         session_memory_reset_reason=session_memory_reset_reason,
                         memory_expected_reply_type=memory_expected_reply_type,
+                        message_text=message_text,
+                        booking_slot_signal=booking_slot_signal,
                     )
                     if clarify_guard_reason:
                         if saved_message:
@@ -2510,6 +2546,7 @@ __all__ = [
     "_get_recent_service_hint",
     "_is_blocked_slot_message",
     "_is_booking_related_message",
+    "_is_booking_slot_signal",
     "_is_booking_time_service_decision",
     "_is_noise_slot_message",
     "_match_expected_reply",

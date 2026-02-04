@@ -17,6 +17,7 @@
   - Added AGENTS.md guidance for booking dialog generator usage.
   - Ran 5 live dialog scenarios (69 turns) via webhook; evidence `/tmp/booking_dialog_runs_20260204-012816/` (run_summary/outbox_payloads/trace_bundles).
   - Ran 5 more live dialog scenarios (64 turns, 51 missing replies) via webhook; evidence `/tmp/booking_dialog_runs_20260204-014810/` (run_summary/outbox_payloads/trace_bundles).
+  - Implemented booking slot-signal + clarify-guard + shield skip for booking flow; local pytest evidence `/tmp/pytest_webhook_booking_slot_signal_20260204.txt`.
 - next:
   - Decide whether to run CA05 booking-commit (blocked by minimum_data_contract in /admin/health).
 - evidence:
