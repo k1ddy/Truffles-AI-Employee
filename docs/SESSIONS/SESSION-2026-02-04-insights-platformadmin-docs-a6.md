@@ -1,17 +1,14 @@
-# SESSION 2026-02-04-console-insights-platformadmin-a6 — Console Insights Platform Admin
+# SESSION 2026-02-04-insights-platformadmin-docs-a6 — Doc-only Insights Evidence
 
 - status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-04-console-insights-platformadmin.md
-- branch: feat/2026-02-04-console-insights-platformadmin-a6
-- worktree: /home/zhan/worktrees/2026-02-04-console-insights-platformadmin-a6
+- branch: docs/2026-02-04-insights-platformadmin
+- worktree: /home/zhan/worktrees/2026-02-04-insights-platformadmin-doc
 - base_ref: origin/main
-- scope: Platform Admin access to Insights (canon + RBAC + audit docs).
+- scope: Doc-only evidence sync for platform_admin Insights.
 - done:
-  - Insights доступен platform_admin
-  - Session created.
-  - Lint passed.
-  - Console web redeployed.
+  - Synced STATE/session docs to main.
 - next:
   - —
 - evidence:
