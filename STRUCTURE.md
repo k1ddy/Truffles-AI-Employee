@@ -53,6 +53,7 @@
 | `scripts/install_hooks.sh` | Установка обязательных hooks | Все роли |
 | `scripts/test_api_container.sh` | Контейнерный pytest (drift‑safe, sanitized env) | Backend/QA |
 | `scripts/booking_confirm_verify.sh` | Runbook скрипт: booking confirm verification + evidence | QA/OPS/Brain |
+| `scripts/booking_dialog_scenarios.py` | Генератор booking‑диалогов (10–15 ходов, перебивки, медиа‑шаблоны) | QA/OPS |
 | `scripts/restart_knowledge_gateway.sh` | Перезапуск Knowledge Gateway (shadow) | OPS |
 | `scripts/restart_provider_gateway.sh` | Перезапуск Provider Gateway (shadow) | OPS |
 | `scripts/restart_inbox_service.sh` | Перезапуск Inbox Service (shadow) | OPS |
@@ -74,6 +75,7 @@
 | `truffles-api/app/services/calendar_sync_service.py` | Calendar provider sync via outbox + cursors + busy blocks | Backend |
 | `truffles-api/app/services/tool_registry_service.py` | Tool registry executor (calendar/catalog) for LLM plan | Backend |
 | `truffles-api/app/services/appointment_reminder_service.py` | Appointment reminder/follow-up jobs + outbox enqueue | Backend |
+| `truffles-api/app/services/metrics_daily_service.py` | Daily metrics snapshot (metrics_daily) | Backend |
 | `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |
 | `truffles-api/app/models/console_macro.py` | DB model for Inbox macros (Console) | Backend |
 | `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |
@@ -119,6 +121,7 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-dec.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-canon.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-tp-batch-create.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-kit.md`
@@ -216,6 +219,7 @@
 - `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-dsl.md`
 - `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-docs.md`
 - `docs/TASK_PACKAGES/TP-2026-02-01-pack-compiler-implementation.md`
+- `docs/TASK_PACKAGES/TP-2026-02-04-metrics-daily-auto.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-gateway-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consumer-shadow.md`
 - `docs/TASK_PACKAGES/TP-2026-01-27-knowledge-snapshot-consult-cutover.md`
@@ -598,7 +602,7 @@ truffles-api/
 | Папка | Содержание |
 |-------|------------|
 | `Legal/` | Договоры, NDA |
-| `Sales/` | Бриф клиента, скрипты |
+| `Sales/` | Бриф клиента, скрипты, billing rules (`Sales/BILLING_COUNTING.md`) |
 
 **Не для кода.**
 

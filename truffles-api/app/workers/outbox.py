@@ -6,6 +6,10 @@ from datetime import datetime, timedelta, timezone
 from app.database import SessionLocal
 from app.logging_config import get_logger, setup_logging
 from app.services.calendar_sync_service import schedule_inbound_syncs
+from app.services.metrics_daily_service import (
+    get_metrics_daily_status_allowlist,
+    run_metrics_daily_snapshot,
+)
 from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
 
 setup_logging()
@@ -83,6 +87,48 @@ def _get_outbox_worker_settings() -> tuple[float, int, int, int, float, int, int
         stale_seconds,
     )
 
+
+def _get_metrics_daily_settings() -> tuple[bool, int, int, int, int, int]:
+    enabled = _is_env_enabled(os.environ.get("METRICS_DAILY_AUTO_ENABLED"), default=False)
+    try:
+        run_hour = int(os.environ.get("METRICS_DAILY_RUN_HOUR_UTC", "1"))
+    except (TypeError, ValueError):
+        run_hour = 1
+    try:
+        run_minute = int(os.environ.get("METRICS_DAILY_RUN_MINUTE_UTC", "5"))
+    except (TypeError, ValueError):
+        run_minute = 5
+    try:
+        offset_days = int(os.environ.get("METRICS_DAILY_TARGET_OFFSET_DAYS", "1"))
+    except (TypeError, ValueError):
+        offset_days = 1
+    try:
+        retry_seconds = int(os.environ.get("METRICS_DAILY_RETRY_SECONDS", "600"))
+    except (TypeError, ValueError):
+        retry_seconds = 600
+    try:
+        retry_max = int(os.environ.get("METRICS_DAILY_RETRY_MAX", "3"))
+    except (TypeError, ValueError):
+        retry_max = 3
+
+    run_hour = min(max(run_hour, 0), 23)
+    run_minute = min(max(run_minute, 0), 59)
+    offset_days = max(offset_days, 0)
+    retry_seconds = max(retry_seconds, 60)
+    retry_max = max(retry_max, 0)
+    return enabled, run_hour, run_minute, offset_days, retry_seconds, retry_max
+
+
+def _get_metrics_daily_run_at(now: datetime, run_hour: int, run_minute: int) -> datetime:
+    return datetime(
+        now.year,
+        now.month,
+        now.day,
+        run_hour,
+        run_minute,
+        tzinfo=timezone.utc,
+    )
+
 async def run_worker():
     # 0. Check enabled flag
     if not _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=True):
@@ -97,6 +143,9 @@ async def run_worker():
 
     logger.info("Starting Outbox Worker...")
     next_inbound_schedule_at: datetime | None = None
+    next_metrics_run_at: datetime | None = None
+    last_metrics_metric_date = None
+    metrics_retry_count = 0
     while True:
         try:
             (
@@ -142,6 +191,65 @@ async def run_worker():
                             "Inbound calendar sync scheduled",
                             extra={"context": inbound_results},
                         )
+
+                (
+                    metrics_enabled,
+                    run_hour,
+                    run_minute,
+                    offset_days,
+                    retry_seconds,
+                    retry_max,
+                ) = _get_metrics_daily_settings()
+                if metrics_enabled:
+                    if next_metrics_run_at is None:
+                        next_metrics_run_at = _get_metrics_daily_run_at(now, run_hour, run_minute)
+                    if now >= next_metrics_run_at:
+                        target_date = (now - timedelta(days=offset_days)).date()
+                        if last_metrics_metric_date == target_date:
+                            next_metrics_run_at = _get_metrics_daily_run_at(
+                                now + timedelta(days=1),
+                                run_hour,
+                                run_minute,
+                            )
+                        else:
+                            status_allowlist = get_metrics_daily_status_allowlist()
+                            metrics_db = SessionLocal()
+                            try:
+                                results = run_metrics_daily_snapshot(
+                                    metrics_db,
+                                    metric_date=target_date,
+                                    status_allowlist=status_allowlist,
+                                )
+                            finally:
+                                metrics_db.close()
+                            if results["errors"]:
+                                metrics_retry_count += 1
+                                logger.warning(
+                                    "Metrics daily snapshot errors",
+                                    extra={"context": results},
+                                )
+                                if retry_max and metrics_retry_count <= retry_max:
+                                    next_metrics_run_at = now + timedelta(seconds=retry_seconds)
+                                else:
+                                    last_metrics_metric_date = target_date
+                                    metrics_retry_count = 0
+                                    next_metrics_run_at = _get_metrics_daily_run_at(
+                                        now + timedelta(days=1),
+                                        run_hour,
+                                        run_minute,
+                                    )
+                            else:
+                                logger.info(
+                                    "Metrics daily snapshot complete",
+                                    extra={"context": results},
+                                )
+                                last_metrics_metric_date = target_date
+                                metrics_retry_count = 0
+                                next_metrics_run_at = _get_metrics_daily_run_at(
+                                    now + timedelta(days=1),
+                                    run_hour,
+                                    run_minute,
+                                )
 
                 # 2. Process pending messages
                 while True:

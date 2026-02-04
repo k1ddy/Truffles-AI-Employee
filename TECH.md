@@ -104,6 +104,8 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `GET /health` — проверка здоровья
 - `GET /admin/health` — health/self-heal метрики
 - `POST /admin/outbox/process` — обработка ACK-first очереди (admin token)
+- `GET /admin/metrics` — чтение дневных метрик (admin token)
+- `POST /admin/metrics/snapshot` — запуск snapshot метрик (admin token)
 - `POST /admin/media/cleanup` — TTL‑очистка `/home/zhan/truffles-media` (admin token)
 - `POST /reminders/process` — обработка напоминаний
 
@@ -183,6 +185,14 @@ docker exec truffles_postgres_1 psql -U "$DB_USER" -d chatbot -c 'SELECT ...'
 - `CALENDAR_SYNC_STALE_SECONDS` — порог staleness для health gate (default: 900).
 - `CALENDAR_SYNC_LOOKBACK_DAYS` — глубина lookback для inbound sync (default: 14).
 - `CALENDAR_SYNC_LOOKAHEAD_DAYS` — глубина lookahead для inbound sync (default: 60).
+- `METRICS_DAILY_AUTO_ENABLED` — включает ежедневный snapshot metrics_daily (default: false).
+- `METRICS_DAILY_RUN_HOUR_UTC` — час запуска (UTC) для snapshot (default: 1).
+- `METRICS_DAILY_RUN_MINUTE_UTC` — минута запуска (UTC) для snapshot (default: 5).
+- `METRICS_DAILY_TARGET_OFFSET_DAYS` — на сколько дней назад считать (default: 1).
+- `METRICS_DAILY_STATUS_ALLOWLIST` — allowlist `client.status` (default: active, `all` = без фильтра).
+- `METRICS_DAILY_RETRY_SECONDS` — backoff при ошибке snapshot (сек, default: 600).
+- `METRICS_DAILY_RETRY_MAX` — максимум повторов snapshot за день (default: 3).
+- `METRICS_DAILY_BACKFILL_MAX_DAYS` — лимит backfill дней для `/admin/metrics/snapshot` (default: 31).
 - `AUDIO_TRANSCRIPTION_ENABLED` — включить транскрибацию коротких голосовых (default: false).
 - `AUDIO_TRANSCRIPTION_MAX_MB` — максимум размера голосового для транскрипции (default: 2).
 - `AUDIO_TRANSCRIPTION_MODEL` — модель транскрипции (default: whisper-1).

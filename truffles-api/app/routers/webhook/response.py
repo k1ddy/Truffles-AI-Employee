@@ -336,7 +336,14 @@ def _send_and_save(
 ) -> tuple[str | None, bool]:
     final_text = finalize_response(text, allow_quiet_hours=allow_quiet_hours)
     record_contract_traces()
-    save_message(db, conversation.id, client_id, role="assistant", content=final_text)
+    save_message(
+        db,
+        conversation.id,
+        client_id,
+        role="assistant",
+        content=final_text,
+        message_metadata={"source": "bot"},
+    )
     sent = send_response(final_text)
     return final_text, sent
 

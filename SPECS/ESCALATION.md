@@ -175,8 +175,8 @@ _Статус реализации и evidence — в `STATE.md`._
 - Ответ клиента:
   - `pending_ack` → закрываем handover, `state=bot_active`, короткое подтверждение + re‑entry.
   - `pending_close` → закрываем handover, `state=bot_active`, бот замьючен, короткое подтверждение.
-- Классификация `pending_ack/pending_close`: **детерминированные фразы** подтверждения/закрытия.
-- Reset‑фразы (“начнём сначала/заново”) относятся к `pending_ack` или `pending_close` по детерминированным правилам; обхода pending‑guard нет.
+- Классификация `pending_ack/pending_close`: LLM‑router first, rule‑based fallback для фраз подтверждения/закрытия.
+- Reset‑фразы (“начнём сначала/заново”) относятся к `pending_ack` или `pending_close` через rule‑based fallback; обхода pending‑guard нет.
 - **Auto‑close:** через **4 часа** ожидания без подтверждения — системное закрытие (handover → resolved, state → bot_active).
 
 ### Когда `manager_active`:

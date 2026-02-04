@@ -173,7 +173,11 @@ def _booking_clarify_guard_reason(
     basic_info_message: bool,
     session_memory_reset_reason: str | None,
     memory_expected_reply_type: str | None,
+    message_text: str | None,
+    booking_slot_signal: bool,
 ) -> str | None:
+    from . import _legacy as legacy
+
     if booking_interrupt_info:
         return "booking_interrupt_info"
     if session_memory_reset_reason:
@@ -182,6 +186,13 @@ def _booking_clarify_guard_reason(
         return "session_memory_expected_reply"
     if basic_info_message:
         return "basic_info_message"
+    if booking_slot_signal:
+        return "booking_slot_signal"
+    if message_text and (
+        legacy.is_low_signal_message(message_text)
+        or legacy.is_acknowledgement_message(message_text)
+    ):
+        return "low_signal"
     return None
 
 
@@ -291,7 +302,14 @@ def _handle_clarify_limit_escalation(
         legacy._update_message_decision_metadata(saved_message, {"clarify_limit": True})
     if finalize_response:
         bot_response = finalize_response(bot_response)
-    legacy.save_message(db, conversation.id, conversation.client_id, role="assistant", content=bot_response)
+    legacy.save_message(
+        db,
+        conversation.id,
+        conversation.client_id,
+        role="assistant",
+        content=bot_response,
+        message_metadata={"source": "bot"},
+    )
     sent = send_response(bot_response)
     if not sent:
         result_message = f"{result_message}; response_send=failed"

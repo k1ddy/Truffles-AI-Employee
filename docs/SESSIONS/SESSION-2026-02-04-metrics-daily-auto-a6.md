@@ -1,0 +1,22 @@
+# SESSION 2026-02-04-metrics-daily-auto-a6 — Session 2026-02-04-metrics-daily-auto-a6
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-04-metrics-daily-auto.md
+- branch: feat/2026-02-04-metrics-daily-auto-a6
+- worktree: /home/zhan/worktrees/2026-02-04-metrics-daily-auto-a6
+- base_ref: origin/main
+- scope: Automate metrics_daily snapshot via worker/cron with admin backfill endpoint.
+- done:
+  - Session created.
+  - Added metrics_daily snapshot service and admin trigger endpoint.
+  - Wired daily scheduler into outbox worker (env-toggled).
+  - Updated TECH/STRUCTURE and STATE plan entry.
+- next:
+  - Run /admin/metrics/snapshot for evidence and mark STATE as DONE.
+  - Run session_check + commit + PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-04-metrics-daily-auto.md
+  - Snapshot attempt: POST /admin/metrics/snapshot (localhost) returned 404 (API not redeployed).
+  - Snapshot attempt after restart returned SQL syntax error on :client_id::uuid; fix pending (CAST).
+- last_updated: 2026-02-04

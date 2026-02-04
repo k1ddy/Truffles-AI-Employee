@@ -1317,6 +1317,8 @@ export interface components {
             active_cases?: number;
             resolved_cases?: number;
             avg_resolution_hours?: number | null;
+            total_client_messages?: number | null;
+            total_bot_messages?: number | null;
         };
         OutboxCounts: {
             pending?: number;

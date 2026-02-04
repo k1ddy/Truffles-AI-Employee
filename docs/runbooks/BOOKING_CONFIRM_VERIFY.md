@@ -69,4 +69,47 @@ Common failures and fixes
 Notes
 - Script uses dry-run by default; DB writes require `--apply`.
 - Canceling appointments is optional and explicit.
+- Calendar sync outbox may fail if OAuth tokens are placeholders.
+
+---
+
+Dialog scenario generator (booking stress)
+
+Purpose
+- Generate 10–15 turn client-only dialogs with interruptions to stress booking flow.
+
+Quickstart
+```bash
+python3 scripts/booking_dialog_scenarios.py \
+  --count 5 \
+  --min-turns 10 \
+  --max-turns 15 \
+  --include-media \
+  --media-mode text \
+  --output /tmp/booking_dialog_scenarios.json
+```
+
+LLM mode (optional)
+```bash
+OPENAI_API_KEY=... \
+python3 scripts/booking_dialog_scenarios.py \
+  --mode llm \
+  --count 3 \
+  --min-turns 10 \
+  --max-turns 15 \
+  --include-media \
+  --media-mode text \
+  --output /tmp/booking_dialog_scenarios_llm.json
+```
+
+Scenario patterns included
+- Booking + price + location interrupts + photo reference.
+- Time/name swap + noise interruptions.
+- Master preference switch + alternative time.
+- RU/KZ mixed booking questions.
+- Multi-service booking request + duration interrupt.
+
+Notes
+- Generator outputs client turns only (consultant replies are produced by live system).
+- `media-mode payload` uses placeholder URLs; update for real media tests.
 - Calendar sync outbox may fail if OAuth tokens are placeholders. Fix: set `GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI` on API, complete OAuth via `/console/v1/calendar/google/connect` (callback `/api/calendar/callback`).

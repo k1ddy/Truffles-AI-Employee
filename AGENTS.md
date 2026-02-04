@@ -17,8 +17,8 @@
 
 ## 0) Truffles в одной формуле
 
-**Truffles = Deterministic Core (факты/правила/решения) + LLM (смысл/язык) + Escalation (человек) + Data in KZ**.
-LLM даёт смысл (intent/slots) и формулировку; коммит решений и факты — детерминированные (packs/tools).
+**Truffles = LLM Policy Core (действия/слоты/исход) + Deterministic Safety (LAW/policy/валидация) + Tools/Packs (факты) + Escalation (человек) + Data in KZ**.
+LLM принимает решение (FACT/COLLECT/HANDOFF) и формулирует ответ; safety‑слой валидирует выход, соблюдает hard‑policy/LAW и исполняет tools/packs.
 
 **Контракт продукта (каждое user-сообщение должно привести к одному исходу):**
 - **FACT** — короткий ответ строго из data packs (truth-first).
@@ -179,6 +179,7 @@ LLM даёт смысл (intent/slots) и формулировку; коммит
   - или `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml ...`
 - `ops/diagnose.py` — это live‑check/trace, **не** замена pytest. Используй после тестов, когда нужно проверить живой поток.
 - Быстрый старт booking confirm: `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` + `scripts/booking_confirm_verify.sh`.
+- Генератор booking‑диалогов (10–15 шагов, перебивки/медиа): `scripts/booking_dialog_scenarios.py` — использовать для 5–10 прогонов перед диагнозом/фиксом; скрипт будет дорабатываться.
 
 **Локальные тесты:**
 - локально можно запускать для скорости,

@@ -1,0 +1,34 @@
+# SESSION 2026-02-04-consultant-livecheck-a6 — Consultant live dialog check
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-04-consultant-livecheck.md
+- branch: feat/2026-02-04-consultant-livecheck-a6
+- worktree: /home/zhan/worktrees/2026-02-04-consultant-livecheck-a6
+- base_ref: origin/main
+- scope: Live-check CA06 consult (и CA05 booking-commit при готовности gates) с фиксацией evidence.
+- done:
+  - Session created.
+  - Preflight: prod host confirmed, /admin/health captured (minimum_data_contract missing for 2 branches) `/tmp/admin_health_20260204_consultant_livecheck.json`.
+  - Livecheck CA06 consult succeeded; evidence `/tmp/livecheck_ca06_consult_20260204.txt`.
+  - Live dialog booking script run via webhook (custom sequence); evidence `/tmp/live_dialog_booking_message_ids_20260204.json`, `/tmp/outbox_payload_live_dialog_booking_20260204.json`, `/tmp/trace_bundle_live_dialog_LC-DIALOG-07099f34.json`, `/tmp/trace_bundle_live_dialog_LC-DIALOG-722f2abc.json`, `/tmp/trace_bundle_live_dialog_LC-DIALOG-f8546bf3.json`, `/tmp/trace_bundle_live_dialog_LC-DIALOG-5f533133.json`.
+  - GAP recorded in `STATE.md` for live booking dialog deviation (see evidence above).
+  - Added booking dialog scenario generator + runbook section; smoke output `/tmp/booking_dialog_scenarios_smoke.json`.
+  - Added AGENTS.md guidance for booking dialog generator usage.
+  - Ran 5 live dialog scenarios (69 turns) via webhook; evidence `/tmp/booking_dialog_runs_20260204-012816/` (run_summary/outbox_payloads/trace_bundles).
+  - Ran 5 more live dialog scenarios (64 turns, 51 missing replies) via webhook; evidence `/tmp/booking_dialog_runs_20260204-014810/` (run_summary/outbox_payloads/trace_bundles).
+  - Implemented booking slot-signal + clarify-guard + shield skip for booking flow; local pytest evidence `/tmp/pytest_webhook_booking_slot_signal_20260204.txt`.
+  - Fixed `decision.py` UnboundLocalError in shield gate (ensure booking vars defined before `_handle_shield_gate`).
+  - Live dialog booking scenarios rerun with webhook secret + fresh JIDs (5 dialogs, 65 turns); evidence `/tmp/booking_dialog_runs_20260204-041403/` (run_summary/outbox_payloads/trace_bundles).
+  - Drafted DEC-023 LLM policy core + Task Package `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-dec.md`.
+  - Updated canon docs to align with LLM policy core (AGENTS/STRATEGY/SPECS/PROCESSES/IMPERIUM_DECISIONS/IMPERIUM_GAPS).
+- next:
+  - Decide whether to run CA05 booking-commit (blocked by minimum_data_contract in /admin/health).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-04-consultant-livecheck.md
+  - /tmp/booking_dialog_runs_20260204-012816
+  - /tmp/booking_dialog_runs_20260204-014810
+  - /tmp/booking_dialog_runs_20260204-041403
+  - docs/IMPERIUM_DECISIONS.yaml
+  - docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-dec.md
+- last_updated: 2026-02-04

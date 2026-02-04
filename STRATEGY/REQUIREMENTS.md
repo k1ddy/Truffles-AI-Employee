@@ -51,8 +51,8 @@
 - [ ] **Hard‑LAW:** оплата (подтверждение/проверка/возвраты), медицинка, жалобы, переносы → только эскалация, без “советов”.
 - [ ] **Policy‑gates:** скидки и способы оплаты разрешены только при явных правилах в client_pack; иначе — эскалация.
 - [ ] OOD никогда не отвечает “полезно”, только мягко возвращает в домен.
-- [ ] LLM даёт смысл (intent/slots/confidence) и формулировку, но не коммитит решение и не создаёт факты; commit проходит через deterministic guard, факты — только из packs/tools.
-- [ ] **Hybrid LLM‑plan:** LLM возвращает план (outcome/tool_action/tool_args/pack_refs/language/confidence/goal); валидатор обязан подтверждать pack_refs и инструменты; валидный tool_action всегда выполняется; при ошибке → COLLECT/clarify.
+- [ ] LLM принимает решение (action/slots/next_question) и формулирует ответ; safety‑слой валидирует hard‑LAW/policy и контракт tools/packs, а также блокирует недопустимые действия.
+- [ ] **Hybrid LLM‑plan:** LLM возвращает план (outcome/tool_action/tool_args/pack_refs/language/confidence/goal); валидатор подтверждает pack_refs и инструменты; валидный tool_action выполняется, при нарушении контракта/политики → COLLECT/clarify или HANDOFF по правилам.
 
 ### Точность фактов
 - [ ] Факты только из Client Pack / tools (адрес, цены, услуги, правила).

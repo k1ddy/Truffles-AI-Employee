@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
-from sqlalchemy import and_, case, func, or_
+from sqlalchemy import and_, case, func, or_, text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -3014,7 +3014,22 @@ async def get_metrics_daily(
             if c.resolved_at
         )
         avg_resolution = round(total_hours / len(resolved_cases), 2)
-    
+
+    metrics_row = db.execute(
+        text(
+            """
+            SELECT
+              total_user_messages,
+              total_bot_messages
+            FROM metrics_daily
+            WHERE client_id = :client_id AND metric_date = :metric_date
+            """
+        ),
+        {"client_id": context.client.id, "metric_date": target_date},
+    ).mappings().first()
+    total_client_messages = metrics_row.get("total_user_messages") if metrics_row else None
+    total_bot_messages = metrics_row.get("total_bot_messages") if metrics_row else None
+
     return ConsoleMetricsDailyResponse(
         date=target_date.isoformat(),
         total_cases=total,
@@ -3022,6 +3037,8 @@ async def get_metrics_daily(
         active_cases=active,
         resolved_cases=resolved,
         avg_resolution_hours=avg_resolution,
+        total_client_messages=total_client_messages,
+        total_bot_messages=total_bot_messages,
     )
 
 
