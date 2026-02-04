@@ -20,6 +20,7 @@
   - Verified `metrics_analytics_daily` rows exist for `demo_salon`.
   - Added KPI tooltip copy for Insights tiles and trends.
   - Merged PR #533 and redeployed console-web with KPI tooltips.
+  - Simplified KPI tooltip copy (plain language) and redeployed console-web.
 - next:
   - Verify Insights trends in Console UI (post-deploy smoke).
 - evidence:
@@ -48,4 +49,6 @@
   - /tmp/analytics_metrics_demo_salon_20260205.txt
   - /tmp/console_web_lint_insights_tooltips_20260205.txt
   - /tmp/console_web_redeploy_insights_tooltips_20260205.txt
+  - /tmp/console_web_lint_insights_tooltips_simple_20260205.txt
+  - /tmp/console_web_redeploy_insights_tooltips_simple_20260205.txt
 - last_updated: 2026-02-05
