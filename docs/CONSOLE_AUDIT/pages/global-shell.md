@@ -17,6 +17,7 @@ Navigation items (labels and routes)
 - Команда (`/team`)
 - Статус (`/ops`)
 - Журнал (`/audit`)
+- Аналитика (`/insights`)
 - Настройки (`/settings`)
 
 Nav visibility rules
