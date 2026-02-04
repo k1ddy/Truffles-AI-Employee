@@ -36,8 +36,8 @@ from app.services.intent_service import (
     is_opt_out_message,
     is_strong_out_of_domain,
 )
-from app.services.knowledge_validation import MinimumDataContractStatus
 from app.services.knowledge_snapshot_consumer import ConsultSnapshotShadowResult
+from app.services.knowledge_validation import MinimumDataContractStatus
 from app.services.message_service import select_handover_user_message
 from app.services.result import Result
 from app.services.state_machine import ConversationState

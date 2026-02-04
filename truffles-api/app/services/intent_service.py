@@ -13,8 +13,8 @@ from app.logging_config import get_logger, record_llm_time
 from app.schemas.intent import (
     validate_answer_interpreter_output,
     validate_dialogue_controller_output,
-    validate_llm_policy_core_output,
     validate_llm_plan_output,
+    validate_llm_policy_core_output,
 )
 from app.services.ai_service import (
     FAST_MODEL,
