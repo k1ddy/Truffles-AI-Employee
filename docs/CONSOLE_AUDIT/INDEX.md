@@ -44,6 +44,7 @@ Pages
 - `docs/CONSOLE_AUDIT/pages/settings.md`
 - `docs/CONSOLE_AUDIT/pages/audit.md`
 - `docs/CONSOLE_AUDIT/pages/ops.md`
+- `docs/CONSOLE_AUDIT/pages/insights.md`
 - `docs/CONSOLE_AUDIT/pages/tenants.md`
 
 System
