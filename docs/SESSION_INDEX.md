@@ -139,4 +139,4 @@
 | 2026-02-04-console-insights-platformadmin-a6 | done | feat/2026-02-04-console-insights-platformadmin-a6 | /home/zhan/worktrees/2026-02-04-console-insights-platformadmin-a6 | docs/TASK_PACKAGES/TP-2026-02-04-console-insights-platformadmin.md | 2026-02-04 |
 | 2026-02-04-insights-platformadmin-docs-a6 | done | docs/2026-02-04-insights-platformadmin | /home/zhan/worktrees/2026-02-04-insights-platformadmin-doc | docs/TASK_PACKAGES/TP-2026-02-04-console-insights-platformadmin.md | 2026-02-04 |
 | 2026-02-04-analytics-message-metrics-a6 | done | feat/2026-02-04-analytics-message-metrics-a6 | /home/zhan/worktrees/2026-02-04-analytics-message-metrics-a6 | docs/TASK_PACKAGES/TP-2026-02-04-analytics-message-metrics.md | 2026-02-04 |
-| 2026-02-04-metrics-daily-auto-a6 | active | feat/2026-02-04-metrics-daily-auto-a6 | /home/zhan/worktrees/2026-02-04-metrics-daily-auto-a6 | docs/TASK_PACKAGES/TP-2026-02-04-metrics-daily-auto.md | 2026-02-04 |
+| 2026-02-04-metrics-daily-auto-a6 | active | feat/2026-02-04-metrics-daily-auto-a6 | /home/zhan/worktrees/2026-02-04-metrics-daily-auto-a6 | docs/TASK_PACKAGES/TP-2026-02-04-metrics-daily-auto.md | 2026-02-04 (metrics-fix) |
