@@ -31,7 +31,7 @@ Legend
 
 ### Owner/Admin
 - [match] Полный доступ к Inbox/Calendar/Knowledge/Team/Settings/Ops/Audit. Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/roles/owner.md`, `docs/CONSOLE_AUDIT/roles/admin.md`.
-- [missing] Integrations/Insights страницы. Canon: `SPECS/CONTROL_PLANE.md` (IA). Impl: отсутствуют в nav.
+- [missing] Integrations страница. Canon: `SPECS/CONTROL_PLANE.md` (IA). Impl: отсутствует в nav.
 
 ### Manager
 - [match] Inbox + Calendar (read/write). Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/roles/manager.md`.
@@ -56,7 +56,7 @@ Legend
 
 - [match] Реализованные пункты навигации: Inbox, Calendar, Knowledge, Team, Settings, Ops, Audit, Tenants (platform_admin). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `docs/CONSOLE_AUDIT/pages/global-shell.md`.
 - [missing] Integrations page (owner/admin/platform admin). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: отсутствует.
-- [missing] Insights/Analytics (optional). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: отсутствует.
+- [match] Insights/Analytics (optional). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/app/insights/page.tsx`, `console-web/src/components/ConsoleShell.tsx`.
 
 ---
 
@@ -114,5 +114,4 @@ Legend
 ## 6) GAP summary (canon vs implemented)
 
 - Integrations page отсутствует (owner/admin/platform admin).
-- Insights/Analytics page отсутствует.
 - Team Users не поддерживает invite/disable; Specialists без управления working_hours/availability.
