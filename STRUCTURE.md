@@ -122,6 +122,7 @@
 
 **Активные Task Packages:**
 - `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-dec.md`
+- `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-impl.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-canon.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-tp-batch-create.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-kit.md`
