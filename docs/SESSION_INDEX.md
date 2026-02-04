@@ -141,4 +141,4 @@
 | 2026-02-04-analytics-message-metrics-a6 | done | feat/2026-02-04-analytics-message-metrics-a6 | /home/zhan/worktrees/2026-02-04-analytics-message-metrics-a6 | docs/TASK_PACKAGES/TP-2026-02-04-analytics-message-metrics.md | 2026-02-04 |
 | 2026-02-04-metrics-daily-auto-a6 | active | feat/2026-02-04-metrics-daily-auto-a6 | /home/zhan/worktrees/2026-02-04-metrics-daily-auto-a6 | docs/TASK_PACKAGES/TP-2026-02-04-metrics-daily-auto.md | 2026-02-04 (metrics-admin-fix) |
 | 2026-02-04-llm-policy-core-impl-a7 | active | feat/2026-02-04-llm-policy-core-impl-a7 | /home/zhan/worktrees/2026-02-04-llm-policy-core-impl-a7 | docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-impl.md | 2026-02-04 |
-| 2026-02-05-console-analytics-kpis-a7 | active | feat/2026-02-05-console-analytics-kpis-a7 | /home/zhan/worktrees/2026-02-05-console-analytics-kpis-a7 | docs/TASK_PACKAGES/TP-2026-02-05-console-analytics-kpis.md | 2026-02-05 (deploy) |
+| 2026-02-05-console-analytics-kpis-a7 | active | feat/2026-02-05-console-analytics-kpis-a7 | /home/zhan/worktrees/2026-02-05-console-analytics-kpis-a7 | docs/TASK_PACKAGES/TP-2026-02-05-console-analytics-kpis.md | 2026-02-05 (deploy/backfill) |
