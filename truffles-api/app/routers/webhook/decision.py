@@ -3915,11 +3915,29 @@ def _handle_minimum_data_safe_mode_gate(
     saved_message: Message | None,
     message_text: str,
     status: MinimumDataContractStatus,
+    guard_only: bool = False,
     send_and_save,
 ) -> WebhookResponse | None:
     if status.ready or not status.missing_fields:
         return None
     if not conversation.branch_id:
+        return None
+    if guard_only:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "minimum_data_safe_mode",
+                "decision": "guard_only",
+                "state": conversation.state,
+                "reason": "minimum_data_contract",
+                "missing_fields": status.missing_fields,
+            },
+        )
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {"minimum_data_guard_only": True},
+            )
         return None
 
     missing_fields = status.missing_fields
@@ -4737,6 +4755,14 @@ async def _handle_webhook_payload(
             )
 
     routing = _get_routing_policy(conversation.state)
+    llm_policy_core_guard_only = bool(
+        LLM_POLICY_CORE_ENABLED
+        and routing.get("allow_bot_reply", False)
+        and message_text
+        and os.environ.get("OPENAI_API_KEY")
+    )
+    if llm_policy_core_guard_only:
+        timing_context["llm_policy_core_enabled"] = True
     context_contract, context_error = build_context_contract(conversation, payload, settings)
     _record_decision_trace(
         conversation,
@@ -5567,6 +5593,9 @@ async def _handle_webhook_payload(
     expected_reply_shortcircuit = expected_reply_state.expected_reply_shortcircuit
     expected_reply_blocked_by_info = expected_reply_state.expected_reply_blocked_by_info
     memory_expected_reply_type = expected_reply_state.memory_expected_reply_type
+    expected_reply_shortcircuit_effective = bool(
+        expected_reply_shortcircuit and not llm_policy_core_guard_only
+    )
 
     # 4.5 Branch routing (instance_id -> branch, or ask user)
     branch_response = _handle_branch_selection_gate(
@@ -5666,7 +5695,7 @@ async def _handle_webhook_payload(
         conversation=conversation,
         message_text=message_text,
         batch_messages=batch_messages,
-        expected_reply_shortcircuit=expected_reply_shortcircuit,
+        expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
         now=now,
         send_and_save=_send_and_save,
     )
@@ -5850,12 +5879,27 @@ async def _handle_webhook_payload(
                     bot_response=bot_response,
                 )
 
+    pending_domain_signal = False
+    if llm_policy_core_guard_only and message_text:
+        pending_domain_signal = bool(
+            _looks_like_info_query(message_text, client_slug=payload.client_slug)
+            or _is_booking_request(message_text, client_slug=payload.client_slug)
+            or _is_booking_slot_signal(message_text, client_slug=payload.client_slug)
+            or _looks_like_policy_topic(
+                message_text,
+                policy_type=policy_type,
+                policy_pack=policy_pack,
+                client_slug=payload.client_slug,
+            )
+        )
     pending_response = _handle_pending_gate(
         db=db,
         conversation=conversation,
         message_text=message_text,
         saved_message=saved_message,
         now=now,
+        guard_only=llm_policy_core_guard_only,
+        in_domain_signal=pending_domain_signal,
         send_and_save=_send_and_save,
     )
     if pending_response:
@@ -6305,7 +6349,7 @@ async def _handle_webhook_payload(
         booking_context=booking_context,
         booking=booking,
         booking_active=booking_active,
-        expected_reply_shortcircuit=expected_reply_shortcircuit,
+        expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
         context=context,
         context_manager=context_manager,
         current_goal=current_goal,
@@ -6577,6 +6621,7 @@ async def _handle_webhook_payload(
         current_goal=current_goal,
         multi_intent_other_followup=multi_intent_other_followup,
         client_slug=payload.client_slug,
+        guard_only=llm_policy_core_guard_only,
         send_and_save=_send_and_save,
         record_policy_count=record_policy_count,
         record_escalation_metric=_record_escalation_metric,
@@ -6610,6 +6655,7 @@ async def _handle_webhook_payload(
         saved_message=saved_message,
         message_text=message_text,
         status=minimum_data_status,
+        guard_only=llm_policy_core_guard_only,
         send_and_save=_send_and_save,
     )
     if safe_mode_response:
@@ -6629,7 +6675,7 @@ async def _handle_webhook_payload(
         bypass_domain_flows=bypass_domain_flows,
         message_text=message_text,
         booking_wants_flow=booking_wants_flow,
-        expected_reply_shortcircuit=expected_reply_shortcircuit,
+        expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
         expected_reply_type=expected_reply_type,
         class_carryover=class_carryover,
         client_slug=payload.client_slug,
@@ -6695,6 +6741,7 @@ async def _handle_webhook_payload(
         and not consult_intent
         and not booking_signal
         and not booking_wants_flow
+        and not llm_policy_core_guard_only
         and not (
             isinstance(booking_block_meta, dict)
             and booking_block_meta.get("booking_blocked_reason") == "procedure_combo"
@@ -6759,6 +6806,7 @@ async def _handle_webhook_payload(
         and not consult_intent
         and not booking_signal
         and not booking_wants_flow
+        and not llm_policy_core_guard_only
         and not (
             isinstance(booking_block_meta, dict)
             and booking_block_meta.get("booking_blocked_reason") == "procedure_combo"
@@ -6935,11 +6983,35 @@ async def _handle_webhook_payload(
     if discount_signal:
         promotions_trigger = True
 
+    if promotions_trigger and llm_policy_core_guard_only and message_text:
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "policy_gate",
+                "decision": "guard_only",
+                "state": conversation.state,
+                "policy_gate": "discounts",
+                "policy_section": "discounts",
+                "source": policy_source,
+            },
+        )
+        if saved_message:
+            meta_updates = {
+                "policy_guard_only": True,
+                "policy_gate": "discounts",
+                "policy_section": "discounts",
+                "source": policy_source,
+            }
+            if policy_pack_missing:
+                meta_updates["policy_pack_missing"] = True
+            _update_message_decision_metadata(saved_message, meta_updates)
+
     if (
         promotions_trigger
         and routing["allow_bot_reply"]
         and not bypass_domain_flows
         and message_text
+        and not llm_policy_core_guard_only
     ):
         class_router_result = _resolve_class_router_result(
             info_intents=info_class_intents,
@@ -7295,7 +7367,7 @@ async def _handle_webhook_payload(
                     info_class_intents=policy_info_set,
                     expected_reply_type=expected_reply_type,
                     expected_reply_matched=expected_reply_matched,
-                    expected_reply_shortcircuit=expected_reply_shortcircuit,
+                    expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
                     batch_non_booking_message=batch_non_booking_message,
                     booking_messages=booking_messages,
                     booking_context=booking_context,
@@ -8222,7 +8294,7 @@ async def _handle_webhook_payload(
         info_class_intents=info_class_intents,
         expected_reply_type=expected_reply_type,
         expected_reply_matched=expected_reply_matched,
-        expected_reply_shortcircuit=expected_reply_shortcircuit,
+        expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
         batch_non_booking_message=batch_non_booking_message,
         booking_messages=booking_messages,
         booking_context=booking_context,
@@ -8604,7 +8676,7 @@ async def _handle_webhook_payload(
             class_carryover=class_carryover,
             router_state=router_state,
             intent_decomp_payload=intent_decomp_payload,
-            expected_reply_shortcircuit=expected_reply_shortcircuit,
+            expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
             log_timing=_log_timing,
         )
     if span is not None:
@@ -9069,7 +9141,7 @@ async def _handle_webhook_payload(
                     timing_context=timing_context,
                     intent_decomp_payload=intent_decomp_payload,
                     class_router_result=class_router_result,
-                    expected_reply_shortcircuit=expected_reply_shortcircuit,
+                    expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
                     out_of_domain_signal=out_of_domain_signal,
                     booking_signal=booking_signal,
                     info_class_intents=info_class_intents,
@@ -9183,7 +9255,7 @@ async def _handle_webhook_payload(
             timing_context=timing_context,
             intent_decomp_payload=intent_decomp_payload,
             class_router_result=class_router_result,
-            expected_reply_shortcircuit=expected_reply_shortcircuit,
+            expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
             out_of_domain_signal=out_of_domain_signal,
             booking_signal=booking_signal,
             info_class_intents=info_class_intents,
@@ -9216,6 +9288,36 @@ async def _handle_webhook_payload(
             source="routing",
             fast_intent=False,
         )
+        if routing.get("allow_bot_reply", False):
+            bot_response = MSG_FACT_GUARD_CLARIFY
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "routing",
+                    "decision": "unknown_state_fallback",
+                    "state": conversation.state,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="reply",
+                intent="unknown_state",
+                source="unknown_state",
+                fast_intent=False,
+            )
+            bot_response, sent = _send_and_save(bot_response)
+            result_message = (
+                "Unknown state fallback sent"
+                if sent
+                else "Unknown state fallback failed"
+            )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
         result_message = f"Unknown state: {conversation.state}"
 
     _ensure_action_gate()
