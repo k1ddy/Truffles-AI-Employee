@@ -1,0 +1,32 @@
+# Page: Insights (Analytics)
+
+Route
+- `/insights`
+
+UI entry points
+- `console-web/src/app/insights/page.tsx`
+
+Roles
+- Read: platform_admin, owner, admin.
+
+Sections
+- Daily metrics summary (total/pending/active/resolved, average resolution time).
+- Date picker with refresh.
+
+Actions
+- Select date (daily slice).
+- Refresh metrics.
+
+API endpoints used
+- Metrics: `GET /console/v1/metrics/daily` (optional `date=YYYY-MM-DD`).
+
+Backend handlers
+- `truffles-api/app/routers/console.py`:
+  - `get_metrics_daily`.
+
+Data sources
+- `handovers`, `conversations` (daily case metrics).
+
+Related code
+- UI: `console-web/src/app/insights/page.tsx`.
+- Backend: `truffles-api/app/routers/console.py`.

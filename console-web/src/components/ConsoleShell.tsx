@@ -75,6 +75,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: "Команда", href: "/team", section: "team", action: "read", testId: "nav-team" },
     { label: "Статус", href: "/ops", section: "ops", action: "read", testId: "nav-ops" },
     { label: "Журнал", href: "/audit", section: "audit", action: "read", testId: "nav-audit" },
+    { label: "Аналитика", href: "/insights", section: "insights", action: "read", testId: "nav-insights" },
     { label: "Настройки", href: "/settings", section: "settings", action: "read", testId: "nav-settings" },
 ];
 
@@ -148,6 +149,14 @@ const NAV_ICONS: Partial<Record<ConsoleSection, ReactNode>> = {
         <NavIcon>
             <path d="M4 6h1M4 12h1M4 18h1" />
             <path d="M8 6h12M8 12h12M8 18h12" />
+        </NavIcon>
+    ),
+    insights: (
+        <NavIcon>
+            <path d="M4 19h16" />
+            <path d="M7 16v-6" />
+            <path d="M12 16v-10" />
+            <path d="M17 16v-3" />
         </NavIcon>
     ),
     settings: (

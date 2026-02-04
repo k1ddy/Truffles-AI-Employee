@@ -13,6 +13,7 @@ ENV BUILD_TIME=$BUILD_TIME
 COPY truffles-api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY truffles-api/pyproject.toml .
 COPY truffles-api/app/ ./app/
 COPY truffles-api/tests/ ./tests/
 COPY contracts/ ./contracts/

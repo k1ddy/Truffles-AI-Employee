@@ -86,6 +86,7 @@ export type ConsoleSection =
     | "knowledge"
     | "team"
     | "calendar"
+    | "insights"
     | "settings"
     | "ops"
     | "audit"
@@ -109,6 +110,10 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
     calendar: {
         read: ["platform_admin", "owner", "admin", "manager", "specialist", "viewer"],
         write: ["platform_admin", "owner", "admin", "manager", "specialist"],
+    },
+    insights: {
+        read: ["platform_admin", "owner", "admin"],
+        write: [],
     },
     settings: {
         read: ["platform_admin", "owner", "admin"],
