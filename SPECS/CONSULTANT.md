@@ -52,7 +52,7 @@ _Любые статусы ниже — DERIVED; единственный ист
 
 - Формат ответа: короткое подтверждение → факт/ограничение → один следующий шаг.
 - Запреты: длинные списки, лекции, "я ИИ", оправдания, обещания без фактов.
-- Тон по времени суток (утро/день/вечер) и языку клиента (RU/KZ/mixed), без новых фактов; варианты ответов детерминированы (seed от `conversation_id`).
+- Тон по времени суток (утро/день/вечер) и языку клиента (RU/KZ/mixed), без новых фактов; варианты ответов выбираются LLM в рамках playbook/стиля (без фикс‑seed).
 
 ---
 
@@ -189,7 +189,7 @@ _Примечание:_ текущая реализация fact resolver опи
 **Slot-lock + booking_confirm (P0):**
 - При активной записи `expected_reply_type` фиксируется и не сбрасывается перебивками/провокациями.
 - `expected_reply_type` меняется только при успешном заполнении слота, явной отмене записи, или переходе в `pending`.
-- Каждый вход **в booking‑контексте** проходит `slot_extract` (LLM) + `slot_validate` (детерминированно); при низкой уверенности — переспрашиваем.
+- Каждый вход **в booking‑контексте** проходит `slot_extract` (LLM) + `slot_validate` (hard‑validation); при низкой уверенности — переспрашиваем.
 - При сомнении обязателен `booking_confirm`: краткое резюме (дата/время/мастер/услуга/имя) + вопрос "верно?".
 - `booking_commit` допускается только после явного подтверждения слотов.
 
@@ -200,7 +200,7 @@ _Примечание:_ текущая реализация fact resolver опи
 - Если `state=manager_active` → бот молчит (бот‑ответы запрещены).
 - Если `state=pending` → обрабатываем in‑domain запросы (info/booking/consult) **без** создания нового handover; приоритет у `pending_status/pending_ack/pending_close`.
 - При первой эскалации обязателен notice: “передал менеджеру; сообщения передаются, пока ждём ответ, я могу помочь с услугами/ценами/записью”.
-- Reset‑фразы (“начнём сначала/заново”) в `pending` трактуются как `pending_ack` или `pending_close` по детерминированным правилам; обхода pending‑guard нет.
+- Reset‑фразы (“начнём сначала/заново”) в `pending` трактуются как `pending_ack` или `pending_close` через rule‑based fallback; обхода pending‑guard нет.
 - Trace/meta: `stage=pending_guard/pending_status/pending_sla/pending_resume`, `pending_action ∈ {pending_status,pending_ack,pending_close,pending_sla_ping,pending_pass}`.
 
 **Consult clarify (pack-first, без LLM-советов):**
@@ -212,14 +212,14 @@ _Примечание:_ текущая реализация fact resolver опи
 - `clarify_limit=2` максимум; после лимита без topic/facts → эскалация с reason `consult_no_topic`.
 - Hard‑LAW/Policy/opt‑out/human выше consult: если сработало — consult‑playbook/LLM не применяется.
 - Если есть consult‑интент вместе с pricing/info → consult‑ответ идёт первым, факты добавляются только при наличии в pack/tools.
-- Вариант ответа playbook выбирается детерминированно (hash от `conversation_id + playbook_id`) — без дрейфа.
+- Вариант ответа playbook выбирается LLM внутри playbook (без фиксированного hash).
 - Trace/meta: `stage=consult_flow` (`decision=consult_clarify|consult_escalate|short_circuit|consult_pack`), `clarify_attempt`,
   `consult_topic_id`, `consult_playbook_id`, `consult_variant_id`, `consult_source=pack`, `consult_risk_class`, `consult_confidence`.
 
 **Consult schema (domain-agnostic, controlled fallback):**
 - Pack schema: `contracts/consult/consult_playbook.v1.jsonschema` (topics, allowed_advice, required_questions, risk_tags).
 - LLM output contract: `contracts/consult/consult_controller_output.v1.jsonschema` (intent, topic_id, confidence, risk_class, actions, slots).
-- Topic resolution: semantic retrieval over pack topics → Top‑K candidates → LLM selects `topic_id`; при сбое embeddings допускается детерминированный fallback **только по pack‑index терминам** с фиксацией `resolver_fallback_reason` (без кодовых словарей).
+- Topic resolution: semantic retrieval over pack topics → Top‑K candidates → LLM selects `topic_id`; при сбое embeddings допускается rule‑based fallback **только по pack‑index терминам** с фиксацией `resolver_fallback_reason` (без кодовых словарей).
 - Deterministic commit: low confidence / missing facts / risk high → clarify or handoff; never answer outside `allowed_advice`.
 
 **CTA после инфо‑ответа (standalone, вне booking):**
@@ -334,7 +334,7 @@ _Примечание:_ текущая реализация fact resolver опи
 
 ## LLM‑first понимание + Response Guard [P0]
 
-- **LLM‑контроллер** отдаёт intent/slots (structured JSON), но commit — детерминированный (validators + semantic resolver).
+- **LLM‑контроллер** отдаёт intent/slots (structured JSON); commit проходит через hard‑validators + semantic evidence.
 - Slot-extract работает через LLM (естественные формулировки: “после обеда”, “в пятницу утром”); при низкой уверенности → `booking_confirm`.
 - **Enforcement‑гейты** (state/policy/LAW) выше смысла и могут перекрывать решение ради безопасности.
 - **Signal Snapshot Layer:** единая точка сигналов (pack‑index + semantic/RAG + LLM pack‑ref). Источники/версии пишем в decision_meta.
@@ -406,7 +406,7 @@ if is_rejection(intent):
    - `context_manager.current_goal` = info|consult|booking (ставится по intent_decomp)
    - `context_manager.refusal_flags` (name/phone) — только явные отказы, TTL 10 сообщений или до явной инициативы
    - `context_manager.clarify_attempts` — счётчик уточнений по intent; `clarify_limit=2`, после лимита → эскалация
-   - `context_manager.compact_summary` — детерминированное резюме фактов (услуга/время/имя/язык/отказы)
+   - `context_manager.compact_summary` — структурированное резюме фактов (услуга/время/имя/язык/отказы)
    - Все обновления пишутся в `decision_meta` и `decision_trace`
 
 **Реализация:**
@@ -444,7 +444,7 @@ def get_conversation_history(db, conversation_id, limit=10):
 - Consent обязателен: один явный вопрос, ответ "да/нет". До согласия — только pending‑слоты.
 - Записываем только подтверждённые данные с высокой уверенностью (слоты booking, явное имя).
 - Конфликт слотов: приоритет последнего подтверждённого значения; при сомнении — re‑confirm.
-- `compact_summary` — детерминированный, без новых фактов/советов.
+- `compact_summary` — без новых фактов/советов.
 - В этой сессии память **не активируем**; флаг `MEMORY_PROFILE_ENABLED=0` (default).
 
 ---

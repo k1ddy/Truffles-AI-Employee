@@ -495,7 +495,7 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 | Уровень | Что проверяет | Инструмент | Evidence |
 | --- | --- | --- | --- |
 | L0 (fast) | lint + unit (базовая регрессия) | GitHub Actions (lint/unit) | ссылка на run |
-| L1 (core) | детерминизм/регрессии поведения | GitHub Actions (core-eval) | ссылка на run |
+| L1 (core) | поведенческие регрессии/инварианты | GitHub Actions (core-eval) | ссылка на run |
 | L2 (long/asr) | длинные диалоги + шум/ASR | GitHub Actions (long-eval/asr-eval) | ссылка на run |
 | L3 (livecheck) | канон на реальном inbound | CI livecheck + Live-check SOP | `livecheck-*` артефакты + `STATE.md` |
 | L4 (nightly) | стресс 10–15 ходов + LLM-вариации | Nightly workflow (planned) | nightly artifacts + summary |
@@ -568,14 +568,14 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 
 **LLM‑роль в тестах (экономия ручного труда):**
 - **LLM‑Generator:** генерирует RU/KZ/mixed/ASR‑варианты (фикс‑seed; сохранённый prompt).
-- **LLM‑Controller:** смысл/маршрут; детерминированные гейты защищают безопасность.
+- **LLM‑Controller:** смысл/маршрут; hard‑safety/policy гейты защищают безопасность.
 - **LLM‑Triage (опционально):** группирует фейлы в паттерны; не влияет на PASS/FAIL.
 
-### 5.1.3 Redis в CI (детерминизм против скорости)
+### 5.1.3 Redis в CI (воспроизводимость против скорости)
 
 **Стандарт:** сначала включаем Redis‑service в CI для eval, фиксируем время прогона.
 
-**Fallback:** если L1/L2 становятся слишком медленными — включаем детерминированный режим без Redis
+**Fallback:** если L1/L2 становятся слишком медленными — включаем облегчённый режим без Redis
 (`REDIS_DISABLED=1` или аналогичный флаг) и фиксируем это в DoD задачи.
 **Решение:** выбор режима (Redis on/off) фиксируется в Task Package и подтверждается CI‑таймингами.
 
@@ -627,15 +627,15 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 **Выбор инструментов (современный OSS‑стек):**
 - **Contract/Fuzz:** Schemathesis (OpenAPI‑fuzz, на базе Hypothesis).
 - **Property‑based:** Hypothesis (инварианты логики).
-- **Load/Soak:** k6 (контейнер, deterministic сценарии).
+- **Load/Soak:** k6 (контейнер, воспроизводимые сценарии).
 - **Observability:** OpenTelemetry + Prometheus + Grafana + Loki/Tempo.
 - **Tracing/Debug:** decision_trace + decision_meta (runtime evidence).
 
 **Правило:** инструменты не заменяют канон; они дают повторяемые доказательства.
 
-### 5.5.1 LLM testing policy (детерминизм + статистика)
+### 5.5.1 LLM testing policy (safety‑gates + статистика)
 
-**Блокирующие (deterministic) гейты:**
+**Блокирующие (safety) гейты:**
 - Факты/консалт из pack: `llm_used=false`, `source=pack`, `consult_playbook_id` присутствует.
 - Hard‑LAW/Policy: LLM не вызывается, `policy_gate` фиксируется.
 
@@ -692,7 +692,7 @@ Marker формат: `LC:<suite>:<case_id>:<timestamp>:<seq>`.
 
 ### 5.7 Webhook fuzz SOP (safe runner)
 
-**Цель:** безопасный и детерминированный прогон `/webhook/{client_slug}` без риска отправки на чужие номера.
+**Цель:** безопасный и изолированный прогон `/webhook/{client_slug}` без риска отправки на чужие номера.
 
 **Режимы:**
 - `logic` (default): уникальный JID на кейс, `--skip-outbox` по умолчанию.
@@ -842,7 +842,7 @@ python3 ops/diagnose.py chaos-sim \
 
 **Anchors (минимум):**
 - На каждый CA — 2–4 **якорных** фразы, чтобы гарантировать срабатывание гейта.
-- Якоря = детерминизм. **Текст ответа не сравниваем**, только meta/trace.
+- Якоря = rule‑based fallback. **Текст ответа не сравниваем**, только meta/trace.
 
 **Dialogs (6–10 шагов):**
 - Для booking/consult/pending обязателен dialog‑suite на 6–10 шагов.
@@ -1087,13 +1087,13 @@ chatflow_service → WhatsApp
 | 18 | **LLM primary + fallback** (`response._handle_llm_primary`) | LLM path enabled | ai_response/clarify/escalate | `stage=llm_guard`, `stage=ai_response`, `stage=llm_degradation` |
 
 **Consult topic resolver**
-- `truffles-api/app/services/knowledge_service.py` uses embeddings for topic candidates; if embeddings fail or return empty, допускается детерминированный fallback **только по pack‑index терминам** с фиксацией причины fallback в trace/meta.
+- `truffles-api/app/services/knowledge_service.py` uses embeddings for topic candidates; if embeddings fail or return empty, допускается rule‑based fallback **только по pack‑index терминам** с фиксацией причины fallback в trace/meta.
 
 **Signal snapshot (routing signals, DEC-018)**
 - Сводим сигналы от **compiled pack‑index** (anchors/lexicons/cards), domain_router anchors (сгенерированы из pack‑index), semantic match (RAG/Qdrant), consult resolver, LLM pack‑ref.
 - Пишем в `decision_meta` источники/score/threshold **и pack version/hash**, чтобы объяснять OOD/booking/intent решения.
 - Канон: anchors в `client_config` синхронизируются из pack при publish; дрейф считается дефектом.
-- LLM‑выход обязан быть pack‑ref‑only; при несоответствии → deterministic fallback + `llm_pack_ref_error` в meta.
+- LLM‑выход обязан быть pack‑ref‑only; при несоответствии → rule‑based fallback + `llm_pack_ref_error` в meta.
 
 **Hybrid LLM‑plan (DEC-020)**
 - LLM возвращает **план** в строгом JSON: `outcome`, `tool_action`, `tool_args`, `pack_refs`, `language`, `confidence`, `reason`, `goal`, `slot_state`, `open_questions`.
@@ -1108,7 +1108,7 @@ chatflow_service → WhatsApp
 **Quiet-hours + evening greeting**
 - `_finalize_bot_response` applies quiet‑hours notice with TTL and вечернее приветствие (state=bot_active only); timestamps stored in `conversation.context`.
 
-### Determinism Inventory (лексиконы + правила)
+### Rule‑based Inventory (лексиконы + правила)
 **Принцип:** лексиконы — fallback; основной разбор смысла через semantic resolver и LLM‑router (см. `STRATEGY/REQUIREMENTS.md`).
 **Правило:** бизнес‑лексиконы запрещены в коде; все доменные списки живут в packs/pack‑index. Кодовые списки допустимы только для safety/system‑gates.
 **Правило:** не расширять словари ради прохождения eval; сначала правим packs/контракты, затем корректируем тесты.
@@ -1119,7 +1119,7 @@ chatflow_service → WhatsApp
 - `truffles-api/app/knowledge/demo_salon/INTENTS_PHRASES_DEMO_SALON.yaml`  
   Phrase intents + offtopic examples (используется в `phrase_match_intent`).
 
-**Code lexicons / regex (детерминированные списки):**
+**Code lexicons / regex (rule‑based списки):**
 _Legacy note:_ список ниже — технический долг; новые бизнес‑лексиконы в код добавлять нельзя, миграция в packs обязательна.
 - `truffles-api/app/routers/webhook/decision.py`  
   `SHIELD_TOXIC_PATTERNS`, `SHIELD_MEANINGFUL_PATTERN`, `HYGIENE_KEYWORDS`,  
@@ -1135,7 +1135,7 @@ _Legacy note:_ список ниже — технический долг; нов
 - `truffles-api/app/routers/webhook/policy.py`  
   Keyword‑match по policy pack + guard overrides.
 
-**Deterministic gates (не лексиконы):**
+**Hard gates (не лексиконы):**
 - Preflight: `http._run_preflight` (client/secret/instanceId/branch)  
 - Dedupe + Debounce: `dedup._handle_dedup_gate`, `dedup._handle_debounce_gate`  
 - Pending/mute/reengage: `pending._handle_pending_gate`, `guards._handle_reengage_and_mute_gate`  
@@ -1154,13 +1154,13 @@ _Legacy note:_ список ниже — технический долг; нов
      weight/priority, optional regex.  
    - В коде оставить только “движок” матчинга и порог score.
 
-3) **Лёгкая морфология (детерминированно)**  
+3) **Лёгкая морфология (rule‑based)**  
    - RU: стемминг/суффикс‑правила (офлайн расширение → packs).  
    - KZ: минимальные суффикс‑шаблоны (также офлайн, фиксированный список).
 
 4) **Scoring вместо “точного совпадения”**  
    - Токены/стемы/алиасы → score.  
-   - Пороговое решение (deterministic): score ≥ threshold.
+   - Пороговое решение (thresholded): score ≥ threshold.
 
 5) **Trace/meta для объяснимости**  
    - decision_meta: `lexicon_hit`, `lexicon_score`, `lexicon_version`, `lang_detected`.  

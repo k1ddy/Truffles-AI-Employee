@@ -21,6 +21,7 @@
   - Fixed `decision.py` UnboundLocalError in shield gate (ensure booking vars defined before `_handle_shield_gate`).
   - Live dialog booking scenarios rerun with webhook secret + fresh JIDs (5 dialogs, 65 turns); evidence `/tmp/booking_dialog_runs_20260204-041403/` (run_summary/outbox_payloads/trace_bundles).
   - Drafted DEC-023 LLM policy core + Task Package `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-dec.md`.
+  - Updated canon docs to align with LLM policy core (AGENTS/STRATEGY/SPECS/PROCESSES/IMPERIUM_DECISIONS/IMPERIUM_GAPS).
 - next:
   - Decide whether to run CA05 booking-commit (blocked by minimum_data_contract in /admin/health).
 - evidence:

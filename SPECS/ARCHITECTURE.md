@@ -153,8 +153,8 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - **LLM contract:** LLM возвращает только pack‑ID/intent/slots + confidence (pack‑ref‑only); факты только из packs/tools.
 - **Hybrid LLM‑plan (DEC-020):** LLM возвращает план JSON (outcome/tool_action/tool_args/pack_refs/language/confidence/goal); валидатор проверяет безопасность/состояние/аргументы и гарантирует tool‑first.
 - **Pack‑index:** строится на publish (domain/company/client/branch), версионируется и пишется в decision_meta (pack_id/version/hash).
-- **DEC-019 Pack‑Compiler:** packs компилируются в deterministic artifacts (pack‑index + signal graph + policy bundles); runtime читает только compiled artifacts; Policy/Signal DSL валидируется при compile; auto‑ingest только через approval.
-- **Routing:** gates принимают решения только по snapshot; low‑confidence → deterministic fallback с фиксацией `fallback_reason`.
+- **DEC-019 Pack‑Compiler:** packs компилируются в compiled artifacts (pack‑index + signal graph + policy bundles); runtime читает только compiled artifacts; Policy/Signal DSL валидируется при compile; auto‑ingest только через approval.
+- **Routing:** gates принимают решения только по snapshot; low‑confidence → rule‑based fallback с фиксацией `fallback_reason`.
 
 #### Outbox payload contract + action gate
 - **Контракт payload:** валидируем перед enqueue (см. `contracts/events/outbox.webhook_payload.v1.jsonschema` и `truffles-api/app/schemas/outbox_payload.py`).  
@@ -305,8 +305,8 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - **Host Persona** → формулировка ответа (шаблоны/LLM) по `SPECS/CONSULTANT.md`, CTA/quiet hours в response‑слое.
 - **Observability** → decision_trace/meta на каждом сообщении.
 
-### LLM‑first Understanding + Deterministic Commit — канон
-- Цель: **LLM даёт смысл**, но commit решения проходит через deterministic validators.
+### LLM policy core + Hard‑safety enforcement — канон
+- Цель: **LLM принимает решение**, а hard‑safety/policy и контракт tools/packs валидируются safety‑слоем.
 - Выход LLM (IntentContract): `intent`, `slots`, `language`, `emotion`, `confidence`, `risk_signals`.
 - Booking slot extract: LLM выделяет `service/master/time/name` в JSON; при низкой уверенности → `booking_confirm`.
 - `slot_extract` вызывается только при активном booking‑signal (expected_reply_type/current_goal=booking или LLM intent/slots указывают на запись); Hard‑LAW/pending/opt‑out блокируют slot_extract.
@@ -317,7 +317,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Anchors/лексика/эвристики — **fallback/boost**, не основной источник смысла.
 - LLM‑контроллер — основной арбитр смысла; словари/якоря не расширяем ради покрытия, только для safety‑gate и минимальных якорей.
 - OOD допустим **только** если есть out‑signals и **нет** in‑signals (strict‑in).
-- Если confidence ниже порога/LLM недоступен → fallback на semantic resolver/детерминированный router; фиксация в trace.
+- Если confidence ниже порога/LLM недоступен → fallback на semantic resolver/safety router; фиксация в trace.
 - Multi‑intent: сильный класс отвечает первым, остальные идут в очередь (intent_queue) с возвратом к цели.
 - `info_bundle` — **отдельный класс**, не “схлопывается” в `info`.
 
@@ -331,7 +331,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - TraceContract: `stage`, `decision`, `reason`, `meta`.
 
 ### Slot extraction + confirmation (P0)
-- Stages: `slot_extract` (LLM JSON), `slot_validate` (детерминированно), `booking_confirm` (подтверждение слотов).
+- Stages: `slot_extract` (LLM JSON), `slot_validate` (hard‑validation), `booking_confirm` (подтверждение слотов).
 - Запуск `slot_extract` — только при активном booking‑signal; в остальных случаях слоты не извлекаем.
 - Slot-lock: активный `expected_reply_type` сохраняется при перебивках; смена только на заполнение слота/отмену/`pending`.
 - decision_trace: `stage=slot_extract|slot_validate|booking_confirm` с `decision` и `slot_summary`.
@@ -345,7 +345,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 2) **Tool resolver** → собирает факты из packs/инструментов.
 3) **Response Guard** → проверяет финальный текст на допустимые секции.
 
-**Tools (deterministic):**
+**Tools (contracted):**
 - `fact.info_bundle` → address/hours/parking/guest_policy.
 - `fact.pricing` → price_item + price_text.
 - `fact.duration` → duration_item + duration_text.
@@ -371,7 +371,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - decision_meta: `fact_source`, `fact_payload` keys, `tool_used`.
 
 ### Semantic Resolver (P0)
-**Цель:** устойчивость RU/KZ/mixed без раздувания ключевых слов; детерминированный commit.
+**Цель:** устойчивость RU/KZ/mixed без раздувания ключевых слов; LLM‑first commit с semantic evidence.
 
 **Вход:**
 - `user_text`, `expected_reply_type`, `client_slug`, `branch_id`
@@ -383,13 +383,14 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - `client_pack.service_cards`: service_id, name, category, description, examples (ru/kk/mixed)
 - Индексация: `ops/sync_client.py --sync` → Qdrant, metadata `{client_slug, branch_id, card_type, id}`
 
-**Scoring (deterministic):**
+**Scoring (thresholded):**
 - Embeddings (BGE‑M3), top‑k=5.
 - Пороги: `intent_threshold`, `service_threshold` (глобальные + per‑card override).
 
 **Commit rules:**
-- Если `semantic_score >= threshold` → commit semantic result (может override LLM).
-- Если `semantic_score < threshold` и LLM `confidence` высокий → commit LLM result, но метка `semantic_low_confidence`.
+- Если `semantic_score >= threshold` и результат совпадает с LLM → commit LLM result, метка `semantic_confirmed`.
+- Если `semantic_score >= threshold` и результат конфликтует с LLM → clarify (без override), метка `semantic_conflict`.
+- Если `semantic_score < threshold` и LLM `confidence` высокий → commit LLM result, метка `semantic_low_confidence`.
 - Иначе → clarify или handoff (по правилам).
 
 **Output (meta):**
@@ -402,7 +403,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - `decision_meta` включает все output‑поля.
 
 **Fallback:**
-- При недоступных embeddings/ошибках → deterministic anchors (record `semantic_fallback_reason`).
+- При недоступных embeddings/ошибках → rule‑based anchors (record `semantic_fallback_reason`).
 
 ### Response Guard (P0)
 **Цель:** ноль галлюцинаций и строгое соответствие фактам.
@@ -415,7 +416,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Для handoff: только эскалационные шаблоны.
 
 **Fallback:**
-- Нарушение → deterministic шаблон или clarify/escalate, записать guard‑решение.
+- Нарушение → safe‑шаблон или clarify/escalate, записать guard‑решение.
 
 **Trace/meta:**
 - decision_trace: `stage=response_guard`, `decision=pass|fallback`, `reason`.
@@ -433,7 +434,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 - Поток: Sense → Decide → Act → Speak.
 - Действия (пример): `leadcard_update`, `handoff_create`, `status_update`, `clarify_request`, `booking_step`.
 - Риск‑типы: low/medium/high; high‑risk действия → только handoff.
-- LLM может предложить `tool_call`, но исполняет только deterministic executor по policy.
+- LLM может предложить `tool_call`, но исполняет только policy‑validated executor.
 - Allowed‑facts validator: проверяет, что ответ использует только разрешённые факты; при нарушении → clarify/handoff.
 - ActionContract: `action_type`, `required_next_slots`, `escalation_reason` (остальное — meta).
 - Trace meta: `action_id`, `tool_used`, `policy_override`.
@@ -441,14 +442,14 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 ### Answer‑Interpreter (expected_reply_type) — канон
 - Включается **только** если ожидается ответ на вопрос (`expected_reply_type` активен).
 - Делает **семантический** разбор ответа (slot/value/confidence), а не классификацию запроса.
-- Низкая уверенность/ошибка → fallback на детерминированный парсер + короткий уточняющий вопрос.
+- Низкая уверенность/ошибка → fallback на rule‑based parser + короткий уточняющий вопрос.
 - Если `expected_reply_match=false` → интерпретатор не применяется: слот не заполняем, идём в root‑gates, затем при активной записи возвращаем booking‑prompt.
 - Не может менять класс ответа и не влияет на Hard‑LAW/policy‑gates.
 
 ### Signal Snapshot (routing signals)
 - Единая точка фиксации сигналов: domain_router anchors (client_config), pack lexicons (policy/guest/service), semantic match (RAG/Qdrant), consult topic resolver.
 - Сигналы пишутся в `decision_meta` с источником/score/threshold; используются для OOD/booking/intent gate.
-- LLM‑router остаётся primary по смыслу; детерминированные сигналы — safety/fallback, а не “истина”.
+- LLM‑router остаётся primary по смыслу; rule‑based сигналы — safety/fallback, а не “истина”.
 
 ### Consult clarify (pack-only, no LLM advice)
 - Consult canon: info-first only from pack playbooks; no LLM advice/facts. If explicit info/booking request (pricing/duration/location/hours/booking) and service recognized → short-circuit to normal info/booking; advice-style consult stays in consult even if service recognized. If playbook missing and no service → max 2 clarifications (`clarify_limit=2`), then escalate `consult_no_service`.
@@ -535,7 +536,7 @@ chatflow_service → WhatsApp (single request; msg_id idempotency; retries/backo
 
 ### Policy‑gates (конфиг per client)
 - Hard‑LAW всегда эскалирует (оплата: подтверждение/проверка/возвраты, медицинка, жалобы, переносы).
-- Policy‑gates (скидки/оплата info) исполняются детерминированно по `client_pack.policy.discounts` и `client_pack.policy.payment_info`.
+- Policy‑gates (скидки/оплата info) исполняются строго по `client_pack.policy.discounts` и `client_pack.policy.payment_info`.
 - Если правило отсутствует/не совпало — эскалация (без попытки торга).
 
 ### Booking mode (с/без CRM)
@@ -615,7 +616,7 @@ Topic в Telegram: если у клиента нет topic_id — создать
 - Ответ клиента:
   - `pending_ack` → handover → resolved, `state=bot_active`.
   - `pending_close` → handover → resolved, `state=bot_active`, бот замьючен.
-- Классификация `pending_ack/pending_close`: LLM‑router first, при ошибке/низкой уверенности — детерминированный fallback.
+- Классификация `pending_ack/pending_close`: LLM‑router first, при ошибке/низкой уверенности — rule‑based fallback.
 - Auto‑close: 4 часа ожидания без подтверждения → системное закрытие.
 
 ### Менеджер → Клиент

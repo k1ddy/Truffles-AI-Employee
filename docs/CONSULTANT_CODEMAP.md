@@ -67,16 +67,14 @@ preflight reject happens before a conversation is resolved.
    - Multi‑intent + intent decomposition trace: `_run_intent_decomposition`.
      `truffles-api/app/routers/webhook/decision.py:886`, `truffles-api/app/routers/webhook/decision.py:5282`
 
-8) Domain flows (deterministic core)
-   - Booking/info/consult flows run before LLM generation and can return early:
+8) LLM policy core (DEC‑023 target state)
+   - LLM decides action/slots/next_question; safety code only validates schema + enforces hard safety.
+
+9) Domain flows (tool execution after LLM decision)
+   - Booking/info/consult flows are executed as tools chosen by the LLM policy core.
      `truffles-api/app/routers/webhook/booking.py`, `truffles-api/app/routers/webhook/info.py`,
      `truffles-api/app/routers/webhook/response.py`
-
-9) LLM primary response (only if domain flows did not answer)
-   - `_handle_llm_primary` → `generate_bot_response` → `generate_ai_response` (RAG + LLM).
-     `truffles-api/app/routers/webhook/decision.py:6583`, `truffles-api/app/routers/webhook/response.py:1073`,
-     `truffles-api/app/services/message_service.py:104`, `truffles-api/app/services/ai_service.py:1948`
-   - If LLM primary fails or is skipped, `truth_gate` fallback can still answer deterministically.
+   - LLM response (`_handle_llm_primary`) is used when action=reply and no tool output is required.
 
 10) Outbox delivery
     - Outbox enqueue + send happens after response creation.
@@ -180,9 +178,9 @@ python3 ops/diagnose.py trace-bundle \
 - `status`: `SENT`
 - `outbox.latency_ms.inbound_to_outbox_ms=10541.99`
 
-**Interpretation:** this message hit the truth gate (deterministic reply) but still used LLM for routing
-(`controller_llm_ms`, `multi_intent_llm_ms`). LLM generation (`ai_response`) did not run because the
-truth gate provided a safe response.
+**Interpretation:** this message hit a safety gate (hard policy/LAW) while still using LLM for routing
+(`controller_llm_ms`, `multi_intent_llm_ms`). Under DEC‑023, only hard safety gates can override the
+LLM policy decision; all other replies remain LLM‑driven.
 
 ## 1) Entry point & decision graph (the brain orchestrator)
 
@@ -192,7 +190,7 @@ truth gate provided a safe response.
 - Accept inbound message, enrich with context, run gates, choose action (reply/escalate/booking_prompt), and record `decision_meta`/`decision_trace`.
 
 **Behavior impact:**
-- **Order matters.** State/pending/LAW/policy gates can override any LLM meaning. This keeps the system safe and deterministic.
+- **Order matters.** Only hard safety gates (LAW/policy/schema) may override LLM policy decisions.
 - If you change stage order, you change bot behavior. See `SPECS/SYSTEM_REFERENCE.md` → “Decision pipeline”.
 
 ## 1.1) Ingress adapters (ChatFlow + Provider Gateway)
@@ -383,7 +381,7 @@ truth gate provided a safe response.
 - `truffles-api/app/routers/webhook/decision.py:6332` → `_handle_consult_flow(...)` is invoked before multi-intent routing.
 
 **Pack load + schema validation**
-- `truffles-api/app/services/consult_pack_service.py:22-163` → load/validate pack, build deterministic reply.
+- `truffles-api/app/services/consult_pack_service.py:22-163` → load/validate pack, build pack-sourced reply.
 - `truffles-api/app/schemas/consult.py:37-120` → playbook + controller output schemas (validate/guard).
 
 **Topic resolution (semantic + controller)**

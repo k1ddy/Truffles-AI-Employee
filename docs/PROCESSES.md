@@ -424,7 +424,7 @@ class Stage(Protocol):
 | Auto-close | 4 hours | Close without response |
 | Outbox backlog | > 100 | Alert |
 | Escalation rate | > 30% | Review triggers |
-| LLM timeout | > 2% | Fallback to deterministic |
+| LLM timeout | > 2% | Fallback to safe‑mode (hard‑safety) |
 
 ### 6.1 Ops — Outbox Queue & Retry
 

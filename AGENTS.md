@@ -17,8 +17,8 @@
 
 ## 0) Truffles в одной формуле
 
-**Truffles = Deterministic Core (факты/правила/решения) + LLM (смысл/язык) + Escalation (человек) + Data in KZ**.
-LLM даёт смысл (intent/slots) и формулировку; коммит решений и факты — детерминированные (packs/tools).
+**Truffles = LLM Policy Core (действия/слоты/исход) + Deterministic Safety (LAW/policy/валидация) + Tools/Packs (факты) + Escalation (человек) + Data in KZ**.
+LLM принимает решение (FACT/COLLECT/HANDOFF) и формулирует ответ; safety‑слой валидирует выход, соблюдает hard‑policy/LAW и исполняет tools/packs.
 
 **Контракт продукта (каждое user-сообщение должно привести к одному исходу):**
 - **FACT** — короткий ответ строго из data packs (truth-first).

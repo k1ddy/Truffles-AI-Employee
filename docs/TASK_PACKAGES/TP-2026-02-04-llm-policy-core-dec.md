@@ -1,10 +1,10 @@
 # TP-2026-02-04-llm-policy-core-dec
 
-- Название/цель: Зафиксировать DEC по переходу на LLM policy core (LLM принимает решение action/slots/next_question) и подготовить план/контракты для имплементации без детерминированных гейтов.
+- Название/цель: Зафиксировать DEC по переходу на LLM policy core (LLM принимает решение action/slots/next_question) и подготовить план/контракты для имплементации без override‑гейтов.
 - Canon refs: `STATE.md` (NOW/GAP по booking диалогам), `docs/IMPERIUM_DECISIONS.yaml` (DEC-010/DEC-018/DEC-020), `SPECS/ARCHITECTURE.md`, `SPECS/CONSULTANT.md`, `SPECS/SYSTEM_REFERENCE.md`, `STRATEGY/REQUIREMENTS.md`.
 - Invariant: продуктовый контракт FACT/COLLECT/HANDOFF сохраняется; факты только через packs/tools; policy/LAW gate остаётся жёстким; trace/meta пишутся на ранних возвратах; `_legacy.py` adapter-only.
 - Scope:
-  - DEC-023: LLM policy core (LLM принимает action/slots/next_question; deterministic code = schema-валидация + safety + tool execution).
+  - DEC-023: LLM policy core (LLM принимает action/slots/next_question; safety code = schema-валидация + safety + tool execution).
   - Контракт LLM policy core output (JSON schema) + правила валидации/ошибок.
   - План отключения expected-reply/pending/router overrides при включённом LLM policy core.
   - План перехода эскалаций: только явный запрос менеджера или policy risk.
@@ -24,7 +24,7 @@
   2) Описать контракт LLM policy core output + правила валидации (schema + hard safety).
   3) Определить флаг/режим для отключения expected-reply/pending/router overrides.
   4) Зафиксировать правила эскалации: только явный запрос менеджера или policy risk.
-  5) Зафиксировать LLM-тестирование: генерация сценариев + детерминированный verify по decision_meta/trace.
+  5) Зафиксировать LLM-тестирование: генерация сценариев + строгий verify по decision_meta/trace.
   6) Обновить `STATE.md` и `STRUCTURE.md`.
 - DoD:
   - DEC-023 записан в `docs/IMPERIUM_DECISIONS.yaml`.
@@ -47,4 +47,4 @@
   - Base: `origin/main`
   - Merge: doc-only fast-forward в `main`
   - Cleanup: `scripts/session_end.sh --status done` + remove worktree/branch
-- Риски/блокеры: конфликт с DEC-010/DEC-018 (детерминированные гейты). Требуется явное позиционирование как замена decision_model и фиксация safety-гейтов.
+- Риски/блокеры: конфликт с DEC-010/DEC-018 (override‑гейты). Требуется явное позиционирование как замена decision_model и фиксация safety-гейтов.
