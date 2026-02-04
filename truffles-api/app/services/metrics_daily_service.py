@@ -19,8 +19,8 @@ _DEFAULT_BACKFILL_MAX_DAYS = 31
 _METRICS_DAILY_SQL = """
 WITH params AS (
   SELECT
-    :client_id::uuid AS client_id,
-    :metric_date::date AS metric_date
+    CAST(:client_id AS uuid) AS client_id,
+    CAST(:metric_date AS date) AS metric_date
 ),
 bounds AS (
   SELECT
