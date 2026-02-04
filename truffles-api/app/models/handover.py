@@ -16,6 +16,7 @@ class Handover(Base):
     trigger_type = Column(Text, nullable=False)  # intent, keyword, manual, timeout
     trigger_value = Column(Text)
     context_summary = Column(Text)
+    meta = Column(JSONB)
     adapter_type = Column(Text)  # telegram, webhook, bitrix, email, whatsapp_web
     adapter_response = Column(JSONB)
     status = Column(Text, nullable=False)  # pending, active, resolved, bot_handling, timeout
@@ -31,6 +32,7 @@ class Handover(Base):
     assigned_to_name = Column(Text)
     resolution_time_seconds = Column(Integer)
     telegram_message_id = Column(BigInteger)
+    trigger_message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id"))
     assigned_to = Column(String(100))
     reminder_1_sent_at = Column(TIMESTAMP(timezone=True))
     reminder_2_sent_at = Column(TIMESTAMP(timezone=True))

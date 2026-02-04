@@ -12,6 +12,8 @@ Roles
 Sections
 - Message volume (client inbound, bot replies).
 - Daily metrics summary (total/pending/active/resolved, average resolution time).
+- KPI tiles (truth-first: bot-closed, time saved estimate, booking conversion, first response p50/p90, after-hours coverage, escalation quality, losses/risks, top intents).
+- KPI trends (7-day sparkline series).
 - Date picker with refresh.
 
 Actions

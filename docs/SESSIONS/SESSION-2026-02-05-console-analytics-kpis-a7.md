@@ -1,0 +1,57 @@
+# SESSION 2026-02-05-console-analytics-kpis-a7 — Session 2026-02-05-console-analytics-kpis-a7
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-05-console-analytics-kpis.md
+- branch: feat/2026-02-05-console-analytics-kpis-a7
+- worktree: /home/zhan/worktrees/2026-02-05-console-analytics-kpis-a7
+- base_ref: origin/main
+- scope: Insights KPI truth-first (analytics snapshot + events + API/UI updates).
+- done:
+  - Added KPI snapshot schema + outbox/alert event logging hooks.
+  - Extended daily analytics snapshot + Console Insights API/UI.
+  - Updated docs + tests (console analytics).
+  - Applied DB migrations (handover meta, outbox status events, alert events, analytics table).
+  - Ran daily snapshot for client `truffles` and verified latest analytics row.
+  - Added KPI trend series + sparkline charts; fixed SQL ambiguity in top intents/sections.
+  - Deployed API + console-web; backfilled KPI snapshot for last 7 days (client `truffles`).
+  - Backfilled KPI snapshot for last 7 days (client `demo_salon`) and today for `truffles`.
+  - Deployed local API image from commit `677da6aa` (GHCR bypass) and verified `/admin/version`.
+  - Verified `metrics_analytics_daily` rows exist for `demo_salon`.
+  - Added KPI tooltip copy for Insights tiles and trends.
+  - Merged PR #533 and redeployed console-web with KPI tooltips.
+  - Simplified KPI tooltip copy (plain language) and redeployed console-web.
+  - Removed native browser tooltip to avoid double hints.
+- next:
+  - Verify Insights trends in Console UI (post-deploy smoke).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-05-console-analytics-kpis.md
+  - /tmp/analytics_migration_019_metrics_analytics_daily.txt
+  - /tmp/analytics_migration_020_handover_meta.txt
+  - /tmp/analytics_migration_021_outbox_status_events.txt
+  - /tmp/analytics_migration_022_alert_events.txt
+  - /tmp/analytics_daily_snapshot_20260204_retry.txt
+  - /tmp/analytics_metrics_analytics_daily_latest.txt
+  - /tmp/api_redeploy_analytics_kpis_20260205.txt
+  - /tmp/console_web_redeploy_insights_kpis_20260205.txt
+  - /tmp/analytics_backfill_7d_20260205.txt
+  - /tmp/analytics_metrics_analytics_daily_7d_20260205.txt
+  - /tmp/analytics_backfill_demo_salon_7d_20260205.txt
+  - /tmp/analytics_metrics_analytics_daily_demo_salon_7d_20260205.txt
+  - /tmp/analytics_backfill_truffles_today_20260205.txt
+  - /tmp/analytics_metrics_analytics_daily_truffles_today_20260205.txt
+  - /tmp/pytest_console_analytics_20260205_trends.txt
+  - /tmp/console_web_lint_analytics_20260205_trends.txt
+  - /tmp/api_local_build_analytics_kpis_20260205.txt
+  - /tmp/api_local_image_inspect_20260205.txt
+  - /tmp/api_local_redeploy_analytics_kpis_20260205.txt
+  - /tmp/analytics_api_version_local_20260205.txt
+  - /tmp/analytics_client_ids_20260205.txt
+  - /tmp/analytics_metrics_demo_salon_20260205.txt
+  - /tmp/console_web_lint_insights_tooltips_20260205.txt
+  - /tmp/console_web_redeploy_insights_tooltips_20260205.txt
+  - /tmp/console_web_lint_insights_tooltips_simple_20260205.txt
+  - /tmp/console_web_redeploy_insights_tooltips_simple_20260205.txt
+  - /tmp/console_web_lint_insights_tooltips_no_native_20260205.txt
+  - /tmp/console_web_redeploy_insights_tooltips_no_native_20260205.txt
+- last_updated: 2026-02-05

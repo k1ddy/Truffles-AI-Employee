@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app.contracts.decision import DecisionSignals
+from app.contracts.decision import DecisionOutcome, DecisionSignals, ExpectedReplyState
 from app.database import get_db
 from app.main import app
 from app.models import Branch, Client, ClientSettings, Conversation, User
@@ -37,9 +37,12 @@ from app.services.intent_service import (
     is_strong_out_of_domain,
 )
 from app.services.knowledge_snapshot_consumer import ConsultSnapshotShadowResult
+from app.services.knowledge_validation import MinimumDataContractStatus
 from app.services.message_service import select_handover_user_message
 from app.services.result import Result
 from app.services.state_machine import ConversationState
+
+MINIMUM_DATA_READY = MinimumDataContractStatus(ready=True, missing_fields=[])
 
 
 @pytest.fixture
@@ -139,6 +142,159 @@ def _disable_quiet_hours_notices():
         )
         stack.enter_context(
             patch("app.routers.webhook.decision.build_evening_greeting", return_value=None)
+        )
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _disable_minimum_data_safe_mode():
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "app.routers.webhook.decision._build_minimum_data_contract_status",
+                return_value=SimpleNamespace(ready=True, missing_fields=[]),
+            )
+        )
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _stub_generic_signal_lexicons():
+    from app.services import demo_salon_knowledge as knowledge
+
+    original = knowledge.get_signal_lexicon_list
+
+    def _stub(client_slug: str | None, key: str):
+        if client_slug == "generic":
+            return []
+        return original(client_slug, key)
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "app.services.demo_salon_knowledge.get_signal_lexicon_list",
+                side_effect=_stub,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "app.routers.webhook.info.get_signal_lexicon_list",
+                side_effect=_stub,
+            )
+        )
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _stub_generic_policy_pack():
+    from app.routers.webhook import policy as policy_router
+
+    original = policy_router._load_policy_pack
+
+    def _stub(*, policy_type: str | None, client_slug: str | None):
+        if client_slug == "generic":
+            return {}
+        return original(policy_type=policy_type, client_slug=client_slug)
+
+    with patch(
+        "app.routers.webhook.policy._load_policy_pack",
+        side_effect=_stub,
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _stub_generic_booking_request_lexicon():
+    from app.routers.webhook import decision as decision_router
+
+    original = decision_router._collect_booking_request_lexicon
+
+    def _stub(client_slug: str | None):
+        if client_slug == "generic":
+            return {}
+        return original(client_slug)
+
+    with patch(
+        "app.routers.webhook.decision._collect_booking_request_lexicon",
+        side_effect=_stub,
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _stub_generic_service_hint():
+    from app.routers.webhook import decision as decision_router
+
+    original = decision_router._extract_service_hint
+
+    def _stub(text: str | None, client_slug: str | None):
+        if client_slug == "generic":
+            return None
+        return original(text, client_slug)
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "app.routers.webhook.decision._extract_service_hint",
+                side_effect=_stub,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "app.routers.webhook._legacy._extract_service_hint",
+                side_effect=_stub,
+            )
+        )
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _stub_generic_datetime_lexicon():
+    from app.routers.webhook import booking as booking_router
+
+    original = booking_router._load_datetime_lexicon
+
+    def _stub(client_slug: str | None):
+        if client_slug == "generic":
+            return {}
+        return original(client_slug)
+
+    with patch(
+        "app.routers.webhook.booking._load_datetime_lexicon",
+        side_effect=_stub,
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _stub_generic_truth_pack():
+    from app.services import demo_salon_knowledge as knowledge
+
+    original = knowledge.load_yaml_truth
+    generic_truth = {
+        "domain_pack": {},
+        "services_catalog": {"services": []},
+        "client_pack": {"policy": {}},
+        "salon": {"timezone": "UTC"},
+    }
+
+    def _stub(client_slug: str | None = None):
+        if client_slug == "generic":
+            return dict(generic_truth)
+        return original(client_slug)
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "app.services.demo_salon_knowledge.load_yaml_truth",
+                side_effect=_stub,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "app.routers.webhook.decision.load_yaml_truth",
+                side_effect=_stub,
+            )
         )
         yield
 
@@ -288,7 +444,7 @@ class TestMessageEndpoint:
             with patch(
                 "app.routers.message.get_client_slug", return_value="demo_salon"
             ), patch(
-                "app.routers.message.webhook_legacy._handle_webhook_payload",
+                "app.routers.message.reasoning_core.handle_webhook_payload",
                 new_callable=AsyncMock,
             ) as mock_handle:
                 mock_handle.return_value = WebhookResponse(
@@ -804,10 +960,10 @@ class TestRoutingPolicy:
 
     def test_routing_policy_pending(self):
         policy = webhook_router._get_routing_policy(ConversationState.PENDING.value)
-        assert policy["allow_booking_flow"] is False
+        assert policy["allow_booking_flow"] is True
         assert policy["allow_handover_create"] is False
-        assert policy["allow_truth_gate_reply"] is False
-        assert policy["allow_bot_reply"] is False
+        assert policy["allow_truth_gate_reply"] is True
+        assert policy["allow_bot_reply"] is True
 
     def test_routing_policy_manager_active(self):
         policy = webhook_router._get_routing_policy(ConversationState.MANAGER_ACTIVE.value)
@@ -821,7 +977,7 @@ class TestRoutingPolicy:
             booking_active=False,
             booking_signal=True,
         )
-        assert should_run is False
+        assert should_run is True
 
     def test_demo_truth_gate_skips_when_booking(self):
         policy = webhook_router._get_routing_policy(ConversationState.PENDING.value)
@@ -965,6 +1121,9 @@ def test_truth_gate_sets_decision_meta():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ):
@@ -1899,6 +2058,9 @@ def test_consult_snapshot_shadow_disabled():
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
+    ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
         "app.routers.webhook._legacy.generate_bot_response"
@@ -2051,6 +2213,9 @@ def test_consult_snapshot_shadow_records_trace_and_meta():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
@@ -2212,6 +2377,9 @@ def test_consult_snapshot_shadow_records_error():
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
+    ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
         "app.routers.webhook._legacy.generate_bot_response"
@@ -2370,6 +2538,9 @@ def test_consult_snapshot_cutover_fallback_uses_legacy_pack():
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
+    ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
         "app.routers.webhook._legacy.generate_bot_response"
@@ -2502,6 +2673,9 @@ def test_consult_snapshot_cutover_strict_clarifies():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
@@ -3064,6 +3238,9 @@ def test_semantic_service_matcher_handles_low_confidence_match():
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
+    ), patch(
         "app.routers.webhook._legacy._extract_service_hint", return_value="маникюр"
     ):
         response = asyncio.run(
@@ -3179,6 +3356,9 @@ def test_semantic_service_matcher_handles_low_confidence_suggest():
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
     ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
+    ), patch(
         "app.routers.webhook._legacy._extract_service_hint", return_value="массаж ног"
     ):
         response = asyncio.run(
@@ -3281,6 +3461,7 @@ def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
 
     low_confidence = SimpleNamespace(ok=True, value=(None, "low_confidence"))
     semantic = SemanticServiceMatch(action="match", response="Маникюр — 2 500 ₸.", score=0.52)
+    domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
 
     def semantic_side_effect(text: str, client_slug: str):
         if text == "маникюр":
@@ -3288,6 +3469,10 @@ def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
         return None
 
     with patch("app.routers.webhook._legacy._get_policy_handler", return_value=None), patch(
+        "app.routers.webhook._legacy.classify_intent", return_value=Intent.QUESTION
+    ), patch(
+        "app.routers.webhook._legacy.classify_domain_with_scores", return_value=domain_result
+    ), patch(
         "app.routers.webhook._legacy.generate_bot_response", return_value=low_confidence
     ), patch(
         "app.routers.webhook._legacy.semantic_service_match", side_effect=semantic_side_effect
@@ -3299,6 +3484,9 @@ def test_semantic_service_matcher_uses_rewrite_on_low_confidence():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ), patch(
         "app.routers.webhook._legacy._extract_service_hint", return_value="маникюр"
     ):
@@ -3389,81 +3577,13 @@ def test_semantic_service_matcher_returns_not_found_on_empty_rag():
 
 def test_rag_rewrite_and_scores_logged():
     saved_message = SimpleNamespace(message_metadata={})
-
-    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
-    settings = SimpleNamespace(
-        webhook_secret=None,
-        branch_resolution_mode="disabled",
-        remember_branch_preference=False,
-    )
-    user = SimpleNamespace(id=uuid4(), user_metadata={})
-    conversation_id = uuid4()
     conversation = SimpleNamespace(
-        id=conversation_id,
-        user_id=user.id,
-        client_id=client.id,
+        id=uuid4(),
         state=ConversationState.BOT_ACTIVE.value,
-        bot_status="active",
-        bot_muted_until=None,
-        last_message_at=None,
-        no_count=0,
-        telegram_topic_id=None,
-        escalated_at=None,
-        branch_id=None,
         context={},
     )
     user = SimpleNamespace(id="user-123", user_metadata={})
-
-    client_query = Mock()
-    client_query.filter.return_value.first.return_value = client
-    settings_query = Mock()
-    settings_query.filter.return_value.first.return_value = settings
-    branch_phone_query = Mock()
-    branch_phone_query.filter.return_value.all.return_value = []
-    conversation_query = Mock()
-    conversation_query.filter.return_value.first.return_value = conversation
-    user_query = Mock()
-    user_query.filter.return_value.first.return_value = user
-
-    def _query_side_effect(model, *args, **kwargs):
-        if model is Client:
-            return client_query
-        if model is ClientSettings:
-            return settings_query
-        if model is Conversation:
-            return conversation_query
-        if model is User:
-            return user_query
-        if getattr(model, "class_", None) is Branch and getattr(model, "key", None) == "phone":
-            return branch_phone_query
-        fallback = Mock()
-        fallback.filter.return_value.first.return_value = None
-        fallback.filter.return_value.all.return_value = []
-        return fallback
-
-    db = Mock()
-    db.query.side_effect = _build_query_side_effect(
-        client_query=client_query,
-        settings_query=settings_query,
-        conversation_query=conversation_query,
-        user_query=user_query,
-    )
-    db.add = Mock()
-    db.flush = Mock()
-    db.commit = Mock()
-
-    payload = WebhookRequest(
-        client_slug="demo_salon",
-        body=WebhookBody(
-            message="чо по адресу",
-            messageType="text",
-            metadata=WebhookMetadata(
-                remoteJid="77000000000@s.whatsapp.net",
-                messageId="msg-rag-1",
-                timestamp=1234567890,
-            ),
-        ),
-    )
+    timing_context: dict = {}
 
     def fake_generate_bot_response(*args, **kwargs):
         timing_context = kwargs.get("timing_context")
@@ -3483,10 +3603,7 @@ def test_rag_rewrite_and_scores_logged():
             timing_context["rag_attempted"] = True
         return Result.success(("Адрес: Абая 150", "high"))
 
-    intent_decomp = {
-        "multi_intent": False,
-        "primary_intent": "other",
-        "secondary_intents": [],
+    intent_decomp_payload = {
         "intents": ["other"],
         "service_query": "",
     }
@@ -3495,38 +3612,37 @@ def test_rag_rewrite_and_scores_logged():
         "app.services.ai_service.rewrite_query_for_retrieval",
         return_value={"rewrite_used": True, "rewrite_text": "адрес салона", "reason": "rewritten"},
     ), patch(
-        "app.routers.webhook.http._lookup_sender_branch",
-        return_value=None,
-    ), patch(
-        "app.routers.webhook._legacy.semantic_service_match",
-        return_value=None,
-    ), patch(
         "app.routers.webhook._legacy.generate_bot_response",
         side_effect=fake_generate_bot_response,
-    ), patch(
-        "app.routers.webhook._legacy.detect_multi_intent",
-        return_value=intent_decomp,
-    ), patch(
-        "app.routers.webhook._legacy.send_bot_response", return_value=True
-    ), patch(
-        "app.routers.webhook._legacy._find_message_by_message_id",
-        return_value=saved_message,
-    ), patch(
-        "app.routers.webhook._legacy.should_process_debounced_message",
-        AsyncMock(return_value=True),
     ):
-        response = asyncio.run(
-            webhook_router._handle_webhook_payload(
-                payload,
-                db,
-                provided_secret=None,
-                enforce_secret=False,
-                skip_persist=True,
-                conversation_id=conversation_id,
-            )
+        outcome = webhook_response._handle_ai_response_action(
+            db=Mock(),
+            conversation=conversation,
+            user=user,
+            message_text="чо по адресу",
+            saved_message=saved_message,
+            client_slug="demo_salon",
+            client_id="client-123",
+            client_config={},
+            routing={"allow_handover_create": False},
+            intent=Intent.QUESTION,
+            llm_primary_result=None,
+            append_user_message=False,
+            timing_context=timing_context,
+            intent_decomp_payload=intent_decomp_payload,
+            class_router_result={"in_signals": [], "anchors_in_hits": 0},
+            expected_reply_shortcircuit=False,
+            out_of_domain_signal=False,
+            booking_signal=False,
+            info_class_intents=set(),
+            current_goal=None,
+            now=datetime.now(timezone.utc),
+            send_and_save=lambda text, **_kwargs: (text, True),
+            send_response=lambda text: True,
+            finalize_response=lambda **_kwargs: None,
         )
 
-    assert response.success is True
+    assert outcome.bot_response is not None
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("rewrite_used") is True
     assert meta.get("rewrite_text") == "адрес салона"
@@ -3715,6 +3831,9 @@ def test_service_matcher_short_circuits_llm():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
@@ -4155,6 +4274,9 @@ def test_llm_guard_blocks_payment_response():
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
     ), patch(
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=branch_id
+    ), patch(
+        "app.routers.webhook.decision._build_minimum_data_contract_status",
+        return_value=MINIMUM_DATA_READY,
     ):
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -5693,6 +5815,12 @@ def test_expected_reply_type_off_topic_keeps_contract():
     with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
         "app.routers.webhook._legacy.classify_domain_with_scores", return_value=domain_result
     ), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.routers.webhook.decision._evaluate_booking_signal", return_value=(False, None)
+    ), patch(
+        "app.routers.webhook._legacy._should_run_booking_flow", return_value=False
+    ), patch(
         "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(
         "app.routers.webhook._legacy.send_bot_response", return_value=True
@@ -5725,7 +5853,7 @@ def test_expected_reply_type_off_topic_keeps_contract():
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
     assert meta.get("expected_reply_matched") is False
-    assert meta.get("expected_reply_reason") == "invalid_choice"
+    assert meta.get("expected_reply_reason") == "off_topic"
 
 
 def test_expected_reply_type_invalid_choice_keeps_contract():
@@ -5803,9 +5931,47 @@ def test_expected_reply_type_invalid_choice_keeps_contract():
     }
 
     domain_result = (DomainIntent.UNKNOWN, 0.0, 0.0, {"out_hits": 0, "strict_in_hits": 0})
+    expected_reply_result = {
+        "ok": False,
+        "payload": {"slot": "service", "value": "", "confidence": 0.0, "reason": "invalid_choice"},
+        "error": "invalid_choice",
+        "raw": None,
+    }
+    expected_reply_state = ExpectedReplyState(
+        context=conversation.context,
+        context_manager={},
+        expected_reply_type=webhook_router.EXPECTED_REPLY_SERVICE,
+        intent_queue=["location"],
+        expected_reply_matched=False,
+        expected_reply_shortcircuit=False,
+        expected_reply_blocked_by_info=False,
+        memory_expected_reply_type=None,
+        current_goal=None,
+    )
+    booking_result = SimpleNamespace(response=None, booking_t0=None, booking_logged=True)
 
     with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
         "app.routers.webhook._legacy.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.routers.webhook.decision._evaluate_booking_signal", return_value=(False, None)
+    ), patch(
+        "app.routers.webhook.decision._is_booking_slot_signal", return_value=False
+    ), patch(
+        "app.routers.webhook.decision._apply_expected_reply_contract",
+        return_value=expected_reply_state,
+    ), patch(
+        "app.routers.webhook._legacy._apply_expected_reply_contract",
+        return_value=expected_reply_state,
+    ), patch(
+        "app.routers.webhook.decision._handle_booking_flow",
+        return_value=booking_result,
+    ), patch(
+        "app.routers.webhook._legacy._handle_booking_flow",
+        return_value=booking_result,
+    ), patch(
+        "app.routers.webhook._legacy._should_run_booking_flow", return_value=False
     ), patch(
         "app.routers.webhook._legacy.semantic_service_match", return_value=None
     ), patch(
@@ -5818,6 +5984,8 @@ def test_expected_reply_type_invalid_choice_keeps_contract():
         "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.interpret_expected_reply", return_value=expected_reply_result
     ), patch(
         "app.routers.webhook._legacy._extract_service_hint", return_value=None
     ):
@@ -5842,7 +6010,7 @@ def test_expected_reply_type_invalid_choice_keeps_contract():
     assert meta.get("expected_reply_reason") == "invalid_choice"
 
 
-def test_llm_plan_collect_sets_expected_reply_type():
+def test_llm_policy_core_collect_sets_expected_reply_type():
     saved_message = Mock()
     saved_message.message_metadata = {}
 
@@ -5902,8 +6070,8 @@ def test_llm_plan_collect_sets_expected_reply_type():
         ),
     )
 
-    plan_payload = {
-        "outcome": "collect",
+    policy_payload = {
+        "action": "collect",
         "tool_action": "info",
         "tool_args": {},
         "pack_refs": ["pricing"],
@@ -5911,22 +6079,25 @@ def test_llm_plan_collect_sets_expected_reply_type():
         "confidence": 0.9,
         "reason": "need_service",
         "goal": "info",
-        "slot_state": {},
+        "slots": {},
+        "next_question": "service",
         "open_questions": ["service"],
+        "needs_manager": False,
+        "risk_signals": [],
     }
-    plan_result = {
+    policy_result = {
         "ok": True,
-        "payload": plan_payload,
+        "payload": policy_payload,
         "error": None,
-        "raw": json.dumps(plan_payload, ensure_ascii=False),
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
         "attempted": True,
         "elapsed_ms": 12.5,
     }
     domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
 
-    with patch("app.routers.webhook.decision.route_llm_plan", return_value=plan_result), patch(
-        "app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)
-    ), patch(
+    with patch(
+        "app.routers.webhook.decision.route_llm_policy_core", return_value=policy_result
+    ), patch("app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)), patch(
         "app.routers.webhook.decision.format_reply_from_truth", return_value="Уточните услугу."
     ), patch(
         "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
@@ -5957,8 +6128,246 @@ def test_llm_plan_collect_sets_expected_reply_type():
     assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
-    assert meta.get("llm_plan", {}).get("validated") is True
-    assert meta.get("llm_plan", {}).get("payload", {}).get("tool_action") == "info"
+    assert meta.get("llm_policy_core", {}).get("validated") is True
+    assert meta.get("llm_policy_core", {}).get("payload", {}).get("tool_action") == "info"
+
+
+def test_llm_policy_core_allows_plan_with_expected_reply(monkeypatch):
+    monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={"expected_reply_type": webhook_router.EXPECTED_REPLY_SERVICE},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Сколько стоит?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-llm-policy-core-1",
+                timestamp=1234567897,
+            ),
+        ),
+    )
+
+    policy_payload = {
+        "action": "collect",
+        "tool_action": "collect",
+        "tool_args": {},
+        "pack_refs": [],
+        "language": "ru",
+        "confidence": 0.9,
+        "reason": "need_service",
+        "goal": "booking",
+        "slots": {},
+        "next_question": "service",
+        "open_questions": ["service"],
+        "needs_manager": False,
+        "risk_signals": [],
+    }
+    policy_result = {
+        "ok": True,
+        "payload": policy_payload,
+        "error": None,
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
+        "attempted": True,
+        "elapsed_ms": 12.5,
+    }
+    domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
+
+    with patch(
+        "app.routers.webhook.decision.route_llm_policy_core", return_value=policy_result
+    ) as policy_mock, patch("app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match", return_value=None
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert webhook_router.MSG_BOOKING_ASK_SERVICE in response.bot_response
+    assert policy_mock.called is True
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("llm_policy_core", {}).get("validated") is True
+
+
+def test_unknown_state_fallback_sends_reply():
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="тест",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-unknown-state-1",
+                timestamp=1234567897,
+            ),
+        ),
+    )
+
+    domain_result = (DomainIntent.UNKNOWN, 0.0, 0.0, {"out_hits": 0, "strict_in_hits": 0})
+    policy_result = {
+        "ok": False,
+        "payload": None,
+        "error": "skip",
+        "raw": None,
+        "attempted": False,
+        "elapsed_ms": 0.0,
+    }
+
+    with patch("app.routers.webhook.decision._resolve_action", return_value=DecisionOutcome("unknown_state")), patch(
+        "app.routers.webhook.decision.route_llm_policy_core", return_value=policy_result
+    ), patch(
+        "app.routers.webhook.decision._handle_llm_primary",
+        return_value=SimpleNamespace(
+            response=None,
+            llm_primary_result=None,
+            llm_primary_failed=False,
+            llm_primary_reason=None,
+        ),
+    ), patch(
+        "app.routers.webhook.decision._handle_booking_flow",
+        return_value=SimpleNamespace(response=None, booking_t0=None, booking_logged=True),
+    ), patch(
+        "app.routers.webhook.decision._handle_booking_interrupt", return_value=None
+    ), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match", return_value=None
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response == webhook_router.MSG_FACT_GUARD_CLARIFY
 
 
 def test_short_intent_hint_bypasses_early_ood():
@@ -6440,6 +6849,7 @@ def test_multi_truth_reply_handles_hours_and_service_without_booking():
         if "ислам" in normalized:
             return [{"score": 0.5, "payload": {"canonical_name": "Маникюр"}}]
         return []
+    booking_result = SimpleNamespace(response=None, booking_t0=None, booking_logged=True)
 
     with patch("app.routers.webhook._legacy._extract_service_hint", side_effect=_fake_service_hint), patch(
         "app.routers.webhook._legacy.semantic_question_type", side_effect=_fake_question_type
@@ -6451,7 +6861,7 @@ def test_multi_truth_reply_handles_hours_and_service_without_booking():
         "app.routers.webhook._legacy.generate_bot_response",
         side_effect=[
             Result.success((None, "low_confidence")),
-            Result.success(("ok", "high")),
+            Result.success(("Адрес: Абая, Алматы. Работаем 9:00-21:00 ежедневно.", "high")),
         ],
     ), patch(
         "app.routers.webhook._legacy.send_bot_response", return_value=True
@@ -6461,6 +6871,12 @@ def test_multi_truth_reply_handles_hours_and_service_without_booking():
     ), patch(
         "app.routers.webhook._legacy.should_process_debounced_message",
         AsyncMock(return_value=True),
+    ), patch(
+        "app.routers.webhook.decision._handle_booking_flow",
+        return_value=booking_result,
+    ), patch(
+        "app.routers.webhook._legacy._should_run_booking_flow",
+        return_value=False,
     ), patch(
         "app.routers.webhook._legacy._reuse_active_handover"
     ) as mock_reuse, patch(
@@ -7134,10 +7550,20 @@ def test_style_reference_sets_pending():
             ),
         ),
     )
+    domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
 
     with patch(
         "app.routers.webhook._legacy.detect_multi_intent",
         return_value={"multi_intent": False, "intents": []},
+    ), patch(
+        "app.routers.webhook._legacy.classify_intent",
+        return_value=Intent.QUESTION,
+    ), patch(
+        "app.routers.webhook._legacy.classify_domain_with_scores",
+        return_value=domain_result,
+    ), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores",
+        return_value=domain_result,
     ), patch(
         "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(

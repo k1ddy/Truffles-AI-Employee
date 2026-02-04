@@ -26,6 +26,7 @@
 | `contracts/llm/dialogue_controller_output.v1.jsonschema` | Контракт LLM‑контроллера (router) | Архитектор/Backend |
 | `contracts/llm/answer_interpreter_output.v1.jsonschema` | Контракт LLM answer_interpreter | Архитектор/Backend |
 | `contracts/llm/llm_plan_output.v1.jsonschema` | Контракт Hybrid LLM plan | Архитектор/Backend |
+| `contracts/llm/llm_policy_core_output.v1.jsonschema` | Контракт LLM policy core | Архитектор/Backend |
 | `contracts/packs/` | Pack-compiler artifacts (signal graph, indexes) | Архитектор/Backend |
 | `contracts/packs/signal_graph.v1.jsonschema` | Канон сигнального графа (anchors/lexicons) | Архитектор/Backend |
 | `contracts/policy/` | Policy DSL bundles | Архитектор/Backend |
@@ -76,8 +77,10 @@
 | `truffles-api/app/services/tool_registry_service.py` | Tool registry executor (calendar/catalog) for LLM plan | Backend |
 | `truffles-api/app/services/appointment_reminder_service.py` | Appointment reminder/follow-up jobs + outbox enqueue | Backend |
 | `truffles-api/app/services/metrics_daily_service.py` | Daily metrics snapshot (metrics_daily) | Backend |
+| `truffles-api/app/models/alert_event.py` | DB model for alert events (analytics) | Backend |
 | `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |
 | `truffles-api/app/models/console_macro.py` | DB model for Inbox macros (Console) | Backend |
+| `truffles-api/app/models/outbox_status_event.py` | DB model for outbox status events (analytics) | Backend |
 | `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |
 | `truffles-api/app/provider_gateway_app.py` | Отдельный app для Provider Gateway | Backend |
 | `truffles-api/app/inbox_service_app.py` | Отдельный app для Inbox Service | Backend |
@@ -91,6 +94,9 @@
 | `truffles-api/migrations/017_add_console_macros.sql` | Migration: console_macros (Inbox быстрые ответы) | Backend/OPS |
 | `truffles-api/migrations/018_add_learning_consent_pack_candidates.sql` | Migration: learning consent + anonymization/retention + pack candidates | Backend/OPS |
 | `truffles-api/migrations/019_add_handover_trigger_types.sql` | Migration: expand handovers.trigger_type allowed values | Backend/OPS |
+| `truffles-api/migrations/020_add_handover_meta.sql` | Migration: handovers meta snapshot + trigger_message_id | Backend/OPS |
+| `truffles-api/migrations/021_add_outbox_status_events.sql` | Migration: outbox_status_events (status history) | Backend/OPS |
+| `truffles-api/migrations/022_add_alert_events.sql` | Migration: alert_events (no_response, etc.) | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 | `console-web/src/app/insights/page.tsx` | Insights/Analytics page (read-only daily metrics) | Frontend |
@@ -122,6 +128,7 @@
 
 **Активные Task Packages:**
 - `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-dec.md`
+- `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-impl.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-canon.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-tp-batch-create.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-kit.md`
@@ -560,6 +567,7 @@ truffles-api/
 | `intent_classifier.md` | Промпт для классификации |
 | `summarizer.md` | Промпт для суммаризации |
 | `llm_plan.md` | Промпт Hybrid LLM plan |
+| `llm_policy_core.md` | Промпт LLM policy core |
 
 ---
 
@@ -592,6 +600,7 @@ truffles-api/
 - `ops/migrations/016_add_asr_metrics.sql` — метрики ASR (fail rate + totals).
 - `ops/migrations/017_add_knowledge_backlog.sql` — backlog пропусков (low_confidence/out_of_domain/llm_timeout/clarify).
 - `ops/migrations/018_add_outbox_meta.sql` — JSONB meta в `outbox_messages` для таймингов/метаданных.
+- `ops/migrations/019_add_metrics_analytics_daily.sql` — KPI‑метрики аналитики (truth-first).
 
 **Старые скрипты:** `.archive/ops_old/` — не в git.
 

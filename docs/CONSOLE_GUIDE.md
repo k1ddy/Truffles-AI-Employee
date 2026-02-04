@@ -190,6 +190,18 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
   `GET /console/v1/ops/outbox`, `POST /console/v1/ops/outbox/retry`
 - RBAC: owner/admin/support read; owner/admin write (retry/verify/test).
 
+**Insights KPI (truth-first)**
+- Статусы: `FACT` (полные данные), `EST` (оценка), `NEED` (неполнота данных).
+- Закрыты без человека: диалоги с bot‑ответом и без handover за 24ч; “закрыт” = нет нового inbound 24ч после последнего user‑сообщения. `NEED` если окно 24ч не закрыто.
+- Экономия времени менеджера: `total_bot_messages * медиана ручного ответа (сек)` — **EST**. Медиана считается по user→первый manager в диалоге.
+- Конверсия в запись: `appointments` с `conversation_id` и user‑сообщением ≤24ч до booking / кол‑во inbound‑диалогов. `NEED` если есть bookings без `conversation_id`.
+- Время до первого ответа (p50/p90): время от первого user до первого bot/manager; показываем `missing_total` без ответа.
+- После‑часов покрытие: user‑сообщения вне `branch.working_hours` (TZ) и bot‑ответ ≤10 мин. `NEED` если нет `timezone`/`working_hours`.
+- Качество эскалаций: % handover, где есть слоты service + datetime + контакт (name/phone) в `handovers.meta`. `NEED` при отсутствии snapshot.
+- Потери/риски: `outbox_status_events` FAILED + `alert_events` no_response в день; “спасено” = FAILED, но позже SENT (**EST**).
+- Топ‑темы и боли: top‑N intents + info_sections из `decision_meta` (детерминированно). `NEED` если отсутствует intent; LLM‑кластеризация помечается как **EST**.
+- Тренды KPI: 7‑дневные sparklines на основе `metrics_analytics_daily` (без тяжёлых запросов).
+
 ---
 
 ## 3.1 Telegram integration (Console)

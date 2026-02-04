@@ -124,6 +124,6 @@ def test_semantic_service_match_passes_client_slug(monkeypatch):
 
 
 def test_stage_order_snapshot_hash():
-    expected = "8c2ff80a096e9b1f61a46e78bcfe49419706bde734f53501785d64b5a9cb5993"
+    expected = "ddbb277246cd0a9f29e132253eb46653753c145d73f32c0495fdce10e063a0e2"
     stage_order = _load_stage_order_snapshot()
     assert _stage_order_hash(stage_order) == expected

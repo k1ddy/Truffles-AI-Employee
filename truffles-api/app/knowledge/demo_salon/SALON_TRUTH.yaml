@@ -1070,6 +1070,9 @@ domain_pack:
     location_phrases:
       ru:
         - адрес
+        - локац
+        - перекр
+        - улиц
         - где вы
         - где наход
     parking_direct_phrases:
@@ -1157,6 +1160,19 @@ domain_pack:
     lateness_phrases:
       ru:
         - опозда
+    hours_question_phrases:
+      ru:
+        - режим работ
+        - график
+        - до скольк
+        - во сколько
+        - с какого времен
+        - когда заканчива
+        - закрыва
+        - открыва
+        - открыт
+        - сегодня
+        - выходн
     hours_extra_phrases:
       ru:
         - ашык

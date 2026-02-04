@@ -369,6 +369,8 @@ def get_system_anchor_groups(intent: str) -> list[tuple[str, ...]]:
 @lru_cache(maxsize=8)
 def load_yaml_truth(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
     raw = _load_yaml(_truth_path(client_slug))
+    if not raw:
+        return {}
     compiled = compile_pack_payload(raw)
     effective = compiled.get("effective_pack") if isinstance(compiled, dict) else None
     return effective if isinstance(effective, dict) else raw
@@ -688,6 +690,39 @@ _SERVICE_STOPWORDS = {
     "со",
 }
 
+_OFFTOPIC_FALLBACK_ACKS = {
+    "ок",
+    "окей",
+    "ok",
+    "okay",
+    "да",
+    "нет",
+    "ага",
+    "угу",
+    "ладно",
+    "хорошо",
+    "понятно",
+    "ясно",
+}
+
+_OFFTOPIC_FALLBACK_QUESTION_WORDS = {
+    "что",
+    "где",
+    "когда",
+    "как",
+    "скольк",
+    "можно",
+    "какой",
+    "какая",
+    "какие",
+    "куда",
+    "почему",
+    "зачем",
+    "кто",
+    "чем",
+    "чего",
+}
+
 
 def _normalize_alias_tokens(text: str) -> list[str]:
     tokens = _tokenize(text)
@@ -798,6 +833,29 @@ def _is_offtopic_message(normalized: str, client_slug: str) -> bool:
     if any(phrase and phrase in normalized for phrase in _offtopic_phrases(client_slug)):
         return True
     return _signal_contains_any(normalized, client_slug, "offtopic_keywords")
+
+
+def _looks_like_question(message: str, normalized: str) -> bool:
+    if "?" in (message or ""):
+        return True
+    return any(word in normalized for word in _OFFTOPIC_FALLBACK_QUESTION_WORDS)
+
+
+def _should_fallback_offtopic(
+    message: str,
+    normalized: str,
+    phrase_intents: set[str],
+    client_slug: str,
+) -> bool:
+    if not normalized or phrase_intents:
+        return False
+    if normalized in _OFFTOPIC_FALLBACK_ACKS:
+        return False
+    if _looks_like_question(message, normalized):
+        return False
+    if _message_has_service_token(normalized, client_slug):
+        return False
+    return True
 
 
 def _match_service(normalized: str, client_slug: str) -> dict[str, Any] | None:
@@ -2426,7 +2484,7 @@ def format_reply_from_truth(
         gift = truth.get("salon", {}).get("amenities", {}).get("gift_certificates")
         return gift or "Можно купить сертификат на любую сумму."
     if intent == "off_topic":
-        return "Я помогаю только с вопросами о наших услугах салона — цены, запись, адрес."
+        return "Я помогаю только по салону — по услугам, записи, ценам и адресу."
     return None
 
 
@@ -3334,6 +3392,11 @@ def get_demo_salon_decision(
                 meta=meta,
                 price_item=price_item_payload,
             )
+
+    if _should_fallback_offtopic(message, normalized, phrase_intents, slug):
+        reply = format_reply_from_truth("off_topic", client_slug=slug, truth=truth)
+        if reply:
+            return _build_truth_decision(response=reply, intent="off_topic")
 
     return None
 

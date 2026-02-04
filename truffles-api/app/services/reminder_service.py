@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.models import ClientSettings, Conversation, Handover, Message, User
+from app.models import AlertEvent, ClientSettings, Conversation, Handover, Message, User
 from app.schemas.reminder import ReminderItem
 from app.services.alert_service import alert_warning
 from app.services.chatflow_service import send_bot_response
@@ -337,6 +337,19 @@ def check_no_response_alerts(db: Session) -> dict:
                 "last_action": last_action or "unknown",
                 "decision_trace": last_trace,
             },
+        )
+        db.add(
+            AlertEvent(
+                client_id=conversation.client_id,
+                branch_id=conversation.branch_id,
+                conversation_id=conversation.id,
+                message_id=last_user.id,
+                alert_type="no_response",
+                alert_metadata={
+                    "minutes_waiting": minutes_waiting,
+                    "last_action": last_action or "unknown",
+                },
+            )
         )
 
         alerted.append(
