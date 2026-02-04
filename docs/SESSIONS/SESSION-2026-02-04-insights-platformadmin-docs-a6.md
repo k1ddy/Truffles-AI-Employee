@@ -1,0 +1,21 @@
+# SESSION 2026-02-04-insights-platformadmin-docs-a6 — Doc-only Insights Evidence
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-04-console-insights-platformadmin.md
+- branch: docs/2026-02-04-insights-platformadmin
+- worktree: /home/zhan/worktrees/2026-02-04-insights-platformadmin-doc
+- base_ref: origin/main
+- scope: Doc-only evidence sync for platform_admin Insights.
+- done:
+  - Synced STATE/session docs to main.
+- next:
+  - —
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-04-console-insights-platformadmin.md
+  - /tmp/console_web_lint_insights_platformadmin_20260204.txt
+  - /tmp/console_web_redeploy_insights_platformadmin_20260204.txt
+  - /tmp/console_web_build_env_platformadmin_20260204.txt
+  - /tmp/console_web_container_status_platformadmin_20260204.txt
+  - /tmp/console_insights_platformadmin_http_20260204.txt
+- last_updated: 2026-02-04
