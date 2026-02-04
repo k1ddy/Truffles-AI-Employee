@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.models import OutboxMessage
+from app.models import OutboxMessage, OutboxStatusEvent
 
 
 def build_inbound_message_id(
@@ -63,6 +63,26 @@ def enqueue_outbox_message(
     )
     result = db.execute(stmt)
     return result.rowcount > 0
+
+
+def _insert_outbox_status_events(db: Session, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    now = datetime.now(timezone.utc)
+    payload = [
+        {
+            "outbox_id": row.get("id"),
+            "client_id": row.get("client_id"),
+            "conversation_id": row.get("conversation_id"),
+            "branch_id": row.get("branch_id"),
+            "status": row.get("status"),
+            "last_error": row.get("last_error"),
+            "attempts": row.get("attempts"),
+            "created_at": row.get("created_at") or row.get("updated_at") or now,
+        }
+        for row in rows
+    ]
+    db.execute(insert(OutboxStatusEvent), payload)
 
 
 def claim_pending_outbox(db: Session, *, limit: int = 10) -> list[dict[str, Any]]:
@@ -195,11 +215,17 @@ def release_stale_processing(
                         updated_at = NOW()
                     WHERE status = 'PROCESSING'
                       AND updated_at <= NOW() - (:stale_seconds * INTERVAL '1 second')
-                    RETURNING status
+                    RETURNING id,
+                              client_id,
+                              conversation_id,
+                              branch_id,
+                              status,
+                              last_error,
+                              attempts,
+                              updated_at
                 )
-                SELECT status, COUNT(*) AS count
+                SELECT *
                 FROM updated
-                GROUP BY status
                 """
             ),
             {
@@ -211,16 +237,16 @@ def release_stale_processing(
         .mappings()
         .all()
     )
+    _insert_outbox_status_events(db, rows)
     db.commit()
     released = 0
     failed = 0
     for row in rows:
         status = row.get("status")
-        count = int(row.get("count") or 0)
         if status == "FAILED":
-            failed += count
+            failed += 1
         else:
-            released += count
+            released += 1
     return {"released": released, "failed": failed}
 
 
@@ -232,22 +258,36 @@ def mark_outbox_status(
     last_error: str | None = None,
     next_attempt_at: datetime | None = None,
 ) -> None:
-    db.execute(
-        text(
-            """
-            UPDATE outbox_messages
-            SET status = :status,
-                last_error = :last_error,
-                next_attempt_at = :next_attempt_at,
-                updated_at = NOW()
-            WHERE id = :id
-            """
-        ),
-        {
-            "id": outbox_id,
-            "status": status,
-            "last_error": last_error,
-            "next_attempt_at": next_attempt_at,
-        },
+    row = (
+        db.execute(
+            text(
+                """
+                UPDATE outbox_messages
+                SET status = :status,
+                    last_error = :last_error,
+                    next_attempt_at = :next_attempt_at,
+                    updated_at = NOW()
+                WHERE id = :id
+                RETURNING id,
+                          client_id,
+                          conversation_id,
+                          branch_id,
+                          status,
+                          last_error,
+                          attempts,
+                          updated_at
+                """
+            ),
+            {
+                "id": outbox_id,
+                "status": status,
+                "last_error": last_error,
+                "next_attempt_at": next_attempt_at,
+            },
+        )
+        .mappings()
+        .first()
     )
+    if row:
+        _insert_outbox_status_events(db, [row])
     db.commit()

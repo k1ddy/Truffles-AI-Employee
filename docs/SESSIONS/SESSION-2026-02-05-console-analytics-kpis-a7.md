@@ -1,0 +1,29 @@
+# SESSION 2026-02-05-console-analytics-kpis-a7 — Session 2026-02-05-console-analytics-kpis-a7
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-05-console-analytics-kpis.md
+- branch: feat/2026-02-05-console-analytics-kpis-a7
+- worktree: /home/zhan/worktrees/2026-02-05-console-analytics-kpis-a7
+- base_ref: origin/main
+- scope: Insights KPI truth-first (analytics snapshot + events + API/UI updates).
+- done:
+  - Added KPI snapshot schema + outbox/alert event logging hooks.
+  - Extended daily analytics snapshot + Console Insights API/UI.
+  - Updated docs + tests (console analytics).
+  - Applied DB migrations (handover meta, outbox status events, alert events, analytics table).
+  - Ran daily snapshot for client `truffles` and verified latest analytics row.
+  - Added KPI trend series + sparkline charts; fixed SQL ambiguity in top intents/sections.
+- next:
+  - Deploy API/UI changes and verify Insights trends in Console.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-05-console-analytics-kpis.md
+  - /tmp/analytics_migration_019_metrics_analytics_daily.txt
+  - /tmp/analytics_migration_020_handover_meta.txt
+  - /tmp/analytics_migration_021_outbox_status_events.txt
+  - /tmp/analytics_migration_022_alert_events.txt
+  - /tmp/analytics_daily_snapshot_20260204_retry.txt
+  - /tmp/analytics_metrics_analytics_daily_latest.txt
+  - /tmp/pytest_console_analytics_20260205_trends.txt
+  - /tmp/console_web_lint_analytics_20260205_trends.txt
+- last_updated: 2026-02-05

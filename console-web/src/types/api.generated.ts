@@ -1309,6 +1309,29 @@ export interface components {
             redis?: "ok" | "error" | "connected";
             outbox_backlog?: number;
         };
+        /** @enum {string} */
+        KpiStatus: "fact" | "estimate" | "need";
+        AnalyticsTopIntent: {
+            intent: string;
+            count: number;
+            share: number;
+        };
+        AnalyticsTopSection: {
+            section: string;
+            count: number;
+            share: number;
+        };
+        AnalyticsTrendPoint: {
+            /** Format: date */
+            date: string;
+            bot_closed_rate?: number | null;
+            booking_conversion_rate?: number | null;
+            first_response_p50_seconds?: number | null;
+            after_hours_coverage_rate?: number | null;
+            escalation_quality_rate?: number | null;
+            outbox_failed_total?: number | null;
+            no_response_alert_total?: number | null;
+        };
         MetricsDailyResponse: {
             /** Format: date */
             date?: string;
@@ -1319,6 +1342,43 @@ export interface components {
             avg_resolution_hours?: number | null;
             total_client_messages?: number | null;
             total_bot_messages?: number | null;
+            inbound_conversations_total?: number | null;
+            bot_closed_sessions?: number | null;
+            bot_closed_total_sessions?: number | null;
+            bot_closed_incomplete_total?: number | null;
+            bot_closed_rate?: number | null;
+            bot_closed_status?: components["schemas"]["KpiStatus"];
+            manager_median_response_seconds?: number | null;
+            manager_time_saved_seconds_estimate?: number | null;
+            manager_time_saved_status?: components["schemas"]["KpiStatus"];
+            booking_total?: number | null;
+            booking_attributed?: number | null;
+            booking_missing_conversation_total?: number | null;
+            booking_conversion_rate?: number | null;
+            booking_status?: components["schemas"]["KpiStatus"];
+            first_response_p50_seconds?: number | null;
+            first_response_p90_seconds?: number | null;
+            first_response_missing_total?: number | null;
+            first_response_status?: components["schemas"]["KpiStatus"];
+            after_hours_total?: number | null;
+            after_hours_covered?: number | null;
+            after_hours_missing_total?: number | null;
+            after_hours_coverage_rate?: number | null;
+            after_hours_status?: components["schemas"]["KpiStatus"];
+            escalation_total?: number | null;
+            escalation_quality_total?: number | null;
+            escalation_meta_missing_total?: number | null;
+            escalation_quality_rate?: number | null;
+            escalation_quality_status?: components["schemas"]["KpiStatus"];
+            outbox_failed_total?: number | null;
+            outbox_saved_total?: number | null;
+            no_response_alert_total?: number | null;
+            loss_risk_status?: components["schemas"]["KpiStatus"];
+            intent_missing_total?: number | null;
+            top_intents?: components["schemas"]["AnalyticsTopIntent"][] | null;
+            top_info_sections?: components["schemas"]["AnalyticsTopSection"][] | null;
+            top_intents_status?: components["schemas"]["KpiStatus"];
+            analytics_trend?: components["schemas"]["AnalyticsTrendPoint"][] | null;
         };
         OutboxCounts: {
             pending?: number;
@@ -2433,6 +2493,8 @@ export interface operations {
             query?: {
                 /** @description Defaults to today */
                 date?: string;
+                /** @description Trend window size (defaults to 7) */
+                trend_days?: number;
             };
             header?: {
                 /** @description Client selection when identity maps to multiple clients. */
