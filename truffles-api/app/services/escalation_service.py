@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.models import Branch, ClientSettings, Conversation, Handover, User
+from app.models import Branch, ClientSettings, Conversation, Handover, Message, User
 from app.services.alert_service import alert_error
 from app.services.state_machine import ConversationState
 from app.services.telegram_service import TelegramService, build_handover_buttons, format_handover_message
@@ -14,6 +14,75 @@ from app.services.telegram_service import TelegramService, build_handover_button
 logger = get_logger("escalation_service")
 
 SIMULATION_CONTEXT_KEY = "simulation"
+
+
+def _normalize_slot_value(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _extract_decision_meta(message: Message | None) -> dict:
+    if not message or not isinstance(message.message_metadata, dict):
+        return {}
+    decision_meta = message.message_metadata.get("decision_meta")
+    return decision_meta if isinstance(decision_meta, dict) else {}
+
+
+def _build_handover_meta(conversation: Conversation, message: Message | None, user: User | None) -> dict | None:
+    decision_meta = _extract_decision_meta(message)
+    meta: dict = {}
+    intent = decision_meta.get("intent")
+    if isinstance(intent, str) and intent.strip():
+        meta["intent"] = intent.strip()
+    info_sections = decision_meta.get("info_sections")
+    if isinstance(info_sections, list):
+        cleaned_sections = [item.strip() for item in info_sections if isinstance(item, str) and item.strip()]
+        if cleaned_sections:
+            meta["info_sections"] = cleaned_sections
+
+    slots: dict[str, str] = {}
+    raw_slots = decision_meta.get("slots")
+    if isinstance(raw_slots, dict):
+        for key in ("service", "datetime", "name", "phone"):
+            value = _normalize_slot_value(raw_slots.get(key))
+            if value:
+                slots[key] = value
+
+    context = conversation.context if isinstance(conversation.context, dict) else {}
+    booking = context.get("booking") if isinstance(context, dict) else None
+    if isinstance(booking, dict):
+        for key in ("service", "datetime", "name", "phone"):
+            if key in slots:
+                continue
+            value = _normalize_slot_value(booking.get(key))
+            if value:
+                slots[key] = value
+
+    if user:
+        if "name" not in slots:
+            name = _normalize_slot_value(getattr(user, "name", None))
+            if name:
+                slots["name"] = name
+        if "phone" not in slots:
+            phone = _normalize_slot_value(getattr(user, "phone", None))
+            if phone:
+                slots["phone"] = phone
+
+    if slots:
+        meta["slots"] = slots
+
+    return meta or None
+
+
+def _get_latest_user_message(db: Session, conversation_id: UUID) -> Message | None:
+    return (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id, Message.role == "user")
+        .order_by(Message.created_at.desc())
+        .first()
+    )
 
 
 def _is_simulation_context(conversation: Conversation | None) -> bool:
@@ -95,6 +164,8 @@ def create_handover(
 ) -> Handover:
     """Create handover record in database."""
     now = datetime.now(timezone.utc)
+    trigger_message = _get_latest_user_message(db, conversation.id)
+    handover_meta = _build_handover_meta(conversation, trigger_message, user)
 
     handover = Handover(
         conversation_id=conversation.id,
@@ -107,6 +178,8 @@ def create_handover(
         adapter_type="telegram",
         channel="telegram",
         channel_ref=user.remote_jid if user else None,
+        trigger_message_id=trigger_message.id if trigger_message else None,
+        meta=handover_meta,
     )
     db.add(handover)
     db.flush()  # Get ID before commit

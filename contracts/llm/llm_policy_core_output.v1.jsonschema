@@ -3,17 +3,20 @@
   "title": "llm_policy_core_output.v1",
   "type": "object",
   "additionalProperties": true,
-  "required": ["outcome", "confidence"],
+  "required": ["action", "confidence"],
   "properties": {
-    "outcome": {"type": "string"},
+    "action": {"type": "string"},
     "tool_action": {"type": "string"},
     "tool_args": {"type": "object"},
     "pack_refs": {"type": "array", "items": {"type": "string"}},
+    "slots": {"type": "object", "additionalProperties": {"type": "string"}},
+    "next_question": {"type": "string"},
+    "open_questions": {"type": "array", "items": {"type": "string"}},
+    "needs_manager": {"type": "boolean"},
+    "risk_signals": {"type": "array", "items": {"type": "string"}},
     "language": {"type": "string"},
     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
     "reason": {"type": "string"},
-    "goal": {"type": "string"},
-    "slot_state": {"type": "object", "additionalProperties": {"type": "string"}},
-    "open_questions": {"type": "array", "items": {"type": "string"}}
+    "goal": {"type": "string"}
   }
 }

@@ -1,7 +1,7 @@
 import re
 import secrets
 from datetime import date as dt_date
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
@@ -2946,6 +2946,21 @@ async def get_settings(
     )
 
 
+def _resolve_kpi_status(
+    value: object,
+    *,
+    missing_total: int | None = None,
+    estimate: bool = False,
+) -> str:
+    if value is None:
+        return "need"
+    if estimate:
+        return "estimate"
+    if missing_total and missing_total > 0:
+        return "need"
+    return "fact"
+
+
 @router.get(
     "/metrics/daily",
     response_model=ConsoleMetricsDailyResponse,
@@ -2953,21 +2968,30 @@ async def get_settings(
 async def get_metrics_daily(
     request: Request,
     date: Optional[str] = None,
+    trend_days: Optional[int] = None,
     db: Session = Depends(get_db),
 ) -> ConsoleMetricsDailyResponse:
     """Get daily metrics for cases."""
-    from app.schemas.console import ConsoleMetricsDailyResponse
+    from app.schemas.console import ConsoleAnalyticsTrendPoint, ConsoleMetricsDailyResponse
     
     context = get_console_context(request, db)
     require_console_permission(context, "ops", "read")
     
-    _reject_unknown_query_params(request, {"date"})
+    _reject_unknown_query_params(request, {"date", "trend_days"})
 
     # Parse date or use today
     if date is not None:
         target_date = _parse_date_param("date", date)
     else:
         target_date = datetime.now(timezone.utc).date()
+
+    resolved_trend_days = trend_days if trend_days is not None else 7
+    if resolved_trend_days < 3:
+        resolved_trend_days = 3
+    if resolved_trend_days > 60:
+        resolved_trend_days = 60
+
+    trend_start_date = target_date - timedelta(days=resolved_trend_days - 1)
     
     # Base query for the date
     start_of_day = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=timezone.utc)
@@ -3030,6 +3054,163 @@ async def get_metrics_daily(
     total_client_messages = metrics_row.get("total_user_messages") if metrics_row else None
     total_bot_messages = metrics_row.get("total_bot_messages") if metrics_row else None
 
+    analytics_row = db.execute(
+        text(
+            """
+            SELECT
+              inbound_conversations_total,
+              bot_closed_sessions,
+              bot_closed_total_sessions,
+              bot_closed_incomplete_total,
+              bot_closed_rate,
+              manager_median_response_seconds,
+              manager_time_saved_seconds_estimate,
+              booking_total,
+              booking_attributed,
+              booking_missing_conversation_total,
+              booking_conversion_rate,
+              first_response_p50_seconds,
+              first_response_p90_seconds,
+              first_response_missing_total,
+              after_hours_total,
+              after_hours_covered,
+              after_hours_missing_total,
+              after_hours_coverage_rate,
+              escalation_total,
+              escalation_quality_total,
+              escalation_meta_missing_total,
+              escalation_quality_rate,
+              outbox_failed_total,
+              outbox_saved_total,
+              no_response_alert_total,
+              intent_missing_total,
+              top_intents,
+              top_info_sections
+            FROM metrics_analytics_daily
+            WHERE client_id = :client_id AND metric_date = :metric_date
+            """
+        ),
+        {"client_id": context.client.id, "metric_date": target_date},
+    ).mappings().first()
+
+    inbound_conversations_total = analytics_row.get("inbound_conversations_total") if analytics_row else None
+    bot_closed_sessions = analytics_row.get("bot_closed_sessions") if analytics_row else None
+    bot_closed_total_sessions = analytics_row.get("bot_closed_total_sessions") if analytics_row else None
+    bot_closed_incomplete_total = analytics_row.get("bot_closed_incomplete_total") if analytics_row else None
+    bot_closed_rate = analytics_row.get("bot_closed_rate") if analytics_row else None
+    manager_median_response_seconds = (
+        analytics_row.get("manager_median_response_seconds") if analytics_row else None
+    )
+    manager_time_saved_seconds_estimate = (
+        analytics_row.get("manager_time_saved_seconds_estimate") if analytics_row else None
+    )
+    booking_total = analytics_row.get("booking_total") if analytics_row else None
+    booking_attributed = analytics_row.get("booking_attributed") if analytics_row else None
+    booking_missing_conversation_total = (
+        analytics_row.get("booking_missing_conversation_total") if analytics_row else None
+    )
+    booking_conversion_rate = analytics_row.get("booking_conversion_rate") if analytics_row else None
+    first_response_p50_seconds = (
+        analytics_row.get("first_response_p50_seconds") if analytics_row else None
+    )
+    first_response_p90_seconds = (
+        analytics_row.get("first_response_p90_seconds") if analytics_row else None
+    )
+    first_response_missing_total = (
+        analytics_row.get("first_response_missing_total") if analytics_row else None
+    )
+    after_hours_total = analytics_row.get("after_hours_total") if analytics_row else None
+    after_hours_covered = analytics_row.get("after_hours_covered") if analytics_row else None
+    after_hours_missing_total = analytics_row.get("after_hours_missing_total") if analytics_row else None
+    after_hours_coverage_rate = analytics_row.get("after_hours_coverage_rate") if analytics_row else None
+    escalation_total = analytics_row.get("escalation_total") if analytics_row else None
+    escalation_quality_total = analytics_row.get("escalation_quality_total") if analytics_row else None
+    escalation_meta_missing_total = (
+        analytics_row.get("escalation_meta_missing_total") if analytics_row else None
+    )
+    escalation_quality_rate = analytics_row.get("escalation_quality_rate") if analytics_row else None
+    outbox_failed_total = analytics_row.get("outbox_failed_total") if analytics_row else None
+    outbox_saved_total = analytics_row.get("outbox_saved_total") if analytics_row else None
+    no_response_alert_total = analytics_row.get("no_response_alert_total") if analytics_row else None
+    intent_missing_total = analytics_row.get("intent_missing_total") if analytics_row else None
+    top_intents = analytics_row.get("top_intents") if analytics_row else None
+    top_info_sections = analytics_row.get("top_info_sections") if analytics_row else None
+    if analytics_row and top_intents is None:
+        top_intents = []
+    if analytics_row and top_info_sections is None:
+        top_info_sections = []
+
+    trend_rows = db.execute(
+        text(
+            """
+            SELECT
+              metric_date,
+              bot_closed_rate,
+              booking_conversion_rate,
+              first_response_p50_seconds,
+              after_hours_coverage_rate,
+              escalation_quality_rate,
+              outbox_failed_total,
+              no_response_alert_total
+            FROM metrics_analytics_daily
+            WHERE client_id = :client_id
+              AND metric_date >= :start_date
+              AND metric_date <= :end_date
+            ORDER BY metric_date
+            """
+        ),
+        {
+            "client_id": context.client.id,
+            "start_date": trend_start_date,
+            "end_date": target_date,
+        },
+    ).mappings().all()
+
+    trend_by_date = {row["metric_date"]: row for row in trend_rows}
+    analytics_trend = []
+    for offset in range(resolved_trend_days):
+        metric_date = trend_start_date + timedelta(days=offset)
+        row = trend_by_date.get(metric_date)
+        analytics_trend.append(
+            ConsoleAnalyticsTrendPoint(
+                date=metric_date.isoformat(),
+                bot_closed_rate=row.get("bot_closed_rate") if row else None,
+                booking_conversion_rate=row.get("booking_conversion_rate") if row else None,
+                first_response_p50_seconds=row.get("first_response_p50_seconds") if row else None,
+                after_hours_coverage_rate=row.get("after_hours_coverage_rate") if row else None,
+                escalation_quality_rate=row.get("escalation_quality_rate") if row else None,
+                outbox_failed_total=row.get("outbox_failed_total") if row else None,
+                no_response_alert_total=row.get("no_response_alert_total") if row else None,
+            )
+        )
+
+    bot_closed_status = _resolve_kpi_status(
+        bot_closed_rate,
+        missing_total=bot_closed_incomplete_total,
+    )
+    manager_time_saved_status = _resolve_kpi_status(
+        manager_time_saved_seconds_estimate,
+        estimate=True,
+    )
+    booking_status = _resolve_kpi_status(
+        booking_conversion_rate,
+        missing_total=booking_missing_conversation_total,
+    )
+    first_response_status = _resolve_kpi_status(first_response_p50_seconds)
+    after_hours_status = _resolve_kpi_status(
+        after_hours_coverage_rate,
+        missing_total=after_hours_missing_total,
+    )
+    escalation_quality_status = _resolve_kpi_status(
+        escalation_quality_rate,
+        missing_total=escalation_meta_missing_total,
+    )
+    loss_risk_status = _resolve_kpi_status(outbox_failed_total)
+    top_intents_status = _resolve_kpi_status(
+        top_intents,
+        missing_total=intent_missing_total,
+    )
+
     return ConsoleMetricsDailyResponse(
         date=target_date.isoformat(),
         total_cases=total,
@@ -3039,6 +3220,43 @@ async def get_metrics_daily(
         avg_resolution_hours=avg_resolution,
         total_client_messages=total_client_messages,
         total_bot_messages=total_bot_messages,
+        inbound_conversations_total=inbound_conversations_total,
+        bot_closed_sessions=bot_closed_sessions,
+        bot_closed_total_sessions=bot_closed_total_sessions,
+        bot_closed_incomplete_total=bot_closed_incomplete_total,
+        bot_closed_rate=bot_closed_rate,
+        bot_closed_status=bot_closed_status,
+        manager_median_response_seconds=manager_median_response_seconds,
+        manager_time_saved_seconds_estimate=manager_time_saved_seconds_estimate,
+        manager_time_saved_status=manager_time_saved_status,
+        booking_total=booking_total,
+        booking_attributed=booking_attributed,
+        booking_missing_conversation_total=booking_missing_conversation_total,
+        booking_conversion_rate=booking_conversion_rate,
+        booking_status=booking_status,
+        first_response_p50_seconds=first_response_p50_seconds,
+        first_response_p90_seconds=first_response_p90_seconds,
+        first_response_missing_total=first_response_missing_total,
+        first_response_status=first_response_status,
+        after_hours_total=after_hours_total,
+        after_hours_covered=after_hours_covered,
+        after_hours_missing_total=after_hours_missing_total,
+        after_hours_coverage_rate=after_hours_coverage_rate,
+        after_hours_status=after_hours_status,
+        escalation_total=escalation_total,
+        escalation_quality_total=escalation_quality_total,
+        escalation_meta_missing_total=escalation_meta_missing_total,
+        escalation_quality_rate=escalation_quality_rate,
+        escalation_quality_status=escalation_quality_status,
+        outbox_failed_total=outbox_failed_total,
+        outbox_saved_total=outbox_saved_total,
+        no_response_alert_total=no_response_alert_total,
+        loss_risk_status=loss_risk_status,
+        intent_missing_total=intent_missing_total,
+        top_intents=top_intents,
+        top_info_sections=top_info_sections,
+        top_intents_status=top_intents_status,
+        analytics_trend=analytics_trend,
     )
 
 

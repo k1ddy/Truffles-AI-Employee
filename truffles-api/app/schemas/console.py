@@ -522,6 +522,32 @@ class ConsoleAgentListResponse(BaseModel):
     items: list[ConsoleAgentWithIdentities]
 
 
+KpiStatus = Literal["fact", "estimate", "need"]
+
+
+class ConsoleAnalyticsTopIntent(BaseModel):
+    intent: str
+    count: int
+    share: float
+
+
+class ConsoleAnalyticsTopSection(BaseModel):
+    section: str
+    count: int
+    share: float
+
+
+class ConsoleAnalyticsTrendPoint(BaseModel):
+    date: str
+    bot_closed_rate: Optional[float] = None
+    booking_conversion_rate: Optional[float] = None
+    first_response_p50_seconds: Optional[float] = None
+    after_hours_coverage_rate: Optional[float] = None
+    escalation_quality_rate: Optional[float] = None
+    outbox_failed_total: Optional[int] = None
+    no_response_alert_total: Optional[int] = None
+
+
 class ConsoleMetricsDailyResponse(BaseModel):
     date: str
     total_cases: int
@@ -531,6 +557,43 @@ class ConsoleMetricsDailyResponse(BaseModel):
     avg_resolution_hours: Optional[float] = None
     total_client_messages: Optional[int] = None
     total_bot_messages: Optional[int] = None
+    inbound_conversations_total: Optional[int] = None
+    bot_closed_sessions: Optional[int] = None
+    bot_closed_total_sessions: Optional[int] = None
+    bot_closed_incomplete_total: Optional[int] = None
+    bot_closed_rate: Optional[float] = None
+    bot_closed_status: Optional[KpiStatus] = None
+    manager_median_response_seconds: Optional[float] = None
+    manager_time_saved_seconds_estimate: Optional[float] = None
+    manager_time_saved_status: Optional[KpiStatus] = None
+    booking_total: Optional[int] = None
+    booking_attributed: Optional[int] = None
+    booking_missing_conversation_total: Optional[int] = None
+    booking_conversion_rate: Optional[float] = None
+    booking_status: Optional[KpiStatus] = None
+    first_response_p50_seconds: Optional[float] = None
+    first_response_p90_seconds: Optional[float] = None
+    first_response_missing_total: Optional[int] = None
+    first_response_status: Optional[KpiStatus] = None
+    after_hours_total: Optional[int] = None
+    after_hours_covered: Optional[int] = None
+    after_hours_missing_total: Optional[int] = None
+    after_hours_coverage_rate: Optional[float] = None
+    after_hours_status: Optional[KpiStatus] = None
+    escalation_total: Optional[int] = None
+    escalation_quality_total: Optional[int] = None
+    escalation_meta_missing_total: Optional[int] = None
+    escalation_quality_rate: Optional[float] = None
+    escalation_quality_status: Optional[KpiStatus] = None
+    outbox_failed_total: Optional[int] = None
+    outbox_saved_total: Optional[int] = None
+    no_response_alert_total: Optional[int] = None
+    loss_risk_status: Optional[KpiStatus] = None
+    intent_missing_total: Optional[int] = None
+    top_intents: Optional[list[ConsoleAnalyticsTopIntent]] = None
+    top_info_sections: Optional[list[ConsoleAnalyticsTopSection]] = None
+    top_intents_status: Optional[KpiStatus] = None
+    analytics_trend: Optional[list[ConsoleAnalyticsTrendPoint]] = None
 
 
 class ConsoleSettingsUpdateRequest(BaseModel):

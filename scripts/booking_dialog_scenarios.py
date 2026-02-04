@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import random
+import re
 import time
 import urllib.request
 from typing import Any
@@ -257,6 +258,7 @@ def _validate_dialog(dialog: dict[str, Any], *, min_turns: int, max_turns: int) 
 def _call_openai(prompt: str, *, api_key: str, model: str, base_url: str) -> str:
     payload = {
         "model": model,
+        "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": "Return JSON only."},
             {"role": "user", "content": prompt},
@@ -277,17 +279,18 @@ def _call_openai(prompt: str, *, api_key: str, model: str, base_url: str) -> str
 
 
 def _parse_llm_json(content: str) -> dict[str, Any]:
-    cleaned = (content or "").strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`").lstrip()
-        if cleaned.lower().startswith("json"):
-            cleaned = cleaned[4:].lstrip()
-    if not cleaned.startswith("{"):
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
-            cleaned = cleaned[start : end + 1]
-    return json.loads(cleaned)
+            return json.loads(text[start : end + 1])
+        raise
 
 
 def _generate_llm_dialogs(
