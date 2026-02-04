@@ -529,6 +529,8 @@ class ConsoleMetricsDailyResponse(BaseModel):
     active_cases: int
     resolved_cases: int
     avg_resolution_hours: Optional[float] = None
+    total_client_messages: Optional[int] = None
+    total_bot_messages: Optional[int] = None
 
 
 class ConsoleSettingsUpdateRequest(BaseModel):

@@ -107,7 +107,7 @@ def _send_pending_user_message(
         client_id=conversation.client_id,
         role="assistant",
         content=text,
-        message_metadata={"decision_meta": decision_meta},
+        message_metadata={"decision_meta": decision_meta, "source": "reminder"},
     )
     conversation.last_message_at = datetime.now(timezone.utc)
     return ok

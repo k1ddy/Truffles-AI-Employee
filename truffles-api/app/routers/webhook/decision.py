@@ -5248,7 +5248,14 @@ async def _handle_webhook_payload(
         final_text = _finalize_bot_response(text, allow_quiet_hours=allow_quiet_hours)
         final_text = _apply_memory_updates(final_text)
         _record_contract_traces()
-        save_message(db, conversation.id, client.id, role="assistant", content=final_text)
+        save_message(
+            db,
+            conversation.id,
+            client.id,
+            role="assistant",
+            content=final_text,
+            message_metadata={"source": "bot"},
+        )
         sent = _send_response(final_text)
         _persist_timing_snapshot()
         return final_text, sent

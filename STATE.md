@@ -911,6 +911,7 @@
 | **Требования** | `STRATEGY/REQUIREMENTS.md` | Требования Жанбола |
 | **Roadmap** | `STRATEGY/TECH_ROADMAP.md` | Технический план |
 | **Продукт** | `STRATEGY/PRODUCT.md` | Тарифы, фичи |
+| **Биллинг** | `Business/Sales/BILLING_COUNTING.md` | При изменении правил подсчета сообщений/счетов |
 | **Рынок** | `STRATEGY/MARKET.md` | Исследования, метрики |
 | | | |
 | **База знаний** | `knowledge/*.md`, `knowledge/demo_salon/*.md` | FAQ, примеры, сленг, демо-салон |
