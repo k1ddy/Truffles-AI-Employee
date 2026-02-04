@@ -463,6 +463,8 @@ def _handle_pending_gate(
     message_text: str,
     saved_message: Message | None,
     now: datetime,
+    guard_only: bool = False,
+    in_domain_signal: bool = False,
     send_and_save,
 ) -> WebhookResponse | None:
     from . import _legacy as legacy
@@ -475,6 +477,7 @@ def _handle_pending_gate(
         eligible=False,
         reason="pending",
     )
+    guard_only_skip = bool(guard_only and in_domain_signal)
     handover = legacy.get_active_handover(db, conversation.id)
     if not handover:
         context = legacy._get_conversation_context(conversation)
@@ -652,6 +655,23 @@ def _handle_pending_gate(
     if legacy.is_handover_status_question(message_text) and not (
         isinstance(pending_intent, str) and pending_intent.strip() == "procedure_combo"
     ):
+        if guard_only_skip:
+            trace_payload = {
+                "stage": "pending_status",
+                "decision": "guard_only",
+                "state": conversation.state,
+            }
+            trace_payload.update(router_pending_meta)
+            legacy._record_decision_trace(conversation, trace_payload)
+            if saved_message:
+                legacy._update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_action": "pending_status_guard_only",
+                        "pending_guard_only": True,
+                    },
+                )
+            return None
         bot_response = legacy.MSG_PENDING_STATUS
         trace_payload = {
             "stage": "pending_status",
@@ -678,6 +698,23 @@ def _handle_pending_gate(
         )
 
     if _is_pending_wait(message_text):
+        if guard_only_skip:
+            trace_payload = {
+                "stage": "pending_wait",
+                "decision": "guard_only",
+                "state": conversation.state,
+            }
+            trace_payload.update(router_pending_meta)
+            legacy._record_decision_trace(conversation, trace_payload)
+            if saved_message:
+                legacy._update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_action": "pending_wait_guard_only",
+                        "pending_guard_only": True,
+                    },
+                )
+            return None
         bot_response = legacy.MSG_PENDING_WAIT
         trace_payload = {
             "stage": "pending_wait",
@@ -715,6 +752,23 @@ def _handle_pending_gate(
         and now - escalated_at >= timedelta(minutes=legacy.PENDING_SLA_PING_MINUTES)
     )
     if ping_due:
+        if guard_only_skip:
+            trace_payload = {
+                "stage": "pending_sla",
+                "decision": "guard_only",
+                "state": conversation.state,
+            }
+            trace_payload.update(router_pending_meta)
+            legacy._record_decision_trace(conversation, trace_payload)
+            if saved_message:
+                legacy._update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_action": "pending_sla_guard_only",
+                        "pending_guard_only": True,
+                    },
+                )
+            return None
         pending_sla[legacy.PENDING_SLA_PING_SENT_KEY] = now.isoformat()
         context = _set_pending_sla(context, pending_sla)
         legacy._set_conversation_context(conversation, context)

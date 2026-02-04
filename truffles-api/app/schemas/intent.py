@@ -200,6 +200,10 @@ class LlmPlanOutput(BaseModel):
         return _normalize_slots(value)
 
 
+class LlmPolicyCoreOutput(LlmPlanOutput):
+    model_config = ConfigDict(extra="ignore")
+
+
 def validate_dialogue_controller_output(
     payload_json: dict[str, Any],
 ) -> tuple[DialogueControllerOutput | None, str | None]:
@@ -227,4 +231,14 @@ def validate_llm_plan_output(
         contract = LlmPlanOutput.model_validate(payload_json)
     except ValidationError as exc:
         return None, f"llm_plan_error:{_summarize_validation_error(exc)}"
+    return contract, None
+
+
+def validate_llm_policy_core_output(
+    payload_json: dict[str, Any],
+) -> tuple[LlmPolicyCoreOutput | None, str | None]:
+    try:
+        contract = LlmPolicyCoreOutput.model_validate(payload_json)
+    except ValidationError as exc:
+        return None, f"llm_policy_core_error:{_summarize_validation_error(exc)}"
     return contract, None

@@ -800,6 +800,7 @@ def _handle_policy_escalation_gate(
     current_goal: str | None,
     multi_intent_other_followup: str | None,
     client_slug: str,
+    guard_only: bool = False,
     send_and_save,
     record_policy_count,
     record_escalation_metric,
@@ -859,6 +860,43 @@ def _handle_policy_escalation_gate(
     )
     if policy_match:
         section_key, section = policy_match
+        if guard_only and section_key not in hard_law_sections:
+            risk_level = _resolve_policy_risk_level(section)
+            intent = _resolve_policy_intent(section_key, section)
+            router_gate_meta = legacy._set_router_observability(
+                saved_message,
+                eligible=False,
+                reason="policy_guard_only",
+            )
+            trace_payload = {
+                "stage": "policy_gate",
+                "decision": "guard_only",
+                "intent": intent,
+                "state": conversation.state,
+                "policy_type": policy_type,
+                "policy_gate": section_key,
+                "policy_section": section_key,
+                "source": policy_source,
+            }
+            if isinstance(risk_level, str) and risk_level:
+                trace_payload["risk_level"] = risk_level
+            if booking_wants_flow is not None:
+                trace_payload["booking_wants_flow"] = booking_wants_flow
+            trace_payload.update(router_gate_meta)
+            legacy._record_decision_trace(conversation, trace_payload)
+            if saved_message:
+                meta_updates = {
+                    "policy_guard_only": True,
+                    "policy_gate": section_key,
+                    "policy_section": section_key,
+                    "source": policy_source,
+                }
+                if policy_pack_missing:
+                    meta_updates["policy_pack_missing"] = True
+                if isinstance(risk_level, str) and risk_level:
+                    meta_updates["risk_level"] = risk_level
+                legacy._update_message_decision_metadata(saved_message, meta_updates)
+            return None
         if section_key == "complaint":
             normalized_text = legacy._normalize_text(message_text)
             explicit_keywords, consult_override_keywords = _resolve_complaint_guard(policy_pack)

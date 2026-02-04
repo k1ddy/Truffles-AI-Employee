@@ -276,6 +276,20 @@ def _call_openai(prompt: str, *, api_key: str, model: str, base_url: str) -> str
     return body["choices"][0]["message"]["content"]
 
 
+def _parse_llm_json(content: str) -> dict[str, Any]:
+    cleaned = (content or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`").lstrip()
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:].lstrip()
+    if not cleaned.startswith("{"):
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            cleaned = cleaned[start : end + 1]
+    return json.loads(cleaned)
+
+
 def _generate_llm_dialogs(
     rng: random.Random,
     *,
@@ -299,7 +313,7 @@ def _generate_llm_dialogs(
         f"media_mode={media_mode}, media_kind={media_kind}."
     )
     content = _call_openai(prompt, api_key=api_key, model=model, base_url=base_url)
-    payload = json.loads(content)
+    payload = _parse_llm_json(content)
     dialogs = payload.get("dialogs") or []
     if not isinstance(dialogs, list):
         return []
