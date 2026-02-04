@@ -16,6 +16,8 @@
   - Added KPI trend series + sparkline charts; fixed SQL ambiguity in top intents/sections.
   - Deployed API + console-web; backfilled KPI snapshot for last 7 days (client `truffles`).
   - Backfilled KPI snapshot for last 7 days (client `demo_salon`) and today for `truffles`.
+  - Deployed local API image from commit `677da6aa` (GHCR bypass) and verified `/admin/version`.
+  - Verified `metrics_analytics_daily` rows exist for `demo_salon`.
 - next:
   - Verify Insights trends in Console UI (post-deploy smoke).
 - evidence:
@@ -36,4 +38,10 @@
   - /tmp/analytics_metrics_analytics_daily_truffles_today_20260205.txt
   - /tmp/pytest_console_analytics_20260205_trends.txt
   - /tmp/console_web_lint_analytics_20260205_trends.txt
+  - /tmp/api_local_build_analytics_kpis_20260205.txt
+  - /tmp/api_local_image_inspect_20260205.txt
+  - /tmp/api_local_redeploy_analytics_kpis_20260205.txt
+  - /tmp/analytics_api_version_local_20260205.txt
+  - /tmp/analytics_client_ids_20260205.txt
+  - /tmp/analytics_metrics_demo_salon_20260205.txt
 - last_updated: 2026-02-05
