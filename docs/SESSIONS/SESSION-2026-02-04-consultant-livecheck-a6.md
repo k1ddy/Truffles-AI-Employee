@@ -25,6 +25,8 @@
   - Ran booking confirm verify (CA05 booking-commit + CA12 booking-full) on demo_salon/branch_b; evidence `/tmp/booking-confirm-20260204-110404`.
   - Ran 5 LLM-generated booking dialogs via webhook; evidence `/tmp/booking_llm_runs_20260204-154404` (scenarios + dialog reports).
   - Stabilized LLM scenario generator (response_format + code-fence tolerant parsing); smoke output `/tmp/booking_llm_scenario_smoke.json`.
+  - Updated `STATE.md` with LLM booking dialog gap details + analysis summary `/tmp/booking_llm_runs_20260204-154404/analysis_summary.json`.
+  - Opened PR https://github.com/k1ddy/Truffles-AI-Employee/pull/531.
 - next:
   - Review LLM dialog reports for missing assistant replies; decide remediation path.
 - evidence:
