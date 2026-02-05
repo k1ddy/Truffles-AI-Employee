@@ -437,6 +437,164 @@ POST /console/v1/cases/{case_id}/return
 - UX debt register: `docs/CONSOLE_AUDIT/UX_BACKLOG.md`.
 - Any Control Plane behavior change requires a separate Task Package and audit doc updates.
 
+### 2.7 Unified Client Onboarding Runbook (operational, step-by-step)
+
+**Назначение:** единая инструкция запуска клиента от подписания документов до поддержки. Используется Brain/Hands/OPS как исполняемый порядок действий.
+
+**Результат запуска:** клиент считается запущенным только если выполнены шаги 0..8, а Go/No-Go = PASS.
+
+#### 2.7.1 Inputs and artifacts (before step 0)
+
+`Input package` (обязательный):
+- Подписанные документы: договор + NDA (если нужен) + политика обработки данных.
+- Подтверждение оплаты.
+- Ниша клиента и ссылка на reference pack ниши.
+- Бриф клиента (факты для pack): адрес, часы, услуги, цены, длительности, политики, дисклеймеры, RU/KK.
+- Технические данные: номер WA, `instanceId` из ChatFlow, Telegram chat/group id, список сотрудников бизнеса.
+
+`Artifacts` (что сохраняем):
+- IDs: `company_id`, `client_id`, `branch_id`.
+- IDs staff: `agent_id`, `agent_membership_id`, `agent_identity_id` (если OIDC linked).
+- Validation: список missing fields или отметка `0 missing`.
+- Publish evidence: версия knowledge + sync result.
+- Live-check evidence: `conversation_id` + `decision_meta/trace` + outbox status.
+
+#### 2.7.2 Steps 0..8 with exact control points
+
+0) **Niche reference gate**
+- Проверка: reference pack по нише существует и назначен клиенту.
+- Если нет reference pack -> STOP (онбординг не начинается).
+
+1) **Provision business hierarchy (company/client/branch)**
+- API:
+  - `POST /console/v1/admin/companies`
+  - `POST /console/v1/admin/clients`
+  - `POST /console/v1/admin/branches`
+- Поля branch (минимум): `client_id`, `slug`, `name`, `instance_id` (для active branch), `phone`.
+- Контроль:
+  - уникальность `slug`, `instance_id`, `phone` в рамках клиента;
+  - активный branch запрещен без `instance_id` (`INVALID_PARAM`).
+
+2) **Create Console staff accounts and bind to business**
+- Identity source: Keycloak (OIDC user with stable `sub`).
+- Binding API: `POST /console/v1/admin/agents`:
+  - создаёт `agents`;
+  - создаёт `agent_memberships` (`scope=client|branch`);
+  - при `oidc_subject` создаёт `agent_identities(channel=\"oidc\")`.
+- Правила:
+  - `manager`/`specialist` требуют `branch_id`;
+  - доступ в Console строится через `agent_identities(channel=oidc, external_id=sub)` + `agent_memberships`.
+- Контроль:
+  - `GET /console/v1/agents` показывает созданных сотрудников;
+  - `GET /console/v1/me` для пользователя возвращает правильный tenant-context.
+
+3) **Configure channel bindings (WA + Telegram + webhook secret)**
+- Branch-level:
+  - `PATCH /console/v1/admin/branches/{branch_id}` -> `instance_id`, `phone`, `telegram_chat_id`, timezone.
+- Client-level:
+  - `client_settings.webhook_secret` должен быть установлен.
+  - Текущая реализация: отдельного Console endpoint для `webhook_secret` нет, задаётся через DB/ops-процедуру.
+- ChatFlow:
+  - webhook URL формата `/webhook/{client_slug}?webhook_secret=<secret>&instanceId=<instanceId>`.
+- Контроль:
+  - unknown `instanceId` блокируется в runtime;
+  - один phone не может обслуживать несколько branch в strict isolation.
+
+4) **Prepare required data pack (intake -> normalize -> complete)**
+- Обязательные минимальные поля проверяются в `truffles-api/app/services/knowledge_validation.py`.
+- Базовый обязательный набор:
+  - `client_pack.salon.name`
+  - `client_pack.salon.city`
+  - `client_pack.salon.address.full`
+  - `client_pack.salon.hours.days`
+  - `client_pack.salon.hours.open`
+  - `client_pack.salon.hours.close`
+  - `client_pack.salon.services_summary`
+  - `client_pack.salon.communication.languages` (должны включать `ru` и `kk`)
+  - `client_pack.services_catalog.services`
+  - `client_pack.service_duration_estimates`
+  - `client_pack.booking.collect_fields`
+  - `client_pack.booking.bot_can_confirm`
+  - `client_pack.price_list`
+  - `client_pack.guest_policy`
+  - `client_pack.safety.medical_note`
+  - `client_pack.pricing.price_from_reason`
+  - `client_pack.quality.expectations_photo`
+  - policy блок: `hard_law`, `payment_info`, `reschedule`, `cancel`, `medical`, `legal`, `complaint`, `discounts`, `guard_topics.refund`
+- Контроль:
+  - missing fields = 0;
+  - если missing > 0 -> возврат в COLLECT и запуск запрещён.
+
+5) **Publish and sync knowledge**
+- Pipeline: `validate -> publish -> sync`.
+- API:
+  - `POST /console/v1/knowledge/validate`
+  - `POST /console/v1/knowledge/publish`
+  - `GET /console/v1/knowledge/history`
+- Контроль:
+  - publish успешен;
+  - active version существует;
+  - warnings/errors обработаны без игнора.
+
+6) **Booking readiness (calendar data)**
+- В onboarding state machine для booking обязательны:
+  - `working_hours`,
+  - `booking_settings`,
+  - `specialists` (активный специалист в branch).
+- API/данные:
+  - `working_hours`/`booking_settings` задаются через branch update;
+  - проверка специалистов доступна через `GET /console/v1/specialists`.
+- Ограничение текущей реализации:
+  - публичного Console endpoint для create/update specialist сейчас нет (только чтение/слоты/bookings в `calendar.py`);
+  - заполнение `specialists` делается через согласованный ops-процесс (DB/seed), затем проверяется API.
+
+7) **Advance onboarding state machine + hard Go/No-Go**
+- API:
+  - `GET /console/v1/onboarding/status?branch_id=<id>`
+  - `POST /console/v1/onboarding/advance`
+- Порядок шагов:
+  - `branch_draft -> integrations -> team -> telegram -> knowledge -> booking -> go_no_go`
+- Hard gate PASS (обязателен):
+  - data pack 100%;
+  - payment confirmed;
+  - WA configured (`instance_id` + webhook route);
+  - calendar ready (`working_hours` + `booking_settings` + `specialists`).
+- Любой missing -> `No-Go`.
+
+8) **Live-check and handover to support**
+- Проверка фактического потока:
+  - тестовый inbound с allowlist sender;
+  - результат содержит `decision_meta/trace`;
+  - outbox не в failed.
+- Support readiness:
+  - Telegram/Console escalation channel проверен;
+  - команда знает канал и регламент (`Business/Support/Регламент_техподдержки.md`).
+- После запуска любое изменение данных проходит тот же pipeline из шага 4-5.
+
+#### 2.7.3 Account creation scheme (where/how linked)
+
+| Entity | Где создаётся | Как связывается с бизнесом | Где проверять |
+|---|---|---|---|
+| Console staff (`owner/admin/manager/support`) | Keycloak (OIDC user) + `POST /console/v1/admin/agents` | `agents.client_id`, `agent_memberships(scope/company_id/client_id/branch_id)`, `agent_identities(channel=oidc, external_id=sub)` | `/console/v1/agents`, `/console/v1/me`, таблицы `agents/agent_memberships/agent_identities` |
+| Specialists (booking masters) | ops/manual process в `specialists` (до появления write API) | `specialists.client_id + specialists.branch_id` | `GET /console/v1/specialists`, таблица `specialists` |
+| End customers (WA users) | auto on first inbound | `users.client_id + users.remote_jid` | таблица `users`, flow `conversation_service.get_or_create_user` |
+| Business hierarchy | `POST /console/v1/admin/companies|clients|branches` | `company -> client -> branch` | `/console/v1/me` context, таблицы `companies/clients/branches` |
+
+#### 2.7.4 Stop conditions (mandatory)
+
+- Нет reference pack ниши.
+- Нет OIDC mapping для staff (нет `agent_identities(channel=oidc)`).
+- Missing required pack fields.
+- Не подтверждена оплата.
+- Не заполнен booking минимум (`working_hours|booking_settings|specialists`).
+- Go/No-Go не PASS.
+
+#### 2.7.5 Ownership
+
+- **Top Architect/Brain:** утверждают канон шагов и DoD.
+- **Hands/OPS:** исполняют runbook, собирают evidence.
+- **Owner (Жанбол):** финальное решение Go/No-Go и коммерческое подтверждение.
+
 ---
 
 ## 3. Module Contracts

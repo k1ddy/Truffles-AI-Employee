@@ -12,8 +12,9 @@
   - Updated `docs/PROCESSES.md` sections 2.4-2.6 with step-by-step onboarding contract (0..8).
   - Added explicit full-launch gate (data 100% + payment + WA + calendar) and no safe-mode launch rule.
   - Added runtime account entities mapping (OIDC staff, specialists, inbound users, company/client/branch provisioning).
+  - Added operational runbook section 2.7 with executable onboarding steps, stop conditions, and account-creation linkage table.
 - next:
-  - Run `scripts/session_check.sh`, then commit as doc-only session close.
+  - Keep `docs/PROCESSES.md` in sync with future Console API changes.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-05-onboarding-billing-support-audit.md
 - last_updated: 2026-02-06
