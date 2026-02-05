@@ -1,6 +1,8 @@
 # СОГЛАШЕНИЕ О КОНФИДЕНЦИАЛЬНОСТИ (NDA)
 
-DERIVED: legal template; not canonical until approved/signed. Claims must align with `STRATEGY/PRODUCT.md` and `docs/SELLING_TRUTHS.md`.
+**Статус:** TEMPLATE (готов для подписания)
+**Owner:** Жанбол
+**Примечание:** внешние обещания должны соответствовать `STRATEGY/PRODUCT.md` и `docs/SELLING_TRUTHS.md`.
 
 **№ ____**
 
