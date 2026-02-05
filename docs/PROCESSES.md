@@ -261,58 +261,46 @@ POST /console/v1/cases/{case_id}/return
 **Goal**
 - 1 phone = 1 branch (strict isolation).
 - Inbound replies must always come from the same phone and use branch-only data.
+- Launch is allowed only in full mode after all gates are green.
 
 **Inputs (from Owner/BA)**
-- Company name
-- Branch name
-- Phone number
-- `instanceId` (from ChatFlow)
-- Optional: manager contact (telegram_id / phone)
+- Signed legal package + payment confirmation.
+- Company name, client, branch.
+- Phone number.
+- `instanceId` (from ChatFlow).
+- Client-level `webhook_secret` (token).
+- Optional: manager contact (`telegram_id` / phone).
 
-**Mandatory branch data (required before go-live)**
-- Address + hours
-- Services + pricing
-- Service durations (estimates or per-service duration notes)
-- Policies (refund/reschedule/medical/payment) + guest rules
-- Required disclaimers (medical constraints, "price from" variability, results expectations)
-- RU/KZ variants declared for user-facing text (at least `ru` + `kk` in languages)
-- Master full names (schedule slots later via CRM/calendar integration)
-  - Enforced via knowledge pack validation + Go/No-Go gate (required fields).
+**Mandatory branch data (100% required before go-live)**
+- Address + hours.
+- Services + pricing.
+- Service durations (estimates or per-service duration notes).
+- Policies (refund/reschedule/medical/payment) + guest rules.
+- Required disclaimers (medical constraints, "price from" variability, results expectations).
+- RU/KZ variants declared for user-facing text (at least `ru` + `kk` in languages).
+- Master full names and calendar setup source.
+- Enforced via knowledge pack validation + Go/No-Go gate (required fields).
 
-**Process**
-1. Provision tenant + branch records.
-2. Map `branches.instance_id = instanceId` and `phone = number`.
-3. Validate uniqueness: one phone and one instanceId per branch.
-4. Load and validate branch data pack; index knowledge by `knowledge_tag`.
-5. Generate webhook URL and send it back for ChatFlow configuration.
-6. Live-check using an external sender number (not connected to any instance).
-7. Go-live + monitoring (outbox, SLA, delivery, loops).
+**Step-by-step contract (0..8)**
+0. **Niche Reference (mandatory):** for each niche create/update reference pack first. Without reference pack, onboarding is blocked.
+1. **Intake:** collect client input from file/form and map into canonical niche fields.
+2. **Normalization:** semantic mapping + autofill from context; if fields are missing, launch COLLECT questions until full completion.
+3. **Hard validation (100%):** validate mandatory fields (address/hours/services+prices/durations/policies/disclaimers/RU+KK/contacts). If not 100%, launch is blocked.
+4. **Provisioning (auto path):** create company/client/branch, bind `phone + instance_id + webhook_secret`, enforce uniqueness (`1 phone = 1 branch`, unique `instance_id`).
+5. **Owner manual steps (explicit):** configure WhatsApp in ChatFlow and provide `instanceId/token/phone`; fill branch calendar; confirm payment manually.
+6. **Knowledge publish (auto path):** `generate pack -> validate -> publish -> sync`; run test dialog for `FACT/COLLECT/HANDOFF` and verify trace/outbox.
+7. **Go-Live decision:** allow launch only when all four are true: data=100%, payment confirmed, WA configured, calendar filled.
+8. **Support and changes:** every data change goes through the same pipeline (`intake -> normalize -> validate -> publish`); escalations via Telegram/Console.
 
-**Blocking rules (no-go)**
-- Missing mandatory branch data -> block go-live (safe mode only with explicit approval).
+**Blocking rules (hard no-go)**
+- Missing mandatory data (any field from the required set) -> no launch.
 - Unknown `instanceId` -> block inbound and alert.
 - Phone connected to multiple instances -> stop (loop risk).
-
-**Safe mode (explicit approval only)**
-- Allowed outcomes: `FACT`, `COLLECT`, `HANDOFF` only.
-- `FACT` is allowed only for verified pack facts; no inference or booking commit.
-
-**Example**
-Company: "Mira Salon"
-
-Branches:
-- "Mira Salon - Zhandosova" -> phone `+7 701 111 1111`, instanceId `INST_AAA`
-- "Mira Salon - Zharokova" -> phone `+7 701 222 2222`, instanceId `INST_BBB`
-- "Mira Salon - Timiryazeva" -> phone `+7 701 333 3333`, instanceId `INST_CCC`
-
-Generated webhooks:
-- `https://api.truffles.kz/webhook/mira_salon?webhook_secret=...&instanceId=INST_AAA`
-- `https://api.truffles.kz/webhook/mira_salon?webhook_secret=...&instanceId=INST_BBB`
-- `https://api.truffles.kz/webhook/mira_salon?webhook_secret=...&instanceId=INST_CCC`
+- Payment not confirmed or calendar not configured -> no launch.
 
 **Policy**
 - If a company has multiple branches but only one phone, strict isolation is not supported.
-- Require one phone per branch to onboard.
+- Launch in safe mode is forbidden. Safe mode may exist only as runtime protection, not as onboarding completion.
 
 ### 2.5 Control Plane Go/No-Go (Ready for Live Customers)
 
@@ -334,13 +322,14 @@ Generated webhooks:
 - Правила биллинга канонизированы: `Business/Sales/BILLING_COUNTING.md`.
 
 **B. Онбординг и данные клиента**
-- Созданы tenant+branch; `branches.instance_id` и `phone` заполнены и уникальны (см. раздел 2.4).
-- Обязательные данные branch-pack заполнены и валидированы (address/hours/services/pricing/durations/policies/disclaimers/ru/kk) — см. раздел 2.4.
-- Webhook URL создан и передан в ChatFlow; inbound проверен внешним номером (см. раздел 2.4).
+- Для ниши есть актуальный reference pack (шаг 0 из раздела 2.4).
+- Созданы company/client/branch; `branches.instance_id` и `phone` заполнены и уникальны (см. раздел 2.4).
+- Обязательные данные branch-pack заполнены и валидированы на 100% (address/hours/services/pricing/durations/policies/disclaimers/ru/kk/contacts) — см. раздел 2.4.
+- `webhook_secret` задан на уровне клиента, webhook URL передан в ChatFlow, inbound проверен внешним номером (см. раздел 2.4).
 
 **C. Control Plane и Knowledge**
 - Provisioning/onboarding шаги проходят через консоль и/или API, порядок шагов соблюден (см. `SPECS/CONTROL_PLANE.md`).
-- Knowledge publish защищен: validate → publish → audit/rollback; ошибки ведут к safe mode (см. `SPECS/CONTROL_PLANE.md`).
+- Knowledge publish защищен: validate -> publish -> audit/rollback; после publish есть проверка `FACT/COLLECT/HANDOFF` + trace/outbox.
 - Console build info подтвержден в `STATE.md` (DEC-014).
 
 **D. Runtime-готовность**
@@ -350,9 +339,11 @@ Generated webhooks:
 **E. Поддержка после go-live**
 - Канал эскалации настроен (Telegram/Console handover) и проверен (см. разделы 2.2-2.3).
 - Регламент поддержки готов как template; финализация под клиента обязательна.
+- Операционный поток изменений данных после запуска использует тот же pipeline из раздела 2.4 (без обходов).
 
 **Decision**
-- Любой пропуск в A-D → **No-Go**. Возможен только safe mode по правилам раздела 2.4 и с явным одобрением.
+- Любой пропуск в A-E -> **No-Go**.
+- Запуск в safe mode как замена Go-Live не допускается.
 
 #### 2.5.3 Где описаны процессы (и чего нет)
 
@@ -365,109 +356,86 @@ Generated webhooks:
 **Не описано или не готово (по `Business/ДОКУМЕНТЫ_АРСЕНАЛ.md`)**
 - Отдельные документы в статусе Draft (DERIVED): согласие на обработку данных, ограничение ответственности, политика возврата, акт приёма-передачи, SLA, disclosure об автоматизированных ответах.
 
-### 2.6 Audit: согласие → регулярная оплата → техподдержка (процесс + GAP)
+### 2.6 End-to-End Contract: signed docs -> onboarding -> support
 
-**Цель:** единый, проверяемый путь от согласия до регулярной оплаты и поддержки. Документ для новых агентов и людей, которые впервые входят в систему.
+**Цель:** фиксировать единый операционный путь от подписания документов до регулярной поддержки, без ручных обходов запуска.
 
 **Источники истины (факты по коду/докам):**
 - Onboarding state machine: `truffles-api/app/services/onboarding_state.py`.
-- Minimum data contract + required fields: `truffles-api/app/services/knowledge_validation.py`.
-- Billing данные в системе: `truffles-api/app/models/company.py`, `truffles-api/app/routers/console.py` (поле `billing_info`).
-- Onboarding SOP (CA‑13/CA‑14): `SPECS/SYSTEM_REFERENCE.md`.
-- Onboarding/Go‑No‑Go канон: разделы 2.4–2.5 этого документа + `SPECS/CONTROL_PLANE.md`.
-- Control Plane аудит: `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md`, `docs/REPORTS/2026-02-01-console-web-fact-audit.md`, `docs/CONSOLE_AUDIT/UX_BACKLOG.md`.
-- Юридические/онбординг/поддержка документы: `Business/ДОКУМЕНТЫ_АРСЕНАЛ.md` и шаблоны в `Business/Legal/*`, `Business/Onboarding/*`, `Business/Support/*`.
+- Provisioning/admin API: `truffles-api/app/routers/console.py` (`/console/v1/admin/companies|clients|branches|agents`).
+- Calendar/specialists API: `truffles-api/app/routers/calendar.py` (`/console/v1/specialists|slots|bookings`).
+- OIDC auth mapping: `truffles-api/app/services/console_auth.py`.
+- User auto-create on inbound: `truffles-api/app/services/conversation_service.py`.
+- Entity models: `truffles-api/app/models/agent.py`, `truffles-api/app/models/agent_membership.py`, `truffles-api/app/models/agent_identity.py`, `truffles-api/app/models/specialist.py`, `truffles-api/app/models/user.py`.
+- Console context model: `SPECS/CONTROL_PLANE.md`, `docs/CONSOLE_GUIDE.md`.
+- Onboarding SOP and webhook/instance contracts: `SPECS/SYSTEM_REFERENCE.md`.
 
-#### 2.6.1 Этапы процесса (входы/выходы)
+#### 2.6.1 Stage-by-stage responsibilities (0..8)
 
-1) **Согласие и юридическая база**
-- Вход: договор, NDA, политика обработки данных, согласие на обработку данных, ограничения ответственности.
-- Выход: согласованный пакет документов + право на обработку данных.
+**Этап 0 — Niche Reference**
+- Truffles (Owner): утвердить эталонный reference pack для ниши до intake.
+- Клиент (Owner/Admin): подтвердить, что бизнес-процесс соответствует выбранной нише.
+- Выход: reference pack существует и назначен клиенту.
 
-2) **Оплата и коммерческие условия**
-- Вход: счет/реквизиты, условия оплаты из `STRATEGY/PRODUCT.md`.
-- Выход: подтверждённая оплата, заполненный `billing_info` компании.
+**Этап 1-3 — Intake -> Normalize -> Validate (100%)**
+- Truffles (Owner): собрать данные, привести к канону, закрыть все missing fields до 100%.
+- Клиент (Owner/Admin): предоставить факты по адресу/часам/услугам/ценам/длительностям/политикам/дисклеймерам/RU+KK/контактам.
+- Выход: валидный branch pack без пробелов.
 
-3) **Сбор данных клиента (pack)**
-- Вход: бриф, факты и правила бизнеса.
-- Выход: валидный pack по required fields (см. `knowledge_validation.py`) + RU/KK языки.
+**Этап 4-5 — Provisioning + manual owner actions**
+- Truffles (Owner): создать company/client/branch, связать `phone + instance_id + webhook_secret`, проверить уникальность.
+- Клиент (Owner/Admin): вручную настроить WA в ChatFlow, передать `instanceId/token/phone`, заполнить календарь филиала, подтвердить оплату.
+- Выход: технический контур и коммерческий контур готовы.
 
-4) **Provisioning и Onboarding**
-- Вход: `instance_id`, телефоны, Telegram‑группы, знания, команда.
-- Выход: пройдённые шаги state machine + активные каналы.
+**Этап 6 — Publish**
+- Truffles (Owner): выполнить `generate -> validate -> publish -> sync`, затем onboarding smoke + trace/outbox checks.
+- Клиент (Owner/Admin): подтвердить фактическую корректность опубликованных данных.
+- Выход: опубликованный и синхронизированный pack.
 
-5) **Onboarding проверки (CA‑13/14)**
-- Вход: webhook, allowlist sender‑JID, доступ к live‑check.
-- Выход: inbound‑proof + smoke‑suite evidence.
+**Этап 7 — Go-Live**
+- Truffles (Owner): принять решение Go/No-Go по жесткому гейту (данные 100% + оплата + WA + календарь).
+- Клиент (Owner/Admin): подтвердить операционную готовность команды.
+- Выход: запуск только при полном прохождении гейта.
 
-6) **Go/No‑Go**
-- Вход: чек‑лист (раздел 2.5), evidence в `STATE.md`.
-- Выход: решение Go/No‑Go.
+**Этап 8 — Support and change management**
+- Truffles (Owner/Support): вести эскалации через Telegram/Console; любое изменение данных запускать через тот же pipeline (`intake -> normalize -> validate -> publish`).
+- Клиент (Owner/Admin/Manager): отправлять изменения только через поддерживаемый процесс, без обходных ручных патчей в runtime.
+- Выход: предсказуемые изменения без дрейфа знаний.
 
-7) **Go‑live и регулярная работа**
-- Вход: Go‑решение + включённый канал.
-- Выход: стабильный поток, trace/meta/outbox работают.
+#### 2.6.2 Account entities and linkage (runtime contract)
 
-8) **Регулярная оплата и поддержка**
-- Вход: правила подсчёта (CANON, `Business/Sales/BILLING_COUNTING.md`), канал поддержки.
-- Выход: выставление счетов по факту + работающий процесс обращений.
+1) **Console staff accounts (owner/admin/manager/support)**
+- Identity source: OIDC users (Keycloak realm), seed/example: `ops/keycloak-realm.json`.
+- Binding to business: `POST /console/v1/admin/agents` creates `agents` + `agent_memberships`; optional `oidc_subject` creates `agent_identities` with `channel="oidc"`.
+- Auth flow: Console reads OIDC `sub`, matches `agent_identities(channel="oidc")`, then resolves access by `agent_memberships` scope (`company/client/branch`).
+- Canon fields: `agents.client_id`, `agent_memberships.scope/company_id/client_id/branch_id`.
 
-#### 2.6.2 Что нужно от каждой стороны (stage-by-stage)
+2) **Working specialists (masters for booking)**
+- Stored in `specialists` and linked by `specialists.client_id` + `specialists.branch_id`.
+- Used by calendar routes under `/console/v1` (`/specialists`, `/slots`, `/bookings`) and by scheduling logic.
 
-**Этап 1 — Согласие и юридическая база**
-- Truffles (Owner): подготовить финальные версии договора/NDA/политики/согласий (без новых обещаний).
-- Клиент (Owner/Admin): подписать пакет, предоставить реквизиты/контакт.
-- Внешние: —.
+3) **End customers (WhatsApp users)**
+- Created automatically on first inbound in `get_or_create_user`.
+- Identity key: `users.client_id + users.remote_jid`.
 
-**Этап 2 — Оплата**
-- Truffles (Owner): выставить счёт по шаблону, подтвердить оплату, заполнить `billing_info`.
-- Клиент (Owner/Admin): оплатить по счету и подтвердить платеж.
-- Внешние: банк/платёжный провайдер.
+4) **Business hierarchy (company/client/branch)**
+- Provisioning API: `POST /console/v1/admin/companies|clients|branches`.
+- Console context is always `Company -> Client -> Branch` (`docs/CONSOLE_GUIDE.md`).
 
-**Этап 3 — Pack данные**
-- Truffles (Owner): проверить required fields по `knowledge_validation.py`, зафиксировать gaps.
-- Клиент (Owner/Admin): предоставить факты/правила/языки RU/KK.
-- Внешние: —.
+#### 2.6.3 Gaps and constraints (current repo)
 
-**Этап 4 — Provisioning/Onboarding**
-- Truffles (Owner): создать tenant/branch, заполнить `instance_id`, Telegram, знания; пройти state machine (`onboarding_state.py`).
-- Клиент (Owner/Admin): дать доступ к WhatsApp instanceId, создать Telegram‑группы, назначить менеджеров.
-- Внешние: ChatFlow (WA), Telegram.
+- Several legal documents remain Draft (DERIVED): see `Business/ДОКУМЕНТЫ_АРСЕНАЛ.md`.
+- Billing runtime has `company.billing_info` only; there is no invoice/subscription model in core DB.
+- Fully automated onboarding orchestrator is still limited; canonical sync path is `ops/sync_client.py` + onboarding state machine.
+- Any onboarding flow change must keep Go/No-Go fail-closed and be backed by evidence in `STATE.md`.
 
-**Этап 5 — Onboarding проверки (CA‑13/14)**
-- Truffles (Owner): запустить `ops/sync_client.py --validate/--sync` и live‑checks по SOP.
-- Клиент (Owner/Admin): предоставить тестовый номер для inbound (allowlist).
-- Внешние: ChatFlow/WA.
+#### 2.6.4 Control Plane audit checkpoints
 
-**Этап 6 — Go/No‑Go**
-- Truffles (Owner): зафиксировать evidence в `STATE.md`, принять решение.
-- Клиент (Owner/Admin): подтвердить готовность и ограничения.
-- Внешние: —.
-
-**Этап 7 — Go‑live**
-- Truffles (Owner): мониторинг outbox/trace, фиксация ошибок.
-- Клиент (Owner/Admin): контролировать обращения и эскалации.
-- Внешние: ChatFlow/WA, Telegram.
-
-**Этап 8 — Регулярная оплата и поддержка**
-- Truffles (Owner): считать биллинг по `Business/Sales/BILLING_COUNTING.md`, выставлять счёт, принимать обращения по регламенту.
-- Клиент (Owner/Admin): своевременно оплачивать, фиксировать инциденты по каналу поддержки.
-- Внешние: банк/платёжный провайдер, email‑канал поддержки.
-
-#### 2.6.3 GAP / чего не хватает (по факту репозитория)
-
-- Отдельные документы остаются в статусе Draft (DERIVED): согласие на обработку данных, ограничение ответственности, политика возврата, акт приёма‑передачи, SLA, disclosure об автоматизированных ответах (`Business/ДОКУМЕНТЫ_АРСЕНАЛ.md`).
-- В коде нет моделей счетов/подписок: есть только `company.billing_info` (JSON), без биллингового контура.
-- RU/KK варианты user‑facing строк не формализованы в едином контракте (GAP в `STATE.md`).
-- Safe‑mode семантика конфликтует между документами (GAP в `STATE.md`).
-- Автоматизация онбординга ограничена: есть `ops/sync_client.py`, `onboard_client.py` отсутствует.
-
-#### 2.6.4 Control Plane аудит: что перепроверять после этапов
-
-- Provisioning/Onboarding UI: `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md` + `docs/REPORTS/2026-02-01-console-web-fact-audit.md`.
-- RBAC и доступы (support/owner/admin/manager): `docs/CONSOLE_AUDIT/roles/*`.
-- UX‑долги и несоответствия: `docs/CONSOLE_AUDIT/UX_BACKLOG.md`.
-- Любые изменения в Control Plane требуют отдельного Task Package и обновления audit‑доков.
+- Provisioning/Onboarding UI parity: `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md`.
+- Fact audit snapshot: `docs/REPORTS/2026-02-01-console-web-fact-audit.md`.
+- RBAC role cards: `docs/CONSOLE_AUDIT/roles/*`.
+- UX debt register: `docs/CONSOLE_AUDIT/UX_BACKLOG.md`.
+- Any Control Plane behavior change requires a separate Task Package and audit doc updates.
 
 ---
 
