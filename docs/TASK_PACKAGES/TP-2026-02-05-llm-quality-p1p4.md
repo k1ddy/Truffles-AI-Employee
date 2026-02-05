@@ -21,6 +21,7 @@
 ## Scope
 - Chaos‑coverage оси (state/intent/language/modality/noise/tool success/failure) + метрики покрытия.
 - Tool‑sandbox hooks для booking confirm/cancel/calendar paths в рамках runner.
+- LLM‑judge опирается на pack truth/consult playbook (state‑aware, без текстового золотого ответа).
 - Таксономия ошибок (expectation vs canon vs code vs data) + регрессионные гейты и тренды.
 - Обновление runbook и evidence фиксирование в `STATE.md`.
 
@@ -41,14 +42,15 @@
 ## Plan
 1) Добавить chaos‑осевые метки в генератор/runner и посчитать покрытие.
 2) Встроить tool‑sandbox hooks (confirm/cancel/calendar) в runner без влияния на core.
-3) Добавить таксономию ошибок и регрессионные гейты (baseline diff + thresholds).
-4) Обновить runbook (правила/команды/артефакты).
-5) Прогон allowlist (LLM, sample judge) + фиксация evidence в `STATE.md`.
+3) Подключить pack truth/consult playbook в LLM‑judge (контекст только из packs).
+4) Добавить таксономию ошибок и регрессионные гейты (baseline diff + thresholds).
+5) Обновить runbook (правила/команды/артефакты).
+6) Прогон allowlist (LLM, sample judge) + фиксация evidence в `STATE.md`.
 
 ## DoD
 - Summary содержит метрики по chaos‑осям + таксономию ошибок + regression/threshold статус.
 - Tool‑hooks отражены в trace/meta и не ломают flow.
-- Runbook обновлён и описывает новые метрики/гейты.
+- Runbook обновлён и описывает новые метрики/гейты/источник truth для judge.
 - Evidence зафиксирован и отражен в `STATE.md`.
 
 ## Checks

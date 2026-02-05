@@ -13,6 +13,9 @@
   - Updated booking confirm runbook with taxonomy/coverage/tool hooks.
   - Ran allowlist llm-quality (run_id 20260205-114556) and updated baseline/history.
   - Updated STATE.md evidence for latest run.
+  - Added pack truth + consult playbook context for LLM-judge; extended tool hooks to auto cancel/calendar.
+  - Updated runbook to describe pack-truth judge + cancel/calendar tool hooks.
+  - Attempted allowlist LLM-quality run; failed due to OpenAI timeout (baseline not updated).
 - next:
   - Session end + commit.
 - evidence:

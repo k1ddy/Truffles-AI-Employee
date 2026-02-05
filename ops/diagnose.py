@@ -27,6 +27,11 @@ import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
 
+try:
+    import yaml
+except Exception:
+    yaml = None
+
 LIVECHECK_SUITES = {
     "ca01-core": [
         {
@@ -657,6 +662,35 @@ LLM_QUALITY_SECTION_TAG_MAP = {}
 for _tag, _sections in LLM_QUALITY_INFO_SECTION_MAP.items():
     for _section in _sections:
         LLM_QUALITY_SECTION_TAG_MAP.setdefault(_section, _tag)
+LLM_QUALITY_INTENT_TAG_MAP = {
+    "pricing": {"price"},
+    "price": {"price"},
+    "discount": {"promo"},
+    "discount_haggle": {"promo"},
+    "promo": {"promo"},
+    "promotion": {"promo"},
+    "hours": {"hours"},
+    "working_hours": {"hours"},
+    "schedule": {"hours"},
+    "address": {"location"},
+    "location": {"location"},
+    "parking": {"parking"},
+    "service_duration": {"duration"},
+    "duration": {"duration"},
+    "master": {"master"},
+    "specialist": {"master"},
+}
+LLM_QUALITY_POLICY_INTENTS = {
+    "cancel_request",
+    "cancel_policy",
+    "reschedule",
+    "refund",
+    "complaint",
+    "medical",
+    "payment",
+    "payment_info",
+    "discount_haggle",
+}
 LLM_QUALITY_TAG_HINTS = {
     "price": [
         r"сколько\\s+стоит",
@@ -2209,6 +2243,224 @@ def _llm_quality_repo_root():
 def _llm_quality_dialog_script():
     return os.path.join(_llm_quality_repo_root(), "scripts", "booking_dialog_scenarios.py")
 
+def _llm_quality_pack_dir(client_slug: str):
+    return os.path.join(
+        _llm_quality_repo_root(), "truffles-api", "app", "knowledge", client_slug
+    )
+
+def _llm_quality_load_yaml(path: str):
+    if not os.path.exists(path):
+        return None, f"missing:{path}"
+    if yaml is None:
+        return None, "pyyaml_missing"
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle), None
+    except Exception as exc:
+        return None, f"yaml_error:{exc}"
+
+def _llm_quality_load_pack_context(client_slug: str):
+    pack_dir = _llm_quality_pack_dir(client_slug)
+    truth_path = os.path.join(pack_dir, "SALON_TRUTH.yaml")
+    playbook_path = os.path.join(pack_dir, "CONSULT_PLAYBOOK.yaml")
+    truth, truth_error = _llm_quality_load_yaml(truth_path)
+    playbook, playbook_error = _llm_quality_load_yaml(playbook_path)
+    errors = {}
+    if truth_error:
+        errors["truth"] = truth_error
+    if playbook_error:
+        errors["consult_playbook"] = playbook_error
+    return {
+        "truth": truth if isinstance(truth, dict) else None,
+        "consult_playbook": playbook if isinstance(playbook, dict) else None,
+        "errors": errors,
+        "paths": {"truth": truth_path, "consult_playbook": playbook_path},
+    }
+
+def _llm_quality_compact_services_catalog(catalog, *, include_price: bool):
+    if not isinstance(catalog, dict):
+        return None
+    compact = {}
+    for key in (
+        "suggestions",
+        "not_found_reply",
+        "duration_clarify",
+        "service_presence_reply",
+    ):
+        if key in catalog:
+            compact[key] = catalog.get(key)
+    services = catalog.get("services")
+    if isinstance(services, list):
+        compact_services = []
+        for service in services:
+            if not isinstance(service, dict):
+                continue
+            entry = {}
+            for key in ("name", "duration_text"):
+                if key in service:
+                    entry[key] = service.get(key)
+            if include_price:
+                for key in ("price_items", "quick_price_key"):
+                    if key in service:
+                        entry[key] = service.get(key)
+            if entry:
+                compact_services.append(entry)
+        if compact_services:
+            compact["services"] = compact_services
+    return compact
+
+def _llm_quality_compact_truth(truth, tags, intents):
+    if not isinstance(truth, dict):
+        return {}
+    selected = {}
+    salon = truth.get("salon")
+    if isinstance(salon, dict):
+        salon_selected = {}
+        if "location" in tags:
+            for key in ("name", "city", "address"):
+                if key in salon:
+                    salon_selected[key] = salon.get(key)
+        if "hours" in tags and "hours" in salon:
+            salon_selected["hours"] = salon.get("hours")
+        if "parking" in tags and "parking" in salon:
+            salon_selected["parking"] = salon.get("parking")
+        if salon_selected:
+            if "communication" in salon:
+                salon_selected["communication"] = salon.get("communication")
+            selected["salon"] = salon_selected
+    if "price" in tags:
+        for key in ("pricing", "price_quick_answers", "price_list", "promotions"):
+            if key in truth:
+                selected[key] = truth.get(key)
+        catalog = _llm_quality_compact_services_catalog(
+            truth.get("services_catalog"), include_price=True
+        )
+        if catalog:
+            selected["services_catalog"] = catalog
+    if "promo" in tags and "promotions" in truth and "promotions" not in selected:
+        selected["promotions"] = truth.get("promotions")
+    if "duration" in tags:
+        for key in ("duration_or_price_clarify",):
+            if key in truth:
+                selected[key] = truth.get(key)
+        catalog = _llm_quality_compact_services_catalog(
+            truth.get("services_catalog"), include_price=False
+        )
+        if catalog and "services_catalog" not in selected:
+            selected["services_catalog"] = catalog
+    if "master" in tags and "team" in truth:
+        selected["team"] = truth.get("team")
+    if "policy" in tags:
+        for key in ("policy", "guest_policy", "safety"):
+            if key in truth:
+                selected[key] = truth.get(key)
+    if "style_reference" in tags and "style_reference" in truth:
+        selected["style_reference"] = truth.get("style_reference")
+    if "quality" in tags and "quality" in truth:
+        selected["quality"] = truth.get("quality")
+    if "service" in tags and "services_summary" in truth:
+        selected["services_summary"] = truth.get("services_summary")
+    if "system_messages" in tags and "system_messages" in truth:
+        selected["system_messages"] = truth.get("system_messages")
+    return selected
+
+def _llm_quality_compact_consult_playbook(playbook, topic_id=None):
+    if not isinstance(playbook, dict):
+        return None
+    topics = playbook.get("topics") or []
+    compact_topics = []
+    for topic in topics:
+        if not isinstance(topic, dict):
+            continue
+        if topic_id and topic.get("id") != topic_id:
+            continue
+        compact_topics.append(
+            {
+                "id": topic.get("id"),
+                "title": topic.get("title"),
+                "summary": topic.get("summary"),
+                "allowed_advice": topic.get("allowed_advice"),
+                "required_questions": topic.get("required_questions"),
+                "optional_questions": topic.get("optional_questions"),
+                "disallowed_claims": topic.get("disallowed_claims"),
+                "risk_tags": topic.get("risk_tags"),
+                "clarify_limit": topic.get("clarify_limit"),
+                "escalate_when": topic.get("escalate_when"),
+                "next_step": topic.get("next_step"),
+            }
+        )
+    if not compact_topics and topic_id:
+        return None
+    default_policy = playbook.get("default_policy")
+    if isinstance(default_policy, dict):
+        default_policy = {
+            "clarify_limit": default_policy.get("clarify_limit"),
+            "escalate_on_low_confidence": default_policy.get("escalate_on_low_confidence"),
+        }
+    return {"topics": compact_topics, "default_policy": default_policy}
+
+def _llm_quality_collect_truth_tags(info_tags, expected_info_sections, meta, trace_entries):
+    tags = set(info_tags or [])
+    info_sections, intents = _llm_quality_collect_info_signals(meta, trace_entries)
+    for section in info_sections:
+        tag = LLM_QUALITY_SECTION_TAG_MAP.get(section)
+        if tag:
+            tags.add(tag)
+    for section in expected_info_sections or []:
+        tag = LLM_QUALITY_SECTION_TAG_MAP.get(section)
+        if tag:
+            tags.add(tag)
+    for intent in intents:
+        for tag in LLM_QUALITY_INTENT_TAG_MAP.get(intent, set()):
+            tags.add(tag)
+    if isinstance(meta, dict):
+        meta_intent = meta.get("intent")
+        if isinstance(meta_intent, str) and meta_intent in LLM_QUALITY_POLICY_INTENTS:
+            tags.add("policy")
+        policy_gate = meta.get("policy_gate")
+        if isinstance(policy_gate, str) and policy_gate.strip() and policy_gate != "none":
+            tags.add("policy")
+        consult_playbook_id = (
+            meta.get("consult_playbook_id")
+            or meta.get("consult_topic_id")
+            or meta.get("consult_topic")
+        )
+        if consult_playbook_id:
+            tags.add("consult")
+    return tags, intents
+
+def _llm_quality_build_pack_context(pack_context, info_tags, expected_info_sections, meta, trace_entries):
+    if not isinstance(pack_context, dict):
+        return {}
+    tags, intents = _llm_quality_collect_truth_tags(
+        info_tags, expected_info_sections, meta, trace_entries
+    )
+    truth_context = _llm_quality_compact_truth(
+        pack_context.get("truth"), tags, intents
+    )
+    consult_id = None
+    if isinstance(meta, dict):
+        consult_id = (
+            meta.get("consult_playbook_id")
+            or meta.get("consult_topic_id")
+            or meta.get("consult_topic")
+        )
+    consult_context = _llm_quality_compact_consult_playbook(
+        pack_context.get("consult_playbook"), consult_id
+    )
+    if "consult" in tags and consult_context is None:
+        consult_context = _llm_quality_compact_consult_playbook(
+            pack_context.get("consult_playbook")
+        )
+    context = {}
+    if truth_context:
+        context["pack_truth"] = truth_context
+    if consult_context:
+        context["consult_playbook"] = consult_context
+    if pack_context.get("errors"):
+        context["pack_errors"] = pack_context.get("errors")
+    return context
+
 def _llm_quality_parse_actions(value):
     if not value:
         return []
@@ -2590,7 +2842,8 @@ def _llm_quality_build_judge_prompt(payload: dict) -> str:
     reasons = ", ".join(sorted(LLM_QUALITY_JUDGE_REASONS.keys()))
     return (
         "You are a QA judge for a salon booking consultant. "
-        "Use only the provided context. Do not assume missing facts. "
+        "Use only the provided context (pack_truth / consult_playbook). "
+        "Do not assume missing facts. "
         "If conversation_state is pending/manager_active, any bot reply is wrong. "
         "If expected_reply is false but the bot replied, mark fail. "
         "If expected_info_sections are present, the reply must address them or ask for clarification. "
@@ -3148,6 +3401,7 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--tool-hooks", choices=["off", "check", "auto"], default="check")
     parser.add_argument("--tool-confirm-text", default="да")
     parser.add_argument("--tool-cancel-text", default="отмена")
+    parser.add_argument("--tool-calendar-text", default="проверь запись")
     parser.add_argument("--tool-hook-wait", type=float, default=0.8)
     parser.add_argument("--tool-hook-limit", type=int, default=2)
     parser.add_argument("--reset-before-dialog", action="store_true")
@@ -4951,6 +5205,13 @@ def _run_llm_quality(args):
         "reasons": {},
         "skips": {},
     }
+    pack_context = _llm_quality_load_pack_context(client_slug)
+    judge_stats["pack"] = {
+        "truth_loaded": bool(pack_context.get("truth")),
+        "consult_playbook_loaded": bool(pack_context.get("consult_playbook")),
+        "errors": pack_context.get("errors"),
+        "paths": pack_context.get("paths"),
+    }
     failures = []
     failure_counts = {}
     taxonomy_counts = {key: 0 for key in LLM_QUALITY_TAXONOMY_CATEGORIES}
@@ -5625,6 +5886,15 @@ def _run_llm_quality(args):
                         "booking_slots": booking_slots,
                         "info_tags": info_tags,
                     }
+                    pack_payload = _llm_quality_build_pack_context(
+                        pack_context,
+                        info_tags,
+                        expected_info_sections,
+                        meta,
+                        trace_entries,
+                    )
+                    if pack_payload:
+                        judge_payload.update(pack_payload)
                     prompt = _llm_quality_build_judge_prompt(judge_payload)
                     try:
                         judge_raw = _llm_quality_call_judge(
@@ -5700,18 +5970,40 @@ def _run_llm_quality(args):
                 if state == "pending" and args.pending_mode == "ack" and not simulate_manager:
                     pending_action_result = _send_pending_ack(remote_jid)
 
+                tool_hook_results = []
                 tool_hook_result = None
-                if args.tool_hooks == "auto" and tool_signals.get("confirm"):
-                    if "confirm" not in turn_tags:
-                        hook_key = conversation_id or f"dialog-{dialog_idx}"
-                        hook_state = tool_hook_state.setdefault(
-                            hook_key, {"confirm": 0, "cancel": 0}
-                        )
-                        if hook_state["confirm"] < max(args.tool_hook_limit, 1):
-                            tool_hook_result = _send_tool_hook(
-                                remote_jid, args.tool_confirm_text, "confirm"
+                if args.tool_hooks == "auto":
+                    hook_key = conversation_id or f"dialog-{dialog_idx}"
+                    hook_state = tool_hook_state.setdefault(
+                        hook_key, {"confirm": 0, "cancel": 0, "calendar": 0}
+                    )
+                    hook_limit = max(args.tool_hook_limit, 1)
+                    if tool_signals.get("confirm") and "confirm" not in turn_tags:
+                        if hook_state["confirm"] < hook_limit:
+                            tool_hook_results.append(
+                                _send_tool_hook(
+                                    remote_jid, args.tool_confirm_text, "confirm"
+                                )
                             )
                             hook_state["confirm"] += 1
+                    if tool_signals.get("cancel") and "cancel" not in turn_tags:
+                        if hook_state["cancel"] < hook_limit:
+                            tool_hook_results.append(
+                                _send_tool_hook(
+                                    remote_jid, args.tool_cancel_text, "cancel"
+                                )
+                            )
+                            hook_state["cancel"] += 1
+                    if tool_signals.get("calendar") and "calendar" not in turn_tags:
+                        if hook_state["calendar"] < hook_limit:
+                            tool_hook_results.append(
+                                _send_tool_hook(
+                                    remote_jid, args.tool_calendar_text, "calendar"
+                                )
+                            )
+                            hook_state["calendar"] += 1
+                if tool_hook_results:
+                    tool_hook_result = tool_hook_results[0]
 
                 record = {
                     "dialog_id": dialog.get("dialog_id"),
@@ -5754,6 +6046,7 @@ def _run_llm_quality(args):
                     "booking_progressed": booking_progressed,
                     "tool_signals": tool_signals,
                     "tool_hook": tool_hook_result,
+                    "tool_hooks": tool_hook_results,
                     "evaluation": {
                         "ok": not evaluation_reasons,
                         "reasons": evaluation_reasons,
@@ -5917,6 +6210,7 @@ def _run_llm_quality(args):
         "tool_hook_limit": args.tool_hook_limit,
         "tool_confirm_text": args.tool_confirm_text,
         "tool_cancel_text": args.tool_cancel_text,
+        "tool_calendar_text": args.tool_calendar_text,
         "tool_hook_wait": args.tool_hook_wait,
         "jid_mode": args.jid_mode,
         "regression_tolerance": args.regression_tolerance,

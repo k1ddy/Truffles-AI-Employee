@@ -220,7 +220,8 @@ Thresholds (summary.thresholds)
 
 LLM judge (semantic, non-blocking)
 - Enabled via `--judge-sample 0.1` (or `--judge-mode all` to judge every reply).
-- Uses user text + bot reply + decision_meta/trace summary; does not check raw facts beyond provided context.
+- Uses user text + bot reply + decision_meta/trace summary + pack truth (`SALON_TRUTH.yaml`) + consult playbook (`CONSULT_PLAYBOOK.yaml`).
+  Judge context is limited to relevant sections (info tags / intents); full packs are not injected.
 - Output stored in `summary.json` under `judge` and per-turn in `responses.jsonl`.
 - Judge results are non-blocking and should be used as a signal, not a gate.
 
@@ -235,8 +236,8 @@ Chaos coverage map (summary.coverage)
 
 Tool hooks (optional)
 - `--tool-hooks check` (default): record tool signals only.
-- `--tool-hooks auto`: send confirm text when slot_confirmation_required (skips if turn has `confirm` tag).
-- `--tool-confirm-text` / `--tool-cancel-text` / `--tool-hook-limit` / `--tool-hook-wait` tune hooks.
+- `--tool-hooks auto`: send confirm/cancel/calendar texts when tool signals fire (skips if turn has matching tag).
+- `--tool-confirm-text` / `--tool-cancel-text` / `--tool-calendar-text` / `--tool-hook-limit` / `--tool-hook-wait` tune hooks.
 
 How to read results
 - `reply_rate` counts inline `bot_response` + outbox; `expected_reply_rate` excludes expected non-replies (pending/manager_active).
