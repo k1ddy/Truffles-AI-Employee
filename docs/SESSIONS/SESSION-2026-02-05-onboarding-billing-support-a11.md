@@ -11,6 +11,7 @@
   - Added audit process section with responsibilities + GAP list in docs/PROCESSES.md.
   - Finalized legal/onboarding/support templates and canon billing policy.
   - Resolved merge conflicts in legal/support/arsenal docs and session index.
+  - Aligned SLA template note to “only by separate agreement”.
 - next:
   - Run session_check after conflict resolution before commit/push.
 - evidence:

@@ -1,6 +1,6 @@
 # SLA (УРОВЕНЬ СЕРВИСА) — ШАБЛОН
 
-⚠️ **НЕ ИСПОЛЬЗУЕТСЯ.** SLA не предоставляется. Документ сохранён только как архивный шаблон.
+⚠️ **ТОЛЬКО ПО ОТДЕЛЬНОМУ СОГЛАСОВАНИЮ.** По умолчанию SLA не действует и не создаёт обязательств; документ сохранён как шаблон.
 
 DERIVED: legal template; not canonical until approved/signed. Claims must align with `STRATEGY/PRODUCT.md` and `docs/SELLING_TRUTHS.md`.
 
